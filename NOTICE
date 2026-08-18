@@ -1,0 +1,19 @@
+SoloMapling Plugin (SPI / ServerExtension packaging)
+====================================================
+
+Copyright (C) 2026 the SoloMapling Plugin contributors
+
+This product is based on work by MadaraGameDev / Richy from:
+
+    https://github.com/MadaraGameDev/SoloMapling
+
+Original project: SoloMapling — artificial player simulation for MapleStory v83
+(built on Cosmic). Licensed under the GNU Affero General Public License v3.0
+(AGPL-3.0). See the accompanying LICENSE file.
+
+This repository is an architectural port / packaging of that framework as a
+host-neutral SPI plugin jar. It is not an official SoloMapling release and is
+not affiliated with or endorsed by MadaraGameDev.
+
+Upstream Cosmic / OdinMS-derived engine code remains under AGPL-3.0 as in the
+original SoloMapling tree.

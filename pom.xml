@@ -8,12 +8,21 @@
     <artifactId>solomapling-plugin</artifactId>
     <version>0.3.0-SNAPSHOT</version>
     <packaging>jar</packaging>
-    <name>SoloMapling Plugin</name>
+    <name>SoloMapling Plugin (SPI)</name>
     <description>
-        SoloMapling artificial-player framework as a BeiDou ServerExtension jar.
-        Compiles against BeiDou engine types (org.gms.*) and extension-api (provided).
-        Does not ship Cosmic/BeiDou server sources.
+        SPI / ServerExtension packaging of SoloMapling (based on MadaraGameDev/SoloMapling, AGPL-3.0).
+        Artificial-player framework jar for BeiDou and other maple-extension hosts.
+        Not an official SoloMapling release. Compiles against host extension-api + engine types (provided);
+        does not ship Cosmic/BeiDou server sources.
     </description>
+    <url>https://github.com/zmzeng/solomapling-plugin</url>
+    <licenses>
+        <license>
+            <name>GNU Affero General Public License v3.0</name>
+            <url>https://www.gnu.org/licenses/agpl-3.0.html</url>
+            <distribution>repo</distribution>
+        </license>
+    </licenses>
 
     <properties>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
