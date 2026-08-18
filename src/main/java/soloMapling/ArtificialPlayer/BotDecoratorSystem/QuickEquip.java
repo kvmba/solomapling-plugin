@@ -2,7 +2,7 @@ package soloMapling.ArtificialPlayer.BotDecoratorSystem;
 
 import org.gms.client.Character;
 import soloMapling.ArtificialPlayer.BotCustomization;
-import soloMapling.ArtificialPlayer.BotTier;
+import org.gms.client.BotTier;
 
 import java.util.Map;
 import java.util.concurrent.ThreadLocalRandom;

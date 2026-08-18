@@ -10,7 +10,7 @@ import soloMapling.ArtificialPlayer.BotMovementSystem.MovementStructures.Movemen
 import soloMapling.ArtificialPlayer.BotPartySystem.BotPartyCommands;
 import soloMapling.ArtificialPlayer.BotSM;
 import soloMapling.ArtificialPlayer.BotTradeSystem.BotTradeCommands;
-import soloMapling.ArtificialPlayer.BotTradeSystem.BotTradeQueue;
+import org.gms.server.trade.PendingTradeInvites;
 import soloMapling.ArtificialPlayer.BotTradeSystem.BotTradeSM;
 import soloMapling.server.BotTiming;
 import soloMapling.server.ExecutorServiceManager;
@@ -105,11 +105,11 @@ public class DropGameBot extends BotSM {
 
     // Drain stray trade requests from any player other than our locked-in `player`.
     private void rejectOtherTradeRequests() {
-        Character requester = BotTradeQueue.getInstance().getTradeRequest(getChr());
+        Character requester = PendingTradeInvites.getInstance().getTradeRequest(getChr());
         if (requester == null) return;
         if (requester == player) return;
         dprint("draining stray trade request from " + requester.getName() + " — busy");
-        BotTradeQueue.getInstance().removeTradeRequest(getChr());
+        PendingTradeInvites.getInstance().removeTradeRequest(getChr());
         try {
             BotTradeCommands.declineTradeInvite(getChr());
         } catch (Exception e) {

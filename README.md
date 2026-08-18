@@ -36,7 +36,7 @@ engine + bots in one tree     →   host (BeiDou) + plugins/*.jar
 ## What we changed
 
 - **Packaging:** Cosmic-embedded sources → shaded `ServerExtension` plugin jar for `gms-server/plugins/`.
-- **Host boundary:** engine hooks (chat, map enter, trade, party invite, artificial-character checks) live in the host; the plugin subscribes via SPI / host bridges instead of patching Cosmic in-tree.
+- **Host boundary:** the host exposes artificial-character checks and gameplay events; this plugin registers a classifier and bridges host events into its internal EventBus (see [docs/HOST_BOUNDARY.md](docs/HOST_BOUNDARY.md)).
 - **Build:** compiles against BeiDou `extension-api` + `gms-server` (`provided`); does **not** ship Cosmic or BeiDou server sources.
 
 ## Integration model
@@ -44,16 +44,17 @@ engine + bots in one tree     →   host (BeiDou) + plugins/*.jar
 | Piece | Where |
 |-------|--------|
 | Framework (`soloMapling/**`) | this repo → `plugins/solomapling-plugin-*.jar` |
-| Thin SPI (`extension-api`) | host (e.g. BeiDou) |
+| Thin SPI (`extension-api`) | host — includes `ArtificialCharacters` / `CharacterClassifier` |
 | Engine types (`org.gms.*`) | host `gms-server` (provided at compile time) |
-| Host bridges (`BotHelpers`, `EventBus`, party/chat events, …) | host `gms-server` |
+| Host gameplay events | host publishes `CharacterMapEnteredEvent` / `CharacterChatEvent` / `PartyInviteEvent`; `HostGameplayEventBridge` forwards map/chat into SoloMapling `EventBus` |
+| Artificial-character checks | plugin registers classifier in `onLoad`; host uses `HostHooks.isArtificial` (no `soloMapling` imports) |
 
 ## Build
 
-Prerequisites: JDK 21, Maven, and a local install of the host `extension-api` + `gms-server` that includes the SoloMapling host hooks.
+Prerequisites: JDK 21, Maven, and a local install of the host `extension-api` + `gms-server` that includes the extension runtime and simulation APIs (`BotClient`, `BotTier`, `PendingTradeInvites`, …).
 
 ```bash
-# In BeiDou-Server (feat/solomapling-plugin-host or equivalent)
+# In BeiDou-Server
 mvn -pl extension-api,gms-server -am install -DskipTests
 
 # In this repo

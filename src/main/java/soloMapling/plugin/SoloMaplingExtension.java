@@ -3,6 +3,8 @@ package soloMapling.plugin;
 import org.gms.client.Character;
 import org.gms.client.Client;
 import org.gms.client.command.Command;
+import org.gms.extension.api.ArtificialCharacters;
+import org.gms.extension.api.CharacterClassifier;
 import org.gms.extension.api.HostRuntime;
 import org.gms.extension.api.ServerExtension;
 import org.gms.extension.api.event.ServerReadyEvent;
@@ -32,6 +34,9 @@ public final class SoloMaplingExtension implements ServerExtension {
 
     private static final Logger log = LoggerFactory.getLogger(SoloMaplingExtension.class);
 
+    /** Historical SoloMapling id convention: bots &gt; 20000, console 999. */
+    private static final CharacterClassifier BOT_IDS = id -> id > 20000 || id == 999;
+
     private HostRuntime runtime;
 
     @Override
@@ -51,6 +56,9 @@ public final class SoloMaplingExtension implements ServerExtension {
                 runtime.hostId(),
                 runtime.config().getBool("solomapling.spawn-bots-on-startup", false));
 
+        ArtificialCharacters.register(BOT_IDS);
+        log.info("SoloMapling registered ArtificialCharacters classifier");
+
         String populationPath = runtime.config().getString("solomapling.population-config", "");
         if (populationPath != null && !populationPath.isBlank()) {
             EnvironmentPopulationConfig.setConfigPath(populationPath);
@@ -62,8 +70,8 @@ public final class SoloMaplingExtension implements ServerExtension {
 
         registerCommands(runtime);
 
-        // Host->bot input bridges. Both must be live before any player can chat or invite, so they
-        // are wired at load time rather than with the bot waves (bots also spawn via !bot).
+        // Host->bot input bridges. Must be live before any player can chat or invite.
+        HostGameplayEventBridge.register(runtime);
         PlayerChatBridge.register();
         BotPartyInviteBridge.register(runtime);
 
@@ -151,6 +159,7 @@ public final class SoloMaplingExtension implements ServerExtension {
     @Override
     public void onUnload() {
         log.info("SoloMapling plugin onUnload");
+        ArtificialCharacters.unregister(BOT_IDS);
         runtime = null;
     }
 }

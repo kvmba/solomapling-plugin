@@ -1,6 +1,6 @@
 package soloMapling.ArtificialPlayer.BotDecoratorSystem;
 
-import soloMapling.ArtificialPlayer.BotTier;
+import org.gms.client.BotTier;
 
 import java.util.EnumMap;
 import java.util.Map;

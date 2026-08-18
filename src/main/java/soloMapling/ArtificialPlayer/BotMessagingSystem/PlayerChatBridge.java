@@ -10,10 +10,9 @@ import java.util.concurrent.atomic.AtomicBoolean;
 
 import static soloMapling.ArtificialPlayer.BotHelpers.isBot;
 
-// The only producer of the "primary" queue the Dispatcher drains: the host publishes CHAT_GENERAL
-// for every non-bot general chat line, this turns it into the ChatMessage the messaging stack
-// expects. Without it no player line ever reaches a bot, so every name-call ("Tiger party?") is
-// silently dropped and the whole dialogue stack (menus, party asks, trades) looks dead.
+// Consumes CHAT_GENERAL from SoloMapling EventBus (fed by HostGameplayEventBridge from the host
+// CharacterChatEvent). Turns each non-bot general chat line into the ChatMessage the messaging
+// stack expects. Without it no player line ever reaches a bot.
 public final class PlayerChatBridge implements EventSubscriber {
 
     private static final PlayerChatBridge INSTANCE = new PlayerChatBridge();
