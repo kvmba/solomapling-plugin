@@ -11,6 +11,8 @@ import org.gms.net.server.world.World;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import soloMapling.ArtificialPlayer.BotClientHandler;
+import soloMapling.ArtificialPlayer.BotMessagingSystem.PlayerChatBridge;
+import soloMapling.ArtificialPlayer.BotPartySystem.BotPartyInviteBridge;
 import soloMapling.Environment.EnvironmentManager;
 import soloMapling.Environment.EnvironmentPopulationConfig;
 import soloMapling.command.ArtificialPlayerCommand;
@@ -59,6 +61,11 @@ public final class SoloMaplingExtension implements ServerExtension {
                 plan.loadedFrom(), plan.scale(), plan.trainingCohortTotal());
 
         registerCommands(runtime);
+
+        // Host->bot input bridges. Both must be live before any player can chat or invite, so they
+        // are wired at load time rather than with the bot waves (bots also spawn via !bot).
+        PlayerChatBridge.register();
+        BotPartyInviteBridge.register(runtime);
 
         runtime.events().subscribe(ServerReadyEvent.class, this::onHostServerReady);
 

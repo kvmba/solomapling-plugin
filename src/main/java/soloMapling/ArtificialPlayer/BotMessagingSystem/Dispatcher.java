@@ -16,6 +16,10 @@ import static soloMapling.BotLogger.log;
 
 public class Dispatcher implements Runnable {
 
+    // Drain cap per 2s tick. One-per-tick starved the queue: the cleaner expires anything older than
+    // 10s, so a couple of chatty players in town could push a name-call out before it was ever read.
+    private static final int MAX_DRAIN_PER_TICK = 32;
+
     private static final Dispatcher dispatcher = new Dispatcher(MessageQueue.getInstance());
     private final MessageQueue messageQueue;
     private final ExecutorService executor = getExecutorService();
@@ -36,15 +40,19 @@ public class Dispatcher implements Runnable {
     @Override
     public void run() {
 //        log("Dispatcher: RUN");
-        processMessages();
+        for (int i = 0; i < MAX_DRAIN_PER_TICK; i++) {
+            if (!processMessages()) {
+                return;
+            }
+        }
     }
 
-    //    @Override
-    private void processMessages() {
+    // Returns false when the primary queue is drained (or the message could not be handled).
+    private boolean processMessages() {
         try {
             ChatMessage message = messageQueue.getMessageNonBlocking("primary");
             if (message == null) {
-                return;
+                return false;
             }
             Collection<Character> chars_on_map = message.getMap().getCharacters();
             final int[] botToCall = new int[1];  // Using an array to hold the bot ID
@@ -57,8 +65,10 @@ public class Dispatcher implements Runnable {
             } else {
                 handleMessageWithNoBotName(message);
             }
+            return true;
         } catch (Exception e) {
             e.printStackTrace();
+            return false;
         }
     }
 
