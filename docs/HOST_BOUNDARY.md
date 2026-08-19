@@ -1,4 +1,4 @@
-# Host boundary (phases 1–2)
+# Host boundary
 
 ## Goal
 
@@ -7,17 +7,19 @@ BeiDou engine code must not `import soloMapling.*`. SoloMapling remains a provid
 ## What the host owns
 
 - `ArtificialCharacters` + `CharacterClassifier` (`extension-api`)
-- `HostHooks.isArtificial` / `HostHooks.publish`
-- Gameplay events: `CharacterMapEnteredEvent`, `CharacterChatEvent`, `PartyInviteEvent`
-- Simulation APIs: `BotClient`, `BotTier`, `PendingTradeInvites`, movement/combat helpers
+- `TradeParticipantHook` + `TradeParticipants` (`extension-api`)
+- `HostHooks.isArtificial` / `HostHooks.trade*` / `HostHooks.publish`
+- Gameplay events: `CharacterMapEnteredEvent`, `CharacterChatEvent`, `PartyInviteEvent`, `TradeInviteEvent`
+- Simulation APIs: `BotClient`, `BotTier`, movement/combat helpers
 
 ## What the plugin does on load
 
 1. `ArtificialCharacters.register(id -> id > 20000 || id == 999)`
-2. `HostGameplayEventBridge` — host map/chat events → internal `EventBus`
-3. `PlayerChatBridge` / `BotPartyInviteBridge` — existing bot input paths
-4. Register GM commands via `HostCommandRegistry`
+2. `TradeParticipants.register(SoloMaplingTradeParticipantHook)`
+3. `HostGameplayEventBridge` — host map/chat events → internal `EventBus`
+4. `PlayerChatBridge` / `BotPartyInviteBridge` / `BotTradeInviteBridge`
+5. Register GM commands via `HostCommandRegistry`
 
-## Trade (still transitional)
+## Trade (phase 3)
 
-Trade still uses `HostHooks.isArtificial` and `PendingTradeInvites` (host capability). See [TRADE_DESIGN.md](TRADE_DESIGN.md) for the phase-3 proposal.
+Host publishes `TradeInviteEvent` and consults `TradeParticipantHook`. Plugin owns `BotTradeQueue` + FSM. See [TRADE_DESIGN.md](TRADE_DESIGN.md).

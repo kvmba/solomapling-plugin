@@ -44,14 +44,15 @@ engine + bots in one tree     →   host (BeiDou) + plugins/*.jar
 | Piece | Where |
 |-------|--------|
 | Framework (`soloMapling/**`) | this repo → `plugins/solomapling-plugin-*.jar` |
-| Thin SPI (`extension-api`) | host — includes `ArtificialCharacters` / `CharacterClassifier` |
+| Thin SPI (`extension-api`) | host — includes `ArtificialCharacters` / `TradeParticipantHook` |
 | Engine types (`org.gms.*`) | host `gms-server` (provided at compile time) |
-| Host gameplay events | host publishes `CharacterMapEnteredEvent` / `CharacterChatEvent` / `PartyInviteEvent`; `HostGameplayEventBridge` forwards map/chat into SoloMapling `EventBus` |
+| Host gameplay events | host publishes map/chat/party/trade invite events; bridges forward into SoloMapling queues / `EventBus` |
 | Artificial-character checks | plugin registers classifier in `onLoad`; host uses `HostHooks.isArtificial` (no `soloMapling` imports) |
+| Trade | plugin registers `TradeParticipantHook` + `BotTradeInviteBridge` → `BotTradeQueue` (see [docs/TRADE_DESIGN.md](docs/TRADE_DESIGN.md)) |
 
 ## Build
 
-Prerequisites: JDK 21, Maven, and a local install of the host `extension-api` + `gms-server` that includes the extension runtime and simulation APIs (`BotClient`, `BotTier`, `PendingTradeInvites`, …).
+Prerequisites: JDK 21, Maven, and a local install of the host `extension-api` + `gms-server` that includes the extension runtime and simulation APIs (`BotClient`, `BotTier`, `TradeParticipantHook`, …).
 
 ```bash
 # In BeiDou-Server

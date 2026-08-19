@@ -1,13 +1,12 @@
 package soloMapling.ArtificialPlayer.BotTradeSystem;
 
 import org.gms.client.Character;
-import org.gms.server.trade.PendingTradeInvites;
 import soloMapling.ArtificialPlayer.BotBlockList;
 
 public class BotTradeLogic {
 
     public static boolean checkTradeQueue(Character fakechar) {
-        PendingTradeInvites queue = PendingTradeInvites.getInstance();
+        BotTradeQueue queue = BotTradeQueue.getInstance();
         if (!queue.hasPendingTrades(fakechar)) {
             return false;
         }
@@ -29,15 +28,15 @@ public class BotTradeLogic {
 
     private static void acceptTradeRequest(Character fakechar) {
         BotTradeCommands.acceptTradeInvite(fakechar);
-        PendingTradeInvites.getInstance().removeTradeRequest(fakechar);
+        BotTradeQueue.getInstance().removeTradeRequest(fakechar);
     }
 
     private static void rejectTradeRequest(Character fakechar) {
         BotTradeCommands.declineTradeInvite(fakechar);
-        PendingTradeInvites.getInstance().removeTradeRequest(fakechar);
+        BotTradeQueue.getInstance().removeTradeRequest(fakechar);
     }
 
     public static void clearTradeRequest(Character fakechar) {
-        PendingTradeInvites.getInstance().removeTradeRequest(fakechar);
+        BotTradeQueue.getInstance().removeTradeRequest(fakechar);
     }
 }

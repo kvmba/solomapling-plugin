@@ -15,6 +15,8 @@ import org.slf4j.LoggerFactory;
 import soloMapling.ArtificialPlayer.BotClientHandler;
 import soloMapling.ArtificialPlayer.BotMessagingSystem.PlayerChatBridge;
 import soloMapling.ArtificialPlayer.BotPartySystem.BotPartyInviteBridge;
+import soloMapling.ArtificialPlayer.BotTradeSystem.BotTradeInviteBridge;
+import soloMapling.ArtificialPlayer.BotTradeSystem.SoloMaplingTradeParticipantHook;
 import soloMapling.Environment.EnvironmentManager;
 import soloMapling.Environment.EnvironmentPopulationConfig;
 import soloMapling.command.ArtificialPlayerCommand;
@@ -46,7 +48,7 @@ public final class SoloMaplingExtension implements ServerExtension {
 
     @Override
     public String version() {
-        return "0.3.0";
+        return "0.4.0";
     }
 
     @Override
@@ -57,7 +59,8 @@ public final class SoloMaplingExtension implements ServerExtension {
                 runtime.config().getBool("solomapling.spawn-bots-on-startup", false));
 
         ArtificialCharacters.register(BOT_IDS);
-        log.info("SoloMapling registered ArtificialCharacters classifier");
+        SoloMaplingTradeParticipantHook.register();
+        log.info("SoloMapling registered ArtificialCharacters classifier + TradeParticipantHook");
 
         String populationPath = runtime.config().getString("solomapling.population-config", "");
         if (populationPath != null && !populationPath.isBlank()) {
@@ -74,6 +77,7 @@ public final class SoloMaplingExtension implements ServerExtension {
         HostGameplayEventBridge.register(runtime);
         PlayerChatBridge.register();
         BotPartyInviteBridge.register(runtime);
+        BotTradeInviteBridge.register(runtime);
 
         runtime.events().subscribe(ServerReadyEvent.class, this::onHostServerReady);
 
@@ -159,6 +163,7 @@ public final class SoloMaplingExtension implements ServerExtension {
     @Override
     public void onUnload() {
         log.info("SoloMapling plugin onUnload");
+        SoloMaplingTradeParticipantHook.unregister();
         ArtificialCharacters.unregister(BOT_IDS);
         runtime = null;
     }
