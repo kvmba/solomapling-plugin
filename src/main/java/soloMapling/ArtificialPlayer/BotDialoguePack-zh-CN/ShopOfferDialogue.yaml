@@ -622,3 +622,22 @@ ShopOffer:
       - "{player}，欢迎光临，随便看看。"
     emote: 2
     wait: 0
+  # Whispered later on when an AFK shop owner "accepts" an offer. {room} is the FM room label.
+  AFKPriceUpdate:
+    text:
+      - "嘿，我把{item}的价格改成{price}了，快来拿！{room}"
+      - "喂，{item}给你降到{price}了，还在架上要就来。{room}"
+      - "抱歉刚挂机。{item}按你说的标成{price}了。{room}"
+      - "刚回来。{item}现在{price}，直接拿吧。{room}"
+      - "行，{item}就{price}，店里已经改好了。{room}"
+      - "看到你的出价了，{item}{price}归你。{room}"
+      - "刚才挂机不好意思，{item}改成{price}了，来看看。{room}"
+      - "{item}已改成{price}，不过先到先得啊。{room}"
+    emote: 0
+    wait: 0
+  # Nudge for visitors who chat at the shop without a parsable offer.
+  OfferHint:
+    text:
+      - "提示：出价请直接打价格（如 50m、1.5b）加物品名。有重复物品可用 1st/2nd/3rd 区分！"
+    emote: 0
+    wait: 0

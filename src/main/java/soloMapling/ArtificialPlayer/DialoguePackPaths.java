@@ -1,5 +1,6 @@
 package soloMapling.ArtificialPlayer;
 
+import soloMapling.Environment.LocalizedResources;
 import soloMapling.Environment.PluginResources;
 import soloMapling.Environment.SoloMaplingLanguageConfig;
 
@@ -48,20 +49,6 @@ public final class DialoguePackPaths {
     }
 
     private static String resolveRelative(String fileName) {
-        String localizedPack = SoloMaplingLanguageConfig.dialoguePackDirectoryName();
-
-        String localized = PACK_ROOT + localizedPack + "/" + fileName;
-        if (PluginResources.exists(localized)) {
-            return localized;
-        }
-
-        if (!DEFAULT_PACK.equals(localizedPack)) {
-            String def = PACK_ROOT + DEFAULT_PACK + "/" + fileName;
-            if (PluginResources.exists(def)) {
-                return def;
-            }
-        }
-
-        return null;
+        return LocalizedResources.resolve(PACK_ROOT, DEFAULT_PACK, fileName);
     }
 }

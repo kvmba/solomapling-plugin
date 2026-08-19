@@ -539,3 +539,122 @@ MerchantBot:
       - 2
       - 3
     wait: 1
+  # Shouted by SellingMerchantBot while standing in the FM. %ITEM% is the item on offer.
+  SellAdvertise:
+    text:
+      - "卖 %ITEM% 你出价"
+      - "卖> %ITEM% 出价"
+      - "卖>> %ITEM% 来交易"
+      - "出> %ITEM% 直接交易我！"
+      - "卖> %ITEM% 私聊我"
+      - "卖> %ITEM% 别低刀"
+      - "卖 %ITEM% 萌新勿扰"
+      - "卖>> %ITEM% 骗子勿扰"
+      - "出> %ITEM% 只接大佬"
+      - "卖> %ITEM% 只接美女"
+      - "卖> %ITEM% 点券党勿扰"
+      - "卖 %ITEM% 只接靓仔"
+      - "卖>> %ITEM% 二次元勿扰"
+      - "出> %ITEM% 只说中文"
+      - "卖> %ITEM% 不接外服"
+      - "卖> %ITEM% 只接诚意价"
+      - "卖 %ITEM% 别浪费我时间"
+      - "卖>> %ITEM% 只接实价"
+      - "出> %ITEM% 别磨叽"
+      - "卖> %ITEM% 你开价"
+      - "卖> %ITEM% 快来交易"
+      - "卖 %ITEM% 私聊"
+      - "卖>> %ITEM% 出个价"
+      - "出> %ITEM% 拒绝低刀"
+      - "卖> %ITEM% 实价出"
+      - "卖> %ITEM% 直接跟我交易"
+      - "卖 %ITEM% 只接认真买家"
+      - "卖>> %ITEM% 不接骗子"
+      - "出> %ITEM% 手快有手慢无"
+      - "卖> %ITEM% 不接墨迹的"
+      - "卖> %ITEM% 大佬优先"
+      - "卖 %ITEM% 出价即可"
+      - "卖>> %ITEM% 交易我就行"
+      - "出> %ITEM% 别耽误工夫"
+      - "卖> %ITEM% 谢绝骗子"
+      - "卖 %ITEM% 急出"
+    emote:
+      - 2
+      - 3
+    wait: 1
+  # Shouted by BuyingMerchantBot. %ITEM% is the wanted item, %PRICE% the offered meso price.
+  BuyAdvertise:
+    text:
+      - "收 %ITEM% %PRICE% 来交易"
+      - "收> %ITEM% %PRICE% 私聊我"
+      - "收>> %ITEM% %PRICE% 直接交易我！"
+      - "求收> %ITEM% %PRICE% 私我"
+      - "收> %ITEM% %PRICE% 密我"
+      - "收> %ITEM% %PRICE% 别低刀"
+      - "收 %ITEM% %PRICE% 萌新勿扰"
+      - "收>> %ITEM% %PRICE% 骗子勿扰"
+      - "求收> %ITEM% %PRICE% 只接大佬"
+      - "收> %ITEM% %PRICE% 只接美女"
+      - "收> %ITEM% %PRICE% 点券党勿扰"
+      - "收 %ITEM% %PRICE% 只接靓仔"
+      - "收>> %ITEM% %PRICE% 二次元勿扰"
+      - "求收> %ITEM% %PRICE% 只说中文"
+      - "收> %ITEM% %PRICE% 不接外服"
+      - "收> %ITEM% %PRICE% 只接诚意价"
+      - "收 %ITEM% %PRICE% 别浪费我时间"
+      - "收>> %ITEM% %PRICE% 只接实价"
+      - "求收> %ITEM% %PRICE% 只按公道价"
+      - "收> %ITEM% %PRICE% 快来交易"
+      - "收> %ITEM% %PRICE% 私我"
+      - "收 %ITEM% %PRICE% 密我谈"
+      - "收>> %ITEM% %PRICE% 私聊"
+      - "求收> %ITEM% %PRICE% 拒绝低刀"
+      - "收> %ITEM% %PRICE% 实价收"
+      - "收> %ITEM% %PRICE% 直接跟我交易"
+      - "收 %ITEM% %PRICE% 只接认真卖家"
+      - "收>> %ITEM% %PRICE% 不接骗子"
+      - "求收> %ITEM% %PRICE% 快来交易"
+      - "收> %ITEM% %PRICE% 价格公道"
+      - "收> %ITEM% %PRICE% 大佬优先"
+      - "收 %ITEM% %PRICE% 密我"
+      - "收>> %ITEM% %PRICE% 别耽误工夫"
+      - "求收> %ITEM% %PRICE% 密我谈"
+      - "收> %ITEM% %PRICE% 萌新勿扰"
+      - "收 %ITEM% %PRICE% 公道价收"
+    emote:
+      - 2
+      - 3
+    wait: 1
+  # NXMerchantBot: shouted while hawking a 10k NX cash code for 50m.
+  NXAdvertise:
+    text:
+      - "卖1万点券充值码，5000万，快来交易！"
+      - "卖>1万点券码 5000万，别低刀"
+      - "点券码 1万 >> 5000万 快来交易！！只接实价"
+      - "1万点券充值码 5000万，只接大佬"
+      - "卖点券码！1万！！5000万！！骗子勿扰"
+      - "卖>>10000点券码，5000万，只接诚意价"
+      - "有点券码，1万卖5000万，速来交易"
+    emote: 3
+    wait: 1
+  # NXMerchantBot hand-off after a successful trade (spoken, then over messenger).
+  NXContactNotice:
+    text:
+      - "私聊你了。"
+    emote: 0
+    wait: 1
+  NXCodeHandoff:
+    text:
+      - "这是1万点券码……记得抄下来。注意不要带横杠"
+    emote: 0
+    wait: 1
+  NXCodeThanks:
+    text:
+      - "慢用！"
+    emote: 0
+    wait: 1
+  NXInviteIgnored:
+    text:
+      - "你没接受聊天邀请……那没办法了，菜。"
+    emote: 0
+    wait: 1

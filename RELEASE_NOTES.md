@@ -1,5 +1,17 @@
 # Release notes — SoloMapling Plugin (SPI)
 
+## 0.4.0-SNAPSHOT
+
+### Localization
+
+`solomapling.language: zh-CN` previously only switched the bot dialogue packs, so free-market bots kept shouting English lines that were hardcoded in Java or read from English-only word lists. Those three paths now follow the language setting:
+
+- Merchant bot shouts moved from Java string arrays into `MerchantBotDialogue.yaml` (`SellAdvertise`, `BuyAdvertise` with `%ITEM%` / `%PRICE%` placeholders, plus `NXAdvertise` and the NX messenger hand-off nodes).
+- Shop names / descriptions resolve through the new `FMNameDesc-zh-CN/` word lists, with the English lists as fallback. Bot IGNs and kaomoji stay ASCII on purpose.
+- Remaining hardcoded strings moved into YAML / word lists: the AFK price-update whisper and offer hint (`ShopOfferDialogue.yaml`), the shop greeting (`welcomeDesc.txt`), the offerable tag (`offerableDesc.txt`), and the RWT currency tags (`rwtCurrencyDesc.txt`).
+
+Directory-level language resolution is now shared by `LocalizedResources` instead of living in `DialoguePackPaths`, so any resource pack can gain a `-<tag>` sibling. Shop-title padding also measures rendered width rather than `String.length()`, so double-width names aren't padded as if they were ASCII.
+
 ## 0.3.1-SNAPSHOT
 
 ### Fixes

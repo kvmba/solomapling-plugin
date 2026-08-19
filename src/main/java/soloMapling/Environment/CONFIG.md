@@ -46,12 +46,17 @@ Do **not** write recordings or machine state into `src/main/java`. Recording out
 
 ## Dialogue language
 
-Bot dialogue YAML lives under `soloMapling/ArtificialPlayer/`:
+Localized resource directories use a `-<language tag>` sibling, resolved by `LocalizedResources`:
 
-| Directory | Language |
+| Directory | Contents |
 |-----------|----------|
-| `BotDialoguePack/` | English (default) |
-| `BotDialoguePack-zh-CN/` | Simplified Chinese |
+| `ArtificialPlayer/BotDialoguePack/` | Bot dialogue YAML, English (default) |
+| `ArtificialPlayer/BotDialoguePack-zh-CN/` | Bot dialogue YAML, Simplified Chinese |
+| `FreeMarket/FMNameDesc/` | FM shop name / description word lists, English (default) |
+| `FreeMarket/FMNameDesc-zh-CN/` | FM shop name / description word lists, Simplified Chinese |
+
+Bot IGNs (`randomRealMaplestoryIGNs.txt`) and kaomoji (`emojiFaces.txt`) are intentionally not
+localized and always fall back to the English list.
 
 Set in `application.yml`:
 

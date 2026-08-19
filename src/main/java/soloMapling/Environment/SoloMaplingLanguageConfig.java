@@ -48,10 +48,7 @@ public final class SoloMaplingLanguageConfig {
 
     /** {@code BotDialoguePack} for English; {@code BotDialoguePack-zh-CN} for localized packs. */
     public static String dialoguePackDirectoryName() {
-        if (isDefaultEnglish(languageTag)) {
-            return "BotDialoguePack";
-        }
-        return "BotDialoguePack-" + languageTag;
+        return LocalizedResources.directoryName("BotDialoguePack");
     }
 
     public static boolean isDefaultEnglish() {
