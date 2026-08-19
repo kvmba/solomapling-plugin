@@ -1,5 +1,27 @@
 # Release notes — SoloMapling Plugin (SPI)
 
+## 0.4.0-SNAPSHOT
+
+### Features
+
+- **SocialBot Hybrid LLM chat:** optional DeepSeek integration for free-form player dialogue during active SocialBot sessions (`solomapling.llm.*`). Menu options, party recruit, and goodbye remain YAML/rule-driven.
+- Uses [simple-openai](https://github.com/sashirestela/simple-openai) (`SimpleOpenAIDeepseek`); client + OkHttp/Jackson shaded into the plugin jar.
+- `DialogueContextResolver.buildSnapshot()` exports live game context into LLM system prompts.
+
+### Config (`application.yml`)
+
+```yaml
+solomapling:
+  llm:
+    enabled: false
+    api-key: ${DEEPSEEK_API_KEY:}
+    model: deepseek-v4-flash
+    max-tokens: 80
+    timeout-ms: 10000
+    history-turns: 8
+    fallback-to-yaml: true
+```
+
 ## 0.3.1-SNAPSHOT
 
 ### Fixes
