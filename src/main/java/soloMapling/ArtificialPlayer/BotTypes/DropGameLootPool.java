@@ -1,8 +1,8 @@
 package soloMapling.ArtificialPlayer.BotTypes;
 
 import com.esotericsoftware.yamlbeans.YamlReader;
+import soloMapling.Environment.PluginResources;
 
-import java.io.FileReader;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -12,7 +12,7 @@ import static soloMapling.BotLogger.log;
 
 public class DropGameLootPool {
 
-    private static final String LOOT_POOL_PATH = "src/main/java/soloMapling/ArtificialPlayer/BotDialoguePack/DropGameLootPool.yaml";
+    private static final String LOOT_POOL_PATH = "ArtificialPlayer/BotDialoguePack/DropGameLootPool.yaml";
     private static final Random random = new Random();
     private static final int SPECIAL_CHANCE_PERCENT = 33;
 
@@ -37,7 +37,7 @@ public class DropGameLootPool {
     public static DropGameLootPool load(String tier) {
         DropGameLootPool pool = new DropGameLootPool();
         try {
-            YamlReader reader = new YamlReader(new FileReader(LOOT_POOL_PATH));
+            YamlReader reader = new YamlReader(PluginResources.openReader(LOOT_POOL_PATH));
             Map<String, Object> root = (Map<String, Object>) reader.read();
             Map<String, Object> tierNode = (Map<String, Object>) root.get(tier);
             if (tierNode == null) {

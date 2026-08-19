@@ -26,7 +26,6 @@ import org.gms.constants.id.MapId;
 import org.gms.constants.id.NpcId;
 
 import java.awt.*;
-import java.io.File;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -65,8 +64,6 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
 public class EnvironmentManager {
-
-    private static final String BASE_PATH = "src/main/java/soloMapling/ArtificialPlayer/BotMovementSystem/movementDataPackets";
 
     /**
      * Tolerance for Y-coordinate matching when determining if a character is on a platform.

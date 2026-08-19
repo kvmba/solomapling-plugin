@@ -1,11 +1,14 @@
 package soloMapling.ArtificialPlayer.BotTownSystem;
 
+import soloMapling.Environment.RuntimeData;
+
 import java.awt.Point;
 import java.io.BufferedReader;
-import java.io.File;
-import java.io.FileReader;
-import java.io.FileWriter;
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.StandardOpenOption;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -20,22 +23,20 @@ public final class TownPinsStore {
     private TownPinsStore() {
     }
 
-    private static final String PATH =
-            "src/main/java/soloMapling/ArtificialPlayer/BotTownSystem/TownPins.txt";
-
     // Append one pin. Writes a header the first time the file is created.
     public static synchronized void addPin(int mapId, int x, int y) {
         try {
-            File f = new File(PATH);
-            boolean writeHeader = !f.exists();
-            try (FileWriter fw = new FileWriter(f, true)) {
-                if (writeHeader) {
-                    fw.write("# Machine-owned pinned town spots (appended by !env townpresence mark).\n");
-                    fw.write("# One per line:  <mapId>: <x>,<y>   - merged into TownPresence.yaml pins at load.\n");
-                    fw.write("# Safe to hand-edit or delete lines.\n");
-                }
-                fw.write(mapId + ": " + x + "," + y + "\n");
+            Path path = RuntimeData.ensureParent(RuntimeData.townPins());
+            boolean writeHeader = !Files.isRegularFile(path);
+            StringBuilder sb = new StringBuilder();
+            if (writeHeader) {
+                sb.append("# Machine-owned pinned town spots (appended by !env townpresence mark).\n");
+                sb.append("# One per line:  <mapId>: <x>,<y>   - merged into TownPresence.yaml pins at load.\n");
+                sb.append("# Safe to hand-edit or delete lines.\n");
             }
+            sb.append(mapId).append(": ").append(x).append(',').append(y).append('\n');
+            Files.writeString(path, sb.toString(), StandardCharsets.UTF_8,
+                    StandardOpenOption.CREATE, StandardOpenOption.APPEND);
         } catch (IOException e) {
             System.out.println("[TownPinsStore] failed to append pin: " + e.getMessage());
         }
@@ -44,11 +45,11 @@ public final class TownPinsStore {
     // mapId -> its pinned points. Empty if the file doesn't exist yet.
     public static synchronized Map<Integer, List<Point>> load() {
         Map<Integer, List<Point>> out = new HashMap<>();
-        File f = new File(PATH);
-        if (!f.exists()) {
+        Path path = RuntimeData.townPins();
+        if (!Files.isRegularFile(path)) {
             return out;
         }
-        try (BufferedReader r = new BufferedReader(new FileReader(f))) {
+        try (BufferedReader r = Files.newBufferedReader(path, StandardCharsets.UTF_8)) {
             String line;
             while ((line = r.readLine()) != null) {
                 String s = line.trim();

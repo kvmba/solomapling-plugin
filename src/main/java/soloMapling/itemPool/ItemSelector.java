@@ -1,9 +1,9 @@
 package soloMapling.itemPool;
 
 import com.esotericsoftware.yamlbeans.YamlReader;
+import soloMapling.Environment.PluginResources;
 import soloMapling.server.MapleVersionManager;
 
-import java.io.FileReader;
 import java.util.*;
 import java.util.Map.Entry;
 
@@ -13,8 +13,9 @@ public class ItemSelector {
     private Map<String, List<ItemNode>> items;
 
     public ItemSelector(String yamlFile) throws Exception {
-        YamlReader reader = new YamlReader(new FileReader(yamlFile));
-        items = (Map<String, List<ItemNode>>) reader.read();
+        try (var reader = PluginResources.openReader(yamlFile)) {
+            items = (Map<String, List<ItemNode>>) new YamlReader(reader).read();
+        }
     }
 
     // Convert a map to an ItemNode instance
@@ -162,7 +163,7 @@ public class ItemSelector {
     public static ItemNode getRandomItemFull(String itemPool, String itemType, String tier) {
         try {
             int version = MapleVersionManager.getItemPoolVersion();
-            ItemSelector itemSelector = new ItemSelector("src/main/java/soloMapling/itemPool/itemConfig/" + itemPool);
+            ItemSelector itemSelector = new ItemSelector("itemPool/itemConfig/" + itemPool);
             ItemNode randomItem = itemSelector.getRandomItem(itemType, tier, version);
             if (randomItem != null) {
                 return randomItem;

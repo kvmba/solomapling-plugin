@@ -1,8 +1,8 @@
 package soloMapling.itemPool;
 
 import com.esotericsoftware.yamlbeans.YamlReader;
+import soloMapling.Environment.PluginResources;
 
-import java.io.FileReader;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
@@ -29,8 +29,7 @@ import java.util.Set;
  */
 public class EquipOmitList {
 
-    private static final String YAML_PATH =
-            "src/main/java/soloMapling/itemPool/EquipOmitList.yaml";
+    private static final String YAML_PATH = "itemPool/EquipOmitList.yaml";
 
     private static volatile boolean enabled = true;
     private static volatile boolean loaded = false;
@@ -46,7 +45,7 @@ public class EquipOmitList {
         if (loaded) return;
 
         try {
-            YamlReader reader = new YamlReader(new FileReader(YAML_PATH));
+            YamlReader reader = new YamlReader(PluginResources.openReader(YAML_PATH));
             Map<String, Object> root = (Map<String, Object>) reader.read();
 
             if (root != null) {

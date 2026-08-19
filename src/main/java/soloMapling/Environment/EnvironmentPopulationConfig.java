@@ -4,8 +4,6 @@ import com.esotericsoftware.yamlbeans.YamlReader;
 
 import java.io.File;
 import java.io.FileReader;
-import java.io.InputStream;
-import java.io.InputStreamReader;
 import java.io.Reader;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
@@ -24,7 +22,7 @@ import soloMapling.ArtificialPlayer.BotTownSystem.TownPresenceConfig;
  * <ol>
  *   <li>explicit path from {@link #setConfigPath(String)} / {@code solomapling.population-config}</li>
  *   <li>cwd-relative {@value #DEFAULT_FS_PATH} (gms-server working directory)</li>
- *   <li>classpath resource {@value #CLASSPATH_RESOURCE}</li>
+ *   <li>{@link PluginResources} {@code Environment/EnvironmentPopulation.yaml}</li>
  * </ol>
  */
 public final class EnvironmentPopulationConfig {
@@ -34,8 +32,7 @@ public final class EnvironmentPopulationConfig {
 
     public static final String DEFAULT_FS_PATH =
             "src/main/java/soloMapling/Environment/EnvironmentPopulation.yaml";
-    public static final String CLASSPATH_RESOURCE =
-            "soloMapling/Environment/EnvironmentPopulation.yaml";
+    public static final String RESOURCE_PATH = "Environment/EnvironmentPopulation.yaml";
 
     public record PlatformBatch(int m1, int m2, int m5) {
     }
@@ -213,11 +210,14 @@ public final class EnvironmentPopulationConfig {
             currentSourceLabel = cwd.getAbsolutePath();
             return new FileReader(cwd, StandardCharsets.UTF_8);
         }
-        InputStream in = EnvironmentPopulationConfig.class.getClassLoader()
-                .getResourceAsStream(CLASSPATH_RESOURCE);
-        if (in != null) {
-            currentSourceLabel = "classpath:" + CLASSPATH_RESOURCE;
-            return new InputStreamReader(in, StandardCharsets.UTF_8);
+        File root = new File("EnvironmentPopulation.yaml");
+        if (root.isFile()) {
+            currentSourceLabel = root.getAbsolutePath();
+            return new FileReader(root, StandardCharsets.UTF_8);
+        }
+        if (PluginResources.exists(RESOURCE_PATH)) {
+            currentSourceLabel = "plugin:" + RESOURCE_PATH;
+            return PluginResources.openReader(RESOURCE_PATH);
         }
         currentSourceLabel = null;
         return null;

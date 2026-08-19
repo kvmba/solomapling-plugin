@@ -44,7 +44,7 @@ caps:
   - 1002071
   - 1002076
   - 1002077
-  - 1002186
+  # 1002186 removed: info-only cap (no action tree) — breaks worn poses
   - 1002187
   - 1002191
   - 1002192
@@ -141,7 +141,7 @@ caps:
   - 1002569
   - 1002575
   - 1002576
-  - 1002695
+  # 1002695 removed: broken UOL (backDefault/default1 missing)
   - 1002696
   - 1002697
   - 1002698
@@ -172,7 +172,7 @@ caps:
   - 1002835
   - 1002836
   - 1002837
-  - 1002839
+  # 1002839 removed: broken UOL (default/defaultAc missing in stabT2)
   - 1002840
   - 1002844
   - 1002845

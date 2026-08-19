@@ -99,4 +99,4 @@ solomapling:
 
 ## Version
 
-`0.3.0-SNAPSHOT` — framework lineage aligned with SoloMapling v0.3; packaging is SPI/plugin-only.
+`0.3.1-SNAPSHOT` — framework lineage aligned with SoloMapling v0.3; packaging is SPI/plugin-only.

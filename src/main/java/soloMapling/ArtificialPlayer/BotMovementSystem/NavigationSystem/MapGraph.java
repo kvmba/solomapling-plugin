@@ -8,20 +8,18 @@ import org.jgrapht.graph.DirectedMultigraph;
 import org.jgrapht.nio.DefaultAttribute;
 import org.jgrapht.nio.dot.DOTExporter;
 import soloMapling.ArtificialPlayer.BotMovementSystem.MovementStructures.MovementRecordingRaw;
+import soloMapling.Environment.PluginResources;
+import soloMapling.Environment.RuntimeData;
 
 import java.awt.*;
-import java.io.File;
 import java.io.FileWriter;
 import java.io.StringWriter;
 import java.io.Writer;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.List;
-import java.util.Map;
-import java.io.File;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
 
 import static soloMapling.ArtificialPlayer.BotMovementSystem.InPacketReader.getMovementRecordingRaw;
@@ -29,16 +27,17 @@ import static soloMapling.DebugUtilities.debugprint;
 
 public class MapGraph {
 
+    private static final String MOVEMENT_DIR_PREFIX =
+            "ArtificialPlayer/BotMovementSystem/movementDataPackets/map";
+
     final int mapId;
     boolean drawGraphDot = false;
     private Graph<String, NamedEdge> graph;
     private List<String> mainAreas = new ArrayList<>();
     private List<String> connectors = new ArrayList<>();
-    File directory;
 
     public MapGraph(int mapId) {
         this.mapId = mapId; // convertFMMapDirectoryID(mapId);
-        this.directory = new File("src/main/java/soloMapling/ArtificialPlayer/BotMovementSystem/movementDataPackets/map" + this.mapId);
         this.setMainAreas();
         this.setConnectors();
         this.buildGraph();
@@ -145,16 +144,14 @@ public class MapGraph {
     }
 
     public void setMainAreas() {
-        if (!directory.exists()) {
+        String dir = MOVEMENT_DIR_PREFIX + mapId;
+        if (!PluginResources.directoryExists(dir)) {
             debugprint("MapGraph: no movement-packet dir for map " + mapId);
             return;
         }
 
-        File[] files = directory.listFiles();
         HashSet<String> uniqueMainAreas = new HashSet<>();
-
-        for (File file : files) {
-            String fileName = file.getName();
+        for (String fileName : PluginResources.listFileNames(dir, null)) {
             // Check if the file is a main area file (e.g., m1.bin, m2.csv)
             if (fileName.startsWith("m") && fileName.contains(".")) {
                 int dotIndex = fileName.indexOf('.');
@@ -169,16 +166,14 @@ public class MapGraph {
     }
 
     public void setConnectors() {
-        if (!directory.exists()) {
+        String dir = MOVEMENT_DIR_PREFIX + mapId;
+        if (!PluginResources.directoryExists(dir)) {
             debugprint("MapGraph: no movement-packet dir for map " + mapId);
             return;
         }
 
-        File[] files = directory.listFiles();
         HashSet<String> uniqueConnectors = new HashSet<>();
-
-        for (File file : files) {
-            String fileName = file.getName();
+        for (String fileName : PluginResources.listFileNames(dir, null)) {
             // Check if the file is a connector file (e.g., c1-4.bin, c4-1.csv)
             if (fileName.startsWith("c") && fileName.contains("-")) {
                 int dotIndex = fileName.indexOf('.');
@@ -393,8 +388,10 @@ public class MapGraph {
 
         // Export to DOT file
         try {
-            Writer writer = new FileWriter("graph.dot");
+            Path out = RuntimeData.ensureParent(RuntimeData.graphDot());
+            Writer writer = new FileWriter(out.toFile());
             exporter.exportGraph(graph, writer);
+            writer.close();
 
             // Also print to console
             StringWriter stringWriter = new StringWriter();

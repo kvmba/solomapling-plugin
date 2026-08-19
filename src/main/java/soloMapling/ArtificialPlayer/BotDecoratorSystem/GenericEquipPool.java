@@ -2,9 +2,9 @@ package soloMapling.ArtificialPlayer.BotDecoratorSystem;
 
 import com.esotericsoftware.yamlbeans.YamlReader;
 import org.gms.server.ItemInformationProvider;
+import soloMapling.Environment.PluginResources;
 import soloMapling.itemPool.EquipOmitList;
 
-import java.io.FileReader;
 import java.util.*;
 import java.util.concurrent.ThreadLocalRandom;
 
@@ -21,7 +21,7 @@ import java.util.concurrent.ThreadLocalRandom;
 public class GenericEquipPool {
 
     private static final String YAML_PATH =
-            "src/main/java/soloMapling/ArtificialPlayer/BotDecoratorSystem/GenericEquipPool.yaml";
+            "ArtificialPlayer/BotDecoratorSystem/GenericEquipPool.yaml";
 
     // Higher = stricter preference for gear near the bot's level. 0.05 gives a gentle tail
     // so a level 95 bot can still occasionally roll a level-35 whip for fashion.
@@ -68,7 +68,7 @@ public class GenericEquipPool {
         if (loaded) return;
 
         try {
-            YamlReader reader = new YamlReader(new FileReader(YAML_PATH));
+            YamlReader reader = new YamlReader(PluginResources.openReader(YAML_PATH));
             Map<String, Object> root = (Map<String, Object>) reader.read();
 
             ItemInformationProvider iip = ItemInformationProvider.getInstance();

@@ -2,9 +2,9 @@ package soloMapling.ArtificialPlayer.BotDecoratorSystem;
 
 import com.esotericsoftware.yamlbeans.YamlReader;
 import org.gms.constants.inventory.EquipType;
+import soloMapling.Environment.PluginResources;
 import soloMapling.itemPool.EquipMetadataCache;
 
-import java.io.FileReader;
 import java.util.*;
 import java.util.concurrent.ThreadLocalRandom;
 
@@ -20,7 +20,7 @@ import java.util.concurrent.ThreadLocalRandom;
 public class NXItemPool {
 
     private static final String YAML_PATH =
-            "src/main/java/soloMapling/ArtificialPlayer/BotDecoratorSystem/NXItemPool.yaml";
+            "ArtificialPlayer/BotDecoratorSystem/NXItemPool.yaml";
 
     public static final int GENDER_MALE = 0;
     public static final int GENDER_FEMALE = 1;
@@ -77,7 +77,7 @@ public class NXItemPool {
         if (loaded) return;
 
         try {
-            YamlReader reader = new YamlReader(new FileReader(YAML_PATH));
+            YamlReader reader = new YamlReader(PluginResources.openReader(YAML_PATH));
             Map<String, Object> root = (Map<String, Object>) reader.read();
             if (root == null) root = Collections.emptyMap();
 

@@ -8,3 +8,7 @@ target/
 *.class
 *.log
 .mvn/wrapper/maven-wrapper.jar
+
+# Local translation / audit scratch
+scripts/.zh_translate_cache*.json
+scripts/zh_todo_strings.json

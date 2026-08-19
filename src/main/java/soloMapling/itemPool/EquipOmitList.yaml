@@ -196,6 +196,14 @@ ids:
   - 1452083 # Solomon's Unstable Bow
   - 1452084 # Solomon's Bow
 
+  # Broken UOL targets in Character.wz (client deep-audit via WzDeepAudit):
+  # heal frames link to missing swingO2 parts; bots wearing these can render
+  # broken glove/weapon sprites during heal/alert poses.
+  - 1082065 # Blue Diad Work Gloves — heal UOL -> missing swingO2/*/lGlove
+  - 1082066 # Red Diad Work Gloves — same
+  - 1082067 # Green Diad Work Gloves — same
+  - 1332037 # Fan — heal/2/weapon UOL -> missing swingO2/0/weapon
+
 # Optional: omit a contiguous id block at once. Format: "min-max" (inclusive).
 # ranges:
 #   - "1302200-1302299"

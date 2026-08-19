@@ -9,7 +9,6 @@ import soloMapling.ArtificialPlayer.BotMovementSystem.MovementCommands;
 import soloMapling.server.ExecutorServiceManager;
 
 import java.awt.*;
-import java.io.File;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -39,7 +38,6 @@ import static soloMapling.server.SoloMaplingUtilities.getMapleMapById;
 // the wave orchestration. Ours (SoloMapling).
 public class PlatformPlacement {
 
-    private static final String BASE_PATH = "src/main/java/soloMapling/ArtificialPlayer/BotMovementSystem/movementDataPackets";
     // Tolerance for Y-coordinate matching when determining if a character is on a platform;
     // characters within this vertical distance of the platform are considered "on" it.
     private static final int Y_TOLERANCE = 10;
@@ -475,24 +473,8 @@ public class PlatformPlacement {
      * @return List of platform IDs (e.g., ["m1", "m2", "m3"])
      */
     public static List<String> getAvailablePlatformIds(int mapId) {
-        List<String> platformIds = new ArrayList<>();
-        File mapDir = new File(BASE_PATH + "/map" + mapId);
-
-        if (!mapDir.exists() || !mapDir.isDirectory()) {
-            return platformIds;
-        }
-
-        File[] files = mapDir.listFiles((dir, name) -> name.endsWith(".csv"));
-
-        if (files != null) {
-            for (File file : files) {
-                String name = file.getName();
-                // Remove .csv extension to get platform ID
-                platformIds.add(name.substring(0, name.length() - 4));
-            }
-        }
-        //debugprint("MapID", mapId, "Platform ids: ", platformIds);
-        return platformIds;
+        return PluginResources.listBasenames(
+                "ArtificialPlayer/BotMovementSystem/movementDataPackets/map" + mapId, ".csv");
     }
 
     public static List<String> getMainPlatformIds(int mapId) {

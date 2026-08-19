@@ -31,13 +31,11 @@ bottoms:
   - 1062000
   - 1062001
 
-overalls:
-  - 1050018
-  - 1050100
-  - 1050127
-  - 1051017
-  - 1051098
-  - 1051140
+# overalls category disabled: every previously listed ID
+# (1050018/1050100/1050127/1051017/1051098/1051140) has broken UOLs in
+# Character.wz (mailArm targets missing in prone/heal frames; some also fail to
+# parse), making bots render broken arms mid-animation. Left empty on purpose.
+overalls: []
 
 weapons:
   - 1302000
@@ -78,7 +76,7 @@ weapons:
   - 1332030
   - 1332032
   - 1332053
-  - 1402013
+  # 1402013 removed: broken UOL in Character.wz weapon animation
   - 1402014
   - 1402029
   - 1432008

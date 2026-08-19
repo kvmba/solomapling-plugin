@@ -88,11 +88,11 @@ class EnvironmentPopulationConfigTest {
     void missingOverrideFallsBack() {
         EnvironmentPopulationConfig.setConfigPath("/tmp/does-not-exist-env-pop.yaml");
         var plan = EnvironmentPopulationConfig.reload();
-        // Still finds DEFAULT_FS_PATH or classpath after missing override
+        // Still finds DEFAULT_FS_PATH, cwd root, or PluginResources after missing override
         assertTrue(plan.training().cohorts().size() >= 1
                 || new File(EnvironmentPopulationConfig.DEFAULT_FS_PATH).isFile()
                 || plan.loadedFrom().contains("built-in")
-                || plan.loadedFrom().contains("classpath")
+                || plan.loadedFrom().contains("plugin:")
                 || plan.loadedFrom().contains("EnvironmentPopulation"));
     }
 }
