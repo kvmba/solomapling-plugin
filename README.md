@@ -10,6 +10,11 @@ This repository is a **plugin / SPI packaging** of SoloMapling for host servers 
 | License | [AGPL-3.0](LICENSE) — see [NOTICE](NOTICE) |
 | Artifact | `solo-mapling:solomapling-plugin` (keeps the SoloMapling brand; title marks it as a plugin) |
 
+## Commit history boundary
+
+- **`port: … (packaging only)`** — first commit: upstream [MadaraGameDev/SoloMapling](https://github.com/MadaraGameDev/SoloMapling) packaged as an SPI plugin. Intentional **no** gameplay/bot-logic changes.
+- **All later commits** — may include behavior/logic changes (host bridges, classifiers, trade hooks, docs, etc.).
+
 ## Attribution
 
 SoloMapling is an artificial-player framework for MapleStory v83 originally built **on Cosmic**. This port keeps that brand and framework code under AGPL-3.0 and credits the original authors. Please prefer the [upstream showcase / demos](https://github.com/MadaraGameDev/SoloMapling#showcase) when describing the project.
