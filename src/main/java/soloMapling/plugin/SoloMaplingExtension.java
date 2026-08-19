@@ -19,6 +19,7 @@ import soloMapling.ArtificialPlayer.BotTradeSystem.BotTradeInviteBridge;
 import soloMapling.ArtificialPlayer.BotTradeSystem.SoloMaplingTradeParticipantHook;
 import soloMapling.Environment.EnvironmentManager;
 import soloMapling.Environment.EnvironmentPopulationConfig;
+import soloMapling.Environment.SoloMaplingLanguageConfig;
 import soloMapling.command.ArtificialPlayerCommand;
 import soloMapling.command.BotMoveCommand;
 import soloMapling.command.EnvironmentCommand;
@@ -61,6 +62,11 @@ public final class SoloMaplingExtension implements ServerExtension {
         ArtificialCharacters.register(BOT_IDS);
         SoloMaplingTradeParticipantHook.register();
         log.info("SoloMapling registered ArtificialCharacters classifier + TradeParticipantHook");
+
+        SoloMaplingLanguageConfig.configure(runtime.config());
+        log.info("SoloMapling language={} dialoguePack={}",
+                SoloMaplingLanguageConfig.languageTag(),
+                SoloMaplingLanguageConfig.dialoguePackDirectoryName());
 
         String populationPath = runtime.config().getString("solomapling.population-config", "");
         if (populationPath != null && !populationPath.isBlank()) {

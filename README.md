@@ -84,6 +84,7 @@ solomapling:
   plugins-enabled: true
   plugins-dir: plugins
   spawn-bots-on-startup: true
+  language: zh-CN   # optional; defaults to gms.service.language (en-US | zh-CN)
 ```
 
 ## SPI entry

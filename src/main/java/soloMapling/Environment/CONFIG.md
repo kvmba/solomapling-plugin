@@ -32,6 +32,24 @@ One file drives world population:
 
 If the FS file exists under the process cwd, it wins over the copy inside the plugin jar.
 
+## Dialogue language
+
+Bot dialogue YAML lives under `soloMapling/ArtificialPlayer/`:
+
+| Directory | Language |
+|-----------|----------|
+| `BotDialoguePack/` | English (default) |
+| `BotDialoguePack-zh-CN/` | Simplified Chinese |
+
+Set in `application.yml`:
+
+```yaml
+solomapling:
+  language: zh-CN   # optional; falls back to gms.service.language, then en-US
+```
+
+Resolution matches BeiDou scripts: localized pack first, then English fallback. At runtime the plugin reads from cwd FS paths (when present) or from the plugin jar classpath.
+
 ## Live commands (GM ≥ 4)
 
 ```

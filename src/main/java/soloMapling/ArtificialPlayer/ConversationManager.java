@@ -11,7 +11,7 @@ import soloMapling.ArtificialPlayer.BotTypes.SocialBot;
 import soloMapling.server.ExecutorServiceManager;
 
 import java.awt.*;
-import java.io.FileReader;
+import java.io.Reader;
 import java.util.*;
 import java.util.List;
 import java.util.concurrent.ScheduledFuture;
@@ -58,7 +58,7 @@ public class ConversationManager {
     // nobody's watching.
     private volatile Set<Integer> ambientMapIds = buildAmbientMapIds();
 
-    private static final String DIALOGUE_YAML = "src/main/java/soloMapling/ArtificialPlayer/BotDialoguePack/ConversationDialogue.yaml";
+    private static final String DIALOGUE_YAML = "ConversationDialogue.yaml";
 
     private final Set<Integer> botsInConversation = Collections.synchronizedSet(new HashSet<>());
     private final LinkedList<String> recentScriptIds = new LinkedList<>();
@@ -361,7 +361,7 @@ public class ConversationManager {
     private void loadScripts() {
         allScripts = new ArrayList<>();
         try {
-            YamlReader reader = new YamlReader(new FileReader(DIALOGUE_YAML));
+            YamlReader reader = new YamlReader(DialoguePackPaths.openDialogueReader(DIALOGUE_YAML));
             Map<String, Object> root = (Map<String, Object>) reader.read();
             Map<String, Object> conversations = (Map<String, Object>) root.get("conversations");
             if (conversations == null) return;

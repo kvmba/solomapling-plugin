@@ -1,8 +1,9 @@
 package soloMapling.ArtificialPlayer.BotChatterSystem;
 
 import com.esotericsoftware.yamlbeans.YamlReader;
+import soloMapling.ArtificialPlayer.DialoguePackPaths;
 
-import java.io.FileReader;
+import java.io.Reader;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -18,8 +19,7 @@ public final class TownChatterLines {
     private TownChatterLines() {
     }
 
-    private static final String YAML_PATH =
-            "src/main/java/soloMapling/ArtificialPlayer/BotDialoguePack/TownChatterDialogue.yaml";
+    private static final String YAML_FILE = "TownChatterDialogue.yaml";
 
     private static volatile List<List<String>> cached;
     private static final Random RANDOM = new Random();
@@ -52,8 +52,8 @@ public final class TownChatterLines {
     @SuppressWarnings("unchecked")
     private static List<List<String>> load() {
         List<List<String>> out = new ArrayList<>();
-        try {
-            YamlReader reader = new YamlReader(new FileReader(YAML_PATH));
+        try (Reader fileReader = DialoguePackPaths.openDialogueReader(YAML_FILE)) {
+            YamlReader reader = new YamlReader(fileReader);
             Map<String, Object> root = (Map<String, Object>) reader.read();
             if (root == null) {
                 return out;
@@ -80,7 +80,7 @@ public final class TownChatterLines {
                 }
             }
         } catch (Exception e) {
-            System.out.println("[TownChatterLines] failed to load " + YAML_PATH + ": " + e.getMessage());
+            System.out.println("[TownChatterLines] failed to load " + YAML_FILE + ": " + e.getMessage());
             return new ArrayList<>();
         }
         return out;

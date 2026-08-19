@@ -10,8 +10,8 @@ import com.esotericsoftware.yamlbeans.YamlReader;
 import soloMapling.ArtificialPlayer.BotTypes.DiceBot;
 
 import java.util.Map;
-import java.io.FileReader;
 import java.io.IOException;
+import java.io.Reader;
 
 import static soloMapling.ArtificialPlayer.BotCommandsPack.SocialCommands.BotDialogue;
 import static soloMapling.ArtificialPlayer.BotCommandsPack.SocialCommands.BotEmote;
@@ -129,19 +129,20 @@ public class BotDialogueHandler {
     }
 
     public static Map<String, Object> readDialogueYaml(String dialoguePack, String dialogueType, String dialogueNode) {
-        String dialoguePackBase = "src/main/java/soloMapling/ArtificialPlayer/BotDialoguePack/";
-        String filePath = String.format("%s%s", dialoguePackBase, dialoguePack);
-
         Map<String, Object> dialogueConstructorNode = null;
-        try {
-            YamlReader reader = new YamlReader(new FileReader(filePath));
-
-            // Read the root node
-            Map<String, Object> root = (Map<String, Object>) reader.read();
+        try (Reader reader = DialoguePackPaths.openDialogueReader(dialoguePack)) {
+            YamlReader yaml = new YamlReader(reader);
+            Map<String, Object> root = (Map<String, Object>) yaml.read();
+            if (root == null) {
+                return null;
+            }
             Map<String, Object> BotTypeNode = (Map<String, Object>) root.get(dialogueType);
+            if (BotTypeNode == null) {
+                return null;
+            }
             dialogueConstructorNode = (Map<String, Object>) BotTypeNode.get(dialogueNode);
         } catch (IOException e) {
-            e.printStackTrace();
+            System.err.println("[BotDialogueHandler] failed to load " + dialoguePack + ": " + e.getMessage());
         }
         return dialogueConstructorNode;
     }

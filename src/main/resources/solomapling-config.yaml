@@ -1,9 +1,6 @@
-# Deprecated placeholder
+# Deprecated placeholder — see soloMapling/Environment/CONFIG.md
 
-This file previously contained a Cosmic-style world config dump and was unused by SoloMapling.
+# Dialogue / script language (en-US | zh-CN). When unset, falls back to gms.service.language.
+# language: zh-CN
 
-Population / TrainingBot configuration lives in:
-
-`soloMapling/Environment/EnvironmentPopulation.yaml`
-
-See `soloMapling/Environment/CONFIG.md`.
+# Population config lives in soloMapling/Environment/EnvironmentPopulation.yaml
