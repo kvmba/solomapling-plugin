@@ -108,7 +108,7 @@ class BotMovementState {
     long alertedUntilMs = 0L;
     boolean alertResetScheduled = false;  // guards BotContactDamage's one-shot alert-reset task
 
-    // ── Contact-damage state (BotContactDamage; bots take visible hits but never lose HP) ──
+    // ── Contact-damage state (cosmetic for ambience bots; real HP for rostered companions) ──
     int mobHitCooldownMs = 0;             // i-frame countdown after a contact/fall hit
     Point lastMobTouchCheckPos = null;    // previous-tick foot pos for the swept anti-tunnel AABB
     int lastMobTouchMapId = -1;           // invalidates the sweep across a map change
@@ -124,8 +124,10 @@ class BotMovementState {
     int aiTickAccumulatorMs = 0;
     // LOD scheduling: the driver self-reschedules each bot's tick at a cadence that matches its tier
     // (fast when observed, slow when unobserved), so an unobserved bot stops consuming 20 Hz wakeups.
-    // tickStopped guards the self-reschedule against a concurrent stop()/disable().
+    // The generation invalidates stale tasks across stop/start; the driver also synchronizes on this
+    // state while ticking so two generations can never execute this bot concurrently.
     volatile boolean tickStopped = false;
+    long tickGeneration = 0L;
     // LOD coarse (M2): the slim analytic-movement record used while the bot is unobserved — it moves
     // along this baked-edge plan by wall-clock time (no physics). coarseActive marks that the last
     // tick advanced analytically, so the driver reconstructs the physics shadow on promotion to FULL.

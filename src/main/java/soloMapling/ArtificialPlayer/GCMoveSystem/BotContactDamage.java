@@ -13,8 +13,10 @@ import java.util.List;
 import java.util.concurrent.ThreadLocalRandom;
 
 // Makes a bot visibly take damage from mobs - contact/touch damage and fall damage - with organic
-// knockback and a broadcast hurt packet, but no HP and no death (bots are immortal; this renders the
-// look of getting hit only). Extracted and trimmed from GreenCatMS's BotCombatManager (HP loss,
+// knockback and a broadcast hurt packet. Artificial players lose real server-side HP from mob contact,
+// with an MVP 1-HP floor that avoids running the host's client-oriented death flow for a headless
+// character. Extracted and trimmed from
+// GreenCatMS's BotCombatManager (HP loss,
 // death/revive, danger-assessment, and the STANCE knockback roll all removed) and rebound from the
 // donor's BotEntry onto this package's BotMovementState. Credit: NutNNut.
 //
@@ -44,7 +46,8 @@ final class BotContactDamage {
     // each candidate with the real lower-half hitbox overlap.
     private static final int   MOB_QUERY_MARGIN       = 150;
 
-    // Damage number - option B: cosmetic, scaled off the mob's physical attack, never touches HP.
+    // Damage number is scaled off physical attack. All artificial-player types apply the same roll to
+    // real HP through resolveMobHitDamage, so TrainingBot and persistent companion semantics agree.
     private static final double DMG_FACTOR  = 0.5;   // multiplier on mob.getPADamage()
     private static final double DMG_SPREAD  = 0.20;  // +/- random variance around the scaled value
 
@@ -76,6 +79,12 @@ final class BotContactDamage {
             entry.mobHitCooldownMs = 0; // reset i-frames so the first hit on re-entry is instant
             return;
         }
+        // A bot already at 0 HP may have been killed by another server subsystem. Do not
+        // repeatedly emit touch hits or mutate it here; lifecycle/respawn ownership stays outside
+        // this movement layer.
+        if (bot.getHp() <= 0) {
+            return;
+        }
         Point botPos = bot.getPosition();
         try {
             if (entry.mobHitCooldownMs > 0) {
@@ -104,10 +113,40 @@ final class BotContactDamage {
         double missChance = isThief(bot) ? THIEF_MISS_CHANCE : BASE_MISS_CHANCE;
         int dmg = ThreadLocalRandom.current().nextDouble() < missChance ? 0 : rollMobDamage(mob);
         MobHitKnockback kb = resolveMobHitKnockback(bot.getPosition(), mob.getPosition());
-        applyDamage(entry, bot, dmg, -1, mob.getId(), kb.direction(), kb.airVelX());
+        MobHitDamage resolved = resolveMobHitDamage(bot.getHp(), dmg);
+        if (resolved.hpDamage() > 0) {
+            // safeAddHP is the host Character path: it atomically keeps HP above zero, updates the
+            // stat, and runs HP-change hooks. The precomputed cap also makes this behavior explicit
+            // and testable rather than delegating the MVP death policy entirely to host internals.
+            bot.safeAddHP(-resolved.hpDamage());
+            // The headless BotClient intentionally drops the bot's own STAT_CHANGED packet. Publish
+            // party HP directly after the mutation so a real party member can observe the new value;
+            // Character.hpChangeAction's deferred map callback is not a reliable UI path here.
+            bot.updatePartyMemberHP();
+        }
+        applyDamage(entry, bot, resolved.broadcastDamage(), -1, mob.getId(),
+                kb.direction(), kb.airVelX());
     }
 
-    // Option B: cosmetic damage scaled off the mob's physical attack - no defense math, no HP.
+    /**
+     * Separates artificial-player HP semantics from the shared visual hit path.
+     *
+     * <p>The wire damage remains the rolled hit so observers still see the normal hurt effect.
+     * Every artificial-player type receives the HP delta. Contact damage is capped at 1 HP for the
+     * MVP: this gives companions and TrainingBots consistent real attrition while avoiding the host
+     * death routine, which assumes a connected player client. A bot already at 0 HP is filtered by
+     * {@link #tickMobDamage}.</p>
+     */
+    static MobHitDamage resolveMobHitDamage(int currentHp, int rolledDamage) {
+        int broadcastDamage = Math.max(0, rolledDamage);
+        if (broadcastDamage == 0) {
+            return new MobHitDamage(broadcastDamage, 0);
+        }
+        int hpDamage = Math.min(broadcastDamage, Math.max(0, currentHp - 1));
+        return new MobHitDamage(broadcastDamage, hpDamage);
+    }
+
+    // Lightweight touch-damage roll: no defense math yet; artificial-player HP policy is applied separately.
     private static int rollMobDamage(Monster mob) {
         double base = Math.max(1, mob.getPADamage()) * DMG_FACTOR;
         double spread = 1.0 + ThreadLocalRandom.current().nextDouble(-DMG_SPREAD, DMG_SPREAD);
@@ -217,6 +256,9 @@ final class BotContactDamage {
     }
 
     private record MobHitKnockback(int direction, int airVelX) {
+    }
+
+    record MobHitDamage(int broadcastDamage, int hpDamage) {
     }
 
     // Swept-AABB touch detection (anti-tunnel; lower-half mob box only).

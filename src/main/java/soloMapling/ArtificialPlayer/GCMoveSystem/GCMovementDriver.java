@@ -17,10 +17,9 @@ import java.util.concurrent.atomic.AtomicInteger;
  * per-bot TimerManager task + BotManager.stepMovementCore funnel with a
  * self-contained scheduled driver.
  *
- * Threading: a shared scheduled pool; each bot is driven by one repeating fixed-rate task.
- * java.util.concurrent.ScheduledThreadPoolExecutor never runs the SAME periodic task
- * concurrently with itself, so per-bot single-thread (which GreenCat's non-volatile physics
- * fields assume) is preserved. A scale-out LOD scheduler can replace this later.
+ * Threading: a shared scheduled pool; each bot has one self-rescheduling deadline chain.
+ * Its state monitor serializes ticks across stop/start races, preserving the per-bot
+ * single-thread assumption made by GreenCat's non-volatile physics fields.
  */
 final class GCMovementDriver {
     private GCMovementDriver() {
@@ -70,13 +69,23 @@ final class GCMovementDriver {
             });
 
     static void start(BotMovementState entry) {
-        stop(entry);
-        entry.tickStopped = false;
-        scheduleNext(entry, 0);
+        synchronized (entry) {
+            cancelScheduledTick(entry);
+            entry.tickStopped = false;
+            long generation = ++entry.tickGeneration;
+            scheduleNext(entry, generation, System.nanoTime());
+        }
     }
 
     static void stop(BotMovementState entry) {
-        entry.tickStopped = true; // gate the self-reschedule; an in-flight tick may finish once more
+        synchronized (entry) {
+            entry.tickStopped = true;
+            entry.tickGeneration++;
+            cancelScheduledTick(entry);
+        }
+    }
+
+    private static void cancelScheduledTick(BotMovementState entry) {
         if (entry.task != null) {
             entry.task.cancel(false);
             entry.task = null;
@@ -88,21 +97,53 @@ final class GCMovementDriver {
      * cadence that matches the bot's tier — TICK_MS (50 ms) when its map is observed,
      * UNOBSERVED_TICK_MS (250 ms) when not. So an unobserved bot stops consuming 20 Hz wakeups
      * (the analytic CoarseExecutor is pure wall-clock, so a slower cadence gives identical positions).
-     * Successive ticks never overlap (the next is scheduled only after this one returns) and the
-     * executor establishes happens-before between them, so per-bot single-thread semantics hold even
-     * though the physical pool thread may differ.
+     * Each next deadline is based on the preceding deadline, not on tick completion, so tick work does
+     * not get added to the visible 50 ms cadence. If work overruns one or more periods, missed deadlines
+     * are skipped rather than executed as an unbounded catch-up burst. Re-reading the tier after every
+     * tick preserves dynamic promotion/demotion between 50/250/1000 ms.
      */
-    private static void scheduleNext(BotMovementState entry, long delayMs) {
-        if (entry.tickStopped) {
-            return;
-        }
-        entry.task = POOL.schedule(() -> {
-            safeTick(entry);
-            scheduleNext(entry, nextDelayMs(entry));
-        }, delayMs, TimeUnit.MILLISECONDS);
+    private static void scheduleNext(BotMovementState entry, long generation, long deadlineNanos) {
+        long delayNanos = Math.max(0L, deadlineNanos - System.nanoTime());
+        entry.task = POOL.schedule(
+                () -> runScheduledTick(entry, generation, deadlineNanos),
+                delayNanos,
+                TimeUnit.NANOSECONDS);
     }
 
-    private static long nextDelayMs(BotMovementState entry) {
+    private static void runScheduledTick(BotMovementState entry, long generation, long deadlineNanos) {
+        synchronized (entry) {
+            if (entry.tickStopped || entry.tickGeneration != generation) {
+                return;
+            }
+            safeTick(entry);
+            if (entry.tickStopped || entry.tickGeneration != generation) {
+                return;
+            }
+            long completedAtNanos = System.nanoTime();
+            long cadenceNanos = TimeUnit.MILLISECONDS.toNanos(nextCadenceMs(entry));
+            long nextDeadlineNanos = nextDeadline(deadlineNanos, completedAtNanos, cadenceNanos);
+            scheduleNext(entry, generation, nextDeadlineNanos);
+        }
+    }
+
+    /*
+     * Pure scheduling calculation, with arbitrary-but-consistent time units for focused tests.
+     * A completion exactly on the next deadline may run immediately; a completion after it skips
+     * enough whole slots to return to the first future deadline.
+     */
+    static long nextDeadline(long previousDeadline, long completedAt, long cadence) {
+        if (cadence <= 0L) {
+            throw new IllegalArgumentException("cadence must be positive");
+        }
+        long next = previousDeadline + cadence;
+        if (next >= completedAt) {
+            return next;
+        }
+        long missedSlots = (completedAt - next) / cadence + 1L;
+        return next + missedSlots * cadence;
+    }
+
+    private static long nextCadenceMs(BotMovementState entry) {
         Character bot = entry.bot;
         boolean active = bot != null && bot.getMap() != null
                 && ObserverTracker.isActiveMap(bot.getMapId());

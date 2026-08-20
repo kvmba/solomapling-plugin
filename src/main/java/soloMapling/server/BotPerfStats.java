@@ -33,7 +33,7 @@ public final class BotPerfStats {
         }
     }
 
-    // shared combat ticker health, written once per sweep by TrainingBot.combatTickAll
+    // Shared combat ticker health, written once per GrindTickRegistry sweep.
     private static volatile long combatLastMs = 0;
     private static volatile long combatMaxMs = 0;
     private static volatile int combatBots = 0;
