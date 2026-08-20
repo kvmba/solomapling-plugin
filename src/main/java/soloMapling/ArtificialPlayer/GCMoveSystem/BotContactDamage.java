@@ -4,12 +4,17 @@ import org.gms.client.Character;
 import org.gms.server.life.Monster;
 import org.gms.server.maps.MapObject;
 import org.gms.server.maps.MapObjectType;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import soloMapling.companion.CompanionRoster;
 import soloMapling.server.MethodScheduler;
 import org.gms.util.PacketCreator;
 
 import java.awt.Point;
 import java.awt.Rectangle;
 import java.util.List;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ThreadLocalRandom;
 
 // Makes a bot visibly take damage from mobs - contact/touch damage and fall damage - with organic
@@ -32,6 +37,10 @@ import java.util.concurrent.ThreadLocalRandom;
 // Entry points: tickMobDamage (once per bot per tick, from GCMovementDriver) and applyFallDamage
 // (from BotPhysicsEngine at the landing transition). Everything else is private.
 final class BotContactDamage {
+
+    private static final Logger log = LoggerFactory.getLogger(BotContactDamage.class);
+    private static final long DIAGNOSTIC_INTERVAL_MS = 5_000L;
+    private static final Map<Integer, Long> NEXT_DIAGNOSTIC_AT = new ConcurrentHashMap<>();
 
     private BotContactDamage() {
     }
@@ -77,6 +86,7 @@ final class BotContactDamage {
     static void tickMobDamage(BotMovementState entry, Character bot) {
         if (!GCMovement.isMapObserved(bot.getMapId())) {
             entry.mobHitCooldownMs = 0; // reset i-frames so the first hit on re-entry is instant
+            diagnose(bot, null, "MAP_UNOBSERVED", null);
             return;
         }
         // A bot already at 0 HP may have been killed by another server subsystem. Do not
@@ -93,19 +103,48 @@ final class BotContactDamage {
             }
             Rectangle query = new Rectangle(getBotTouchBounds(entry, bot));
             query.grow(MOB_QUERY_MARGIN, MOB_QUERY_MARGIN);
+            Monster nearby = null;
             for (MapObject obj : bot.getMap().getMapObjectsInRect(query, List.of(MapObjectType.MONSTER))) {
                 Monster mob = (Monster) obj;
                 if (!isHostileLivingMonster(mob)) {
                     continue;
                 }
+                nearby = mob;
                 if (isMobTouchingBot(entry, bot, mob)) {
+                    diagnose(bot, mob, "CONTACT", getBotTouchBounds(entry, bot));
                     applyMobHit(entry, bot, mob);
                     return;
                 }
             }
+            diagnose(bot, nearby, nearby == null ? "NO_NEARBY_MOB" : "NO_OVERLAP",
+                    getBotTouchBounds(entry, bot));
         } finally {
             rememberMobTouchCheck(entry, bot, botPos);
         }
+    }
+
+    private static void diagnose(
+            Character bot,
+            Monster mob,
+            String reason,
+            Rectangle botBounds) {
+        if (bot == null || !CompanionRoster.isCompanion(bot.getId()) || !log.isInfoEnabled()) {
+            return;
+        }
+        long now = System.currentTimeMillis();
+        Long next = NEXT_DIAGNOSTIC_AT.get(bot.getId());
+        if (next != null && next > now) {
+            return;
+        }
+        NEXT_DIAGNOSTIC_AT.put(bot.getId(), now + DIAGNOSTIC_INTERVAL_MS);
+        log.info(
+                "Companion contact diagnostic cid={} reason={} map={} hp={}/{} botPos={} botBounds={} mobOid={} mobId={} mobPos={} mobBounds={}",
+                bot.getId(), reason, bot.getMapId(), bot.getHp(), bot.getMaxHp(),
+                bot.getPosition(), botBounds,
+                mob == null ? -1 : mob.getObjectId(),
+                mob == null ? -1 : mob.getId(),
+                mob == null ? null : mob.getPosition(),
+                mob == null ? null : BotMobHitboxProvider.getMobBounds(mob));
     }
 
     // Apply one contact hit from the mob (or a miss flash).

@@ -162,6 +162,13 @@ public class BotGeneration {
         addBotToServer(companion);
         try {
             companion.getMap().addPlayer(companion);
+            // Character.loadCharFromDB creates a fresh Character instance, while an
+            // existing PartyCharacter may still reference the instance from before a
+            // companion restart. Publish the live instance through the host's normal
+            // silent-update path instead of teaching EXP distribution about companions.
+            if (companion.getParty() != null) {
+                companion.silentPartyUpdate();
+            }
         } catch (RuntimeException | Error failure) {
             try {
                 companion.getMap().removePlayer(companion);
