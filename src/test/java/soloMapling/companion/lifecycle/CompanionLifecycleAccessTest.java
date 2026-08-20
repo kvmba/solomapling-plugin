@@ -71,6 +71,12 @@ class CompanionLifecycleAccessTest {
             }
 
             @Override
+            public CareerReconciliation reconcileCareer(
+                    LoadedCompanion companion, CompanionProfile profile) {
+                return new CareerReconciliation(0, 0, 0);
+            }
+
+            @Override
             public void applyProgression(
                     LoadedCompanion companion,
                     OfflineProgressionSettlement settlement) {

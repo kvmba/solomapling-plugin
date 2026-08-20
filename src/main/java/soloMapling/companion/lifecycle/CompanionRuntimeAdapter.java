@@ -12,6 +12,11 @@ public interface CompanionRuntimeAdapter {
 
     LoadedCompanion load(CompanionProfile profile);
 
+    /**
+     * Applies any level-eligible deterministic job advancements.
+     */
+    CareerReconciliation reconcileCareer(LoadedCompanion companion, CompanionProfile profile);
+
     void applyProgression(LoadedCompanion companion, OfflineProgressionSettlement settlement);
 
     /**
@@ -31,5 +36,24 @@ public interface CompanionRuntimeAdapter {
         int characterId();
 
         int level();
+    }
+
+    record CareerReconciliation(int advancements, int apSpent, int spSpent) {
+        public CareerReconciliation {
+            if (advancements < 0 || apSpent < 0 || spSpent < 0) {
+                throw new IllegalArgumentException("career reconciliation counts must not be negative");
+            }
+        }
+
+        public boolean changed() {
+            return advancements > 0 || apSpent > 0 || spSpent > 0;
+        }
+
+        public CareerReconciliation plus(CareerReconciliation other) {
+            return new CareerReconciliation(
+                    advancements + other.advancements,
+                    apSpent + other.apSpent,
+                    spSpent + other.spSpent);
+        }
     }
 }

@@ -243,11 +243,21 @@ public final class CompanionLifecycleCoordinator {
             }
             cleanupResidual(profile.characterId());
             if (shouldBeOnline) {
-                return online.containsKey(profile.characterId())
-                        ? putStatus(profile.characterId(),
-                                CompanionLifecycleStatus.State.ONLINE,
-                                true, true, "ALREADY_ONLINE", activity.name(), now)
-                        : spawnInternal(profile, activity, now);
+                CompanionRuntimeAdapter.LoadedCompanion loaded = online.get(profile.characterId());
+                if (loaded == null) {
+                    return spawnInternal(profile, activity, now);
+                }
+                CompanionRuntimeAdapter.CareerReconciliation career =
+                        runtime.reconcileCareer(loaded, profile);
+                if (career.changed()) {
+                    runtime.saveCheckpoint(loaded);
+                }
+                return putStatus(profile.characterId(),
+                        CompanionLifecycleStatus.State.ONLINE,
+                        true, true, "ALREADY_ONLINE",
+                        activity.name() + ";careerAdvancements=" + career.advancements()
+                                + ";apSpent=" + career.apSpent()
+                                + ";spSpent=" + career.spSpent(), now);
             }
             return online.containsKey(profile.characterId())
                     ? despawnInternal(profile.characterId(), profile, now,
@@ -275,7 +285,10 @@ public final class CompanionLifecycleCoordinator {
             int persistedLevel = runtime.persistedLevel(profile);
             settlement = settle(profile, persistedLevel, now);
             loaded = runtime.load(profile);
+            CompanionRuntimeAdapter.CareerReconciliation career =
+                    runtime.reconcileCareer(loaded, profile);
             runtime.applyProgression(loaded, settlement);
+            career = career.plus(runtime.reconcileCareer(loaded, profile));
             // Character and profile persistence are separate transactions. Saving the
             // reward first leaves a bounded duplicate-on-crash window, never a lost reward.
             runtime.saveCheckpoint(loaded);
@@ -288,7 +301,10 @@ public final class CompanionLifecycleCoordinator {
                     true, true, "SPAWNED",
                     "activity=" + activity + ";settlementActivity=OFFLINE"
                             + ";exp=" + settlement.experience()
-                            + ";mesos=" + settlement.mesos(), now);
+                            + ";mesos=" + settlement.mesos()
+                            + ";careerAdvancements=" + career.advancements()
+                            + ";apSpent=" + career.apSpent()
+                            + ";spSpent=" + career.spSpent(), now);
         } catch (Throwable exception) {
             online.remove(profile.characterId());
             if (loaded != null) {

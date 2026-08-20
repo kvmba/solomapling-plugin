@@ -130,6 +130,25 @@ class CompanionLifecycleCoordinatorTest {
     }
 
     @Test
+    void onlineCareerAllocationIsCheckpointedWithoutRespawn() {
+        FakeRepository repository = new FakeRepository(profile(24, ONLINE, NOW.minusSeconds(60)));
+        FakeRuntime runtime = new FakeRuntime();
+        CompanionLifecycleCoordinator coordinator = coordinator(repository, runtime);
+        coordinator.start();
+        int checkpointsAfterSpawn = java.util.Collections.frequency(
+                runtime.events, "checkpoint:24");
+        runtime.career = new CompanionRuntimeAdapter.CareerReconciliation(1, 5, 3);
+
+        coordinator.reconcileNow();
+
+        assertEquals(checkpointsAfterSpawn + 1,
+                java.util.Collections.frequency(runtime.events, "checkpoint:24"));
+        assertEquals(1, runtime.loads.getOrDefault(24, 0));
+        assertTrue(coordinator.status(24).orElseThrow().detail().contains("apSpent=5"));
+        assertTrue(coordinator.status(24).orElseThrow().detail().contains("spSpent=3"));
+    }
+
+    @Test
     void invalidProfileIsTypedAndDoesNotBlockOtherProfiles() {
         FakeRepository repository = new FakeRepository(
                 profile(14, "not-versioned", NOW.minusSeconds(60)),
@@ -304,6 +323,7 @@ class CompanionLifecycleCoordinatorTest {
         private final Set<Integer> failLoads = new HashSet<>();
         private final Set<Integer> failAttaches = new HashSet<>();
         private final List<String> events;
+        private CareerReconciliation career = new CareerReconciliation(0, 0, 0);
 
         private FakeRuntime() {
             this(new java.util.ArrayList<>());
@@ -325,6 +345,12 @@ class CompanionLifecycleCoordinatorTest {
                 throw new IllegalStateException("synthetic load failure");
             }
             return new FakeLoaded(profile.characterId(), 200);
+        }
+
+        @Override
+        public CareerReconciliation reconcileCareer(
+                LoadedCompanion companion, CompanionProfile profile) {
+            return career;
         }
 
         @Override

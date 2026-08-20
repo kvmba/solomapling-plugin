@@ -5,7 +5,7 @@ after every meaningful implementation or verification step.
 
 ## Current status
 
-Last updated: 2026-08-20
+Last updated: 2026-08-21
 
 - Overall phase: Phase 1 started.
 - Plugin worktree created and active.
@@ -14,6 +14,8 @@ Last updated: 2026-08-20
 - Host baseline install and plugin tests pass.
 - Dynamic persistent-companion roster and native load/save lifecycle foundation
   implemented in the plugin.
+- Deterministic Explorer career paths and automatic AP/SP allocation are
+  implemented but not yet deployed.
 - No implementation commit has been created yet.
 
 ## Worktrees
@@ -105,6 +107,7 @@ Do not implement in the original checkouts. They contain runtime/user state:
 - [x] Add online spawn/despawn coordinator.
 - [x] Add bounded offline progression.
 - [x] Add softly weighted encounter director.
+- [x] Add deterministic career advancement and AP/SP allocation.
 
 ### Phase 4: verification
 
@@ -230,3 +233,18 @@ failure. Do not paste secrets or large logs.
   The complete host test suite passes (6 tests), and the updated host artifact
   packages successfully. Runtime monster movement, companion contact damage,
   and party EXP still require validation after deployment.
+- 2026-08-21: Added persona-seeded Explorer career paths with automatic
+  advancement at levels 10/30/70/120. A GM-selected first or second job is
+  preserved, later jobs stay on that branch, and online reconciliation
+  checkpoints every career/AP/SP mutation. Offline EXP is granted in
+  level-bounded chunks so advancement caps do not discard the remaining
+  settlement. Unspent AP goes to the class primary stat; SP fills available
+  skills along the current lineage without bypassing fourth-job mastery caps.
+  The host tests pass (4 tests), all 162 plugin tests pass, and
+  plugin packaging plus `git diff --check` pass.
+- 2026-08-21: Built and deployed the career-enabled host/plugin stack and
+  gracefully restarted the beta runtime. API and login ports are listening.
+  Luna loaded as job 100 at level 19 and automatically spent 20 AP and 28 SP.
+  Live kill diagnostics also confirmed party EXP increasing for both Luna and
+  the human player. Character `ming` (cid 4, account `zmzeng13`) was explicitly
+  confirmed and updated to GM level 4 for continued testing.
