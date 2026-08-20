@@ -7,15 +7,18 @@ after every meaningful implementation or verification step.
 
 Last updated: 2026-08-21
 
-- Overall phase: Phase 1 started.
+- Overall phase: Phase 4 acceptance in progress.
 - Plugin worktree created and active.
 - Host worktree created from the beta test-server branch.
 - Architecture plan persisted in `docs/LLM_COMPANION_MVP_PLAN.md`.
-- Host baseline install and plugin tests pass.
+- Host reactor tests and the complete plugin test suite pass.
 - Dynamic persistent-companion roster and native load/save lifecycle foundation
   implemented in the plugin.
-- Deterministic Explorer career paths and automatic AP/SP allocation are
-  implemented but not yet deployed.
+- Deterministic Explorer career paths, automatic AP/SP allocation, and native
+  backpack/potion management are deployed.
+- Automated live verification covers real shop purchases, HP/MP potion use,
+  durable inventory/vitals, and persistent identity across repeated restarts.
+- Player-visible chat, party/follow, and joint-training acceptance remains.
 - No implementation commit has been created yet.
 
 ## Worktrees
@@ -85,7 +88,7 @@ Do not implement in the original checkouts. They contain runtime/user state:
 - [x] Add dynamic `CompanionRoster`.
 - [x] Add persistent character load/spawn/save/despawn.
 - [x] Add controlled provisioning command.
-- [ ] Add persistence tests.
+- [x] Add persistence tests.
 
 ### Phase 2: cognition and action
 
@@ -113,19 +116,18 @@ Do not implement in the original checkouts. They contain runtime/user state:
 
 - [x] Add `!companion` diagnostics.
 - [x] Run unit tests.
-- [ ] Run live MySQL and game integration tests.
-- [ ] Deploy the plugin jar to the beta runtime.
-- [ ] Verify persistent identity across two restarts.
+- [x] Run live MySQL and game integration tests.
+- [x] Deploy the plugin jar to the beta runtime.
+- [x] Verify persistent identity across two restarts.
 - [ ] Verify chat, party, follow, and joint training.
-- [ ] Verify LLM timeout and invalid-action safety.
+- [x] Verify LLM timeout and invalid-action safety.
 
 ## Next actions
 
-1. Deploy the plugin-owned migration and provision a companion against the beta
-   database.
-2. Package and deploy the plugin jar to the beta runtime.
-3. Exercise restart persistence and player interaction scenarios.
-4. Record exact commands and results without storing credentials.
+1. Run player-visible chat, party, follow, and joint-training acceptance.
+2. Observe automatic HP/MP potion use during that session.
+3. Exercise an away-from-town supply run and confirm return to the player.
+4. Record final acceptance results without storing credentials.
 
 ## Verification log
 
@@ -258,3 +260,34 @@ failure. Do not paste secrets or large logs.
   Live kill diagnostics also confirmed party EXP increasing for both Luna and
   the human player. Character `ming` (cid 4, account `zmzeng13`) was explicitly
   confirmed and updated to GM level 4 for continued testing.
+- 2026-08-21: Added deterministic survival and backpack management for
+  persistent companions. Companions independently use HP/MP potions, restock
+  below 12 to a target of 60, purchase from real NPC shop catalogs with real
+  mesos, and sell bounded ordinary loot only under inventory pressure. Cash,
+  quest, owned, logged, untradeable, rechargeable, and restorative items are
+  protected from sale. Persistent companions now receive dedicated bound
+  `BotClient` instances. BeiDou shop purchases deduct mesos only after item
+  insertion succeeds. Companion skill MP remains cosmetic by product decision;
+  players cannot observe a headless companion's MP.
+- 2026-08-21: Live Luna supply test started and completed on map `101000002`.
+  The real shop transaction bought 97 items and left 51 mesos. Two subsequent
+  graceful restarts loaded the same persistent profile without another supply
+  run, confirming that the purchased stock survived both restarts.
+- 2026-08-21: Live low-vitals test set Luna to HP 50 / MP 1 while the server was
+  offline. After startup, the survival loop consumed two item `2010001`
+  potions (HP 50 -> 150 -> 250) and one item `2010003` potion (MP 1 -> 25).
+  A graceful save persisted HP 250, MP 25, and remaining quantities 58 and 36;
+  the following restart did not repeat potion use or restocking.
+- 2026-08-21: Final static verification passed `git diff --check` in both
+  worktrees. `mvn -pl gms-server -am test` passed all 4 host tests, and the
+  complete plugin `mvn test` suite passed all 169 tests. The runtime is online
+  with API port 8686 and login port 8484 listening. Remaining acceptance is
+  intentionally limited to player-visible interaction and an away-from-town
+  return-to-player supply scenario.
+- 2026-08-21: Player-visible acceptance with `ming` confirmed actor-isolated
+  memory, normal chat, party invitation acceptance, cross-map following,
+  autonomous attacks, HP potion use, and party EXP for both Luna and the human
+  player. A crowded-map defect kept CompanionBot contesting CAMP spots already
+  used by TrainingBots; companion training now forces ROAM, and live retest
+  confirmed immediate autonomous combat. Skill MP deduction was intentionally
+  removed because companion MP is not player-visible.

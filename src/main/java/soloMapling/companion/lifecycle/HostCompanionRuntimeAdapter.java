@@ -14,6 +14,7 @@ import soloMapling.companion.CompanionRoster;
 import soloMapling.companion.agent.ProductionCompanionBrain;
 import soloMapling.companion.persistence.CompanionProfile;
 import soloMapling.companion.progression.CompanionBuildAllocator;
+import soloMapling.companion.progression.CompanionCareerBuild;
 import soloMapling.companion.progression.CompanionCareerPath;
 import soloMapling.companion.routine.OfflineProgressionSettlement;
 
@@ -54,37 +55,79 @@ public final class HostCompanionRuntimeAdapter implements CompanionRuntimeAdapte
     public LoadedCompanion load(CompanionProfile profile) {
         CompanionRoster.register(profile.characterId());
         return new HostLoadedCompanion(
-                BotGeneration.loadPersistentBot(profile.characterId()), profile.personaSeed());
+                BotGeneration.loadPersistentBot(profile.characterId()),
+                CompanionCareerBuild.parse(profile.careerBuild()));
     }
 
     @Override
     public CareerReconciliation reconcileCareer(
             LoadedCompanion companion, CompanionProfile profile) {
-        return reconcileCareer(unwrap(companion), profile.personaSeed());
+        CompanionCareerBuild careerBuild = CompanionCareerBuild.parse(profile.careerBuild());
+        HostLoadedCompanion loaded = (HostLoadedCompanion) companion;
+        if (loaded.careerBuild() != careerBuild) {
+            throw new IllegalStateException("Loaded companion career build changed");
+        }
+        return reconcileCareer(unwrap(companion), careerBuild);
     }
 
-    private static CareerReconciliation reconcileCareer(Character character, long personaSeed) {
-        int advancements = advanceCareer(character, personaSeed);
-        CompanionBuildAllocator.Allocation allocation =
-                CompanionBuildAllocator.allocate(character);
-        if (allocation.apSpent() > 0 || allocation.spSpent() > 0) {
-            log.info("Companion build allocated cid={} job={} level={} apSpent={} spSpent={}",
-                    character.getId(), character.getJob().getId(), character.getLevel(),
-                    allocation.apSpent(), allocation.spSpent());
+    @Override
+    public String buildDiagnostics(
+            LoadedCompanion companion,
+            CompanionProfile profile
+    ) {
+        CompanionCareerBuild careerBuild =
+                CompanionCareerBuild.parse(profile.careerBuild());
+        return "careerBuild=" + careerBuild.id()
+                + ";ruleset=" + CompanionCareerBuild.RULESET_VERSION
+                + ";dryRun=true;"
+                + CompanionBuildAllocator.preview(
+                        unwrap(companion), careerBuild).summary();
+    }
+
+    private static CareerReconciliation reconcileCareer(
+            Character character,
+            CompanionCareerBuild careerBuild
+    ) {
+        CompanionBuildAllocator.Allocation before =
+                CompanionBuildAllocator.allocate(character, careerBuild);
+        int advancements = advanceCareer(character, careerBuild);
+        CompanionBuildAllocator.Allocation after =
+                CompanionBuildAllocator.allocate(character, careerBuild);
+        int apSpent = before.apSpent() + after.apSpent();
+        int spSpent = before.spSpent() + after.spSpent();
+        String detail = joinDetail(before.summary(), after.summary());
+        if (apSpent > 0 || spSpent > 0) {
+            log.info("Companion build allocated cid={} build={} job={} level={} apSpent={} spSpent={}",
+                    character.getId(), careerBuild.id(),
+                    character.getJob().getId(), character.getLevel(),
+                    apSpent, spSpent);
         }
         return new CareerReconciliation(
-                advancements, allocation.apSpent(), allocation.spSpent());
+                advancements, apSpent, spSpent,
+                "careerBuild=" + careerBuild.id() + ";ruleset="
+                        + CompanionCareerBuild.RULESET_VERSION + ";" + detail);
     }
 
-    private static int advanceCareer(Character character, long personaSeed) {
+    private static int advanceCareer(
+            Character character,
+            CompanionCareerBuild careerBuild
+    ) {
         int advancements = 0;
         while (advancements < MAX_ADVANCEMENTS_PER_RECONCILE) {
             var nextJobId = CompanionCareerPath.nextJobId(
-                    character.getJob().getId(), character.getLevel(), personaSeed);
+                    character.getJob().getId(), character.getLevel(), careerBuild);
             if (nextJobId.isEmpty()) {
                 break;
             }
             Job previous = character.getJob();
+            if (previous == Job.BEGINNER
+                    && !meetsFirstJobRequirement(character, careerBuild)) {
+                log.warn("Companion first job deferred cid={} build={} level={} str={} dex={} int={} luk={}",
+                        character.getId(), careerBuild.id(), character.getLevel(),
+                        character.getStr(), character.getDex(),
+                        character.getInt(), character.getLuk());
+                break;
+            }
             Job next = Job.getById(nextJobId.getAsInt());
             if (next == Job.BEGINNER || next == previous) {
                 throw new IllegalStateException(
@@ -97,6 +140,19 @@ public final class HostCompanionRuntimeAdapter implements CompanionRuntimeAdapte
                     character.getId(), character.getLevel(), previous.getId(), next.getId());
         }
         return advancements;
+    }
+
+    private static boolean meetsFirstJobRequirement(
+            Character character,
+            CompanionCareerBuild careerBuild
+    ) {
+        return switch (careerBuild.firstJobId()) {
+            case 100 -> character.getStr() >= 35;
+            case 200 -> character.getInt() >= 20;
+            case 300, 400 -> character.getDex() >= 25;
+            case 500 -> character.getDex() >= 20;
+            default -> false;
+        };
     }
 
     @Override
@@ -119,7 +175,7 @@ public final class HostCompanionRuntimeAdapter implements CompanionRuntimeAdapte
         Character character = companion.character();
         int remaining = experience;
         while (remaining > 0) {
-            advanceCareer(character, companion.personaSeed());
+            advanceCareer(character, companion.careerBuild());
             if (character.getLevel() >= character.getMaxLevel()) {
                 log.warn("Companion offline EXP stopped at career cap cid={} level={} job={} remaining={}",
                         character.getId(), character.getLevel(), character.getJob().getId(), remaining);
@@ -161,10 +217,23 @@ public final class HostCompanionRuntimeAdapter implements CompanionRuntimeAdapte
         return host.character();
     }
 
-    private record HostLoadedCompanion(Character character, long personaSeed) implements LoadedCompanion {
+    private static String joinDetail(String left, String right) {
+        if (left.equals(right)) {
+            return left;
+        }
+        return left + ";" + right;
+    }
+
+    private record HostLoadedCompanion(
+            Character character,
+            CompanionCareerBuild careerBuild
+    ) implements LoadedCompanion {
         private HostLoadedCompanion {
             if (character == null) {
                 throw new NullPointerException("character");
+            }
+            if (careerBuild == null) {
+                throw new NullPointerException("careerBuild");
             }
         }
 

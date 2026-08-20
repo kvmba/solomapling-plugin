@@ -166,8 +166,8 @@ public final class CompanionCommand extends Command {
                 companion.characterId(), companion.accountId(), companion.displayName(),
                 companion.status(), companion.enabled()));
         player.dropMessage(6, String.format(
-                "personaSeed=%d growth=%s mode=%s native=%s",
-                companion.personaSeed(), companion.growthStage(),
+                "personaSeed=%d careerBuild=%s growth=%s mode=%s native=%s",
+                companion.personaSeed(), companion.careerBuild(), companion.growthStage(),
                 companion.currentMode(), nativeState(companion)));
         player.dropMessage(6, "created=" + companion.createdAt() + " updated=" + companion.updatedAt());
     }
@@ -201,7 +201,7 @@ public final class CompanionCommand extends Command {
         player.dropMessage(6, "Companion despawn succeeded: " + formatStatus(result));
     }
 
-    private void status(Character player, String[] params) {
+    private void status(Character player, String[] params) throws SQLException {
         if (params.length > 2) {
             throw new IllegalArgumentException("usage: !companion status [cid]");
         }
@@ -215,6 +215,9 @@ public final class CompanionCommand extends Command {
                 return;
             }
             player.dropMessage(6, "Companion status succeeded: " + formatStatus(result.get()));
+            coordinator.buildDiagnostics(characterId).ifPresent(detail ->
+                    player.dropMessage(6, "Companion build dry-run: "
+                            + statusDetail(detail)));
             return;
         }
 
@@ -369,9 +372,19 @@ public final class CompanionCommand extends Command {
 
     private static String formatStatus(CompanionLifecycleStatus status) {
         return String.format(
-                "cid=%d state=%s desiredOnline=%s loaded=%s code=%s observed=%s",
+                "cid=%d state=%s desiredOnline=%s loaded=%s code=%s observed=%s detail=%s",
                 status.characterId(), status.state(), status.desiredOnline(), status.loaded(),
-                status.code(), status.observedAt());
+                status.code(), status.observedAt(), statusDetail(status.detail()));
+    }
+
+    private static String statusDetail(String detail) {
+        String normalized = detail == null ? "" : detail
+                .replace('\n', ' ')
+                .replace('\r', ' ')
+                .trim();
+        return normalized.length() <= 500
+                ? normalized
+                : normalized.substring(0, 499) + "…";
     }
 
     private void help(Character player) {

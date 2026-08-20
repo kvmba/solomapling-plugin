@@ -4,6 +4,7 @@ import org.gms.extension.api.HostCharacterProvisionRequest;
 import org.gms.extension.api.HostCharacterProvisionResult;
 import org.gms.extension.api.HostCharacterProvisioner;
 import org.gms.extension.api.HostRuntime;
+import soloMapling.companion.progression.CompanionCareerBuild;
 
 import java.sql.PreparedStatement;
 import java.util.Objects;
@@ -62,14 +63,16 @@ public final class HostRuntimeCompanionProvisioner implements CompanionHostProvi
                 (connection, metadata) -> {
                     String sql = """
                             INSERT INTO bot_profiles
-                                (character_id, account_id, display_name, persona_seed)
-                            VALUES (?, ?, ?, ?)
+                                (character_id, account_id, display_name, persona_seed, career_build)
+                            VALUES (?, ?, ?, ?, ?)
                             """;
                     try (PreparedStatement statement = connection.prepareStatement(sql)) {
                         statement.setInt(1, metadata.characterId());
                         statement.setInt(2, metadata.accountId());
                         statement.setString(3, metadata.characterName());
                         statement.setLong(4, request.personaSeed());
+                        statement.setString(
+                                5, CompanionCareerBuild.fromSeed(request.personaSeed()).id());
                         if (statement.executeUpdate() != 1) {
                             throw new IllegalStateException("bot profile insertion failed");
                         }

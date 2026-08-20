@@ -8,6 +8,7 @@ import org.gms.extension.api.HostConfig;
 import org.gms.extension.api.HostEventBus;
 import org.gms.extension.api.HostRuntime;
 import org.junit.jupiter.api.Test;
+import soloMapling.companion.progression.CompanionCareerBuild;
 
 import java.lang.reflect.Proxy;
 import java.sql.Connection;
@@ -45,6 +46,7 @@ class HostRuntimeCompanionProvisionerTest {
         assertEquals(800, parameters.get(2));
         assertEquals("Mira", parameters.get(3));
         assertEquals(42L, parameters.get(4));
+        assertEquals(CompanionCareerBuild.fromSeed(42L).id(), parameters.get(5));
     }
 
     @Test

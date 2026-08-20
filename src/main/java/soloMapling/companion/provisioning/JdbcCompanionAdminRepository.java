@@ -16,7 +16,8 @@ public final class JdbcCompanionAdminRepository implements CompanionAdminReposit
 
     private static final String SELECT = """
             SELECT bp.character_id, bp.account_id, bp.display_name, bp.status, bp.enabled,
-                   bp.persona_seed, bp.growth_stage, bp.current_mode, bp.created_at, bp.updated_at,
+                   bp.persona_seed, bp.career_build, bp.growth_stage, bp.current_mode,
+                   bp.created_at, bp.updated_at,
                    (a.id IS NOT NULL) AS account_present,
                    (c.id IS NOT NULL) AS character_present,
                    (c.accountid = bp.account_id) AS ownership_matches
@@ -72,6 +73,7 @@ public final class JdbcCompanionAdminRepository implements CompanionAdminReposit
                 resultSet.getString("status"),
                 resultSet.getBoolean("enabled"),
                 resultSet.getLong("persona_seed"),
+                resultSet.getString("career_build"),
                 resultSet.getString("growth_stage"),
                 resultSet.getString("current_mode"),
                 instant(resultSet, "created_at"),

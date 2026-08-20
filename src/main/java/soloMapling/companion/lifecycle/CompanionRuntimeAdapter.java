@@ -17,6 +17,13 @@ public interface CompanionRuntimeAdapter {
      */
     CareerReconciliation reconcileCareer(LoadedCompanion companion, CompanionProfile profile);
 
+    /**
+     * Returns a read-only AP/SP preview for GM diagnostics.
+     */
+    default String buildDiagnostics(LoadedCompanion companion, CompanionProfile profile) {
+        return "";
+    }
+
     void applyProgression(LoadedCompanion companion, OfflineProgressionSettlement settlement);
 
     /**
@@ -38,11 +45,21 @@ public interface CompanionRuntimeAdapter {
         int level();
     }
 
-    record CareerReconciliation(int advancements, int apSpent, int spSpent) {
+    record CareerReconciliation(
+            int advancements,
+            int apSpent,
+            int spSpent,
+            String detail
+    ) {
         public CareerReconciliation {
             if (advancements < 0 || apSpent < 0 || spSpent < 0) {
                 throw new IllegalArgumentException("career reconciliation counts must not be negative");
             }
+            detail = detail == null ? "" : detail;
+        }
+
+        public CareerReconciliation(int advancements, int apSpent, int spSpent) {
+            this(advancements, apSpent, spSpent, "");
         }
 
         public boolean changed() {
@@ -53,7 +70,18 @@ public interface CompanionRuntimeAdapter {
             return new CareerReconciliation(
                     advancements + other.advancements,
                     apSpent + other.apSpent,
-                    spSpent + other.spSpent);
+                    spSpent + other.spSpent,
+                    joinDetail(detail, other.detail));
+        }
+
+        private static String joinDetail(String left, String right) {
+            if (left.isBlank()) {
+                return right;
+            }
+            if (right.isBlank() || left.equals(right)) {
+                return left;
+            }
+            return left + ";" + right;
         }
     }
 }

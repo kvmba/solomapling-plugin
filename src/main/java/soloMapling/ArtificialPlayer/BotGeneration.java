@@ -1,5 +1,6 @@
 package soloMapling.ArtificialPlayer;
 
+import org.gms.client.BotClient;
 import org.gms.client.Character;
 import org.gms.client.Client;
 import org.gms.client.Job;
@@ -151,10 +152,15 @@ public class BotGeneration {
             return existing;
         }
 
-        Character companion = Character.loadCharFromDB(characterId, getBotClient(), true);
+        Client companionClient = new BotClient(
+                SoloMaplingConstants.GameConstants.WORLD_SCANIA,
+                SoloMaplingConstants.GameConstants.CHANNEL_1);
+        Character companion =
+                Character.loadCharFromDB(characterId, companionClient, true);
         if (companion == null) {
             throw new IllegalStateException("Unable to load companion character " + characterId);
         }
+        companionClient.setPlayer(companion);
         if (companion.getMap() == null) {
             throw new IllegalStateException("Companion has no valid map: " + characterId);
         }

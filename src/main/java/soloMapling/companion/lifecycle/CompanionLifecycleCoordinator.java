@@ -131,6 +131,17 @@ public final class CompanionLifecycleCoordinator {
         return Map.copyOf(statuses);
     }
 
+    public Optional<String> buildDiagnostics(int characterId) throws SQLException {
+        CompanionRuntimeAdapter.LoadedCompanion loaded = online.get(characterId);
+        if (loaded == null) {
+            return Optional.empty();
+        }
+        CompanionProfile profile = profiles.findByCharacterId(characterId)
+                .orElseThrow(() -> new IllegalArgumentException(
+                        "Companion profile not found: " + characterId));
+        return Optional.of(runtime.buildDiagnostics(loaded, profile));
+    }
+
     public RoutineSchedule schedule(int characterId) throws SQLException {
         CompanionProfile profile = profiles.findByCharacterId(characterId)
                 .orElseThrow(() -> new IllegalArgumentException(
@@ -257,7 +268,8 @@ public final class CompanionLifecycleCoordinator {
                         true, true, "ALREADY_ONLINE",
                         activity.name() + ";careerAdvancements=" + career.advancements()
                                 + ";apSpent=" + career.apSpent()
-                                + ";spSpent=" + career.spSpent(), now);
+                                + ";spSpent=" + career.spSpent()
+                                + ";" + career.detail(), now);
             }
             return online.containsKey(profile.characterId())
                     ? despawnInternal(profile.characterId(), profile, now,
@@ -304,7 +316,8 @@ public final class CompanionLifecycleCoordinator {
                             + ";mesos=" + settlement.mesos()
                             + ";careerAdvancements=" + career.advancements()
                             + ";apSpent=" + career.apSpent()
-                            + ";spSpent=" + career.spSpent(), now);
+                            + ";spSpent=" + career.spSpent()
+                            + ";" + career.detail(), now);
         } catch (Throwable exception) {
             online.remove(profile.characterId());
             if (loaded != null) {

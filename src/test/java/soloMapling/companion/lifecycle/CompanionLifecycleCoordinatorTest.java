@@ -135,9 +135,12 @@ class CompanionLifecycleCoordinatorTest {
         FakeRuntime runtime = new FakeRuntime();
         CompanionLifecycleCoordinator coordinator = coordinator(repository, runtime);
         coordinator.start();
+        runtime.diagnostics = "careerBuild=bowmaster;dryRun=true";
         int checkpointsAfterSpawn = java.util.Collections.frequency(
                 runtime.events, "checkpoint:24");
-        runtime.career = new CompanionRuntimeAdapter.CareerReconciliation(1, 5, 3);
+        runtime.career = new CompanionRuntimeAdapter.CareerReconciliation(
+                1, 5, 3,
+                "careerBuild=bowmaster;apTarget=STR:29;nextSkill=3101005:1->30");
 
         coordinator.reconcileNow();
 
@@ -146,6 +149,12 @@ class CompanionLifecycleCoordinatorTest {
         assertEquals(1, runtime.loads.getOrDefault(24, 0));
         assertTrue(coordinator.status(24).orElseThrow().detail().contains("apSpent=5"));
         assertTrue(coordinator.status(24).orElseThrow().detail().contains("spSpent=3"));
+        assertTrue(coordinator.status(24).orElseThrow().detail()
+                .contains("careerBuild=bowmaster"));
+        assertTrue(coordinator.status(24).orElseThrow().detail()
+                .contains("nextSkill=3101005"));
+        assertEquals("careerBuild=bowmaster;dryRun=true",
+                coordinator.buildDiagnostics(24).orElseThrow());
     }
 
     @Test
@@ -324,6 +333,7 @@ class CompanionLifecycleCoordinatorTest {
         private final Set<Integer> failAttaches = new HashSet<>();
         private final List<String> events;
         private CareerReconciliation career = new CareerReconciliation(0, 0, 0);
+        private String diagnostics = "";
 
         private FakeRuntime() {
             this(new java.util.ArrayList<>());
@@ -351,6 +361,14 @@ class CompanionLifecycleCoordinatorTest {
         public CareerReconciliation reconcileCareer(
                 LoadedCompanion companion, CompanionProfile profile) {
             return career;
+        }
+
+        @Override
+        public String buildDiagnostics(
+                LoadedCompanion companion,
+                CompanionProfile profile
+        ) {
+            return diagnostics;
         }
 
         @Override

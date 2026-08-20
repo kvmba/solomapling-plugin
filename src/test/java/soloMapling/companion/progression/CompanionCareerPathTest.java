@@ -21,6 +21,25 @@ class CompanionCareerPathTest {
     }
 
     @Test
+    void persistedBuildFixesTheCompleteLineageBeforeFirstJob() {
+        CompanionCareerBuild build = CompanionCareerBuild.MARKSMAN;
+
+        assertEquals(300, CompanionCareerPath.nextJobId(0, 10, build).orElseThrow());
+        assertEquals(320, CompanionCareerPath.nextJobId(300, 30, build).orElseThrow());
+        assertEquals(321, CompanionCareerPath.nextJobId(320, 70, build).orElseThrow());
+        assertEquals(322, CompanionCareerPath.nextJobId(321, 120, build).orElseThrow());
+        assertFalse(CompanionCareerPath.nextJobId(310, 70, build).isPresent());
+    }
+
+    @Test
+    void magicianFirstJobUsesClassicLevelEightThreshold() {
+        assertEquals(200, CompanionCareerPath.nextJobId(
+                0, 8, CompanionCareerBuild.BISHOP).orElseThrow());
+        assertFalse(CompanionCareerPath.nextJobId(
+                0, 7, CompanionCareerBuild.BISHOP).isPresent());
+    }
+
+    @Test
     void manualFirstJobIsRespectedAndBranchRemainsStable() {
         int warriorBranch = CompanionCareerPath.nextJobId(100, 30, 77L).orElseThrow();
 

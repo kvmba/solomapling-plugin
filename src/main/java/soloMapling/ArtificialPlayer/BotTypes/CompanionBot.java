@@ -4,6 +4,7 @@ import org.gms.client.Character;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import soloMapling.ArtificialPlayer.BotGrindSystem.GrindBrain;
+import soloMapling.ArtificialPlayer.BotGrindSystem.GrindStyle;
 import soloMapling.ArtificialPlayer.BotGrindSystem.GrindTickRegistry;
 import soloMapling.ArtificialPlayer.BotMessagingSystem.CharacterStorage;
 import soloMapling.ArtificialPlayer.BotPartySystem.BotPartyQueue;
@@ -27,6 +28,7 @@ import soloMapling.companion.execution.CompanionActionExecutor;
 import soloMapling.companion.execution.CompanionTargetResolver;
 import soloMapling.companion.execution.CompanionTrainingController;
 import soloMapling.companion.planner.CompanionPlannerResult;
+import soloMapling.companion.survival.CompanionSurvivalController;
 
 import java.time.Duration;
 import java.util.ArrayList;
@@ -58,6 +60,8 @@ public final class CompanionBot extends BotSM implements
     private TurnContext activeContext;
     private final GrindBrain grind = new GrindBrain(message -> { });
     private final CompanionCombatLifecycle combatLifecycle = new CompanionCombatLifecycle();
+    private final CompanionSurvivalController survival =
+            new CompanionSurvivalController();
     private volatile Character trainingTarget;
     private volatile Boolean lastTrainingSameMap;
     private volatile String pendingInviteKey;
@@ -82,6 +86,10 @@ public final class CompanionBot extends BotSM implements
         this.brain = java.util.Objects.requireNonNull(brain, "brain");
         this.actionExecutor = java.util.Objects.requireNonNull(actionExecutor, "actionExecutor");
         this.turns = java.util.Objects.requireNonNull(turns, "turns");
+        // A companion trains around its player rather than owning a stationary
+        // TrainingBot camp. CAMP can starve combat on crowded maps while it
+        // repeatedly contests occupied or unreachable spots.
+        this.grind.forceStyle(GrindStyle.ROAM);
         botType = "CompanionBot";
     }
 
@@ -144,6 +152,9 @@ public final class CompanionBot extends BotSM implements
 
     private void updateActiveState() {
         if (getChr() == null || getChr().getMap() == null) {
+            return;
+        }
+        if (survival.tick(getChr())) {
             return;
         }
         maintainTraining();
@@ -256,8 +267,10 @@ public final class CompanionBot extends BotSM implements
         Character companion = getChr();
         Character target = trainingTarget;
         if (checkIfNotRunningOrPaused()
-                || !combatLifecycle.active() || companion == null || target == null
-                || companion.getMap() == null || target.getMap() == null
+                || !combatLifecycle.active() || companion == null) {
+            return;
+        }
+        if (target == null || companion.getMap() == null || target.getMap() == null
                 || companion.getMapId() != target.getMapId()) {
             return;
         }
@@ -276,6 +289,7 @@ public final class CompanionBot extends BotSM implements
     @Override
     public synchronized void stopScheduledTask() {
         stopTraining();
+        survival.cancel();
         GCMovement.disable(getChr());
         super.stopScheduledTask();
     }
@@ -292,6 +306,9 @@ public final class CompanionBot extends BotSM implements
         Character companion = getChr();
         Character target = trainingTarget;
         if (target == null) {
+            return;
+        }
+        if (survival.supplyRunActive()) {
             return;
         }
         boolean online = target.getMap() != null;

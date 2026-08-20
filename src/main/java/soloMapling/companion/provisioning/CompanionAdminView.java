@@ -10,6 +10,7 @@ public record CompanionAdminView(
         String status,
         boolean enabled,
         long personaSeed,
+        String careerBuild,
         String growthStage,
         String currentMode,
         Instant createdAt,

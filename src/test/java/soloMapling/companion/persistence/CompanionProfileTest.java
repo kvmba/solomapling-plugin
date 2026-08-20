@@ -1,6 +1,7 @@
 package soloMapling.companion.persistence;
 
 import org.junit.jupiter.api.Test;
+import soloMapling.companion.progression.CompanionCareerBuild;
 
 import java.time.Instant;
 
@@ -20,6 +21,7 @@ class CompanionProfileTest {
 
         assertEquals("Mira", profile.displayName());
         assertEquals("active", profile.status());
+        assertEquals(CompanionCareerBuild.fromSeed(99L).id(), profile.careerBuild());
         assertEquals("", profile.persona());
         assertEquals("Australia/Sydney", profile.routineTimezone());
         assertEquals("novice", profile.growthStage());

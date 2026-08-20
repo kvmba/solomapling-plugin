@@ -1,6 +1,7 @@
 package soloMapling.companion.persistence;
 
 import org.junit.jupiter.api.Test;
+import soloMapling.companion.progression.CompanionCareerBuild;
 
 import javax.sql.DataSource;
 import java.io.InputStream;
@@ -44,6 +45,26 @@ class CompanionSchemaMigratorTest {
                         () -> "Missing table migration: " + table);
             }
         }
+
+        String careerMigration =
+                "db/migration/solomapling/V2__add_companion_career_build.sql";
+        try (InputStream stream = CompanionSchemaMigrator.class.getClassLoader()
+                .getResourceAsStream(careerMigration)) {
+            assertNotNull(stream, "Career build migration must be packaged in the plugin");
+            String sql = new String(stream.readAllBytes(), StandardCharsets.UTF_8);
+            assertTrue(sql.contains("`career_build`"));
+            assertTrue(sql.contains("NOT NULL DEFAULT ''"));
+        }
+    }
+
+    @Test
+    void adoptsExistingManualJobsWithoutChangingTheirBranch() {
+        assertEquals(CompanionCareerBuild.BOWMASTER,
+                CompanionSchemaMigrator.careerForExisting(311, 42L));
+        assertEquals(CompanionCareerBuild.BISHOP,
+                CompanionSchemaMigrator.careerForExisting(232, 7L));
+        assertEquals(100,
+                CompanionSchemaMigrator.careerForExisting(100, 99L).firstJobId());
     }
 
     private static DataSource noConnectionDataSource() {

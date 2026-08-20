@@ -1,6 +1,7 @@
 package soloMapling.companion.persistence;
 
 import org.gms.util.DatabaseConnection;
+import soloMapling.companion.progression.CompanionCareerBuild;
 
 import java.sql.Connection;
 import java.sql.PreparedStatement;
@@ -16,7 +17,7 @@ public final class JdbcCompanionProfileRepository implements CompanionProfileRep
 
     private static final String COLUMNS = """
             character_id, account_id, display_name, status, enabled,
-            persona_seed, persona, system_prompt, greeting,
+            persona_seed, career_build, persona, system_prompt, greeting,
             routine_timezone, routine_profile, growth_stage, current_mode,
             last_online_at, last_settled_at, created_at, updated_at
             """;
@@ -88,13 +89,19 @@ public final class JdbcCompanionProfileRepository implements CompanionProfileRep
     }
 
     private static CompanionProfile readProfile(ResultSet resultSet) throws SQLException {
+        long personaSeed = resultSet.getLong("persona_seed");
+        String careerBuild = resultSet.getString("career_build");
+        if (careerBuild == null || careerBuild.isBlank()) {
+            careerBuild = CompanionCareerBuild.fromSeed(personaSeed).id();
+        }
         return new CompanionProfile(
                 resultSet.getInt("character_id"),
                 resultSet.getInt("account_id"),
                 resultSet.getString("display_name"),
                 resultSet.getString("status"),
                 resultSet.getBoolean("enabled"),
-                resultSet.getLong("persona_seed"),
+                personaSeed,
+                careerBuild,
                 resultSet.getString("persona"),
                 resultSet.getString("system_prompt"),
                 resultSet.getString("greeting"),
