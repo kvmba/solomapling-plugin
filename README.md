@@ -42,6 +42,9 @@ engine + bots in one tree     →   host (BeiDou) + plugins/*.jar
 
 - **Packaging:** Cosmic-embedded sources → shaded `ServerExtension` plugin jar for `gms-server/plugins/`.
 - **Host boundary:** the host exposes artificial-character checks and gameplay events; this plugin registers a classifier and bridges host events into its internal EventBus (see [docs/HOST_BOUNDARY.md](docs/HOST_BOUNDARY.md)).
+- **Persistence boundary:** the plugin applies and versions its own `bot_*`
+  Flyway migrations; the host only supplies generic native-character
+  provisioning and its transaction callback.
 - **Build:** compiles against BeiDou `extension-api` + `gms-server` (`provided`); does **not** ship Cosmic or BeiDou server sources.
 
 ## Integration model
@@ -53,6 +56,7 @@ engine + bots in one tree     →   host (BeiDou) + plugins/*.jar
 | Engine types (`org.gms.*`) | host `gms-server` (provided at compile time) |
 | Host gameplay events | host publishes map/chat/party/trade invite events; bridges forward into SoloMapling queues / `EventBus` |
 | Artificial-character checks | plugin registers classifier in `onLoad`; host uses `HostHooks.isArtificial` (no `soloMapling` imports) |
+| Companion persistence | plugin owns `bot_*` tables and `flyway_solomapling_schema_history`; host remains unaware of Companion schema |
 | Trade | plugin registers `TradeParticipantHook` + `BotTradeInviteBridge` → `BotTradeQueue` (see [docs/TRADE_DESIGN.md](docs/TRADE_DESIGN.md)) |
 
 ## Build

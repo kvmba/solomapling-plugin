@@ -31,6 +31,7 @@ import soloMapling.companion.CompanionRoster;
 import soloMapling.companion.lifecycle.CompanionLifecycleAccess;
 import soloMapling.companion.lifecycle.CompanionLifecycleCoordinator;
 import soloMapling.companion.lifecycle.HostCompanionRuntimeAdapter;
+import soloMapling.companion.persistence.CompanionSchemaMigrator;
 import soloMapling.companion.persistence.JdbcCompanionProfileRepository;
 import soloMapling.companion.routine.OfflineProgressionPolicy;
 import soloMapling.itemPool.DesirableEquipList;
@@ -72,9 +73,11 @@ public final class SoloMaplingExtension implements ServerExtension {
     @Override
     public void onLoad(HostRuntime runtime) {
         this.runtime = runtime;
+        int migrationsExecuted = CompanionSchemaMigrator.migrate();
         log.info("SoloMapling plugin onLoad hostId={} spawnBotsOnStartup={}",
                 runtime.hostId(),
                 runtime.config().getBool("solomapling.spawn-bots-on-startup", false));
+        log.info("SoloMapling schema ready migrationsExecuted={}", migrationsExecuted);
 
         ArtificialCharacters.register(BOT_IDS);
         SoloMaplingTradeParticipantHook.register();

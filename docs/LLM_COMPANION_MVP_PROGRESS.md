@@ -79,8 +79,8 @@ Do not implement in the original checkouts. They contain runtime/user state:
 
 ### Phase 1: persistence
 
-- [x] Add Flyway migration for profile, relationship, memory, knowledge, and
-      activity tables.
+- [x] Add plugin-owned Flyway migration for profile, relationship, memory,
+      knowledge, and activity tables.
 - [x] Add plugin persistence records and repositories.
 - [x] Add dynamic `CompanionRoster`.
 - [x] Add persistent character load/spawn/save/despawn.
@@ -121,7 +121,8 @@ Do not implement in the original checkouts. They contain runtime/user state:
 
 ## Next actions
 
-1. Run the host migration and provision a companion against the beta database.
+1. Deploy the plugin-owned migration and provision a companion against the beta
+   database.
 2. Package and deploy the plugin jar to the beta runtime.
 3. Exercise restart persistence and player interaction scenarios.
 4. Record exact commands and results without storing credentials.
@@ -233,6 +234,15 @@ failure. Do not paste secrets or large logs.
   The complete host test suite passes (6 tests), and the updated host artifact
   packages successfully. Runtime monster movement, companion contact damage,
   and party EXP still require validation after deployment.
+- 2026-08-21: Moved the five `bot_*` table definitions out of the BeiDou host
+  migration set and into SoloMapling's isolated
+  `db/migration/solomapling` location. The plugin now runs Flyway before
+  registering hooks or commands and records its own history in
+  `flyway_solomapling_schema_history`. It baselines the already non-empty host
+  database at plugin version `0`, then applies the idempotent plugin `V1`, so
+  both existing and fresh Companion installations are adopted safely. BeiDou
+  retains only generic native provisioning, transaction callback, cache, and
+  artificial-character responsibilities.
 - 2026-08-21: Added persona-seeded Explorer career paths with automatic
   advancement at levels 10/30/70/120. A GM-selected first or second job is
   preserved, later jobs stay on that branch, and online reconciliation

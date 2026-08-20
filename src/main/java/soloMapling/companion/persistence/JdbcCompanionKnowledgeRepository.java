@@ -13,7 +13,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 
-/** JDBC persistence matching the host V1.11.6 {@code bot_knowledge} schema. */
+/** JDBC persistence matching SoloMapling's plugin-owned {@code bot_knowledge} schema. */
 public final class JdbcCompanionKnowledgeRepository
         implements CompanionKnowledgeRepository {
 

@@ -75,7 +75,10 @@ flowchart LR
 
 ## Persistence model
 
-Add Flyway-managed tables in the host repository:
+Add Flyway-managed tables in the SoloMapling plugin. Plugin migrations use the
+isolated `db/migration/solomapling` location and
+`flyway_solomapling_schema_history`; the host owns only native account/character
+schema and the generic provisioning transaction:
 
 - `bot_profiles`: account/character identity, persona seed and text, routine
   settings, growth stage, current mode, and settlement timestamps.
@@ -125,7 +128,7 @@ database is deferred until scale demonstrates a need.
 
 ### Phase 1: persistent identity
 
-- Add host database migrations.
+- Add plugin-owned database migrations.
 - Add plugin repositories, domain records, and a dynamic companion roster.
 - Add persistent load/spawn/save/despawn paths without changing ambient bot
   generation.
