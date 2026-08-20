@@ -85,7 +85,30 @@ solomapling:
   plugins-dir: plugins
   spawn-bots-on-startup: true
   language: zh-CN   # optional; defaults to gms.service.language (en-US | zh-CN)
+  llm:
+    enabled: false
+    api-key: ${DEEPSEEK_API_KEY:}   # or set env DEEPSEEK_API_KEY
+    model: deepseek-v4-flash
+    max-tokens: 80
+    timeout-ms: 10000
+    history-turns: 8
+    fallback-to-yaml: true          # on LLM failure, speak a YAML line instead
 ```
+
+### SocialBot LLM chat (Hybrid)
+
+When `solomapling.llm.enabled: true` and an API key is set, **SocialBot** uses DeepSeek for **free-form player chat** during an active conversation (player must @ the bot by name first). Structured intents still use YAML:
+
+| Player intent | Handler |
+|---------------|---------|
+| Menu `1`–`3` / keywords (what's up, rumors, …) | YAML dialogue |
+| `4` / team / party | Party recruit flow |
+| `5` / goodbye / bye | YAML farewell |
+| Anything else | LLM (`deepseek-v4-flash` by default) |
+
+LLM calls run on virtual threads and never block the chat packet thread. Replies are capped (~120 chars) for map chat. Session history is in-memory per bot↔player and cleared when the conversation ends.
+
+Client library: [simple-openai](https://github.com/sashirestela/simple-openai) (`SimpleOpenAIDeepseek`), shaded into the plugin jar.
 
 ## SPI entry
 
@@ -99,4 +122,4 @@ solomapling:
 
 ## Version
 
-`0.4.0-SNAPSHOT` — framework lineage aligned with SoloMapling v0.3; packaging is SPI/plugin-only.
+`0.4.0-SNAPSHOT` — SocialBot Hybrid LLM chat (DeepSeek via simple-openai) and zh-CN free-market localization; packaging is SPI/plugin-only.

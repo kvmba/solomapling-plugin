@@ -79,6 +79,39 @@ public final class DialogueContextResolver {
         return Optional.of(sb.toString());
     }
 
+    /** Multi-line game-state snapshot for LLM prompts; omits fields that cannot be resolved. */
+    public static String buildSnapshot(Character self, Character player) {
+        if (self == null) {
+            return "(no bot context)";
+        }
+        Resolution res = new Resolution(self, player);
+        StringBuilder sb = new StringBuilder();
+        appendSnapshotLine(sb, "Your name", nonBlank(self.getName()));
+        appendSnapshotLine(sb, "Your map", res.resolve("MAP"));
+        appendSnapshotLine(sb, "Your region", res.resolve("REGION"));
+        appendSnapshotLine(sb, "Your job", res.resolve("JOB"));
+        appendSnapshotLine(sb, "Your level", res.resolve("LEVEL"));
+        appendSnapshotLine(sb, "Your weapon", res.resolve("WEAPON"));
+        appendSnapshotLine(sb, "Nearby mob", res.resolve("MOB"));
+        appendSnapshotLine(sb, "Notable drop", res.resolve("DROP"));
+        if (player != null) {
+            appendSnapshotLine(sb, "Player name", res.resolve("PLAYER_NAME"));
+            appendSnapshotLine(sb, "Player level", res.resolve("PLAYER_LEVEL"));
+            appendSnapshotLine(sb, "Player job", res.resolve("PLAYER_JOB"));
+            appendSnapshotLine(sb, "Player fame", res.resolve("PLAYER_FAME"));
+            appendSnapshotLine(sb, "Player weapon", res.resolve("PLAYER_WEAPON"));
+            appendSnapshotLine(sb, "Player gear", res.resolve("PLAYER_GEAR"));
+            appendSnapshotLine(sb, "Player pet", res.resolve("PLAYER_PET"));
+            appendSnapshotLine(sb, "Player guild", res.resolve("PLAYER_GUILD"));
+            appendSnapshotLine(sb, "Player NX item", res.resolve("PLAYER_NX"));
+        }
+        return sb.isEmpty() ? "(minimal context)" : sb.toString().trim();
+    }
+
+    private static void appendSnapshotLine(StringBuilder sb, String label, Optional<String> value) {
+        value.filter(v -> !v.isBlank()).ifPresent(v -> sb.append("- ").append(label).append(": ").append(v).append('\n'));
+    }
+
     // Per-fill resolver. Caches the focus mob so {MOB} and {DROP} in the same line agree on one mob.
     private static final class Resolution {
         private final Character self;

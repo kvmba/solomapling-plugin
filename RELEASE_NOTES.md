@@ -2,6 +2,26 @@
 
 ## 0.4.0-SNAPSHOT
 
+### Features
+
+- **SocialBot Hybrid LLM chat:** optional DeepSeek integration for free-form player dialogue during active SocialBot sessions (`solomapling.llm.*`). Menu options, party recruit, and goodbye remain YAML/rule-driven.
+- Uses [simple-openai](https://github.com/sashirestela/simple-openai) (`SimpleOpenAIDeepseek`); client + OkHttp/Jackson shaded into the plugin jar.
+- `DialogueContextResolver.buildSnapshot()` exports live game context into LLM system prompts.
+
+### Config (`application.yml`)
+
+```yaml
+solomapling:
+  llm:
+    enabled: false
+    api-key: ${DEEPSEEK_API_KEY:}
+    model: deepseek-v4-flash
+    max-tokens: 80
+    timeout-ms: 10000
+    history-turns: 8
+    fallback-to-yaml: true
+```
+
 ### Localization
 
 `solomapling.language: zh-CN` previously only switched the bot dialogue packs, so free-market bots kept shouting English lines that were hardcoded in Java or read from English-only word lists. Those three paths now follow the language setting:

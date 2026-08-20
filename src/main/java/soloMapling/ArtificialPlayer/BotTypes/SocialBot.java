@@ -6,6 +6,9 @@ import soloMapling.ArtificialPlayer.ConversationManager;
 import soloMapling.ArtificialPlayer.BotDialogueHandler;
 import soloMapling.ArtificialPlayer.BotFlavorSystem.BotFlavor;
 import soloMapling.ArtificialPlayer.BotFlavorSystem.LevelUpCongrats;
+import soloMapling.ArtificialPlayer.LlmSystem.SocialChatSessionStore;
+import soloMapling.ArtificialPlayer.LlmSystem.SocialLlmConfig;
+import soloMapling.ArtificialPlayer.LlmSystem.SocialLlmService;
 import soloMapling.ArtificialPlayer.BotMessagingSystem.ChatMessage;
 import soloMapling.ArtificialPlayer.BotMessagingSystem.MessageQueue;
 import soloMapling.ArtificialPlayer.BotPartySystem.BotPartyQueue;
@@ -350,32 +353,106 @@ public class SocialBot extends BotSM {
         if (socialState == SocialBotState.AWAITING_CHOICE) {
             handleDialogueChoice(message.getContent(), player);
             tracker.increment();
+        } else if (socialState == SocialBotState.RESPONDING) {
+            // LLM reply in flight — ignore extra lines until the chain finishes.
         }
     }
 
     private void handleDialogueChoice(String content, Character player) {
         String lower = content.trim().toLowerCase();
 
-        String category = null;
-        if (lower.equals("1") || lower.contains("what's up") || lower.contains("whats up")) {
-            category = "WhatsUp";
-        } else if (lower.equals("2") || lower.contains("interesting")) {
-            category = "Interesting";
-        } else if (lower.equals("3") || lower.contains("rumor")) {
-            category = "Rumors";
-        } else if (lower.equals("4") || lower.contains("team") || lower.contains("party")) {
-            handlePartyAsk(player);
-            return;
-        } else if (lower.equals("5") || lower.contains("goodbye") || lower.contains("bye") || lower.contains("cya")) {
+        if (isGoodbyeIntent(lower)) {
             doGoodbye(player);
             resetConversation();
             return;
         }
-
-        if (category == null) {
-            category = "WhatsUp";
+        if (isPartyIntent(lower)) {
+            handlePartyAsk(player);
+            return;
         }
 
+        String category = resolveMenuCategory(lower);
+        if (category != null) {
+            respondWithYamlCategory(category, player);
+            return;
+        }
+
+        if (SocialLlmService.isEnabled()) {
+            handleFreeformLlm(content, player);
+            return;
+        }
+
+        respondWithYamlCategory("WhatsUp", player);
+    }
+
+    private static boolean isGoodbyeIntent(String lower) {
+        return lower.equals("5")
+                || lower.contains("goodbye")
+                || lower.contains("bye")
+                || lower.contains("cya");
+    }
+
+    private static boolean isPartyIntent(String lower) {
+        return lower.equals("4")
+                || lower.contains("team")
+                || lower.contains("party");
+    }
+
+    /** Returns a YAML dialogue category for structured menu picks, or null for free-form chat. */
+    private static String resolveMenuCategory(String lower) {
+        if (lower.equals("1") || lower.contains("what's up") || lower.contains("whats up")) {
+            return "WhatsUp";
+        }
+        if (lower.equals("2") || lower.contains("interesting")) {
+            return "Interesting";
+        }
+        if (lower.equals("3") || lower.contains("rumor")) {
+            return "Rumors";
+        }
+        return null;
+    }
+
+    private void handleFreeformLlm(String content, Character player) {
+        socialState = SocialBotState.RESPONDING;
+        int botId = getChr().getId();
+        int playerId = player.getId();
+
+        SocialLlmService.completeAsync(getChr(), player, content,
+                reply -> deliverLlmReply(player, botId, playerId, reply),
+                () -> {
+                    if (SocialLlmConfig.fallbackToYaml()) {
+                        respondWithYamlCategory("WhatsUp", player);
+                    } else {
+                        BotTiming.chain()
+                                .stopUnless(() -> isConversationWith(player))
+                                .run(() -> {
+                                    socialState = SocialBotState.AWAITING_CHOICE;
+                                    showInteractiveOptions(player);
+                                })
+                                .start();
+                    }
+                });
+    }
+
+    private void deliverLlmReply(Character player, int botId, int playerId, String reply) {
+        BotTiming.Chain chain = BotTiming.chain()
+                .stopUnless(() -> isConversationWith(player))
+                .pauseRandom(1500, 3000)
+                .run(() -> botFaceTowardsPoint(getChr(), player.getPosition()));
+        if (reply != null && !reply.isBlank()) {
+            chain.run(() -> {
+                BotSpeak(getChr(), reply);
+                SocialChatSessionStore.addAssistant(botId, playerId, reply);
+            });
+        }
+        chain.run(() -> {
+            socialState = SocialBotState.AWAITING_CHOICE;
+            showInteractiveOptions(player);
+        });
+        chain.start();
+    }
+
+    private void respondWithYamlCategory(String category, Character player) {
         if (random.nextDouble() < RARE_LINE_CHANCE) {
             category = "Rare";
         }
@@ -568,6 +645,7 @@ public class SocialBot extends BotSM {
         Character respondant = getInteractors().getRespondant();
         if (respondant != null) {
             expirePlayerChatCommands(respondant);
+            SocialChatSessionStore.clear(getChr().getId(), respondant.getId());
         }
         getInteractors().resetRespondant();
         socialState = SocialBotState.IDLE_AMBIENT;

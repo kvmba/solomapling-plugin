@@ -17,6 +17,7 @@ import soloMapling.ArtificialPlayer.BotMessagingSystem.PlayerChatBridge;
 import soloMapling.ArtificialPlayer.BotPartySystem.BotPartyInviteBridge;
 import soloMapling.ArtificialPlayer.BotTradeSystem.BotTradeInviteBridge;
 import soloMapling.ArtificialPlayer.BotTradeSystem.SoloMaplingTradeParticipantHook;
+import soloMapling.ArtificialPlayer.LlmSystem.SocialLlmService;
 import soloMapling.Environment.EnvironmentManager;
 import soloMapling.Environment.EnvironmentPopulationConfig;
 import soloMapling.Environment.SoloMaplingLanguageConfig;
@@ -49,7 +50,7 @@ public final class SoloMaplingExtension implements ServerExtension {
 
     @Override
     public String version() {
-        return "0.4.0";
+        return "0.4.0-SNAPSHOT";
     }
 
     @Override
@@ -67,6 +68,8 @@ public final class SoloMaplingExtension implements ServerExtension {
         log.info("SoloMapling language={} dialoguePack={}",
                 SoloMaplingLanguageConfig.languageTag(),
                 SoloMaplingLanguageConfig.dialoguePackDirectoryName());
+
+        SocialLlmService.configure(runtime.config());
 
         String populationPath = runtime.config().getString("solomapling.population-config", "");
         if (populationPath != null && !populationPath.isBlank()) {
