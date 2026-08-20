@@ -61,6 +61,7 @@ public final class CompanionBot extends BotSM implements
     private volatile Character trainingTarget;
     private volatile Boolean lastTrainingSameMap;
     private volatile String pendingInviteKey;
+    private volatile long nextCombatDiagnosticAt;
     private final InviteTurnDeduplicator inviteTurns = new InviteTurnDeduplicator();
 
     public CompanionBot(Character character) {
@@ -260,6 +261,15 @@ public final class CompanionBot extends BotSM implements
                 || companion.getMapId() != target.getMapId()) {
             return;
         }
+        long now = System.currentTimeMillis();
+        if (nextCombatDiagnosticAt <= now) {
+            nextCombatDiagnosticAt = now + 5_000L;
+            log.info("Companion combat tick cid={} map={} position={} monsters={} observed={} style={} spot={} progressAgeMs={}",
+                    companion.getId(), companion.getMapId(), companion.getPosition(),
+                    companion.getMap().getAllMonsters().size(),
+                    GCMovement.isMapObserved(companion.getMapId()),
+                    grind.activeStyle(), grind.spotLabel(), grind.msSinceProgress());
+        }
         grind.tick(companion);
     }
 
@@ -311,6 +321,7 @@ public final class CompanionBot extends BotSM implements
         }
         GCMovement.setGrinding(companion, true);
         grind.start(companion);
+        nextCombatDiagnosticAt = 0L;
         GrindTickRegistry.getInstance().register(this);
         log.debug("Companion combat activated cid={} targetCid={} map={}",
                 companion.getId(), target.getId(), companion.getMapId());

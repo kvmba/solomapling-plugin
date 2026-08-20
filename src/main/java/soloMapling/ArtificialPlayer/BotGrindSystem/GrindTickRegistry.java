@@ -1,8 +1,11 @@
 package soloMapling.ArtificialPlayer.BotGrindSystem;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import soloMapling.server.BotPerfStats;
 import soloMapling.server.ExecutorServiceManager;
 
+import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
@@ -17,6 +20,8 @@ import java.util.concurrent.atomic.AtomicBoolean;
  */
 public final class GrindTickRegistry {
 
+    private static final Logger log = LoggerFactory.getLogger(GrindTickRegistry.class);
+    private static final long FAILURE_LOG_INTERVAL_MS = 10_000L;
     public static final long TICK_MS = 250L;
 
     @FunctionalInterface
@@ -32,6 +37,7 @@ public final class GrindTickRegistry {
     private static final GrindTickRegistry INSTANCE = new GrindTickRegistry();
 
     private final Set<Participant> participants = ConcurrentHashMap.newKeySet();
+    private final Map<Participant, Long> nextFailureLogAt = new ConcurrentHashMap<>();
     private final AtomicBoolean started = new AtomicBoolean(false);
     private final TickerScheduler scheduler;
 
@@ -68,6 +74,7 @@ public final class GrindTickRegistry {
     public void unregister(Participant participant) {
         if (participant != null) {
             participants.remove(participant);
+            nextFailureLogAt.remove(participant);
         }
     }
 
@@ -105,8 +112,17 @@ public final class GrindTickRegistry {
         for (Participant participant : participants) {
             try {
                 participant.grindTick();
-            } catch (Throwable ignored) {
-                // A broken participant must never terminate the shared ticker.
+            } catch (Throwable failure) {
+                // A broken participant must never terminate the shared ticker, but
+                // suppressing the failure entirely makes a live combat stall impossible
+                // to diagnose.
+                long now = System.currentTimeMillis();
+                Long next = nextFailureLogAt.get(participant);
+                if (next == null || next <= now) {
+                    nextFailureLogAt.put(participant, now + FAILURE_LOG_INTERVAL_MS);
+                    log.error("Grind participant tick failed type={}",
+                            participant.getClass().getName(), failure);
+                }
             }
         }
         BotPerfStats.recordCombatSweep(
