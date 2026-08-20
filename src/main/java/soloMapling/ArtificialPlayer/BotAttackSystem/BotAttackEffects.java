@@ -15,13 +15,17 @@ import org.gms.server.maps.MapItem;
 import org.gms.server.maps.MapObject;
 import org.gms.server.maps.MapObjectType;
 import org.gms.server.maps.MapleMap;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import soloMapling.ArtificialPlayer.GCMoveSystem.GCMovement;
+import soloMapling.companion.CompanionRoster;
 import soloMapling.server.MethodScheduler;
 import org.gms.util.PacketCreator;
 import org.gms.util.Randomizer;
 
 import java.awt.Point;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -38,6 +42,8 @@ import java.util.Map;
  * world drop rates.
  */
 public final class BotAttackEffects {
+
+    private static final Logger log = LoggerFactory.getLogger(BotAttackEffects.class);
 
     private BotAttackEffects() {}
 
@@ -133,6 +139,7 @@ public final class BotAttackEffects {
     /* Apply HP damage; on death, credit EXP + the death broadcast (no vanilla drops) and spawn our own loot. */
     private static boolean applyDamageAndLoot(Character bot, Monster target, int damage, short hitDelay) {
         MapleMap map = bot.getMap();
+        Map<Integer, Integer> expBefore = companionPartyExp(bot);
 
         boolean killed = target.damage(bot, damage, false); // register damage; false = allow death
         if (killed) {
@@ -140,12 +147,32 @@ public final class BotAttackEffects {
             // vanilla drop step (which yields nothing for a bot-only kill). We spawn the
             // loot ourselves below with proper ownership.
             map.killMonster(target, bot, false, hitDelay);
+            if (!expBefore.isEmpty()) {
+                log.info("Companion kill EXP diagnostic cid={} mobId={} damage={} partyId={} before={} after={}",
+                        bot.getId(), target.getId(), damage,
+                        bot.getParty() == null ? -1 : bot.getParty().getId(),
+                        expBefore, companionPartyExp(bot));
+            }
             dropMobLoot(bot, target, hitDelay);
             // No vacuum here: the dropped loot is collected organically by the bot itself - TrainingBot
             // walks over the pile and picks drops up one at a time (own + free-for-all), and any drop it
             // abandons expires via the normal map item lifetime. See TrainingBot loot handling + DropCommands.
         }
         return killed;
+    }
+
+    private static Map<Integer, Integer> companionPartyExp(Character bot) {
+        if (bot == null || !CompanionRoster.isCompanion(bot.getId())) {
+            return Map.of();
+        }
+        Map<Integer, Integer> experience = new LinkedHashMap<>();
+        experience.put(bot.getId(), bot.getExp());
+        for (Character member : bot.getPartyMembersOnSameMap()) {
+            if (member != null) {
+                experience.put(member.getId(), member.getExp());
+            }
+        }
+        return experience;
     }
 
     /*
