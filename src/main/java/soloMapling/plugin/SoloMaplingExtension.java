@@ -23,12 +23,21 @@ import soloMapling.Environment.EnvironmentPopulationConfig;
 import soloMapling.Environment.SoloMaplingLanguageConfig;
 import soloMapling.command.ArtificialPlayerCommand;
 import soloMapling.command.BotMoveCommand;
+import soloMapling.command.CompanionCommand;
 import soloMapling.command.EnvironmentCommand;
 import soloMapling.command.FMBotCommand;
 import soloMapling.command.GCMoveCommand;
+import soloMapling.companion.CompanionRoster;
+import soloMapling.companion.lifecycle.CompanionLifecycleAccess;
+import soloMapling.companion.lifecycle.CompanionLifecycleCoordinator;
+import soloMapling.companion.lifecycle.HostCompanionRuntimeAdapter;
+import soloMapling.companion.persistence.JdbcCompanionProfileRepository;
+import soloMapling.companion.routine.OfflineProgressionPolicy;
 import soloMapling.itemPool.DesirableEquipList;
 import soloMapling.itemPool.EquipMetadataCache;
 import soloMapling.server.MethodScheduler;
+
+import java.time.Clock;
 
 /**
  * SPI entry for SoloMapling. Discovered via
@@ -38,10 +47,17 @@ public final class SoloMaplingExtension implements ServerExtension {
 
     private static final Logger log = LoggerFactory.getLogger(SoloMaplingExtension.class);
 
-    /** Historical SoloMapling id convention: bots &gt; 20000, console 999. */
-    private static final CharacterClassifier BOT_IDS = id -> id > 20000 || id == 999;
+    /**
+     * Persistent companions keep their native auto-increment character IDs.
+     * The historical range remains classified for ephemeral template clones.
+     */
+    private static final CharacterClassifier BOT_IDS =
+            id -> CompanionRoster.isCompanion(id) || id > 20000 || id == 999;
 
+    private final CompanionLifecycleAccess companionLifecycleAccess =
+            new CompanionLifecycleAccess();
     private HostRuntime runtime;
+    private CompanionLifecycleCoordinator companionLifecycle;
 
     @Override
     public String id() {
@@ -108,6 +124,9 @@ public final class SoloMaplingExtension implements ServerExtension {
         bindCommand(runtime, "move", 4, "SoloMapling bot move commands", new BotMoveCommand());
         bindCommand(runtime, "fmbot", 4, "SoloMapling FM bot commands", new FMBotCommand());
         bindCommand(runtime, "gcmove", 4, "SoloMapling GCMove commands", new GCMoveCommand());
+        bindCommand(runtime, "companion", 4,
+                "Persistent companion provisioning and diagnostics",
+                new CompanionCommand(runtime, companionLifecycleAccess));
     }
 
     private void bindCommand(HostRuntime runtime, String syntax, int level, String description, Command command) {
@@ -149,13 +168,35 @@ public final class SoloMaplingExtension implements ServerExtension {
     public void onServerReady() {
         boolean spawn = runtime != null
                 && runtime.config().getBool("solomapling.spawn-bots-on-startup", false);
-        log.info("SoloMapling onServerReady spawnBotsOnStartup={}", spawn);
+        boolean companionsEnabled = runtime != null
+                && runtime.config().getBool("solomapling.companions.enabled", false);
+        log.info("SoloMapling onServerReady spawnBotsOnStartup={} companionsEnabled={}",
+                spawn, companionsEnabled);
         try {
             BotClientHandler.initHeadlessBotClient();
             log.info("SoloMapling BotClientHandler headless client initialized");
         } catch (Throwable t) {
             log.error("SoloMapling failed to init headless BotClient", t);
             return;
+        }
+        try {
+            CompanionRoster.refreshFromDatabase();
+        } catch (Throwable t) {
+            // Keep legacy ambient bots available when a developer runs the
+            // plugin before applying the companion schema migration.
+            log.warn("SoloMapling companion roster unavailable; persistent companions disabled: {}",
+                    t.toString());
+        }
+        if (companionsEnabled) {
+            CompanionLifecycleCoordinator lifecycle = new CompanionLifecycleCoordinator(
+                    new JdbcCompanionProfileRepository(),
+                    new HostCompanionRuntimeAdapter(),
+                    OfflineProgressionPolicy.conservativeDefaults(),
+                    Clock.systemUTC());
+            lifecycle.start();
+            companionLifecycle = lifecycle;
+            companionLifecycleAccess.register(lifecycle);
+            log.info("SoloMapling persistent companion lifecycle started");
         }
         if (spawn) {
             MethodScheduler.runAfterDelay(() -> {
@@ -172,8 +213,15 @@ public final class SoloMaplingExtension implements ServerExtension {
     @Override
     public void onUnload() {
         log.info("SoloMapling plugin onUnload");
+        CompanionLifecycleCoordinator lifecycle = companionLifecycle;
+        companionLifecycleAccess.clear(lifecycle);
+        companionLifecycle = null;
+        if (lifecycle != null) {
+            lifecycle.stop();
+        }
         SoloMaplingTradeParticipantHook.unregister();
         ArtificialCharacters.unregister(BOT_IDS);
+        CompanionRoster.clear();
         runtime = null;
     }
 }

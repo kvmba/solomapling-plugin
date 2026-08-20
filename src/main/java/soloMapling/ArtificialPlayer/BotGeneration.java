@@ -8,6 +8,7 @@ import org.gms.util.DatabaseConnection;
 import soloMapling.ArtificialPlayer.BotAttackSystem.BotBuffDriver;
 import soloMapling.ArtificialPlayer.BotBuffRequestSystem.BotBuffRequestHandler;
 import soloMapling.ArtificialPlayer.BotMessagingSystem.CharacterStorage;
+import soloMapling.companion.CompanionRoster;
 import soloMapling.server.SoloMaplingConstants;
 import soloMapling.server.SoloMaplingUtilities;
 
@@ -131,6 +132,70 @@ public class BotGeneration {
         Character finalBot = bot;
         runAsync(() -> playSpawnChoreography(finalBot));
         return botId;
+    }
+
+    /**
+     * Loads a registered companion's native character state and places it in
+     * the channel world. Unlike {@link #createBot(Point, MapleMap)}, this path
+     * never clones the fmbot template or overwrites the database character ID.
+     */
+    public static Character loadPersistentBot(int characterId) {
+        if (!CompanionRoster.isCompanion(characterId)) {
+            throw new IllegalArgumentException("Character is not an enabled companion: " + characterId);
+        }
+        if (getBotClient() == null) {
+            throw new IllegalStateException("Headless bot client is not initialized");
+        }
+        Character existing = getChr(characterId);
+        if (existing != null) {
+            return existing;
+        }
+
+        Character companion = Character.loadCharFromDB(characterId, getBotClient(), true);
+        if (companion == null) {
+            throw new IllegalStateException("Unable to load companion character " + characterId);
+        }
+        if (companion.getMap() == null) {
+            throw new IllegalStateException("Companion has no valid map: " + characterId);
+        }
+
+        addBotToServer(companion);
+        try {
+            companion.getMap().addPlayer(companion);
+        } catch (RuntimeException | Error failure) {
+            try {
+                companion.getMap().removePlayer(companion);
+            } catch (Throwable cleanupFailure) {
+                failure.addSuppressed(cleanupFailure);
+            }
+            try {
+                removeBotFromServer(companion);
+            } catch (Throwable cleanupFailure) {
+                failure.addSuppressed(cleanupFailure);
+            }
+            companion.setLoggedIn(false);
+            throw failure;
+        }
+        // addPlayer announces a newly entering character 42px above its portal.
+        // Real clients apply gravity; headless companions need the same recorded
+        // drop-down used by generated bots or they remain visually suspended.
+        runAsync(() -> playSpawnChoreography(companion));
+        debugprint("[BotGeneration] loaded persistent companion "
+                + companion.getName() + " (" + companion.getId() + ")");
+        return companion;
+    }
+
+    /**
+     * Saves a persistent companion through BeiDou's native character
+     * persistence path before removing it from the simulated online world.
+     */
+    public static void saveAndRemovePersistentBot(Character companion) {
+        if (companion == null || !CompanionRoster.isCompanion(companion.getId())) {
+            throw new IllegalArgumentException("Character is not a persistent companion");
+        }
+        companion.saveCharToDB(true);
+        removeBotFromServer(companion);
+        companion.setLoggedIn(false);
     }
 
 

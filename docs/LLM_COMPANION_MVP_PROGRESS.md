@@ -1,0 +1,232 @@
+# LLM Companion MVP Progress
+
+This file is the durable handoff for continuing after a context reset. Update it
+after every meaningful implementation or verification step.
+
+## Current status
+
+Last updated: 2026-08-20
+
+- Overall phase: Phase 1 started.
+- Plugin worktree created and active.
+- Host worktree created from the beta test-server branch.
+- Architecture plan persisted in `docs/LLM_COMPANION_MVP_PLAN.md`.
+- Host baseline install and plugin tests pass.
+- Dynamic persistent-companion roster and native load/save lifecycle foundation
+  implemented in the plugin.
+- No implementation commit has been created yet.
+
+## Worktrees
+
+- Plugin:
+  `/Users/zmzeng12/Code/fork/worktrees/solomapling-llm-companion`
+  - Branch: `feat/llm-companion-mvp`
+  - Base at creation: plugin `master` commit `0981dac`
+- Host:
+  `/Users/zmzeng12/Code/fork/worktrees/beidou-llm-companion`
+  - Branch: `feat/llm-companion-mvp-host`
+  - Base at creation: beta commit `cf12ada3f`
+
+Do not implement in the original checkouts. They contain runtime/user state:
+
+- Original plugin checkout has unrelated untracked `.vscode/`.
+- Original beta checkout has a modified `application.yml` and untracked
+  `log4j2-debug.xml`.
+
+## Decisions already made
+
+- Use the beta repository as the test/deployment host, while keeping it rebased
+  on master.
+- Persistent companions use real BeiDou account and character rows.
+- Keep a two-tier population:
+  - many ephemeral script/YAML ambient bots;
+  - initially three persistent LLM-guided companions.
+- Keep engine interaction in the plugin JVM. The LLM is a low-frequency
+  high-level planner; deterministic FSMs execute actions.
+- Use MySQL for profiles, memories, relationships, knowledge, and activity.
+- Use bounded aggregate offline progression rather than frame-by-frame
+  simulation.
+- MVP excludes full boss tactics, autonomous market speculation, quest
+  reasoning, and cash-shop purchasing.
+
+## Repository facts
+
+- Current plugin version is `0.4.0-SNAPSHOT`.
+- The beta runtime previously deployed `0.3.1-SNAPSHOT`; source and deployed jar
+  were out of sync.
+- Existing LLM support is limited to SocialBot free-form chat and stores only an
+  in-memory sliding window.
+- Ambient bot creation clones the `fmbot` template and overwrites the ID with a
+  value above 20000.
+- Persistent loading must instead call
+  `Character.loadCharFromDB(characterId, botClient, true)`.
+- `Character.saveCharToDB` ignores characters whose `loggedIn` flag is false;
+  loading with `channelServer=true` sets the flag.
+- Artificial classification currently uses
+  `id > 20000 || id == 999`; persistent IDs require a dynamic roster.
+- Host event dispatch is synchronous. Event listeners may enqueue work but must
+  never call the LLM or perform slow database work inline.
+
+## Phase checklist
+
+### Phase 0: baseline
+
+- [x] Build and test host modules in the host worktree.
+- [x] Build and test plugin 0.4.0 against the host artifacts.
+- [x] Record baseline failures before changing behavior.
+
+### Phase 1: persistence
+
+- [x] Add Flyway migration for profile, relationship, memory, knowledge, and
+      activity tables.
+- [x] Add plugin persistence records and repositories.
+- [x] Add dynamic `CompanionRoster`.
+- [x] Add persistent character load/spawn/save/despawn.
+- [x] Add controlled provisioning command.
+- [ ] Add persistence tests.
+
+### Phase 2: cognition and action
+
+- [x] Add stable persona model.
+- [x] Add perception/knowledge restrictions.
+- [x] Add memory ranking and decay.
+- [x] Add memory persistence.
+- [x] Add memory consolidation.
+- [x] Generalize `SocialLlmService` behind `LlmClient`.
+- [x] Add structured action schema and parser.
+- [x] Add disclosure-bounded companion planner orchestration.
+- [x] Add engine-independent action validation.
+- [x] Add engine action executor.
+- [x] Add `CompanionBot` and attention triggers.
+
+### Phase 3: life simulation
+
+- [x] Add routine scheduler.
+- [x] Add online spawn/despawn coordinator.
+- [x] Add bounded offline progression.
+- [x] Add softly weighted encounter director.
+
+### Phase 4: verification
+
+- [x] Add `!companion` diagnostics.
+- [x] Run unit tests.
+- [ ] Run live MySQL and game integration tests.
+- [ ] Deploy the plugin jar to the beta runtime.
+- [ ] Verify persistent identity across two restarts.
+- [ ] Verify chat, party, follow, and joint training.
+- [ ] Verify LLM timeout and invalid-action safety.
+
+## Next actions
+
+1. Run the host migration and provision a companion against the beta database.
+2. Package and deploy the plugin jar to the beta runtime.
+3. Exercise restart persistence and player interaction scenarios.
+4. Record exact commands and results without storing credentials.
+
+## Verification log
+
+Append dated entries here. Include the command, result, and any actionable
+failure. Do not paste secrets or large logs.
+
+- 2026-08-20: Worktrees and durable planning files created. Baseline builds not
+  yet run.
+- 2026-08-20: `mvn -pl extension-api,gms-server -am install -DskipTests`
+  succeeded in the host worktree (66.7 seconds).
+- 2026-08-20: `mvn test` succeeded in the plugin worktree. 22 tests passed,
+  including three new `CompanionRosterTest` cases. Javac reported only the
+  existing unchecked-operation warning in `InPacketReader`; tests also exposed
+  the existing multiple-SLF4J-provider warning.
+- 2026-08-20: Added host migration
+  `V1.11.6__create_bot_companion_tables.sql`. Host compile/package and
+  `git diff --check` pass. The migration has not yet been executed against a
+  live MySQL instance.
+- 2026-08-20: Added deterministic persona rendering and pure memory scoring,
+  decay, matching, and stable top-K selection. Re-ran `mvn test` after aligning
+  persona seeds with the schema's numeric seed; all 33 tests passed.
+- 2026-08-20: Added schema-matched JDBC repositories for profiles, memories,
+  relationships, and activity logs, including reversible tag encoding and
+  atomic relationship interaction increments. All 51 tests passed; live MySQL
+  integration remains pending.
+- 2026-08-20: Added strict versioned action JSON parsing and target-specific,
+  engine-independent authorization. The parser rejects unknown/duplicate
+  fields, unsupported actions, bad IDs, oversized output, and excessive action
+  counts. Added deterministic routine scheduling and allow-list-only encounter
+  selection. Full suite reached 65 passing tests before the offline settlement
+  follow-up.
+- 2026-08-20: Fixed offline settlement to consume the complete observed interval
+  while crediting only the capped duration, preventing repeated cap-sized claims
+  against one long absence. The full 65-test suite passes.
+- 2026-08-20: Added provider-neutral `LlmClient`, request/message models, and a
+  DeepSeek adapter while retaining the SocialBot facade and YAML fallback.
+  Fake-client success, empty, failure, and timeout coverage brings the suite to
+  69 passing tests.
+- 2026-08-20: Added typed companion planner orchestration with strict context
+  allowlists for target relationships, actor-bound memories, and known maps.
+  Player input is bounded and control-normalized. The suite reached 84 passing
+  tests after disclosure-boundary regressions were added.
+- 2026-08-20: Added the allowlist-only engine action executor. Follow uses
+  `GCMovement` without replacing the companion state machine; training requires
+  a companion-owned capability interface.
+- 2026-08-20: Added schema-matched knowledge persistence and `PerceptionPolicy`.
+  Planner authority now derives only from the current map, same-map characters,
+  and enabled map knowledge owned by that companion. The suite reached 100
+  passing tests.
+- 2026-08-20: Added the first `CompanionBot`/turn-coordinator integration and
+  Dispatcher routing. Review fixes prevent conversation state from blocking
+  actions, restrict continuation to same-map humans, deduplicate reply/SAY, and
+  bound queued input. Final compilation is temporarily blocked while the
+  parallel host atomic-provisioning API is being added and installed.
+- 2026-08-20: Added a host-neutral atomic character-provisioning capability and
+  BeiDou implementation. Account, native character child rows, and
+  `bot_profiles` share one JDBC transaction; the character cache is updated only
+  after commit. Host compile/package/tests and 113 plugin tests pass. A real
+  MySQL provisioning smoke test remains pending.
+- 2026-08-20: Added deterministic memory consolidation with effective
+  (non-persisted) decay, stable source-aware summary keys, and retry-safe
+  summary-before-source-archive ordering. The full 117-test plugin suite passes.
+- 2026-08-20: Completed opt-in companion lifecycle reconciliation, bounded
+  offline checkpoints, persistent spawn/despawn, and shutdown saving. Failed
+  attach cannot leave an online profile; reward checkpointing prefers a bounded
+  duplicate-on-crash window over permanent loss. All 129 plugin tests pass.
+- 2026-08-20: Expanded `!companion` with bounded
+  `spawn/despawn/status/schedule/save/think/memories` operations. Lifecycle
+  access is registered only while the coordinator is live; manual think remains
+  same-map and asynchronous, and memory diagnostics truncate content.
+- 2026-08-20: Local MySQL is reachable, but an unauthenticated smoke probe was
+  correctly denied. No database mutation was attempted; migration/provisioning
+  end-to-end verification still requires the test server's configured
+  credentials.
+- 2026-08-20: Integrated party invite/accept execution and companion-owned joint
+  combat on the shared 250 ms grind ticker. Cross-map authority is restricted
+  to accepting the exact pending inviter; follow and training remain same-map.
+  Inactive companions perform no training, invite, planning, or combat work,
+  and ticker startup is retry-safe after scheduler failure. Independent
+  `mvn test` verification passed all 147 tests; `git diff --check` also passed.
+- 2026-08-20: The live beta schema already contained unrelated migrations
+  `1.11.6` and `1.11.7`, so the companion migration was renumbered to `1.11.8`
+  before execution. Flyway applied `1.11.8` successfully and all five companion
+  tables are present. Host and plugin packaging both pass. Runtime deployment
+  still requires restarting the currently active beta server with the new host
+  and plugin artifacts.
+- 2026-08-20: Live provisioning created native account, character, and profile
+  rows atomically (`luna`, cid 5), but a post-commit login-cache exception made
+  the GM command falsely report failure. Cache publication is now best-effort
+  after the durable commit so callers cannot be encouraged to create
+  duplicates; failures are logged and repaired by restart. Companion command
+  database/unexpected failures now include server-side stack traces. The new
+  host regression tests and all 147 plugin tests pass, and both artifacts
+  package successfully.
+- 2026-08-21: Runtime combat validation found that headless artificial
+  characters could become monster controllers, freezing mobs because they
+  cannot emit `MOVE_LIFE`. Artificial characters are now excluded. Visible
+  real players remain preferred, with a hidden real GM used only as fallback
+  so a map containing a hidden tester and bots still has a movement-capable
+  controller. The host's existing `TakeDamageHandler` intentionally skips HP
+  deduction for hidden GMs, so player collision-damage validation must be run
+  after toggling `!hide` off.
+- 2026-08-21: Party EXP resolution now treats `Party.getMembers()` IDs as
+  authoritative and resolves the live recipients from the current map,
+  avoiding stale `PartyCharacter` object references after companion reload.
+  The complete host test suite passes (6 tests), and the updated host artifact
+  packages successfully. Runtime monster movement, companion contact damage,
+  and party EXP still require validation after deployment.

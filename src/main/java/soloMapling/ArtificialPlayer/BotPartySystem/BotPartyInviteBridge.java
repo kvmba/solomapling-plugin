@@ -4,6 +4,7 @@ import org.gms.client.Character;
 import org.gms.extension.api.HostRuntime;
 import org.gms.extension.event.PartyInviteEvent;
 import soloMapling.ArtificialPlayer.BotMessagingSystem.CharacterStorage;
+import soloMapling.ArtificialPlayer.BotTypes.CompanionBot;
 
 import java.util.concurrent.atomic.AtomicBoolean;
 
@@ -40,5 +41,8 @@ public final class BotPartyInviteBridge {
         debugprint("BotPartyInviteBridge: " + inviter.getName() + " invited bot " + invited.getName()
                 + " to partyId=" + event.partyId());
         BotPartyQueue.getInstance().addPartyInvite(invited, inviter, event.partyId());
+        if (CharacterStorage.getBotById(invited.getId()) instanceof CompanionBot companion) {
+            companion.onPartyInvite(inviter, event.partyId());
+        }
     }
 }
