@@ -18,8 +18,12 @@ Last updated: 2026-08-21
   backpack/potion management are deployed.
 - Automated live verification covers real shop purchases, HP/MP potion use,
   durable inventory/vitals, and persistent identity across repeated restarts.
-- Player-visible chat, party/follow, and joint-training acceptance remains.
-- No implementation commit has been created yet.
+- Player-visible acceptance now covers actor-isolated memory, normal chat,
+  party invitation acceptance, cross-map following, autonomous joint training,
+  HP potion use, and party EXP for both the companion and human player.
+- The remaining live acceptance scenario is an away-from-town supply run that
+  returns the companion to the player.
+- Implementation commits are present on the feature branch.
 
 ## Worktrees
 
@@ -119,15 +123,13 @@ Do not implement in the original checkouts. They contain runtime/user state:
 - [x] Run live MySQL and game integration tests.
 - [x] Deploy the plugin jar to the beta runtime.
 - [x] Verify persistent identity across two restarts.
-- [ ] Verify chat, party, follow, and joint training.
+- [x] Verify chat, party, follow, and joint training.
 - [x] Verify LLM timeout and invalid-action safety.
 
 ## Next actions
 
-1. Run player-visible chat, party, follow, and joint-training acceptance.
-2. Observe automatic HP/MP potion use during that session.
-3. Exercise an away-from-town supply run and confirm return to the player.
-4. Record final acceptance results without storing credentials.
+1. Exercise an away-from-town supply run and confirm return to the player.
+2. Record final acceptance results without storing credentials.
 
 ## Verification log
 
