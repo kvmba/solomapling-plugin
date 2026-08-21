@@ -57,6 +57,8 @@ public final class CompanionBot extends BotSM implements
     private static final Duration SESSION_TIMEOUT = Duration.ofSeconds(45);
     private static final Duration PLANNING_TIMEOUT = Duration.ofSeconds(12);
     private static final Duration TURN_COOLDOWN = Duration.ofSeconds(2);
+    private static final long COMBAT_STUCK_REPAIR_MS = 20_000L;
+    private static final long COMBAT_REPAIR_COOLDOWN_MS = 15_000L;
     private static final String FALLBACK_REPLY = "Give me a moment—I'm still with you.";
 
     private final CompanionBrain brain;
@@ -72,6 +74,7 @@ public final class CompanionBot extends BotSM implements
     private volatile Boolean lastTrainingSameMap;
     private volatile String pendingInviteKey;
     private volatile long nextCombatDiagnosticAt;
+    private volatile long nextCombatRepairAt;
     private volatile long nextProactiveScanAt;
     private volatile boolean proactiveLookupPending;
     private int proactiveCursor;
@@ -303,6 +306,7 @@ public final class CompanionBot extends BotSM implements
         stopTraining();
         trainingTarget = target;
         lastTrainingSameMap = true;
+        nextCombatRepairAt = 0L;
         GCMovement.follow(getChr(), target);
         combatLifecycle.start(this::activateTrainingCombat);
         log.info("Companion training started cid={} targetCid={} map={} following={}",
@@ -320,6 +324,7 @@ public final class CompanionBot extends BotSM implements
         combatLifecycle.stop(this::deactivateTrainingCombat);
         trainingTarget = null;
         lastTrainingSameMap = null;
+        nextCombatRepairAt = 0L;
         if (previousTarget != null || wasActive) {
             log.info("Companion training stopped cid={} targetCid={} wasActive={}",
                     getChr() == null ? -1 : getChr().getId(),
@@ -347,6 +352,20 @@ public final class CompanionBot extends BotSM implements
                     companion.getMap().getAllMonsters().size(),
                     GCMovement.isMapObserved(companion.getMapId()),
                     grind.activeStyle(), grind.spotLabel(), grind.msSinceProgress());
+        }
+        if (grind.msSinceProgress() >= COMBAT_STUCK_REPAIR_MS
+                && now >= nextCombatRepairAt
+                && !companion.getMap().getAllMonsters().isEmpty()
+                && target.getPosition() != null) {
+            nextCombatRepairAt = now + COMBAT_REPAIR_COOLDOWN_MS;
+            GCMovement.stop(companion);
+            GCMovement.teleportTo(
+                    companion, target.getPosition().x, target.getPosition().y);
+            grind.resetupAfterTeleport(companion);
+            log.warn("Companion combat repaired cid={} targetCid={} map={} progressAgeMs={} destination={}",
+                    companion.getId(), target.getId(), companion.getMapId(),
+                    grind.msSinceProgress(), target.getPosition());
+            return;
         }
         grind.tick(companion);
     }
