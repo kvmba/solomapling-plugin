@@ -97,7 +97,8 @@ public final class CompanionGearController {
                         companion.getLevel(), companion.getMeso())) {
             return false;
         }
-        int destination = CompanionGearRoute.equipmentShopFor(companion.getMapId());
+        int destination =
+                CompanionGearRoute.equipmentShopForJob(companion.getJob().getId());
         if (destination < 0) {
             shopRetryAt = now + SHOP_RETRY_MS;
             return false;

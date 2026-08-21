@@ -32,7 +32,7 @@ public final class CompanionGearAdvice {
         List<String> facts = new ArrayList<>();
         EquipType requestedType = requestedType(message);
         if (asksWhere(message) && asksToBuy(message)) {
-            facts.add(shopFact(requestedType, currentMapId));
+            facts.add(shopFact(requestedType));
         }
         if (asksWhere(message) && asksToFarm(message) && requestedType != null) {
             facts.addAll(dropFacts(requestedType, requestedLevel(message), dropSources));
@@ -40,16 +40,15 @@ public final class CompanionGearAdvice {
         return List.copyOf(facts);
     }
 
-    private static String shopFact(EquipType requestedType, int currentMapId) {
+    private static String shopFact(EquipType requestedType) {
         if (requestedType == EquipType.STAFF || requestedType == EquipType.WAND) {
             return "法师法杖/魔杖优先查询魔法密林武器店，mapId=101000001；"
                     + "实际是否出售指定物品仍以该 NPC 当前目录为准。";
         }
-        int nearest = CompanionGearRoute.equipmentShopFor(currentMapId);
         return "1到40级普通装备主要在职业主城的武器/防具 NPC 商店购买："
                 + "战士勇士部落 mapId=102000001，法师魔法密林 mapId=101000001，"
-                + "弓箭手射手村 mapId=100000101，飞侠废弃都市 mapId=103000001"
-                + (nearest < 0 ? "。" : "；按当前位置计算的最近装备店 mapId=" + nearest + "。");
+                + "弓箭手射手村 mapId=100000101，飞侠废弃都市 mapId=103000001，"
+                + "海盗诺特勒斯号 mapId=120000200。";
     }
 
     private static List<String> dropFacts(
