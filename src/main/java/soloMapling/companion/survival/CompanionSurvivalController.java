@@ -25,6 +25,8 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Supplier;
 
 import static soloMapling.companion.survival.CompanionSurvivalPolicy.Resource.HP;
@@ -43,6 +45,8 @@ public final class CompanionSurvivalController {
     private static final long SUPPLY_TIMEOUT_MS = 180_000L;
     private static final long FAILED_SUPPLY_RETRY_MS = 300_000L;
     private static final int MAX_SALE_STACKS = 24;
+    private static final Set<Integer> UNREADABLE_EFFECT_ITEMS =
+            ConcurrentHashMap.newKeySet();
 
     private long nextCheckAt;
     private long nextUseAt;
@@ -352,6 +356,9 @@ public final class CompanionSurvivalController {
         ItemInformationProvider provider = ItemInformationProvider.getInstance();
         List<CompanionSurvivalPolicy.Potion> potions = new ArrayList<>();
         for (Item item : companion.getInventory(InventoryType.USE).list()) {
+            if (!isPotionCandidate(item.getItemId())) {
+                continue;
+            }
             StatEffect effect = safeItemEffect(provider, item.getItemId());
             CompanionSurvivalPolicy.Potion potion = potion(
                     companion, item.getItemId(), item.getQuantity(),
@@ -371,6 +378,9 @@ public final class CompanionSurvivalController {
         List<ShopItem> catalog = shop.getItems();
         for (short slot = 0; slot < catalog.size(); slot++) {
             ShopItem item = catalog.get(slot);
+            if (!isPotionCandidate(item.getItemId())) {
+                continue;
+            }
             StatEffect effect = safeItemEffect(provider, item.getItemId());
             CompanionSurvivalPolicy.Potion potion = potion(
                     companion, item.getItemId(), 0, item.getPrice(), slot, effect);
@@ -415,9 +425,16 @@ public final class CompanionSurvivalController {
         try {
             return provider.getItemEffect(itemId);
         } catch (RuntimeException exception) {
-            log.debug("Skipping item with unreadable effect item={}", itemId);
+            if (UNREADABLE_EFFECT_ITEMS.add(itemId)) {
+                log.debug("Skipping item with unreadable effect item={}", itemId);
+            }
             return null;
         }
+    }
+
+    static boolean isPotionCandidate(int itemId) {
+        int category = itemId / 10_000;
+        return category >= 200 && category <= 202;
     }
 
     private static <T> T withBoundClient(
