@@ -19,6 +19,7 @@ import org.gms.server.maps.MapFactory;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import soloMapling.ArtificialPlayer.BotClientHandler;
+import soloMapling.ArtificialPlayer.BotGeneration;
 import soloMapling.ArtificialPlayer.BotMessagingSystem.PlayerChatBridge;
 import soloMapling.ArtificialPlayer.BotPartySystem.BotPartyInviteBridge;
 import soloMapling.ArtificialPlayer.BotTradeSystem.BotTradeInviteBridge;
@@ -86,6 +87,8 @@ public final class SoloMaplingExtension implements ServerExtension {
                 runtime.hostId(),
                 runtime.config().getBool("solomapling.spawn-bots-on-startup", false));
         log.info("SoloMapling schema ready migrationsExecuted={}", migrationsExecuted);
+
+        BotGeneration.ensureTemplateCharacter(runtime);
 
         ArtificialCharacters.register(BOT_IDS);
         SoloMaplingTradeParticipantHook.register();

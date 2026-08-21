@@ -4,8 +4,14 @@ import org.gms.client.BotClient;
 import org.gms.client.Character;
 import org.gms.client.Client;
 import org.gms.client.Job;
+import org.gms.extension.api.HostCharacterProvisionRequest;
+import org.gms.extension.api.HostCharacterProvisionResult;
+import org.gms.extension.api.HostCharacterProvisioner;
+import org.gms.extension.api.HostRuntime;
 import org.gms.server.maps.MapleMap;
 import org.gms.util.DatabaseConnection;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import soloMapling.ArtificialPlayer.BotAttackSystem.BotBuffDriver;
 import soloMapling.ArtificialPlayer.BotBuffRequestSystem.BotBuffRequestHandler;
 import soloMapling.ArtificialPlayer.BotMessagingSystem.CharacterStorage;
@@ -17,6 +23,8 @@ import java.awt.*;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
+import java.util.Arrays;
+import java.util.OptionalInt;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -34,6 +42,13 @@ import static soloMapling.server.SoloMaplingUtilities.world;
 
 public class BotGeneration {
 
+    private static final Logger log = LoggerFactory.getLogger(BotGeneration.class);
+
+    public static final String TEMPLATE_ACCOUNT_NAME = "fmbot";
+    public static final String TEMPLATE_CHARACTER_NAME = "fmbot";
+    private static final String TEMPLATE_PASSWORD = "password";
+    private static final int TEMPLATE_WORLD_ID = 0;
+
     // Bot generation - handles anything related to putting the bots in the server
 
     // Atomic because bots spawn in parallel - a plain int would let two threads
@@ -43,6 +58,45 @@ public class BotGeneration {
     /** Resolved once: prefer character named "fmbot", else fall back to CID 2. */
     private static volatile int templateCharacterId = -1;
 
+    /**
+     * Ensures the clone template exists using the host atomic provisioner
+     * (same API as Companion native account/character creation).
+     */
+    public static void ensureTemplateCharacter(HostRuntime runtime) {
+        OptionalInt existing = findTemplateCharacterId();
+        if (existing.isPresent()) {
+            templateCharacterId = existing.getAsInt();
+            log.info("fmbot template already present id={}", templateCharacterId);
+            return;
+        }
+        if (runtime == null) {
+            log.warn("fmbot template missing and HostRuntime is unavailable");
+            return;
+        }
+        HostCharacterProvisioner provisioner = runtime.characterProvisioner().orElse(null);
+        if (provisioner == null) {
+            log.warn("fmbot template missing and host has no HostCharacterProvisioner");
+            return;
+        }
+
+        char[] credential = TEMPLATE_PASSWORD.toCharArray();
+        try {
+            HostCharacterProvisionResult result = provisioner.provision(
+                    new HostCharacterProvisionRequest(
+                            TEMPLATE_ACCOUNT_NAME,
+                            credential,
+                            TEMPLATE_CHARACTER_NAME,
+                            TEMPLATE_WORLD_ID));
+            templateCharacterId = result.characterId();
+            log.info("provisioned fmbot template accountId={} characterId={}",
+                    result.accountId(), result.characterId());
+        } catch (Exception e) {
+            log.error("failed to provision fmbot template via HostCharacterProvisioner", e);
+        } finally {
+            Arrays.fill(credential, '\0');
+        }
+    }
+
     private static int templateCharacterId() {
         if (templateCharacterId > 0) {
             return templateCharacterId;
@@ -51,24 +105,32 @@ public class BotGeneration {
             if (templateCharacterId > 0) {
                 return templateCharacterId;
             }
-            try (Connection con = DatabaseConnection.getConnection();
-                 PreparedStatement ps = con.prepareStatement(
-                         "SELECT id FROM characters WHERE name = ? LIMIT 1")) {
-                ps.setString(1, "fmbot");
-                try (ResultSet rs = ps.executeQuery()) {
-                    if (rs.next()) {
-                        templateCharacterId = rs.getInt("id");
-                        debugprint("[BotGeneration] template character fmbot id=" + templateCharacterId);
-                        return templateCharacterId;
-                    }
-                }
-            } catch (Exception e) {
-                debugprint("[BotGeneration] failed to resolve fmbot template: " + e);
+            OptionalInt existing = findTemplateCharacterId();
+            if (existing.isPresent()) {
+                templateCharacterId = existing.getAsInt();
+                debugprint("[BotGeneration] template character fmbot id=" + templateCharacterId);
+                return templateCharacterId;
             }
             templateCharacterId = 2; // Cosmic default
             debugprint("[BotGeneration] falling back to template CID 2");
             return templateCharacterId;
         }
+    }
+
+    private static OptionalInt findTemplateCharacterId() {
+        try (Connection con = DatabaseConnection.getConnection();
+             PreparedStatement ps = con.prepareStatement(
+                     "SELECT id FROM characters WHERE name = ? LIMIT 1")) {
+            ps.setString(1, TEMPLATE_CHARACTER_NAME);
+            try (ResultSet rs = ps.executeQuery()) {
+                if (rs.next()) {
+                    return OptionalInt.of(rs.getInt("id"));
+                }
+            }
+        } catch (Exception e) {
+            log.warn("failed to resolve fmbot template character: {}", e.toString());
+        }
+        return OptionalInt.empty();
     }
 
     /**
