@@ -1,7 +1,5 @@
 package soloMapling.ArtificialPlayer.LlmSystem;
 
-import io.github.sashirestela.openai.domain.chat.ChatMessage;
-
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
@@ -30,19 +28,19 @@ public final class SocialChatSessionStore {
         addTurn(botId, playerId, "assistant", content);
     }
 
-    public static List<ChatMessage> toChatMessages(int botId, int playerId, int maxTurns) {
+    public static List<LlmMessage> toMessages(int botId, int playerId, int maxTurns) {
         Deque<Turn> turns = SESSIONS.get(key(botId, playerId));
         if (turns == null || turns.isEmpty() || maxTurns <= 0) {
             return List.of();
         }
         List<Turn> slice = new ArrayList<>(turns);
         int from = Math.max(0, slice.size() - maxTurns);
-        List<ChatMessage> messages = new ArrayList<>();
+        List<LlmMessage> messages = new ArrayList<>();
         for (Turn turn : slice.subList(from, slice.size())) {
             if ("assistant".equals(turn.role())) {
-                messages.add(ChatMessage.AssistantMessage.of(turn.content()));
+                messages.add(LlmMessage.assistant(turn.content()));
             } else {
-                messages.add(ChatMessage.UserMessage.of(turn.content()));
+                messages.add(LlmMessage.user(turn.content()));
             }
         }
         return messages;

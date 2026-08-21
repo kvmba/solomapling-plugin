@@ -60,32 +60,49 @@ public class BotPartyCommands {
     }
 
     public static boolean botAcceptPartyInvite(Character fakechar) {
-        BotPartyQueue.PartyInviteEntry entry = BotPartyQueue.getInstance().getPartyInvite(fakechar);
-        if (entry == null) {
-            debugprint("botAcceptPartyInvite: no pending invite for " + fakechar.getName());
-            return false;
-        }
+        return botAcceptPartyInvite(fakechar, -1);
+    }
 
-        int partyId = entry.getPartyId();
-        InviteResult res = InviteCoordinator.answerInvite(InviteType.PARTY, fakechar.getId(), partyId, true);
-        BotPartyQueue.getInstance().removePartyInvite(fakechar);
+    /**
+     * Accept only the currently queued inviter. The queue lock spans validation,
+     * coordinator answer, and removal so a replacement invite cannot be accepted
+     * between the companion executor's authorization check and this operation.
+     */
+    public static boolean botAcceptPartyInvite(Character fakechar, int expectedInviterId) {
+        BotPartyQueue queue = BotPartyQueue.getInstance();
+        synchronized (queue) {
+            BotPartyQueue.PartyInviteEntry entry = queue.getPartyInvite(fakechar);
+            if (entry == null) {
+                debugprint("botAcceptPartyInvite: no pending invite for " + fakechar.getName());
+                return false;
+            }
+            Character inviter = entry.getInviter();
+            if (expectedInviterId > 0
+                    && (inviter == null || inviter.getId() != expectedInviterId)) {
+                debugprint("botAcceptPartyInvite: pending inviter does not match expected id="
+                        + expectedInviterId);
+                return false;
+            }
 
-        if (res.result == InviteResultType.ACCEPTED) {
-            boolean joined = Party.joinParty(fakechar, partyId, false);
-            if (!joined) {
-                // joinParty fails silently to the inviter (party disbanded / full / bot already
-                // partied) - tell them so a clean re-invite is the obvious next move.
-                Character inviter = entry.getInviter();
-                if (inviter != null) {
+            int partyId = entry.getPartyId();
+            InviteResult res = InviteCoordinator.answerInvite(
+                    InviteType.PARTY, fakechar.getId(), partyId, true);
+            queue.removePartyInvite(fakechar);
+
+            if (res.result == InviteResultType.ACCEPTED) {
+                boolean joined = Party.joinParty(fakechar, partyId, false);
+                if (!joined && inviter != null) {
+                    // joinParty fails silently to the inviter (party disbanded / full /
+                    // bot already partied) - tell them so a clean re-invite is obvious.
                     inviter.sendPacket(PacketCreator.serverNotice(5, fakechar.getName()
                             + " couldn't join your party (it was full or disbanded) - try inviting again."));
                 }
+                debugprint("botAcceptPartyInvite: joined=" + joined + " partyId=" + partyId);
+                return joined;
             }
-            debugprint("botAcceptPartyInvite: joined=" + joined + " partyId=" + partyId);
-            return joined;
+            debugprint("botAcceptPartyInvite: invite expired/invalid, result=" + res.result);
+            return false;
         }
-        debugprint("botAcceptPartyInvite: invite expired/invalid, result=" + res.result);
-        return false;
     }
 
     public static boolean botRejectPartyInvite(Character fakechar) {

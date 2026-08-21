@@ -235,7 +235,7 @@ public class BlackjackDealerBot extends BotSM {
         triggerAIPlayerReaction(player, "PlayerBust");
 
         Character kicked = lootLoserBets(player);
-        DropCommands.lootItemListOnFloor(getChr(), player.getCardsOnMap());
+        DropCommands.clearItemListFromFloor(getChr(), player.getCardsOnMap());
         player.clearCardsOnMap();
 
         if (kicked != null) {
@@ -624,7 +624,7 @@ public class BlackjackDealerBot extends BotSM {
     private void lootPlayerCards(BlackjackPlayer player) {
         try {
             if (!player.getCardsOnMap().isEmpty()) {
-                DropCommands.lootItemListOnFloor(getChr(), player.getCardsOnMap());
+                DropCommands.clearItemListFromFloor(getChr(), player.getCardsOnMap());
                 player.clearCardsOnMap();
             }
         } catch (Exception e) {

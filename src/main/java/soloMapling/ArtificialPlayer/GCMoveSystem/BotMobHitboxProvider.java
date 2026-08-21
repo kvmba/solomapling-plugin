@@ -79,8 +79,8 @@ final class BotMobHitboxProvider {
     }
 
     private static Rectangle loadMobBounds(int mobId) {
-        Path mobFile = WZFiles.MOB.getFile().resolve(String.format("%07d.img.xml", mobId));
-        if (!Files.isRegularFile(mobFile)) {
+        Path mobFile = resolveMobFile(mobId);
+        if (mobFile == null) {
             log.debug("Bot mob hitbox: no WZ file for mob {} - caching miss", mobId);
             return UNRESOLVED_BOUNDS;
         }
@@ -125,13 +125,27 @@ final class BotMobHitboxProvider {
             return root;
         }
 
-        Path linkedFile = WZFiles.MOB.getFile().resolve(String.format("%07d.img.xml", linkedMobId));
-        if (!Files.isRegularFile(linkedFile)) {
+        Path linkedFile = resolveMobFile(linkedMobId);
+        if (linkedFile == null) {
             return root;
         }
 
         Document linkedDocument = parseXmlDocument(linkedFile);
         return linkedDocument != null ? linkedDocument.getDocumentElement() : root;
+    }
+
+    private static Path resolveMobFile(int mobId) {
+        String fileName = String.format("%07d.img.xml", mobId);
+        Path preferred = WZFiles.MOB.getFile().resolve(fileName);
+        if (Files.isRegularFile(preferred)) {
+            return preferred;
+        }
+
+        // Localized WZ directories are intentionally sparse overlays. WZFiles.getFile()
+        // selects the overlay directory when it exists, so assets absent from that overlay
+        // must fall back to the complete base WZ rather than becoming unresolvable.
+        Path base = WZFiles.MOB.getBaseFile().resolve(fileName);
+        return Files.isRegularFile(base) ? base : null;
     }
 
     private static Rectangle calculateWorldBounds(Rectangle modelBounds, Point origin, boolean facingLeft) {

@@ -32,6 +32,7 @@
         <jgrapht.version>1.5.2</jgrapht.version>
         <jgraphx.version>4.2.2</jgraphx.version>
         <simple-openai.version>3.22.1</simple-openai.version>
+        <flyway.version>9.15.2</flyway.version>
     </properties>
 
     <dependencies>
@@ -54,6 +55,20 @@
             <artifactId>slf4j-api</artifactId>
             <version>2.0.17</version>
             <scope>provided</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.flywaydb</groupId>
+            <artifactId>flyway-core</artifactId>
+            <version>${flyway.version}</version>
+            <scope>provided</scope>
+            <exclusions>
+                <!-- The host supplies Flyway's TOML support. Avoid allowing its
+                     older Jackson core to override the LLM client's version. -->
+                <exclusion>
+                    <groupId>com.fasterxml.jackson.dataformat</groupId>
+                    <artifactId>jackson-dataformat-toml</artifactId>
+                </exclusion>
+            </exclusions>
         </dependency>
 
         <dependency>

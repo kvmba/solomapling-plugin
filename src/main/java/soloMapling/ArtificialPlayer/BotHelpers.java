@@ -18,15 +18,20 @@ public class BotHelpers {
     // BotHelpers - bot related stuff with regards to programming (object manipulation, etc)
 
     public static Character getCharFromChannelStorage(int cid) {
-        // just as a catch incacse i enter the cid without 20000
-        if (cid < 1000) {
-            cid = cid + 20000;
+        Channel channel = Server.getInstance().getChannel(0, 1);
+        Character exact = channel.getPlayerStorage().getCharacterById(cid);
+        if (isBot(exact)) {
+            return exact;
         }
 
-        Channel channel = Server.getInstance().getChannel(0, 1);
-        Character fakechar = channel.getPlayerStorage().getCharacterById(cid);
-        if (isBot(fakechar)) {
-            return (fakechar);
+        // Legacy generated bots use 20000-based ids, and old GM workflows
+        // commonly omit that prefix. Prefer the exact id first so native
+        // persistent companions such as cid=5 remain addressable.
+        if (cid < 1000) {
+            Character legacy = channel.getPlayerStorage().getCharacterById(cid + 20000);
+            if (isBot(legacy)) {
+                return legacy;
+            }
         }
         return null;
     }

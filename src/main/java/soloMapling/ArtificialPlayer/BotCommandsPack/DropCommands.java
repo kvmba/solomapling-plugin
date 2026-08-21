@@ -3,7 +3,6 @@ package soloMapling.ArtificialPlayer.BotCommandsPack;
 import org.gms.client.Character;
 import org.gms.client.inventory.Equip;
 import org.gms.client.inventory.Item;
-import org.gms.net.packet.Packet;
 import org.gms.server.maps.MapItem;
 import org.gms.server.maps.MapObject;
 import org.gms.server.maps.MapObjectType;
@@ -194,9 +193,7 @@ public class DropCommands {
         // 1000 Range = next to feet // 3000 = 2.5 character widths length
         List<MapObject> items = fakechar.getMap().getMapObjectsInRange(itemLocation, range, Arrays.asList(MapObjectType.ITEM));
         for (MapObject item : items) {
-            MapItem mapItem = (MapItem) item;
-            final Packet pickupPacket = PacketCreator.removeItemFromMap(mapItem.getObjectId(), 2, fakechar.getId());
-            fakechar.getMap().pickItemDrop(pickupPacket, mapItem);
+            botLootSingleDrop(fakechar, (MapItem) item);
         }
     }
 
@@ -216,8 +213,7 @@ public class DropCommands {
         for (MapObject item : items) {
             MapItem mapItem = (MapItem) item;
             if (mapItem.getOwnerId() == targetCharacter.getId()) {
-                final Packet pickupPacket = PacketCreator.removeItemFromMap(mapItem.getObjectId(), 2, fakechar.getId());
-                fakechar.getMap().pickItemDrop(pickupPacket, mapItem);
+                botLootSingleDrop(fakechar, mapItem);
             }
         }
     }
@@ -227,9 +223,21 @@ public class DropCommands {
     public static void lootItemListOnFloor(Character fakechar, List<MapObject> items) {
         for (MapObject item : items) {
             MapItem mapItem = (MapItem) item;
-            final Packet pickupPacket = PacketCreator.removeItemFromMap(mapItem.getObjectId(), 2, fakechar.getId());
-            fakechar.getMap().pickItemDrop(pickupPacket, mapItem);
+            botLootSingleDrop(fakechar, mapItem);
             BotHelpers.blockingSleep(100);
+        }
+    }
+
+    /** Removes synthetic table props without applying normal inventory pickup effects. */
+    public static void clearItemListFromFloor(Character fakechar, List<MapObject> items) {
+        if (fakechar == null || fakechar.getMap() == null || items == null) {
+            return;
+        }
+        for (MapObject item : items) {
+            if (item instanceof MapItem mapItem) {
+                fakechar.getMap().makeDisappearItemFromMap(mapItem);
+                BotHelpers.blockingSleep(100);
+            }
         }
     }
 
@@ -259,11 +267,14 @@ public class DropCommands {
 
     // Pick up one specific drop (organic single-item loot, paced by the caller for a natural look).
     public static void botLootSingleDrop(Character fakechar, MapItem mapItem) {
-        if (mapItem == null || mapItem.isPickedUp()) {
+        if (fakechar == null || fakechar.getMap() == null
+                || mapItem == null || mapItem.isPickedUp()) {
             return;
         }
-        final Packet pickupPacket = PacketCreator.removeItemFromMap(mapItem.getObjectId(), 2, fakechar.getId());
-        fakechar.getMap().pickItemDrop(pickupPacket, mapItem);
+        // Use the engine's authoritative pickup path. It enforces ownership,
+        // inventory capacity and quest restrictions and adds the actual item
+        // before removing the map object.
+        fakechar.pickupItem(mapItem);
     }
 
     // Sweep all drops the bot is entitled to (own + free-for-all) within range. Used as a tidy-up when a

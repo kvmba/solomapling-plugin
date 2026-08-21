@@ -21,6 +21,7 @@ import soloMapling.ArtificialPlayer.BotDialogueHandler;
 import soloMapling.ArtificialPlayer.BotMessagingSystem.CharacterStorage;
 import soloMapling.ArtificialPlayer.BotGrindSystem.DeepHub;
 import soloMapling.ArtificialPlayer.BotGrindSystem.GrindBrain;
+import soloMapling.ArtificialPlayer.BotGrindSystem.GrindTickRegistry;
 import soloMapling.ArtificialPlayer.BotGrindSystem.MapMobIndex;
 import soloMapling.ArtificialPlayer.BotGrindSystem.TrainingMapChooser;
 import soloMapling.ArtificialPlayer.BotGrindSystem.SpotFinder;
@@ -43,7 +44,6 @@ import java.util.Random;
 import java.util.Set;
 import java.util.TreeMap;
 import java.util.TreeSet;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -62,8 +62,8 @@ import static soloMapling.BotLogger.log;
 // Two state machines, kept separate (the design's core split):
 //  - Macro brain: updateState() on the slow BotSM tick (2-6s): INIT -> IN_TOWN -> DECIDE -> GO_TRAIN
 //    -> GRIND -> GO_TOWN -> IN_TOWN ... Tier-agnostic; only issues movement intents and accrues abstract EXP.
-//  - Combat tier: one shared 0.5s ticker (ensureCombatTicker) swings every grinding bot whose map is
-//    observed (GCMovement.isMapObserved). The single shared task drives all bots' combat — no thread per bot.
+//  - Combat tier: the process-wide GrindTickRegistry's single 250ms ticker swings every registered
+//    grinder whose map is observed. The shared task drives training and companion combat — no thread per bot.
 //
 // EXP: when unobserved (the common case) the bot levels by cheap arithmetic (kills/min x per-kill-exp),
 // applied silently (no packets) via setExp/setLevel. When a real player is on its map, real kills (the
@@ -73,7 +73,7 @@ import static soloMapling.BotLogger.log;
 // Map discovery is deterministic from WZ: the bot finds level-appropriate field maps near its spawn
 // town by BFS over the portal graph (TrainingMapFinder + MapMobIndex), reading mob levels straight from
 // Map.wz/Mob.wz. No hand-authored region table; town-locality emerges from hop distance.
-public class TrainingBot extends BotSM {
+public class TrainingBot extends BotSM implements GrindTickRegistry.Participant {
 
     // ── Tunables (decoration, not balance — rough is fine) ───────────────────
     // REAL-tier swing/decision cadence (shared ticker). Only OBSERVED grinders do real work here — combatTick
@@ -81,7 +81,6 @@ public class TrainingBot extends BotSM {
     // spends LOD bandwidth on the handful of on-screen bots (snappier reacquire, tighter jump-attack/blink
     // timing, more responsive loot vacuum) while unobserved grinders only pay a doubled cheap early-return.
     // UNTESTED: validate the combat sweep cost with !env perf before/after; revert to 500 if it climbs.
-    private static final long COMBAT_TICK_MS = 250;          // was 500; observation-tiered by the early-returns above
     private static final double KILLS_PER_MIN = 30.0;        // abstract grind speed
     private static final long GRIND_MIN_MS = 600_000;        // a grind session lasts 10–20 min
     private static final long GRIND_MAX_MS = 1_200_000;
@@ -165,36 +164,9 @@ public class TrainingBot extends BotSM {
     private static final long BUFF_MIN_MS = 90_000;
     private static final long BUFF_MAX_MS = 120_000;
 
-    // ── Shared combat ticker (one task for ALL training bots) ────────────────
-    private static final Set<TrainingBot> ACTIVE_GRINDERS = ConcurrentHashMap.newKeySet();
-    private static volatile boolean combatTickerStarted = false;
-
-    private static synchronized void ensureCombatTicker() {
-        if (combatTickerStarted) {
-            return;
-        }
-        combatTickerStarted = true;
-        ExecutorServiceManager.getScheduledExecutorService().scheduleAtFixedRate(
-                TrainingBot::combatTickAll, COMBAT_TICK_MS, COMBAT_TICK_MS, TimeUnit.MILLISECONDS);
-    }
-
-    // Swing every grinding bot whose map a real player can see. One exception per bot never stops the ticker.
-    private static void combatTickAll() {
-        long sweepStart = System.currentTimeMillis();
-        for (TrainingBot bot : ACTIVE_GRINDERS) {
-            try {
-                bot.combatTick();
-            } catch (Exception e) {
-                // a single bot's combat error must never kill the shared ticker
-            }
-        }
-        soloMapling.server.BotPerfStats.recordCombatSweep(
-                System.currentTimeMillis() - sweepStart, ACTIVE_GRINDERS.size());
-    }
-
     // How many bots the shared combat ticker currently visits (for !env perf).
     public static int activeGrinderCount() {
-        return ACTIVE_GRINDERS.size();
+        return GrindTickRegistry.getInstance().participantCount(TrainingBot.class);
     }
 
     // Fable Phase 3: an unobserved GRINDING bot is the deep-background case - abstract
@@ -211,7 +183,8 @@ public class TrainingBot extends BotSM {
         return super.lowPriorityDelayMs();
     }
 
-    private void combatTick() {
+    @Override
+    public void grindTick() {
         Character chr = getChr();
         if (chr == null || !getRunning() || phase != Phase.GRIND) {
             return; // gated; removal happens in leaveGrind()/stopScheduledTask()
@@ -385,7 +358,6 @@ public class TrainingBot extends BotSM {
     // ── Phases ───────────────────────────────────────────────────────────────
 
     private void doInit() {
-        ensureCombatTicker();
         homeMapId = getChr().getMapId();
         // No mobs here → it's a town: do the town beat first. Has mobs → a field: decide immediately.
         enterPhase(MapMobIndex.level(homeMapId) < 0 ? Phase.IN_TOWN : Phase.DECIDE);
@@ -717,7 +689,7 @@ public class TrainingBot extends BotSM {
             breaks.schedule(grindUntilMs, resumingFromBreak);
             lastExpAccrualMs = now();
             nextBuffMs = now(); // buff up as soon as a player can see it (looks already-buffed on arrival)
-            ACTIVE_GRINDERS.add(this);
+            GrindTickRegistry.getInstance().register(this);
             lastKnownLevel = chr.getLevel();
             if (!resumingFromBreak) {
                 sayContext("GrindStart", chr, null); // a resumed session already spoke BreakOver
@@ -960,7 +932,7 @@ public class TrainingBot extends BotSM {
     }
 
     private void leaveGrind() {
-        ACTIVE_GRINDERS.remove(this);
+        GrindTickRegistry.getInstance().unregister(this);
         grind.release(getChr()); // drop the spot claim + reset combat state
         clearTrainTarget(); // release this map's occupancy slot
         GCMovement.setRestHold(getChr(), false); // belt-and-braces: never leave a rope rest hold set on bail
@@ -1334,7 +1306,7 @@ public class TrainingBot extends BotSM {
     // Release combat + movement when the bot stops (FINISHED / converted / manually stopped).
     @Override
     public synchronized void stopScheduledTask() {
-        ACTIVE_GRINDERS.remove(this);
+        GrindTickRegistry.getInstance().unregister(this);
         Character chr = getChr();
         if (chr != null) {
             if (chr.getChair() > 0) {

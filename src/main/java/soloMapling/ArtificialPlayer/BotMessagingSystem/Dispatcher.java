@@ -3,6 +3,7 @@ package soloMapling.ArtificialPlayer.BotMessagingSystem;
 import org.gms.client.Character;
 import soloMapling.ArtificialPlayer.BotSM;
 import soloMapling.ArtificialPlayer.BotTypes.SocialBot;
+import soloMapling.ArtificialPlayer.BotTypes.CompanionBot;
 
 import java.util.Collection;
 import java.util.concurrent.*;
@@ -105,14 +106,23 @@ public class Dispatcher implements Runnable {
     private void startNewBotSession(BotSM bot, ChatMessage message) {
         log("Bot not running. Start scheduledTask line");
         bot.setRunning(true);
-        bot.getInteractors().setRespondant(message.getSender());
         bot.startScheduledTask();
+        if (bot instanceof CompanionBot companionBot) {
+            companionBot.enqueuePlayerMessage(message.getSender(), message.getContent());
+            return;
+        }
+        bot.getInteractors().setRespondant(message.getSender());
         if (bot instanceof SocialBot socialBot) {
             socialBot.onFirstInteraction(message.getSender());
         }
     }
 
     private void handleExistingBotSession(BotSM bot, ChatMessage message) {
+        if (bot instanceof CompanionBot companionBot) {
+            companionBot.enqueuePlayerMessage(message.getSender(), message.getContent());
+            companionBot.nudgeSoon(0L);
+            return;
+        }
         if (bot instanceof SocialBot socialBot) {
             handleSocialBotSession(socialBot, message);
             return;
@@ -168,6 +178,14 @@ public class Dispatcher implements Runnable {
     private void handleMessageWithNoBotName(ChatMessage message) {
         // message does not contain any info w/ bot names.
         Character respondant = message.getSender();
+        for (BotSM bot : CharacterStorage.getAllBots().values()) {
+            if (bot instanceof CompanionBot companionBot
+                    && companionBot.acceptsContinuation(respondant)) {
+                companionBot.enqueuePlayerMessage(respondant, message.getContent());
+                companionBot.nudgeSoon(0L);
+                return;
+            }
+        }
         if (CharacterStorage.checkIfRespondant(respondant)) { // Check if message contains a respondant
             expirePlayerChatCommands(respondant); // Expires any bubbles for respondants, catch all.
             messageQueue.addMessage(message); // Put into 2nd queue
