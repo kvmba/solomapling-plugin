@@ -152,18 +152,18 @@ Do not implement in the original checkouts. They contain runtime/user state:
 
 ## Acceptance issues found
 
-- [Fixed locally; live retest pending] Potion-shop routing used a small city/map
+- [Deployed; live retest pending] Potion-shop routing used a small city/map
   whitelist. Regional routes now also cover Korean Folk Town, Aquarium, Leafre,
   Mu Lung, Herb Town, Ariant, Magatia, Ellin Forest, Singapore, Malaysia, New
   Leaf City, and Japan.
-- [Fixed locally; live retest pending] The companion combat ticker continued
+- [Deployed; live retest pending] The companion combat ticker continued
   issuing movement while a supply or equipment run owned movement. Combat now
   yields to either controller.
-- [Fixed locally; live retest pending] Companion combat intentionally does not
+- [Deployed; live retest pending] Companion combat intentionally does not
   consume visible MP. MP potions no longer trigger restocking, get purchased,
   or get consumed by the survival loop; supply demand uses HP stock and
   inventory pressure only.
-- [Fixed locally; live retest pending] Supply and equipment movement previously
+- [Deployed; live retest pending] Supply and equipment movement previously
   prevented queued player turns from advancing. Player turns now advance before
   movement-owning controllers, and REST/GOODBYE cancel those activities.
 
@@ -369,3 +369,8 @@ failure. Do not paste secrets or large logs.
   target/route reselection. Position repair now requires at least 90 seconds
   without combat progress and an unobserved map, so an observed player never
   sees a companion teleport into combat. The full suite passed all 207 tests.
+- 2026-08-21: Committed the coordinated travel/combat fixes as `498e810`,
+  rebuilt the beta host and plugin artifacts, gracefully stopped the previous
+  runtime, and deployed both artifacts. The replacement runtime started as PID
+  `46761`; API port `8686` and login port `8484` are listening, Luna loaded at
+  level 38, and both host item capabilities initialized successfully.
