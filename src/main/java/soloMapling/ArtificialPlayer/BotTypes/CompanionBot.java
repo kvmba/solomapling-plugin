@@ -263,7 +263,8 @@ public final class CompanionBot extends BotSM implements
             log.debug("Companion decision cid={} reason={} reply={} actions={}",
                     context.request().companionCharacterId(),
                     decision.reason(), decision.reply(), decision.actions());
-            for (CompanionAction action : CompanionDecisionActions.forExecution(decision)) {
+            for (CompanionAction action : CompanionDecisionActions.forExecution(
+                    decision, context.request().playerMessage(), context.request().playerCharacterId())) {
                 ActionExecutionResult execution =
                         actionExecutor.execute(action, getChr(), this, context.resolver());
                 executions.add(execution);

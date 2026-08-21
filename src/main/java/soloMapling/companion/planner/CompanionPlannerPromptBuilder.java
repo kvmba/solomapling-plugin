@@ -45,6 +45,8 @@ public final class CompanionPlannerPromptBuilder {
                 DROP_GIFT is allowed only for itemIds explicitly listed in giftableItemIds.
                 If a requested item is owned but not giftable, decline naturally according to the persona.
                 Gear goals are suggestions for cooperative hunting, including bosses, not authority to invent tactics.
+                When the player explicitly asks to train, grind, or fight monsters together, use TRAIN_WITH rather
+                than FOLLOW; TRAIN_WITH already includes following the player while fighting.
 
                 Companion identity:
                 displayName: %s

@@ -5,6 +5,7 @@ import org.gms.client.inventory.Equip;
 import org.gms.client.inventory.InventoryType;
 import org.gms.client.inventory.Item;
 import org.gms.constants.inventory.EquipType;
+import org.gms.constants.inventory.ItemConstants;
 import org.gms.server.ItemInformationProvider;
 
 import java.util.ArrayList;
@@ -16,6 +17,10 @@ import java.util.Map;
 /** Builds a bounded snapshot of one companion's own native inventory. */
 public final class CompanionInventoryPerception {
     private static final int MAX_FACTS = 512;
+    private static final short FORBIDDEN_GIFT_FLAGS = ItemConstants.LOCK
+            | ItemConstants.UNTRADEABLE
+            | ItemConstants.ACCOUNT_SHARING
+            | ItemConstants.MERGE_UNTRADEABLE;
 
     private CompanionInventoryPerception() {
     }
@@ -90,8 +95,7 @@ public final class CompanionInventoryPerception {
                 && !provider.isCash(item.getItemId())
                 && !provider.isQuestItem(item.getItemId())
                 && !provider.isDropRestricted(item.getItemId())
-                && item.getOwner().isEmpty()
-                && item.getItemLog().isEmpty();
+                && (item.getFlag() & FORBIDDEN_GIFT_FLAGS) == 0;
     }
 
     private static String itemName(ItemInformationProvider provider, int itemId) {

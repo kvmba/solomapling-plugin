@@ -228,6 +228,19 @@ public class DropCommands {
         }
     }
 
+    /** Removes synthetic table props without applying normal inventory pickup effects. */
+    public static void clearItemListFromFloor(Character fakechar, List<MapObject> items) {
+        if (fakechar == null || fakechar.getMap() == null || items == null) {
+            return;
+        }
+        for (MapObject item : items) {
+            if (item instanceof MapItem mapItem) {
+                fakechar.getMap().makeDisappearItemFromMap(mapItem);
+                BotHelpers.blockingSleep(100);
+            }
+        }
+    }
+
     public static void botLootSelectedItems(Character chr, int[] itemsToLoot) {
         List<MapObject> itemsOnFloor = checkForItemsOnFloor(chr, chr.getPosition(), 10000, itemsToLoot);
         if (!itemsOnFloor.isEmpty()) {
