@@ -54,9 +54,14 @@ public final class HostCompanionRuntimeAdapter implements CompanionRuntimeAdapte
     @Override
     public LoadedCompanion load(CompanionProfile profile) {
         CompanionRoster.register(profile.characterId());
-        return new HostLoadedCompanion(
-                BotGeneration.loadPersistentBot(profile.characterId()),
-                CompanionCareerBuild.parse(profile.careerBuild()));
+        Character character = BotGeneration.loadPersistentBot(profile.characterId());
+        CompanionCareerBuild careerBuild =
+                CompanionCareerBuild.parse(profile.careerBuild());
+        log.info("Companion build dry-run cid={} job={} level={} build={} {}",
+                character.getId(), character.getJob().getId(), character.getLevel(),
+                careerBuild.id(),
+                CompanionBuildAllocator.preview(character, careerBuild).summary());
+        return new HostLoadedCompanion(character, careerBuild);
     }
 
     @Override

@@ -291,3 +291,11 @@ failure. Do not paste secrets or large logs.
   used by TrainingBots; companion training now forces ROAM, and live retest
   confirmed immediate autonomous combat. Skill MP deduction was intentionally
   removed because companion MP is not player-visible.
+- 2026-08-21: Replaced generic AP/SP filling with persisted
+  `v083-classic-v1` career builds, ordinary-build AP formulas, and ordered SP
+  milestones for all 12 Explorer branches. The clean plugin suite passed all
+  182 tests and the host suite passed all 5 tests. Live pre-application
+  diagnostics adopted Luna as `dark-knight-spear` at job 100/level 25, reported
+  no AP delta and no blocked SP milestone, and remained unchanged after a
+  graceful restart. The verification also found and corrected BeiDou's stale
+  Warrior active-skill constants (`1001004`/`1001005`) against the v83 WZ.

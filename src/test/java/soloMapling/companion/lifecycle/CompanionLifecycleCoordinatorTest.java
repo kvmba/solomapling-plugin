@@ -130,7 +130,7 @@ class CompanionLifecycleCoordinatorTest {
     }
 
     @Test
-    void onlineCareerAllocationIsCheckpointedWithoutRespawn() {
+    void onlineCareerAllocationIsCheckpointedWithoutRespawn() throws Exception {
         FakeRepository repository = new FakeRepository(profile(24, ONLINE, NOW.minusSeconds(60)));
         FakeRuntime runtime = new FakeRuntime();
         CompanionLifecycleCoordinator coordinator = coordinator(repository, runtime);
