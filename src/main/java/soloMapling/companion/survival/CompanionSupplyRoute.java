@@ -9,6 +9,42 @@ public final class CompanionSupplyRoute {
     }
 
     public static int potionShopFor(int mapId) {
+        if (mapId >= 800_000_000 && mapId < 900_000_000) {
+            return 800_000_000;
+        }
+        if (mapId >= 600_000_000 && mapId < 601_000_000) {
+            return 600_000_000;
+        }
+        if (mapId >= 550_000_000 && mapId < 551_000_000) {
+            return 550_000_000;
+        }
+        if (mapId >= 540_000_000 && mapId < 541_000_000) {
+            return 540_000_000;
+        }
+        if (mapId >= 300_000_000 && mapId < 301_000_000) {
+            return 300_000_000;
+        }
+        if (mapId >= 261_000_000 && mapId < 262_000_000) {
+            return 261_000_000;
+        }
+        if (mapId >= 260_000_000 && mapId < 261_000_000) {
+            return 260_000_000;
+        }
+        if (mapId >= 251_000_000 && mapId < 252_000_000) {
+            return 251_000_000;
+        }
+        if (mapId >= 250_000_000 && mapId < 251_000_000) {
+            return 250_000_002;
+        }
+        if (mapId >= 240_000_000 && mapId < 241_000_000) {
+            return 240_000_002;
+        }
+        if (mapId >= 230_000_000 && mapId < 231_000_000) {
+            return 230_000_002;
+        }
+        if (mapId >= 222_000_000 && mapId < 223_000_000) {
+            return 222_000_000;
+        }
         if (mapId >= 211_000_000 && mapId < 212_000_000) {
             return 211_000_102;
         }

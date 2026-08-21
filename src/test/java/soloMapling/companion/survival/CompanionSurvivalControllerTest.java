@@ -17,4 +17,11 @@ class CompanionSurvivalControllerTest {
         assertFalse(CompanionSurvivalController.isPotionCandidate(2070000));
         assertFalse(CompanionSurvivalController.isPotionCandidate(2330000));
     }
+
+    @Test
+    void supplyDemandUsesHpStockAndInventoryPressureOnly() {
+        assertTrue(CompanionSurvivalController.needsSupplyRun(11, false));
+        assertTrue(CompanionSurvivalController.needsSupplyRun(60, true));
+        assertFalse(CompanionSurvivalController.needsSupplyRun(60, false));
+    }
 }

@@ -766,7 +766,7 @@ public class TrainingBot extends BotSM implements GrindTickRegistry.Participant 
             // A mob is reachable but we still can't land a hit (wedged / pathing failure) → reset position.
             debugChat("watchdog: no hit for " + (stuck / 1000) + "s, mob reachable -> teleport to portal & re-grind");
             teleportToNearestPortal(chr);
-            grind.resetupAfterTeleport(chr); // fresh kill window + re-select a spot from the new position
+            grind.resetAfterStall(chr); // fresh kill window + re-select a spot from the new position
             teleportedThisEpisode = true;
             lastRepairMs = now();
             return false;

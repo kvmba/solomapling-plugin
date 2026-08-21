@@ -69,6 +69,12 @@ class CompanionSurvivalPolicyTest {
         assertEquals(200000002, CompanionSupplyRoute.potionShopFor(200010100));
         assertEquals(211000102, CompanionSupplyRoute.potionShopFor(211041100));
         assertEquals(220000002, CompanionSupplyRoute.potionShopFor(220030400));
+        assertEquals(230000002, CompanionSupplyRoute.potionShopFor(230040200));
+        assertEquals(240000002, CompanionSupplyRoute.potionShopFor(240040511));
+        assertEquals(261000000, CompanionSupplyRoute.potionShopFor(261020401));
+        assertEquals(540000000, CompanionSupplyRoute.potionShopFor(540020500));
+        assertEquals(600000000, CompanionSupplyRoute.potionShopFor(600000000));
+        assertEquals(800000000, CompanionSupplyRoute.potionShopFor(801040100));
     }
 
     private static CompanionSurvivalPolicy.Potion potion(

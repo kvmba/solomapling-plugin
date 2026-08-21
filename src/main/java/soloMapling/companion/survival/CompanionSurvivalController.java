@@ -30,7 +30,6 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Supplier;
 
 import static soloMapling.companion.survival.CompanionSurvivalPolicy.Resource.HP;
-import static soloMapling.companion.survival.CompanionSurvivalPolicy.Resource.MP;
 
 /**
  * Executes the deterministic survival loop owned by one persistent companion:
@@ -110,10 +109,6 @@ public final class CompanionSurvivalController {
                 CompanionSurvivalPolicy.chooseForUse(
                         HP, companion.getHp(), companion.getCurrentMaxHp(), inventory);
         if (selected.isEmpty()) {
-            selected = CompanionSurvivalPolicy.chooseForUse(
-                    MP, companion.getMp(), companion.getCurrentMaxMp(), inventory);
-        }
-        if (selected.isEmpty()) {
             return false;
         }
         CompanionSurvivalPolicy.Potion potion = selected.orElseThrow();
@@ -159,10 +154,11 @@ public final class CompanionSurvivalController {
     private boolean needsSupplyRun(Character companion) {
         List<CompanionSurvivalPolicy.Potion> inventory = inventoryPotions(companion);
         int hpStock = stock(inventory, HP);
-        int mpStock = stock(inventory, MP);
-        return CompanionSurvivalPolicy.needsRestock(hpStock)
-                || CompanionSurvivalPolicy.needsRestock(mpStock)
-                || inventoryPressure(companion);
+        return needsSupplyRun(hpStock, inventoryPressure(companion));
+    }
+
+    static boolean needsSupplyRun(int hpStock, boolean inventoryPressure) {
+        return CompanionSurvivalPolicy.needsRestock(hpStock) || inventoryPressure;
     }
 
     private void advanceSupplyRun(Character companion, long now) {
@@ -219,10 +215,7 @@ public final class CompanionSurvivalController {
     }
 
     private int restock(Character companion, Shop shop) {
-        int bought = 0;
-        bought += restockResource(companion, shop, HP);
-        bought += restockResource(companion, shop, MP);
-        return bought;
+        return restockResource(companion, shop, HP);
     }
 
     private int restockResource(
@@ -344,7 +337,8 @@ public final class CompanionSurvivalController {
                 continue;
             }
             Shop shop = ShopFactory.getInstance().getShopForNPC(((NPC) object).getId());
-            if (shop != null && !shopPotions(companion, shop).isEmpty()) {
+            if (shop != null && shopPotions(companion, shop).stream()
+                    .anyMatch(potion -> potion.hpRestore() > 0)) {
                 return shop;
             }
         }

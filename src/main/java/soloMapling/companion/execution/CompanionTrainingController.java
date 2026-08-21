@@ -13,4 +13,12 @@ public interface CompanionTrainingController {
     ActionExecutionResult beginTrainingWith(Character target);
 
     void stopTraining();
+
+    /**
+     * Stops every high-level activity that would resume movement after REST or
+     * GOODBYE. Implementations with no additional activity can use the default.
+     */
+    default void stopForRest() {
+        stopTraining();
+    }
 }

@@ -150,6 +150,23 @@ Do not implement in the original checkouts. They contain runtime/user state:
    relationship-driven proactive conversation after its cooldown.
 6. Record final acceptance results without storing credentials.
 
+## Acceptance issues found
+
+- [Fixed locally; live retest pending] Potion-shop routing used a small city/map
+  whitelist. Regional routes now also cover Korean Folk Town, Aquarium, Leafre,
+  Mu Lung, Herb Town, Ariant, Magatia, Ellin Forest, Singapore, Malaysia, New
+  Leaf City, and Japan.
+- [Fixed locally; live retest pending] The companion combat ticker continued
+  issuing movement while a supply or equipment run owned movement. Combat now
+  yields to either controller.
+- [Fixed locally; live retest pending] Companion combat intentionally does not
+  consume visible MP. MP potions no longer trigger restocking, get purchased,
+  or get consumed by the survival loop; supply demand uses HP stock and
+  inventory pressure only.
+- [Fixed locally; live retest pending] Supply and equipment movement previously
+  prevented queued player turns from advancing. Player turns now advance before
+  movement-owning controllers, and REST/GOODBYE cancel those activities.
+
 ## Verification log
 
 Append dated entries here. Include the command, result, and any actionable
@@ -335,3 +352,20 @@ failure. Do not paste secrets or large logs.
   live-test equipment purchasing. Inventory dialogue, gift pickup, gear
   purchase/drop/equip, and proactive conversation still require a logged-in
   player/GM session.
+- 2026-08-21: Live acceptance confirmed grounded equipped/backpack inventory
+  answers. A low-HP-potion test started a supply run from map `100040103` to
+  `100000102`, but active joint-training combat movement overrode the route and
+  the run timed out. Testing also confirmed that the potion-shop route whitelist
+  does not cover the `600000000` region. Because companion MP is intentionally
+  cosmetic and is not consumed, MP potion stock and purchases are not useful
+  supply criteria and must be removed from the supply loop.
+- 2026-08-21: Implemented the supply/control fixes locally. Combat now pauses
+  for supply and gear movement, player turns remain responsive during those
+  runs, REST/GOODBYE cancel active movement owners, MP is excluded from potion
+  use and restocking, and the regional potion-shop route table covers the
+  additional verified towns including map `600000000`. `mvn test` passed all
+  204 tests and `git diff --check` passed. Deployment and live retest remain.
+- 2026-08-21: Replaced the companion's visible 20-second stuck teleport with
+  target/route reselection. Position repair now requires at least 90 seconds
+  without combat progress and an unobserved map, so an observed player never
+  sees a companion teleport into combat. The full suite passed all 207 tests.

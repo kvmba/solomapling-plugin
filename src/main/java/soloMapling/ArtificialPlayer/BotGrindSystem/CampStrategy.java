@@ -139,7 +139,7 @@ class CampStrategy implements GrindStrategy {
     // Watchdog teleport-to-portal escalation: re-select a spot from the new position. doSelectSpot
     // releases the old claim before claiming the new one, so no claim leaks here.
     @Override
-    public void resetAfterTeleport(Character chr) {
+    public void resetAfterStall(Character chr) {
         resetAnchorWatchdog();
         state = State.SELECT_SPOT;
     }

@@ -183,15 +183,15 @@ public final class GrindBrain {
         }
     }
 
-    // Watchdog teleport-to-portal escalation: drop the target and re-anchor from the new position.
-    // Deliberately does NOT reset the heartbeat, so the bail timer keeps running if the teleport
-    // didn't help. The strategy's re-select releases its old claim first, so no claim leaks here.
-    public void resetupAfterTeleport(Character chr) {
+    // Watchdog recovery: drop the stale target and let the strategy re-anchor/reselect from the
+    // character's current position. Deliberately does NOT reset the heartbeat, so escalation can
+    // continue if ordinary repathing does not help.
+    public void resetAfterStall(Character chr) {
         targetOid = -1;
         resetApproachProgress(chr);
         GrindStrategy s = strategy;
         if (s != null) {
-            s.resetAfterTeleport(chr);
+            s.resetAfterStall(chr);
         }
     }
 

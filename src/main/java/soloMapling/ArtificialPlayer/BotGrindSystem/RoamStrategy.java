@@ -102,7 +102,7 @@ final class RoamStrategy implements GrindStrategy {
     }
 
     @Override
-    public void resetAfterTeleport(Character chr) {
+    public void resetAfterStall(Character chr) {
         starvedSinceMs = 0L; // fresh position, fresh seek window
     }
 

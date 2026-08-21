@@ -283,7 +283,7 @@ public final class CompanionActionExecutor {
 
         @Override
         public ActionExecutionResult rest(Character companion, BotSM bot) {
-            stopTraining(bot);
+            stopForRest(bot);
             GCMovement.stop(companion);
             bot.waitFor(REST_HOLD_MS);
             return ActionExecutionResult.success(
@@ -292,7 +292,7 @@ public final class CompanionActionExecutor {
 
         @Override
         public ActionExecutionResult goodbye(Character companion, BotSM bot) {
-            stopTraining(bot);
+            stopForRest(bot);
             GCMovement.stop(companion);
             if (BotPartyQueue.getInstance().hasPendingInvite(companion)) {
                 BotPartyCommands.botRejectPartyInvite(companion);
@@ -311,9 +311,9 @@ public final class CompanionActionExecutor {
             return null;
         }
 
-        private static void stopTraining(BotSM bot) {
+        private static void stopForRest(BotSM bot) {
             if (bot instanceof CompanionTrainingController trainingController) {
-                trainingController.stopTraining();
+                trainingController.stopForRest();
             }
         }
     }

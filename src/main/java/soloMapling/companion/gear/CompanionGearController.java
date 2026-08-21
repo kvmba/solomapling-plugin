@@ -63,7 +63,10 @@ public final class CompanionGearController {
     /**
      * Low-frequency lifecycle. Returns true while an equipment-shop trip owns movement.
      */
-    public boolean tick(Character companion, GearDropSourceProvider dropSources) {
+    public boolean tick(
+            Character companion,
+            GearDropSourceProvider dropSources,
+            boolean allowShopStart) {
         if (!usable(companion)) {
             return gearRunActive();
         }
@@ -88,7 +91,8 @@ public final class CompanionGearController {
             advanceShopRun(companion, now);
             return gearRunActive();
         }
-        if (now < shopRetryAt
+        if (!allowShopStart
+                || now < shopRetryAt
                 || companion.getMeso() <= CompanionShopGearPolicy.potionMesosReserve(
                         companion.getLevel(), companion.getMeso())) {
             return false;

@@ -25,11 +25,12 @@ import soloMapling.companion.agent.ProductionCompanionBrain;
 import soloMapling.companion.agent.ProactiveAttentionPolicy;
 import soloMapling.companion.agent.TurnCoordinator;
 import soloMapling.companion.execution.ActionExecutionResult;
-import soloMapling.companion.execution.CompanionCombatLifecycle;
 import soloMapling.companion.execution.CompanionActionExecutor;
+import soloMapling.companion.execution.CompanionCombatLifecycle;
+import soloMapling.companion.execution.CompanionCombatRecoveryPolicy;
+import soloMapling.companion.execution.CompanionRuntimeCapabilities;
 import soloMapling.companion.execution.CompanionTargetResolver;
 import soloMapling.companion.execution.CompanionTrainingController;
-import soloMapling.companion.execution.CompanionRuntimeCapabilities;
 import soloMapling.companion.gear.CompanionGearController;
 import soloMapling.companion.planner.CompanionPlannerResult;
 import soloMapling.companion.survival.CompanionSurvivalController;
@@ -57,7 +58,6 @@ public final class CompanionBot extends BotSM implements
     private static final Duration SESSION_TIMEOUT = Duration.ofSeconds(45);
     private static final Duration PLANNING_TIMEOUT = Duration.ofSeconds(12);
     private static final Duration TURN_COOLDOWN = Duration.ofSeconds(2);
-    private static final long COMBAT_STUCK_REPAIR_MS = 20_000L;
     private static final long COMBAT_REPAIR_COOLDOWN_MS = 15_000L;
     private static final String FALLBACK_REPLY = "Give me a moment—I'm still with you.";
 
@@ -167,17 +167,21 @@ public final class CompanionBot extends BotSM implements
         if (getChr() == null || getChr().getMap() == null) {
             return;
         }
+        // Player turns remain responsive while supply/gear controllers own movement.
+        turns.tick(this::plan, this::execute);
         if (survival.tick(getChr())) {
             return;
         }
-        if ((trainingTarget == null || getChr().getLevel() > 40 || gear.gearRunActive())
-                && gear.tick(getChr(), CompanionRuntimeCapabilities.dropSources())) {
+        boolean allowShopStart = trainingTarget == null
+                || getChr().getLevel() > 40
+                || gear.gearRunActive();
+        if (gear.tick(
+                getChr(), CompanionRuntimeCapabilities.dropSources(), allowShopStart)) {
             return;
         }
         maintainTraining();
         observePendingInvite();
         maybeInitiateConversation();
-        turns.tick(this::plan, this::execute);
     }
 
     private void maybeInitiateConversation() {
@@ -333,11 +337,19 @@ public final class CompanionBot extends BotSM implements
     }
 
     @Override
+    public synchronized void stopForRest() {
+        stopTraining();
+        survival.cancel();
+        gear.cancel();
+    }
+
+    @Override
     public void grindTick() {
         Character companion = getChr();
         Character target = trainingTarget;
         if (checkIfNotRunningOrPaused()
-                || !combatLifecycle.active() || companion == null) {
+                || !combatLifecycle.active() || companion == null
+                || survival.supplyRunActive() || gear.gearRunActive()) {
             return;
         }
         if (target == null || companion.getMap() == null || target.getMap() == null
@@ -353,18 +365,27 @@ public final class CompanionBot extends BotSM implements
                     GCMovement.isMapObserved(companion.getMapId()),
                     grind.activeStyle(), grind.spotLabel(), grind.msSinceProgress());
         }
-        if (grind.msSinceProgress() >= COMBAT_STUCK_REPAIR_MS
-                && now >= nextCombatRepairAt
-                && !companion.getMap().getAllMonsters().isEmpty()
-                && target.getPosition() != null) {
+        long progressAgeMs = grind.msSinceProgress();
+        boolean mapObserved = GCMovement.isMapObserved(companion.getMapId());
+        CompanionCombatRecoveryPolicy.Recovery recovery =
+                CompanionCombatRecoveryPolicy.choose(
+                        progressAgeMs, mapObserved, now >= nextCombatRepairAt);
+        if (recovery != CompanionCombatRecoveryPolicy.Recovery.NONE
+                && !companion.getMap().getAllMonsters().isEmpty()) {
             nextCombatRepairAt = now + COMBAT_REPAIR_COOLDOWN_MS;
             GCMovement.stop(companion);
-            GCMovement.teleportTo(
-                    companion, target.getPosition().x, target.getPosition().y);
-            grind.resetupAfterTeleport(companion);
-            log.warn("Companion combat repaired cid={} targetCid={} map={} progressAgeMs={} destination={}",
-                    companion.getId(), target.getId(), companion.getMapId(),
-                    grind.msSinceProgress(), target.getPosition());
+            if (recovery == CompanionCombatRecoveryPolicy.Recovery.POSITION_REPAIR
+                    && target.getPosition() != null) {
+                GCMovement.teleportTo(
+                        companion, target.getPosition().x, target.getPosition().y);
+                log.warn("Companion combat position repaired offscreen cid={} targetCid={} map={} progressAgeMs={} destination={}",
+                        companion.getId(), target.getId(), companion.getMapId(),
+                        progressAgeMs, target.getPosition());
+            } else {
+                log.info("Companion combat repathing cid={} targetCid={} map={} progressAgeMs={}",
+                        companion.getId(), target.getId(), companion.getMapId(), progressAgeMs);
+            }
+            grind.resetAfterStall(companion);
             return;
         }
         grind.tick(companion);

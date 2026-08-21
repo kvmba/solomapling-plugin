@@ -108,7 +108,7 @@ final class StackStrategy implements GrindStrategy {
     }
 
     @Override
-    public void resetAfterTeleport(Character chr) {
+    public void resetAfterStall(Character chr) {
         state = State.SELECT_STACK;
     }
 

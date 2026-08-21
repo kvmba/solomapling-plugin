@@ -29,10 +29,10 @@ interface GrindStrategy {
     // released by release(); a raced one is prevented by claimActive).
     void resetEpisodeUnderLock();
 
-    // The macro watchdog teleported the bot to a portal: re-anchor from the new position. The brain
+    // The watchdog is repathing or repaired position: re-anchor from the current position. The brain
     // has already dropped the sticky target and approach progress; the heartbeat is deliberately
-    // NOT refreshed (the bail timer keeps running if the teleport didn't help).
-    void resetAfterTeleport(Character chr);
+    // NOT refreshed so recovery can escalate if ordinary pathing does not help.
+    void resetAfterStall(Character chr);
 
     // True when this map is full for this style (every spot claimed / seek range contested) — the
     // macro crowd-bail reads it through GrindBrain.mapSaturated().
