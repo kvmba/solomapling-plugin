@@ -123,6 +123,12 @@ public final class AgentDecisionParser {
                 requireActionFields(node, location, "characterId");
                 yield new CompanionAction.TrainWith(requireInt(node, "characterId", location));
             }
+            case DROP_GIFT -> {
+                requireActionFields(node, location, "characterId", "itemId");
+                yield new CompanionAction.DropGift(
+                        requireInt(node, "characterId", location),
+                        requireInt(node, "itemId", location));
+            }
             case REST -> {
                 requireActionFields(node, location);
                 yield new CompanionAction.Rest();

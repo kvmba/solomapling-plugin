@@ -3,6 +3,7 @@ package soloMapling.companion.agent;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
+import java.util.Optional;
 import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -148,6 +149,24 @@ class ActionValidatorTest {
                 List.of("ACTION_ON_COOLDOWN", "ALREADY_IN_PARTY", "CURRENTLY_ENGAGED",
                         "CURRENTLY_ENGAGED"),
                 result.violations().stream().map(ActionValidator.Violation::code).toList());
+    }
+
+    @Test
+    void giftRequiresSameMapTargetAndExplicitItemAuthorization() {
+        CompanionInventoryItem bandana = new CompanionInventoryItem(
+                1002019, "White Bandana", "EQUIP", (short) 1, 1,
+                false, true, true, "CAP", 10);
+        CompanionStateSnapshot authorized = new CompanionStateSnapshot(
+                CURRENT_MAP, Set.of(TARGET), false, Set.of(CURRENT_MAP),
+                Set.of(TARGET), Set.of(), false, List.of(bandana),
+                Optional.empty(), Set.of(1002019));
+
+        assertTrue(validator.validate(
+                decision(List.of(new CompanionAction.DropGift(TARGET, 1002019))),
+                authorized).valid());
+        assertEquals("ITEM_NOT_GIFTABLE", validator.validate(
+                decision(List.of(new CompanionAction.DropGift(TARGET, 1002020))),
+                authorized).violations().getFirst().code());
     }
 
     private static AgentDecision decision(List<CompanionAction> actions) {

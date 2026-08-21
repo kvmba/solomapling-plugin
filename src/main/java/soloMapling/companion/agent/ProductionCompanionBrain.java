@@ -21,12 +21,14 @@ import soloMapling.companion.persona.PersonaProfile;
 import soloMapling.companion.planner.CompanionPlannerInput;
 import soloMapling.companion.planner.CompanionPlannerResult;
 import soloMapling.companion.planner.CompanionPlannerService;
+import soloMapling.companion.execution.ActionExecutionResult;
 import soloMapling.server.ExecutorServiceManager;
 
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
@@ -107,6 +109,20 @@ public final class ProductionCompanionBrain implements CompanionBrain {
                 .exceptionally(error -> contextFailure());
     }
 
+    @Override
+    public CompletableFuture<Optional<CompanionRelationship>> relationship(
+            int companionCharacterId, int playerCharacterId) {
+        return CompletableFuture.supplyAsync(() -> {
+            try {
+                return relationships.get(companionCharacterId, playerCharacterId);
+            } catch (Throwable error) {
+                log.warn("Companion relationship lookup failed cid={} playerCid={}",
+                        companionCharacterId, playerCharacterId, error);
+                return Optional.empty();
+            }
+        }, executor);
+    }
+
     private CompanionPlannerInput buildInput(TurnRequest request) {
         try {
             CompanionProfile profile = profiles.findByCharacterId(request.companionCharacterId())
@@ -122,19 +138,26 @@ public final class ProductionCompanionBrain implements CompanionBrain {
                     .get(request.companionCharacterId(), request.playerCharacterId())
                     .map(List::of)
                     .orElseGet(List::of);
+            PersonaProfile persona = persona(profile);
+            CompanionStateSnapshot perception = request.perception().withGiftableItemIds(
+                    CompanionGiftPolicy.allowedItemIds(
+                            request.perception().inventoryItems(),
+                            request.perception().gearGoal(),
+                            persona,
+                            related.stream().findFirst()));
             Instant now = Instant.now();
             log.debug("Companion context built cid={} playerCid={} memories={} relationships={} map={}",
                     request.companionCharacterId(), request.playerCharacterId(),
                     candidates.size(), related.size(), request.perception().currentMapId());
             return new CompanionPlannerInput(
                     profile,
-                    persona(profile),
-                    request.perception(),
+                    persona,
+                    perception,
                     candidates,
                     new MemoryScorer.Context(
                             now,
                             Integer.toString(request.playerCharacterId()),
-                            Integer.toString(request.perception().currentMapId()),
+                            Integer.toString(perception.currentMapId()),
                             Set.of("conversation")),
                     MemoryScorer.Parameters.defaults(),
                     12,
@@ -169,7 +192,12 @@ public final class ProductionCompanionBrain implements CompanionBrain {
                     "player",
                     turn.request().playerCharacterId(),
                     summary,
-                    "actions=" + turn.executions().size(),
+                    "actions=" + turn.executions().size() + ";codes="
+                            + turn.executions().stream()
+                            .map(ActionExecutionResult::reasonCode)
+                            .limit(8)
+                            .toList()
+                            + giftAudit(turn),
                     now);
         } catch (Throwable ignored) {
             log.warn("Companion activity persistence failed cid={} playerCid={}",
@@ -202,6 +230,59 @@ public final class ProductionCompanionBrain implements CompanionBrain {
                     turn.request().companionCharacterId(),
                     turn.request().playerCharacterId(), ignored);
         }
+        persistRelationship(turn, summary, now);
+    }
+
+    private void persistRelationship(CompletedTurn turn, String summary, Instant now) {
+        boolean successfulTurn = turn.result() instanceof CompanionPlannerResult.Success;
+        if (!successfulTurn) {
+            return;
+        }
+        int familiarity = 1;
+        int trust = hasSuccessfulExecution(turn, "PARTY_ACCEPTED", "PARTY_INVITE_SENT",
+                "FOLLOW_STARTED", "TRAINING_STARTED") ? 1 : 0;
+        int affinity = hasSuccessfulExecution(turn, "GIFT_DROPPED") ? 1 : 0;
+        try {
+            relationships.upsertInteraction(
+                    turn.request().companionCharacterId(),
+                    turn.request().playerCharacterId(),
+                    affinity > 0 ? "friend" : trust > 0 ? "companion" : "acquaintance",
+                    familiarity,
+                    trust,
+                    affinity,
+                    summary,
+                    now);
+        } catch (Throwable error) {
+            log.warn("Companion relationship persistence failed cid={} playerCid={}",
+                    turn.request().companionCharacterId(),
+                    turn.request().playerCharacterId(), error);
+        }
+    }
+
+    private static boolean hasSuccessfulExecution(CompletedTurn turn, String... reasonCodes) {
+        Set<String> expected = Set.of(reasonCodes);
+        for (ActionExecutionResult execution : turn.executions()) {
+            if ((execution.status() == ActionExecutionResult.Status.SUCCESS
+                    || execution.status() == ActionExecutionResult.Status.DEFERRED)
+                    && expected.contains(execution.reasonCode())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static String giftAudit(CompletedTurn turn) {
+        if (!(turn.result() instanceof CompanionPlannerResult.Success success)
+                || !hasSuccessfulExecution(turn, "GIFT_DROPPED")) {
+            return "";
+        }
+        return success.decision().actions().stream()
+                .filter(CompanionAction.DropGift.class::isInstance)
+                .map(CompanionAction.DropGift.class::cast)
+                .findFirst()
+                .map(gift -> ";giftItemId=" + gift.itemId()
+                        + ";giftTargetId=" + gift.characterId())
+                .orElse("");
     }
 
     private static PersonaProfile persona(CompanionProfile profile) {

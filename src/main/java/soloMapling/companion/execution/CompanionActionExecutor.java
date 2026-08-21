@@ -39,6 +39,8 @@ public final class CompanionActionExecutor {
 
         ActionExecutionResult trainWith(Character companion, BotSM bot, Character target);
 
+        ActionExecutionResult dropGift(Character companion, BotSM bot, Character target, int itemId);
+
         ActionExecutionResult rest(Character companion, BotSM bot);
 
         ActionExecutionResult goodbye(Character companion, BotSM bot);
@@ -90,6 +92,12 @@ public final class CompanionActionExecutor {
             @Override
             public ActionExecutionResult trainWith(Character companion, BotSM bot, Character target) {
                 return adapter.trainWith(companion, bot, target);
+            }
+
+            @Override
+            public ActionExecutionResult dropGift(
+                    Character companion, BotSM bot, Character target, int itemId) {
+                return adapter.dropGift(companion, bot, target, itemId);
             }
 
             @Override
@@ -253,6 +261,24 @@ public final class CompanionActionExecutor {
                             "TRAINING_CONTROLLER_FAILED",
                             "Companion training controller returned no result")
                     : result;
+        }
+
+        @Override
+        public ActionExecutionResult dropGift(
+                Character companion, BotSM bot, Character target, int itemId) {
+            ActionExecutionResult sameMap = requireSameMap(companion, target);
+            if (sameMap != null) {
+                return sameMap;
+            }
+            CompanionRuntimeCapabilities.GiftResult result =
+                    CompanionRuntimeCapabilities.dropGift(companion, target, itemId);
+            return result.success()
+                    ? ActionExecutionResult.success(
+                            "GIFT_DROPPED",
+                            "The original inventory item was dropped for the authorized player")
+                    : ActionExecutionResult.rejected(
+                            result.code(),
+                            "The requested inventory item could not be dropped: " + result.code());
         }
 
         @Override

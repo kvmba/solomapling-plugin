@@ -41,6 +41,17 @@ class AgentDecisionParserTest {
     }
 
     @Test
+    void parsesDropGiftWithStrictItemAndTargetIds() {
+        AgentDecision decision = parser.parse(decisionWithAction("""
+                {"schemaVersion":1,"type":"DROP_GIFT","characterId":42,"itemId":1002019}
+                """));
+
+        assertEquals(
+                new CompanionAction.DropGift(42, 1002019),
+                decision.actions().getFirst());
+    }
+
+    @Test
     void rejectsUnknownActionsFieldsAndMalformedOrDuplicateJson() {
         List<String> hostileOutputs = List.of(
                 decisionWithAction("""

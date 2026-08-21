@@ -38,6 +38,8 @@ final class ActionExecutionRouter<C, B, T> {
 
         ActionExecutionResult trainWith(C companion, B bot, T target);
 
+        ActionExecutionResult dropGift(C companion, B bot, T target, int itemId);
+
         ActionExecutionResult rest(C companion, B bot);
 
         ActionExecutionResult goodbye(C companion, B bot);
@@ -107,6 +109,11 @@ final class ActionExecutionRouter<C, B, T> {
                                 .map(target -> requireResult(
                                         adapter.trainWith(companion, bot, target), action))
                                 .orElseGet(() -> targetRejected(trainWith.characterId()));
+                case CompanionAction.DropGift gift ->
+                        resolveTarget(action.type(), gift.characterId(), resolver)
+                                .map(target -> requireResult(
+                                        adapter.dropGift(companion, bot, target, gift.itemId()), action))
+                                .orElseGet(() -> targetRejected(gift.characterId()));
                 case CompanionAction.Rest ignored ->
                         requireResult(adapter.rest(companion, bot), action);
                 case CompanionAction.Goodbye ignored ->

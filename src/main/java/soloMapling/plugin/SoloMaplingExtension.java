@@ -5,11 +5,17 @@ import org.gms.client.Client;
 import org.gms.client.command.Command;
 import org.gms.extension.api.ArtificialCharacters;
 import org.gms.extension.api.CharacterClassifier;
+import org.gms.extension.api.HostItemActions;
+import org.gms.extension.api.HostMonsterDrops;
 import org.gms.extension.api.HostRuntime;
 import org.gms.extension.api.ServerExtension;
 import org.gms.extension.api.event.ServerReadyEvent;
 import org.gms.net.server.Server;
 import org.gms.net.server.world.World;
+import org.gms.server.life.LifeFactory;
+import org.gms.server.life.Monster;
+import org.gms.server.life.MonsterInformationProvider;
+import org.gms.server.maps.MapFactory;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import soloMapling.ArtificialPlayer.BotClientHandler;
@@ -34,6 +40,8 @@ import soloMapling.companion.lifecycle.HostCompanionRuntimeAdapter;
 import soloMapling.companion.persistence.CompanionSchemaMigrator;
 import soloMapling.companion.persistence.JdbcCompanionProfileRepository;
 import soloMapling.companion.routine.OfflineProgressionPolicy;
+import soloMapling.companion.execution.CompanionRuntimeCapabilities;
+import soloMapling.companion.gear.GearDropSourceProvider;
 import soloMapling.itemPool.DesirableEquipList;
 import soloMapling.itemPool.EquipMetadataCache;
 import soloMapling.server.MethodScheduler;
@@ -89,6 +97,7 @@ public final class SoloMaplingExtension implements ServerExtension {
                 SoloMaplingLanguageConfig.dialoguePackDirectoryName());
 
         SocialLlmService.configure(runtime.config());
+        installCompanionRuntimeCapabilities(runtime);
 
         String populationPath = runtime.config().getString("solomapling.population-config", "");
         if (populationPath != null && !populationPath.isBlank()) {
@@ -130,6 +139,65 @@ public final class SoloMaplingExtension implements ServerExtension {
         bindCommand(runtime, "companion", 4,
                 "Persistent companion provisioning and diagnostics",
                 new CompanionCommand(runtime, companionLifecycleAccess));
+    }
+
+    private static void installCompanionRuntimeCapabilities(HostRuntime runtime) {
+        HostItemActions itemActions = runtime.itemActions().orElse(null);
+        HostMonsterDrops monsterDrops = runtime.monsterDrops().orElse(null);
+        CompanionRuntimeCapabilities.install(
+                (sourceId, targetId, inventoryType, slot, quantity) -> {
+                    if (itemActions == null) {
+                        return new CompanionRuntimeCapabilities.GiftResult(
+                                false, "HOST_ITEM_ACTIONS_UNAVAILABLE");
+                    }
+                    HostItemActions.DropResult result = itemActions.dropToCharacter(
+                            sourceId, targetId, inventoryType, slot, quantity);
+                    return new CompanionRuntimeCapabilities.GiftResult(
+                            result.success(), result.code());
+                },
+                itemId -> {
+                    if (monsterDrops == null) {
+                        return java.util.List.of();
+                    }
+                    return monsterDrops.findSources(itemId, 8).stream()
+                            .map(SoloMaplingExtension::toGearDropSource)
+                            .toList();
+                });
+        log.info("SoloMapling companion host capabilities itemActions={} monsterDrops={}",
+                itemActions != null, monsterDrops != null);
+    }
+
+    private static GearDropSourceProvider.DropSource toGearDropSource(
+            HostMonsterDrops.DropSource source) {
+        MonsterInformationProvider monsters = MonsterInformationProvider.getInstance();
+        String mobName = monsters.getMobNameFromId(source.dropperId());
+        int mapId = parseMapId(MapFactory.getMapIdByLifeId(source.dropperId()));
+        boolean boss = false;
+        try {
+            Monster monster = LifeFactory.getMonster(source.dropperId());
+            boss = monster != null && monster.isBoss();
+        } catch (RuntimeException ignored) {
+            // Name/drop facts remain useful even when a mob template cannot be loaded.
+        }
+        return new GearDropSourceProvider.DropSource(
+                source.dropperId(),
+                mobName == null ? "monster-" + source.dropperId() : mobName,
+                mapId,
+                mapId < 0 ? "" : "map-" + mapId,
+                source.chance() / 1_000_000.0,
+                boss);
+    }
+
+    private static int parseMapId(String raw) {
+        if (raw == null) return -1;
+        java.util.regex.Matcher matcher =
+                java.util.regex.Pattern.compile("(\\d{9})(?:\\.img)?$").matcher(raw);
+        if (!matcher.find()) return -1;
+        try {
+            return Integer.parseInt(matcher.group(1));
+        } catch (NumberFormatException ignored) {
+            return -1;
+        }
     }
 
     private void bindCommand(HostRuntime runtime, String syntax, int level, String description, Command command) {
@@ -223,6 +291,7 @@ public final class SoloMaplingExtension implements ServerExtension {
             lifecycle.stop();
         }
         SoloMaplingTradeParticipantHook.unregister();
+        CompanionRuntimeCapabilities.clear();
         ArtificialCharacters.unregister(BOT_IDS);
         CompanionRoster.clear();
         runtime = null;

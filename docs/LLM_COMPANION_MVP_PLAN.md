@@ -64,7 +64,7 @@ flowchart LR
 - LLM output is a versioned, structured action. It never receives a live
   `Character` reference and never calls engine methods directly.
 - Initial action allowlist: `SAY`, `EMOTE`, `ACCEPT_PARTY`, `INVITE_PARTY`,
-  `FOLLOW`, `GO_TO`, `TRAIN_WITH`, `REST`, and `GOODBYE`.
+  `FOLLOW`, `GO_TO`, `TRAIN_WITH`, `DROP_GIFT`, `REST`, and `GOODBYE`.
 - Existing 100 ms/250 ms state-machine ticks never call an LLM. LLM turns are
   triggered by direct address, conversation continuation, party/trade invites,
   goal completion, or recovery from a stuck high-level task.
@@ -115,6 +115,26 @@ database is deferred until scale demonstrates a need.
 - An encounter director may softly weight a routine's already-valid candidate
   maps toward the player's progression. It cannot teleport an observed bot,
   and it applies per-player and per-companion cooldowns.
+
+## Equipment growth and relationship interaction
+
+- Companions perceive their own native equipped items and backpack contents, so
+  inventory answers are grounded in authoritative runtime facts.
+- Through level 40, companions reserve potion mesos and purchase wearable
+  upgrades from real town NPC catalogs. Weapons are prioritized before caps,
+  coats, pants, overalls, and shoes.
+- After level 40, companions derive upgrade goals from wearable WZ equipment
+  and real `drop_data` sources. They can suggest the corresponding monster,
+  boss, and map to a player; this does not add autonomous boss tactics.
+- Native monster pickup uses the authoritative engine path before removing the
+  map drop. Better backpack equipment is worn through native equip validation.
+- `DROP_GIFT` is a proposal only. The engine rechecks the actual unequipped
+  item, same-map target, drop restrictions, persona generosity, relationship,
+  and current gear needs, then creates a normal-expiry owner-only ground drop
+  containing the original item instance.
+- Successful conversations and cooperative actions update familiarity, trust,
+  and affinity. Idle companions may initiate a brief same-map conversation
+  after a relationship-based, per-player cooldown with stable jitter.
 
 ## Implementation phases
 

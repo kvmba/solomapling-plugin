@@ -1,10 +1,13 @@
 package soloMapling.companion.agent;
 
 import soloMapling.companion.execution.ActionExecutionResult;
+import soloMapling.companion.persistence.CompanionRelationship;
 import soloMapling.companion.planner.CompanionPlannerResult;
 
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 
 /**
@@ -19,6 +22,11 @@ public interface CompanionBrain {
 
     default void record(CompletedTurn turn) {
         // Optional best-effort persistence hook. Production implementations offload before returning.
+    }
+
+    default CompletionStage<Optional<CompanionRelationship>> relationship(
+            int companionCharacterId, int playerCharacterId) {
+        return CompletableFuture.completedFuture(Optional.empty());
     }
 
     record TurnRequest(

@@ -1,6 +1,8 @@
 package soloMapling.companion.agent;
 
 import java.util.Objects;
+import java.util.List;
+import java.util.Optional;
 import java.util.Set;
 
 /**
@@ -14,7 +16,10 @@ public record CompanionStateSnapshot(
         Set<Integer> knownMapIds,
         Set<Integer> targetCharacterIds,
         Set<CompanionAction.ActionType> cooldownActions,
-        boolean engaged) {
+        boolean engaged,
+        List<CompanionInventoryItem> inventoryItems,
+        Optional<CompanionGearGoal> gearGoal,
+        Set<Integer> giftableItemIds) {
 
     public CompanionStateSnapshot {
         requireNonNegative(currentMapId, "currentMapId");
@@ -34,6 +39,38 @@ public record CompanionStateSnapshot(
         if (!knownMapIds.contains(currentMapId)) {
             throw new IllegalArgumentException("knownMapIds must contain currentMapId");
         }
+        Objects.requireNonNull(inventoryItems, "inventoryItems must not be null");
+        inventoryItems = List.copyOf(inventoryItems);
+        if (inventoryItems.stream().anyMatch(Objects::isNull)) {
+            throw new IllegalArgumentException("inventoryItems must not contain null");
+        }
+        gearGoal = Objects.requireNonNull(gearGoal, "gearGoal must not be null");
+        giftableItemIds = immutablePositiveIds(giftableItemIds, "giftableItemIds");
+        Set<Integer> ownedItemIds = inventoryItems.stream()
+                .filter(item -> !item.equipped())
+                .map(CompanionInventoryItem::itemId)
+                .collect(java.util.stream.Collectors.toUnmodifiableSet());
+        if (!ownedItemIds.containsAll(giftableItemIds)) {
+            throw new IllegalArgumentException("giftableItemIds must refer to unequipped inventory items");
+        }
+    }
+
+    public CompanionStateSnapshot(
+            int currentMapId,
+            Set<Integer> sameMapCharacterIds,
+            boolean inParty,
+            Set<Integer> knownMapIds,
+            Set<Integer> targetCharacterIds,
+            Set<CompanionAction.ActionType> cooldownActions,
+            boolean engaged) {
+        this(currentMapId, sameMapCharacterIds, inParty, knownMapIds,
+                targetCharacterIds, cooldownActions, engaged, List.of(), Optional.empty(), Set.of());
+    }
+
+    public CompanionStateSnapshot withGiftableItemIds(Set<Integer> itemIds) {
+        return new CompanionStateSnapshot(
+                currentMapId, sameMapCharacterIds, inParty, knownMapIds,
+                targetCharacterIds, cooldownActions, engaged, inventoryItems, gearGoal, itemIds);
     }
 
     private static Set<Integer> immutablePositiveIds(Set<Integer> ids, String field) {

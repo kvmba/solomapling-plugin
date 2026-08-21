@@ -67,6 +67,15 @@ public final class ActionValidator {
                 requireKnownTarget(trainWith.characterId(), state, index, violations);
                 requireSameMap(trainWith.characterId(), state, index, violations);
             }
+            case CompanionAction.DropGift gift -> {
+                requireKnownTarget(gift.characterId(), state, index, violations);
+                requireSameMap(gift.characterId(), state, index, violations);
+                if (!state.giftableItemIds().contains(gift.itemId())) {
+                    add(violations, index, "ITEM_NOT_GIFTABLE",
+                            "itemId is not authorized for gifting: " + gift.itemId());
+                }
+                requireNotEngaged(state, index, violations);
+            }
             case CompanionAction.Rest ignored ->
                     requireNotEngaged(state, index, violations);
             case CompanionAction.Goodbye ignored -> {

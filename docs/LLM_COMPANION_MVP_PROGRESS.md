@@ -7,7 +7,7 @@ after every meaningful implementation or verification step.
 
 Last updated: 2026-08-21
 
-- Overall phase: Phase 4 acceptance in progress.
+- Overall phase: Phase 4 acceptance plus equipment/relationship extension in progress.
 - Plugin worktree created and active.
 - Host worktree created from the beta test-server branch.
 - Architecture plan persisted in `docs/LLM_COMPANION_MVP_PLAN.md`.
@@ -24,6 +24,13 @@ Last updated: 2026-08-21
 - The remaining live acceptance scenario is an away-from-town supply run that
   returns the companion to the player.
 - Implementation commits are present on the feature branch.
+- Companion inventory/equipment perception, deterministic gear growth,
+  drop-backed upgrade goals, persona/relationship-gated owner-only gifts,
+  relationship growth, and proactive conversation cooldowns are implemented.
+- BeiDou exposes authoritative item pickup/gift-drop and reverse monster-drop
+  capabilities without importing plugin code.
+- Host and plugin test suites pass, and the updated artifacts are deployed to
+  the beta runtime. Startup confirmed both new host capabilities are available.
 
 ## Worktrees
 
@@ -125,11 +132,23 @@ Do not implement in the original checkouts. They contain runtime/user state:
 - [x] Verify persistent identity across two restarts.
 - [x] Verify chat, party, follow, and joint training.
 - [x] Verify LLM timeout and invalid-action safety.
+- [x] Verify gear, inventory disclosure, gift authorization, relationship, and
+      proactive-attention policies with automated tests.
+- [x] Deploy the equipment/relationship extension and confirm host capabilities.
+- [ ] Live-verify inventory Q&A, owner-only gift pickup, NPC equipment purchase,
+      dropped-equipment pickup/equip, and proactive conversation.
 
 ## Next actions
 
-1. Exercise an away-from-town supply run and confirm return to the player.
-2. Record final acceptance results without storing credentials.
+1. Log in beside Luna and ask for her hats, then request a known backpack cap.
+2. Give Luna enough mesos to preserve potion stock and buy a level-appropriate
+   NPC shop upgrade; she currently has only 9 mesos.
+3. Live-verify a monster equipment drop enters her backpack and is auto-equipped.
+4. Raise/use a post-level-40 companion to verify the suggested item, monster or
+   boss, and map against the live drop table.
+5. Exercise the remaining away-from-town supply-return scenario and observe a
+   relationship-driven proactive conversation after its cooldown.
+6. Record final acceptance results without storing credentials.
 
 ## Verification log
 
@@ -301,3 +320,18 @@ failure. Do not paste secrets or large logs.
   no AP delta and no blocked SP milestone, and remained unchanged after a
   graceful restart. The verification also found and corrected BeiDou's stale
   Warrior active-skill constants (`1001004`/`1001005`) against the v83 WZ.
+- 2026-08-21: Added host-owned authoritative bot pickup, original-instance
+  owner-only gift drops, and bounded reverse `drop_data` lookup. Added Companion
+  inventory/equipment facts, a strict `DROP_GIFT` action, deterministic
+  persona/relationship gift authorization, relationship increments, and
+  anti-spam proactive conversations. Added level 0-40 NPC equipment shopping
+  with potion-meso reserve, post-level-40 dynamic drop goals, weapon-first
+  scoring, and native auto-equip. Complete host and plugin suites pass and
+  `git diff --check` is clean in both worktrees.
+- 2026-08-21: Packaged and deployed both artifacts and gracefully restarted the
+  beta runtime. API/login ports returned online and plugin startup logged
+  `itemActions=true monsterDrops=true`. Luna loaded at level 30, then correctly
+  prioritized her existing potion supply run; with only 9 mesos she could not
+  live-test equipment purchasing. Inventory dialogue, gift pickup, gear
+  purchase/drop/equip, and proactive conversation still require a logged-in
+  player/GM session.

@@ -5,6 +5,8 @@ import soloMapling.ArtificialPlayer.LlmSystem.LlmClient;
 import soloMapling.ArtificialPlayer.LlmSystem.LlmMessage;
 import soloMapling.ArtificialPlayer.LlmSystem.LlmRequest;
 import soloMapling.companion.agent.CompanionAction;
+import soloMapling.companion.agent.CompanionGearGoal;
+import soloMapling.companion.agent.CompanionInventoryItem;
 import soloMapling.companion.agent.CompanionStateSnapshot;
 import soloMapling.companion.memory.MemoryRecord;
 import soloMapling.companion.memory.MemoryScorer;
@@ -17,6 +19,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicReference;
@@ -88,6 +91,43 @@ class CompanionPlannerServiceTest {
         assertTrue(prompt.contains("Reliable training partner."));
         assertFalse(prompt.contains("UNAUTHORIZED_RELATIONSHIP_MUST_NOT_APPEAR"));
         assertFalse(prompt.contains("characterId=777"));
+    }
+
+    @Test
+    void disclosesOwnedInventoryGearGoalGiftAuthorityAndRelationshipNumbers() {
+        CompanionPlannerInput base = input();
+        CompanionInventoryItem bandana = new CompanionInventoryItem(
+                1002019, "White Bandana", "EQUIP", (short) 3, 1,
+                false, true, true, "CAP", 8);
+        CompanionStateSnapshot state = new CompanionStateSnapshot(
+                base.state().currentMapId(),
+                base.state().sameMapCharacterIds(),
+                base.state().inParty(),
+                base.state().knownMapIds(),
+                base.state().targetCharacterIds(),
+                base.state().cooldownActions(),
+                false,
+                List.of(bandana),
+                Optional.of(new CompanionGearGoal(
+                        1302004, "Sword", "WEAPON", 40,
+                        2220000, "Red Snail", 100020000, 0.003, false)),
+                Set.of(1002019));
+        CompanionPlannerInput request = new CompanionPlannerInput(
+                base.profile(), base.persona(), state, base.memoryCandidates(),
+                base.memoryContext(), base.memoryParameters(), base.memoryLimit(),
+                base.minimumMemoryStrength(), base.relationships(),
+                "What hats do you have?");
+
+        String prompt = captureRequest(request).messages().getFirst().content();
+
+        assertTrue(prompt.contains("name=White Bandana"));
+        assertTrue(prompt.contains("equipType=CAP"));
+        assertTrue(prompt.contains("giftableItemIds: [1002019]"));
+        assertTrue(prompt.contains("itemName=Sword"));
+        assertTrue(prompt.contains("monsterName=Red Snail"));
+        assertTrue(prompt.contains("familiarity=10"));
+        assertTrue(prompt.contains("trust=10"));
+        assertTrue(prompt.contains("affinity=10"));
     }
 
     @Test

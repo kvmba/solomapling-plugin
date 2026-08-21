@@ -33,13 +33,16 @@ class ActionExecutionRouterTest {
         assertEquals(ActionExecutionResult.Status.SUCCESS,
                 router.execute(new CompanionAction.TrainWith(42), "companion", "bot", resolver).status());
         assertEquals(ActionExecutionResult.Status.SUCCESS,
+                router.execute(new CompanionAction.DropGift(42, 1002019),
+                        "companion", "bot", resolver).status());
+        assertEquals(ActionExecutionResult.Status.SUCCESS,
                 router.execute(new CompanionAction.Rest(), "companion", "bot", resolver).status());
         assertEquals(ActionExecutionResult.Status.SUCCESS,
                 router.execute(new CompanionAction.Goodbye(), "companion", "bot", resolver).status());
 
         assertEquals(
                 List.of("say:hello", "emote:3", "follow:target-42",
-                        "train:target-42", "rest", "goodbye"),
+                        "train:target-42", "gift:target-42:1002019", "rest", "goodbye"),
                 adapter.calls);
     }
 
@@ -255,6 +258,13 @@ class ActionExecutionRouterTest {
             }
             calls.add("train:" + target);
             return ActionExecutionResult.success("TRAINING_STARTED", "started");
+        }
+
+        @Override
+        public ActionExecutionResult dropGift(
+                String companion, String bot, String target, int itemId) {
+            calls.add("gift:" + target + ":" + itemId);
+            return ActionExecutionResult.success("GIFT_DROPPED", "dropped");
         }
 
         @Override

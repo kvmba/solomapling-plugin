@@ -17,6 +17,7 @@ public sealed interface CompanionAction permits
         CompanionAction.Follow,
         CompanionAction.GoTo,
         CompanionAction.TrainWith,
+        CompanionAction.DropGift,
         CompanionAction.Rest,
         CompanionAction.Goodbye {
 
@@ -38,6 +39,7 @@ public sealed interface CompanionAction permits
         FOLLOW,
         GO_TO,
         TRAIN_WITH,
+        DROP_GIFT,
         REST,
         GOODBYE
     }
@@ -118,6 +120,20 @@ public sealed interface CompanionAction permits
         @Override
         public ActionType type() {
             return ActionType.TRAIN_WITH;
+        }
+    }
+
+    record DropGift(int characterId, int itemId) implements CompanionAction {
+        public DropGift {
+            requirePositiveCharacterId(characterId);
+            if (itemId <= 0) {
+                throw new IllegalArgumentException("itemId must be positive");
+            }
+        }
+
+        @Override
+        public ActionType type() {
+            return ActionType.DROP_GIFT;
         }
     }
 

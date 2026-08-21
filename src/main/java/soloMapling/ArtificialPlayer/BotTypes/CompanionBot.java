@@ -17,20 +17,25 @@ import soloMapling.companion.agent.CompanionAction;
 import soloMapling.companion.agent.CompanionBrain;
 import soloMapling.companion.agent.CompanionDecisionActions;
 import soloMapling.companion.agent.CompanionInteractionPolicy;
+import soloMapling.companion.agent.CompanionInventoryPerception;
 import soloMapling.companion.agent.CompanionStateSnapshot;
 import soloMapling.companion.agent.CompanionUpdateGate;
 import soloMapling.companion.agent.InviteTurnDeduplicator;
 import soloMapling.companion.agent.ProductionCompanionBrain;
+import soloMapling.companion.agent.ProactiveAttentionPolicy;
 import soloMapling.companion.agent.TurnCoordinator;
 import soloMapling.companion.execution.ActionExecutionResult;
 import soloMapling.companion.execution.CompanionCombatLifecycle;
 import soloMapling.companion.execution.CompanionActionExecutor;
 import soloMapling.companion.execution.CompanionTargetResolver;
 import soloMapling.companion.execution.CompanionTrainingController;
+import soloMapling.companion.execution.CompanionRuntimeCapabilities;
+import soloMapling.companion.gear.CompanionGearController;
 import soloMapling.companion.planner.CompanionPlannerResult;
 import soloMapling.companion.survival.CompanionSurvivalController;
 
 import java.time.Duration;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -62,10 +67,15 @@ public final class CompanionBot extends BotSM implements
     private final CompanionCombatLifecycle combatLifecycle = new CompanionCombatLifecycle();
     private final CompanionSurvivalController survival =
             new CompanionSurvivalController();
+    private final CompanionGearController gear = new CompanionGearController();
     private volatile Character trainingTarget;
     private volatile Boolean lastTrainingSameMap;
     private volatile String pendingInviteKey;
     private volatile long nextCombatDiagnosticAt;
+    private volatile long nextProactiveScanAt;
+    private volatile boolean proactiveLookupPending;
+    private int proactiveCursor;
+    private final Map<Integer, Instant> lastProactiveByPlayer = new java.util.concurrent.ConcurrentHashMap<>();
     private final InviteTurnDeduplicator inviteTurns = new InviteTurnDeduplicator();
 
     public CompanionBot(Character character) {
@@ -157,9 +167,63 @@ public final class CompanionBot extends BotSM implements
         if (survival.tick(getChr())) {
             return;
         }
+        if ((trainingTarget == null || getChr().getLevel() > 40 || gear.gearRunActive())
+                && gear.tick(getChr(), CompanionRuntimeCapabilities.dropSources())) {
+            return;
+        }
         maintainTraining();
         observePendingInvite();
+        maybeInitiateConversation();
         turns.tick(this::plan, this::execute);
+    }
+
+    private void maybeInitiateConversation() {
+        long nowMillis = System.currentTimeMillis();
+        if (nowMillis < nextProactiveScanAt || proactiveLookupPending
+                || turns.state() != TurnCoordinator.State.ROUTINE
+                || trainingTarget != null || survival.supplyRunActive()
+                || getState() == BotState.TRADING) {
+            return;
+        }
+        nextProactiveScanAt = nowMillis + 30_000L;
+        List<Character> players = getChr().getMap().getCharacters().stream()
+                .filter(candidate -> candidate != null && !isBot(candidate)
+                        && candidate.getMapId() == getChr().getMapId())
+                .sorted(java.util.Comparator.comparingInt(Character::getId))
+                .toList();
+        if (players.isEmpty()) {
+            return;
+        }
+        Character candidate = players.get(Math.floorMod(proactiveCursor++, players.size()));
+        int companionId = getChr().getId();
+        int playerId = candidate.getId();
+        int mapId = getChr().getMapId();
+        Instant now = Instant.ofEpochMilli(nowMillis);
+        proactiveLookupPending = true;
+        brain.relationship(companionId, playerId).whenComplete((relationship, error) -> {
+            proactiveLookupPending = false;
+            if (error != null || relationship == null
+                    || !ProactiveAttentionPolicy.shouldInitiate(
+                            relationship, now, lastProactiveByPlayer.get(playerId), true)) {
+                return;
+            }
+            Character companion = getChr();
+            if (companion == null || companion.getMap() == null || companion.getMapId() != mapId
+                    || candidate.getMap() == null || candidate.getMapId() != mapId
+                    || turns.state() != TurnCoordinator.State.ROUTINE
+                    || trainingTarget != null || survival.supplyRunActive()) {
+                return;
+            }
+            lastProactiveByPlayer.put(playerId, Instant.now());
+            turns.enqueueEvent(new TurnCoordinator.Message(
+                    playerId,
+                    "Proactive social moment with character " + playerId
+                            + ". Start one brief, natural conversation grounded in shared memories "
+                            + "or invite them to help with the current equipment goal. Do not claim they spoke first."));
+            nudgeSoon(0);
+            log.info("Companion proactive conversation queued cid={} playerCid={} map={}",
+                    companionId, playerId, mapId);
+        });
     }
 
     private java.util.concurrent.CompletionStage<CompanionPlannerResult> plan(
@@ -290,6 +354,7 @@ public final class CompanionBot extends BotSM implements
     public synchronized void stopScheduledTask() {
         stopTraining();
         survival.cancel();
+        gear.cancel();
         GCMovement.disable(getChr());
         super.stopScheduledTask();
     }
@@ -308,7 +373,7 @@ public final class CompanionBot extends BotSM implements
         if (target == null) {
             return;
         }
-        if (survival.supplyRunActive()) {
+        if (survival.supplyRunActive() || gear.gearRunActive()) {
             return;
         }
         boolean online = target.getMap() != null;
@@ -407,7 +472,19 @@ public final class CompanionBot extends BotSM implements
                 Set.of(mapId), // No knowledge repository yet: current map is the complete allowlist.
                 targetIds,
                 Set.of(),
-                false); // Conversation/planning is interruptible; engine busy states are checked at execution.
+                false, // Conversation/planning is interruptible; engine busy states are checked at execution.
+                CompanionInventoryPerception.snapshot(companion),
+                gear.cachedGoal().map(goal -> new soloMapling.companion.agent.CompanionGearGoal(
+                        goal.itemId(),
+                        goal.itemName(),
+                        goal.slot().name(),
+                        goal.requiredLevel(),
+                        goal.mobId(),
+                        goal.mobName(),
+                        goal.mapId(),
+                        goal.chance(),
+                        goal.boss())),
+                Set.of());
         CompanionTargetResolver resolver = new SnapshotResolver(
                 mapId,
                 Map.copyOf(allowedPlayers),

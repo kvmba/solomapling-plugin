@@ -76,9 +76,9 @@ public final class JdbcCompanionRelationshipRepository
                 ) VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?)
                 ON DUPLICATE KEY UPDATE
                     relationship_type = VALUES(relationship_type),
-                    familiarity = VALUES(familiarity),
-                    trust = VALUES(trust),
-                    affinity = VALUES(affinity),
+                    familiarity = LEAST(1000, GREATEST(0, familiarity + VALUES(familiarity))),
+                    trust = LEAST(1000, GREATEST(0, trust + VALUES(trust))),
+                    affinity = LEAST(1000, GREATEST(0, affinity + VALUES(affinity))),
                     interaction_count = interaction_count + 1,
                     summary = VALUES(summary),
                     last_interaction_at = VALUES(last_interaction_at)

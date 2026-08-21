@@ -1,6 +1,8 @@
 package soloMapling.companion.planner;
 
 import soloMapling.ArtificialPlayer.LlmSystem.LlmMessage;
+import soloMapling.companion.agent.CompanionGearGoal;
+import soloMapling.companion.agent.CompanionInventoryItem;
 import soloMapling.companion.agent.CompanionStateSnapshot;
 import soloMapling.companion.memory.MemoryRecord;
 import soloMapling.companion.persistence.CompanionRelationship;
@@ -35,9 +37,14 @@ public final class CompanionPlannerPromptBuilder {
                 {"schemaVersion":1,"type":"FOLLOW","characterId":integer}
                 {"schemaVersion":1,"type":"GO_TO","mapId":integer}
                 {"schemaVersion":1,"type":"TRAIN_WITH","characterId":integer}
+                {"schemaVersion":1,"type":"DROP_GIFT","characterId":integer,"itemId":integer}
                 {"schemaVersion":1,"type":"REST"}
                 {"schemaVersion":1,"type":"GOODBYE"}
                 Propose only actions authorized by the supplied state. Actions are proposals, not executions.
+                Inventory facts are authoritative. Never claim to own an item that is not listed.
+                DROP_GIFT is allowed only for itemIds explicitly listed in giftableItemIds.
+                If a requested item is owned but not giftable, decline naturally according to the persona.
+                Gear goals are suggestions for cooperative hunting, including bosses, not authority to invent tactics.
 
                 Companion identity:
                 displayName: %s
@@ -68,14 +75,55 @@ public final class CompanionPlannerPromptBuilder {
                 knownMapIds: %s
                 targetCharacterIds: %s
                 cooldownActions: %s
-                engaged: %s""".formatted(
+                engaged: %s
+                inventory:
+                %s
+                gearGoal: %s
+                giftableItemIds: %s""".formatted(
                 state.currentMapId(),
                 sorted(state.sameMapCharacterIds()),
                 state.inParty(),
                 sorted(state.knownMapIds()),
                 sorted(state.targetCharacterIds()),
                 state.cooldownActions().stream().map(Enum::name).sorted().toList(),
-                state.engaged());
+                state.engaged(),
+                renderInventory(state.inventoryItems()),
+                renderGearGoal(state.gearGoal()),
+                sorted(state.giftableItemIds()));
+    }
+
+    private static String renderInventory(List<CompanionInventoryItem> inventory) {
+        if (inventory.isEmpty()) {
+            return "- none";
+        }
+        List<String> lines = new ArrayList<>(inventory.size());
+        for (CompanionInventoryItem item : inventory) {
+            lines.add("- itemId=" + item.itemId()
+                    + ", name=" + singleLine(item.name())
+                    + ", inventory=" + item.inventoryType()
+                    + ", slot=" + item.slot()
+                    + ", quantity=" + item.quantity()
+                    + ", equipped=" + item.equipped()
+                    + ", equipType=" + item.equipType()
+                    + ", tradeable=" + item.tradeable());
+        }
+        return String.join("\n", lines);
+    }
+
+    private static String renderGearGoal(java.util.Optional<CompanionGearGoal> goal) {
+        if (goal.isEmpty()) {
+            return "none";
+        }
+        CompanionGearGoal value = goal.orElseThrow();
+        return "itemId=" + value.itemId()
+                + ", itemName=" + singleLine(value.itemName())
+                + ", equipType=" + value.equipType()
+                + ", requiredLevel=" + value.requiredLevel()
+                + ", monsterId=" + value.monsterId()
+                + ", monsterName=" + singleLine(value.monsterName())
+                + ", mapId=" + value.mapId()
+                + ", dropChance=" + value.dropChance()
+                + ", boss=" + value.boss();
     }
 
     private static String renderMemories(List<MemoryRecord> memories) {
@@ -92,10 +140,13 @@ public final class CompanionPlannerPromptBuilder {
     private static String renderRelationships(List<CompanionRelationship> relationships) {
         List<String> lines = new ArrayList<>();
         for (CompanionRelationship relationship : relationships) {
-            if (!relationship.summary().isBlank()) {
-                lines.add("- characterId=" + relationship.relatedCharacterId()
-                        + ": " + singleLine(relationship.summary()));
-            }
+            lines.add("- characterId=" + relationship.relatedCharacterId()
+                    + ", type=" + relationship.relationshipType()
+                    + ", familiarity=" + relationship.familiarity()
+                    + ", trust=" + relationship.trust()
+                    + ", affinity=" + relationship.affinity()
+                    + ", interactions=" + relationship.interactionCount()
+                    + ", summary=" + singleLine(relationship.summary()));
         }
         return lines.isEmpty() ? "- none" : String.join("\n", lines);
     }
