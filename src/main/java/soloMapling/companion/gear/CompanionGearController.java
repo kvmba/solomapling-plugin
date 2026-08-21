@@ -166,18 +166,36 @@ public final class CompanionGearController {
             CompanionGearPolicy.Summary summary = summarize(companion);
             Optional<CompanionGearPolicy.GearItem> choice =
                     CompanionGearPolicy.bestUpgrade(
-                            summary.equipBackpack(), summary.equipped(),
+                            wearableBackpack(companion, summary.equipBackpack()),
+                            summary.equipped(),
                             companion.getLevel(), companion.getGender(),
                             getReqJobViaJobStyle(companion.getJobStyle()));
             if (choice.isEmpty() || !equipFromBackpack(companion, choice.orElseThrow())) {
                 break;
             }
+            log.info("Companion auto-equipped upgrade cid={} item={} slot={}",
+                    companion.getId(), choice.orElseThrow().itemId(),
+                    choice.orElseThrow().slot());
             equippedCount++;
         }
         if (equippedCount > 0) {
             companion.saveCharToDB(true);
         }
         return equippedCount;
+    }
+
+    private List<CompanionGearPolicy.GearItem> wearableBackpack(
+            Character companion, List<CompanionGearPolicy.GearItem> candidates) {
+        ItemInformationProvider provider = ItemInformationProvider.getInstance();
+        return candidates.stream()
+                .filter(candidate -> companion.getInventory(InventoryType.EQUIP).list().stream()
+                        .filter(item -> item instanceof Equip
+                                && item.getItemId() == candidate.itemId()
+                                && item.getPosition() > 0)
+                        .map(Equip.class::cast)
+                        .anyMatch(equip -> provider.canWearEquipment(
+                                companion, equip, candidate.slot().destination())))
+                .toList();
     }
 
     /**
