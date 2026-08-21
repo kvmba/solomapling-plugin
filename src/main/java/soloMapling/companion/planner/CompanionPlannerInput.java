@@ -22,6 +22,7 @@ public record CompanionPlannerInput(
         int memoryLimit,
         double minimumMemoryStrength,
         List<CompanionRelationship> relationships,
+        List<String> gearAdvice,
         String playerMessage) {
 
     public static final int MAX_PLAYER_MESSAGE_LENGTH = CompanionBrain.MAX_PLAYER_MESSAGE_LENGTH;
@@ -46,6 +47,8 @@ public record CompanionPlannerInput(
         }
         relationships = List.copyOf(
                 Objects.requireNonNull(relationships, "relationships must not be null"));
+        gearAdvice = List.copyOf(
+                Objects.requireNonNull(gearAdvice, "gearAdvice must not be null"));
         playerMessage = Objects.requireNonNull(
                 playerMessage, "playerMessage must not be null");
         if (playerMessage.length() > MAX_PLAYER_MESSAGE_LENGTH) {
@@ -59,5 +62,20 @@ public record CompanionPlannerInput(
         if (playerMessage.isEmpty()) {
             throw new IllegalArgumentException("playerMessage must not be blank");
         }
+    }
+
+    public CompanionPlannerInput(
+            CompanionProfile profile,
+            PersonaProfile persona,
+            CompanionStateSnapshot state,
+            List<MemoryRecord> memoryCandidates,
+            MemoryScorer.Context memoryContext,
+            MemoryScorer.Parameters memoryParameters,
+            int memoryLimit,
+            double minimumMemoryStrength,
+            List<CompanionRelationship> relationships,
+            String playerMessage) {
+        this(profile, persona, state, memoryCandidates, memoryContext, memoryParameters,
+                memoryLimit, minimumMemoryStrength, relationships, List.of(), playerMessage);
     }
 }

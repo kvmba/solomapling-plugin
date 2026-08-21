@@ -18,10 +18,12 @@ import soloMapling.companion.persistence.JdbcCompanionMemoryRepository;
 import soloMapling.companion.persistence.JdbcCompanionProfileRepository;
 import soloMapling.companion.persistence.JdbcCompanionRelationshipRepository;
 import soloMapling.companion.persona.PersonaProfile;
+import soloMapling.companion.gear.CompanionGearAdvice;
 import soloMapling.companion.planner.CompanionPlannerInput;
 import soloMapling.companion.planner.CompanionPlannerResult;
 import soloMapling.companion.planner.CompanionPlannerService;
 import soloMapling.companion.execution.ActionExecutionResult;
+import soloMapling.companion.execution.CompanionRuntimeCapabilities;
 import soloMapling.server.ExecutorServiceManager;
 
 import java.time.Duration;
@@ -163,6 +165,9 @@ public final class ProductionCompanionBrain implements CompanionBrain {
                     12,
                     0.05,
                     related,
+                    CompanionGearAdvice.forQuestion(
+                            request.playerMessage(), perception.currentMapId(),
+                            CompanionRuntimeCapabilities.dropSources()),
                     request.playerMessage());
         } catch (Throwable error) {
             log.warn("Companion context build failed cid={} playerCid={}",

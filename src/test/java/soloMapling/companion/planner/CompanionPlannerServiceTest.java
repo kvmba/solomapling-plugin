@@ -131,6 +131,24 @@ class CompanionPlannerServiceTest {
     }
 
     @Test
+    void disclosesAuthoritativeGearAdviceForCurrentQuestion() {
+        CompanionPlannerInput base = input();
+        CompanionPlannerInput request = new CompanionPlannerInput(
+                base.profile(), base.persona(), base.state(), base.memoryCandidates(),
+                base.memoryContext(), base.memoryParameters(), base.memoryLimit(),
+                base.minimumMemoryStrength(), base.relationships(),
+                List.of("itemName=Wizard Staff, monsterName=Dark Axe Stump, mapId=102030000"),
+                "在哪里可以打法杖？");
+
+        String prompt = captureRequest(request).messages().getFirst().content();
+
+        assertTrue(prompt.contains("Authoritative gear advice for this question:"));
+        assertTrue(prompt.contains("itemName=Wizard Staff"));
+        assertTrue(prompt.contains("monsterName=Dark Axe Stump"));
+        assertTrue(prompt.contains("mapId=102030000"));
+    }
+
+    @Test
     void excludesMemoriesWithUnauthorizedActorsOrUnknownMaps() {
         CompanionPlannerInput base = input();
         List<MemoryRecord> candidates = List.of(

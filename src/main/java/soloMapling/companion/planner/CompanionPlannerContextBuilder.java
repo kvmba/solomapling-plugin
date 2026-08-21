@@ -32,7 +32,8 @@ public final class CompanionPlannerContextBuilder {
                         .thenComparingLong(CompanionRelationship::id))
                 .toList();
         return new CompanionPlannerContext(
-                input.profile(), input.persona(), input.state(), memories, relationships);
+                input.profile(), input.persona(), input.state(), memories, relationships,
+                input.gearAdvice());
     }
 
     private static boolean allowedActor(String actorKey, Set<Integer> allowedCharacterIds) {

@@ -45,6 +45,8 @@ public final class CompanionPlannerPromptBuilder {
                 DROP_GIFT is allowed only for itemIds explicitly listed in giftableItemIds.
                 If a requested item is owned but not giftable, decline naturally according to the persona.
                 Gear goals are suggestions for cooperative hunting, including bosses, not authority to invent tactics.
+                Gear advice facts are authoritative results for the current question. Answer location questions directly,
+                include useful item/monster/map names or IDs, and state uncertainty when the facts do.
                 When the player explicitly asks to train, grind, or fight monsters together, use TRAIN_WITH rather
                 than FOLLOW; TRAIN_WITH already includes following the player while fighting.
 
@@ -61,12 +63,16 @@ public final class CompanionPlannerPromptBuilder {
 
                 Relationship summaries:
                 %s
+
+                Authoritative gear advice for this question:
+                %s
                 """.formatted(
                 singleLine(context.profile().displayName()),
                 printableMultiline(context.persona().renderPrompt()).stripTrailing(),
                 renderState(context.state()),
                 renderMemories(context.relevantMemories()),
-                renderRelationships(context.relationships()));
+                renderRelationships(context.relationships()),
+                renderGearAdvice(context.gearAdvice()));
     }
 
     private static String renderState(CompanionStateSnapshot state) {
@@ -151,6 +157,14 @@ public final class CompanionPlannerPromptBuilder {
                     + ", summary=" + singleLine(relationship.summary()));
         }
         return lines.isEmpty() ? "- none" : String.join("\n", lines);
+    }
+
+    private static String renderGearAdvice(List<String> facts) {
+        return facts.isEmpty()
+                ? "- none"
+                : facts.stream().map(fact -> "- " + singleLine(fact))
+                .reduce((left, right) -> left + "\n" + right)
+                .orElse("- none");
     }
 
     private static List<Integer> sorted(Set<Integer> values) {

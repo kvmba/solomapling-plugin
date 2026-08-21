@@ -15,7 +15,8 @@ public record CompanionPlannerContext(
         PersonaProfile persona,
         CompanionStateSnapshot state,
         List<MemoryRecord> relevantMemories,
-        List<CompanionRelationship> relationships) {
+        List<CompanionRelationship> relationships,
+        List<String> gearAdvice) {
 
     public CompanionPlannerContext {
         profile = Objects.requireNonNull(profile, "profile must not be null");
@@ -25,5 +26,7 @@ public record CompanionPlannerContext(
                 Objects.requireNonNull(relevantMemories, "relevantMemories must not be null"));
         relationships = List.copyOf(
                 Objects.requireNonNull(relationships, "relationships must not be null"));
+        gearAdvice = List.copyOf(
+                Objects.requireNonNull(gearAdvice, "gearAdvice must not be null"));
     }
 }
