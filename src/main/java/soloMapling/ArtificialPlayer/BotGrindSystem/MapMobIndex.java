@@ -38,8 +38,28 @@ public final class MapMobIndex {
         static final MapMobInfo NONE = new MapMobInfo(-1, 0, List.of(), List.of());
     }
 
-    private static final ThreadLocal<DataProvider> MAP_SOURCE =
-            ThreadLocal.withInitial(() -> DataProviderFactory.getDataProvider(WZFiles.MAP));
+    // Shared, lazily-created WZ handle. Deliberately NOT a ThreadLocal: bot ticks are dispatched
+    // onto virtual threads (a fresh one per tick), so a ThreadLocal built an entire DataProvider
+    // per tick — and each construction walks the whole Map.wz tree (~65ms, 5.7k files). One shared
+    // instance is safe (XMLWZFile.getData is synchronized) and matches how the host itself holds
+    // its providers (MapFactory, LifeFactory); every lookup lands in CACHE below, so the read path
+    // runs at most once per map for the lifetime of the process.
+    private static volatile DataProvider MAP_SOURCE;
+
+    private static DataProvider mapSource() {
+        DataProvider source = MAP_SOURCE;
+        if (source == null) {
+            synchronized (MapMobIndex.class) {
+                source = MAP_SOURCE;
+                if (source == null) {
+                    source = DataProviderFactory.getDataProvider(WZFiles.MAP);
+                    MAP_SOURCE = source;
+                }
+            }
+        }
+        return source;
+    }
+
     private static final Map<Integer, MapMobInfo> CACHE = new ConcurrentHashMap<>();
     private static final Map<Integer, Integer> MOB_LEVEL = new ConcurrentHashMap<>();
 
@@ -145,7 +165,7 @@ public final class MapMobIndex {
     }
 
     private static Data loadMapData(int mapId) {
-        DataProvider src = MAP_SOURCE.get();
+        DataProvider src = mapSource();
         Data mapData = src.getData(mapImgPath(mapId));
         if (mapData == null) {
             return null;

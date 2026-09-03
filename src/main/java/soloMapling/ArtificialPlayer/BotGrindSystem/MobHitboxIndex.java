@@ -37,8 +37,28 @@ public final class MobHitboxIndex {
     private static final Hitbox DEFAULT = new Hitbox(40, 60);
     private static final int MAX_LINK_DEPTH = 3;
 
-    private static final ThreadLocal<DataProvider> MOB_SOURCE =
-            ThreadLocal.withInitial(() -> DataProviderFactory.getDataProvider(WZFiles.MOB));
+    // Shared, lazily-created WZ handle. Deliberately NOT a ThreadLocal: bot ticks run on virtual
+    // threads (a new one per tick), so a ThreadLocal rebuilt the whole Mob.wz DataProvider on every
+    // tick — each construction walks the entire tree (measured ~26ms for Mob.wz, 2k files). One
+    // shared instance is safe (XMLWZFile.getData is synchronized) and matches how the host holds
+    // its providers (LifeFactory). Every lookup is memoized in CACHE, so this path runs at most
+    // once per mob id for the lifetime of the process.
+    private static volatile DataProvider MOB_SOURCE;
+
+    private static DataProvider mobSource() {
+        DataProvider source = MOB_SOURCE;
+        if (source == null) {
+            synchronized (MobHitboxIndex.class) {
+                source = MOB_SOURCE;
+                if (source == null) {
+                    source = DataProviderFactory.getDataProvider(WZFiles.MOB);
+                    MOB_SOURCE = source;
+                }
+            }
+        }
+        return source;
+    }
+
     private static final Map<Integer, Hitbox> CACHE = new ConcurrentHashMap<>();
 
     public static Hitbox hitbox(int mobId) {
@@ -60,7 +80,7 @@ public final class MobHitboxIndex {
     }
 
     private static Hitbox computeWithDepth(int mobId, int depth) {
-        DataProvider src = MOB_SOURCE.get();
+        DataProvider src = mobSource();
         Data mob = src.getData(StringUtil.getLeftPaddedStr(mobId + ".img", '0', 11));
         if (mob == null) {
             return DEFAULT;
