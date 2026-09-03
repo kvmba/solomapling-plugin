@@ -2549,11 +2549,14 @@ final class BotPhysicsEngine {
 
     /* Bot-side drop-in for MapleMap.getPointBelow (calcPointBelow), same math. */
     static Point pointBelowIndexed(MapleMap map, Point initial) {
-        if (map == null) {
+        // No foothold tree at all: there is no ground to find. Return null rather than falling
+        // through to map.getPointBelow(), which dereferences the same null tree
+        // (MapleMap.calcPointBelow -> footholds.findBelow) and throws. Matches findBelowIndexed.
+        if (map == null || map.getFootholds() == null) {
             return null;
         }
-        if (map.getFootholds() == null || collisionIndex(map) == UNINDEXABLE) {
-            return map.getPointBelow(initial); // stubbed map/tree — original query path
+        if (collisionIndex(map) == UNINDEXABLE) {
+            return map.getPointBelow(initial); // stubbed tree — original query path
         }
         Foothold fh = findBelowIndexed(map, initial);
         if (fh == null) {
