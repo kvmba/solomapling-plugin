@@ -20,6 +20,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import soloMapling.ArtificialPlayer.BotClientHandler;
 import soloMapling.ArtificialPlayer.BotGeneration;
+import soloMapling.ArtificialPlayer.BotMessagingSystem.CharacterStorage;
 import soloMapling.ArtificialPlayer.BotMessagingSystem.PlayerChatBridge;
 import soloMapling.ArtificialPlayer.BotPartySystem.BotPartyInviteBridge;
 import soloMapling.ArtificialPlayer.BotTradeSystem.BotTradeInviteBridge;
@@ -60,9 +61,21 @@ public final class SoloMaplingExtension implements ServerExtension {
     /**
      * Persistent companions keep their native auto-increment character IDs.
      * The historical range remains classified for ephemeral template clones.
+     *
+     * <p>{@code CharacterStorage.botLoggedIn} is consulted first because it is populated the
+     * instant a Character is wrapped in a BotSM, so it is the only source that is already
+     * correct for a character that has become a bot but has not yet reached the roster
+     * (e.g. a companion being attached). Without it such a character is briefly classified as
+     * a real player and the host runs player-facing map scripts against it, which then fail
+     * with "Cannot read property 'getMapId' of null" because headless bot clients have no
+     * Character. The id-range and roster checks remain as belt-and-braces for characters
+     * that are bots by construction but not yet attached (e.g. mid-spawn).
      */
     private static final CharacterClassifier BOT_IDS =
-            id -> CompanionRoster.isCompanion(id) || id > 20000 || id == 999;
+            id -> CharacterStorage.botLoggedIn(id)
+                    || CompanionRoster.isCompanion(id)
+                    || id > 20000
+                    || id == 999;
 
     private final CompanionLifecycleAccess companionLifecycleAccess =
             new CompanionLifecycleAccess();
