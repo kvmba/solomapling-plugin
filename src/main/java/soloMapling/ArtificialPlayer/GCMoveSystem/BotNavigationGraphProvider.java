@@ -68,6 +68,13 @@ final class BotNavigationGraphProvider {
     private static final int FAST_WARMUP_MAX_FOOTHOLDS = 200;
     private static final Path CACHE_DIR = Path.of("cache", "bot-nav", "v" + GRAPH_VERSION);
     private static final Map<GraphCacheKey, BotNavigationGraph> GRAPHS = new ConcurrentHashMap<>();
+    // mapId -> the GraphCacheKeys cached for that map. GRAPHS is keyed by (map, speed, jump, snowshoes),
+    // but the three hottest lookups (peekGraph(MapleMap), peekClosestGraph, peekBestGraph) only know the
+    // mapId and had to scan the whole cache linearly. At ~1000 cached graphs that measured ~9.2us per
+    // call, and peekBestGraph runs on every movement tick (20/s per observed bot, 4/s per coarse bot):
+    // ~3.7% of a core at 1000 moving bots. This index turns those scans into a small per-map walk.
+    // Maintained at both GRAPHS write sites (rebuildGraph and the async warm/load task).
+    private static final Map<Integer, Set<GraphCacheKey>> GRAPH_KEYS_BY_MAP_ID = new ConcurrentHashMap<>();
     private static final Map<GraphCacheKey, CompletableFuture<BotNavigationGraph>> PENDING_GRAPHS = new ConcurrentHashMap<>();
     private static final Map<GraphCacheKey, GraphBuildReport> LAST_BUILD_REPORTS = new ConcurrentHashMap<>();
     private static final Map<Integer, Set<Integer>> COLLIDABLE_WALL_IDS_BY_MAP_ID = new ConcurrentHashMap<>();
@@ -358,12 +365,26 @@ final class BotNavigationGraphProvider {
         if (map == null) {
             return null;
         }
-        for (Map.Entry<GraphCacheKey, BotNavigationGraph> entry : GRAPHS.entrySet()) {
-            if (entry.getKey().mapId() == map.getId()) {
-                return entry.getValue();
+        Set<GraphCacheKey> keys = GRAPH_KEYS_BY_MAP_ID.get(map.getId());
+        if (keys == null || keys.isEmpty()) {
+            return null;
+        }
+        // The old full-cache scan returned whichever entry ConcurrentHashMap happened to yield
+        // first — arbitrary. Pick the smallest key instead so the answer is deterministic and
+        // independent of iteration order.
+        GraphCacheKey bestKey = null;
+        BotNavigationGraph bestGraph = null;
+        for (GraphCacheKey key : keys) {
+            BotNavigationGraph graph = GRAPHS.get(key);
+            if (graph == null) {
+                continue;
+            }
+            if (bestKey == null || compareKeys(key, bestKey) < 0) {
+                bestKey = key;
+                bestGraph = graph;
             }
         }
-        return null;
+        return bestGraph;
     }
 
     /* Returns the cached graph for the requested profile without triggering a build. */
@@ -383,9 +404,14 @@ final class BotNavigationGraphProvider {
         GraphCacheKey requested = GraphCacheKey.from(map.getId(), canonicalProfile(map, movementProfile));
         BotNavigationGraph bestGraph = null;
         int bestDistance = Integer.MAX_VALUE;
-        for (Map.Entry<GraphCacheKey, BotNavigationGraph> entry : GRAPHS.entrySet()) {
-            GraphCacheKey key = entry.getKey();
-            if (key.mapId() != requested.mapId()) {
+        GraphCacheKey bestKey = null;
+        Set<GraphCacheKey> keys = GRAPH_KEYS_BY_MAP_ID.get(map.getId());
+        if (keys == null || keys.isEmpty()) {
+            return null;
+        }
+        for (GraphCacheKey key : keys) {
+            BotNavigationGraph graph = GRAPHS.get(key);
+            if (graph == null) {
                 continue;
             }
 
@@ -394,12 +420,35 @@ final class BotNavigationGraphProvider {
             int distance = Math.abs(key.totalSpeedStat() - requested.totalSpeedStat())
                     + Math.abs(key.totalJumpStat() - requested.totalJumpStat())
                     + (key.snowShoes() != requested.snowShoes() ? 1_000 : 0);
-            if (bestGraph == null || distance < bestDistance) {
-                bestGraph = entry.getValue();
+            // Ties are common (two speed/jump buckets equally far away), and the old full-cache
+            // scan broke them by ConcurrentHashMap iteration order — arbitrary and unstable. Now
+            // that we scan a small per-map set, break ties on the key itself so the chosen graph
+            // is deterministic and independent of insertion/iteration order.
+            if (bestGraph == null || distance < bestDistance
+                    || (distance == bestDistance && bestKey != null && compareKeys(key, bestKey) < 0)) {
+                bestGraph = graph;
                 bestDistance = distance;
+                bestKey = key;
             }
         }
         return bestGraph;
+    }
+
+    // Deterministic ordering for tie-breaking: mapId, then speed, then jump, then snowshoes.
+    private static int compareKeys(GraphCacheKey a, GraphCacheKey b) {
+        int c = Integer.compare(a.mapId(), b.mapId());
+        if (c != 0) {
+            return c;
+        }
+        c = Integer.compare(a.totalSpeedStat(), b.totalSpeedStat());
+        if (c != 0) {
+            return c;
+        }
+        c = Integer.compare(a.totalJumpStat(), b.totalJumpStat());
+        if (c != 0) {
+            return c;
+        }
+        return Boolean.compare(a.snowShoes(), b.snowShoes());
     }
 
     /*
@@ -453,6 +502,7 @@ final class BotNavigationGraphProvider {
         GraphCacheKey key = GraphCacheKey.from(map.getId(), movementProfile);
         BotNavigationGraph rebuilt = buildGraph(map, movementProfile);
         GRAPHS.put(key, rebuilt);
+        GRAPH_KEYS_BY_MAP_ID.computeIfAbsent(map.getId(), ignored -> ConcurrentHashMap.newKeySet()).add(key);
         // The map's region index changed with the graph - drop any memoized runtime lookup so
         // physics can't keep querying the replaced graph's regions (BotPhysicsEngine).
         BotPhysicsEngine.invalidateWalkRegionLookup(map.getId());
@@ -488,6 +538,8 @@ final class BotNavigationGraphProvider {
             try {
                 BotNavigationGraph graph = loadOrBuildGraph(map, movementProfile, key);
                 GRAPHS.put(key, graph);
+                GRAPH_KEYS_BY_MAP_ID.computeIfAbsent(map.getId(), ignored -> ConcurrentHashMap.newKeySet())
+                        .add(key);
                 // New graph for this map - drop any memoized runtime lookup built from the old one.
                 BotPhysicsEngine.invalidateWalkRegionLookup(map.getId());
                 future.complete(graph);
