@@ -149,7 +149,10 @@ final class BotPhysicsEngine {
     private record GroundStepPreview(int baseY, Point point, Foothold foothold, boolean lostGround, boolean blocked) {
     }
 
+    // graph==null marks the in-flight BUILDER's lookup (see setBuildWalkRegionLookup): it carries a
+    // partially-built region index and must never be cached or reused as a finished graph's lookup.
     private record WalkRegionLookup(int mapId,
+                                    BotNavigationGraph graph,
                                     Map<Integer, BotNavigationGraph.Region> regionsById,
                                     Map<Integer, Integer> regionIdByFootholdId,
                                     Map<Integer, Foothold> footholdsById) {
@@ -587,29 +590,56 @@ final class BotPhysicsEngine {
             ACTIVE_BUILD_WALK_REGION_LOOKUP.remove();
             return;
         }
-        ACTIVE_BUILD_WALK_REGION_LOOKUP.set(new WalkRegionLookup(map.getId(), regionsById, regionIdByFootholdId, footholdsById));
+        // The graph here is the one still being built, so it is passed as null: the in-flight
+        // builder's lookup must never be cached or reused as a finished graph's lookup.
+        ACTIVE_BUILD_WALK_REGION_LOOKUP.set(
+                new WalkRegionLookup(map.getId(), null, regionsById, regionIdByFootholdId, footholdsById));
     }
 
     static void clearBuildWalkRegionLookup() {
         ACTIVE_BUILD_WALK_REGION_LOOKUP.remove();
     }
 
+    // Memoized runtime lookups, keyed by mapId. resolveWalkRegionLookup is called 2-3x per ground
+    // step at 20 Hz per observed bot, and used to allocate a fresh record on every call. Both the
+    // graph and the foothold map are immutable once built, so one shared instance is safe for
+    // concurrent readers. A cached entry is only reused while it still points at the SAME graph
+    // instance for that map, and is invalidated whenever a graph is rebuilt/replaced
+    // (see BotNavigationGraphProvider) - so a stale region index can never outlive its graph.
+    // The in-flight builder's lookup (setBuildWalkRegionLookup) is separate and never cached.
+    private static final Map<Integer, WalkRegionLookup> WALK_REGION_LOOKUPS = new ConcurrentHashMap<>();
+
     private static WalkRegionLookup resolveWalkRegionLookup(MapleMap map) {
         if (map == null) {
             return null;
         }
 
+        // A graph currently being built on THIS thread wins (build paths mutate partially-built state).
         WalkRegionLookup activeLookup = ACTIVE_BUILD_WALK_REGION_LOOKUP.get();
         if (activeLookup != null && activeLookup.mapId() == map.getId()) {
             return activeLookup;
         }
 
+        // Single peek: peekGraph scans the graph cache, so never call it twice on the hot path.
         BotNavigationGraph graph = BotNavigationGraphProvider.peekGraph(map);
         if (graph == null) {
             return null;
         }
 
-        return new WalkRegionLookup(map.getId(), graph.regionsById, graph.regionIdByFootholdId, footholdsById(map));
+        WalkRegionLookup cached = WALK_REGION_LOOKUPS.get(map.getId());
+        if (cached != null && cached.graph() == graph) {
+            return cached;
+        }
+
+        WalkRegionLookup built = new WalkRegionLookup(
+                graph.mapId, graph, graph.regionsById, graph.regionIdByFootholdId, footholdsById(map));
+        WALK_REGION_LOOKUPS.put(map.getId(), built);
+        return built;
+    }
+
+    /** Drop a cached lookup — call whenever a map's graph is replaced so no stale index survives. */
+    public static void invalidateWalkRegionLookup(int mapId) {
+        WALK_REGION_LOOKUPS.remove(mapId);
     }
 
     private static Map<Integer, Foothold> footholdsById(MapleMap map) {

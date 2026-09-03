@@ -453,6 +453,9 @@ final class BotNavigationGraphProvider {
         GraphCacheKey key = GraphCacheKey.from(map.getId(), movementProfile);
         BotNavigationGraph rebuilt = buildGraph(map, movementProfile);
         GRAPHS.put(key, rebuilt);
+        // The map's region index changed with the graph - drop any memoized runtime lookup so
+        // physics can't keep querying the replaced graph's regions (BotPhysicsEngine).
+        BotPhysicsEngine.invalidateWalkRegionLookup(map.getId());
         CompletableFuture<BotNavigationGraph> pending = PENDING_GRAPHS.remove(key);
         if (pending != null) {
             pending.complete(rebuilt);
@@ -485,6 +488,8 @@ final class BotNavigationGraphProvider {
             try {
                 BotNavigationGraph graph = loadOrBuildGraph(map, movementProfile, key);
                 GRAPHS.put(key, graph);
+                // New graph for this map - drop any memoized runtime lookup built from the old one.
+                BotPhysicsEngine.invalidateWalkRegionLookup(map.getId());
                 future.complete(graph);
             } catch (Throwable t) {
                 future.completeExceptionally(t);
