@@ -620,7 +620,6 @@ final class BotPhysicsEngine {
             return activeLookup;
         }
 
-        // Single peek: peekGraph scans the graph cache, so never call it twice on the hot path.
         BotNavigationGraph graph = BotNavigationGraphProvider.peekGraph(map);
         if (graph == null) {
             return null;

@@ -370,8 +370,8 @@ final class BotNavigationGraphProvider {
             return null;
         }
         // The old full-cache scan returned whichever entry ConcurrentHashMap happened to yield
-        // first — arbitrary. Pick the smallest key instead so the answer is deterministic and
-        // independent of iteration order.
+        // first — arbitrary. Stats are bucketed, so a map holds only a handful of profile keys;
+        // pick the smallest one so the answer is deterministic and order-independent.
         GraphCacheKey bestKey = null;
         BotNavigationGraph bestGraph = null;
         for (GraphCacheKey key : keys) {

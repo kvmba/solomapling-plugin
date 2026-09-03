@@ -59,19 +59,13 @@ public class BotDebugHandler {
     }
 
     public void debugLoggingFull(String BotLogMessage, String chalkboardMessage) {
-        // BotLogger BotLog.txt log file.
-        // Only bots explicitly opted in via MapleMessengerConsole write to the log. BotSM.updateState
+        // Only bots explicitly opted in via MapleMessengerConsole consume a log line. BotSM.updateState
         // calls this on EVERY macro tick for EVERY bot, and an unconditional LOGGER.info here costs
         // ~3.6us per tick measured against the host's real log4j2 rolling-file appender — at 1000+
         // bots ticking at 2-6s that is pure overhead for a file nobody opted into reading.
-        boolean loggingThisBot = isLoggingBot(chr.getId());
-        if (loggingThisBot) {
-            log(BotLogMessage);
-        }
-
-        // MapleMessengerConsole Logging
-        if (loggingThisBot) {
-            sendMMCLogToConnected(BotLogMessage);
+        if (isLoggingBot(chr.getId())) {
+            log(BotLogMessage);                    // BotLogger BotLog.txt log file
+            sendMMCLogToConnected(BotLogMessage);   // MapleMessengerConsole logging
         }
 
         // chalk board message - in game debugging
