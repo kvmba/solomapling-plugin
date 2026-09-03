@@ -60,8 +60,15 @@ final class GCMovementDriver {
     private static final long PROFILE_REFRESH_INTERVAL_MS = 20_000;
 
     private static final AtomicInteger THREAD_SEQ = new AtomicInteger();
+
+    // Movement-tick pool size: one driver thread per core, but never fewer than 1 (the JVM can
+    // report 0 processors). The old max(2, cores / 2) forced >= 2 threads even on a single-core
+    // box and gave away half the machine on a big one.
+    private static final int TICK_POOL_SIZE =
+            Math.max(1, Runtime.getRuntime().availableProcessors());
+
     private static final ScheduledExecutorService POOL = Executors.newScheduledThreadPool(
-            Math.max(2, Runtime.getRuntime().availableProcessors() / 2),
+            TICK_POOL_SIZE,
             r -> {
                 Thread t = new Thread(r, "gcmove-tick-" + THREAD_SEQ.getAndIncrement());
                 t.setDaemon(true);
