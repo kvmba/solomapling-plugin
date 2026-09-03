@@ -59,11 +59,18 @@ public class BotDebugHandler {
     }
 
     public void debugLoggingFull(String BotLogMessage, String chalkboardMessage) {
-        // BotLogger BotLog.txt log file
-        log(BotLogMessage);
+        // BotLogger BotLog.txt log file.
+        // Only bots explicitly opted in via MapleMessengerConsole write to the log. BotSM.updateState
+        // calls this on EVERY macro tick for EVERY bot, and an unconditional LOGGER.info here costs
+        // ~3.6us per tick measured against the host's real log4j2 rolling-file appender — at 1000+
+        // bots ticking at 2-6s that is pure overhead for a file nobody opted into reading.
+        boolean loggingThisBot = isLoggingBot(chr.getId());
+        if (loggingThisBot) {
+            log(BotLogMessage);
+        }
 
         // MapleMessengerConsole Logging
-        if (isLoggingBot(chr.getId())) {
+        if (loggingThisBot) {
             sendMMCLogToConnected(BotLogMessage);
         }
 
@@ -102,7 +109,21 @@ public class BotDebugHandler {
     }
 
     void handleDebugPrints(BotSM botSM) {
-        botSM.getDebugger().debugLoggingFull("\n\n" + botSM.getChr().getName() + " State: " + botSM.state);
+        // Skip the whole debug-print block — including the message string concat — unless something
+        // would actually consume it. BotSM.updateState runs this on every macro tick for every bot;
+        // building "\n\n<name> State: <state>" each time was a guaranteed allocation + a file write
+        // per bot tick even when no console/chalkboard consumer was attached.
+        Character chr = botSM.getChr();
+        if (chr == null) {
+            return;
+        }
+        boolean consumed = isLoggingBot(chr.getId())
+                || botSM.getDebugger().useChalkDebug
+                || botSM.getDebugger().isLogInteractors();
+        if (!consumed) {
+            return;
+        }
+        botSM.getDebugger().debugLoggingFull("\n\n" + chr.getName() + " State: " + botSM.state);
         botSM.getDebugger().logCurrentRespondantsAndInquirers(botSM);
 //        debugprint("current state: " + botSM.state);
     }
