@@ -20,7 +20,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import soloMapling.ArtificialPlayer.BotClientHandler;
 import soloMapling.ArtificialPlayer.BotGeneration;
-import soloMapling.ArtificialPlayer.BotHelpers;
 import soloMapling.ArtificialPlayer.BotMessagingSystem.PlayerChatBridge;
 import soloMapling.ArtificialPlayer.BotPartySystem.BotPartyInviteBridge;
 import soloMapling.ArtificialPlayer.BotTradeSystem.BotTradeInviteBridge;
@@ -92,7 +91,6 @@ public final class SoloMaplingExtension implements ServerExtension {
         BotGeneration.ensureTemplateCharacter(runtime);
 
         ArtificialCharacters.register(BOT_IDS);
-        BotHelpers.invalidateClassifierCache();
         SoloMaplingTradeParticipantHook.register();
         log.info("SoloMapling registered ArtificialCharacters classifier + TradeParticipantHook");
 
@@ -298,7 +296,6 @@ public final class SoloMaplingExtension implements ServerExtension {
         SoloMaplingTradeParticipantHook.unregister();
         CompanionRuntimeCapabilities.clear();
         ArtificialCharacters.unregister(BOT_IDS);
-        BotHelpers.invalidateClassifierCache();
         CompanionRoster.clear();
         runtime = null;
     }
