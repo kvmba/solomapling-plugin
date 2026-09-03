@@ -7,6 +7,7 @@ import org.gms.server.maps.MapItem;
 import org.gms.server.maps.MapObject;
 import org.gms.server.maps.MapObjectType;
 import org.gms.server.TimerManager;
+import soloMapling.ArtificialPlayer.BotClientBinding;
 import soloMapling.ArtificialPlayer.BotHelpers;
 import soloMapling.ArtificialPlayer.BotLogic;
 import org.gms.util.PacketCreator;
@@ -274,7 +275,11 @@ public class DropCommands {
         // Use the engine's authoritative pickup path. It enforces ownership,
         // inventory capacity and quest restrictions and adds the actual item
         // before removing the map object.
-        fakechar.pickupItem(mapItem);
+        //
+        // pickupItem resolves the character through client.getPlayer(), so the bot
+        // must be published on its (shared, headless) client for the call or the
+        // engine NPEs inside InventoryManipulator.checkSpace. See BotClientBinding.
+        BotClientBinding.runWithBoundPlayer(fakechar, () -> fakechar.pickupItem(mapItem));
     }
 
     // Sweep all drops the bot is entitled to (own + free-for-all) within range. Used as a tidy-up when a

@@ -17,6 +17,7 @@ import org.gms.server.maps.MapObject;
 import org.gms.server.maps.MapObjectType;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import soloMapling.ArtificialPlayer.BotClientBinding;
 import soloMapling.ArtificialPlayer.GCMoveSystem.GCMovement;
 
 import java.util.ArrayList;
@@ -433,17 +434,9 @@ public final class CompanionSurvivalController {
 
     private static <T> T withBoundClient(
             Character companion, Supplier<T> operation) {
-        Client client = Objects.requireNonNull(
-                companion.getClient(), "companion client");
-        synchronized (client) {
-            Character previous = client.getPlayer();
-            client.setPlayer(companion);
-            try {
-                return operation.get();
-            } finally {
-                client.setPlayer(previous);
-            }
-        }
+        // Companions own a private client, but the binding rule is identical to
+        // every other artificial character - keep it in one place.
+        return BotClientBinding.withBoundPlayer(companion, operation);
     }
 
     private record SupplyRun(
