@@ -15,6 +15,7 @@ import soloMapling.ArtificialPlayer.BotCommandsPack.MegaphoneCommands;
 import soloMapling.ArtificialPlayer.BotDecoratorSystem.BotDecorateBody;
 import soloMapling.ArtificialPlayer.BotDecoratorSystem.BotDecorateEquips;
 import soloMapling.ArtificialPlayer.BotDecoratorSystem.BotDecorateNX;
+import soloMapling.ArtificialPlayer.BotDecoratorSystem.BotFame;
 import soloMapling.ArtificialPlayer.BotMovementSystem.MovementCommands;
 import soloMapling.ArtificialPlayer.BotMovementSystem.MovementStructures.MovementRecording;
 import soloMapling.ArtificialPlayer.BotMessagingSystem.CharacterStorage;
@@ -389,6 +390,16 @@ public class ArtificialPlayerCommand extends Command {
                         : "No overlapping bot found near " + fakechar.getName() + ".");
                 break;
 
+            case "fame":
+                player.yellowMessage(fakechar.getName() + " (lv" + fakechar.getLevel() + ", "
+                        + fakechar.getTier() + ") fame: " + fakechar.getFame());
+                break;
+            case "rerollfame":
+                BotFame.apply(fakechar);
+                player.yellowMessage("Re-rolled " + fakechar.getName() + " (lv" + fakechar.getLevel()
+                        + ", " + fakechar.getTier() + ") fame -> " + fakechar.getFame());
+                break;
+
             // Party commands
             case "makeparty":
                 player.yellowMessage("makeparty result: " + BotPartyCommands.botMakeParty(fakechar));
@@ -535,6 +546,17 @@ public class ArtificialPlayerCommand extends Command {
                 } else {
                     player.yellowMessage("Dealer bot not found or not a BlackjackDealerBot, or player bot not found.");
                 }
+                break;
+            case "setfame":
+                if (input3 < BotFame.MIN_FAME || input3 > BotFame.MAX_FAME) {
+                    player.yellowMessage("setfame: fame must be " + BotFame.MIN_FAME + ".." + BotFame.MAX_FAME
+                            + " (bot fame is generated in that range)");
+                    break;
+                }
+                // No broadcast needed: the client pulls fame on demand when a
+                // player opens the bot's info window, same as level/job changes.
+                fakechar.setFame(input3);
+                player.yellowMessage("Set " + fakechar.getName() + " fame to " + input3);
                 break;
             case "loot":
                 break;

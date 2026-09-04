@@ -30,6 +30,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 import static soloMapling.ArtificialPlayer.BotClientHandler.getBotClient;
 import static soloMapling.ArtificialPlayer.BotCommandsPack.WarpCommands.botEnterPortalDropDown;
+import soloMapling.ArtificialPlayer.BotDecoratorSystem.BotFame;
 import static soloMapling.ArtificialPlayer.BotDecoratorSystem.BotDecorate.setBotVariables;
 import static soloMapling.ArtificialPlayer.BotMovementSystem.MovementCommands.microTurnAroundToLeft;
 import static soloMapling.DebugUtilities.debugprint;
@@ -160,6 +161,9 @@ public class BotGeneration {
         consoleBot = Character.loadCharFromDB(baseId, getBotClient(), false);
 
         consoleBot = setConsoleBot(consoleBot, botId); // Bot onDemandBot
+        // Console bot skips BotDecorate (fixed level/job, no decoration), so its
+        // fame would otherwise stay at whatever the template character carries.
+        BotFame.apply(consoleBot);
         addBotToServer(consoleBot);
         return consoleBot;
     }
@@ -335,7 +339,6 @@ public class BotGeneration {
         onDemandBot.setName("Console");
 
         onDemandBot.setId(botId);
-        onDemandBot.setFame(botId); // debug purposes
         onDemandBot.setLevel(69);
         onDemandBot.setJob(Job.getById(420));
 
@@ -347,7 +350,6 @@ public class BotGeneration {
         onDemandBot.setClient(getBotClient());
         onDemandBot.setName(getRandomCharacterIGN());
         onDemandBot.setId(botId);
-        onDemandBot.setFame(botId); // debug purposes
         return onDemandBot;
     }
 

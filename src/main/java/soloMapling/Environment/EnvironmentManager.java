@@ -6,6 +6,7 @@ import org.gms.server.maps.MapleMap;
 import soloMapling.ArtificialPlayer.BotGeneration;
 import soloMapling.ArtificialPlayer.BotMovementSystem.MovementCommands;
 import soloMapling.ArtificialPlayer.BotDecoratorSystem.BotDecorate;
+import soloMapling.ArtificialPlayer.BotDecoratorSystem.BotFame;
 import soloMapling.ArtificialPlayer.BotDecoratorSystem.BotDecorationQueue;
 import soloMapling.ArtificialPlayer.BotDecoratorSystem.BotEquipChecker;
 import soloMapling.ArtificialPlayer.BotHelpers;
@@ -775,6 +776,7 @@ public class EnvironmentManager {
                 bot.setLevel(level);
                 bot.setJob(Job.getById(slot.jobForTier(tier)));
                 EquipBot(bot, slot.weaponId());
+                BotFame.apply(bot);   // re-roll: fame was generated from the spawn-time level
                 setAndStartBots(List.of(bot.getId()), BotTypeManager.BotType.TEST_ATTACK_BOT);
             });
         }
@@ -1036,6 +1038,9 @@ public class EnvironmentManager {
             Character bot = BotHelpers.getCharFromChannelStorage(botId);
             if (bot != null) {
                 bot.setLevel(minLevel + random().nextInt(maxLevel - minLevel + 1));
+                // Fame was rolled from the decoration-time level; re-roll it so
+                // the rep matches the level these bots actually end up at.
+                BotFame.apply(bot);
             }
         }
     }

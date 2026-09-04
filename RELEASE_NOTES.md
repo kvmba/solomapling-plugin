@@ -2,6 +2,16 @@
 
 ## 0.4.0-SNAPSHOT
 
+### Fixes
+
+- **Bot fame was the bot's internal character id.** `BotGeneration` set every artificial player's 人气度 to its own cid (`setFame(botId)`, a debug leftover from the upstream port), so all bots showed a five-digit reputation starting at 20000. Fame is now rolled from level and tier instead (see `BotFame`):
+  - low-level bots land around **-10..30** (beginners sit in the low single digits)
+  - the ceiling grows with level but never exceeds **300**
+  - **~15% of the population carries a negative reputation**
+- Fame is generated after the bot's level/tier are final, and re-rolled where a level is overridden post-decoration (OPQ lobby bots, `spawnAttackTestBots`), so reputation always matches the level shown.
+- `getConsoleBot` bypasses `BotDecorate`, so it now rolls its own fame instead of inheriting the template character's value.
+- New GM commands: `!bot fame <cid>` (inspect), `!bot rerollfame <cid>`, `!bot setfame <cid> <-50..300>`.
+
 ### Features
 
 - **SocialBot Hybrid LLM chat:** optional DeepSeek integration for free-form player dialogue during active SocialBot sessions (`solomapling.llm.*`). Menu options, party recruit, and goodbye remain YAML/rule-driven.

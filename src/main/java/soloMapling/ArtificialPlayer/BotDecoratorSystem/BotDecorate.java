@@ -336,6 +336,7 @@ public class BotDecorate {
         // it took. Its own 30% base gate decides whether the bot actually gets
         // any NX pieces.
         BotDecorateNX.apply(bot);
+        BotFame.apply(bot);
     }
 
     public static void setBotVariables(Character bot, int baseClass, int minLevel, int maxLevel) {
@@ -362,6 +363,7 @@ public class BotDecorate {
         // plain newbies. Uses explicit item ids, so the cache state doesn't matter.
         if (BeginnerEquip.isBeginner(bot)) {
             BeginnerEquip.apply(bot);
+            BotFame.apply(bot);
             return;
         }
 
@@ -375,6 +377,7 @@ public class BotDecorate {
         }
 
         BotDecorateNX.apply(bot);
+        BotFame.apply(bot);
     }
 
     private static boolean hasClothing(Character bot) {
