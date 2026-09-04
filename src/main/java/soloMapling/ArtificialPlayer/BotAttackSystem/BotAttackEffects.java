@@ -73,7 +73,8 @@ public final class BotAttackEffects {
      * @param bodyActionId the per-weapon swing animation id (from BotAttackData)
      * @param facingMask   the stance/facing byte (0x00 right / 0x80 left)
      * @param speed        the attack-speed byte (2..9)
-     * @param hitDelay     ms before the damage numbers land (also the drop delay)
+     * @param hitDelay     ms before the damage numbers land (attack packet only; loot
+     *                    timing comes from the die1 animation, see applyDamageAndLoot)
      */
     public static boolean meleeStrike(Character bot, Map<Monster, List<Integer>> hits, int skillId,
                                       int skillLevel, int bodyActionId, int facingMask, int speed, short hitDelay) {
