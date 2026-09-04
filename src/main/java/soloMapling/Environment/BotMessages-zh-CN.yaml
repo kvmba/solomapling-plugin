@@ -26,6 +26,20 @@ menu.training_party.training: "练得怎么样？"
 menu.training_party.follow: "跟我来！"
 menu.training_party.goodbye: "再见"
 
+# Extra typeable aliases for the training menu's party option.
+#
+# The English keywords in TrainingBot ("party"/"team"/"join") are always matched, so this list
+# only ADDS phrasings - it is not a replacement. It exists because the English list is not
+# transliterated: without it a player reading "要组队吗？" has to answer in English, and the
+# label alone ("要组队吗", derived from the label text) only matches when that exact phrase is
+# typed.
+#
+# Keep these narrow enough not to hijack the neighbouring options: BotOptionMenu.match() walks
+# the options IN ORDER, so an alias that also appears in "training" or "goodbye" would win or
+# lose on ordering rather than on meaning.
+menu.training_solo.party.keywords:
+  - ["组队", "组我", "带我", "一起", "上车", "刷怪"]
+
 menu.follower.train: "在这儿陪我练！"
 menu.follower.nevermind: "没事了"
 

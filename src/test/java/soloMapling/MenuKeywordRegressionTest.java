@@ -8,6 +8,7 @@ import soloMapling.Environment.SoloMaplingLanguageConfig;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * The TrainingBot comment on its keyword lists is a real constraint, not decoration: a greedy
@@ -55,5 +56,23 @@ class MenuKeywordRegressionTest {
         // nor fire on party phrasing.
         boolean flavorMatchesOnParty = kw.get(0).stream().anyMatch("我要组队"::contains);
         assertFalse(flavorMatchesOnParty, "flavor keywords leaked party phrasing: " + kw.get(0));
+    }
+
+    // The party option's English list ("party"/"team"/"join") is not transliterated, so a player
+    // reading the Chinese menu had to answer in English. BotMessages-zh-CN.yaml now ships the
+    // phrasings a Chinese-speaking player actually types; this pins them to the party option
+    // (index 1 - the middle of training/party/goodbye).
+    @Test
+    void chinesePartyPhrasingsReachThePartyOption() {
+        SoloMaplingLanguageConfig.setLanguageTag("zh-CN");
+        List<List<String>> kw = BotMessages.keywords("menu.training_solo", SOLO_SUFFIXES, SOLO_KEYWORDS);
+        List<String> party = kw.get(1);
+
+        for (String typed : new String[]{"组队", "组我", "带我", "一起", "上车", "刷怪"}) {
+            assertTrue(party.stream().anyMatch(typed::contains),
+                    "party option should match \"" + typed + "\", got " + party);
+        }
+        // English must survive: the YAML aliases extend the Java list, they do not replace it.
+        assertTrue(party.contains("party"), "English keywords must survive, got " + party);
     }
 }
