@@ -205,6 +205,13 @@ public final class BotWanderSystem {
             stop(bot); // gone, or left the map we were bound to - the caller owns any re-start
             return;
         }
+        // LOD gate: this poll is 400ms per bot and had no observability check, so an unobserved
+        // bot kept picking stroll targets and re-issuing moves at full rate with nobody watching.
+        // Skipping while the map is unseen keeps the wander dormant until a real player arrives;
+        // the next poll after promotion resumes from the dwell/walk state it left behind.
+        if (!GCMovement.isMapObserved(bot.getMapId())) {
+            return;
+        }
         MapleMap map = bot.getMap();
         Point bp = bot.getPosition();
         long now = nowMs();
