@@ -666,6 +666,29 @@ public final class SpotFinder {
         if (map == null || members == null || members.isEmpty() || from == null) {
             return null;
         }
+        // Hoist the ledge lookups out of the (mob x member) loop.
+        //
+        // Each onDifferentLedge call resolved BOTH of its points, so a member anchor was
+        // re-resolved once per mob, and a mob once per member: monsters x members x 2 region
+        // lookups, each costing a graph peek plus four foothold-tree queries. At a typical
+        // 40 mobs x 5 members that was 400 lookups per sweep; resolving each anchor and each
+        // mob once makes it 45 - the same answers for ~1/9 of the work.
+        //
+        // Safe because monsters only move when a real client sends MOVE_LIFE, so every
+        // position involved is fixed for the duration of this call. Caching across sweeps
+        // would NOT be safe and is deliberately not done here.
+        List<Spot> anchors = (preferred != null) ? List.of(preferred) : members;
+        int[] anchorRegions = new int[anchors.size()];
+        boolean unbaked = false;
+        for (int i = 0; i < anchors.size(); i++) {
+            Point a = anchors.get(i).anchor();
+            anchorRegions[i] = (a == null) ? -1
+                    : GCMovement.peekRegionIdAt(map, a.x, a.y);
+            // An unbaked map made the old onDifferentLedge return false for every pair,
+            // i.e. accept every in-box hostile. Preserve that rather than start filtering.
+            unbaked |= anchorRegions[i] == GCMovement.UNBAKED_REGION;
+        }
+
         List<Monster> band = new ArrayList<>();
         for (Monster m : map.getAllMonsters()) {
             if (!isHostile(m)) {
@@ -675,20 +698,40 @@ public final class SpotFinder {
             if (mp == null || mp.x < x0 || mp.x > x1 || mp.y < yTop || mp.y > yBottom) {
                 continue;
             }
-            if (preferred != null) {
-                if (!GCMovement.onDifferentLedge(map, preferred.anchor().x, preferred.anchor().y, mp.x, mp.y)) {
-                    band.add(m);
-                }
+            if (unbaked) {
+                band.add(m);
                 continue;
             }
-            for (Spot member : members) {
-                if (!GCMovement.onDifferentLedge(map, member.anchor().x, member.anchor().y, mp.x, mp.y)) {
+            int mobRegion = GCMovement.peekRegionIdAt(map, mp.x, mp.y);
+            if (mobRegion == GCMovement.UNBAKED_REGION) {
+                // Only reachable if the graph vanished mid-sweep; treat as unbaked, as above.
+                band.add(m);
+                continue;
+            }
+            for (int i = 0; i < anchorRegions.length; i++) {
+                if (acceptsSameLedge(anchorRegions[i], mobRegion)) {
                     band.add(m);
                     break;
                 }
             }
         }
         return bestClustered(band, from, clusterRadius);
+    }
+
+    /*
+     * The same-ledge gate the old code expressed as !onDifferentLedge(anchor, mob), restated on
+     * already-resolved region ids so each point is resolved once instead of once per pair.
+     *
+     * onDifferentLedge was: ra >= 0 && rb >= 0 && ra != rb, and callers accepted the mob when
+     * that was false. So a mob is accepted when either point is on no ledge (-1 - a flying mob,
+     * a point mid-air: "can't tell, don't filter") or both share one. De Morgan of that is the
+     * expression below; SpotFinderBucketedGateTest proves the two agree across the whole
+     * integer domain, so this is a pure performance change with no behavioural difference.
+     *
+     * Callers must have already ruled out UNBAKED_REGION (an unbaked map accepts everything).
+     */
+    static boolean acceptsSameLedge(int anchorRegion, int mobRegion) {
+        return anchorRegion < 0 || mobRegion < 0 || anchorRegion == mobRegion;
     }
 
     // Cluster-biased target pick on the anchor's OWN ledge, within the [x0,x1] band and the coarse

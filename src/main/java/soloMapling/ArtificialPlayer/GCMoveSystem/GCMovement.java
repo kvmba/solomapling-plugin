@@ -596,6 +596,30 @@ public final class GCMovement {
         return ra >= 0 && rb >= 0 && ra != rb;
     }
 
+    /*
+     * The ledge (region id) under (x,y) on an ALREADY-baked graph, or -1 when the point is on no
+     * ledge. -2 when the map has no baked graph yet - distinguishable from -1 so a caller can tell
+     * "this point is on no ledge" apart from "we cannot answer at all".
+     *
+     * Peek-only, like onDifferentLedge: it never triggers a build. regionIdAt() is NOT usable on a
+     * hot path - it calls getGraph(), which joins on a graph build (potentially hundreds of ms) if
+     * the map isn't baked. Combat ticks must never pay that.
+     *
+     * Returns -2 (not -1) for an unbaked map so callers can reproduce onDifferentLedge's "can't
+     * tell, don't filter" behaviour: that method returned false for every pair when unbaked, which
+     * accepts every candidate. Collapsing -2 into -1 here would silently start filtering.
+     */
+    public static int peekRegionIdAt(MapleMap map, int x, int y) {
+        BotNavigationGraph g = BotNavigationGraphProvider.peekGraph(map);
+        if (g == null) {
+            return UNBAKED_REGION;
+        }
+        return g.findRegionId(map, new Point(x, y));
+    }
+
+    /* Sentinel from peekRegionIdAt: the map has no baked nav graph, so no ledge is answerable. */
+    public static final int UNBAKED_REGION = -2;
+
     /* The set of region ids reachable from the ledge under (fromX,fromY) (empty if it's on none). */
     public static java.util.Set<Integer> reachableRegions(MapleMap map, int fromX, int fromY) {
         BotNavigationGraph g = BotNavigationGraphProvider.getGraph(map);
