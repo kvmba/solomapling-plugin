@@ -1,0 +1,225 @@
+# Player-visible UI strings that live in Java code rather than in a BotDialoguePack YAML.
+#
+# Every string a player can see that is NOT spoken as bot dialogue belongs here: system
+# notices (party declined), trade-chat lines, hint balloons (option menus), yellow
+# messages, and chalkboards. Bot dialogue lines stay in BotDialoguePack*.
+#
+# Resolution: BotMessages-<tag>.yaml first, then this file (see LocalizedResources).
+# A key missing from the localized copy silently falls back to the English value here,
+# so adding a key to this file is always safe.
+#
+# Placeholders are {0}, {1}, ... and are substituted positionally by BotMessages.get().
+# Keep the placeholder count/order identical across translations.
+
+# ---------------------------------------------------------------------------
+# Party
+# ---------------------------------------------------------------------------
+party.declined: "{0} has declined your party request."
+party.join_failed: "{0} couldn't join your party (it was full or disbanded) - try inviting again."
+
+# ---------------------------------------------------------------------------
+# Option menus (labels shown in the hint balloon)
+#
+# NOTE: the labels below are display-only. Each menu also carries keyword lists in
+# BotMessages.keywords() which are matched against what the player types; a localized
+# label must always ship with a matching localized keyword list, or a player who sees
+# the Chinese menu still has to type English to answer it.
+# ---------------------------------------------------------------------------
+menu.training_solo.training: "How's the training?"
+menu.training_solo.party: "Wanna party up?"
+menu.training_solo.goodbye: "Goodbye"
+
+menu.training_party.training: "How's the training?"
+menu.training_party.follow: "Follow me!"
+menu.training_party.goodbye: "Goodbye"
+
+menu.follower.train: "Train here with me!"
+menu.follower.nevermind: "Nevermind"
+
+menu.social.whatsup: "What's up?"
+menu.social.interesting: "Anything interesting?"
+menu.social.rumors: "Any rumors?"
+menu.social.teamup: "Wanna team up?"
+menu.social.goodbye: "Goodbye"
+
+# Extra typeable aliases for the social menu, mirroring the zh-CN pack. The English keywords
+# passed to BotMessages.keywords() and the localized label text are matched too; these lists only
+# add phrasings worth accepting. Lists are per-language overrides, not merges, so each pack that
+# defines them should stand on its own.
+menu.social.whatsup.keywords:
+  - ["whats up", "sup", "how's it going", "hows it going"]
+menu.social.interesting.keywords:
+  - ["anything", "news", "happening"]
+menu.social.rumors.keywords:
+  - ["rumor", "rumour", "gossip", "heard"]
+menu.social.teamup.keywords:
+  - ["team", "party", "group"]
+menu.social.goodbye.keywords:
+  - ["bye", "goodbye", "cya", "later"]
+
+menu.yesno.yes: "Yes"
+menu.yesno.no: "No"
+
+menu.tutorial.yes: "Yes"
+menu.tutorial.no: "No"
+
+menu.gamezone.yes: "Yes"
+menu.gamezone.no: "No"
+
+menu.dice.cho: "Bet Cho (even)"
+menu.dice.han: "Bet Han (odd)"
+
+menu.blackjack.join: "Join"
+menu.blackjack.stand: "Stand"
+menu.blackjack.hit: " - Hit -"
+
+# ---------------------------------------------------------------------------
+# Trade
+# ---------------------------------------------------------------------------
+trade.nothing_to_sell: "I don't have anything at the moment"
+trade.good_to_go: "trade looks good to go!"
+trade.timed_out: "Timed Out!"
+trade.meso_offer: "Here's {0} mesos for your item!"
+trade.nothing_for_sale: "I don't have anything for sale currently, sorry"
+trade.here_is_what_i_have: "Here is what I've got. check it out!"
+trade.declined: "Nah I'm good. Good bye."
+trade.why_decline: "Why did you decline?"
+trade.thank_you: "Thank you!"
+# Composed by generateWantsMessageString(). Kept as whole-sentence templates rather than
+# word fragments: the English "I want X and Y" does not assemble correctly in Chinese,
+# where the connective and the item-quantity order both differ.
+trade.wants_prefix: "I want "
+trade.wants_connective: " and "
+trade.wants_separator: ", "
+trade.wants_quantity: "{0}x {1}"
+trade.wants_nothing: "nothing specific"
+
+# ---------------------------------------------------------------------------
+# Tutorial bot
+# ---------------------------------------------------------------------------
+tutorial.selected_item: "You've selected {0}! Enjoy it!"
+tutorial.type_name_correctly: "Did you type the name in correctly?"
+tutorial.gifts_later: "No worries, the gifts will be waiting for you next time."
+tutorial.talk_again: "Talk to me again if you're ready."
+tutorial.trade_intro: "Here are some goodies to get you started!"
+tutorial.trade_summary: "1B mesos, potions, scrolls, stars, and gear. All yours!"
+
+# ---------------------------------------------------------------------------
+# Social bot
+# ---------------------------------------------------------------------------
+social.busy: "They seem busy..."
+
+# ---------------------------------------------------------------------------
+# Blackjack
+# ---------------------------------------------------------------------------
+blackjack.waiting_for_players: "Waiting for Players to join table.."
+blackjack.place_bets: "Please Place your Bets!"
+blackjack.bets_closed: "All bets are closed. Let's Begin."
+blackjack.my_card: "My card: {0}."
+blackjack.my_turn: "My Turn."
+blackjack.bust: "Too many. I Bust."
+blackjack.again: "Let's go again."
+blackjack.no_bet_for: "No Bet detected for: {0}"
+blackjack.stole_bet: "Player has stolen back his bet."
+blackjack.left_table: "{0} has left. Automatic Stand."
+blackjack.left_map: "{0} has left the map."
+blackjack.no_response: "No response from {0}. Automatic Stand."
+blackjack.make_decision: "Please Make a decision {0}"
+blackjack.joined_table: "{0} has joined the table."
+blackjack.already_at_table: "You are already at the table."
+blackjack.you_joined: "You have joined {0}'s Blackjack table. You will be in the next round."
+blackjack.table_full: "Table is full."
+blackjack.casino_defame: "[Mushroom Casino] You have stolen your bets. You have been defamed by the Mushroom Casino."
+blackjack.bet_announce: "{0} bets on {1}!"
+
+# ---------------------------------------------------------------------------
+# Dice
+# ---------------------------------------------------------------------------
+dice.place_bets: "Please Place your bets!"
+dice.no_bet: "No Bet detected. Please Place your bets!"
+dice.stole_bet: "Player has stolen back his bet. Ceasing Game."
+dice.result: "Result: [{0}] [{1}] - {2}"
+dice.result_han: "Han"
+dice.result_cho: "Cho"
+dice.place_bets_when_ready: "Please place your bets when you are ready!"
+dice.select_han_cho: "Please Select Han or Cho!"
+dice.casino_defame: "[Mushroom Casino] You have stolen your bets. You have been defamed by the Mushroom Casino."
+dice.bet_announce: "{0} bets on {1}!"
+# Words a player types to place a bet. Han/Cho are proper to the game and stay untranslated in
+# the result line, but the localized words are accepted too so the menu can be answered by typing
+# what it shows.
+dice.roll: "Rolled [{0}] [{1}]"
+dice.keyword_bet: "bet"
+dice.keyword_han: "han"
+dice.keyword_cho: "cho"
+
+# ---------------------------------------------------------------------------
+# Gacha
+# ---------------------------------------------------------------------------
+gacha.position_set: "Position set!"
+gacha.wow: "Wow! {0}"
+gacha.lucky: "Lucky {0}!"
+gacha.nice_scroll: "Nice scroll {0}!"
+gacha.unlucky: "Ooof... unlucky D:"
+gacha.congrats: "Ayy Congrats {0}!"
+
+# ---------------------------------------------------------------------------
+# Drop game
+# ---------------------------------------------------------------------------
+dropgame.busy: "Busy with {0}! Try again after this game."
+dropgame.rules: "Drop Game! Medium: 10m / Elite: 50m"
+dropgame.put_mesos: "Put in your mesos and confirm!"
+dropgame.trade_cancelled: "Trade cancelled."
+dropgame.too_slow: "Too slow! Trade timed out."
+dropgame.wrong_amount: "Wrong amount! 10m or 50m only."
+dropgame.tier_locked: "{0} tier locked in!"
+dropgame.loot_pool_error: "Loot pool error. Refunding and resetting."
+dropgame.invite_failed: "Couldn't send party invite. Resetting."
+dropgame.player_left: "Player left the map."
+dropgame.invite_timeout: "Party invite timed out — mesos forfeited. Don't waste my time next round!"
+
+# ---------------------------------------------------------------------------
+# Game zone host
+# ---------------------------------------------------------------------------
+gamezone.talk_again: "Talk to me again if you're ready."
+gamezone.serve_drink: "One {0}, coming right up!"
+gamezone.no_such_drink: "Hmm, I don't have that. Try again!"
+gamezone.drink.coke: "Coke"
+gamezone.drink.water: "Water"
+gamezone.drink.elixir: "Elixir"
+
+# Present only in the English pack: BotMessagesTest asserts that a key missing from the
+# localized copy falls back to this value instead of rendering blank.
+test.english_only: "english only"
+
+# ---------------------------------------------------------------------------
+# Casino (shared by Blackjack and Dice)
+# ---------------------------------------------------------------------------
+# Bet announcement, built by BotLogic.announceBetString(). The item names it embeds come from
+# the game data and are localized by the host, not by us - only the glue text is here.
+casino.bet_prefix: "{0}'s Bet: "
+casino.bet_entry: "{0}x {1}"
+casino.bet_separator: ", "
+
+# ---------------------------------------------------------------------------
+# OPQ
+# ---------------------------------------------------------------------------
+opq.cloud_pieces: "Cloud Pieces: {0}"
+opq.dropping_clouds: "Dropping {0} cloud{1}!"
+# English plural suffix; Chinese has no plural, so the localized value is empty.
+opq.cloud_plural: "s"
+opq.taking_box: "I'll get the {0} box!"
+opq.got_record: "Got a record!"
+opq.dropping_record: "Dropping my record!"
+opq.box_ordinal.1: "1st"
+opq.box_ordinal.2: "2nd"
+opq.box_ordinal.3: "3rd"
+opq.box_ordinal.4: "4th"
+opq.box_ordinal.5: "5th"
+opq.box_ordinal.6: "6th"
+opq.box_ordinal.7: "7th"
+
+# ---------------------------------------------------------------------------
+# Training bot chalkboard (shown while the bot is on a break)
+# ---------------------------------------------------------------------------
+training.break_sign: "brb"

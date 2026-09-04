@@ -40,6 +40,9 @@ public final class SoloMaplingLanguageConfig {
     /** For tests and live reload via {@code !env language reload}. */
     public static void setLanguageTag(String tag) {
         languageTag = normalize(tag);
+        // Message text is cached per language; the cache would otherwise keep serving the
+        // previous language until the next restart.
+        BotMessages.invalidate();
     }
 
     public static String languageTag() {

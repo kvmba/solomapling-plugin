@@ -23,6 +23,7 @@ import soloMapling.server.EventMessageSystem.EventType;
 import soloMapling.server.EventMessageSystem.GameEvent;
 import soloMapling.server.MethodScheduler;
 import org.gms.util.PacketCreator;
+import soloMapling.Environment.BotMessages;
 
 import java.awt.Point;
 import java.util.List;
@@ -80,12 +81,20 @@ public class SocialBot extends BotSM {
     private static final double OBSERVED_RELOCATE_CHANCE = 0.15; // usually defer a drift while watched
     private static final long OBSERVED_DEFER_MS = 30_000;      // retry window when we defer an observed drift
 
-    private static final String[] INTERACTIVE_OPTIONS = {
-            "What's up?",
-            "Anything interesting?",
-            "Any rumors?",
-            "Wanna team up?",
-            "Goodbye"
+    // Interactive menu shown once a player engages. Labels are localized; the keyword sets below
+    // are the English ones and stay authoritative (they are matched as substrings, and a couple
+    // deliberately narrow entries - see resolveMenuCategory). BotMessages.keywords() appends the
+    // localized label text and any per-language YAML aliases, so the menu answers in both
+    // languages no matter which one is displayed.
+    private static final String[] INTERACTIVE_SUFFIXES = {
+            "whatsup", "interesting", "rumors", "teamup", "goodbye"
+    };
+    private static final String[][] INTERACTIVE_KEYWORDS = {
+            {"what's up", "whats up"},
+            {"interesting"},
+            {"rumor"},
+            {"team", "party"},
+            {"bye", "goodbye", "cya", "later"}
     };
 
     private static final String DIALOGUE_PATH = "SocialBotDialogue.yaml";
@@ -392,21 +401,36 @@ public class SocialBot extends BotSM {
                 || lower.contains("cya");
     }
 
-    private static boolean isPartyIntent(String lower) {
-        return lower.equals("4")
-                || lower.contains("team")
-                || lower.contains("party");
+    // Menu keywords, resolved once per bot: English keywords plus the localized label text plus
+    private final List<List<String>> interactiveKeywords =
+            BotMessages.keywords("menu.social", INTERACTIVE_SUFFIXES, INTERACTIVE_KEYWORDS);
+
+    private boolean isPartyIntent(String lower) {
+        return lower.equals("4") || matchesOption(lower, 3);
+    }
+
+    /** True when the typed text matches option {@code index} of the interactive menu. */
+    private boolean matchesOption(String lower, int index) {
+        if (index >= interactiveKeywords.size()) {
+            return false;
+        }
+        for (String kw : interactiveKeywords.get(index)) {
+            if (lower.contains(kw)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /** Returns a YAML dialogue category for structured menu picks, or null for free-form chat. */
-    private static String resolveMenuCategory(String lower) {
-        if (lower.equals("1") || lower.contains("what's up") || lower.contains("whats up")) {
+    private String resolveMenuCategory(String lower) {
+        if (lower.equals("1") || matchesOption(lower, 0)) {
             return "WhatsUp";
         }
-        if (lower.equals("2") || lower.contains("interesting")) {
+        if (lower.equals("2") || matchesOption(lower, 1)) {
             return "Interesting";
         }
-        if (lower.equals("3") || lower.contains("rumor")) {
+        if (lower.equals("3") || matchesOption(lower, 2)) {
             return "Rumors";
         }
         return null;
@@ -614,15 +638,17 @@ public class SocialBot extends BotSM {
     }
 
     private void showBusyHint(Character player) {
-        player.yellowMessage("They seem busy...");
-        player.getClient().sendPacket(PacketCreator.sendHint("They seem busy...", 150, 5));
+        String busy = BotMessages.get("social.busy");
+        player.yellowMessage(busy);
+        // Only the immediate-response path needs enableActions(); the hint itself is harmless
+        // on a client that is gone.
+        player.getClient().sendPacket(PacketCreator.sendHint(busy, 150, 5));
         player.getClient().sendPacket(PacketCreator.enableActions());
         MethodScheduler.runAfterDelay(() -> expirePlayerChatCommands(player), 5000);
     }
 
     private void showInteractiveOptions(Character player) {
-        List<String> options = List.of(INTERACTIVE_OPTIONS);
-        displayPlayerChatCommands(player, options);
+        displayPlayerChatCommands(player, BotMessages.labels("menu.social", INTERACTIVE_SUFFIXES));
     }
 
     // --- Timeout ---

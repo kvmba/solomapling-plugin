@@ -10,6 +10,8 @@ import soloMapling.ArtificialPlayer.BotSM;
 import soloMapling.server.EventMessageSystem.EventBus;
 import soloMapling.server.EventMessageSystem.EventType;
 import soloMapling.server.EventMessageSystem.GameEvent;
+import soloMapling.Environment.BotMessages;
+import soloMapling.Environment.YesNo;
 
 import java.util.Collections;
 import java.util.List;
@@ -34,8 +36,20 @@ public class GameZoneHostBot extends BotSM {
     private static final int DRINK_WATER = 2022000;
     private static final int DRINK_ELIXIR = 2000012;
 
-    private static final String[] DRINK_NAMES = {"Coke", "Water", "Elixir"};
+    // Drink names shown in the option menu and matched against what the player types. Localized:
+    // the menu displays these, and handleDrinkPickResponse() matches on them, so a Chinese menu
+    // is answerable in Chinese. Any per-language aliases come from
+    // menu.gamezone.drink.<name>.keywords in the message pack.
+    private static final String[] DRINK_SUFFIXES = {"coke", "water", "elixir"};
     private static final int[] DRINK_IDS = {DRINK_COKE, DRINK_WATER, DRINK_ELIXIR};
+    private static final String[][] DRINK_KEYWORDS = {
+            {"coke"}, {"water"}, {"elixir"}
+    };
+
+    private final String[] drinkNames =
+            BotMessages.labels("gamezone.drink", DRINK_SUFFIXES).toArray(new String[0]);
+    private final List<List<String>> drinkKeywords =
+            BotMessages.keywords("gamezone.drink", DRINK_SUFFIXES, DRINK_KEYWORDS);
 
     private List<String> hint;
 
@@ -176,7 +190,7 @@ public class GameZoneHostBot extends BotSM {
 
     private void offerDrink() {
         getDialogueHandler().executeBotDialogue("DrinkOffer", GameZoneHostBot.this);
-        hint = List.of("Yes", "No");
+        hint = yesNoLabels();
         displayCommands(getInteractors().getRespondant());
         startTimer(20_000);
     }
@@ -185,7 +199,7 @@ public class GameZoneHostBot extends BotSM {
 
     private void presentDrinkOptions() {
         getDialogueHandler().executeBotDialogue("DrinkSelection", GameZoneHostBot.this);
-        hint = List.of(DRINK_NAMES);
+        hint = List.of(drinkNames);
         displayCommands(getInteractors().getRespondant());
         startTimer(30_000);
     }
@@ -224,7 +238,7 @@ public class GameZoneHostBot extends BotSM {
         if (System.currentTimeMillis() < endTime) {
             processMessages();
         } else {
-            BotSpeak(getChr(), "Talk to me again if you're ready.");
+            BotSpeak(getChr(), BotMessages.get("gamezone.talk_again"));
             state = BotState.FINISHED;
             resetHostBotState();
         }
@@ -261,11 +275,15 @@ public class GameZoneHostBot extends BotSM {
     }
 
     private void handleDrinkOfferResponse(String content) {
-        if (content.contains("yes")) {
+        if (YesNo.isYes(content)) {
             drinkAccepted = true;
-        } else if (content.contains("no")) {
+        } else if (YesNo.isNo(content)) {
             drinkAccepted = false;
         }
+    }
+
+    private static List<String> yesNoLabels() {
+        return YesNo.labels();
     }
 
     private void handleDrinkPickResponse(String content) {
@@ -273,15 +291,18 @@ public class GameZoneHostBot extends BotSM {
         if (content.contains("yes") || content.contains("no")) {
             return;
         }
-        for (int i = 0; i < DRINK_NAMES.length; i++) {
-            if (content.contains(DRINK_NAMES[i].toLowerCase())) {
+        for (int i = 0; i < drinkNames.length; i++) {
+            for (String keyword : drinkKeywords.get(i)) {
+                if (!content.contains(keyword)) {
+                    continue;
+                }
                 selectedDrink = DRINK_IDS[i];
-                BotSpeak(getChr(), String.format("One %s, coming right up!", DRINK_NAMES[i]));
+                BotSpeak(getChr(), BotMessages.get("gamezone.serve_drink", drinkNames[i]));
                 waitFor(2000); // beat before SERVE_DRINK ticks
                 return;
             }
         }
-        BotSpeak(getChr(), "Hmm, I don't have that. Try again!");
+        BotSpeak(getChr(), BotMessages.get("gamezone.no_such_drink"));
         BotEmote(getChr(), 6);
     }
 }

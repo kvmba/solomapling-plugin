@@ -1,0 +1,209 @@
+# Player-visible UI strings that live in Java code rather than in a BotDialoguePack YAML.
+# Localized copy for zh-CN. Keys missing here fall back to BotMessages.yaml (English).
+#
+# Placeholders are {0}, {1}, ... and are substituted positionally by BotMessages.get().
+# Keep the placeholder count/order identical to the English file.
+
+# ---------------------------------------------------------------------------
+# Party
+# ---------------------------------------------------------------------------
+party.declined: "{0} 拒绝了你的组队邀请。"
+party.join_failed: "{0} 无法加入你的队伍（队伍已满或已解散）——请重新邀请。"
+
+# ---------------------------------------------------------------------------
+# Option menus (labels shown in the hint balloon)
+#
+# IMPORTANT: these labels are display-only. The keywords a player can type live in
+# BotMessages.keywords() and are seeded from the ENGLISH labels plus the localized ones
+# below, so a player may answer with either language. Keep these short: the hint balloon
+# renders one option per line and long lines get clipped by the client.
+# ---------------------------------------------------------------------------
+menu.training_solo.training: "练得怎么样？"
+menu.training_solo.party: "要组队吗？"
+menu.training_solo.goodbye: "再见"
+
+menu.training_party.training: "练得怎么样？"
+menu.training_party.follow: "跟我来！"
+menu.training_party.goodbye: "再见"
+
+menu.follower.train: "在这儿陪我练！"
+menu.follower.nevermind: "没事了"
+
+menu.social.whatsup: "最近咋样？"
+menu.social.interesting: "有啥新鲜事？"
+menu.social.rumors: "有啥传闻？"
+menu.social.teamup: "要组队吗？"
+menu.social.goodbye: "再见"
+
+# Extra typeable aliases for the social menu. The English keywords and the localized label text
+# are matched too; these cover the phrasings a Chinese-speaking player actually types.
+menu.social.whatsup.keywords:
+  - ["咋样", "怎么样", "近况", "在干嘛", "干嘛呢"]
+menu.social.interesting.keywords:
+  - ["新鲜事", "有意思", "八卦"]
+menu.social.rumors.keywords:
+  - ["传闻", "听说", "小道消息"]
+menu.social.teamup.keywords:
+  - ["组队", "一起打", "带我", "上车"]
+menu.social.goodbye.keywords:
+  - ["再见", "拜拜", "走了", "溜了"]
+
+menu.yesno.yes: "是"
+menu.yesno.no: "不"
+
+menu.tutorial.yes: "是"
+menu.tutorial.no: "不"
+
+menu.gamezone.yes: "是"
+menu.gamezone.no: "不"
+
+menu.dice.cho: "押 Cho（双）"
+menu.dice.han: "押 Han（单）"
+
+menu.blackjack.join: "加入"
+menu.blackjack.stand: "停牌"
+menu.blackjack.hit: " - 要牌 -"
+
+# ---------------------------------------------------------------------------
+# Trade
+# ---------------------------------------------------------------------------
+trade.nothing_to_sell: "我这儿暂时没东西"
+trade.good_to_go: "交易没问题，可以了！"
+trade.timed_out: "超时了！"
+trade.meso_offer: "给你 {0} 金币换你的东西！"
+trade.nothing_for_sale: "我现在没什么要卖的，抱歉"
+trade.here_is_what_i_have: "我这儿就这些，你看看！"
+trade.declined: "算了不用了。再见。"
+trade.why_decline: "你为什么拒绝呀？"
+trade.thank_you: "谢谢！"
+# 中文语序与英文不同（数量词位置、连接词），所以用整句模板而非词片段拼接。
+trade.wants_prefix: "我想要 "
+trade.wants_connective: " 还有 "
+trade.wants_separator: "、"
+trade.wants_quantity: "{0} 个 {1}"
+trade.wants_nothing: "随便什么都行"
+
+# ---------------------------------------------------------------------------
+# Tutorial bot
+# ---------------------------------------------------------------------------
+tutorial.selected_item: "你选了 {0}！拿去用吧！"
+tutorial.type_name_correctly: "名字打对了吗？"
+tutorial.gifts_later: "没关系，礼物下次还给你留着。"
+tutorial.talk_again: "准备好了再来找我。"
+tutorial.trade_intro: "这些好东西送你起步用！"
+tutorial.trade_summary: "10亿金币、药水、卷轴、飞镖和装备。全是你的！"
+
+# ---------------------------------------------------------------------------
+# Social bot
+# ---------------------------------------------------------------------------
+social.busy: "他好像正忙着……"
+
+# ---------------------------------------------------------------------------
+# Blackjack
+# ---------------------------------------------------------------------------
+blackjack.waiting_for_players: "等玩家上桌……"
+blackjack.place_bets: "请下注！"
+blackjack.bets_closed: "封注了。开始吧。"
+blackjack.my_card: "我的牌：{0}。"
+blackjack.my_turn: "该我了。"
+blackjack.bust: "爆了。我输了。"
+blackjack.again: "再来一局。"
+blackjack.no_bet_for: "没检测到下注：{0}"
+blackjack.stole_bet: "玩家把赌注拿回去了。"
+blackjack.left_table: "{0} 离开了。自动停牌。"
+blackjack.left_map: "{0} 离开地图了。"
+blackjack.no_response: "{0} 没有回应。自动停牌。"
+blackjack.make_decision: "{0}，请做个决定"
+blackjack.joined_table: "{0} 上桌了。"
+blackjack.already_at_table: "你已经在桌上了。"
+blackjack.you_joined: "你已加入 {0} 的 21 点牌桌，下一局开始。"
+blackjack.table_full: "牌桌满了。"
+blackjack.casino_defame: "【蘑菇赌场】你把赌注拿回去了。蘑菇赌场扣除了你的人气。"
+blackjack.bet_announce: "{0} 押注 {1}！"
+
+# ---------------------------------------------------------------------------
+# Dice
+# ---------------------------------------------------------------------------
+dice.place_bets: "请下注！"
+dice.no_bet: "没检测到下注。请下注！"
+dice.stole_bet: "玩家把赌注拿回去了。游戏结束。"
+dice.result: "结果：[{0}] [{1}] —— {2}"
+dice.result_han: "Han（单）"
+dice.result_cho: "Cho（双）"
+dice.place_bets_when_ready: "准备好了就请下注！"
+dice.select_han_cho: "请选择 Han 或 Cho！"
+dice.casino_defame: "【蘑菇赌场】你把赌注拿回去了。蘑菇赌场扣除了你的人气。"
+dice.bet_announce: "{0} 押注 {1}！"
+# 玩家下注时输入的关键字。Han/Cho 是游戏专有名词，结果行里保留原文，但这里也接受中文说法，
+# 让玩家能照着菜单上显示的文字输入。
+dice.roll: "掷出 [{0}] [{1}]"
+dice.keyword_bet: "下注"
+dice.keyword_han: "单"
+dice.keyword_cho: "双"
+
+# ---------------------------------------------------------------------------
+# Gacha
+# ---------------------------------------------------------------------------
+gacha.position_set: "位置已设定！"
+gacha.wow: "哇！{0}"
+gacha.lucky: "运气不错 {0}！"
+gacha.nice_scroll: "卷轴不错 {0}！"
+gacha.unlucky: "哎呀……手气差了 D:"
+gacha.congrats: "诶恭喜 {0}！"
+
+# ---------------------------------------------------------------------------
+# Drop game
+# ---------------------------------------------------------------------------
+dropgame.busy: "正在和 {0} 玩！这局结束后再来。"
+dropgame.rules: "掉落游戏！中级：1000万 / 精英：5000万"
+dropgame.put_mesos: "把金币放进来然后确认！"
+dropgame.trade_cancelled: "交易已取消。"
+dropgame.too_slow: "太慢了！交易超时。"
+dropgame.wrong_amount: "金额不对！只能是 1000万 或 5000万。"
+dropgame.tier_locked: "{0} 档位锁定！"
+dropgame.loot_pool_error: "战利品表出错。退款并重置。"
+dropgame.invite_failed: "组队邀请发不出去。重置。"
+dropgame.player_left: "玩家离开地图了。"
+dropgame.invite_timeout: "组队邀请超时——金币没收。下局别浪费我时间！"
+
+# ---------------------------------------------------------------------------
+# Game zone host
+# ---------------------------------------------------------------------------
+gamezone.talk_again: "准备好了再来找我。"
+gamezone.serve_drink: "来一杯{0}，马上就好！"
+gamezone.no_such_drink: "嗯，我这儿没有。再试试！"
+gamezone.drink.coke: "可乐"
+gamezone.drink.water: "水"
+gamezone.drink.elixir: "万能药水"
+
+# ---------------------------------------------------------------------------
+# Casino (shared by Blackjack and Dice)
+# ---------------------------------------------------------------------------
+# 下注播报，由 BotLogic.announceBetString() 组装。其中的物品名来自游戏数据，由服务端本地化，
+# 这里只提供拼接文本。
+casino.bet_prefix: "{0} 的赌注："
+casino.bet_entry: "{0} 个 {1}"
+casino.bet_separator: "、"
+
+# ---------------------------------------------------------------------------
+# OPQ
+# ---------------------------------------------------------------------------
+opq.cloud_pieces: "云碎片：{0}"
+opq.dropping_clouds: "丢下 {0} 块云片！"
+# 中文没有复数变化，所以这里留空。
+opq.cloud_plural: ""
+opq.taking_box: "我去开第{0}个箱子！"
+opq.got_record: "拿到唱片了！"
+opq.dropping_record: "把我的唱片丢下来！"
+opq.box_ordinal.1: "1"
+opq.box_ordinal.2: "2"
+opq.box_ordinal.3: "3"
+opq.box_ordinal.4: "4"
+opq.box_ordinal.5: "5"
+opq.box_ordinal.6: "6"
+opq.box_ordinal.7: "7"
+
+# ---------------------------------------------------------------------------
+# Training bot chalkboard (shown while the bot is on a break)
+# ---------------------------------------------------------------------------
+training.break_sign: "马上回来"

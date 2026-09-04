@@ -13,6 +13,7 @@ import soloMapling.ArtificialPlayer.BotMessagingSystem.MessageQueue;
 import soloMapling.ArtificialPlayer.BotSM;
 import soloMapling.server.ExecutorServiceManager;
 import soloMapling.server.MethodScheduler;
+import soloMapling.Environment.BotMessages;
 
 import java.awt.*;
 import java.util.ArrayList;
@@ -131,7 +132,7 @@ public class BlackjackDealerBot extends BotSM {
         if (firstTick) {
             table.resetForNewRound();
             if (!table.hasEnoughPlayers()) {
-                SocialCommands.BotChatbubble(getChr(), "Waiting for Players to join table..");
+                SocialCommands.BotChatbubble(getChr(), BotMessages.get("blackjack.waiting_for_players"));
             }
         }
         if (table.hasEnoughPlayers()) {
@@ -144,7 +145,7 @@ public class BlackjackDealerBot extends BotSM {
     private void handleBetting() {
         if (bettingDeadline == 0) {
             dprint("BETTING: requesting bets from " + (table.getPlayerCount() - 1) + " player(s)");
-            SocialCommands.BotChatbubble(getChr(), "Please Place your Bets!");
+            SocialCommands.BotChatbubble(getChr(), BotMessages.get("blackjack.place_bets"));
             triggerArtificialPlayerBets();
             bettingDeadline = System.currentTimeMillis() + 10_000;
             return;
@@ -169,7 +170,7 @@ public class BlackjackDealerBot extends BotSM {
         }
 
         if (table.hasAtLeastOneBet() && table.getWaitCount() > 1) {
-            SocialCommands.BotChatbubble(getChr(), "All bets are closed. Let's Begin.");
+            SocialCommands.BotChatbubble(getChr(), BotMessages.get("blackjack.bets_closed"));
             table.setPhase(BlackjackTable.Phase.DEALING);
         } else {
             table.setPhase(BlackjackTable.Phase.BETTING);
@@ -179,7 +180,7 @@ public class BlackjackDealerBot extends BotSM {
     private void handleDealing() {
         dprint("DEALING: dealing initial cards");
         dealCardsToAllPlayers();
-        SocialCommands.BotSpeak(getChr(), "My card: " + table.getDealer().getHandValue() + ".");
+        SocialCommands.BotSpeak(getChr(), BotMessages.get("blackjack.my_card", table.getDealer().getHandValue()));
         table.setPhase(BlackjackTable.Phase.PLAYER_TURNS);
     }
 
@@ -314,7 +315,7 @@ public class BlackjackDealerBot extends BotSM {
     // (each card changes the next decision), so the dealing rhythm blocks this
     // bot's own tick - a chain can't express it and nothing else is held up.
     private void handleDealerTurn() {
-        SocialCommands.BotSpeak(getChr(), "My Turn.");
+        SocialCommands.BotSpeak(getChr(), BotMessages.get("blackjack.my_turn"));
         BlackjackPlayer dealer = table.getDealer();
 
         int handValue = dealer.getHandValue();
@@ -329,7 +330,7 @@ public class BlackjackDealerBot extends BotSM {
 
         SocialCommands.BotSpeak(getChr(), handValue + ".");
         if (handValue > 21) {
-            SocialCommands.BotSpeak(getChr(), "Too many. I Bust.");
+            SocialCommands.BotSpeak(getChr(), BotMessages.get("blackjack.bust"));
             triggerDealerReaction("DealerLoss");
         } else if (handValue == 21) {
             SocialCommands.BotSpeak(getChr(), "21 for me :P");
@@ -426,7 +427,7 @@ public class BlackjackDealerBot extends BotSM {
 
         // All payouts settled — now safe to clean up cards and start the next round.
         cleanupAllCards();
-        SocialCommands.BotChatbubble(getChr(), "Let's go again.");
+        SocialCommands.BotChatbubble(getChr(), BotMessages.get("blackjack.again"));
         payoutsIssued = false;
         table.setPhase(BlackjackTable.Phase.WAITING);
     }
@@ -501,7 +502,7 @@ public class BlackjackDealerBot extends BotSM {
             }
             Character chr = player.getCharacter();
             if (chr.getMapId() != getChr().getMapId()) {
-                SocialCommands.BotSpeak(getChr(), chr.getName() + " has left the map.");
+                SocialCommands.BotSpeak(getChr(), BotMessages.get("blackjack.left_map", chr.getName()));
                 toKick.add(chr);
                 continue;
             }
@@ -512,7 +513,7 @@ public class BlackjackDealerBot extends BotSM {
                     + " found " + items.size() + " stamp item(s)");
 
             if (items.isEmpty()) {
-                SocialCommands.BotChatbubble(getChr(), "No Bet detected for: " + chr.getName());
+                SocialCommands.BotChatbubble(getChr(), BotMessages.get("blackjack.no_bet_for", chr.getName()));
                 if (player.skipHand()) {
                     dprint("BET_SCAN: kicking " + chr.getName() + " (3 skips)");
                     toKick.add(chr);
@@ -607,8 +608,8 @@ public class BlackjackDealerBot extends BotSM {
 
         // Fame penalty for stealing bets
         chr.setFame(chr.getFame() - 10);
-        chr.dropMessage(5, "[Mushroom Casino] You have stolen your bets. You have been defamed by the Mushroom Casino.");
-        SocialCommands.BotSpeak(getChr(), "Player has stolen back his bet.");
+        chr.dropMessage(5, BotMessages.get("blackjack.casino_defame"));
+        SocialCommands.BotSpeak(getChr(), BotMessages.get("blackjack.stole_bet"));
         lootPlayerCards(player);
         return chr;
     }
@@ -723,7 +724,7 @@ public class BlackjackDealerBot extends BotSM {
 
     private void waitForResponse(BlackjackPlayer player) {
         if (!isBot(player.getCharacter()) && player.getCharacter().getMapId() != getChr().getMapId()) {
-            SocialCommands.BotSpeak(getChr(), player.getName() + " has left. Automatic Stand.");
+            SocialCommands.BotSpeak(getChr(), BotMessages.get("blackjack.left_table", player.getName()));
             player.setResponseStatus("RESPONDED");
             player.setStatus(BlackjackPlayer.PlayerStatus.STAND);
             return;
@@ -733,12 +734,12 @@ public class BlackjackDealerBot extends BotSM {
 
         if (System.currentTimeMillis() >= endTime) {
             if (finalDecision) {
-                SocialCommands.BotSpeak(getChr(), "No response from " + player.getName() + ". Automatic Stand.");
+                SocialCommands.BotSpeak(getChr(), BotMessages.get("blackjack.no_response", player.getName()));
                 player.setResponseStatus("RESPONDED");
                 player.setStatus(BlackjackPlayer.PlayerStatus.STAND);
                 finalDecision = false;
             } else {
-                SocialCommands.BotSpeak(getChr(), "Please Make a decision " + player.getName());
+                SocialCommands.BotSpeak(getChr(), BotMessages.get("blackjack.make_decision", player.getName()));
                 if (!isBot(player.getCharacter())) {
                     showPlayerActionHint(player.getCharacter());
                 }
@@ -768,10 +769,10 @@ public class BlackjackDealerBot extends BotSM {
                 return;
             }
             String content = message.getContent().toLowerCase();
-            if (content.contains("stand") || content.contains("stay")) {
+            if (isStand(content)) {
                 player.setResponseStatus("RESPONDED");
                 player.setStatus(BlackjackPlayer.PlayerStatus.STAND);
-            } else if (content.contains("hit")) {
+            } else if (isHit(content)) {
                 player.setResponseStatus("RESPONDED");
                 player.setStatus(BlackjackPlayer.PlayerStatus.ACTIVE); // ACTIVE = HIT
             }
@@ -791,11 +792,11 @@ public class BlackjackDealerBot extends BotSM {
                 return;
             }
             String content = message.getContent().toLowerCase();
-            if (content.contains("join")) {
+            if (isJoin(content)) {
                 Character sender = message.getSender();
 
                 if (isAlreadyAtTable(sender)) {
-                    sender.yellowMessage("You are already at the table.");
+                    sender.yellowMessage(BotMessages.get("blackjack.already_at_table"));
                     return;
                 }
 
@@ -806,10 +807,10 @@ public class BlackjackDealerBot extends BotSM {
                 if (added) {
                     getInteractors().removeInquirer(sender);
                     getInteractors().setRespondant(sender);
-                    SocialCommands.BotChatbubble(getChr(), sender.getName() + " has joined the table.");
-                    sender.yellowMessage("You have joined " + getChr().getName() + "'s Blackjack table. You will be in the next round.");
+                    SocialCommands.BotChatbubble(getChr(), BotMessages.get("blackjack.joined_table", sender.getName()));
+                    sender.yellowMessage(BotMessages.get("blackjack.you_joined", getChr().getName()));
                 } else {
-                    sender.yellowMessage("Table is full.");
+                    sender.yellowMessage(BotMessages.get("blackjack.table_full"));
                 }
             }
         } catch (Exception e) {
@@ -831,12 +832,32 @@ public class BlackjackDealerBot extends BotSM {
     @Override
     public void displayCommands(Character chr) {
         // Inquiry hint — shown when a player calls the dealer by name.
-        SocialCommands.displayPlayerChatCommands(chr, List.of("Join"));
+        SocialCommands.displayPlayerChatCommands(chr,
+                BotMessages.labels("menu.blackjack", "join"));
     }
 
     // Shown to a real player when it becomes their turn.
     private void showPlayerActionHint(Character chr) {
-        SocialCommands.displayPlayerChatCommands(chr, List.of("Stand", " - Hit -"));
+        SocialCommands.displayPlayerChatCommands(chr,
+                BotMessages.labels("menu.blackjack", "stand", "hit"));
+    }
+
+    // Stand/hit answers. The hint may display 停牌/要牌, so the localized label text is accepted
+    // alongside the English words - a player should be able to answer in whichever language the
+    // menu is showing them (or in English regardless).
+    private boolean isStand(String content) {
+        return content.contains("stand") || content.contains("stay")
+                || content.contains(BotMessages.get("menu.blackjack.stand"));
+    }
+
+    private boolean isHit(String content) {
+        return content.contains("hit")
+                || content.contains(BotMessages.get("menu.blackjack.hit").replace(" ", "").replace("-", ""));
+    }
+
+    private boolean isJoin(String content) {
+        return content.contains("join")
+                || content.contains(BotMessages.get("menu.blackjack.join"));
     }
 
     // TODO: BotSwapItemAtLocation — not yet available in new architecture.

@@ -13,6 +13,7 @@ import soloMapling.ArtificialPlayer.BotPartySystem.BotPartyQueue;
 import soloMapling.ArtificialPlayer.BotPartySystem.BotRecruitManager;
 import soloMapling.ArtificialPlayer.GCMoveSystem.GCMovement;
 import soloMapling.server.BotTickService;
+import soloMapling.Environment.BotMessages;
 
 import java.util.List;
 
@@ -48,9 +49,17 @@ public class FollowerBot extends BotSM {
     private volatile boolean pausedForTrade = false;
 
     // NOTE: no "here" keyword - "there" contains "here", so a casual "hi there" would trigger it.
+    // Labels are localized; the English keywords stay authoritative and the localized label text
+    // is appended to them (see BotMessages.keywords), so either language answers the menu.
+    private static final String[] MENU_SUFFIXES = {"train", "nevermind"};
+    private static final String[][] MENU_KEYWORDS = {
+            {"train", "grind", "station"},
+            {"nevermind", "bye", "nah", "nope"}
+    };
+
     private final BotOptionMenu menu = new BotOptionMenu(this,
-            List.of("Train here with me!", "Nevermind"),
-            List.of(List.of("train", "grind", "station"), List.of("nevermind", "bye", "nah", "nope")),
+            BotMessages.labels("menu.follower", MENU_SUFFIXES),
+            BotMessages.keywords("menu.follower", MENU_SUFFIXES, MENU_KEYWORDS),
             this::onMenuSelect);
 
     public FollowerBot(Character character) {

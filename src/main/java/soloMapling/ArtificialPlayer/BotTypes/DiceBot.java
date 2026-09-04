@@ -11,6 +11,7 @@ import soloMapling.ArtificialPlayer.BotMessagingSystem.MessageQueue;
 import org.gms.server.maps.MapItem;
 import org.gms.server.maps.MapObject;
 
+import soloMapling.Environment.BotMessages;
 import soloMapling.server.MethodScheduler;
 
 import java.awt.*;
@@ -122,12 +123,12 @@ public class DiceBot extends BotSM {
     }
 
     private void startGame() {
-        SocialCommands.BotChatbubble(getChr(), "Please Place your bets!");
+        SocialCommands.BotChatbubble(getChr(), BotMessages.get("dice.place_bets"));
     }
 
     @Override
     public void displayCommands(Character chr) {
-        List<String> hint = List.of("Bet Cho (even)", "Bet Han (odd)");
+        List<String> hint = BotMessages.labels("menu.dice", "cho", "han");
         SocialCommands.displayPlayerChatCommands(chr, hint);
     }
 
@@ -160,7 +161,7 @@ public class DiceBot extends BotSM {
     private boolean handleIfListIsEmpty(List<MapObject> items) {
         // Check if the list is empty
         if (items.isEmpty()) {
-            SocialCommands.BotSpeak(getChr(), "No Bet detected. Please Place your bets!");
+            SocialCommands.BotSpeak(getChr(), BotMessages.get("dice.no_bet"));
             startTime = System.currentTimeMillis(); // Give player more time to bet in case they mistype
             return true;
         }
@@ -229,8 +230,8 @@ public class DiceBot extends BotSM {
 
     private void handlePlayerStealsBets() {
         getInteractors().getRespondant().setFame(getInteractors().getRespondant().getFame() - 10);
-        getInteractors().getRespondant().dropMessage(5, "[Mushroom Casino] You have stolen your bets. You have been defamed by the Mushroom Casino.");
-        SocialCommands.BotSpeak(getChr(), "Player has stolen back his bet. Ceasing Game.");
+        getInteractors().getRespondant().dropMessage(5, BotMessages.get("dice.casino_defame"));
+        SocialCommands.BotSpeak(getChr(), BotMessages.get("dice.stole_bet"));
         state = BotState.FINISHED;
     }
 
@@ -250,7 +251,8 @@ public class DiceBot extends BotSM {
         int sum = rolls[0] + rolls[1];
         boolean isOdd = sum % 2 != 0;
         boolean playerWins = calculateIfPlayerWins(isOdd);
-        SocialCommands.BotSpeak(getChr(), "Result: [" + rolls[0] + "] [" + rolls[1] + "] - " + (isOdd ? "Han" : "Cho")); //  // playerWins ? "Win" : "Lose"
+        SocialCommands.BotSpeak(getChr(), BotMessages.get("dice.result", rolls[0], rolls[1],
+                isOdd ? BotMessages.get("dice.result_han") : BotMessages.get("dice.result_cho")));
         SocialCommands.BotEmote(getChr(), 2);
 
         if (playerWins) {
@@ -282,7 +284,7 @@ public class DiceBot extends BotSM {
             if (!diceBotState.equals(targetState) && System.currentTimeMillis() < endTime) {
                 processMessages();
             } else {
-                SocialCommands.BotSpeak(getChr(), "Please place your bets when you are ready!");
+                SocialCommands.BotSpeak(getChr(), BotMessages.get("dice.place_bets_when_ready"));
                 state = BotState.FINISHED;
                 resetDiceBotState();
             }
@@ -295,13 +297,15 @@ public class DiceBot extends BotSM {
         }
 
         String content = message.getContent().toLowerCase();
-        if (!content.contains("bet")) {
+        // "bet" is the gate; the cho/han word decides the side. Both the English words and the
+        // localized ones are accepted, since the menu shows the localized text.
+        if (!content.contains("bet") && !content.contains(BotMessages.get("dice.keyword_bet"))) {
             return;
         }
 
-        if (content.contains("han")) {
+        if (content.contains("han") || content.contains(BotMessages.get("dice.keyword_han"))) {
             processBet(BetType.HAN, message);
-        } else if (content.contains("cho")) {
+        } else if (content.contains("cho") || content.contains(BotMessages.get("dice.keyword_cho"))) {
             processBet(BetType.CHO, message);
         } else {
             handleInvalidBet(message);
@@ -311,15 +315,16 @@ public class DiceBot extends BotSM {
     private void processBet(BetType betType, ChatMessage message) {
         setDiceBotState(DiceBotState.BET);
         //expirePlayerChatCommands(getRespondant());
-        String announcement = String.format("%s bets on %s!",
-                message.getSender().getName(),
-                betType.name());
-        SocialCommands.BotSpeak(getChr(), announcement);
+        String side = betType == BetType.HAN
+                ? BotMessages.get("dice.result_han")
+                : BotMessages.get("dice.result_cho");
+        SocialCommands.BotSpeak(getChr(),
+                BotMessages.get("dice.bet_announce", message.getSender().getName(), side));
         setBet(betType);
     }
 
     private void handleInvalidBet(ChatMessage message) {
-        SocialCommands.BotSpeak(getChr(), "Please Select Han or Cho!");
+        SocialCommands.BotSpeak(getChr(), BotMessages.get("dice.select_han_cho"));
         startTime = System.currentTimeMillis();
         setBet(BetType.NONE);
     }

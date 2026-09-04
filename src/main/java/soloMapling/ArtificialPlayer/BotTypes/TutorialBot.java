@@ -19,6 +19,8 @@ import soloMapling.ArtificialPlayer.BotSM;
 import soloMapling.ArtificialPlayer.BotTradeSystem.BotTradeCommands;
 import soloMapling.server.BotTiming;
 import soloMapling.server.NXCodeManager;
+import soloMapling.Environment.BotMessages;
+import soloMapling.Environment.YesNo;
 
 import java.awt.*;
 import java.util.ArrayList;
@@ -269,16 +271,20 @@ public class TutorialBot extends BotSM {
         }
     }
 
+    private static List<String> yesNoLabels() {
+        return YesNo.labels();
+    }
+
     private void handleInquiryResponse(String content) {
-        if (content.contains("yes")) {
+        if (YesNo.isYes(content)) {
             runTutorial = true;
-        } else if (content.contains("no")) {
+        } else if (YesNo.isNo(content)) {
             runTutorial = false;
         }
     }
 
     private void handleSelectedHat(String itemName, Integer itemIdSelected) {
-        BotSpeak(getChr(), String.format("You've selected %s! Enjoy it!", itemName));
+        BotSpeak(getChr(), BotMessages.get("tutorial.selected_item", itemName));
         tutPicked = true;
         int[] leftoverHats = Arrays.stream(items).filter(item -> item != itemIdSelected).toArray();
         BotTiming.after(2500, () -> lootLeftoverHats(leftoverHats));
@@ -296,7 +302,7 @@ public class TutorialBot extends BotSM {
             }
         }
         // If no matching item is found
-        BotSpeak(getChr(), "Did you type the name in correctly?");
+        BotSpeak(getChr(), BotMessages.get("tutorial.type_name_correctly"));
         BotEmote(getChr(), 6);
     }
 
@@ -319,16 +325,16 @@ public class TutorialBot extends BotSM {
     }
 
     private void handleAdminResponse(String content) {
-        if (content.contains("yes")) {
+        if (YesNo.isYes(content)) {
             wantsAdmin = true;
-        } else if (content.contains("no")) {
+        } else if (YesNo.isNo(content)) {
             wantsAdmin = false;
         }
     }
 
     private void askAdmin() {
         getDialogueHandler().executeBotDialogue("AskAdmin", TutorialBot.this);
-        hint = List.of("Yes", "No");
+        hint = yesNoLabels();
         displayCommands(getInteractors().getRespondant());
         startTime = System.currentTimeMillis();
         endTime = startTime + (30 * 1000);
@@ -387,7 +393,7 @@ public class TutorialBot extends BotSM {
         }
         if (System.currentTimeMillis() > endTime) {
             BotTradeCommands.cancelTrade(getChr());
-            BotSpeak(getChr(), "No worries, the gifts will be waiting for you next time.");
+            BotSpeak(getChr(), BotMessages.get("tutorial.gifts_later"));
             setTutorialBotState(TutorialBotState.TUTORIAL_1);
             return false;
         }
@@ -402,7 +408,7 @@ public class TutorialBot extends BotSM {
         BotTiming.chain()
                 .stopUnless(() -> getChr().getTrade() != null)
                 .pause(1000)
-                .run(() -> BotTradeCommands.writeTradeChat(getChr(), "Here are some goodies to get you started!"))
+                .run(() -> BotTradeCommands.writeTradeChat(getChr(), BotMessages.get("tutorial.trade_intro")))
                 .pause(1500)
                 .run(() -> BotTradeCommands.setMeso(getChr(), TRADE_MESOS))
                 .pause(500)
@@ -418,7 +424,7 @@ public class TutorialBot extends BotSM {
                 .pause(300)
                 .run(() -> BotTradeCommands.addCleanEquipToTrade(getChr(), robeId, 6))
                 .pause(500)
-                .run(() -> BotTradeCommands.writeTradeChat(getChr(), "1B mesos, potions, scrolls, stars, and gear. All yours!"))
+                .run(() -> BotTradeCommands.writeTradeChat(getChr(), BotMessages.get("tutorial.trade_summary")))
                 .pause(1000)
                 .run(() -> BotTradeCommands.confirmTrade(getChr()))
                 .start();
@@ -433,7 +439,7 @@ public class TutorialBot extends BotSM {
 
     private void inquirePlayer() {
         getDialogueHandler().executeBotDialogue("Inquiry", TutorialBot.this);
-        hint = List.of("Yes", "No");
+        hint = yesNoLabels();
         displayCommands(getInteractors().getRespondant());
         startTime = System.currentTimeMillis();
         endTime = startTime + (20 * 1000);
@@ -443,7 +449,7 @@ public class TutorialBot extends BotSM {
         if (System.currentTimeMillis() < endTime) {
             processMessages();
         } else {
-            SocialCommands.BotSpeak(getChr(), "Talk to me again if you're ready.");
+            SocialCommands.BotSpeak(getChr(), BotMessages.get("tutorial.talk_again"));
             state = BotState.FINISHED;
             resetTutorialBotState();
         }

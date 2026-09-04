@@ -14,6 +14,7 @@ import soloMapling.ArtificialPlayer.BotMovementSystem.MovementCommands;
 import soloMapling.ArtificialPlayer.BotPartySystem.BotPartyLogic;
 import soloMapling.ArtificialPlayer.BotSM;
 import soloMapling.ArtificialPlayer.BotTypes.OPQ.OPQSharedContext.OPQPhase;
+import soloMapling.Environment.BotMessages;
 import soloMapling.Environment.EnvironmentManager;
 import soloMapling.Environment.PlatformPlacement;
 import soloMapling.MapVFX.CustomReactor;
@@ -485,7 +486,7 @@ public class OPQBot extends BotSM {
         if (!found.isEmpty()) {
             DropCommands.lootItemListOnFloor(getChr(), found);
             cloudPiecesLooted += 1;
-            SocialCommands.BotChatbubble(getChr(), "Cloud Pieces: " + cloudPiecesLooted);
+            SocialCommands.BotChatbubble(getChr(), BotMessages.get("opq.cloud_pieces", cloudPiecesLooted));
         }
         waitFor(800); // loot beat before NAVIGATE ticks
 
@@ -506,7 +507,8 @@ public class OPQBot extends BotSM {
         int cloudCount = cloudPiecesLooted;
         debugLogf("handleStage1DropItems: cloudCount=" + cloudCount + " pos=" + getChr().getPosition());
         if (cloudCount > 0) {
-            SocialCommands.BotSpeak(getChr(), "Dropping " + cloudCount + " cloud" + (cloudCount == 1 ? "" : "s") + "!");
+            SocialCommands.BotSpeak(getChr(), BotMessages.get("opq.dropping_clouds", cloudCount,
+                    cloudCount == 1 ? "" : BotMessages.get("opq.cloud_plural")));
             BotTiming.after(400, () ->
                     DropCommands.botThrowItemQty(getChr(), OPQConstants.CLOUD_PIECE, cloudCount, getChr().getPosition()));
             waitFor(800); // hold WAIT until the throw lands
@@ -610,7 +612,7 @@ public class OPQBot extends BotSM {
 
         // Chat which box we're going for (ordinal based on sorted position right-to-left)
         String ordinal = orchestrator.getBoxOrdinal(reactorOid);
-        SocialCommands.BotSpeak(getChr(), "I'll get the " + ordinal + " box!");
+        SocialCommands.BotSpeak(getChr(), BotMessages.get("opq.taking_box", localizeOrdinal(ordinal)));
 
         Point reactorPos = reactor.getPosition();
         double dx = Math.abs(getChr().getPosition().getX() - reactorPos.getX());
@@ -708,7 +710,7 @@ public class OPQBot extends BotSM {
         debugLogf("handleStage2Loot: lootedRecordItemId=" + lootedRecordItemId
                 + " floorHits=" + found.size());
         if (lootedRecordItemId > 0) {
-            SocialCommands.BotChatbubble(getChr(), "Got a record!");
+            SocialCommands.BotChatbubble(getChr(), BotMessages.get("opq.got_record"));
         }
         waitFor(800); // loot beat before RETURN ticks
 
@@ -716,6 +718,20 @@ public class OPQBot extends BotSM {
         sharedContext.putBoxAssignment(getChr().getId(), null);
 
         transitionTo(OPQBotState.STAGE_2_RETURN, "loot pass complete, returning to music box");
+    }
+
+    /**
+     * Box ordinals reach us as English words ("1st".."7th") because OPQConstants doubles as
+     * debug-log output. For the spoken line, map them onto the localized ordinals so a Chinese
+     * client doesn't hear "我去开第1st个箱子". Unrecognized values pass through unchanged.
+     */
+    private static String localizeOrdinal(String englishOrdinal) {
+        for (int i = 0; i < OPQConstants.STAGE_2_BOX_ORDINALS.length; i++) {
+            if (OPQConstants.STAGE_2_BOX_ORDINALS[i].equals(englishOrdinal)) {
+                return BotMessages.get("opq.box_ordinal." + (i + 1));
+            }
+        }
+        return englishOrdinal;
     }
 
     private void handleStage2Return() {
@@ -727,7 +743,7 @@ public class OPQBot extends BotSM {
 
     private void handleStage2DropItems() {
         if (lootedRecordItemId > 0) {
-            SocialCommands.BotSpeak(getChr(), "Dropping my record!");
+            SocialCommands.BotSpeak(getChr(), BotMessages.get("opq.dropping_record"));
             int recordId = lootedRecordItemId;
             BotTiming.after(400, () ->
                     DropCommands.botThrowItem(getChr(), recordId, getChr().getPosition()));

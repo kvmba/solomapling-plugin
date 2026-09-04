@@ -12,6 +12,8 @@ import org.gms.net.server.world.World;
 import org.gms.server.maps.MapleMap;
 import org.gms.util.PacketCreator;
 
+import soloMapling.Environment.BotMessages;
+
 import static soloMapling.DebugUtilities.debugprint;
 
 public class BotPartyCommands {
@@ -94,8 +96,8 @@ public class BotPartyCommands {
                 if (!joined && inviter != null) {
                     // joinParty fails silently to the inviter (party disbanded / full /
                     // bot already partied) - tell them so a clean re-invite is obvious.
-                    inviter.sendPacket(PacketCreator.serverNotice(5, fakechar.getName()
-                            + " couldn't join your party (it was full or disbanded) - try inviting again."));
+                    inviter.sendPacket(PacketCreator.serverNotice(5,
+                            BotMessages.get("party.join_failed", fakechar.getName())));
                 }
                 debugprint("botAcceptPartyInvite: joined=" + joined + " partyId=" + partyId);
                 return joined;
@@ -120,7 +122,8 @@ public class BotPartyCommands {
         // would be misleading - clear the queue entry either way.
         Character inviter = entry.getInviter();
         if (inviter != null && res.result == InviteResultType.DENIED) {
-            inviter.sendPacket(PacketCreator.serverNotice(5, fakechar.getName() + " has declined your party request."));
+            inviter.sendPacket(PacketCreator.serverNotice(5,
+                    BotMessages.get("party.declined", fakechar.getName())));
         }
         debugprint("botRejectPartyInvite: result=" + res.result + " inviter=" + (inviter == null ? "?" : inviter.getName()));
         return true;
