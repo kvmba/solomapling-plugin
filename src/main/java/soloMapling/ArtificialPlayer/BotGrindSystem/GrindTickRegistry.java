@@ -24,6 +24,13 @@ public final class GrindTickRegistry {
     private static final long FAILURE_LOG_INTERVAL_MS = 10_000L;
     public static final long TICK_MS = 250L;
 
+    // A sweep that overruns its own period makes the shared scheduler run it back-to-back:
+    // combat silently degrades from 4Hz to whatever the machine can sustain, with no record
+    // that it happened. Warn (rate-limited) so an over-budget sweep is diagnosable instead of
+    // showing up only as "bots feel sluggish".
+    private static final long OVERRUN_LOG_INTERVAL_MS = 30_000L;
+    private volatile long nextOverrunLogAt = 0L;
+
     @FunctionalInterface
     public interface Participant {
         void grindTick();
@@ -125,7 +132,32 @@ public final class GrindTickRegistry {
                 }
             }
         }
-        BotPerfStats.recordCombatSweep(
-                System.currentTimeMillis() - sweepStart, participants.size());
+        long elapsedMs = System.currentTimeMillis() - sweepStart;
+        BotPerfStats.recordCombatSweep(elapsedMs, participants.size());
+        if (elapsedMs > TICK_MS) {
+            logOverrun(elapsedMs, participants.size());
+        }
+    }
+
+    private void logOverrun(long elapsedMs, int count) {
+        if (!shouldWarnOverrun(System.currentTimeMillis())) {
+            return;
+        }
+        log.warn("Grind sweep overran its {}ms period: took {}ms for {} participant(s) - "
+                + "combat cadence is degraded; reduce grinder count or per-tick work",
+                TICK_MS, elapsedMs, count);
+    }
+
+    /*
+     * Rate-limit gate for the overrun warning: true at most once per
+     * OVERRUN_LOG_INTERVAL_MS. Driven by an explicit clock so a test can advance
+     * time - a sustained overrun would otherwise warn on every 250ms sweep.
+     */
+    boolean shouldWarnOverrun(long nowMs) {
+        if (nowMs < nextOverrunLogAt) {
+            return false;
+        }
+        nextOverrunLogAt = nowMs + OVERRUN_LOG_INTERVAL_MS;
+        return true;
     }
 }
