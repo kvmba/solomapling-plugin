@@ -21,7 +21,6 @@ import org.slf4j.LoggerFactory;
 import soloMapling.ArtificialPlayer.GCMoveSystem.GCMovement;
 import soloMapling.companion.CompanionRoster;
 import soloMapling.server.MethodScheduler;
-import soloMapling.server.SoloMaplingUtilities;
 import org.gms.util.PacketCreator;
 import org.gms.util.Randomizer;
 
@@ -180,19 +179,23 @@ public final class BotAttackEffects {
                         bot.getParty() == null ? -1 : bot.getParty().getId(),
                         expBefore, companionPartyExp(bot));
             }
-            // Captured at kill time: by the time a delayed task fires the bot may have warped,
-            // logged out or been despawned, and the mob is already removed from the map.
+            // Captured at kill time: by the time a delayed task fires the mob is already
+            // removed from the map, so the roll must not re-read live state off it.
             // Monster.map is never nulled, so a getMap() == null test would be dead code -
             // compare the bot's current map against the kill map instead.
-            final int botId = bot.getId();
             final int killMapId = map.getId();
             final Point deathPos = new Point(target.getPosition());
             final Runnable lootTask = () -> {
-                Character live = SoloMaplingUtilities.getChr(botId);
-                if (live == null || live.getMap() == null || live.getMapId() != killMapId) {
-                    return; // bot gone or changed map - no loot at the corpse
+                // Use the captured Character directly: re-looking it up by id would go
+                // through SoloMaplingUtilities.getChr, which is pinned to mainChannel
+                // (world 0 / channel 1). A bot living on any other channel would resolve
+                // to null, or to a different character with the same id, and silently
+                // lose the loot. Channel.removePlayer only drops the map entry, so this
+                // reference stays valid even if the bot is despawned meanwhile.
+                if (bot.getMap() == null || bot.getMapId() != killMapId) {
+                    return; // bot warped away or left - no loot at the corpse
                 }
-                dropMobLootAt(live, target, killChRate, killDropType, killNoDrops, deathPos);
+                dropMobLootAt(bot, target, killChRate, killDropType, killNoDrops, deathPos);
             };
 
             // Vanilla only staggers loot when use_spawn_loot_on_animation is on, landing it
