@@ -6,6 +6,7 @@ import org.gms.client.inventory.InventoryType;
 import org.gms.client.inventory.Item;
 import org.gms.client.status.MonsterStatus;
 import org.gms.client.status.MonsterStatusEffect;
+import org.gms.config.GameConfig;
 import org.gms.constants.inventory.ItemConstants;
 import org.gms.net.packet.Packet;
 import org.gms.net.server.world.World;
@@ -179,26 +180,31 @@ public final class BotAttackEffects {
                         bot.getParty() == null ? -1 : bot.getParty().getId(),
                         expBefore, companionPartyExp(bot));
             }
-            // Vanilla delays loot until partway through the die1 animation
-            // (use_spawn_loot_on_animation: 0.42 * die1, clamped to 1000..3000ms) so the
-            // pile appears as the mob finishes dying instead of the instant it dies.
-            int die1 = target.getAnimationTime("die1");   // reads WZ stats only - safe after death
-            long lootDelayMs = Math.min(Math.max((long) (0.42 * die1), 1000L), 3000L);
-
-            // Captured at kill time: by the time the task fires the bot may have warped,
+            // Captured at kill time: by the time a delayed task fires the bot may have warped,
             // logged out or been despawned, and the mob is already removed from the map.
             // Monster.map is never nulled, so a getMap() == null test would be dead code -
             // compare the bot's current map against the kill map instead.
             final int botId = bot.getId();
             final int killMapId = map.getId();
             final Point deathPos = new Point(target.getPosition());
-            MethodScheduler.runAfterDelay(() -> {
+            final Runnable lootTask = () -> {
                 Character live = SoloMaplingUtilities.getChr(botId);
                 if (live == null || live.getMap() == null || live.getMapId() != killMapId) {
                     return; // bot gone or changed map - no loot at the corpse
                 }
                 dropMobLootAt(live, target, killChRate, killDropType, killNoDrops, deathPos);
-            }, lootDelayMs);
+            };
+
+            // Vanilla only staggers loot when use_spawn_loot_on_animation is on, landing it
+            // 0.42 * die1 (clamped to 1000..3000ms) into the death animation. Honour the same
+            // flag so a server that turns it off gets instant bot loot, exactly like a player's.
+            if (GameConfig.getServerBoolean("use_spawn_loot_on_animation")) {
+                int die1 = target.getAnimationTime("die1");   // reads WZ stats only - safe after death
+                long lootDelayMs = Math.min(Math.max((long) (0.42 * die1), 1000L), 3000L);
+                MethodScheduler.runAfterDelay(lootTask, lootDelayMs);
+            } else {
+                lootTask.run();
+            }
             // No vacuum here: the dropped loot is collected organically by the bot itself - TrainingBot
             // walks over the pile and picks drops up one at a time (own + free-for-all), and any drop it
             // abandons expires via the normal map item lifetime. See TrainingBot loot handling + DropCommands.
@@ -339,10 +345,10 @@ public final class BotAttackEffects {
                     continue;
                 }
                 mesos = Math.max(1, (int) (mesos * mesoRate));   // vanilla floatToInt truncates
-                map.spawnMesoDrop(mesos, spreadPos(mobX, mobY, index), mob, bot, false, dropType);
+                map.spawnMesoDrop(mesos, spreadPos(mobX, mobY, dropType, index), mob, bot, false, dropType);
             } else {
                 map.spawnItemDrop(mob, bot, toItem(ii, de.itemId, de.Minimum, de.Maximum),
-                        spreadPos(mobX, mobY, index), dropType, false);
+                        spreadPos(mobX, mobY, dropType, index), dropType, false);
             }
         }
     }
@@ -364,15 +370,20 @@ public final class BotAttackEffects {
             }
             if (de.itemId != 0) {
                 map.spawnItemDrop(mob, bot, toItem(ii, de.itemId, de.Minimum, de.Maximum),
-                        spreadPos(mobX, mobY, index), dropType, false);
+                        spreadPos(mobX, mobY, dropType, index), dropType, false);
             }
         }
     }
 
-    /* The index-based horizontal fan-out vanilla uses (0, +25, -25, +50, -50 ... px). */
-    private static Point spreadPos(int mobX, int mobY, int[] index) {
+    /*
+     * The index-based horizontal fan-out (0, +25, -25, +50, -50 ... px). Explosive-reward
+     * mobs (droptype 3) spread at 40px instead of 25px, matching both vanilla branches in
+     * dropItemsFromMonsterOnMap / dropGlobalItemsFromMonsterOnMap.
+     */
+    private static Point spreadPos(int mobX, int mobY, byte dropType, int[] index) {
+        int step = (dropType == 3) ? 40 : 25;
         int d = index[0]++;
-        return new Point(mobX + ((d % 2 == 0) ? (25 * ((d + 1) / 2)) : -(25 * (d / 2))), mobY);
+        return new Point(mobX + ((d % 2 == 0) ? (step * ((d + 1) / 2)) : -(step * (d / 2))), mobY);
     }
 
     private static Item toItem(ItemInformationProvider ii, int itemId, int min, int max) {
