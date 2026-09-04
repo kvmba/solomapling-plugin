@@ -7,6 +7,7 @@ import org.gms.server.ItemInformationProvider;
 import org.gms.server.maps.PlayerShopItem;
 import soloMapling.Environment.LocalizedResources;
 import soloMapling.Environment.PluginResources;
+import soloMapling.Environment.SoloMaplingLanguageConfig;
 import soloMapling.itemPool.ScrolledItemComparator;
 
 import java.io.BufferedReader;
@@ -321,6 +322,11 @@ public class FMShopDescGen {
 
     private static List<String> namePool;
     private static int namePoolIndex = 0;
+    // Language the pool was built for. Not a hot-reload feature: the language is set once during
+    // onLoad and never changes. This only guards against a pool built too early - any call that
+    // happens to fire before SoloMaplingLanguageConfig.configure() would otherwise pin English
+    // names for the whole server lifetime, with nothing to indicate why.
+    private static String namePoolLanguage;
     private static final List<String> assignedCharacterNames = new ArrayList<>();
 
     /**
@@ -351,9 +357,14 @@ public class FMShopDescGen {
      * only when the entire pool is exhausted.
      */
     public static synchronized String getRandomIGN() {
-        if (namePool == null || namePoolIndex >= namePool.size()) {
+        // Rebuild when the pool is exhausted, and when it was built for a different language -
+        // see namePoolLanguage: the pool is never invalidated at runtime otherwise.
+        String language = SoloMaplingLanguageConfig.languageTag();
+        if (namePool == null || namePoolIndex >= namePool.size()
+                || !language.equals(namePoolLanguage)) {
             namePool = loadAndShuffleNames();
             namePoolIndex = 0;
+            namePoolLanguage = language;
         }
         return namePool.get(namePoolIndex++);
     }

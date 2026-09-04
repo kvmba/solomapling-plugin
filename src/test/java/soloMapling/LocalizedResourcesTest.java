@@ -35,7 +35,16 @@ class LocalizedResourcesTest {
     @Test
     void untranslatedListFallsBackToEnglish() {
         SoloMaplingLanguageConfig.setLanguageTag("zh-CN");
-        assertEquals("FreeMarket/FMNameDesc/randomRealMaplestoryIGNs.txt",
+        // emojiFaces.txt is language-neutral, so it is deliberately absent from the zh-CN pack.
+        // (randomRealMaplestoryIGNs.txt used to play this role, but it is localized now.)
+        assertEquals("FreeMarket/FMNameDesc/emojiFaces.txt",
+                LocalizedResources.resolve(PARENT, PACK, "emojiFaces.txt"));
+    }
+
+    @Test
+    void localizedIgnListOverridesEnglish() {
+        SoloMaplingLanguageConfig.setLanguageTag("zh-CN");
+        assertEquals("FreeMarket/FMNameDesc-zh-CN/randomRealMaplestoryIGNs.txt",
                 LocalizedResources.resolve(PARENT, PACK, "randomRealMaplestoryIGNs.txt"));
     }
 
