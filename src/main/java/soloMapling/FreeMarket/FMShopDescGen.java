@@ -17,6 +17,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Random;
+import java.util.concurrent.ThreadLocalRandom;
 
 public class FMShopDescGen {
 
@@ -383,14 +384,36 @@ public class FMShopDescGen {
         return resolved != null ? resolved : "";
     }
 
-    /** Whole word list in file order; empty when the list is missing or unreadable. */
+    // Word lists are packaged resources (immutable at runtime), cached by
+    // resolved path. getRandomStoreDescription used to re-read the whole file
+    // on every draw; shop description generation draws several per merchant and
+    // there are hundreds of merchants to fill at startup.
+    private static final Map<String, List<String>> LINE_CACHE = new HashMap<>();
+
+    /** Drop cached word lists (after a hot-edit of the FMNameDesc files). */
+    public static synchronized void invalidateWordLists() {
+        LINE_CACHE.clear();
+    }
+
+    /** Whole word list in file order; empty when the list is missing or unreadable. Cached. */
     protected static List<String> getStoreDescriptionLines(String type) {
         String filePath = resolveFilePath(type);
         if (filePath.isEmpty()) {
             System.err.println("[FMShopDescGen] no word list for type: " + type);
             return List.of();
         }
+        synchronized (LINE_CACHE) {
+            List<String> cached = LINE_CACHE.get(filePath);
+            if (cached != null) {
+                return cached;
+            }
+            List<String> lines = readNonBlankLines(filePath);
+            LINE_CACHE.put(filePath, lines);
+            return lines;
+        }
+    }
 
+    private static List<String> readNonBlankLines(String filePath) {
         List<String> lines = new ArrayList<>();
         try (BufferedReader reader = new BufferedReader(PluginResources.openReader(filePath))) {
             String line;
@@ -402,38 +425,17 @@ public class FMShopDescGen {
         } catch (IOException e) {
             e.printStackTrace();
         }
-        return lines;
+        return List.copyOf(lines);
     }
 
     protected static String getRandomStoreDescription(String type) {
-        String filePath = resolveFilePath(type);
-        if (filePath.isEmpty()) {
-            System.err.println("[FMShopDescGen] no word list for type: " + type);
+        // Draw one line from the (cached) list instead of re-reading and
+        // re-scanning the whole file for every draw.
+        List<String> lines = getStoreDescriptionLines(type);
+        if (lines.isEmpty()) {
             return "null";
         }
-
-        try (BufferedReader reader = new BufferedReader(PluginResources.openReader(filePath))) {
-            String line;
-            String result = null;
-            Random random = new Random();
-            int count = 0;
-
-            while ((line = reader.readLine()) != null) {
-                count++;
-                if (random.nextInt(count) == 0) {
-                    result = line;
-                }
-            }
-
-            if (result == null) {
-                throw new IOException("File is empty: " + filePath);
-            }
-
-            return result;
-        } catch (IOException e) {
-            e.printStackTrace();
-        }
-        return "null";
+        return lines.get(ThreadLocalRandom.current().nextInt(lines.size()));
     }
 
     protected static String emblemizeFirstLetter(String str) {

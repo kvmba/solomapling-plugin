@@ -23,6 +23,13 @@ public final class TownPinsStore {
     private TownPinsStore() {
     }
 
+    // Parsed pins are cached. This file used to be re-read from disk on EVERY
+    // TownPresenceConfig.overridesFor(mapId) miss, and that method is called per
+    // bot relocation tick - at a few hundred ambient bots that was thousands of
+    // serialized file reads per minute under a global lock. The sidecar only
+    // changes when this class appends to it, so the cache is invalidated on write.
+    private static volatile Map<Integer, List<Point>> cache;
+
     // Append one pin. Writes a header the first time the file is created.
     public static synchronized void addPin(int mapId, int x, int y) {
         try {
@@ -37,13 +44,34 @@ public final class TownPinsStore {
             sb.append(mapId).append(": ").append(x).append(',').append(y).append('\n');
             Files.writeString(path, sb.toString(), StandardCharsets.UTF_8,
                     StandardOpenOption.CREATE, StandardOpenOption.APPEND);
+            cache = null; // this write is the only in-process mutation; drop the cache
         } catch (IOException e) {
             System.out.println("[TownPinsStore] failed to append pin: " + e.getMessage());
         }
     }
 
-    // mapId -> its pinned points. Empty if the file doesn't exist yet.
-    public static synchronized Map<Integer, List<Point>> load() {
+    // mapId -> its pinned points. Empty if the file doesn't exist yet. Cached;
+    // callers get an unmodifiable snapshot so a concurrent addPin can't mutate a
+    // list they are iterating.
+    public static Map<Integer, List<Point>> load() {
+        Map<Integer, List<Point>> local = cache;
+        if (local == null) {
+            local = readFromDisk();
+            cache = local;
+        }
+        return local;
+    }
+
+    public static List<Point> forMap(int mapId) {
+        return load().getOrDefault(mapId, List.of());
+    }
+
+    /** Drop the cached pins so the next {@link #load()} re-reads the sidecar. */
+    public static void invalidate() {
+        cache = null;
+    }
+
+    private static Map<Integer, List<Point>> readFromDisk() {
         Map<Integer, List<Point>> out = new HashMap<>();
         Path path = RuntimeData.townPins();
         if (!Files.isRegularFile(path)) {
@@ -73,10 +101,7 @@ public final class TownPinsStore {
         } catch (IOException e) {
             System.out.println("[TownPinsStore] failed to read pins: " + e.getMessage());
         }
-        return out;
-    }
-
-    public static List<Point> forMap(int mapId) {
-        return load().getOrDefault(mapId, List.of());
+        out.replaceAll((k, v) -> List.copyOf(v));
+        return Map.copyOf(out);
     }
 }

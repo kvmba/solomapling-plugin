@@ -3,7 +3,9 @@ package soloMapling.ArtificialPlayer;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.ConcurrentHashMap;
 
 import org.gms.client.Character;
 import com.esotericsoftware.yamlbeans.YamlReader;
@@ -32,14 +34,17 @@ public class BotDialogueHandler {
         }
 
         public DialogueConstructor(List<String> dialogue, List<Integer> emotes, List<List<Integer>> lineEmotes, long duration) {
-            this.dialogue = dialogue;
-            this.emotes = emotes;
+            this.dialogue = List.copyOf(dialogue);
+            this.emotes = emotes == null ? List.of() : List.copyOf(emotes);
             this.lineEmotes = lineEmotes;
             this.duration = duration;
         }
 
-        private void setDialogue(List<String> newDialogue) {
-            this.dialogue = newDialogue;
+        // Returns a copy carrying different dialogue text, leaving this instance
+        // untouched. DialogueConstructor is cached and shared across bots, so a
+        // per-call string replacement must not mutate it.
+        public DialogueConstructor withDialogue(List<String> newDialogue) {
+            return new DialogueConstructor(newDialogue, emotes, lineEmotes, duration);
         }
 
         public List<String> getDialogue() {
@@ -129,25 +134,54 @@ public class BotDialogueHandler {
     }
 
     public static Map<String, Object> readDialogueYaml(String dialoguePack, String dialogueType, String dialogueNode) {
-        Map<String, Object> dialogueConstructorNode = null;
-        try (Reader reader = DialoguePackPaths.openDialogueReader(dialoguePack)) {
-            YamlReader yaml = new YamlReader(reader);
-            Map<String, Object> root = (Map<String, Object>) yaml.read();
-            if (root == null) {
-                return null;
-            }
-            Map<String, Object> BotTypeNode = (Map<String, Object>) root.get(dialogueType);
-            if (BotTypeNode == null) {
-                return null;
-            }
-            dialogueConstructorNode = (Map<String, Object>) BotTypeNode.get(dialogueNode);
-        } catch (IOException e) {
-            System.err.println("[BotDialogueHandler] failed to load " + dialoguePack + ": " + e.getMessage());
+        Map<String, Object> root = readDialogueRoot(dialoguePack);
+        if (root == null) {
+            return null;
         }
-        return dialogueConstructorNode;
+        Map<String, Object> BotTypeNode = (Map<String, Object>) root.get(dialogueType);
+        if (BotTypeNode == null) {
+            return null;
+        }
+        return (Map<String, Object>) BotTypeNode.get(dialogueNode);
     }
 
+    // Parsed dialogue YAML roots, keyed by pack file name. Dialogue files are
+    // packaged resources (immutable at runtime), but every one of the ~15
+    // getDialogueCon call sites re-read and re-parsed the whole YAML - and those
+    // run per bot tick (chatter, shop offers, flavor barks). At ~1000 bots on a
+    // 2-6s cadence that was hundreds of classpath reads + YAML parses per second.
+    private static final Map<String, Map<String, Object>> DIALOGUE_ROOT_CACHE =
+            new java.util.concurrent.ConcurrentHashMap<>();
+
+    /** Drop cached dialogue YAML (after a hot-edit of a dialogue pack). */
+    public static void invalidateDialogueCache() {
+        DIALOGUE_ROOT_CACHE.clear();
+    }
+
+    /** Parsed root of one dialogue pack; null (and logged) when unreadable. Cached. */
+    private static Map<String, Object> readDialogueRoot(String dialoguePack) {
+        return DIALOGUE_ROOT_CACHE.computeIfAbsent(dialoguePack, pack -> {
+            try (Reader reader = DialoguePackPaths.openDialogueReader(pack)) {
+                YamlReader yaml = new YamlReader(reader);
+                return (Map<String, Object>) yaml.read();
+            } catch (IOException e) {
+                System.err.println("[BotDialogueHandler] failed to load " + pack + ": " + e.getMessage());
+                return null;
+            }
+        });
+    }
+
+    /**
+     * One dialogue node, cached by (pack, botType, node). The YAML root is cached
+     * separately, so a cache hit here is a map lookup instead of a classpath read
+     * plus a full YAML parse plus a re-walk of every text/emote entry.
+     */
     public static DialogueConstructor getDialogueCon(String BotTypeDialoguePath, String BotType, String DialogueNodeName) {
+        String cacheKey = BotTypeDialoguePath + "|" + BotType + "|" + DialogueNodeName;
+        return CON_CACHE.computeIfAbsent(cacheKey, k -> buildDialogueCon(BotTypeDialoguePath, BotType, DialogueNodeName));
+    }
+
+    private static DialogueConstructor buildDialogueCon(String BotTypeDialoguePath, String BotType, String DialogueNodeName) {
         Map<String, Object> dialogMap = readDialogueYaml(BotTypeDialoguePath, BotType, DialogueNodeName);
         if (dialogMap == null) {
             return null;
@@ -187,10 +221,19 @@ public class BotDialogueHandler {
         return any;
     }
 
+    /** Parsed dialogue nodes, keyed by "<pack> <botType> <node>". */
+    private static final Map<String, DialogueConstructor> CON_CACHE =
+            new java.util.concurrent.ConcurrentHashMap<>();
+
+    /** Drop cached dialogue nodes (after a hot-edit of a dialogue pack). */
+    public static void invalidateDialogueNodes() {
+        CON_CACHE.clear();
+    }
+
     public static DialogueConstructor getDialogueConWithReplacedStrings(String BotTypeDialoguePath, String BotType, String DialogueNodeName, Map<String, String> replacements) {
         DialogueConstructor og = getDialogueCon(BotTypeDialoguePath, BotType, DialogueNodeName);
-        og.setDialogue(replaceStrings(og.getDialogue(), replacements));
-        return og;
+        // withDialogue copies: the cached node must stay pristine for other bots.
+        return og.withDialogue(replaceStrings(og.getDialogue(), replacements));
     }
 
     public static List<String> replaceStrings(List<String> inputList, Map<String, String> replacements) {

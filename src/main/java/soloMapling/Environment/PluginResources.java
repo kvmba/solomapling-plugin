@@ -14,7 +14,9 @@ import java.util.Collections;
 import java.util.Enumeration;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.jar.JarEntry;
 import java.util.jar.JarFile;
 import java.util.stream.Stream;
@@ -110,7 +112,24 @@ public final class PluginResources {
         return listFileNames(relativeDir, endsWith, true);
     }
 
+    // Directory listings are cached. The packaged resources are immutable at
+    // runtime, but the jar path below opens the whole JarFile and enumerates
+    // EVERY entry on each call - and getAvailablePlatformIds (a merchant bot
+    // idle-tick call) hits this every time. With ~1000 merchant bots ticking,
+    // that was thousands of full jar enumerations per second.
+    private static final Map<String, List<String>> LIST_CACHE = new ConcurrentHashMap<>();
+
+    /** Drop cached directory listings (after adding/removing packaged resources). */
+    public static void invalidateListings() {
+        LIST_CACHE.clear();
+    }
+
     public static List<String> listFileNames(String relativeDir, String endsWith, boolean stripExtension) {
+        String cacheKey = relativeDir + "|" + endsWith + "|" + stripExtension;
+        return LIST_CACHE.computeIfAbsent(cacheKey, k -> scanFileNames(relativeDir, endsWith, stripExtension));
+    }
+
+    private static List<String> scanFileNames(String relativeDir, String endsWith, boolean stripExtension) {
         String dir = normalize(relativeDir);
         if (!dir.isEmpty() && !dir.endsWith("/")) {
             dir = dir + "/";
@@ -123,7 +142,7 @@ public final class PluginResources {
 
         List<String> out = new ArrayList<>(names);
         Collections.sort(out);
-        return out;
+        return List.copyOf(out);
     }
 
     public static boolean directoryExists(String relativeDir) {

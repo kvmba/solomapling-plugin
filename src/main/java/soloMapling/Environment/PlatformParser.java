@@ -8,6 +8,7 @@ import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
 
 /**
@@ -27,14 +28,34 @@ public class PlatformParser {
     /** Y variance threshold to determine if platform is sloped (in pixels) */
     private static final int SLOPE_THRESHOLD = 50;
 
+    // Parsed platform cache, keyed by "<mapId>/<fileName>". These CSVs are
+    // packaged resources (immutable at runtime), but parsePlatform used to
+    // re-read and re-parse the file on every call - and merchant bots call
+    // getMainPlatformIds + parsePlatform on every idle tick. At a few hundred
+    // merchant bots that was thousands of classpath reads per second.
+    private static final Map<String, Platform> PLATFORM_CACHE = new ConcurrentHashMap<>();
+    private static final Map<String, List<Point>> COORDINATE_CACHE = new ConcurrentHashMap<>();
+
+    /** Drop every cached platform (after a hot-edit of the movement CSVs). */
+    public static void invalidate() {
+        PLATFORM_CACHE.clear();
+        COORDINATE_CACHE.clear();
+    }
+
     /**
      * Parses a movement CSV file and returns the raw list of (x, y) coordinates.
+     * Cached; the packaged CSVs never change at runtime.
      *
      * @param mapId    The map ID (e.g., 910000000)
      * @param fileName The file name without extension (e.g., "m1")
      * @return List of Point objects representing all recorded coordinates
      */
     public static List<Point> parseCoordinates(int mapId, String fileName) {
+        String cacheKey = mapId + "/" + fileName;
+        return COORDINATE_CACHE.computeIfAbsent(cacheKey, k -> readCoordinates(mapId, fileName));
+    }
+
+    private static List<Point> readCoordinates(int mapId, String fileName) {
         List<Point> coordinates = new ArrayList<>();
         String resourcePath = BASE_PATH + "/map" + mapId + "/" + fileName + ".csv";
 
@@ -62,25 +83,27 @@ public class PlatformParser {
             e.printStackTrace();
         }
 
-        return coordinates;
+        return List.copyOf(coordinates);
     }
 
     /**
      * Parses coordinates and organizes them into a Platform object.
      * Automatically detects if platform is FLAT or SLOPED based on Y variance.
+     * Cached - see {@link #parseCoordinates(int, String)}.
      *
      * @param mapId    The map ID (e.g., 910000000)
      * @param fileName The file name without extension (e.g., "m1")
      * @return Platform object with bounds, type, and sorted reference points
      */
     public static Platform parsePlatform(int mapId, String fileName) {
-        List<Point> rawCoordinates = parseCoordinates(mapId, fileName);
-        return organizePlatform(rawCoordinates);
+        return PLATFORM_CACHE.computeIfAbsent(mapId + "/" + fileName,
+                k -> organizePlatform(parseCoordinates(mapId, fileName)));
     }
 
     /**
      * Parses coordinates into a Platform with explicit type override.
-     * Use this if you know the platform type ahead of time.
+     * Use this if you know the platform type ahead of time. Cached per
+     * (mapId, fileName, type).
      *
      * @param mapId    The map ID
      * @param fileName The file name without extension
@@ -88,8 +111,8 @@ public class PlatformParser {
      * @return Platform object
      */
     public static Platform parsePlatform(int mapId, String fileName, Platform.Type type) {
-        List<Point> rawCoordinates = parseCoordinates(mapId, fileName);
-        return organizePlatform(rawCoordinates, type);
+        return PLATFORM_CACHE.computeIfAbsent(mapId + "/" + fileName + "#" + type,
+                k -> organizePlatform(parseCoordinates(mapId, fileName), type));
     }
 
     /**

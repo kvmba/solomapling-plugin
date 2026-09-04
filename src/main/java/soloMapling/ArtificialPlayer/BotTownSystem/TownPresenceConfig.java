@@ -4,6 +4,7 @@ import soloMapling.Environment.EnvironmentPopulationConfig;
 
 import java.awt.Point;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -42,9 +43,15 @@ public final class TownPresenceConfig {
 
     private static volatile List<TownEntry> cached;
 
+    // mapId -> its curation overrides. Built lazily alongside `cached` because
+    // overridesFor() is called per bot relocation tick; without an index every
+    // call walked all towns x all maps (and re-read the pins sidecar on a miss).
+    private static volatile Map<Integer, TownOverrides> overridesByMap;
+
     /** Drop cached towns so the next {@link #towns()} re-parses (called from population reload). */
     public static void invalidate() {
         cached = null;
+        overridesByMap = null;
     }
 
     // Parsed town entries (cached after first load). Returns an empty list on any parse/IO failure so a
@@ -52,8 +59,13 @@ public final class TownPresenceConfig {
     public static List<TownEntry> towns() {
         List<TownEntry> local = cached;
         if (local == null) {
-            local = load();
-            cached = local;
+            synchronized (TownPresenceConfig.class) {
+                local = cached;
+                if (local == null) {
+                    local = load();
+                    cached = local;
+                }
+            }
         }
         return local;
     }
@@ -61,7 +73,10 @@ public final class TownPresenceConfig {
     // Force a re-read from EnvironmentPopulation.yaml (used by !env townpresence / population reload).
     public static List<TownEntry> reload() {
         EnvironmentPopulationConfig.reload();
-        cached = loadFromRaw(EnvironmentPopulationConfig.rawTownsList());
+        synchronized (TownPresenceConfig.class) {
+            cached = loadFromRaw(EnvironmentPopulationConfig.rawTownsList());
+            overridesByMap = buildOverridesIndex(cached);
+        }
         return cached;
     }
 
@@ -87,6 +102,31 @@ public final class TownPresenceConfig {
                     + " (legacy path " + LEGACY_YAML_PATH + " is no longer read)");
         }
         return loadFromRaw(raw);
+    }
+
+    private static Map<Integer, TownOverrides> buildOverridesIndex(List<TownEntry> towns) {
+        Map<Integer, TownOverrides> byMap = new HashMap<>();
+        for (TownEntry t : towns) {
+            for (MapShare m : t.maps()) {
+                byMap.putIfAbsent(m.mapId(), m.overrides());
+            }
+        }
+        return Map.copyOf(byMap);
+    }
+
+    /** Index of the current towns, built on demand and cached with them. */
+    private static Map<Integer, TownOverrides> overridesIndex() {
+        Map<Integer, TownOverrides> local = overridesByMap;
+        if (local == null) {
+            synchronized (TownPresenceConfig.class) {
+                local = overridesByMap;
+                if (local == null) {
+                    local = buildOverridesIndex(towns());
+                    overridesByMap = local;
+                }
+            }
+        }
+        return local;
     }
 
     @SuppressWarnings("unchecked")
@@ -131,13 +171,11 @@ public final class TownPresenceConfig {
 
     // The curation overrides for a map, whether or not the map is listed in a town (so ad-hoc !env spawns
     // on any map still honor marked pins). Merges YAML ban/boost/pins with the sidecar's marked pins.
+    // Hot path: called per bot relocation tick, so the town scan is an O(1) index lookup.
     public static TownOverrides overridesFor(int mapId) {
-        for (TownEntry t : towns()) {
-            for (MapShare m : t.maps()) {
-                if (m.mapId() == mapId) {
-                    return m.overrides();
-                }
-            }
+        TownOverrides listed = overridesIndex().get(mapId);
+        if (listed != null) {
+            return listed;
         }
         List<Point> sidecar = TownPinsStore.forMap(mapId);
         return sidecar.isEmpty() ? TownOverrides.EMPTY : new TownOverrides(List.of(), List.of(), sidecar);
