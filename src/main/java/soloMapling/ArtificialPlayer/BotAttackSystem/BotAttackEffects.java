@@ -59,14 +59,6 @@ public final class BotAttackEffects {
      */
     private static final int DEATH_ANIMATION_FADE_OUT = 1;
 
-    /*
-     * Bounds for the post-death loot delay (0.42 * the mob's die1 animation length).
-     * Vanilla uses 1000..3000; we keep the ceiling and lower the floor to 200ms so bot
-     * kills feel responsive - see applyDamageAndLoot.
-     */
-    private static final long LOOT_DELAY_MIN_MS = 200L;
-    private static final long LOOT_DELAY_MAX_MS = 3000L;
-
     private BotAttackEffects() {}
 
     /*
@@ -212,14 +204,14 @@ public final class BotAttackEffects {
             // turns it off gets instant bot loot, exactly like a player's.
             //
             // Vanilla clamps to 1000..3000ms; we keep the 3000ms ceiling but lower the floor
-            // to 200ms. Bots are headless, so nothing is lost by the pile appearing earlier,
-            // and a long 1s wait on every single kill reads as lag when a bot grinds fast.
-            // Because 0.42 * die1 only reaches 200ms at die1 ~= 476ms, most mobs land on the
-            // floor value: practical delay drops from ~1000ms to 200ms for typical mobs,
-            // while long-death-animation (boss) mobs keep a proportional, readable pause.
+            // to 200L. Bots are headless, so nothing is lost by the pile appearing earlier,
+            // and a flat 1s wait on every kill reads as lag when a bot grinds fast. Since
+            // 0.42 * die1 only reaches 200ms at die1 ~= 476ms, typical mobs (die1 500-1000ms)
+            // land on the floor: 210-420ms instead of a flat 1000ms, while bosses keep the
+            // vanilla pacing.
             if (GameConfig.getServerBoolean("use_spawn_loot_on_animation")) {
                 int die1 = target.getAnimationTime("die1");   // reads WZ stats only - safe after death
-                long lootDelayMs = Math.min(Math.max((long) (0.42 * die1), LOOT_DELAY_MIN_MS), LOOT_DELAY_MAX_MS);
+                long lootDelayMs = Math.min(Math.max((long) (0.42 * die1), 200L), 3000L);
                 MethodScheduler.runAfterDelay(lootTask, lootDelayMs);
             } else {
                 lootTask.run();
