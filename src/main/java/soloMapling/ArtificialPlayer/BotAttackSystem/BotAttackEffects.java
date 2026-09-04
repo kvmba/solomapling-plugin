@@ -155,6 +155,18 @@ public final class BotAttackEffects {
         MapleMap map = bot.getMap();
         Map<Integer, Integer> expBefore = companionPartyExp(bot);
 
+        // Snapshot BEFORE killMonster: its finally block runs dispatchMonsterKilled ->
+        // processMonsterKilled, which clears the mob's stati. Reading SHOWDOWN after that
+        // always returns null and the bonus would be silently lost. This mirrors how
+        // MapleMap.dropFromMonster freezes chRate into MobLootEntry at kill time.
+        final float killChRate = lootChanceRate(bot, target);
+        // Same reasoning for the loot flags: freeze what the kill saw rather than letting
+        // the delayed roll re-read a mob that is already gone from the map.
+        final boolean killNoDrops = target.dropsDisabled();
+        final byte killDropType = (byte) (target.getStats().isExplosiveReward() ? 3
+                : target.getStats().isFfaLoot() ? 2
+                : bot.getParty() != null ? 1 : 0);
+
         boolean killed = target.damage(bot, damage, false); // register damage; false = allow death
         if (killed) {
             // withDrops=false: keep the EXP distribution + death broadcast, skip the
@@ -185,7 +197,7 @@ public final class BotAttackEffects {
                 if (live == null || live.getMap() == null || live.getMapId() != killMapId) {
                     return; // bot gone or changed map - no loot at the corpse
                 }
-                dropMobLootAt(live, target, deathPos);
+                dropMobLootAt(live, target, killChRate, killDropType, killNoDrops, deathPos);
             }, lootDelayMs);
             // No vacuum here: the dropped loot is collected organically by the bot itself - TrainingBot
             // walks over the pile and picks drops up one at a time (own + free-for-all), and any drop it
@@ -220,21 +232,35 @@ public final class BotAttackEffects {
      * so that path is unsafe. Everything below uses the public spawnItemDrop / spawnMesoDrop
      * overloads that take the Character instead.
      *
-     * chRate uses the world rates (drop_rate/boss_drop_rate/meso_rate) rather than the
-     * bot's own field: a bot never runs setWorldRates(), so its dropRate stays at the 1.0
-     * default and getBossDropRate() would divide it back out by the world rate.
+     * chRate is frozen at kill time, the way dropFromMonster stores it on its MobLootEntry:
+     * the SHOWDOWN read must happen before killMonster clears the mob's stati, and the
+     * world rate is read here so a delayed roll cannot pick up a rate change in between.
+     * It uses the world config rates (drop_rate/boss_drop_rate) rather than the bot's own
+     * field: a bot never runs setWorldRates(), so its dropRate stays at the 1.0 default and
+     * getBossDropRate() would divide it straight back out by the world rate.
      */
-    private static void dropMobLoot(Character bot, Monster mob) {
-        dropMobLootAt(bot, mob, mob.getPosition());
+    private static float lootChanceRate(Character bot, Monster mob) {
+        final World world = bot.getWorldServer();
+        float chRate = mob.isBoss() ? Math.max(1f, world.getBossDropRate()) : Math.max(1f, world.getDropRate());
+        MonsterStatusEffect showdown = mob.getStati(MonsterStatus.SHOWDOWN);
+        if (showdown != null) {
+            chRate *= (showdown.getStati().get(MonsterStatus.SHOWDOWN).doubleValue() / 100.0 + 1.0);
+        }
+        if (bot.isFamilyBuff()) {
+            chRate *= bot.getFamilyDrop();
+        }
+        return chRate;
     }
 
     /*
-     * Loot roll for a mob that died at deathPos. The position is captured at kill time:
-     * the mob object is already gone from the map by the time the delayed task fires.
+     * Loot roll for a mob that died at deathPos. Everything mob-specific is captured at
+     * kill time: killMonster clears the mob's stati and removes it from the map, so the
+     * delayed roll must not re-read live state off the Monster.
      */
-    private static void dropMobLootAt(Character bot, Monster mob, Point deathPos) {
+    private static void dropMobLootAt(Character bot, Monster mob, float chRate, byte dropType,
+                                      boolean dropsDisabled, Point deathPos) {
         final MapleMap map = bot.getMap();
-        if (map == null || mob.dropsDisabled()) {
+        if (map == null || dropsDisabled) {
             return;
         }
 
@@ -245,20 +271,7 @@ public final class BotAttackEffects {
             return; // thanks resinate
         }
 
-        // Vanilla droptype precedence: explosive reward > FFA loot > party / owner-only.
-        final byte dropType = (byte) (mob.getStats().isExplosiveReward() ? 3
-                : mob.getStats().isFfaLoot() ? 2
-                : bot.getParty() != null ? 1 : 0);
-
         final World world = bot.getWorldServer();
-        float chRate = mob.isBoss() ? Math.max(1f, world.getBossDropRate()) : Math.max(1f, world.getDropRate());
-        MonsterStatusEffect showdown = mob.getStati(MonsterStatus.SHOWDOWN);
-        if (showdown != null) {
-            chRate *= (showdown.getStati().get(MonsterStatus.SHOWDOWN).doubleValue() / 100.0 + 1.0);
-        }
-        if (bot.isFamilyBuff()) {
-            chRate *= bot.getFamilyDrop();
-        }
         final float mesoRate = Math.max(1f, world.getMesoRate());
 
         final int mobX = deathPos.x;
