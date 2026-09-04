@@ -50,14 +50,20 @@ public final class BotFame {
     private static final int POS_CAP_LV1 = 20;
     /**
      * Positive fame ceiling for a level 200 bot at B tier. Tiers scale this
-     * up/down, and the hardest scaling tier is what lands on {@link #MAX_FAME}.
+     * up/down — sized so the strongest tier lands exactly on {@link #MAX_FAME}.
+     * Raising this past ~222 makes S-tier bots overshoot the cap, and the clamp
+     * then piles every overshoot onto exactly 300 (a visible spike of bots with
+     * the same round number instead of a natural tail).
      */
-    private static final int POS_CAP_LV200 = 240;
+    private static final int POS_CAP_LV200 = 222;
 
     /** Negative fame floor at level 1. */
     private static final int NEG_CAP_LV1 = -10;
-    /** Negative fame floor at level 200. */
-    private static final int NEG_CAP_LV200 = -40;
+    /**
+     * Negative fame floor at level 200 at B tier. Also sized so the strongest
+     * tier bottoms out just inside {@link #MIN_FAME} (-36 * 1.35 = -48.6).
+     */
+    private static final int NEG_CAP_LV200 = -36;
 
     private static final int MAX_LEVEL = 200;
 

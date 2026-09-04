@@ -81,6 +81,37 @@ class BotFameTest {
         assertTrue(mid < high, "lv100 avg " + mid + " should be below lv200 avg " + high);
     }
 
+    /**
+     * Guards the tier-vs-cap arithmetic. If POS_CAP_LV200 (or the S-tier scale)
+     * is ever raised past the point where the tier ceiling exceeds
+     * {@link BotFame#MAX_FAME}, the clamp absorbs every overshoot and bots stack
+     * up on exactly 300 - a visible spike of identical round numbers instead of
+     * a natural tail. Same story at the negative end.
+     */
+    @Test
+    void noBotsPileUpOnTheClampBounds() {
+        for (BotTier tier : BotTier.values()) {
+            Random rng = new Random(21);
+            int atCap = 0;
+            int atFloor = 0;
+            for (int i = 0; i < SAMPLES; i++) {
+                int fame = BotFame.generate(200, tier, rng);
+                if (fame == BotFame.MAX_FAME) {
+                    atCap++;
+                }
+                if (fame == BotFame.MIN_FAME) {
+                    atFloor++;
+                }
+            }
+            // A healthy tail hits the exact bound a handful of times at most;
+            // a clamp pile-up would show orders of magnitude more.
+            assertTrue(atCap <= SAMPLES / 1000,
+                    tier + " bots hit exactly " + BotFame.MAX_FAME + " " + atCap + "/" + SAMPLES + " times");
+            assertTrue(atFloor <= SAMPLES / 1000,
+                    tier + " bots hit exactly " + BotFame.MIN_FAME + " " + atFloor + "/" + SAMPLES + " times");
+        }
+    }
+
     @Test
     void highLevelBotsAreMostlyModest() {
         Random rng = new Random(6);
