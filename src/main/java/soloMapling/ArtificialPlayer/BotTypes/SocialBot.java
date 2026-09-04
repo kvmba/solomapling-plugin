@@ -401,7 +401,10 @@ public class SocialBot extends BotSM {
                 || lower.contains("cya");
     }
 
-    // Menu keywords, resolved once per bot: English keywords plus the localized label text plus
+    // Menu keywords: English keywords plus the localized label text plus
+    // any per-language YAML aliases (see BotMessages.keywords). Index order matches
+    // INTERACTIVE_SUFFIXES. Resolved per instance rather than statically: a static field would
+    // freeze at class-load time and would not follow the configured language.
     private final List<List<String>> interactiveKeywords =
             BotMessages.keywords("menu.social", INTERACTIVE_SUFFIXES, INTERACTIVE_KEYWORDS);
 

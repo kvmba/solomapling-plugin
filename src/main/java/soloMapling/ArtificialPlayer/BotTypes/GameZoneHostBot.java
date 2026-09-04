@@ -46,6 +46,8 @@ public class GameZoneHostBot extends BotSM {
             {"coke"}, {"water"}, {"elixir"}
     };
 
+    // Resolved per instance rather than in a static field: a static would freeze at class-load
+    // time and would not follow the configured language.
     private final String[] drinkNames =
             BotMessages.labels("gamezone.drink", DRINK_SUFFIXES).toArray(new String[0]);
     private final List<List<String>> drinkKeywords =

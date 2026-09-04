@@ -299,6 +299,8 @@ public class DiceBot extends BotSM {
         String content = message.getContent().toLowerCase();
         // "bet" is the gate; the cho/han word decides the side. Both the English words and the
         // localized ones are accepted, since the menu shows the localized text.
+        // The localized words are resolved per call (the lists hold 1-3 short strings and this
+        // runs once per player reply): a cached copy would survive a language switch.
         if (!content.contains("bet") && !content.contains(BotMessages.get("dice.keyword_bet"))) {
             return;
         }

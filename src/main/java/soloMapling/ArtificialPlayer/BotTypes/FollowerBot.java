@@ -57,6 +57,8 @@ public class FollowerBot extends BotSM {
             {"nevermind", "bye", "nah", "nope"}
     };
 
+    // Resolved per instance rather than in a static field: a static would freeze at class-load
+    // time and would not follow the configured language.
     private final BotOptionMenu menu = new BotOptionMenu(this,
             BotMessages.labels("menu.follower", MENU_SUFFIXES),
             BotMessages.keywords("menu.follower", MENU_SUFFIXES, MENU_KEYWORDS),

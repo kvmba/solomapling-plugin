@@ -5,6 +5,10 @@ import java.util.List;
 /**
  * Yes/no option menu, shared by the bots that ask a straight yes/no question (tutorial bot,
  * game-zone host). Both the displayed labels and the accepted answers are localized.
+ *
+ * <p>Answer matching runs once per player reply, not per tick, so it resolves keywords on each
+ * call rather than caching them: a static snapshot would keep serving the previous language after
+ * a switch. The cost is a couple of map lookups against an already-loaded pack.
  */
 public final class YesNo {
 
@@ -33,12 +37,22 @@ public final class YesNo {
     }
 
     private static boolean matches(String content, int index) {
-        if (content == null) {
+        if (content == null || content.isEmpty()) {
             return false;
         }
+        List<String> keywords = BotMessages.keywords(PREFIX, SUFFIXES, KEYWORDS).get(index);
+        // Try the raw text first: toLowerCase() allocates a second string, and most chat is not a
+        // yes/no answer, so the common path should not pay for it.
+        if (containsAny(content, keywords)) {
+            return true;
+        }
         String lower = content.toLowerCase();
-        for (String keyword : BotMessages.keywords(PREFIX, SUFFIXES, KEYWORDS).get(index)) {
-            if (lower.contains(keyword)) {
+        return !lower.equals(content) && containsAny(lower, keywords);
+    }
+
+    private static boolean containsAny(String content, List<String> keywords) {
+        for (String keyword : keywords) {
+            if (content.contains(keyword)) {
                 return true;
             }
         }

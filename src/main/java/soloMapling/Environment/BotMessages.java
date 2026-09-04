@@ -11,7 +11,6 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Player-visible UI strings that live in Java code rather than in a {@code BotDialoguePack} YAML.
@@ -38,25 +37,44 @@ public final class BotMessages {
     public static final String RESOURCE_DIR = "Environment/";
 
     /**
-     * key -> message, in resolution order (localized values first, English fallback after).
-     * Invalidated on language change so {@code !env language} takes effect immediately.
+     * Messages and menu-keyword aliases published as ONE immutable snapshot.
+     *
+     * <p>A single reference matters: bots read these from many threads (one per bot, plus the
+     * chat-message path), and publishing two separate fields let a reader observe a new
+     * {@code messages} paired with a stale {@code keywordIndex} - or, worse, catch an
+     * {@link #invalidate()} mid-flight and read an empty map, which silently renders the raw key
+     * ("party.declined") in front of a player.
      */
-    private static volatile Map<String, String> messages = Map.of();
+    private static final class Pack {
+        final Map<String, String> messages;
+        final Map<String, List<List<String>>> keywords;
+
+        Pack(Map<String, String> messages, Map<String, List<List<String>>> keywords) {
+            this.messages = messages;
+            this.keywords = keywords;
+        }
+
+        static Pack empty() {
+            return new Pack(Map.of(), Map.of());
+        }
+    }
+
+    private static volatile Pack pack = Pack.empty();
 
     /**
-     * Keyword lists for option menus, keyed by menu prefix. Unlike message text these are
-     * <em>merged</em> across languages rather than overridden: a player who sees a Chinese menu
-     * may still answer in English (and vice versa), and menus seeded before a language switch
-     * must keep matching. See {@link #keywords(String, String[])}.
+     * Times the pack has actually been parsed. Test hook: a stampede of first-time readers should
+     * increment this exactly once. Never on the steady-state read path.
      */
-    private static volatile Map<String, List<List<String>>> keywordIndex = Map.of();
+    private static final java.util.concurrent.atomic.AtomicInteger LOAD_COUNT =
+            new java.util.concurrent.atomic.AtomicInteger();
 
-    private static volatile boolean loaded = false;
+    static int loadCount() {
+        return LOAD_COUNT.get();
+    }
 
     /** Localized message with positional placeholders; the key itself on total miss. */
     public static String get(String key, Object... args) {
-        ensureLoaded();
-        String raw = messages.get(key);
+        String raw = pack().messages.get(key);
         if (raw == null) {
             return key;
         }
@@ -65,8 +83,7 @@ public final class BotMessages {
 
     /** Like {@link #get}, but returns {@code fallback} instead of the key when unresolved. */
     public static String getOr(String key, String fallback, Object... args) {
-        ensureLoaded();
-        String raw = messages.get(key);
+        String raw = pack().messages.get(key);
         if (raw == null) {
             return fallback == null ? key : fallback;
         }
@@ -106,7 +123,7 @@ public final class BotMessages {
      * regardless of which language the menu is displayed in.
      */
     public static List<List<String>> keywords(String prefix, String[] suffixes, String[][] englishKeywords) {
-        ensureLoaded();
+        Pack current = pack();
         List<List<String>> out = new ArrayList<>(suffixes.length);
         for (int i = 0; i < suffixes.length; i++) {
             Set<String> perOption = new LinkedHashSet<>();
@@ -114,7 +131,7 @@ public final class BotMessages {
                 Collections.addAll(perOption, englishKeywords[i]);
             }
             String key = prefix + "." + suffixes[i];
-            List<List<String>> extras = keywordIndex.get(key + ".keywords");
+            List<List<String>> extras = current.keywords.get(key + ".keywords");
             if (extras != null) {
                 for (List<String> aliasGroup : extras) {
                     perOption.addAll(aliasGroup);
@@ -122,7 +139,7 @@ public final class BotMessages {
             }
             // The localized label itself, minus punctuation: "跟我来！" -> 跟我来. Chinese labels
             // are one unbroken run of characters, so this yields exactly the text on screen.
-            String label = messages.get(key);
+            String label = current.messages.get(key);
             if (label != null && !label.isBlank()) {
                 perOption.addAll(splitKeywords(label));
             }
@@ -155,11 +172,18 @@ public final class BotMessages {
         return out;
     }
 
-    /** Drop cached messages (after a language switch or a hot-edit of a message pack). */
+    /**
+     * Drop cached messages (after a language switch or a hot-edit of a message pack).
+     *
+     * <p>Synchronized so that a stampede of threads finding an empty pack does not each parse the
+     * YAML. Note the correctness guarantee for readers comes from {@code pack} being a SINGLE
+     * volatile reference, not from this lock - swapping one reference is atomic, so a reader sees
+     * either the old complete snapshot or the new one, never a mix and never an empty map.
+     */
     public static void invalidate() {
-        loaded = false;
-        messages = Map.of();
-        keywordIndex = Map.of();
+        synchronized (BotMessages.class) {
+            pack = Pack.empty();
+        }
     }
 
     private static String format(String raw, Object[] args) {
@@ -170,15 +194,22 @@ public final class BotMessages {
         return out;
     }
 
-    // Same get-then-put discipline as BotDialogueHandler: parsing must not run while a lock is
-    // held, and losing the race is harmless (both threads built an equivalent map).
-    private static void ensureLoaded() {
-        if (loaded) {
-            return;
+    /**
+     * Current snapshot, loading it on first use.
+     *
+     * <p>Steady state is a single volatile read - no lock. Parsing runs outside the lock (it opens
+     * two resources and parses YAML, which would otherwise stall every bot thread behind it), so a
+     * losing race simply rebuilds an equivalent snapshot; only the final reference publication is
+     * synchronized, and that is what makes the swap atomic for readers.
+     */
+    private static Pack pack() {
+        Pack current = pack;
+        if (!current.messages.isEmpty()) {
+            return current;
         }
         synchronized (BotMessages.class) {
-            if (loaded) {
-                return;
+            if (!pack.messages.isEmpty()) {
+                return pack;
             }
             Map<String, String> built = new HashMap<>();
             Map<String, List<List<String>>> builtKeywords = new HashMap<>();
@@ -188,9 +219,9 @@ public final class BotMessages {
             if (!localized.equals(englishPath())) {
                 loadInto(localized, built, builtKeywords);
             }
-            messages = Map.copyOf(built);
-            keywordIndex = Map.copyOf(builtKeywords);
-            loaded = true;
+            pack = new Pack(Map.copyOf(built), Map.copyOf(builtKeywords));
+            LOAD_COUNT.incrementAndGet();
+            return pack;
         }
     }
 
@@ -255,16 +286,4 @@ public final class BotMessages {
         return outer;
     }
 
-    // ------------------------------------------------------------------
-    // Test hook: same guard the production path uses, surfaced so tests can
-    // assert the loaded state without forcing a load as a side effect.
-    // ------------------------------------------------------------------
-    static boolean isLoaded() {
-        return loaded;
-    }
-
-    static final Map<String, String> snapshot() {
-        ensureLoaded();
-        return new ConcurrentHashMap<>(messages);
-    }
 }

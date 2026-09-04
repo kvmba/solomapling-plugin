@@ -842,17 +842,20 @@ public class BlackjackDealerBot extends BotSM {
                 BotMessages.labels("menu.blackjack", "stand", "hit"));
     }
 
-    // Stand/hit answers. The hint may display 停牌/要牌, so the localized label text is accepted
-    // alongside the English words - a player should be able to answer in whichever language the
-    // menu is showing them (or in English regardless).
+    // Stand/hit/join answers. The hint may display 停牌/要牌, so the localized label text is
+    // accepted alongside the English words - a player should be able to answer in whichever
+    // language the menu is showing them (or in English regardless).
     private boolean isStand(String content) {
         return content.contains("stand") || content.contains("stay")
                 || content.contains(BotMessages.get("menu.blackjack.stand"));
     }
 
     private boolean isHit(String content) {
-        return content.contains("hit")
-                || content.contains(BotMessages.get("menu.blackjack.hit").replace(" ", "").replace("-", ""));
+        // The hit label is padded (" - Hit -") for display; strip the decoration so the word
+        // itself is what gets matched.
+        String hitWord = BotMessages.get("menu.blackjack.hit")
+                .replace(" ", "").replace("-", "");
+        return content.contains("hit") || content.contains(hitWord);
     }
 
     private boolean isJoin(String content) {

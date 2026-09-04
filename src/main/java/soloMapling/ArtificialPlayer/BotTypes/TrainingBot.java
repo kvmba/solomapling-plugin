@@ -272,6 +272,8 @@ public class TrainingBot extends BotSM implements GrindTickRegistry.Participant 
             {"bye", "goodbye", "cya", "later"}
     };
 
+    // Resolved per instance rather than in a static field: a static would freeze at class-load
+    // time and would not follow the configured language.
     private final BotOptionMenu soloMenu = new BotOptionMenu(this,
             BotMessages.labels("menu.training_solo", SOLO_SUFFIXES),
             BotMessages.keywords("menu.training_solo", SOLO_SUFFIXES, SOLO_KEYWORDS),
