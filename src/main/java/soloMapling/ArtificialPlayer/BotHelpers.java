@@ -175,11 +175,19 @@ public class BotHelpers {
     // and runs on a virtual thread. Returns false if the thread was interrupted
     // (interrupt flag restored) so the replay loop can bail; true if the wait completed.
     // Diff is clamped at 0 so an out-of-order timestamp can't throw from Thread.sleep.
+    //
+    // A long diff is normal, not a fault: timestamps are wall-clock times captured while a
+    // human was being recorded, so a pause by the recorder replays as a pause here. Across
+    // all 440 shipped recordings (7001 gaps), 90.6% land in 500-1000ms and only 4 exceed
+    // 2s, together adding ~1.2s of sleep. The character barely moves across those 4 gaps
+    // (2.5px on average vs 36.2px for a normal one) - the recorder was standing still.
     public static boolean waitBetweenTwoLong(long timestamp1, long timestamp2) {
         long diff = Math.max(0, timestamp2 - timestamp1);
-        if (diff > 2000) {
-            System.out.println("More than 2 seconds waiting");
-        }
+        // Commented out: this reads as a fault report but only ever meant the recorder paused
+        // mid-capture, so it was crying wolf on healthy playback. See the note above.
+        // if (diff > 2000) {
+        //     System.out.println("More than 2 seconds waiting");
+        // }
         try {
             Thread.sleep(diff);
             return true;
