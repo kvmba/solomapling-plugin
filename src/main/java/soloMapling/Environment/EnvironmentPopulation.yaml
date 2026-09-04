@@ -18,6 +18,21 @@
 version: 1
 scale: 1.0
 
+# Cap on how many bots may be CREATED per second (投放速率上限).
+#
+# Each bot creation is a full character load from the DB (~10+ queries) plus a
+# spawn broadcast that is O(everyone on the map). ~1000 bots released
+# back-to-back pins the CPU at 100% and starves the connection pool, making the
+# server unresponsive to real players while the world fills. Pacing spreads the
+# same population over a longer, calm ramp instead of one burst.
+#
+# 10 = ten bots per second, then wait for the next second. ~1000 bots => ~100s
+#      to fully populate, with the server responsive throughout.
+# 0 (or negative) = unlimited, i.e. the old burst-everything-at-once behaviour.
+#
+# Only affects bot creation at startup and via !env / !bot spawn commands.
+spawn_rate_per_second: 10
+
 waves:
   essentials:
     enabled: true

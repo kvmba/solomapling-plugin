@@ -85,6 +85,60 @@ class EnvironmentPopulationConfigTest {
     }
 
     @Test
+    void bundledYamlPacesSpawnsAtTenPerSecond() {
+        var plan = EnvironmentPopulationConfig.reload();
+        assertEquals(10, plan.spawnRatePerSecond());
+    }
+
+    @Test
+    void spawnRateReadsFromYamlAndDefaultsWhenAbsent() throws Exception {
+        Path configured = Files.createTempFile("env-pop-rate-", ".yaml");
+        Files.writeString(configured, """
+                version: 1
+                spawn_rate_per_second: 25
+                waves:
+                  training:
+                    enabled: false
+                """);
+        Path absent = Files.createTempFile("env-pop-norate-", ".yaml");
+        Files.writeString(absent, """
+                version: 1
+                waves:
+                  training:
+                    enabled: false
+                """);
+        try {
+            EnvironmentPopulationConfig.setConfigPath(configured.toString());
+            assertEquals(25, EnvironmentPopulationConfig.reload().spawnRatePerSecond());
+
+            EnvironmentPopulationConfig.setConfigPath(absent.toString());
+            assertEquals(EnvironmentPopulationConfig.DEFAULT_SPAWN_RATE_PER_SECOND,
+                    EnvironmentPopulationConfig.reload().spawnRatePerSecond());
+        } finally {
+            Files.deleteIfExists(configured);
+            Files.deleteIfExists(absent);
+        }
+    }
+
+    @Test
+    void zeroSpawnRateMeansUnlimited() throws Exception {
+        Path tmp = Files.createTempFile("env-pop-unlimited-", ".yaml");
+        Files.writeString(tmp, """
+                version: 1
+                spawn_rate_per_second: 0
+                waves:
+                  training:
+                    enabled: false
+                """);
+        try {
+            EnvironmentPopulationConfig.setConfigPath(tmp.toString());
+            assertTrue(EnvironmentPopulationConfig.reload().spawnRatePerSecond() <= 0);
+        } finally {
+            Files.deleteIfExists(tmp);
+        }
+    }
+
+    @Test
     void missingOverrideFallsBack() {
         EnvironmentPopulationConfig.setConfigPath("/tmp/does-not-exist-env-pop.yaml");
         var plan = EnvironmentPopulationConfig.reload();

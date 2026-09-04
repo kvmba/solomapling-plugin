@@ -34,6 +34,15 @@ public final class EnvironmentPopulationConfig {
             "src/main/java/soloMapling/Environment/EnvironmentPopulation.yaml";
     public static final String RESOURCE_PATH = "Environment/EnvironmentPopulation.yaml";
 
+    /**
+     * Default cap on bot creations per second when the YAML doesn't say.
+     * Each createBot is a full character load plus an O(map population) spawn
+     * broadcast, so an unpaced ~1000-bot startup pins the CPU and starves the DB
+     * pool; pacing keeps the server responsive to real players while the world
+     * fills. Set {@code spawn_rate_per_second: 0} for unlimited.
+     */
+    public static final int DEFAULT_SPAWN_RATE_PER_SECOND = 10;
+
     public record PlatformBatch(int m1, int m2, int m5) {
     }
 
@@ -87,6 +96,7 @@ public final class EnvironmentPopulationConfig {
     public record PopulationPlan(
             int version,
             double scale,
+            int spawnRatePerSecond,
             String loadedFrom,
             WaveEssentials essentials,
             WaveFmBuildout fmBuildout,
@@ -232,6 +242,9 @@ public final class EnvironmentPopulationConfig {
         return new PopulationPlan(
                 version,
                 scale,
+                // spawn_rate_per_second: cap on how many bots may be created per
+                // second. <= 0 means unlimited (no pacing). See BotSpawnThrottle.
+                toInt(root.get("spawn_rate_per_second"), DEFAULT_SPAWN_RATE_PER_SECOND),
                 source,
                 parseEssentials(asMap(waves.get("essentials"))),
                 parseFmBuildout(asMap(waves.get("fm_buildout"))),
@@ -402,6 +415,7 @@ public final class EnvironmentPopulationConfig {
         return new PopulationPlan(
                 1,
                 1.0,
+                DEFAULT_SPAWN_RATE_PER_SECOND,
                 source,
                 new WaveEssentials(true, true, true, new HenesysBatch(10, 0, 0, 0), "henesys",
                         new PlatformBatch(5, 5, 5)),

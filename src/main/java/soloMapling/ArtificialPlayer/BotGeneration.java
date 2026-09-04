@@ -174,6 +174,13 @@ public class BotGeneration {
 
     // forcedJobId > 0 pins the exact job (GM 'trainhere' test spawn); 0 = a random job for the class.
     public static int createBot(Point pos, MapleMap map, int baseClass, int minLevel, int maxLevel, int forcedJobId) {
+        // Pace arrivals. Every spawn below is a full character load (~10+ SQL
+        // queries) plus an O(map population) spawn broadcast; an unpaced flood
+        // pins the CPU and starves the DB pool. Configured by
+        // spawn_rate_per_second in EnvironmentPopulation.yaml (<=0 = unlimited).
+        // Taken BEFORE the expensive work so the wait is the cheap part.
+        BotSpawnThrottle.acquire();
+
         int cid = templateCharacterId();
 
         Character bot = null;

@@ -136,6 +136,10 @@ public class EnvironmentManager {
         System.out.println(String.format(
                 "[EnvironmentManager] Population plan source=%s scale=%.2f trainingCohorts=%d (scaled total=%d)",
                 pop.loadedFrom(), pop.scale(), pop.training().cohorts().size(), pop.trainingCohortTotal()));
+        int rate = pop.spawnRatePerSecond();
+        System.out.println(String.format(
+                "[EnvironmentManager] Spawn throttle=%s (spawn_rate_per_second=%d)",
+                rate > 0 ? rate + " bots/s" : "UNLIMITED", rate));
 
         var w1 = pop.essentials();
         if (w1.enabled()) {
