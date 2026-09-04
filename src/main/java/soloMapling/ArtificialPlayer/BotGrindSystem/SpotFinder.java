@@ -669,14 +669,28 @@ public final class SpotFinder {
         // Hoist the ledge lookups out of the (mob x member) loop.
         //
         // Each onDifferentLedge call resolved BOTH of its points, so a member anchor was
-        // re-resolved once per mob, and a mob once per member: monsters x members x 2 region
-        // lookups, each costing a graph peek plus four foothold-tree queries. At a typical
-        // 40 mobs x 5 members that was 400 lookups per sweep; resolving each anchor and each
-        // mob once makes it 45 - the same answers for ~1/9 of the work.
+        // re-resolved once per mob, and a mob once per member. Resolving each anchor and each
+        // mob once instead turns that into members + mobs lookups. At 40 mobs x 5 members:
+        //
+        //   worst case (no member matches, so all 5 get tried): 400 -> 45 lookups (8.9x)
+        //   average    (the match lands midway):                240 -> 45 lookups (5.3x)
+        //   best case  (the first member matches):               80 -> 45 lookups (1.8x)
+        //
+        // The old loop broke out on the first match, so the real-world figure is the average
+        // unless a stack's mobs tend to sit on its last member ledge.
         //
         // Safe because monsters only move when a real client sends MOVE_LIFE, so every
         // position involved is fixed for the duration of this call. Caching across sweeps
         // would NOT be safe and is deliberately not done here.
+        //
+        // Known bounded difference: the old code peeked for the graph once per pair, so a
+        // graph finishing mid-sweep made it start filtering partway through. This version
+        // decides unbaked-ness from the anchors alone, so such a sweep stays permissive
+        // throughout. It can therefore accept a few extra candidates (never fewer) on the
+        // one sweep where a map's graph first becomes available - the same set the old code
+        // accepted for the whole sweep up to that point. bestClustered only picks a target
+        // from among the candidates, so the effect is a marginally wider choice for a single
+        // 250ms tick, once per map - not a wrong target.
         List<Spot> anchors = (preferred != null) ? List.of(preferred) : members;
         int[] anchorRegions = new int[anchors.size()];
         boolean unbaked = false;
