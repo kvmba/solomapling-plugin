@@ -4,26 +4,29 @@ import org.gms.client.Character;
 import org.gms.client.inventory.Equip;
 import org.gms.client.inventory.InventoryType;
 import org.gms.client.inventory.Item;
+import org.gms.client.status.MonsterStatus;
+import org.gms.client.status.MonsterStatusEffect;
 import org.gms.constants.inventory.ItemConstants;
 import org.gms.net.packet.Packet;
 import org.gms.net.server.world.World;
 import org.gms.server.ItemInformationProvider;
 import org.gms.server.life.Monster;
 import org.gms.server.life.MonsterDropEntry;
+import org.gms.server.life.MonsterGlobalDropEntry;
 import org.gms.server.life.MonsterInformationProvider;
-import org.gms.server.maps.MapItem;
-import org.gms.server.maps.MapObject;
-import org.gms.server.maps.MapObjectType;
 import org.gms.server.maps.MapleMap;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import soloMapling.ArtificialPlayer.GCMoveSystem.GCMovement;
 import soloMapling.companion.CompanionRoster;
 import soloMapling.server.MethodScheduler;
+import soloMapling.server.SoloMaplingUtilities;
 import org.gms.util.PacketCreator;
 import org.gms.util.Randomizer;
 
 import java.awt.Point;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -44,6 +47,17 @@ import java.util.Map;
 public final class BotAttackEffects {
 
     private static final Logger log = LoggerFactory.getLogger(BotAttackEffects.class);
+
+    /*
+     * Death animation id handed to MapleMap.killMonster: 1 = the vanilla fade-out
+     * (0 = disappear instantly, 2+ = special per-mob sequences).
+     *
+     * Do NOT pass the attack hitDelay here. killMonster 4th arg is the animation byte written
+     * straight into the KILL_MONSTER packet (PacketCreator writes it with writeByte, so 300ms
+     * truncates to 44 - an animation the client has no death sequence for, and the mob pops out
+     * of existence instead of playing die1). The hit delay belongs to the attack packet only.
+     */
+    private static final int DEATH_ANIMATION_FADE_OUT = 1;
 
     private BotAttackEffects() {}
 
@@ -146,14 +160,33 @@ public final class BotAttackEffects {
             // withDrops=false: keep the EXP distribution + death broadcast, skip the
             // vanilla drop step (which yields nothing for a bot-only kill). We spawn the
             // loot ourselves below with proper ownership.
-            map.killMonster(target, bot, false, hitDelay);
+            map.killMonster(target, bot, false, DEATH_ANIMATION_FADE_OUT);
             if (!expBefore.isEmpty()) {
                 log.info("Companion kill EXP diagnostic cid={} mobId={} damage={} partyId={} before={} after={}",
                         bot.getId(), target.getId(), damage,
                         bot.getParty() == null ? -1 : bot.getParty().getId(),
                         expBefore, companionPartyExp(bot));
             }
-            dropMobLoot(bot, target, hitDelay);
+            // Vanilla delays loot until partway through the die1 animation
+            // (use_spawn_loot_on_animation: 0.42 * die1, clamped to 1000..3000ms) so the
+            // pile appears as the mob finishes dying instead of the instant it dies.
+            int die1 = target.getAnimationTime("die1");   // reads WZ stats only - safe after death
+            long lootDelayMs = Math.min(Math.max((long) (0.42 * die1), 1000L), 3000L);
+
+            // Captured at kill time: by the time the task fires the bot may have warped,
+            // logged out or been despawned, and the mob is already removed from the map.
+            // Monster.map is never nulled, so a getMap() == null test would be dead code -
+            // compare the bot's current map against the kill map instead.
+            final int botId = bot.getId();
+            final int killMapId = map.getId();
+            final Point deathPos = new Point(target.getPosition());
+            MethodScheduler.runAfterDelay(() -> {
+                Character live = SoloMaplingUtilities.getChr(botId);
+                if (live == null || live.getMap() == null || live.getMapId() != killMapId) {
+                    return; // bot gone or changed map - no loot at the corpse
+                }
+                dropMobLootAt(live, target, deathPos);
+            }, lootDelayMs);
             // No vacuum here: the dropped loot is collected organically by the bot itself - TrainingBot
             // walks over the pile and picks drops up one at a time (own + free-for-all), and any drop it
             // abandons expires via the normal map item lifetime. See TrainingBot loot handling + DropCommands.
@@ -176,69 +209,172 @@ public final class BotAttackEffects {
     }
 
     /*
-     * Roll the mob's real drop table and spawn each result with vanilla ownership: owner =
-     * the bot, drop-type 1 (party-shared) when grouped else 0 (owner-protected ~15s, then
-     * FFA). Rates come from the world config (drop_rate/boss_drop_rate/meso_rate), not the
-     * bot's own field (a cold bot never runs setWorldRates(), so its rate is a flat 1).
-     * Drops are sprayed horizontally like vanilla instead of stacking on one tile.
+     * Roll the mob's loot the way MapleMap.dropFromMonster does, so a bot kill looks
+     * exactly like a player kill: normal -> global -> quest drops, same droptype, same
+     * chance math, same horizontal fan-out, and the same "loot lands partway through the
+     * die1 animation" timing.
+     *
+     * We cannot call dropFromMonster directly: it goes through spawnDrop/spawnMesoDrop,
+     * which hand the owner's Client to MapItem and to activateItemReactors. Template-cloned
+     * bots share one headless BotClient whose getPlayer() is null (see BotClientBinding),
+     * so that path is unsafe. Everything below uses the public spawnItemDrop / spawnMesoDrop
+     * overloads that take the Character instead.
+     *
+     * chRate uses the world rates (drop_rate/boss_drop_rate/meso_rate) rather than the
+     * bot's own field: a bot never runs setWorldRates(), so its dropRate stays at the 1.0
+     * default and getBossDropRate() would divide it back out by the world rate.
      */
-    private static void dropMobLoot(Character bot, Monster mob, short delay) {
-        MapleMap map = bot.getMap();
-        if (mob.dropsDisabled()) {
+    private static void dropMobLoot(Character bot, Monster mob) {
+        dropMobLootAt(bot, mob, mob.getPosition());
+    }
+
+    /*
+     * Loot roll for a mob that died at deathPos. The position is captured at kill time:
+     * the mob object is already gone from the map by the time the delayed task fires.
+     */
+    private static void dropMobLootAt(Character bot, Monster mob, Point deathPos) {
+        final MapleMap map = bot.getMap();
+        if (map == null || mob.dropsDisabled()) {
             return;
         }
 
-        List<MonsterDropEntry> drops = MonsterInformationProvider.getInstance().retrieveEffectiveDrop(mob.getId());
-        if (drops == null || drops.isEmpty()) {
-            return;
+        final MonsterInformationProvider mi = MonsterInformationProvider.getInstance();
+        final List<MonsterDropEntry> lootEntry = mi.retrieveEffectiveDrop(mob.getId());
+        final List<MonsterGlobalDropEntry> globalEntry = new ArrayList<>(mi.getRelevantGlobalDrops(map.getId()));
+        if ((lootEntry == null || lootEntry.isEmpty()) && globalEntry.isEmpty()) {
+            return; // thanks resinate
         }
 
-        // Vanilla drop-type: party loot when grouped, else owner-own (15s) -> FFA.
-        final byte dropType = (byte) (bot.getParty() != null ? 1 : 0);
-        // World rates (config drop_rate/boss_drop_rate/meso_rate), matching a real player.
+        // Vanilla droptype precedence: explosive reward > FFA loot > party / owner-only.
+        final byte dropType = (byte) (mob.getStats().isExplosiveReward() ? 3
+                : mob.getStats().isFfaLoot() ? 2
+                : bot.getParty() != null ? 1 : 0);
+
         final World world = bot.getWorldServer();
-        final int dropRate = (int) Math.max(1, mob.isBoss() ? world.getBossDropRate() : world.getDropRate());
-        final int mesoRate = (int) Math.max(1, world.getMesoRate());
-        final ItemInformationProvider ii = ItemInformationProvider.getInstance();
-        final int mobX = mob.getPosition().x;
-        final int mobY = mob.getPosition().y;
+        float chRate = mob.isBoss() ? Math.max(1f, world.getBossDropRate()) : Math.max(1f, world.getDropRate());
+        MonsterStatusEffect showdown = mob.getStati(MonsterStatus.SHOWDOWN);
+        if (showdown != null) {
+            chRate *= (showdown.getStati().get(MonsterStatus.SHOWDOWN).doubleValue() / 100.0 + 1.0);
+        }
+        if (bot.isFamilyBuff()) {
+            chRate *= bot.getFamilyDrop();
+        }
+        final float mesoRate = Math.max(1f, world.getMesoRate());
 
-        // Spray successful drops horizontally (0, +25, -25, +50, -50 ... px), the same
-        // index-based fan-out vanilla uses, so loot spreads out instead of stacking.
-        int index = 1;
-        for (MonsterDropEntry de : drops) {
-            int dropChance = (int) Math.min((long) de.chance * dropRate, Integer.MAX_VALUE);
+        final int mobX = deathPos.x;
+        final int mobY = deathPos.y;
+
+        // Normal vs quest drops, split exactly like sortDropEntries(): a quest item the
+        // bot needs is "visible", one it does not need still drops but is not shown to it.
+        final List<MonsterDropEntry> normal = new ArrayList<>();
+        final List<MonsterDropEntry> visibleQuest = new ArrayList<>();
+        final List<MonsterDropEntry> otherQuest = new ArrayList<>();
+        final ItemInformationProvider ii = ItemInformationProvider.getInstance();
+        if (lootEntry != null) {
+            for (MonsterDropEntry mde : lootEntry) {
+                if (!ii.isQuestItem(mde.itemId)) {
+                    normal.add(mde);
+                } else if (bot.needQuestItem(mde.questid, mde.itemId)) {
+                    visibleQuest.add(mde);
+                } else {
+                    otherQuest.add(mde);
+                }
+            }
+        }
+
+        // Global drops only fire when the mob's own table has a real (non-meso) item,
+        // matching MobLootEntry.run()'s hasItemDrop gate.
+        boolean hasItemDrop = false;
+        for (MonsterDropEntry e : normal) {
+            if (e.itemId != 0) {
+                hasItemDrop = true;
+                break;
+            }
+        }
+
+        // One fan-out counter shared across every group, so loot spreads out instead of stacking.
+        final int[] index = {1};
+        dropEntryGroup(bot, mob, normal, chRate, mesoRate, dropType, mobX, mobY, index);
+        if (hasItemDrop) {
+            dropGlobalGroup(bot, mob, globalEntry, dropType, mobX, mobY, index);
+        }
+        dropEntryGroup(bot, mob, visibleQuest, chRate, mesoRate, dropType, mobX, mobY, index);
+        dropEntryGroup(bot, mob, otherQuest, chRate, mesoRate, dropType, mobX, mobY, index);
+    }
+
+    /* Rolls one MonsterDropEntry list (normal / visible-quest / other-quest) at chRate. */
+    private static void dropEntryGroup(Character bot, Monster mob, List<MonsterDropEntry> entries,
+                                       float chRate, float mesoRate, byte dropType,
+                                       int mobX, int mobY, int[] index) {
+        if (entries.isEmpty()) {
+            return;
+        }
+        MapleMap map = bot.getMap();
+        ItemInformationProvider ii = ItemInformationProvider.getInstance();
+
+        Collections.shuffle(entries);
+        for (MonsterDropEntry de : entries) {
+            int dropChance = (int) Math.min((float) de.chance * chRate * bot.getCardRate(de.itemId), Integer.MAX_VALUE);
             if (Randomizer.nextInt(999999) >= dropChance) {
                 continue;
             }
-
-            int spreadX = mobX + ((index % 2 == 0) ? (25 * ((index + 1) / 2)) : -(25 * (index / 2)));
-            Point pos = new Point(spreadX, mobY);
-
             if (de.itemId == 0) { // meso
                 int mesos = rollAmount(de.Minimum, de.Maximum);
-                if (mesos > 0) {
-                    mesos = Math.max(1, mesos * mesoRate);
-                    map.spawnMesoDrop(mesos, pos, mob, bot, /* playerDrop */ false, dropType, delay);
-                    index++;
+                if (mesos <= 0) {
+                    continue;
                 }
+                mesos = Math.max(1, Math.round(mesos * mesoRate));
+                map.spawnMesoDrop(mesos, spreadPos(mobX, mobY, index), mob, bot, false, dropType);
             } else {
-                Item item;
-                if (ItemConstants.getInventoryType(de.itemId) == InventoryType.EQUIP) {
-                    item = ii.randomizeStats((Equip) ii.getEquipById(de.itemId));
-                } else {
-                    short qty = (short) (de.Maximum != 1 ? rollAmount(de.Minimum, de.Maximum) : 1);
-                    item = new Item(de.itemId, (short) 0, qty);
-                }
-                map.spawnItemDrop(mob, bot, item, pos, dropType, /* playerDrop */ false);
-                index++;
+                map.spawnItemDrop(mob, bot, toItem(ii, de.itemId, de.Minimum, de.Maximum),
+                        spreadPos(mobX, mobY, index), dropType, false);
             }
         }
+    }
+
+    /* Global (continent-wide) drops: chance only, no chRate weighting, no quest split. */
+    private static void dropGlobalGroup(Character bot, Monster mob, List<MonsterGlobalDropEntry> entries,
+                                        byte dropType, int mobX, int mobY, int[] index) {
+        if (entries.isEmpty()) {
+            return;
+        }
+        MapleMap map = bot.getMap();
+        ItemInformationProvider ii = ItemInformationProvider.getInstance();
+
+        List<MonsterGlobalDropEntry> shuffled = new ArrayList<>(entries); // cached/shared list: shuffle a copy
+        Collections.shuffle(shuffled);
+        for (MonsterGlobalDropEntry de : shuffled) {
+            if (Randomizer.nextInt(999999) >= de.chance) {
+                continue;
+            }
+            if (de.itemId != 0) {
+                map.spawnItemDrop(mob, bot, toItem(ii, de.itemId, de.Minimum, de.Maximum),
+                        spreadPos(mobX, mobY, index), dropType, false);
+            }
+        }
+    }
+
+    /* The index-based horizontal fan-out vanilla uses (0, +25, -25, +50, -50 ... px). */
+    private static Point spreadPos(int mobX, int mobY, int[] index) {
+        int d = index[0]++;
+        return new Point(mobX + ((d % 2 == 0) ? (25 * ((d + 1) / 2)) : -(25 * (d / 2))), mobY);
+    }
+
+    private static Item toItem(ItemInformationProvider ii, int itemId, int min, int max) {
+        if (ItemConstants.getInventoryType(itemId) == InventoryType.EQUIP) {
+            return ii.randomizeStats((Equip) ii.getEquipById(itemId));
+        }
+        return new Item(itemId, (short) 0, quantityRoll(min, max));
     }
 
     /* Inclusive-ish amount roll matching vanilla (min..max), guarded against nextInt(0). */
     private static int rollAmount(int min, int max) {
         int span = max - min;
         return min + (span > 0 ? Randomizer.nextInt(span) : 0);
+    }
+
+    /* Same roll, narrowed to the short quantity Item wants. */
+    private static short quantityRoll(int min, int max) {
+        return (short) Math.max(1, rollAmount(min, max));
     }
 }
