@@ -36,7 +36,9 @@ public class BotDialogueHandler {
         public DialogueConstructor(List<String> dialogue, List<Integer> emotes, List<List<Integer>> lineEmotes, long duration) {
             this.dialogue = List.copyOf(dialogue);
             this.emotes = emotes == null ? List.of() : List.copyOf(emotes);
-            this.lineEmotes = lineEmotes;
+            // lineEmotes entries may be null by design ("no override, use the
+            // palette"), so copy the outer list only and leave entries as-is.
+            this.lineEmotes = lineEmotes == null ? null : List.copyOf(lineEmotes);
             this.duration = duration;
         }
 
@@ -135,7 +137,7 @@ public class BotDialogueHandler {
 
     public static Map<String, Object> readDialogueYaml(String dialoguePack, String dialogueType, String dialogueNode) {
         Map<String, Object> root = readDialogueRoot(dialoguePack);
-        if (root == null) {
+        if (root == null || root == MISSING_PACK || root.isEmpty()) {
             return null;
         }
         Map<String, Object> BotTypeNode = (Map<String, Object>) root.get(dialogueType);
@@ -158,33 +160,63 @@ public class BotDialogueHandler {
         DIALOGUE_ROOT_CACHE.clear();
     }
 
-    /** Parsed root of one dialogue pack; null (and logged) when unreadable. Cached. */
+    // Sentinel for "this pack could not be read". ConcurrentHashMap cannot store a
+    // null value, and computeIfAbsent does not cache a null RESULT - it would
+    // re-run the loader on every single call. A missing/broken dialogue pack is
+    // permanent, so that would re-open the resource and re-throw on every bot tick.
+    private static final Map<String, Object> MISSING_PACK = Map.of();
+
+    /** Parsed root of one dialogue pack; the MISSING_PACK sentinel when unreadable. Cached. */
     private static Map<String, Object> readDialogueRoot(String dialoguePack) {
-        return DIALOGUE_ROOT_CACHE.computeIfAbsent(dialoguePack, pack -> {
-            try (Reader reader = DialoguePackPaths.openDialogueReader(pack)) {
-                YamlReader yaml = new YamlReader(reader);
-                return (Map<String, Object>) yaml.read();
-            } catch (IOException e) {
-                System.err.println("[BotDialogueHandler] failed to load " + pack + ": " + e.getMessage());
-                return null;
-            }
-        });
+        Map<String, Object> cached = DIALOGUE_ROOT_CACHE.get(dialoguePack);
+        if (cached != null) {
+            return cached;
+        }
+        // Parse OUTSIDE any lock: YAML parsing is slow, and computeIfAbsent would
+        // hold the map's bin lock across it, stalling unrelated packs.
+        Map<String, Object> parsed;
+        try (Reader reader = DialoguePackPaths.openDialogueReader(dialoguePack)) {
+            YamlReader yaml = new YamlReader(reader);
+            Map<String, Object> root = (Map<String, Object>) yaml.read();
+            parsed = root != null ? root : MISSING_PACK;
+        } catch (IOException e) {
+            System.err.println("[BotDialogueHandler] failed to load " + dialoguePack + ": " + e.getMessage());
+            parsed = MISSING_PACK; // cache the failure: it will not fix itself
+        }
+        Map<String, Object> winner = DIALOGUE_ROOT_CACHE.putIfAbsent(dialoguePack, parsed);
+        return winner != null ? winner : parsed;
     }
+
+    // Sentinel for "this node does not exist". Same reasoning as MISSING_PACK:
+    // computeIfAbsent cannot cache a null result, so without a sentinel every bot
+    // tick would re-parse the pack looking for a node that isn't there.
+    private static final DialogueConstructor MISSING_NODE =
+            new DialogueConstructor(List.of(), List.of(), null, 0L);
 
     /**
      * One dialogue node, cached by (pack, botType, node). The YAML root is cached
      * separately, so a cache hit here is a map lookup instead of a classpath read
      * plus a full YAML parse plus a re-walk of every text/emote entry.
+     *
+     * <p>Returns the shared {@link #MISSING_NODE} sentinel for a node that does not
+     * exist rather than null, so the miss is cached too.
      */
     public static DialogueConstructor getDialogueCon(String BotTypeDialoguePath, String BotType, String DialogueNodeName) {
         String cacheKey = BotTypeDialoguePath + "|" + BotType + "|" + DialogueNodeName;
-        return CON_CACHE.computeIfAbsent(cacheKey, k -> buildDialogueCon(BotTypeDialoguePath, BotType, DialogueNodeName));
+        DialogueConstructor cached = CON_CACHE.get(cacheKey);
+        if (cached != null) {
+            return cached == MISSING_NODE ? null : cached;
+        }
+        DialogueConstructor built = buildDialogueCon(BotTypeDialoguePath, BotType, DialogueNodeName);
+        DialogueConstructor winner = CON_CACHE.putIfAbsent(cacheKey, built);
+        built = winner != null ? winner : built;
+        return built == MISSING_NODE ? null : built;
     }
 
     private static DialogueConstructor buildDialogueCon(String BotTypeDialoguePath, String BotType, String DialogueNodeName) {
         Map<String, Object> dialogMap = readDialogueYaml(BotTypeDialoguePath, BotType, DialogueNodeName);
         if (dialogMap == null) {
-            return null;
+            return MISSING_NODE;
         }
         List<String> textList = new ArrayList<>();
         List<List<Integer>> lineEmotes = new ArrayList<>();

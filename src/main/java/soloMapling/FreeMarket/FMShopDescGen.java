@@ -17,6 +17,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Random;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ThreadLocalRandom;
 
 public class FMShopDescGen {
@@ -388,10 +389,15 @@ public class FMShopDescGen {
     // resolved path. getRandomStoreDescription used to re-read the whole file
     // on every draw; shop description generation draws several per merchant and
     // there are hundreds of merchants to fill at startup.
-    private static final Map<String, List<String>> LINE_CACHE = new HashMap<>();
+    //
+    // ConcurrentHashMap so readers never block each other, and so the file read
+    // happens outside any lock (a slow/overridden FS path must not stall every
+    // other word list). Duplicate work on a race is harmless: the lists are
+    // immutable and one simply wins.
+    private static final Map<String, List<String>> LINE_CACHE = new ConcurrentHashMap<>();
 
     /** Drop cached word lists (after a hot-edit of the FMNameDesc files). */
-    public static synchronized void invalidateWordLists() {
+    public static void invalidateWordLists() {
         LINE_CACHE.clear();
     }
 
@@ -402,15 +408,14 @@ public class FMShopDescGen {
             System.err.println("[FMShopDescGen] no word list for type: " + type);
             return List.of();
         }
-        synchronized (LINE_CACHE) {
-            List<String> cached = LINE_CACHE.get(filePath);
-            if (cached != null) {
-                return cached;
-            }
-            List<String> lines = readNonBlankLines(filePath);
-            LINE_CACHE.put(filePath, lines);
-            return lines;
+        List<String> cached = LINE_CACHE.get(filePath);
+        if (cached != null) {
+            return cached;
         }
+        // Read OUTSIDE the cache lock: file I/O must not serialize every caller.
+        List<String> lines = readNonBlankLines(filePath);
+        List<String> winner = LINE_CACHE.putIfAbsent(filePath, lines);
+        return winner != null ? winner : lines;
     }
 
     private static List<String> readNonBlankLines(String filePath) {

@@ -63,6 +63,10 @@ public final class TownPresenceConfig {
                 local = cached;
                 if (local == null) {
                     local = load();
+                    // Publish towns AND its overrides index under one lock so a
+                    // concurrent reader can never observe new towns with a stale
+                    // index (or vice versa).
+                    overridesByMap = buildOverridesIndex(local);
                     cached = local;
                 }
             }
@@ -74,10 +78,11 @@ public final class TownPresenceConfig {
     public static List<TownEntry> reload() {
         EnvironmentPopulationConfig.reload();
         synchronized (TownPresenceConfig.class) {
-            cached = loadFromRaw(EnvironmentPopulationConfig.rawTownsList());
-            overridesByMap = buildOverridesIndex(cached);
+            List<TownEntry> fresh = loadFromRaw(EnvironmentPopulationConfig.rawTownsList());
+            overridesByMap = buildOverridesIndex(fresh);
+            cached = fresh;
+            return fresh;
         }
-        return cached;
     }
 
     // Every town map id in the ambient plan (main town map plus any interior sub-maps), across all towns.
@@ -114,7 +119,13 @@ public final class TownPresenceConfig {
         return Map.copyOf(byMap);
     }
 
-    /** Index of the current towns, built on demand and cached with them. */
+    /**
+     * Index of the towns currently published in {@link #cached}, built on demand.
+     *
+     * <p>{@link #towns()} and {@link #reload()} both populate this under the same
+     * lock as the towns list, so this fallback only fires when the index is
+     * explicitly dropped (e.g. someone clears it) while {@code cached} survives.
+     */
     private static Map<Integer, TownOverrides> overridesIndex() {
         Map<Integer, TownOverrides> local = overridesByMap;
         if (local == null) {

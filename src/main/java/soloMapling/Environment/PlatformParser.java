@@ -46,13 +46,25 @@ public class PlatformParser {
      * Parses a movement CSV file and returns the raw list of (x, y) coordinates.
      * Cached; the packaged CSVs never change at runtime.
      *
+     * <p>Uses get-then-putIfAbsent rather than computeIfAbsent: the file read
+     * happens OUTSIDE any lock, so a slow (or overlay-FS) read cannot stall other
+     * callers - computeIfAbsent would hold the map's bin lock across the whole
+     * read, blocking every key that hashes to the same bin. Duplicate work on a
+     * race is harmless: the parsed data is immutable and one copy simply wins.
+     *
      * @param mapId    The map ID (e.g., 910000000)
      * @param fileName The file name without extension (e.g., "m1")
      * @return List of Point objects representing all recorded coordinates
      */
     public static List<Point> parseCoordinates(int mapId, String fileName) {
         String cacheKey = mapId + "/" + fileName;
-        return COORDINATE_CACHE.computeIfAbsent(cacheKey, k -> readCoordinates(mapId, fileName));
+        List<Point> cached = COORDINATE_CACHE.get(cacheKey);
+        if (cached != null) {
+            return cached;
+        }
+        List<Point> parsed = readCoordinates(mapId, fileName);
+        List<Point> winner = COORDINATE_CACHE.putIfAbsent(cacheKey, parsed);
+        return winner != null ? winner : parsed;
     }
 
     private static List<Point> readCoordinates(int mapId, String fileName) {
@@ -96,8 +108,14 @@ public class PlatformParser {
      * @return Platform object with bounds, type, and sorted reference points
      */
     public static Platform parsePlatform(int mapId, String fileName) {
-        return PLATFORM_CACHE.computeIfAbsent(mapId + "/" + fileName,
-                k -> organizePlatform(parseCoordinates(mapId, fileName)));
+        String key = mapId + "/" + fileName;
+        Platform cached = PLATFORM_CACHE.get(key);
+        if (cached != null) {
+            return cached;
+        }
+        Platform built = organizePlatform(parseCoordinates(mapId, fileName));
+        Platform winner = PLATFORM_CACHE.putIfAbsent(key, built);
+        return winner != null ? winner : built;
     }
 
     /**
@@ -111,8 +129,14 @@ public class PlatformParser {
      * @return Platform object
      */
     public static Platform parsePlatform(int mapId, String fileName, Platform.Type type) {
-        return PLATFORM_CACHE.computeIfAbsent(mapId + "/" + fileName + "#" + type,
-                k -> organizePlatform(parseCoordinates(mapId, fileName), type));
+        String key = mapId + "/" + fileName + "#" + type;
+        Platform cached = PLATFORM_CACHE.get(key);
+        if (cached != null) {
+            return cached;
+        }
+        Platform built = organizePlatform(parseCoordinates(mapId, fileName), type);
+        Platform winner = PLATFORM_CACHE.putIfAbsent(key, built);
+        return winner != null ? winner : built;
     }
 
     /**

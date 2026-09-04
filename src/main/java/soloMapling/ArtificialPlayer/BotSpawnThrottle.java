@@ -84,38 +84,65 @@ public final class BotSpawnThrottle {
         if (limit <= 0) {
             return; // unlimited - keep the historical burst behaviour
         }
-        long deadline;
-        synchronized (LOCK) {
-            long now = System.currentTimeMillis();
-            if (windowStartMs == 0L || now - windowStartMs >= WINDOW_MS) {
-                // Roll to a fresh window. Align to the boundary when we merely
-                // expired (so long-run rate == configured rate), or start now on
-                // the very first call.
-                windowStartMs = (windowStartMs == 0L || now - windowStartMs >= 2 * WINDOW_MS)
-                        ? now
-                        : windowStartMs + WINDOW_MS;
-                usedInWindow.set(0);
-            }
-            if (usedInWindow.get() < limit) {
-                usedInWindow.incrementAndGet();
-                return;
-            }
-            // Window exhausted: wait for the next one, then take the first permit.
-            deadline = windowStartMs + WINDOW_MS;
-        }
 
-        // Sleep OUTSIDE the lock: this bot is not consuming CPU, and other
-        // threads can still observe the exhausted window instead of queueing.
-        sleepUntil(deadline);
+        while (true) {
+            long deadline;
+            synchronized (LOCK) {
+                rollWindowIfDue();
 
-        synchronized (LOCK) {
-            long now = System.currentTimeMillis();
-            if (now - windowStartMs >= WINDOW_MS) {
-                windowStartMs = (now - windowStartMs >= 2 * WINDOW_MS) ? now : windowStartMs + WINDOW_MS;
-                usedInWindow.set(0);
+                // The ONLY place a permit is granted, and it is always guarded by
+                // this check. The post-sleep path below falls back into this same
+                // block, so a herd of threads waking on one deadline can never all
+                // be granted - each either takes a permit that is actually free or
+                // computes the next deadline and sleeps again.
+                if (usedInWindow.get() < limit) {
+                    int used = usedInWindow.incrementAndGet();
+                    java.util.function.IntConsumer probe = overflowProbe;
+                    if (probe != null && used > limit) {
+                        probe.accept(used);
+                    }
+                    return;
+                }
+                deadline = windowStartMs + WINDOW_MS;
             }
-            usedInWindow.incrementAndGet();
+
+            // Sleep OUTSIDE the lock: a waiting bot costs no CPU, and other threads
+            // can still observe the true window state instead of queueing on us.
+            sleepUntil(deadline);
+            // Loop: re-enter the lock, roll the window if it has come due, and
+            // re-check the quota. Waking is a hint, not a permit.
         }
+    }
+
+    /**
+     * Opens the next window when the current one has expired.
+     * Caller must hold {@link #LOCK}.
+     *
+     * <p>Windows ALWAYS advance by exactly {@code WINDOW_MS} - never resynced to
+     * "now". That is what makes the rate bound hold: a window's end is a fixed
+     * point in time, so the permits granted in any 1s interval are bounded even
+     * when a stall lets several windows elapse at once.
+     *
+     * <p>Resyncing to now (the obvious-looking optimisation) silently breaks that
+     * bound: threads still sleeping on an older deadline wake late, find a fresh
+     * window already open, and are granted on top of the permits that window
+     * already handed out - measured 12 permits in one second against a limit of 8.
+     * Idle periods are not worth that: after a long stall the first few windows
+     * are simply spent catching up, which is the correct (conservative) behaviour
+     * for something whose whole job is to protect the server from a flood.
+     */
+    private static void rollWindowIfDue() {
+        long now = System.currentTimeMillis();
+        if (windowStartMs == 0L) {
+            windowStartMs = now;
+            usedInWindow.set(0);
+            return;
+        }
+        if (now - windowStartMs < WINDOW_MS) {
+            return; // current window still live
+        }
+        windowStartMs += WINDOW_MS;
+        usedInWindow.set(0);
     }
 
     /**
@@ -140,7 +167,32 @@ public final class BotSpawnThrottle {
         }
     }
 
-    /** Permits still available in the current window (for diagnostics). */
+    /** Permits handed out in the current window (diagnostics / tests). */
+    public static int usedInWindow() {
+        synchronized (LOCK) {
+            return usedInWindow.get();
+        }
+    }
+
+    // Test-only hook: fired with the offending count if a grant ever pushes the
+    // window past the limit. Lets tests assert the rate invariant from inside the
+    // throttle, instead of trying to infer it from wall-clock timestamps taken
+    // after each grant (which are skewed by scheduling and by the two clocks
+    // involved - currentTimeMillis inside, nanoTime in the test).
+    private static volatile java.util.function.IntConsumer overflowProbe;
+
+    /** Install a probe called with the permit count on any over-limit grant. Tests only. */
+    static void setOverflowProbe(java.util.function.IntConsumer probe) {
+        overflowProbe = probe;
+    }
+
+    /**
+     * Permits still available in the current window (for diagnostics).
+     *
+     * <p>Read-only: it must not roll the window, or a caller polling this to decide
+     * whether to spawn would open windows early and inflate the real rate. So it
+     * mirrors {@link #rollWindowIfDue}'s expiry test without mutating anything.
+     */
     public static int remaining() {
         int limit = limitPerSecond();
         if (limit <= 0) {
@@ -148,8 +200,10 @@ public final class BotSpawnThrottle {
         }
         synchronized (LOCK) {
             long now = System.currentTimeMillis();
-            if (windowStartMs == 0L || now - windowStartMs >= WINDOW_MS) {
-                return limit;
+            boolean expired = windowStartMs == 0L
+                    || (now - windowStartMs >= WINDOW_MS);
+            if (expired) {
+                return limit; // the next acquire() will open a fresh window
             }
             return Math.max(0, limit - usedInWindow.get());
         }

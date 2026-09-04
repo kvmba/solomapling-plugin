@@ -142,6 +142,10 @@ public class EnvironmentCommand extends Command {
         String action = params.length >= 2 ? params[1].toLowerCase() : "help";
         switch (action) {
             case "reload" -> {
+                // Drop the pins sidecar cache too: TownPins.txt is documented as
+                // safe to hand-edit, so `reload` must pick up manual edits (not
+                // just pins added through `mark`, which invalidate themselves).
+                TownPinsStore.invalidate();
                 var towns = TownPresenceConfig.reload();
                 // Rebuild the ambient-social managers' map scope so a curated town list applies live.
                 ConversationManager.getInstance().refreshMapScope();

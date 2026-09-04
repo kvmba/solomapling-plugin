@@ -56,8 +56,16 @@ public final class TownPinsStore {
     public static Map<Integer, List<Point>> load() {
         Map<Integer, List<Point>> local = cache;
         if (local == null) {
-            local = readFromDisk();
-            cache = local;
+            // Double-checked against the same lock addPin uses, so a burst of
+            // relocating bots hitting a cold cache reads the file once, not once
+            // per thread, and can't race an in-flight addPin.
+            synchronized (TownPinsStore.class) {
+                local = cache;
+                if (local == null) {
+                    local = readFromDisk();
+                    cache = local;
+                }
+            }
         }
         return local;
     }
@@ -66,9 +74,15 @@ public final class TownPinsStore {
         return load().getOrDefault(mapId, List.of());
     }
 
-    /** Drop the cached pins so the next {@link #load()} re-reads the sidecar. */
+    /**
+     * Drop the cached pins so the next {@link #load()} re-reads the sidecar.
+     * Call this after a hand-edit of the file - it is documented as safe to edit
+     * by hand, so the cache must be droppable without a restart.
+     */
     public static void invalidate() {
-        cache = null;
+        synchronized (TownPinsStore.class) {
+            cache = null;
+        }
     }
 
     private static Map<Integer, List<Point>> readFromDisk() {

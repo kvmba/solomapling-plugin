@@ -117,6 +117,10 @@ public final class PluginResources {
     // EVERY entry on each call - and getAvailablePlatformIds (a merchant bot
     // idle-tick call) hits this every time. With ~1000 merchant bots ticking,
     // that was thousands of full jar enumerations per second.
+    //
+    // Populated with get-then-putIfAbsent rather than computeIfAbsent: the scan
+    // (jar enumeration / directory walk) must not run while holding the map's bin
+    // lock, or one slow scan blocks every other listing hashing to that bin.
     private static final Map<String, List<String>> LIST_CACHE = new ConcurrentHashMap<>();
 
     /** Drop cached directory listings (after adding/removing packaged resources). */
@@ -126,7 +130,16 @@ public final class PluginResources {
 
     public static List<String> listFileNames(String relativeDir, String endsWith, boolean stripExtension) {
         String cacheKey = relativeDir + "|" + endsWith + "|" + stripExtension;
-        return LIST_CACHE.computeIfAbsent(cacheKey, k -> scanFileNames(relativeDir, endsWith, stripExtension));
+        List<String> cached = LIST_CACHE.get(cacheKey);
+        if (cached != null) {
+            return cached;
+        }
+        // Scan OUTSIDE any lock (see below): jar enumeration opens the whole
+        // JarFile and walks every entry, so holding a bin lock across it would
+        // stall unrelated listings.
+        List<String> scanned = scanFileNames(relativeDir, endsWith, stripExtension);
+        List<String> winner = LIST_CACHE.putIfAbsent(cacheKey, scanned);
+        return winner != null ? winner : scanned;
     }
 
     private static List<String> scanFileNames(String relativeDir, String endsWith, boolean stripExtension) {

@@ -139,6 +139,91 @@ class BotSpawnThrottleTest {
         }
     }
 
+    /**
+     * Regression: a burst larger than one window must NOT all be released when the
+     * window rolls. Every waiter sleeps to the same deadline, so if the post-sleep
+     * path grants a permit without re-checking the count, the whole herd pours
+     * through at once and the limit is meaningless (thundering herd).
+     */
+    @Test
+    @Timeout(value = 30, unit = TimeUnit.SECONDS)
+    void burstLargerThanWindowIsPacedAcrossWindows() throws Exception {
+        final int limit = 10;
+        final int bots = 60; // 6 windows' worth
+        BotSpawnThrottle.setLimitForTest(limit);
+
+        CountDownLatch start = new CountDownLatch(1);
+        CountDownLatch done = new CountDownLatch(bots);
+        for (int i = 0; i < bots; i++) {
+            Thread.ofVirtual().start(() -> {
+                try {
+                    start.await();
+                    BotSpawnThrottle.acquire();
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                } finally {
+                    done.countDown();
+                }
+            });
+        }
+
+        long t0 = System.nanoTime();
+        start.countDown();
+        assertTrue(done.await(25, TimeUnit.SECONDS), "spawn throttle deadlocked");
+        long elapsedMs = (System.nanoTime() - t0) / 1_000_000;
+
+        // 60 bots at 10/s needs ~5s (the first 10 are immediate, then 5 more windows).
+        assertTrue(elapsedMs >= 4000,
+                "60 bots at 10/s must span ~5 windows, but finished in " + elapsedMs
+                        + "ms - the limit is not being enforced");
+    }
+
+    /**
+     * The permits granted within any window must never exceed the limit, even when
+     * every thread wakes at the same instant.
+     *
+     * <p>Asserted from inside the throttle via a probe rather than from
+     * wall-clock timestamps taken after each grant: those are skewed by thread
+     * scheduling, and by the two different clocks involved (currentTimeMillis
+     * inside the throttle, nanoTime in the test). The probe reports the actual
+     * permit count at the moment of the grant, which is the real invariant.
+     */
+    @Test
+    @Timeout(value = 30, unit = TimeUnit.SECONDS)
+    void neverExceedsTheLimitWithinAWindow() throws Exception {
+        final int limit = 8;
+        final int bots = 64;
+        BotSpawnThrottle.setLimitForTest(limit);
+
+        java.util.Queue<Integer> overflows = new java.util.concurrent.ConcurrentLinkedQueue<>();
+        BotSpawnThrottle.setOverflowProbe(overflows::add);
+
+        CountDownLatch start = new CountDownLatch(1);
+        CountDownLatch done = new CountDownLatch(bots);
+        for (int i = 0; i < bots; i++) {
+            Thread.ofVirtual().start(() -> {
+                try {
+                    start.await();
+                    BotSpawnThrottle.acquire();
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                } finally {
+                    done.countDown();
+                }
+            });
+        }
+        start.countDown();
+        try {
+            assertTrue(done.await(25, TimeUnit.SECONDS), "spawn throttle deadlocked");
+            assertTrue(overflows.isEmpty(),
+                    "granted more than the limit within one window: " + overflows + " (limit " + limit + ")");
+            assertTrue(BotSpawnThrottle.usedInWindow() <= limit,
+                    "window count " + BotSpawnThrottle.usedInWindow() + " exceeds limit " + limit);
+        } finally {
+            BotSpawnThrottle.setOverflowProbe(null);
+        }
+    }
+
     @Test
     void estimatedWaitSecondsReflectsTheConfiguredRate() {
         BotSpawnThrottle.setLimitForTest(10);
