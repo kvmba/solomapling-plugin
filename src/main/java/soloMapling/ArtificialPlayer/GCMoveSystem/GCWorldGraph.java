@@ -139,6 +139,17 @@ final class GCWorldGraph {
 
     private static Map<Integer, int[]> build() {
         Map<Integer, int[]> out = new ConcurrentHashMap<>();
+        // A CACHE-style ThreadLocal: one WZ DataProvider per worker thread, because a
+        // DataProvider is not documented as thread-safe so it cannot simply be shared.
+        //
+        // This is ONLY safe because the pool below is a FIXED PLATFORM-THREAD pool - the
+        // ThreadLocal is populated once per long-lived thread and reused across tasks.
+        //
+        // DO NOT swap that pool for virtual threads (or run this on the shared virtual-thread
+        // executor). Bot ticks are dispatched one-virtual-thread-per-tick, so a virtual thread
+        // here would rebuild the entire Map.wz DataProvider for every task - each construction
+        // walks the whole tree (~65ms, 5.7k files). That is the exact trap already documented
+        // and avoided in MapMobIndex and MobHitboxIndex, which use a SHARED provider instead.
         ThreadLocal<DataProvider> mapSources =
                 ThreadLocal.withInitial(() -> DataProviderFactory.getDataProvider(WZFiles.MAP));
         ExecutorService pool = Executors.newFixedThreadPool(
