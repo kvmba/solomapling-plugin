@@ -241,7 +241,9 @@ public final class BotAttackEffects {
      */
     private static float lootChanceRate(Character bot, Monster mob) {
         final World world = bot.getWorldServer();
-        float chRate = mob.isBoss() ? Math.max(1f, world.getBossDropRate()) : Math.max(1f, world.getDropRate());
+        // No Math.max(1, ...) floor here: vanilla does not clamp chRate either, and a floor
+        // would put a bot ABOVE real players on low-rate worlds (drop_rate < 1).
+        float chRate = mob.isBoss() ? world.getBossDropRate() : world.getDropRate();
         MonsterStatusEffect showdown = mob.getStati(MonsterStatus.SHOWDOWN);
         if (showdown != null) {
             chRate *= (showdown.getStati().get(MonsterStatus.SHOWDOWN).doubleValue() / 100.0 + 1.0);
@@ -272,7 +274,7 @@ public final class BotAttackEffects {
         }
 
         final World world = bot.getWorldServer();
-        final float mesoRate = Math.max(1f, world.getMesoRate());
+        final float mesoRate = world.getMesoRate();   // unclamped, like vanilla chr.getMesoRate()
 
         final int mobX = deathPos.x;
         final int mobY = deathPos.y;
@@ -336,7 +338,7 @@ public final class BotAttackEffects {
                 if (mesos <= 0) {
                     continue;
                 }
-                mesos = Math.max(1, Math.round(mesos * mesoRate));
+                mesos = Math.max(1, (int) (mesos * mesoRate));   // vanilla floatToInt truncates
                 map.spawnMesoDrop(mesos, spreadPos(mobX, mobY, index), mob, bot, false, dropType);
             } else {
                 map.spawnItemDrop(mob, bot, toItem(ii, de.itemId, de.Minimum, de.Maximum),
@@ -380,10 +382,17 @@ public final class BotAttackEffects {
         return new Item(itemId, (short) 0, quantityRoll(min, max));
     }
 
-    /* Inclusive-ish amount roll matching vanilla (min..max), guarded against nextInt(0). */
+    /*
+     * Vanilla's amount roll: random in [Minimum, Maximum) only when Maximum != 1 AND
+     * Maximum > Minimum; otherwise the fixed value Maximum.
+     *
+     * Do NOT collapse this to a plain "min + nextInt(max - min)": for the very common
+     * Minimum=0 / Maximum=1 row (a single coin, a single potion) that returns 0, and the
+     * caller then skips the drop entirely - the loot silently disappears. Vanilla takes
+     * the Maximum branch there and drops 1.
+     */
     private static int rollAmount(int min, int max) {
-        int span = max - min;
-        return min + (span > 0 ? Randomizer.nextInt(span) : 0);
+        return (max != 1 && max > min) ? Randomizer.nextInt(max - min) + min : max;
     }
 
     /* Same roll, narrowed to the short quantity Item wants. */
