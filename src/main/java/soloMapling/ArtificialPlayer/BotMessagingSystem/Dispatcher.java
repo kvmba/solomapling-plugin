@@ -194,18 +194,20 @@ public class Dispatcher implements Runnable {
         }
     }
 
-    public void shutdown() {
-        executor.shutdown();
-        try {
-            // Wait for existing tasks to complete
-            if (!executor.awaitTermination(60, java.util.concurrent.TimeUnit.SECONDS)) {
-                executor.shutdownNow();
-            }
-        } catch (InterruptedException ex) {
-            executor.shutdownNow();
-            Thread.currentThread().interrupt();
-        }
-    }
+    /*
+     * Intentionally no shutdown()/stop() method.
+     *
+     * This class's tasks run on the PROCESS-WIDE pools owned by ExecutorServiceManager
+     * (getExecutorService / getScheduledExecutorService), shared with every other
+     * subsystem: the bot tick wheel, the movement driver, the grind sweep, spawn
+     * choreography. Shutting them down here would stop all of them, not just this
+     * dispatcher -- chat routing is one tenant of those pools, not their owner.
+     *
+     * A previous version had exactly such a method. It was never called, so the bug
+     * was latent; wiring it into any lifecycle (plugin unload, reload, a GM command)
+     * would have silently frozen the whole plugin. Removing it rather than leaving it
+     * as a trap.
+     */
 }
 
             /*

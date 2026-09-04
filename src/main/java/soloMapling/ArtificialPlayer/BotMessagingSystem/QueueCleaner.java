@@ -40,18 +40,10 @@ public class QueueCleaner implements Runnable {
         messages.removeIf(message -> currentTime - message.getTimestamp() > expirationTime);
     }
 
-    // Method to stop the scheduler gracefully
-    public void stop() {
-        if (scheduler != null && !scheduler.isShutdown()) {
-            scheduler.shutdown();
-            try {
-                if (!scheduler.awaitTermination(1, TimeUnit.SECONDS)) {
-                    scheduler.shutdownNow();
-                }
-            } catch (InterruptedException e) {
-                scheduler.shutdownNow();
-                Thread.currentThread().interrupt();
-            }
-        }
-    }
+    /*
+     * Intentionally no stop() method, for the same reason as Dispatcher: the cleanup
+     * task runs on the process-wide scheduled pool from ExecutorServiceManager, which
+     * this class does not own. Shutting it down would stop every other subsystem's
+     * periodic work (tick wheel, movement driver, grind sweep) along with this one.
+     */
 }
