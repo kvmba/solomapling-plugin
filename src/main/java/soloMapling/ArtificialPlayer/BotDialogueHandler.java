@@ -17,9 +17,13 @@ import java.io.Reader;
 
 import static soloMapling.ArtificialPlayer.BotCommandsPack.SocialCommands.BotDialogue;
 import static soloMapling.ArtificialPlayer.BotCommandsPack.SocialCommands.BotEmote;
-import static soloMapling.server.SoloMaplingUtilities.random;
 
 public class BotDialogueHandler {
+
+    // Local RNG: reaching into SoloMaplingUtilities.random would trigger that class's static
+    // initializer, which needs a live Server instance. Nothing here needs server state, and
+    // dialogue parsing/selection must stay unit-testable (and usable) without one.
+    private static final java.util.Random RANDOM = new java.util.Random();
 
     private Character chr;
 
@@ -38,8 +42,20 @@ public class BotDialogueHandler {
             this.emotes = emotes == null ? List.of() : List.copyOf(emotes);
             // lineEmotes entries may be null by design ("no override, use the
             // palette"), so copy the outer list only and leave entries as-is.
-            this.lineEmotes = lineEmotes == null ? null : List.copyOf(lineEmotes);
+            // List.copyOf would reject those null entries with an NPE, so build the
+            // unmodifiable view by hand.
+            this.lineEmotes = immutableCopyAllowingNulls(lineEmotes);
             this.duration = duration;
+        }
+
+        // List.copyOf / ImmutableCollections reject null elements, but a null entry in
+        // lineEmotes is meaningful (see parseTextEntries). Copies the list and wraps it
+        // unmodifiable without touching the entries. Returns null for a null input.
+        private static <T> List<T> immutableCopyAllowingNulls(List<T> src) {
+            if (src == null) {
+                return null;
+            }
+            return Collections.unmodifiableList(new ArrayList<>(src));
         }
 
         // Returns a copy carrying different dialogue text, leaving this instance
@@ -62,7 +78,7 @@ public class BotDialogueHandler {
             if (emotes == null || emotes.isEmpty()) {
                 return 0;
             }
-            return emotes.get(random.nextInt(emotes.size()));
+            return emotes.get(RANDOM.nextInt(emotes.size()));
         }
 
         // Emote tied to a specific line: its tagged override (random pick if a list),
@@ -71,7 +87,7 @@ public class BotDialogueHandler {
             if (lineEmotes != null && i >= 0 && i < lineEmotes.size()) {
                 List<Integer> override = lineEmotes.get(i);
                 if (override != null && !override.isEmpty()) {
-                    return override.get(random.nextInt(override.size()));
+                    return override.get(RANDOM.nextInt(override.size()));
                 }
             }
             return getEmote();
@@ -287,7 +303,7 @@ public class BotDialogueHandler {
 
     public static String getRandomDialogueLine(BotSM botSM, String DialogueNodeName) {
         DialogueConstructor dialog = getDialogueCon(botSM.dialoguePath, botSM.botType, DialogueNodeName);
-        return dialog.getDialogue().get(random.nextInt(dialog.getDialogue().size()));
+        return dialog.getDialogue().get(RANDOM.nextInt(dialog.getDialogue().size()));
     }
 
     // Picks a random line from a node and resolves any {TOKEN}s against the speaking bot (self) and
@@ -312,7 +328,7 @@ public class BotDialogueHandler {
         int n = lines.size();
         int tries = Math.min(CONTEXT_REROLLS, n);
         for (int attempt = 0; attempt < tries; attempt++) {
-            String raw = lines.get(random.nextInt(n));
+            String raw = lines.get(RANDOM.nextInt(n));
             if (!DialogueContextResolver.hasTokens(raw)) {
                 return raw;
             }
@@ -340,7 +356,7 @@ public class BotDialogueHandler {
         if (dialog == null || dialog.getDialogue().isEmpty()) {
             return;
         }
-        int idx = random.nextInt(dialog.getDialogue().size());
+        int idx = RANDOM.nextInt(dialog.getDialogue().size());
         String randomText = dialog.getDialogue().get(idx);
         runDialogue(character, dialog, Collections.singletonList(randomText), dialog.getEmoteForIndex(idx));
     }
@@ -363,7 +379,7 @@ public class BotDialogueHandler {
         int n = lines.size();
         int tries = Math.min(CONTEXT_REROLLS, n);
         for (int attempt = 0; attempt < tries; attempt++) {
-            int idx = random.nextInt(n);
+            int idx = RANDOM.nextInt(n);
             String raw = lines.get(idx);
             if (!DialogueContextResolver.hasTokens(raw)) {
                 runDialogue(character, dialog, Collections.singletonList(raw), dialog.getEmoteForIndex(idx));
@@ -399,7 +415,7 @@ public class BotDialogueHandler {
         for (int i = 0; i < lines.size(); i++) {
             (DialogueContextResolver.hasTokens(lines.get(i)) ? contextLines : plainLines).add(i);
         }
-        boolean preferContext = random.nextDouble() < contextChance;
+        boolean preferContext = RANDOM.nextDouble() < contextChance;
         List<Integer> first = preferContext ? contextLines : plainLines;
         List<Integer> second = preferContext ? plainLines : contextLines;
         if (emitOneFrom(character, dialog, lines, first, player)) {
@@ -417,7 +433,7 @@ public class BotDialogueHandler {
         }
         int tries = Math.min(CONTEXT_REROLLS, pool.size());
         for (int attempt = 0; attempt < tries; attempt++) {
-            int idx = pool.get(random.nextInt(pool.size()));
+            int idx = pool.get(RANDOM.nextInt(pool.size()));
             String raw = lines.get(idx);
             if (!DialogueContextResolver.hasTokens(raw)) {
                 runDialogue(character, dialog, Collections.singletonList(raw), dialog.getEmoteForIndex(idx));
