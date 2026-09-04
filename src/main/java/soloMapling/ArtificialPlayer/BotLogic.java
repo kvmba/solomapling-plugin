@@ -15,6 +15,7 @@ import org.gms.server.maps.MapObject;
 import org.gms.server.maps.MapObjectType;
 import org.gms.server.maps.MapleMap;
 import soloMapling.ArtificialPlayer.BotCommandsPack.DropCommands;
+import soloMapling.Environment.BotMessages;
 
 import java.awt.*;
 import java.util.ArrayList;
@@ -315,7 +316,8 @@ public class BotLogic {
             int mapItemId = mapItem.getItemId();
             int qty = mapItem.getItem().getQuantity();
             String itemName = BotHelpers.convertItemIdToName(mapItemId);
-            betString.append(qty).append("x ").append(itemName).append(", ");
+            betString.append(BotMessages.get("casino.bet_entry", qty, itemName))
+                    .append(BotMessages.get("casino.bet_separator"));
         }
         betString = new StringBuilder(betString.toString().replace("'s Stamp", ""));
         betString = new StringBuilder(betString.toString().replace(" Stamp", ""));
@@ -327,8 +329,8 @@ public class BotLogic {
     // todo refactor to generic
     // todo casino bot only
     public static String announceBetString(Character better, List<MapObject> items) {
-        StringBuilder betString = new StringBuilder();
-        betString.append(better.getName()).append("'s Bet: ");
+        StringBuilder betString = new StringBuilder(
+                BotMessages.get("casino.bet_prefix", better.getName()));
         betString = BotLogic.cleanUpBetsString(items, betString);
         return betString.toString();
     }

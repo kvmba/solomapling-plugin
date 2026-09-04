@@ -14,6 +14,7 @@ import soloMapling.ArtificialPlayer.BotTradeSystem.BotTradeQueue;
 import soloMapling.ArtificialPlayer.BotTradeSystem.BotTradeSM;
 import soloMapling.server.BotTiming;
 import soloMapling.server.ExecutorServiceManager;
+import soloMapling.Environment.BotMessages;
 
 import java.awt.*;
 import java.util.List;
@@ -145,7 +146,7 @@ public class DropGameBot extends BotSM {
             dprint("REJECT trade from " + incoming.getName()
                     + " — already engaged with " + player.getName());
             BotTradeCommands.writeTradeChat(getChr(),
-                    "Busy with " + player.getName() + "! Try again after this game.");
+                    BotMessages.get("dropgame.busy", player.getName()));
             BotTiming.after(1500, () -> BotTradeCommands.cancelTrade(getChr()));
             waitFor(2000); // hold ticks until the delayed cancel lands
             cleanupTradeState();
@@ -270,15 +271,15 @@ public class DropGameBot extends BotSM {
     private void tradeWait() {
         if (!isTradeActive()) {
             dprint("TRADE_WAIT: trade no longer active, cancelling");
-            cancelAndReset("Trade cancelled.");
+            cancelAndReset(BotMessages.get("dropgame.trade_cancelled"));
             return;
         }
         dprint("TRADE_WAIT: writing rules, starting 60s timer");
         // Show rules in trade chat
         BotTradeCommands.writeTradeChat(getChr(),
-                "Drop Game! Medium: 10m / Elite: 50m");
+                BotMessages.get("dropgame.rules"));
         BotTradeCommands.writeTradeChat(getChr(),
-                "Put in your mesos and confirm!");
+                BotMessages.get("dropgame.put_mesos"));
         startTimer(60_000); // 60s trade timeout
         setDropGameState(DropGameState.TRADE_VALIDATE);
     }
@@ -287,7 +288,7 @@ public class DropGameBot extends BotSM {
     // Poll until partner locks in, then read mesos and decide tier.
     private void tradeValidate() {
         if (!isTradeActive()) {
-            cancelAndReset("Trade cancelled.");
+            cancelAndReset(BotMessages.get("dropgame.trade_cancelled"));
             return;
         }
 
@@ -295,7 +296,7 @@ public class DropGameBot extends BotSM {
         if (!BotTradeCommands.isPartnerLocked(getChr())) {
             if (System.currentTimeMillis() > stateEndTime) {
                 dprint("TRADE_VALIDATE: partner lock timed out");
-                BotTradeCommands.writeTradeChat(getChr(), "Too slow! Trade timed out.");
+                BotTradeCommands.writeTradeChat(getChr(), BotMessages.get("dropgame.too_slow"));
                 BotTiming.after(2000, () -> BotTradeCommands.cancelTrade(getChr()));
                 waitFor(2500); // resume after the delayed cancel lands
                 cleanupTradeAndReset();
@@ -317,7 +318,7 @@ public class DropGameBot extends BotSM {
             // dialogue below blocks for its YAML duration and must finish
             // before the bot resets to advertising.
             dprint("TRADE_VALIDATE: invalid meso amount, rejecting");
-            BotTradeCommands.writeTradeChat(getChr(), "Wrong amount! 10m or 50m only.");
+            BotTradeCommands.writeTradeChat(getChr(), BotMessages.get("dropgame.wrong_amount"));
             BotHelpers.blockingSleep(2000);
             BotTradeCommands.cancelTrade(getChr());
             getDialogueHandler().executeBotFlavorDialogue("InvalidMeso", DropGameBot.this);
@@ -327,7 +328,7 @@ public class DropGameBot extends BotSM {
 
         // Valid amount - confirm trade
         dprint("TRADE_VALIDATE: tier=" + selectedTier + ", confirming trade");
-        BotTradeCommands.writeTradeChat(getChr(), selectedTier.toUpperCase() + " tier locked in!");
+        BotTradeCommands.writeTradeChat(getChr(), BotMessages.get("dropgame.tier_locked", selectedTier.toUpperCase()));
         BotTiming.after(1000, () -> BotTradeCommands.confirmTrade(getChr()));
         waitFor(3000); // confirm lands at +1s; settle ~2s after it, as before
         setDropGameState(DropGameState.TRADE_FINALIZE);
@@ -340,7 +341,7 @@ public class DropGameBot extends BotSM {
         dprint("TRADE_FINALIZE: loot pool loaded, size=" + lootPool.size());
         if (lootPool.isEmpty()) {
             dprint("TRADE_FINALIZE: loot pool empty for tier=" + selectedTier);
-            BotSpeak(getChr(), "Loot pool error. Refunding and resetting.");
+            BotSpeak(getChr(), BotMessages.get("dropgame.loot_pool_error"));
             cleanupTradeAndReset();
             return;
         }
@@ -359,7 +360,7 @@ public class DropGameBot extends BotSM {
     private void partySetup() {
         if (!isPlayerOnMap()) {
             dprint("PARTY_SETUP: player off-map, cancelling");
-            cancelAndReset("Player left the map.");
+            cancelAndReset(BotMessages.get("dropgame.player_left"));
             return;
         }
 
@@ -368,7 +369,7 @@ public class DropGameBot extends BotSM {
         boolean invited = BotPartyCommands.botInvitePlayer(getChr(), player);
         dprint("PARTY_SETUP: botInvitePlayer -> " + invited);
         if (!invited) {
-            BotSpeak(getChr(), "Couldn't send party invite. Resetting.");
+            BotSpeak(getChr(), BotMessages.get("dropgame.invite_failed"));
             forfeitAndReset();
             return;
         }
@@ -381,7 +382,7 @@ public class DropGameBot extends BotSM {
     // Poll for player to accept the invite. On timeout or decline, warn + forfeit.
     private void partyWait() {
         if (!isPlayerOnMap()) {
-            cancelAndReset("Player left the map.");
+            cancelAndReset(BotMessages.get("dropgame.player_left"));
             return;
         }
 
@@ -396,7 +397,7 @@ public class DropGameBot extends BotSM {
         // never joins).
         if (System.currentTimeMillis() > stateEndTime) {
             dprint("PARTY_WAIT: timed out waiting for player to accept");
-            BotSpeak(getChr(), "Party invite timed out — mesos forfeited. Don't waste my time next round!");
+            BotSpeak(getChr(), BotMessages.get("dropgame.invite_timeout"));
             waitFor(2000); // let the line land before POST_GAME disbands + resets
             setDropGameState(DropGameState.POST_GAME);
         }
@@ -405,7 +406,7 @@ public class DropGameBot extends BotSM {
     // --- PRE-GAME BUFF ---
     private void preGame() {
         if (!isPlayerOnMap()) {
-            cancelAndReset("Player left the map.");
+            cancelAndReset(BotMessages.get("dropgame.player_left"));
             return;
         }
 
@@ -433,7 +434,7 @@ public class DropGameBot extends BotSM {
     // --- GAME LAUNCH ---
     private void gameLaunch() {
         if (!isPlayerOnMap()) {
-            cancelAndReset("Player left the map.");
+            cancelAndReset(BotMessages.get("dropgame.player_left"));
             return;
         }
 

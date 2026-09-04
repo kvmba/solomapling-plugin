@@ -11,6 +11,7 @@ import soloMapling.ArtificialPlayer.BotSM;
 import soloMapling.server.EventMessageSystem.EventBus;
 import soloMapling.server.EventMessageSystem.EventType;
 import soloMapling.server.EventMessageSystem.GameEvent;
+import soloMapling.Environment.BotMessages;
 
 import java.awt.*;
 import java.util.Collections;
@@ -70,7 +71,7 @@ public class GachaBot extends BotSM {
     private void setPosition() {
         // Set the bot's main position where it will operate from
         this.basePosition = getChr().getPosition();
-        SocialCommands.BotChatbubble(getChr(), "Position set!");
+        SocialCommands.BotChatbubble(getChr(), BotMessages.get("gacha.position_set"));
     }
 
     private void runRoulette() {
@@ -115,7 +116,7 @@ public class GachaBot extends BotSM {
         if (reaction != null && !reaction.isEmpty()) {
             SocialCommands.BotSpeak(getChr(), reaction + " " + reward);
         } else {
-            SocialCommands.BotSpeak(getChr(), "Wow! " + reward);
+            SocialCommands.BotSpeak(getChr(), BotMessages.get("gacha.wow", reward));
         }
     }
 
@@ -226,16 +227,16 @@ public class GachaBot extends BotSM {
 
     private void handleGachaponEvent(GameEvent event) {
         SocialCommands.BotEmote(getChr(), 2);
-        SocialCommands.BotChatbubble(getChr(), "Lucky " + event.getPlayerName() + "!");
+        SocialCommands.BotChatbubble(getChr(), BotMessages.get("gacha.lucky", event.getPlayerName()));
     }
 
     private void handleScrollingEvent(GameEvent event) {
         if (event.getPass()) {
             SocialCommands.BotEmote(getChr(), 3);
-            SocialCommands.BotChatbubble(getChr(), "Nice scroll " + event.getPlayerName() + "!");
+            SocialCommands.BotChatbubble(getChr(), BotMessages.get("gacha.nice_scroll", event.getPlayerName()));
         } else {
             SocialCommands.BotEmote(getChr(), 4);
-            SocialCommands.BotChatbubble(getChr(), "Ooof... unlucky D:");
+            SocialCommands.BotChatbubble(getChr(), BotMessages.get("gacha.unlucky"));
         }
     }
 
@@ -246,7 +247,7 @@ public class GachaBot extends BotSM {
         BotMoveStreamOffset(mvr, getChr());
         BotHelpers.blockingSleep(1500);
         SocialCommands.BotEmote(getChr(), 2);
-        SocialCommands.BotChatbubble(getChr(), "Ayy Congrats " + event.getPlayerName() + "!");
+        SocialCommands.BotChatbubble(getChr(), BotMessages.get("gacha.congrats", event.getPlayerName()));
         BotHelpers.blockingSleep(1500);
         MovementRecording mvr2 = getMovementRecording(0, "leftright70");
         BotMoveStreamOffset(mvr2, getChr());

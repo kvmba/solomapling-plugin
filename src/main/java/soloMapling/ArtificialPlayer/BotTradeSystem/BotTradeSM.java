@@ -7,6 +7,7 @@ import org.gms.server.Trade;
 import soloMapling.ArtificialPlayer.BotBlockList;
 import soloMapling.ArtificialPlayer.BotSM;
 import soloMapling.server.BotTiming;
+import soloMapling.Environment.BotMessages;
 
 import java.util.List;
 
@@ -121,7 +122,7 @@ public class BotTradeSM {
                     setTradeState(TradeState.WAITING_RESPONSE);
                 } else {
                     //null
-                    BotTradeCommands.writeTradeChat(getChr(), "I don't have anything at the moment");
+                    BotTradeCommands.writeTradeChat(getChr(), BotMessages.get("trade.nothing_to_sell"));
                     setTradeState(TradeState.WAITING_RESPONSE);
                 }
                 break;
@@ -165,7 +166,7 @@ public class BotTradeSM {
             case CONFIRMING:
                 setTradeStartTime();
                 setOfferAccepted();
-                BotTradeCommands.writeTradeChat(getChr(), "trade looks good to go!");
+                BotTradeCommands.writeTradeChat(getChr(), BotMessages.get("trade.good_to_go"));
                 BotTradeCommands.confirmTrade(getChr());
                 setTradeState(TradeState.CONFIRMED_LOCKED);
                 break;
@@ -184,10 +185,10 @@ public class BotTradeSM {
 
                 if (lastTradeResult != Trade.TradeResult.SUCCESSFUL) {
                     BotEmote(getChr(), 4);
-                    BotSpeak(getChr(), "Why did you decline?");
+                    BotSpeak(getChr(), BotMessages.get("trade.why_decline"));
                 } else {
                     BotEmote(getChr(), 2);
-                    BotSpeak(getChr(), "Thank you!");
+                    BotSpeak(getChr(), BotMessages.get("trade.thank_you"));
                     getParent().setLastTradeResult(Trade.TradeResult.SUCCESSFUL);
                 }
                 getParent().waitFor(2000); // farewell beat before COMPLETED ticks
@@ -199,7 +200,7 @@ public class BotTradeSM {
                 setTradeCompleted();
                 break;
             case TIMED_OUT:
-                BotTradeCommands.writeTradeChat(getChr(), "Timed Out!");
+                BotTradeCommands.writeTradeChat(getChr(), BotMessages.get("trade.timed_out"));
                 // decline (closes the trade window) lands 2s after the message; hold
                 // the bot slightly past it so nothing runs while the window is open
                 BotTiming.after(2000, () -> BotTradeCommands.declineTradeInvite(getChr()));
@@ -236,7 +237,7 @@ public class BotTradeSM {
         int mesoOffering = getParent().getTradeWants().getMesoOffering();
         if (mesoOffering > 0) {
             BotTradeCommands.setMeso(getChr(), mesoOffering);
-            BotTradeCommands.writeTradeChat(getChr(), "Here's " + mesoOffering + " mesos for your item!");
+            BotTradeCommands.writeTradeChat(getChr(), BotMessages.get("trade.meso_offer", mesoOffering));
         }
 
         // Also offer any items we might be exchanging
@@ -281,18 +282,18 @@ public class BotTradeSM {
     protected boolean postItemsForSale() {
         Item itemForSale = getParent().getTradeInventory().getMainItemForSale();
         if (itemForSale == null) {
-            BotTradeCommands.writeTradeChat(getChr(), "I don't have anything for sale currently, sorry");
+            BotTradeCommands.writeTradeChat(getChr(), BotMessages.get("trade.nothing_for_sale"));
             return false;
         }
 
         if (isEquip(itemForSale)) {
             Equip eqForSale = (Equip) getParent().getTradeInventory().getMainItemForSale();
             BotTradeCommands.addEquipToTrade(getChr(), eqForSale, 1);
-            BotTradeCommands.writeTradeChat(getChr(), "Here is what I've got. check it out!");
+            BotTradeCommands.writeTradeChat(getChr(), BotMessages.get("trade.here_is_what_i_have"));
             return true;
         } else {
             BotTradeCommands.addItemToTrade(getChr(), itemForSale.getItemId(), 1, 1);
-            BotTradeCommands.writeTradeChat(getChr(), "Here is what I've got. check it out!");
+            BotTradeCommands.writeTradeChat(getChr(), BotMessages.get("trade.here_is_what_i_have"));
             return true;
         }
     }
@@ -305,71 +306,51 @@ public class BotTradeSM {
     protected String generateWantsMessageString() {
         int mesoWanted = getParent().getTradeWants().getMesoWanted();
         List<ItemQuantity> itemsWanted = getParent().getTradeWants().getItemsWanted();
-        StringBuilder wantsMessage = new StringBuilder("I want ");
+        StringBuilder wantsMessage = new StringBuilder(BotMessages.get("trade.wants_prefix"));
 
         // Meso part
         if (mesoWanted > 0) {
-//            wantsMessage.append(mesoWanted).append(" mesos");
             wantsMessage.append(formatPriceToShorthand(mesoWanted));
-            // Add "and" if there are also items
+            // Add the connective only if items follow it.
             if (itemsWanted != null && !itemsWanted.isEmpty()) {
-                wantsMessage.append(" and ");
+                wantsMessage.append(BotMessages.get("trade.wants_connective"));
             }
         }
 
-        // Items part
-        if (itemsWanted != null && !itemsWanted.isEmpty()) {
-            if (itemsWanted.size() == 1) {
-                ItemQuantity item = itemsWanted.get(0);
+            // Items part
+            if (itemsWanted != null && !itemsWanted.isEmpty()) {
+                wantsMessage.append(describeWantedItems(itemsWanted));
+            }
+
+            // Nothing wanted
+            if (mesoWanted == 0 && (itemsWanted == null || itemsWanted.isEmpty())) {
+                wantsMessage.append(BotMessages.get("trade.wants_nothing"));
+            }
+
+            return wantsMessage.toString();
+        }
+
+        /** "10x Power Elixir、3x Ilbi Throwing Stars" — quantity format and separator are localized. */
+        private String describeWantedItems(List<ItemQuantity> itemsWanted) {
+            StringBuilder out = new StringBuilder();
+            for (int i = 0; i < itemsWanted.size(); i++) {
+                ItemQuantity item = itemsWanted.get(i);
                 String itemName = convertItemIdToName(item.getItemId());
                 if (item.getQuantity() > 1) {
-                    wantsMessage.append("").append(item.getQuantity()).append("x ").append(itemName);
+                    out.append(BotMessages.get("trade.wants_quantity", item.getQuantity(), itemName));
                 } else {
-                    wantsMessage.append("").append(itemName);
+                    out.append(itemName);
                 }
-            } else {
-                wantsMessage.append("");
-                for (int i = 0; i < itemsWanted.size(); i++) {
-                    ItemQuantity item = itemsWanted.get(i);
-                    String itemName = convertItemIdToName(item.getItemId());
-
-                    if (item.getQuantity() > 1) {
-                        wantsMessage.append("").append(item.getQuantity()).append("x ").append(itemName);
-                    } else {
-                        wantsMessage.append("").append(itemName);
-                    }
-
-                    if (i < itemsWanted.size() - 1) {
-                        wantsMessage.append(", ");
-                    }
+                if (i < itemsWanted.size() - 1) {
+                    out.append(BotMessages.get("trade.wants_separator"));
                 }
             }
+            return out.toString();
         }
-//        if (itemsWanted != null && !itemsWanted.isEmpty()) {
-//            if (itemsWanted.size() == 1) {
-//                wantsMessage.append("").append(convertItemIdToName(itemsWanted.get(0).getItemId()));
-//            } else {
-//                wantsMessage.append("");
-//                for (int i = 0; i < itemsWanted.size(); i++) {
-//                    wantsMessage.append("").append(convertItemIdToName(itemsWanted.get(i).getItemId()));
-//                    if (i < itemsWanted.size() - 1) {
-//                        wantsMessage.append(", ");
-//                    }
-//                }
-//            }
-//        }
-
-        // Nothing wanted
-        if (mesoWanted == 0 && (itemsWanted == null || itemsWanted.isEmpty())) {
-            wantsMessage.append("nothing specific");
-        }
-
-        return wantsMessage.toString();
-    }
 
     protected void declineTradeOffer() {
         BotBlockList.getInstance().addToBlockList(getChr().getId(), getTradePartnerCharacter(getChr()).getId());
-        BotTradeCommands.writeTradeChat(getChr(), "Nah I'm good. Good bye.");
+        BotTradeCommands.writeTradeChat(getChr(), BotMessages.get("trade.declined"));
         BotTiming.after(2000, () -> BotTradeCommands.declineTradeInvite(getChr()));
         getParent().waitFor(2500); // hold until the delayed decline lands
     }

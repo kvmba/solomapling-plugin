@@ -33,6 +33,7 @@ import soloMapling.ArtificialPlayer.GCMoveSystem.GCMovement;
 import soloMapling.server.EventMessageSystem.EventBus;
 import soloMapling.server.EventMessageSystem.EventFactory;
 import soloMapling.server.ExecutorServiceManager;
+import soloMapling.Environment.BotMessages;
 
 import java.awt.Point;
 import java.util.ArrayList;
@@ -253,17 +254,33 @@ public class TrainingBot extends BotSM implements GrindTickRegistry.Participant 
     // Keyword lists are matched by substring IN OPTION ORDER - keep the flavor-chat option's
     // keywords narrow so a typed sentence like "how about joining my party" can't hijack the
     // party roll (greedy "how"/"train" did exactly that in live test round 2).
+    //
+    // Labels come from BotMessages so they follow the configured language. The English keywords
+    // below stay authoritative: BotMessages.keywords() appends the localized label text (and any
+    // per-language YAML aliases) rather than replacing them, so a player may answer in either
+    // language, but these deliberately narrow entries keep their leading position.
+    private static final String[] SOLO_SUFFIXES = {"training", "party", "goodbye"};
+    private static final String[][] SOLO_KEYWORDS = {
+            {"hows", "how is", "how goes"},
+            {"party", "team", "join"},
+            {"bye", "goodbye", "cya", "later"}
+    };
+    private static final String[] PARTY_SUFFIXES = {"training", "follow", "goodbye"};
+    private static final String[][] PARTY_KEYWORDS = {
+            {"hows", "how is", "how goes"},
+            {"follow", "come", "lead"},
+            {"bye", "goodbye", "cya", "later"}
+    };
+
+    // Resolved per instance rather than in a static field: a static would freeze at class-load
+    // time and would not follow the configured language.
     private final BotOptionMenu soloMenu = new BotOptionMenu(this,
-            List.of("How's the training?", "Wanna party up?", "Goodbye"),
-            List.of(List.of("hows", "how is", "how goes"),
-                    List.of("party", "team", "join"),
-                    List.of("bye", "goodbye", "cya", "later")),
+            BotMessages.labels("menu.training_solo", SOLO_SUFFIXES),
+            BotMessages.keywords("menu.training_solo", SOLO_SUFFIXES, SOLO_KEYWORDS),
             this::onSoloMenuSelect);
     private final BotOptionMenu partyMenu = new BotOptionMenu(this,
-            List.of("How's the training?", "Follow me!", "Goodbye"),
-            List.of(List.of("hows", "how is", "how goes"),
-                    List.of("follow", "come", "lead"),
-                    List.of("bye", "goodbye", "cya", "later")),
+            BotMessages.labels("menu.training_party", PARTY_SUFFIXES),
+            BotMessages.keywords("menu.training_party", PARTY_SUFFIXES, PARTY_KEYWORDS),
             this::onPartyMenuSelect);
 
     public TrainingBot(Character character) {
@@ -876,7 +893,7 @@ public class TrainingBot extends BotSM implements GrindTickRegistry.Participant 
         } catch (Exception e) {
             // fall through to the default sign
         }
-        return "brb";
+        return BotMessages.get("training.break_sign");
     }
 
     // Is there a hostile mob the bot could actually walk/jump to from where it stands? Reachability-filtered
