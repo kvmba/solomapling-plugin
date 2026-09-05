@@ -32,6 +32,11 @@ public class BotOptionMenu {
 
     private volatile boolean active = false;
     private volatile long lastActivityMs = 0;
+    // One-slot keyword drop box for the party-broadcast path (Dispatcher). The shared "tertiary"
+    // queue can only serve ONE bot - whichever polls first consumes the line and the rest of the
+    // party never sees it - so an addressed-without-a-name keyword arrives here instead, per bot.
+    private volatile String pendingKeyword = null;
+    private volatile Character pendingSender = null;
 
     public BotOptionMenu(BotSM owner, List<String> labels, List<List<String>> keywords, Selection onSelect) {
         if (labels.size() != keywords.size()) {
@@ -53,6 +58,26 @@ public class BotOptionMenu {
         lastActivityMs = System.currentTimeMillis();
     }
 
+    /**
+     * Offers a bare keyword line to this menu WITHOUT showing a hint balloon.
+     *
+     * <p>Used when a player addresses their own party bots by keyword only (no bot name). Returns
+     * {@code true} when the line matches one of this menu's options, in which case the menu arms
+     * itself silently and the selection runs on the owner's next tick, attributed to {@code player};
+     * {@code false} when no option claims it, so the caller may fall back to showing the menu to one
+     * bot instead of to all of them.
+     */
+    public boolean offerDirect(Character player, String content) {
+        if (player == null || match(content) < 0) {
+            return false;
+        }
+        pendingKeyword = content;
+        pendingSender = player;
+        active = true; // armed silently: the player typed the answer, so the hint would be noise
+        lastActivityMs = System.currentTimeMillis();
+        return true;
+    }
+
     // Call once per owner tick. Non-blocking; messages for other bots' inquirers are requeued
     // (the tertiary queue is shared - same etiquette as BlackjackDealerBot.processJoinInquiries).
     public void poll() {
@@ -64,20 +89,32 @@ public class BotOptionMenu {
             return;
         }
         try {
-            ChatMessage message = MessageQueue.getInstance().getMessageNonBlocking("tertiary");
-            if (message == null) {
-                return;
+            Character sender = null;
+            int idx;
+            // The direct drop box wins over the queue: it is already matched and already
+            // attributed to a specific inquirer, and it must not be stolen by another bot.
+            String direct = pendingKeyword;
+            if (direct != null) {
+                pendingKeyword = null;
+                sender = pendingSender;
+                pendingSender = null;
+                idx = sender == null ? -1 : match(direct);
+            } else {
+                ChatMessage message = MessageQueue.getInstance().getMessageNonBlocking("tertiary");
+                if (message == null) {
+                    return;
+                }
+                sender = message.getSender();
+                if (sender == null || isBot(sender)) {
+                    return;
+                }
+                if (!owner.getInteractors().isInquirer(sender)) {
+                    MessageQueue.getInstance().requeueMessage("tertiary", message);
+                    return;
+                }
+                idx = match(message.getContent());
             }
-            Character sender = message.getSender();
-            if (sender == null || isBot(sender)) {
-                return;
-            }
-            if (!owner.getInteractors().isInquirer(sender)) {
-                MessageQueue.getInstance().requeueMessage("tertiary", message);
-                return;
-            }
-            int idx = match(message.getContent());
-            if (idx >= 0) {
+            if (idx >= 0 && sender != null) {
                 lastActivityMs = System.currentTimeMillis();
                 onSelect.onSelect(idx, sender);
             }

@@ -310,6 +310,13 @@ public class TrainingBot extends BotSM implements GrindTickRegistry.Participant 
         return soloMenu.isActive() || partyMenu.isActive();
     }
 
+    // Same-party broadcast (no bot name typed): hand the line to whichever menu variant is live
+    // for this bot's current party state - the same one displayCommands would have shown.
+    @Override
+    public boolean offerKeyword(Character player, String content) {
+        return (getChr().getParty() != null ? partyMenu : soloMenu).offerDirect(player, content);
+    }
+
     // Mid-recruit: a conversation is open or the bot said "invite me" and the window is live.
     // Grind self-repair (teleport/bail), crowd-bail, and the session-end walk-off all hold during
     // this - a bot that says yes and then blinks across the map breaks the exchange.

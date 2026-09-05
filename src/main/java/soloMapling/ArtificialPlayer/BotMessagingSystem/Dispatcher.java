@@ -1,14 +1,19 @@
 package soloMapling.ArtificialPlayer.BotMessagingSystem;
 
 import org.gms.client.Character;
+import org.gms.net.server.world.Party;
+import org.gms.net.server.world.PartyCharacter;
 import soloMapling.ArtificialPlayer.BotSM;
 import soloMapling.ArtificialPlayer.BotTypes.SocialBot;
 import soloMapling.ArtificialPlayer.BotTypes.CompanionBot;
 
+import java.awt.Point;
 import java.util.Collection;
+import java.util.Objects;
 import java.util.concurrent.*;
 
 import static soloMapling.ArtificialPlayer.BotCommandsPack.SocialCommands.expirePlayerChatCommands;
+import static soloMapling.ArtificialPlayer.BotHelpers.isBot;
 import static soloMapling.ArtificialPlayer.BotMessagingSystem.CharacterStorage.getBotById;
 import static soloMapling.ArtificialPlayer.BotMessagingSystem.CharacterStorage.checkIfInvisibleBot;
 import static soloMapling.server.ExecutorServiceManager.getExecutorService;
@@ -62,15 +67,87 @@ public class Dispatcher implements Runnable {
 
             // Determine if the message is for any registered bot
             if (characterFound) {
-                handleBotRunning(botToCall, message);
+                handleBotRunning(botToCall[0], message);
             } else {
                 handleMessageWithNoBotName(message);
             }
+            // Runs in ADDITION to a name call, not instead of it: "Tiger 跟我来" should still
+            // reach Tiger's own party mates, and Tiger itself is skipped below so it isn't
+            // handed the same line twice.
+            deliverToPartyBots(message, characterFound ? botToCall[0] : -1);
             return true;
         } catch (Exception e) {
             e.printStackTrace();
             return false;
         }
+    }
+
+    /**
+     * Addresses every bot in the speaker's own party that shares the speaker's map, WITHOUT the
+     * speaker having typed any bot's name.
+     *
+     * <p>The keyword is handed to each bot individually rather than through the shared tertiary
+     * queue: that queue is single-consumer (whoever polls first takes the message), so broadcasting
+     * through it would deliver a "come here" to exactly one bot and silently drop it for the rest
+     * of the party - the whole point here is that they all answer.
+     *
+     * <p>Bots that recognise the line act on it silently. If nobody recognised it (ordinary party
+     * chatter), exactly one bot - the closest to the speaker - shows its option menu, because the
+     * client only ever displays one hint balloon and N bots fighting over it just flickers.
+     *
+     * @param namedBotId a bot already reached through the name-call path this tick, or -1
+     */
+    private void deliverToPartyBots(ChatMessage message, int namedBotId) {
+        Character sender = message.getSender();
+        Party party = sender == null ? null : sender.getParty();
+        if (party == null) {
+            return;
+        }
+        BotSM fallback = null;
+        int fallbackDistSq = Integer.MAX_VALUE;
+        Point origin = sender.getPosition();
+        for (Character member : party.getMembers().stream()
+                .map(PartyCharacter::getPlayer)
+                .filter(Objects::nonNull)
+                .toList()) {
+            if (member.getId() == namedBotId || !isBot(member)) {
+                continue;
+            }
+            if (member.getMapId() != sender.getMapId()) {
+                continue;
+            }
+            BotSM bot = getBotById(member.getId());
+            if (bot == null || !bot.getRunning()) {
+                continue;
+            }
+            if (bot.offerKeyword(sender, message.getContent())) {
+                bot.getInteractors().setInquirer(sender);
+                bot.nudgeSoon(0L); // speaker is on this bot's map -> answer on the next tick
+                continue;
+            }
+            int distSq = distanceSq(origin, member.getPosition());
+            if (distSq < fallbackDistSq) {
+                fallbackDistSq = distSq;
+                fallback = bot;
+            }
+        }
+        // Nobody claimed the line: show the menu once, on the nearest bot.
+        if (fallback != null) {
+            BotSM shown = fallback;
+            executor.execute(() -> {
+                shown.getInteractors().setInquirer(sender);
+                shown.getDialogueHandler().listOptions(sender, shown);
+            });
+        }
+    }
+
+    private static int distanceSq(Point a, Point b) {
+        if (a == null || b == null) {
+            return Integer.MAX_VALUE;
+        }
+        int dx = a.x - b.x;
+        int dy = a.y - b.y;
+        return dx * dx + dy * dy;
     }
 
     private boolean checkIfCharacterOnMap(Collection<Character> chars_on_map, ChatMessage message, int[] botToCall) {
@@ -87,11 +164,11 @@ public class Dispatcher implements Runnable {
         return characterFound;
     }
 
-    private void handleBotRunning(int[] botToCall, ChatMessage message) {
+    private void handleBotRunning(int namedBotId, ChatMessage message) {
         executor.execute(() -> {
-            BotSM bot = getBotById(botToCall[0]);
+            BotSM bot = getBotById(namedBotId);
             if (bot == null) {
-                logBotNotFound(botToCall[0]);
+                logBotNotFound(namedBotId);
                 return;
             }
 

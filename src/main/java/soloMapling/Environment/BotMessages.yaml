@@ -36,6 +36,12 @@ menu.training_party.goodbye: "Goodbye"
 menu.follower.train: "Train here with me!"
 menu.follower.nevermind: "Nevermind"
 
+# Typeable aliases for the follower menu's "Train here with me!" option, mirroring the zh-CN
+# pack. The English keywords in FollowerBot ("train"/"grind"/"station") are always matched, so
+# these only add phrasings a player is likely to type but that no existing keyword covers.
+menu.follower.train.keywords:
+  - ["train here", "grind here", "stay here", "stop here", "camp here", "hold here"]
+
 menu.social.whatsup: "What's up?"
 menu.social.interesting: "Anything interesting?"
 menu.social.rumors: "Any rumors?"

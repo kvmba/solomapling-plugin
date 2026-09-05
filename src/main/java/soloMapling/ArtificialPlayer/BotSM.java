@@ -428,6 +428,15 @@ public abstract class BotSM implements EventSubscriber {
         SocialCommands.talkCygnusGuideCommands(chr, hint);
     }
 
+    // Addressed without being named: a player in a party with this bot typed a line and the
+    // Dispatcher is handing it to every same-party, same-map bot. Returns true when this bot
+    // recognises the line as one of its own options (it then acts on its next tick, silently -
+    // no hint balloon); false when it does not, so the Dispatcher may show a menu to one bot.
+    // Bot types with an option menu override this; the rest ignore the line.
+    public boolean offerKeyword(Character player, String content) {
+        return false;
+    }
+
     //
 
     protected void checkForTrades() {

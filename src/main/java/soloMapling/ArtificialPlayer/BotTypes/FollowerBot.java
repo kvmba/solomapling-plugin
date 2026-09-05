@@ -216,6 +216,12 @@ public class FollowerBot extends BotSM {
         menu.show(chr);
     }
 
+    // Party broadcast: same keyword matcher as the menu, no hint balloon shown.
+    @Override
+    public boolean offerKeyword(Character player, String content) {
+        return menu.offerDirect(player, content);
+    }
+
     private void onMenuSelect(int idx, Character player) {
         Character chr = getChr();
         if (idx == 0) { // Train here with me!
