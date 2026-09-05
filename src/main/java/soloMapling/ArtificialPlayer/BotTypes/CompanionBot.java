@@ -34,6 +34,7 @@ import soloMapling.companion.execution.CompanionTrainingController;
 import soloMapling.companion.gear.CompanionGearController;
 import soloMapling.companion.planner.CompanionPlannerResult;
 import soloMapling.companion.survival.CompanionSurvivalController;
+import soloMapling.server.BotTiming;
 
 import java.time.Duration;
 import java.time.Instant;
@@ -65,6 +66,7 @@ public final class CompanionBot extends BotSM implements
     private final CompanionActionExecutor actionExecutor;
     private final TurnCoordinator turns;
     private TurnContext activeContext;
+    private long lastPlayedTurnId;
     private final GrindBrain grind = new GrindBrain(message -> { });
     private final CompanionCombatLifecycle combatLifecycle = new CompanionCombatLifecycle();
     private final CompanionSurvivalController survival =
@@ -258,10 +260,35 @@ public final class CompanionBot extends BotSM implements
             BotSpeak(getChr(), FALLBACK_REPLY);
             return;
         }
+        // A companion that answers the instant planning returns sounds like a script, so the whole
+        // decision plays after a human read-and-type beat. It runs off the tick on one chain: the
+        // actions stay in decision order, and the perception snapshot stays the authority boundary.
+        // Latency is measured here rather than after the pause: it is provider latency, and folding
+        // the typing beat into it would report every turn 3-15s slower than the brain really was.
+        long planningLatencyMs =
+                Math.max(0L, (System.nanoTime() - context.startedNanos()) / 1_000_000L);
+        BotTiming.chain()
+                .stopUnless(() -> getChr() != null && getChr().getMap() != null)
+                .pause(BotTiming.typingPauseFor(planned.message().content()))
+                .run(() -> playDecision(context, planned, planningLatencyMs))
+                .start();
+    }
 
+    // Plays one planned turn. The delay is random and longer than the turn cooldown, so a second
+    // message from the same player can be planned and played while this beat is still pending -
+    // its turn id is the tiebreak that keeps the bot from answering the older line last. A real
+    // player catching up on two lines answers the newer one anyway, so the stale turn is dropped.
+    private synchronized void playDecision(
+            TurnContext context, TurnCoordinator.PlannedTurn planned, long elapsedMs) {
+        if (planned.turnId() < lastPlayedTurnId) {
+            log.info("Companion stale turn dropped cid={} playerCid={} turnId={} supersededBy={}",
+                    context.request().companionCharacterId(),
+                    context.request().playerCharacterId(), planned.turnId(), lastPlayedTurnId);
+            return;
+        }
+        lastPlayedTurnId = planned.turnId();
         List<ActionExecutionResult> executions = new ArrayList<>();
         CompanionPlannerResult result = planned.result();
-        long elapsedMs = Math.max(0L, (System.nanoTime() - context.startedNanos()) / 1_000_000L);
         if (result instanceof CompanionPlannerResult.Success success) {
             AgentDecision decision = success.decision();
             log.info("Companion planning succeeded cid={} playerCid={} latencyMs={} actions={}",

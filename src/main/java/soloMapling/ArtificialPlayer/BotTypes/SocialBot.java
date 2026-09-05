@@ -464,7 +464,7 @@ public class SocialBot extends BotSM {
     private void deliverLlmReply(Character player, int botId, int playerId, String reply) {
         BotTiming.Chain chain = BotTiming.chain()
                 .stopUnless(() -> isConversationWith(player))
-                .pauseRandom(1500, 3000)
+                .pause(BotTiming.typingPauseFor(reply))
                 .run(() -> botFaceTowardsPoint(getChr(), player.getPosition()));
         if (reply != null && !reply.isBlank()) {
             chain.run(() -> {
@@ -488,7 +488,7 @@ public class SocialBot extends BotSM {
         int emote = getRandomEmote(category);
         BotTiming.Chain chain = BotTiming.chain()
                 .stopUnless(() -> isConversationWith(player))
-                .pauseRandom(2000, 4000)
+                .pause(BotTiming.typingPauseFor(line))
                 .run(() -> botFaceTowardsPoint(getChr(), player.getPosition()));
         if (line != null) {
             chain.run(() -> BotSpeak(getChr(), line));
@@ -517,7 +517,7 @@ public class SocialBot extends BotSM {
 
         BotTiming.Chain chain = BotTiming.chain()
                 .stopUnless(() -> isConversationWith(player))
-                .pauseRandom(1500, 3000)
+                .pause(BotTiming.typingPauseFor(line))
                 .run(() -> botFaceTowardsPoint(getChr(), player.getPosition()));
         if (line != null) {
             chain.run(() -> BotSpeak(getChr(), line));
@@ -549,6 +549,9 @@ public class SocialBot extends BotSM {
         Character recruiter = chr.getClient().getChannelServer().getPlayerStorage().getCharacterById(recruiterId);
         String line = getRandomLine("PartyJoined", recruiter);
         if (line != null) {
+            // Spoken on the spot, not after a typing beat: the bot converts to a FollowerBot on the
+            // very next line, and a delayed bubble would land seconds later - after the type change
+            // and possibly a walk-off - as a stray line answering nobody.
             BotSpeak(chr, line);
         }
         BotRecruitManager.setPendingLeader(chr.getId(), recruiterId);
@@ -601,7 +604,8 @@ public class SocialBot extends BotSM {
             return r == null || r.getId() == player.getId();
         });
         if (line != null) {
-            chain.run(() -> BotSpeak(getChr(), line));
+            chain.pause(BotTiming.typingPauseFor(line))
+                    .run(() -> BotSpeak(getChr(), line));
             if (emote > 0) {
                 chain.pause(400).run(() -> BotEmote(getChr(), emote));
             }
@@ -613,15 +617,26 @@ public class SocialBot extends BotSM {
     private void doReducedResponse(Character player) {
         String line = getRandomLine("Reduced", player);
         if (line != null) {
-            BotSpeak(getChr(), line);
+            speakAfterBeat(player, line);
         }
     }
 
     private void doNonverbalResponse(Character player) {
         String line = getRandomLine("Nonverbal", player);
         if (line != null) {
-            BotSpeak(getChr(), line);
+            speakAfterBeat(player, line);
         }
+    }
+
+    // Same read-and-type beat the scripted chains use, for the response helpers that used to fire
+    // in the tick the player's line arrived.
+    //
+    // BotTiming.after (one delayed side-effect) rather than a chain: callers here reset the
+    // conversation immediately after speaking, so a chain gated on isConversationWith(...) would
+    // find the respondant already cleared and silently drop the line. The bot is also being told
+    // to stop engaging at this interaction level, so one beat later is still coherent.
+    private void speakAfterBeat(Character player, String line) {
+        BotTiming.after(BotTiming.typingPauseFor(line), () -> BotSpeak(getChr(), line));
     }
 
     // Decides the re-sit at build time; the sit itself lands as a later beat.

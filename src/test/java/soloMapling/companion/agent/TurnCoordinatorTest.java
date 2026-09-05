@@ -86,9 +86,35 @@ class TurnCoordinatorTest {
         assertEquals(1, executed.size(), "late provider completion must be discarded");
     }
 
+    // The companion plays a decision after a random human typing beat (BotTiming.typingPauseFor)
+    // that is longer than the turn cooldown, so two turns can be in flight at once. CompanionBot
+    // orders them by turn id and drops the older one; that ordering depends on turn ids being
+    // strictly increasing per turn. Pin it here so a future refactor can't silently break it.
     @Test
-    void synchronousPlannerFailureBecomesSafeFailureResult() {
+    void turnIdsIncreaseMonotonicallyAcrossTurns() {
         AtomicLong now = new AtomicLong();
+        TurnCoordinator coordinator = coordinator(now);
+        List<Long> turnIds = new ArrayList<>();
+
+        for (int i = 0; i < 5; i++) {
+            coordinator.enqueue(new TurnCoordinator.Message(7, "message " + i));
+            // tick 1 starts planning, tick 2 drains the already-completed future and executes.
+            // Stay well inside the 5s session window so the session does not lapse between turns.
+            coordinator.tick(message -> CompletableFuture.completedFuture(failure()), planned -> { });
+            coordinator.tick(message -> CompletableFuture.completedFuture(failure()),
+                    planned -> turnIds.add(planned.turnId()));
+            now.addAndGet(101); // clear the 100ms turn cooldown
+        }
+
+        assertEquals(5, turnIds.size());
+        for (int i = 1; i < turnIds.size(); i++) {
+            assertTrue(turnIds.get(i) > turnIds.get(i - 1),
+                    "turn ids must increase so a delayed older turn can be detected: " + turnIds);
+        }
+    }
+
+    @Test
+    void synchronousPlannerFailureBecomesSafeFailureResult() {        AtomicLong now = new AtomicLong();
         TurnCoordinator coordinator = coordinator(now);
         List<TurnCoordinator.PlannedTurn> executed = new ArrayList<>();
         coordinator.enqueue(new TurnCoordinator.Message(7, "hello"));

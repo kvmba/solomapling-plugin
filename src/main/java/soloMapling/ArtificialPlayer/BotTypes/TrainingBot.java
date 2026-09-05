@@ -30,6 +30,7 @@ import soloMapling.ArtificialPlayer.BotGrindSystem.TrainingMap;
 import soloMapling.ArtificialPlayer.BotGrindSystem.TrainingMapFinder;
 import soloMapling.ArtificialPlayer.BotTownSystem.TownLoiter;
 import soloMapling.ArtificialPlayer.BotWanderSystem.BotWanderSystem;
+import soloMapling.server.BotTiming;
 import soloMapling.ArtificialPlayer.GCMoveSystem.GCMovement;
 import soloMapling.server.EventMessageSystem.EventBus;
 import soloMapling.server.EventMessageSystem.EventFactory;
@@ -1117,7 +1118,7 @@ public class TrainingBot extends BotSM implements GrindTickRegistry.Participant 
             partyMenu.close(player);
             return;
         }
-        sayRecruit("FollowAccept", player);
+        sayRecruitNow("FollowAccept", player);
         partyMenu.close(player);
         BotRecruitManager.setPendingLeader(chr.getId(), player.getId());
         // stopScheduledTask (via convert) releases the grind: spot claim, occupancy slot,
@@ -1131,8 +1132,31 @@ public class TrainingBot extends BotSM implements GrindTickRegistry.Participant 
     }
 
     // Direct menu reply to the asking player (they're on the map by definition - no observation
-    // gate, no context-chance bias like sayContext).
+    // gate, no context-chance bias like sayContext). Delayed by a human read-and-type beat so the
+    // answer doesn't land in the same tick the player pressed enter.
     private void sayRecruit(String node, Character player) {
+        Character chr = getChr();
+        if (chr == null || chr.getMap() == null) {
+            return;
+        }
+        try {
+            String line = BotDialogueHandler.getRandomResolvedLine(dialoguePath, botType, node, chr, player);
+            if (line != null) {
+                BotTiming.chain()
+                        .stopUnless(() -> chr.getMap() != null)
+                        .pause(BotTiming.typingPauseFor(line))
+                        .run(() -> BotSpeak(chr, line))
+                        .start();
+            }
+        } catch (Exception e) {
+            // a missing dialogue node must never break the tick
+        }
+    }
+
+    // Same line, spoken on the spot. For callers that immediately convert this bot (or otherwise
+    // change its identity) - a delayed line would arrive seconds late, after the bot has already
+    // become a different type and possibly walked off, as a stray bubble answering nobody.
+    private void sayRecruitNow(String node, Character player) {
         Character chr = getChr();
         if (chr == null || chr.getMap() == null) {
             return;

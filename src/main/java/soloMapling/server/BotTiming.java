@@ -129,6 +129,19 @@ public final class BotTiming {
         return lo + (hi > lo ? ThreadLocalRandom.current().nextLong(hi - lo + 1) : 0);
     }
 
+    // "Read the line, then type an answer" - the beat a bot needs to not sound like a script.
+    // 3s floor is the time it takes a human to even notice a chat bubble; the per-character term
+    // is reading time; the jitter keeps two bots from answering on the same beat. Capped at 15s:
+    // past that a real player has tabbed out, and the delay reads as lag, not thought.
+    public static long typingPauseFor(String text) {
+        int len = text == null ? 0 : text.trim().length();
+        long base = Math.min(TYPING_PAUSE_MIN_MS + len * 40L, TYPING_PAUSE_MAX_MS);
+        return Math.min(base + ThreadLocalRandom.current().nextLong(3000), TYPING_PAUSE_MAX_MS);
+    }
+
+    private static final long TYPING_PAUSE_MIN_MS = 3000L;
+    private static final long TYPING_PAUSE_MAX_MS = 15_000L;
+
     private static boolean safely(Runnable r) {
         try {
             r.run();
