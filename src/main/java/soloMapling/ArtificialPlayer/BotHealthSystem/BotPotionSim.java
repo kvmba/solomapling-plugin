@@ -30,9 +30,16 @@ public final class BotPotionSim {
 
     /** Fraction of max HP restored per sip (tops back up to full over a few sips). */
     private static final double HEAL_RATIO = 0.30;
-    /** Random gap between sips. */
-    private static final long MIN_GAP_MS = 3_000L;
-    private static final long MAX_GAP_MS = 8_000L;
+    // Sip cadence scales with how hurt the bot is. A badly hurt bot drinks at the
+    // urgent pace; a bot that has only lost a sliver slows right down, so the recovery
+    // reads as "drinks when it needs to" rather than a metronome ticking to full HP.
+    /** At or below this HP fraction the bot drinks at the urgent pace. */
+    private static final double URGENT_HP_RATIO = 0.30;
+    private static final long URGENT_MIN_GAP_MS = 3_000L;
+    private static final long URGENT_MAX_GAP_MS = 8_000L;
+    /** Approaching full HP the bot slows to this pace. */
+    private static final long CALM_MIN_GAP_MS = 12_000L;
+    private static final long CALM_MAX_GAP_MS = 25_000L;
     /** Item-effect packet payload for the "drank a potion" animation. Must be an HP
      *  potion so the effect matches the rising HP bar: 2000000 is the Red Potion
      *  (Item.wz spec: hp +50). The MP potions (2000003 Blue Potion / 2000006 Mana
@@ -65,8 +72,7 @@ public final class BotPotionSim {
             return;
         }
         // Re-arm first: a bot that stays hurt keeps sipping at a fresh random cadence.
-        nextSipAtMs = now + MIN_GAP_MS
-                + ThreadLocalRandom.current().nextLong(MAX_GAP_MS - MIN_GAP_MS);
+        nextSipAtMs = now + sipGapMs(bot.getHp(), maxHp);
 
         int healed = Math.min(maxHp, bot.getHp() + (int) (maxHp * HEAL_RATIO));
         BotClientBinding.runWithBoundPlayer(bot, () -> bot.updateHp(healed));
@@ -82,6 +88,26 @@ public final class BotPotionSim {
             bot.getMap().broadcastMessage(bot,
                     PacketCreator.itemEffect(bot.getId(), POTION_EFFECT_ITEM), false);
         }
+    }
+
+    /**
+     * The random gap before the next sip, interpolated between the urgent and calm
+     * paces by how hurt the bot is: at or below {@link #URGENT_HP_RATIO} it drinks at
+     * the urgent pace, and the closer it gets to full the slower it goes. Keeps the
+     * cadence honest at the bottom end (a near-dead bot should not slow down) and
+     * unhurried at the top (topping off the last sliver shouldn't look mechanical).
+     */
+    private static long sipGapMs(int hp, int maxHp) {
+        double filled = maxHp > 0 ? (double) Math.max(0, hp) / maxHp : 1.0;
+        double span = 1.0 - URGENT_HP_RATIO;
+        // 0 at/below the urgent threshold, 1 at full HP.
+        double t = span > 0 ? Math.max(0.0, Math.min(1.0, (filled - URGENT_HP_RATIO) / span)) : 1.0;
+        long minGap = Math.round(URGENT_MIN_GAP_MS + (CALM_MIN_GAP_MS - URGENT_MIN_GAP_MS) * t);
+        long maxGap = Math.round(URGENT_MAX_GAP_MS + (CALM_MAX_GAP_MS - URGENT_MAX_GAP_MS) * t);
+        if (maxGap <= minGap) {
+            return minGap;
+        }
+        return minGap + ThreadLocalRandom.current().nextLong(maxGap - minGap);
     }
 
     /**
