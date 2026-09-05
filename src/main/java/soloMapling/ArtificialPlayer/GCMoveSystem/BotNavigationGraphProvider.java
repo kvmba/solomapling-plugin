@@ -605,17 +605,30 @@ final class BotNavigationGraphProvider {
                     || graph.movementProfile.totalSpeedStat() != key.totalSpeedStat()
                     || graph.movementProfile.totalJumpStat() != key.totalJumpStat()
                     || graph.movementProfile.snowShoes() != key.snowShoes()) {
-                log.debug("Discarding bot nav graph cache for map {} speed={} jump={} - "
-                                + "snowShoes {} but wanted {}",
-                        key.mapId(), key.totalSpeedStat(), key.totalJumpStat(),
-                        graph.movementProfile.snowShoes(), key.snowShoes());
+                // Name the dimension that actually differs. This branch fires on any mismatch, so
+                // a message that always blamed snowShoes would send the next reader down the wrong
+                // path — the common case here is a GRAPH_VERSION bump, not a profile collision.
+                log.warn("Discarding bot nav graph cache {}: {} (map {} speed {} jump {} snowshoes {}"
+                                + " vs wanted map {} speed {} jump {} snowshoes {})",
+                        file.getFileName(),
+                        graph.version != GRAPH_VERSION ? "version " + graph.version + " != " + GRAPH_VERSION
+                                : "key mismatch",
+                        graph.mapId, graph.movementProfile.totalSpeedStat(),
+                        graph.movementProfile.totalJumpStat(), graph.movementProfile.snowShoes(),
+                        key.mapId(), key.totalSpeedStat(), key.totalJumpStat(), key.snowShoes());
                 return null;
             }
             seedCachedFootholdCollisionIds(graph);
             return graph;
         } catch (IOException | ClassNotFoundException e) {
-            log.debug("Failed to load bot nav graph cache for map {} speed={} jump={}",
-                    key.mapId(), key.totalSpeedStat(), key.totalJumpStat(), e);
+            // Warn, not debug: a cache that will not load is silently rebuilt on every boot, so at
+            // debug the only symptom is "why is startup slow / why do maps re-bake constantly"
+            // with nothing in the log to explain it. The stack trace distinguishes a corrupt or
+            // half-written file (StreamCorrupted / EOF) from a schema change (ClassNotFound /
+            // InvalidClass) from an unreadable disk.
+            log.warn("Failed to load bot nav graph cache {} for map {} speed={} jump={}; "
+                            + "the graph will be rebuilt in memory (and the file rewritten)",
+                    file.getFileName(), key.mapId(), key.totalSpeedStat(), key.totalJumpStat(), e);
             return null;
         }
     }
@@ -625,9 +638,9 @@ final class BotNavigationGraphProvider {
         // Two builds of the same key can race here: an async warm on the warmup executor and a
         // !gcmove bake (rebuildGraph) on the command thread. Writing straight to `target` opens it
         // with TRUNCATE_EXISTING, so the two ObjectOutputStreams interleave into one truncated
-        // file and the next loadGraph fails on a half-written stream (silently — it logs at
-        // debug). Write a private temp file and rename instead: the rename makes `target` always
-        // either the previous complete graph or a complete new one, never a torn mixture.
+        // file and the next loadGraph fails on a half-written stream. Write a private temp file
+        // and rename instead: the rename makes `target` always either the previous complete graph
+        // or a complete new one, never a torn mixture.
         // No lock is needed — the loser's bytes are simply replaced by the winner's, and both
         // wrote equivalent data (same mapId + profile).
         Path tmp = null;
@@ -645,7 +658,12 @@ final class BotNavigationGraphProvider {
                 Files.move(tmp, target, StandardCopyOption.REPLACE_EXISTING);
             }
         } catch (IOException e) {
-            log.debug("Failed to save bot nav graph cache for map {}", graph.mapId, e);
+            // Warn, not debug: a cache that cannot be written means every map re-bakes on every
+            // restart, permanently — usually a full disk or a permissions problem on CACHE_DIR.
+            // At debug that failure is invisible and the only symptom is a slow startup.
+            log.warn("Failed to save bot nav graph cache {} for map {} (the graph stays in memory "
+                            + "for this session, but every restart will re-bake it)",
+                    target.getFileName(), graph.mapId, e);
         } finally {
             if (tmp != null) {
                 try {

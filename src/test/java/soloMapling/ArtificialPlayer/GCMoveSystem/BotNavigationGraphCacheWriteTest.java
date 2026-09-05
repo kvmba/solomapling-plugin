@@ -31,8 +31,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * <p><b>1. Torn write.</b> Two builds of the same key can reach the disk at once: an async warm
  * on the warmup executor and a {@code !gcmove bake} (rebuildGraph) on the command thread. Writing
  * straight to the target opens it with TRUNCATE_EXISTING, so two ObjectOutputStreams interleave
- * into one truncated file and the next load fails on a half-written stream — silently, because
- * loadGraph logs the failure at debug. Measured on this box: with 8 concurrent writers of
+ * into one truncated file and the next load fails on a half-written stream, forcing a silent
+ * rebuild. Measured on this box: with 8 concurrent writers of
  * DIFFERENT sizes, 15/15 runs produced either a StreamCorruptedException or a truncated-but-
  * parseable file. Same-size writers always produced a byte-identical file, because
  * ObjectOutputStream is deterministic and every writer starts at offset 0 — so the bug needs
