@@ -151,7 +151,7 @@ public class TrainingBot extends BotSM implements GrindTickRegistry.Participant 
     private static final int MAX_MAP_HOPS_PER_EPISODE = 2;    // crowd-driven map changes before the bot settles & shares
     // Crowd-bail runs unobserved too: an unobserved changeMap is invisible and near-free, and it levels
     // crowding BEFORE a player arrives — with the old observed-only gate, a stacked map showed its full
-    // stack at the exact moment someone first walked in. Unobserved bots tick at 120-240s while grinding,
+    // stack at the exact moment someone first walked in. Unobserved bots tick at 240-480s while grinding,
     // so unobserved relief paces itself in minutes, not seconds. Flip to false to restore the old gate.
     private static final boolean CROWD_BAIL_UNOBSERVED = true;
 
@@ -172,14 +172,14 @@ public class TrainingBot extends BotSM implements GrindTickRegistry.Participant 
 
     // Fable Phase 3: an unobserved GRINDING bot is the deep-background case - abstract
     // EXP accrues by elapsed time (doGrind) and the watchdog skips unobserved bots, so
-    // a 120-240s heartbeat loses nothing and cuts the idle macro load ~20x. All other
+    // a 240-480s heartbeat loses nothing and cuts the idle macro load ~40x. All other
     // phases (travel/decide/town/shop) keep the normal slow tick so the bot's life
     // keeps moving between grind sessions. A player entering the map still wakes the
     // bot instantly via the map-entry nudge.
     @Override
     protected long lowPriorityDelayMs() {
         if (phase == Phase.GRIND) {
-            return 120_000 + rng.nextInt(120_000);
+            return 240_000 + rng.nextInt(240_000);
         }
         return super.lowPriorityDelayMs();
     }
@@ -314,7 +314,7 @@ public class TrainingBot extends BotSM implements GrindTickRegistry.Participant 
     // Conversing players expect snappy replies; and once the bot has said "invite me" it must keep
     // ticking fast through the whole armed window so pollRecruitInvite drains the incoming invite
     // promptly (not just while the menu is open). Otherwise the base observed/unobserved policy holds
-    // (including the 120-240s deep-grind override below).
+    // (including the 240-480s deep-grind override below).
     @Override
     public void checkPrioritySpeed() {
         if (recruitingNow()) {

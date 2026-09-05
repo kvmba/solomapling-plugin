@@ -343,7 +343,7 @@ public abstract class BotSM implements EventSubscriber {
     // Cadence tier tracking: reschedule the observed cadence only on a tier flip, but
     // re-assert the low cadence every unobserved tick - a reschedule is two field
     // writes on the tick wheel now, and re-asserting lets a phase-dependent low delay
-    // (TrainingBot deepens to 120-240s while GRINDING) take effect one tick after the
+    // (TrainingBot deepens to 240-480s while GRINDING) take effect one tick after the
     // bot's phase changes.
     private volatile boolean cadenceObserved = true; // startScheduledTask begins at the normal 2-6s cadence
 
@@ -363,10 +363,10 @@ public abstract class BotSM implements EventSubscriber {
     // Unobserved macro cadence for this bot type. Jittered so cohorts that flipped to
     // low together don't stay tick-aligned forever (Fable Phase 3: lockstep clumps CPU
     // into bursts and aliases short !env perf windows). Deep-background types override
-    // this (TrainingBot returns 120-240s while GRINDING - abstract EXP accrues by
+    // this (TrainingBot returns 240-480s while GRINDING - abstract EXP accrues by
     // elapsed time and the grind watchdog skips unobserved bots, so nothing is lost).
     protected long lowPriorityDelayMs() {
-        return 18_000 + random.nextInt(6000); // 18-24s
+        return 36_000 + random.nextInt(12_000); // 36-48s
     }
 
     // Convenience methods for common adjustments
