@@ -9,6 +9,7 @@ import org.gms.net.server.world.PartyCharacter;
 import org.gms.net.server.world.World;
 import soloMapling.ArtificialPlayer.BotAttackSystem.BotAttackDriver;
 import soloMapling.ArtificialPlayer.BotAttackSystem.BotBuffDriver;
+import soloMapling.ArtificialPlayer.BotHealthSystem.BotPotionSim;
 import soloMapling.ArtificialPlayer.BotOptionMenu;
 import soloMapling.ArtificialPlayer.BotPartySystem.BotPartyQueue;
 import soloMapling.ArtificialPlayer.BotPartySystem.BotRecruitManager;
@@ -234,6 +235,10 @@ public class TrainingBot extends BotSM implements GrindTickRegistry.Participant 
     private boolean teleportedThisEpisode = false; // macro watchdog: a portal-teleport has already been tried this stuck episode
     private long lastRepairMs = 0L;             // macro watchdog: last self-repair action (cooldown gate)
 
+    // Simulated potion use: mob contact drains real HP, and a template clone has no
+    // survival loop to give it back, so without this the bot pins at the 1-HP floor.
+    private final BotPotionSim potionSim = new BotPotionSim();
+
     // ── Map crowding state (macro tick only) ──
     // Maps this bot recently left because they were saturated (mapId -> cooldown expiry), so DECIDE steers
     // away from them for a beat; the per-outing crowd-hop counter so a fully-packed region settles into
@@ -350,6 +355,8 @@ public class TrainingBot extends BotSM implements GrindTickRegistry.Participant 
         }
         getDebugger().debugLoggingFull(
                 String.format("%s TrainingBot phase: %s", chr.getName(), phase), String.format("%s", phase));
+
+        potionSim.tick(chr);
 
         switch (phase) {
             case INIT -> doInit();

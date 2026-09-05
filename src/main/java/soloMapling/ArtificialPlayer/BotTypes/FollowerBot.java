@@ -4,6 +4,7 @@ import org.gms.client.Character;
 import org.gms.net.server.world.Party;
 import org.gms.net.server.world.PartyCharacter;
 import soloMapling.ArtificialPlayer.BotDialogueHandler;
+import soloMapling.ArtificialPlayer.BotHealthSystem.BotPotionSim;
 import soloMapling.ArtificialPlayer.BotOptionMenu;
 import soloMapling.ArtificialPlayer.BotSM;
 import soloMapling.ArtificialPlayer.BotTypeManager;
@@ -47,6 +48,10 @@ public class FollowerBot extends BotSM {
     private volatile long leaderLostSinceMs = 0;
     private volatile boolean wasPartied = false;
     private volatile boolean pausedForTrade = false;
+
+    // Simulated potion use: a follower walks into its leader's fights and takes the
+    // same contact damage, with no survival loop of its own to recover from it.
+    private final BotPotionSim potionSim = new BotPotionSim();
 
     // NOTE: no "here" keyword - "there" contains "here", so a casual "hi there" would trigger it.
     // Labels are localized; the English keywords stay authoritative and the localized label text
@@ -105,6 +110,8 @@ public class FollowerBot extends BotSM {
             return;
         }
         pausedForTrade = false;
+
+        potionSim.tick(chr);
 
         switch (followPhase) {
             case INIT -> doInit();
