@@ -70,7 +70,7 @@ public class FollowerBot extends BotSM {
         dialoguePath = "FollowerBotDialogue.yaml";
     }
 
-    // Pinned cadence, observed or not: supervision (re-arm/relog/party checks) must never sleep 9-12s.
+    // Pinned cadence, observed or not: supervision (re-arm/relog/party checks) must never sleep 18-24s.
     @Override
     public void checkPrioritySpeed() {
         updateScheduleDelay(FOLLOW_TICK_MS);

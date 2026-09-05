@@ -108,7 +108,7 @@ public class BotRecruitManager {
 
     // A party invite for this bot just landed in the queue. Wake its macro brain so the next tick
     // drains it via pollInvites within ~300ms, instead of waiting out the slow observation/governor
-    // cadence (60-120s while deep-grinding unobserved) and letting the invite go stale. Same
+    // cadence (120-240s while deep-grinding unobserved) and letting the invite go stale. Same
     // immediate-nudge mechanism the map-entry responder uses; benefits every recruit-enabled bot.
     // nudgeSoon self-guards a not-running / trading / unregistered bot, so no extra check here.
     public static void wakeBotForInvite(Character botChr) {

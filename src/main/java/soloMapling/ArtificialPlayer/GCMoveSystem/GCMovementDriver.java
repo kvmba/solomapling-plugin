@@ -30,13 +30,13 @@ final class GCMovementDriver {
     // driver self-reschedules its tick at this interval instead of TICK_MS, so it stops consuming
     // 20 Hz wakeups. The analytic CoarseExecutor is pure wall-clock, so the slower cadence yields
     // identical positions.
-    private static final int UNOBSERVED_TICK_MS = 250;
+    private static final int UNOBSERVED_TICK_MS = 500;
     // Ours (Fable Phase 3): an unobserved bot with no movement job at all doesn't need
-    // the 250ms coarse cadence either. A job started while idling begins up to ~1s
-    // late, which is invisible on a map nobody can see; on promotion the next tick
-    // returns to TICK_MS. At ~1200 mostly-idle background bots this cuts the constant
-    // movement wakeups roughly 4x.
-    private static final int UNOBSERVED_IDLE_TICK_MS = 1000;
+    // the UNOBSERVED_TICK_MS coarse cadence either. A job started while idling begins up to one
+    // idle period late (~2s), which is invisible on a map nobody can see; on promotion the next
+    // tick returns to TICK_MS. At ~1200 mostly-idle background bots this cuts the constant
+    // movement wakeups roughly 8x.
+    private static final int UNOBSERVED_IDLE_TICK_MS = 2000;
     // Coarse "arrived" box: within this of the goal, hold (and fire arrival) instead of replanning.
     private static final int COARSE_ARRIVE_PX = 12;
     private static final boolean ENABLE_UNSTUCK = true;
@@ -102,7 +102,7 @@ final class GCMovementDriver {
     /*
      * Self-rescheduling tick: instead of a fixed 20 Hz task per bot, each tick schedules the next at a
      * cadence that matches the bot's tier — TICK_MS (50 ms) when its map is observed,
-     * UNOBSERVED_TICK_MS (250 ms) when not. So an unobserved bot stops consuming 20 Hz wakeups
+     * UNOBSERVED_TICK_MS (500 ms) when not. So an unobserved bot stops consuming 20 Hz wakeups
      * (the analytic CoarseExecutor is pure wall-clock, so a slower cadence gives identical positions).
      * Each next deadline is based on the preceding deadline, not on tick completion, so tick work does
      * not get added to the visible 50 ms cadence. If work overruns one or more periods, missed deadlines
