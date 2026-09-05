@@ -910,25 +910,55 @@ class BotMovementManager {
         sendMovementPacket(bot, snapshot, fhId);
     }
 
-    // Real clients report the foothold ID they're standing on in every move packet; the
-    // client uses it to pick the render z-layer. Without it, bots draw on the top layer
-    // (in front of tiles/walls). While airborne, clients keep sending the last-known
-    // ground fh, so cache it on the bot entry.
+    // Real clients report the foothold ID they're standing on in every move packet.
+    // While airborne they keep sending the last-known ground fh, so cache it on the entry.
     //
-    // NOTE (verified by disassembly, do not re-add ladder/rope encoding here):
-    // the fh in MOVE_PLAYER is DEAD DATA. CMovePath::Decode (sub_68A33C) stores it at
-    // CMovePath+0x2C, but its only caller sub_68B371 — the remote-player movement handler —
-    // never reads +0x2C and calls no FootholdTree_* / SetFoothold / SetLadderRopeBinding.
-    // A remote player's draw layer is set ONCE on spawn, by CUser_DecodeSpawnPacket reading
-    // the fh out of SPAWN_PLAYER (0x97F6E0 -> FootholdTree_LookupFootholdById -> sub_9B1288
-    // -> sub_9B12A8 writing CUser+0x130/+0x134). There is no ladder/rope branch on that path,
-    // so climbing cannot be expressed and encoding 0x8000|idx / -idx here changes nothing.
+    // LADDER/ROPE: while climbing, a real client sends a NEGATIVE fh whose magnitude is the
+    // ladder/rope index — the client tests fh & 0x8000 to tell "on a rope" from "on ground",
+    // and that is what makes it bind the character to the rope and take the rope's page as
+    // the render layer. Measured evidence: with bots sending a plain ground foothold id,
+    // every other movement behaviour was correct and ONLY the climbing render layer was
+    // wrong, while real remote players climbed fine. So this field is live, not dead data —
+    // do not remove the rope encoding.
+    //
+    // ENCODING: the client negates the value after reading it as a signed 16-bit int, so the
+    // wire value must be the two's complement of the index, i.e. (-idx) as a short — NOT
+    // (0x8000 | idx), which reads back as -32767 for idx=1 and negates to 32767 (out of
+    // range, silently treated as "no rope").
+    //     idx=1 -> 0xFFFF   -> (int16)-1      -> -(-1)      = 1   correct
+    //     idx=1 -> 0x8001   -> (int16)-32767  -> -(-32767)  = 32767   WRONG
     private static int resolveBroadcastFhId(BotMovementState entry, Character bot) {
+        Rope climbRope = entry.climbRope;
+        if (climbRope != null) {
+            int idx = ropeIndex(bot.getMap(), climbRope);
+            if (idx > 0) {
+                // Two's complement of the 1-based index: the client negates the value it
+                // reads as a signed short, so this lands back on idx.
+                return (-idx) & 0xFFFF;
+            }
+        }
+
         Foothold fh = BotPhysicsEngine.findGroundFoothold(bot.getMap(), bot.getPosition());
         if (fh != null) {
             entry.lastGroundFhId = fh.getId();
         }
         return entry.lastGroundFhId;
+    }
+
+    /**
+     * 1-based index of {@code rope} within the map's rope list, or -1 if not found.
+     *
+     * Base 1 rather than 0: the client's FootholdTree_FindLadderOrRope returns null for
+     * index 0 as well as for out-of-range values ({@code a2 != 0} guard), and the list is
+     * built by iterating the WZ ladderRope node in order — the same order the client stores
+     * in its ladder/rope array (stride 28), so server and client indices line up.
+     */
+    private static int ropeIndex(MapleMap map, Rope rope) {
+        if (map == null || rope == null) {
+            return -1;
+        }
+        int idx = map.getRopes().indexOf(rope);
+        return idx >= 0 ? idx + 1 : -1;
     }
 
     private static void sendMovementPacket(Character bot, BotPhysicsEngine.MovementSnapshot snapshot, int fhId) {
