@@ -931,54 +931,24 @@ class BotMovementManager {
         return entry.lastGroundFhId;
     }
 
-    /**
-     * CMovePath wire format decoded by the client (sub_68A33C), verified in disassembly:
-     *
-     * <pre>
-     *   [0..1]   short  x                 (Decode2)
-     *   [2..3]   short  y                 (Decode2)
-     *   [4]      byte   numCommands       (GetPacketType)
-     *   per command, type 0 (absolute move):
-     *   [5]      byte   type = 0
-     *   [6..7]   short  x
-     *   [8..9]   short  y
-     *   [10..11] short  velX
-     *   [12..13] short  velY
-     *   [14..15] short  fh
-     *   [16]     byte   stance
-     *   [17..18] short  duration
-     * </pre>
-     *
-     * 19 bytes total. The two leading shorts are mandatory: the previous 15-byte
-     * payload omitted them, so the client read data[4] (the low byte of y) as
-     * numCommands and then tried to decode that many commands out of the
-     * remaining bytes, misaligning fh/stance and breaking the render layer.
-     */
     private static void sendMovementPacket(Character bot, BotPhysicsEngine.MovementSnapshot snapshot, int fhId) {
-        byte[] data = new byte[19];
+        byte[] data = new byte[15];
+        data[0] = 1;
         int x = bot.getPosition().x;
         int y = bot.getPosition().y;
-        // CMovePath header: origin position, then the command count.
-        data[0] = (byte) (x & 0xFF);
-        data[1] = (byte) (x >> 8);
-        data[2] = (byte) (y & 0xFF);
-        data[3] = (byte) (y >> 8);
-        data[4] = 1;                     // numCommands
-        // Command type 0 = absolute move.
-        data[5] = 0;
-        data[6] = (byte) (x & 0xFF);
-        data[7] = (byte) (x >> 8);
-        data[8] = (byte) (y & 0xFF);
-        data[9] = (byte) (y >> 8);
-        data[10] = (byte) (snapshot.velX() & 0xFF);
-        data[11] = (byte) (snapshot.velX() >> 8);
-        data[12] = (byte) (snapshot.velY() & 0xFF);
-        data[13] = (byte) (snapshot.velY() >> 8);
-        data[14] = (byte) (fhId & 0xFF);
-        data[15] = (byte) (fhId >> 8);
-        data[16] = (byte) snapshot.stance();
-        data[17] = (byte) (BotPhysicsEngine.cfg.TICK_MS & 0xFF);
-        data[18] = (byte) (BotPhysicsEngine.cfg.TICK_MS >> 8);
+        data[2] = (byte) (x & 0xFF);
+        data[3] = (byte) (x >> 8);
+        data[4] = (byte) (y & 0xFF);
+        data[5] = (byte) (y >> 8);
+        data[6] = (byte) (snapshot.velX() & 0xFF);
+        data[7] = (byte) (snapshot.velX() >> 8);
+        data[8] = (byte) (snapshot.velY() & 0xFF);
+        data[9] = (byte) (snapshot.velY() >> 8);
+        data[10] = (byte) (fhId & 0xFF);
+        data[11] = (byte) (fhId >> 8);
+        data[12] = (byte) snapshot.stance();
+        data[13] = (byte) (BotPhysicsEngine.cfg.TICK_MS & 0xFF);
+        data[14] = (byte) (BotPhysicsEngine.cfg.TICK_MS >> 8);
         InPacket packet = new ByteBufInPacket(Unpooled.wrappedBuffer(data));
         Packet movePacket = PacketCreator.movePlayer(bot.getId(), packet, data.length);
         bot.getMap().broadcastMessage(bot, movePacket, false);
