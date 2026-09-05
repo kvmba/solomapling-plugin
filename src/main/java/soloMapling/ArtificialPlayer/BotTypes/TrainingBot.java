@@ -390,7 +390,11 @@ public class TrainingBot extends BotSM implements GrindTickRegistry.Participant 
     // ── Phases ───────────────────────────────────────────────────────────────
 
     private void doInit() {
-        homeMapId = getChr().getMapId();
+        // Home-town handoff: a bot returning from a FollowerBot ride adopts the map it was based on
+        // before the ride (see FollowerBot.fallbackConvert), not wherever the leader left it. Without
+        // this the far map becomes its permanent home and it never returns to its old circuit.
+        int returning = BotRecruitManager.consumeReturnHome(getChr().getId());
+        homeMapId = returning > 0 ? returning : getChr().getMapId();
         // No mobs here → it's a town: do the town beat first. Has mobs → a field: decide immediately.
         enterPhase(MapMobIndex.level(homeMapId) < 0 ? Phase.IN_TOWN : Phase.DECIDE);
     }
@@ -1128,6 +1132,10 @@ public class TrainingBot extends BotSM implements GrindTickRegistry.Participant 
         sayRecruitNow("FollowAccept", player);
         partyMenu.close(player);
         BotRecruitManager.setPendingLeader(chr.getId(), player.getId());
+        // Remember where this bot was based so the ride can end back there instead of adopting
+        // whatever far map the leader walked to. homeMapId is -1 until the first tick set it.
+        BotRecruitManager.setReturnOrigin(chr.getId(),
+                homeMapId > 0 ? homeMapId : chr.getMapId(), true);
         // stopScheduledTask (via convert) releases the grind: spot claim, occupancy slot,
         // combat/buff drivers, GC movement lock.
         BotTypeManager.convertBotType(chr, BotTypeManager.BotType.FOLLOWER_BOT);

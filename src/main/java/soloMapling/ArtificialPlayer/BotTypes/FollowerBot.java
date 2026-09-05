@@ -280,15 +280,36 @@ public class FollowerBot extends BotSM {
         return null;
     }
 
-    // The ride ended: become a TrainingBot on a mob map, a SocialBot in a town. Callers speak
-    // their own farewell first; this only re-types.
+    // The ride ended: go back to what this bot was before it was recruited. A bot that was a
+    // TrainingBot stays one — it was grinding for a living, and letting fallbackConvert() re-decide
+    // by map would strand it as a SocialBot wherever the leader happened to stop. It also heads for
+    // the map it was based on, instead of adopting whatever far map the leader walked to.
     private void fallbackConvert() {
         Character chr = getChr();
         BotRecruitManager.clearArmed(chr.getId());
         GCMovement.stop(chr);
-        boolean grindable = MapMobIndex.level(chr.getMapId()) >= 0;
-        BotTypeManager.convertBotType(chr,
-                grindable ? BotTypeManager.BotType.TRAINING_BOT : BotTypeManager.BotType.SOCIAL_BOT);
+        boolean grinder = BotRecruitManager.consumeReturnGrinder(chr.getId());
+        int returnHome = BotRecruitManager.consumeReturnHome(chr.getId());
+
+        if (grinder) {
+            // Re-post the map BEFORE converting: convertBotType starts the new bot's tick, and the
+            // fresh TrainingBot reads this on its first doInit().
+            BotRecruitManager.setReturnOrigin(chr.getId(), returnHome, false);
+            BotTypeManager.convertBotType(chr, BotTypeManager.BotType.TRAINING_BOT);
+            return;
+        }
+        if (returnHome > 0) {
+            // Was a town bot. SocialBot has no travel of its own, so move it home before re-typing.
+            if (returnHome != chr.getMapId()) {
+                chr.changeMap(returnHome);
+            }
+            BotTypeManager.convertBotType(chr, BotTypeManager.BotType.SOCIAL_BOT);
+            return;
+        }
+        // No origin recorded (e.g. !bot followbot): the previous map-contents rule.
+        BotTypeManager.convertBotType(chr, MapMobIndex.level(chr.getMapId()) >= 0
+                ? BotTypeManager.BotType.TRAINING_BOT
+                : BotTypeManager.BotType.SOCIAL_BOT);
     }
 
     private void sayNode(String node, Character player) {

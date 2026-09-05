@@ -42,6 +42,11 @@ public class BotRecruitManager {
     private static final Map<Long, Long> DECLINED_UNTIL = new ConcurrentHashMap<>();     // (bot,player) key
     private static final Map<Integer, Integer> PENDING_LEADER = new ConcurrentHashMap<>(); // bot id -> leader id
     private static final Set<Integer> PENDING_STATION = ConcurrentHashMap.newKeySet();   // bot ids
+    // Where a recruited bot was based before it started following (bot id -> map id), plus whether it
+    // was a grinder. Set when the bot converts INTO a FollowerBot, consumed when it converts back out,
+    // so a bot the player led to a far map returns to its old life instead of adopting that map as home.
+    private static final Map<Integer, Integer> RETURN_HOME = new ConcurrentHashMap<>(); // bot id -> map id
+    private static final Set<Integer> RETURN_GRINDER = ConcurrentHashMap.newKeySet();    // bot ids
 
     // The dialogue option was picked: roll accept/decline. On accept the invite window is armed;
     // on decline the (bot,player) pair goes on cooldown. willBecomeFollower gates the global cap.
@@ -155,10 +160,36 @@ public class BotRecruitManager {
         return PENDING_STATION.remove(botCharId);
     }
 
+    // ── Return-to-origin handoff (where the ride started) ────────────────────
+
+    // Called just before converting a bot into a FollowerBot. homeMapId is the bot's town/base map
+    // (a TrainingBot's homeMapId, or the current map for a non-grinder); grinder keeps the bot a
+    // TrainingBot when the ride ends instead of letting fallbackConvert() park it as a SocialBot.
+    public static void setReturnOrigin(int botCharId, int homeMapId, boolean grinder) {
+        if (homeMapId > 0) {
+            RETURN_HOME.put(botCharId, homeMapId);
+        }
+        if (grinder) {
+            RETURN_GRINDER.add(botCharId);
+        }
+    }
+
+    // -1 when nothing was recorded (e.g. a bot converted by the GM command with no origin).
+    public static int consumeReturnHome(int botCharId) {
+        Integer id = RETURN_HOME.remove(botCharId);
+        return id == null ? -1 : id;
+    }
+
+    public static boolean consumeReturnGrinder(int botCharId) {
+        return RETURN_GRINDER.remove(botCharId);
+    }
+
     public static void clearHandoffs(int botCharId) {
         PENDING_LEADER.remove(botCharId);
         PENDING_STATION.remove(botCharId);
         ARMED.remove(botCharId);
+        RETURN_HOME.remove(botCharId);
+        RETURN_GRINDER.remove(botCharId);
     }
 
     // Live scan by type string (no BotTypes import, no counter to keep in sync across conversions).
