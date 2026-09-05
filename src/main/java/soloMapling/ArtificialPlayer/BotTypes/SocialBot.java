@@ -480,11 +480,14 @@ public class SocialBot extends BotSM {
     }
 
     private void deliverLlmReply(Character player, int botId, int playerId, String reply) {
+        boolean speakable = reply != null && !reply.isBlank();
         BotTiming.Chain chain = BotTiming.chain()
                 .stopUnless(() -> isConversationWith(player))
-                .pause(BotTiming.typingPauseFor(reply))
+                // Nothing to say -> nothing to type. A beat here would just be the bot staring
+                // at the player for seconds before repainting the menu.
+                .pause(speakable ? BotTiming.typingPauseFor(reply) : 0L)
                 .run(() -> botFaceTowardsPoint(getChr(), player.getPosition()));
-        if (reply != null && !reply.isBlank()) {
+        if (speakable) {
             chain.run(() -> {
                 BotSpeak(getChr(), reply);
                 SocialChatSessionStore.addAssistant(botId, playerId, reply);
@@ -503,11 +506,13 @@ public class SocialBot extends BotSM {
         int emote = getRandomEmote(category);
         beginReply(player);
         BotTiming.Chain chain = BotTiming.chain()
-                .stopUnless(() -> isConversationWith(player))
-                .pause(BotTiming.typingPauseFor(line))
-                .run(() -> botFaceTowardsPoint(getChr(), player.getPosition()));
+                .stopUnless(() -> isConversationWith(player));
         if (line != null) {
-            chain.run(() -> BotSpeak(getChr(), line));
+            // Beat before speaking, not before the menu repaint: with no line (missing dialogue
+            // node) an unconditional pause is the bot silently staring for seconds.
+            chain.pause(BotTiming.typingPauseFor(line))
+                    .run(() -> botFaceTowardsPoint(getChr(), player.getPosition()))
+                    .run(() -> BotSpeak(getChr(), line));
             if (emote > 0) {
                 chain.pause(400).run(() -> BotEmote(getChr(), emote));
             }
@@ -535,11 +540,13 @@ public class SocialBot extends BotSM {
 
         beginReply(player);
         BotTiming.Chain chain = BotTiming.chain()
-                .stopUnless(() -> isConversationWith(player))
-                .pause(BotTiming.typingPauseFor(line))
-                .run(() -> botFaceTowardsPoint(getChr(), player.getPosition()));
+                .stopUnless(() -> isConversationWith(player));
         if (line != null) {
-            chain.run(() -> BotSpeak(getChr(), line));
+            // Beat before speaking; with no line, skip straight to the outcome so a missing
+            // dialogue node doesn't read as the bot thinking for seconds.
+            chain.pause(BotTiming.typingPauseFor(line))
+                    .run(() -> botFaceTowardsPoint(getChr(), player.getPosition()))
+                    .run(() -> BotSpeak(getChr(), line));
             if (emote > 0) {
                 chain.pause(400).run(() -> BotEmote(getChr(), emote));
             }

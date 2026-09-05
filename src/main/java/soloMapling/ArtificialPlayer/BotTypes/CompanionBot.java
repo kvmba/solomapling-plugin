@@ -267,14 +267,27 @@ public final class CompanionBot extends BotSM implements
         // the typing beat into it would report every turn 3-15s slower than the brain really was.
         long planningLatencyMs =
                 Math.max(0L, (System.nanoTime() - context.startedNanos()) / 1_000_000L);
+        // The beat scales with what the companion is about to SAY, not with what the player typed:
+        // a human's reply time is set by their own line. Using the player's text had it backwards -
+        // a long player message made the bot slower, a one-word "hi" made it answer instantly.
+        long typingBeatMs = BotTiming.typingPauseFor(plannedReply(planned));
         // The gate must also cover the bot being stopped or converted to another type: the Character
         // keeps its map through both, so a map-only check would let a dead CompanionBot keep
         // executing its old decision (including ACCEPT_PARTY) seconds after it was replaced.
         BotTiming.chain()
                 .stopUnless(() -> getChr() != null && getChr().getMap() != null && getRunning())
-                .pause(BotTiming.typingPauseFor(planned.message().content()))
+                .pause(typingBeatMs)
                 .run(() -> playDecision(context, planned, planningLatencyMs))
                 .start();
+    }
+
+    /** The line this turn will speak, for pacing the reply; the fallback when planning failed. */
+    private static String plannedReply(TurnCoordinator.PlannedTurn planned) {
+        if (planned.result() instanceof CompanionPlannerResult.Success success) {
+            String reply = success.decision().reply();
+            return reply == null ? FALLBACK_REPLY : reply;
+        }
+        return FALLBACK_REPLY;
     }
 
     // Plays one planned turn. The delay is random and longer than the turn cooldown, so a second
