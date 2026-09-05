@@ -281,15 +281,17 @@ public final class CompanionBot extends BotSM implements
     // message from the same player can be planned and played while this beat is still pending -
     // its turn id is the tiebreak that keeps the bot from answering the older line last. A real
     // player catching up on two lines answers the newer one anyway, so the stale turn is dropped.
-    private synchronized void playDecision(
+    //
+    // Deliberately NOT synchronized as a whole: the engine actions below can call back into this
+    // bot's own synchronized methods (beginTrainingWith via TrainWith), and holding the monitor
+    // across them would block the tick thread's stopScheduledTask/stopTraining for the whole
+    // action - which, with the reply now delayed seconds, is a long time to hold it. Only the
+    // claim itself needs to be atomic.
+    private void playDecision(
             TurnContext context, TurnCoordinator.PlannedTurn planned, long elapsedMs) {
-        if (planned.turnId() < lastPlayedTurnId) {
-            log.info("Companion stale turn dropped cid={} playerCid={} turnId={} supersededBy={}",
-                    context.request().companionCharacterId(),
-                    context.request().playerCharacterId(), planned.turnId(), lastPlayedTurnId);
+        if (!claimTurn(planned)) {
             return;
         }
-        lastPlayedTurnId = planned.turnId();
         List<ActionExecutionResult> executions = new ArrayList<>();
         CompanionPlannerResult result = planned.result();
         if (result instanceof CompanionPlannerResult.Success success) {
@@ -329,6 +331,18 @@ public final class CompanionBot extends BotSM implements
             executions.add(execution);
         }
         brain.record(new CompanionBrain.CompletedTurn(context.request(), result, executions));
+    }
+
+    // Atomically claims this turn as the newest one played. False when a newer turn has already
+    // played, which drops the stale reply instead of letting it land after the newer answer.
+    private synchronized boolean claimTurn(TurnCoordinator.PlannedTurn planned) {
+        if (planned.turnId() < lastPlayedTurnId) {
+            log.info("Companion stale turn dropped playerCid={} turnId={} supersededBy={}",
+                    planned.message().playerCharacterId(), planned.turnId(), lastPlayedTurnId);
+            return false;
+        }
+        lastPlayedTurnId = planned.turnId();
+        return true;
     }
 
     @Override

@@ -655,7 +655,12 @@ public class SocialBot extends BotSM {
     // find the respondant already cleared and silently drop the line. The bot is also being told
     // to stop engaging at this interaction level, so one beat later is still coherent.
     private void speakAfterBeat(Character player, String line) {
-        BotTiming.after(BotTiming.typingPauseFor(line), () -> BotSpeak(getChr(), line));
+        Character chr = getChr();
+        BotTiming.after(BotTiming.typingPauseFor(line), () -> {
+            if (chr != null && chr.getMap() != null && getRunning()) {
+                BotSpeak(chr, line);
+            }
+        });
     }
 
     // Decides the re-sit at build time; the sit itself lands as a later beat.
