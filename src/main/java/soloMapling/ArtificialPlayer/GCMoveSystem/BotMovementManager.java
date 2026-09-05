@@ -915,26 +915,37 @@ class BotMovementManager {
     // (in front of tiles/walls). While airborne, clients keep sending the last-known
     // ground fh, so cache it on the bot entry.
     //
-    // LADDER/ROPE: when climbing, the client expects a NEGATIVE fh whose low 15 bits are the
+    // LADDER/ROPE: when climbing, the client expects a NEGATIVE fh whose magnitude is the
     // ladder/rope index — see CUser_ApplyMovement_SetFoothold in the client:
     //     if (fh <= 0)      ground = 0;
     //     else              ground = FootholdTree_LookupFootholdById(fh);
-    //     if (fh & 0x8000)  rope = FootholdTree_FindLadderOrRope(-(__int16)fh);
-    //     if (!rope)        CUser_SetLadderRopeBinding(0);      <-- clears climb binding
+    //     if (fh & 0x8000)  ropeIdx = -(__int16)fh;                  // two's complement negate
+    //                       rope = FootholdTree_FindLadderOrRope(ropeIdx);
+    //     if (!rope)        CUser_SetLadderRopeBinding(0);            // clears the climb binding
     // The two branches are INDEPENDENT: sending only a ground ID while on a rope leaves
     // fh & 0x8000 == 0, so the client clears the rope binding and still draws the bot behind
-    // the rope/ladder layer. Hence we must encode 0x8000 | ropeIndex while climbing.
-    // The index is the position in MapleMap.getRopes(), which is built by iterating the WZ
-    // "ladderRope" node in order — the same order the client stores in its FootholdTree
-    // ladder/rope array (stride 28), so the indices line up.
+    // the rope/ladder layer.
+    //
+    // ENCODING: the client negates the value read as a signed 16-bit int, so the wire value
+    // must be the two's complement of the index, i.e. write (-idx) as a short — NOT
+    // (0x8000 | idx). The latter reads back as -32767 for idx=1 and negates to 32767 (out of
+    // range), which silently falls through to "no rope".
+    //     idx=1 -> 0xFFFF -> (int16)-1 -> -(-1)  = 1   correct
+    //     idx=1 -> 0x8001 -> (int16)-32767 -> 32767    WRONG (out of range)
+    //
+    // The index is 1-based: FootholdTree_FindLadderOrRope rejects index 0 outright (a2 != 0)
+    // and bounds-checks against the rope array length, so the 0-based position in
+    // MapleMap.getRopes() is offset by one. That list is built by iterating the WZ
+    // "ladderRope" node in order — the same order the client uses for its ladder/rope array
+    // (stride 28), so the indices line up.
     private static int resolveBroadcastFhId(BotMovementState entry, Character bot) {
         Rope climbRope = entry.climbRope;
         if (climbRope != null) {
             int idx = ropeIndex(bot.getMap(), climbRope);
-            if (idx >= 0) {
-                // 0x8000 marks "ladder/rope" for the client; index occupies the low bits.
-                // Written as a signed short this is negative, which is what the client tests.
-                return 0x8000 | idx;
+            if (idx > 0) {
+                // Two's complement of the 1-based index. Masked to 16 bits so it is written
+                // as a negative short on the wire; the client negates it back to idx.
+                return (-idx) & 0xFFFF;
             }
         }
 
@@ -945,14 +956,16 @@ class BotMovementManager {
         return entry.lastGroundFhId;
     }
 
-    /** Index of {@code rope} within the map's rope list, or -1 if not found. */
+    /**
+     * 1-based index of {@code rope} within the map's rope list, or -1 if not found.
+     * Base 1 rather than 0 because the client's FootholdTree_FindLadderOrRope returns null for
+     * index 0 as well as for out-of-range values.
+     */
     private static int ropeIndex(MapleMap map, Rope rope) {
         if (map == null || rope == null) {
             return -1;
         }
         int idx = map.getRopes().indexOf(rope);
-        // Client-side index is 1-based: FootholdTree_FindLadderOrRope returns 0 for
-        // out-of-range AND for index 0, so a valid rope must start at 1.
         return idx >= 0 ? idx + 1 : -1;
     }
 
