@@ -3293,3 +3293,380 @@ conversations:
       - {speaker: A, text: "图是怪社交契约"}
       - {speaker: B, text: "像隐形领地"}
       - {speaker: C, text: "冒险岛文化好怪哈哈"}
+
+  # ═══════════════════════════════════════
+  #  吵架 / 服务器恩怨
+  # ═══════════════════════════════════════
+
+  grind_spot_beef:
+    participants: 2
+    lines:
+      - {speaker: A, text: "这图我先来的"}
+      - {speaker: B, text: "我也看到了啊 谁先打算谁的", emote: 6}
+      - {speaker: A, text: "我打了一小时了你才来", emote: 3}
+      - {speaker: B, text: "那我走 你继续 当我没说"}
+      - {speaker: A, text: "别阴阳怪气的", emote: 5}
+
+  ks_accusation:
+    participants: 2
+    lines:
+      - {speaker: A, text: "你刚才是不是拉我怪了", emote: 6}
+      - {speaker: B, text: "我正常打怪 你自己没拉住", emote: 5}
+      - {speaker: A, text: "怪明明往你那边跑了", emote: 4}
+      - {speaker: B, text: "那就是我的了 怪不会说谎", emote: 6}
+      - {speaker: A, text: "行 我记住你了", emote: 5}
+
+  map_claim_beef:
+    participants: 2
+    lines:
+      - {speaker: A, text: "这张图我包了 你换一个"}
+      - {speaker: B, text: "你包了？服务器上写你名了？"}
+      - {speaker: A, text: "我在这刷一晚上了", emote: 5}
+      - {speaker: B, text: "我也在这刷一晚上了 巧了", emote: 5}
+      - {speaker: A, text: "那咱俩耗着"}
+
+  standing_spot_beef:
+    participants: 2
+    lines:
+      - {speaker: A, text: "你站我位置上了", emote: 3}
+      - {speaker: B, text: "这位置又不是你家的", emote: 4}
+      - {speaker: A, text: "我先站的 常识懂吗", emote: 5}
+      - {speaker: B, text: "你先站你就站着呗 我又没推你"}
+      - {speaker: A, text: "你这人真没素质"}
+
+  leech_kill_beef:
+    participants: 2
+    lines:
+      - {speaker: A, text: "别在我旁边刷 抢我怪", emote: 6}
+      - {speaker: B, text: "这么大张图 怪是刷新的", emote: 4}
+      - {speaker: A, text: "你就是在抢", emote: 5}
+      - {speaker: B, text: "你要这么说那我偏不走了"}
+      - {speaker: A, text: "随你 反正我记着了", emote: 3}
+
+  scam_callout:
+    participants: 2
+    lines:
+      - {speaker: A, text: "说好给我的东西呢", emote: 6}
+      - {speaker: B, text: "什么 我给你了啊", emote: 5}
+      - {speaker: A, text: "交易记录你看看 空的", emote: 4}
+      - {speaker: B, text: "哦那个啊 我号被人盗了", emote: 5}
+      - {speaker: A, text: "你骗人的借口能不能换一个", emote: 5}
+
+  debt_callout:
+    participants: 2
+    lines:
+      - {speaker: A, text: "你欠我的钱还吗", emote: 5}
+      - {speaker: B, text: "急什么 又不是不还", emote: 3}
+      - {speaker: A, text: "都半个月了", emote: 6}
+      - {speaker: B, text: "你这人怎么这么小气", emote: 4}
+      - {speaker: A, text: "小气？是我借你钱好吧"}
+
+  refund_demand:
+    participants: 2
+    lines:
+      - {speaker: A, text: "你把钱还我 这事就算了", emote: 4}
+      - {speaker: B, text: "我没钱 你看着办", emote: 5}
+      - {speaker: A, text: "你昨天还在喇叭收东西", emote: 6}
+      - {speaker: B, text: "那是别人的钱"}
+      - {speaker: A, text: "行 我喇叭见", emote: 6}
+
+  no_middleman_beef:
+    participants: 2
+    lines:
+      - {speaker: A, text: "担保都不走 你心虚什么", emote: 6}
+      - {speaker: B, text: "走担保要手续费的好吧", emote: 6}
+      - {speaker: A, text: "几十万也要省"}
+      - {speaker: B, text: "我省钱碍着你了吗", emote: 6}
+      - {speaker: A, text: "等着被骗吧你"}
+
+  lost_scroll_beef:
+    participants: 2
+    lines:
+      - {speaker: A, text: "你把我的卷弄哪去了", emote: 4}
+      - {speaker: B, text: "什么卷 我没拿"}
+      - {speaker: A, text: "交易记录清清楚楚", emote: 4}
+      - {speaker: B, text: "可能是系统 bug"}
+      - {speaker: A, text: "bug 你个头"}
+
+  guild_boss_steal:
+    participants: 2
+    lines:
+      - {speaker: A, text: "你们公会昨天偷我们 boss", emote: 6}
+      - {speaker: B, text: "偷？我们打得快而已"}
+      - {speaker: A, text: "我们打了一半你们来抢"}
+      - {speaker: B, text: "谁让你们打得慢"}
+      - {speaker: A, text: "有种再来一次", emote: 3}
+
+  guild_size_taunt:
+    participants: 2
+    lines:
+      - {speaker: A, text: "你公会就这几个人？", emote: 5}
+      - {speaker: B, text: "人多有什么用 都是混子", emote: 3}
+      - {speaker: A, text: "你再说一遍", emote: 5}
+      - {speaker: B, text: "我说你公会都是混子"}
+      - {speaker: A, text: "神木村 八点 敢不敢"}
+
+  guild_war_retreat:
+    participants: 2
+    lines:
+      - {speaker: A, text: "上次公会战你跑得最快", emote: 4}
+      - {speaker: B, text: "那叫战术撤退"}
+      - {speaker: A, text: "你撤到主城了"}
+      - {speaker: B, text: "保存实力懂吗"}
+      - {speaker: A, text: "保存得真好 一个人没死", emote: 4}
+
+  guild_leader_callout:
+    participants: 2
+    lines:
+      - {speaker: A, text: "让你们会长来说话"}
+      - {speaker: B, text: "他会忙着呢 我代表"}
+      - {speaker: A, text: "你代表不了"}
+      - {speaker: B, text: "我跟你说了算就行了", emote: 5}
+      - {speaker: A, text: "你不够格", emote: 6}
+
+  gear_mismatch_beef:
+    participants: 2
+    lines:
+      - {speaker: A, text: "你这身装备也敢来扎昆", emote: 3}
+      - {speaker: B, text: "我装备怎么了"}
+      - {speaker: A, text: "白板一个 输出垫底", emote: 6}
+      - {speaker: B, text: "我输出比你高", emote: 5}
+      - {speaker: A, text: "你那点输出 我闭眼都比你强", emote: 6}
+
+  weapon_mismatch_beef:
+    participants: 2
+    lines:
+      - {speaker: A, text: "你那武器是新手村发的？", emote: 5}
+      - {speaker: B, text: "这是我自己刷的"}
+      - {speaker: A, text: "刷出来的破烂"}
+      - {speaker: B, text: "你懂什么 这是情怀", emote: 3}
+      - {speaker: A, text: "情怀不能当输出用"}
+
+  level_gap_taunt:
+    participants: 2
+    lines:
+      - {speaker: A, text: "我 200 级你 120 级 别跟我叫"}
+      - {speaker: B, text: "等级高就了不起了？", emote: 3}
+      - {speaker: A, text: "了不起 起码打得过你"}
+      - {speaker: B, text: "来啊 单挑"}
+      - {speaker: A, text: "懒得跟你打 浪费药", emote: 3}
+
+  zhelm_taunt:
+    participants: 2
+    lines:
+      - {speaker: A, text: "你扎头都没有 谈什么强度", emote: 4}
+      - {speaker: B, text: "我马上就有了", emote: 3}
+      - {speaker: A, text: "马上是多久 明年吗", emote: 6}
+      - {speaker: B, text: "你管我", emote: 4}
+      - {speaker: A, text: "我不管 我就是比你强", emote: 4}
+
+  hack_accusation:
+    participants: 2
+    lines:
+      - {speaker: A, text: "你是不是开挂了"}
+      - {speaker: B, text: "我开什么挂 你自己菜", emote: 6}
+      - {speaker: A, text: "你这伤害不科学"}
+      - {speaker: B, text: "我练了三年才这输出", emote: 4}
+      - {speaker: A, text: "三年练出这水平 更丢人", emote: 6}
+
+  hack_report_beef:
+    participants: 2
+    lines:
+      - {speaker: A, text: "举报你开挂", emote: 4}
+      - {speaker: B, text: "举报去 我等着查", emote: 3}
+      - {speaker: A, text: "查出来你就完了"}
+      - {speaker: B, text: "查不出来你完了"}
+      - {speaker: A, text: "走着瞧", emote: 3}
+
+  script_walk_beef:
+    participants: 2
+    lines:
+      - {speaker: A, text: "你这走位绝对是脚本"}
+      - {speaker: B, text: "脚本能打出我这种操作？", emote: 3}
+      - {speaker: A, text: "你那也叫操作"}
+      - {speaker: B, text: "比你强就行", emote: 6}
+      - {speaker: A, text: "嘴硬", emote: 6}
+
+  megaphone_spam_beef:
+    participants: 2
+    lines:
+      - {speaker: A, text: "你喇叭刷了八条了", emote: 5}
+      - {speaker: B, text: "我花钱买的 管得着吗", emote: 5}
+      - {speaker: A, text: "全服都烦你", emote: 5}
+      - {speaker: B, text: "烦我的人多了 你算老几"}
+      - {speaker: A, text: "你等着被喷"}
+
+  megaphone_blind_beef:
+    participants: 2
+    lines:
+      - {speaker: A, text: "别刷屏了 看不见聊天了"}
+      - {speaker: B, text: "那你别看"}
+      - {speaker: A, text: "大家都投诉你了"}
+      - {speaker: B, text: "投诉有用早封了", emote: 4}
+      - {speaker: A, text: "迟早的事", emote: 5}
+
+  megaphone_insult_beef:
+    participants: 2
+    lines:
+      - {speaker: A, text: "你骂谁呢", emote: 6}
+      - {speaker: B, text: "骂你啊 怎么了", emote: 4}
+      - {speaker: A, text: "我招你惹你了"}
+      - {speaker: B, text: "你抢我怪的时候怎么不说", emote: 5}
+      - {speaker: A, text: "那事过去了"}
+
+  no_heal_beef:
+    participants: 2
+    lines:
+      - {speaker: A, text: "刚才那波你怎么不奶我"}
+      - {speaker: B, text: "我蓝不够了"}
+      - {speaker: A, text: "蓝不够你不会喝药？"}
+      - {speaker: B, text: "药在冷却", emote: 4}
+      - {speaker: A, text: "你就是菜", emote: 5}
+
+  aggro_fail_beef:
+    participants: 2
+    lines:
+      - {speaker: A, text: "boss 仇恨你拉不住"}
+      - {speaker: B, text: "我拉了 它跑了", emote: 6}
+      - {speaker: A, text: "跑了就是你的问题", emote: 6}
+      - {speaker: B, text: "输出太高怪我咯", emote: 6}
+      - {speaker: A, text: "你那也叫输出"}
+
+  ran_away_beef:
+    participants: 2
+    lines:
+      - {speaker: A, text: "你为什么跑了", emote: 6}
+      - {speaker: B, text: "血要没了 我不跑等死？", emote: 3}
+      - {speaker: A, text: "你跑了我们也团灭了", emote: 3}
+      - {speaker: B, text: "我活着至少还能救", emote: 4}
+      - {speaker: A, text: "救个鬼 你也死了"}
+
+  price_gouge_beef:
+    participants: 2
+    lines:
+      - {speaker: A, text: "你这价格是抢钱吧", emote: 6}
+      - {speaker: B, text: "嫌贵别买"}
+      - {speaker: A, text: "市价才一半"}
+      - {speaker: B, text: "那你买市价的去", emote: 6}
+      - {speaker: A, text: "你迟早卖不出去", emote: 3}
+
+  promised_discount_beef:
+    participants: 2
+    lines:
+      - {speaker: A, text: "说好便宜给我的", emote: 3}
+      - {speaker: B, text: "我什么时候说了"}
+      - {speaker: A, text: "你喇叭上喊的", emote: 6}
+      - {speaker: B, text: "喇叭上喊的是广告", emote: 4}
+      - {speaker: A, text: "你这是虚假宣传"}
+
+  junk_scroll_beef:
+    participants: 2
+    lines:
+      - {speaker: A, text: "你那破卷也好意思摆这个价", emote: 5}
+      - {speaker: B, text: "爱买不买"}
+      - {speaker: A, text: "白送我都嫌占背包", emote: 4}
+      - {speaker: B, text: "那你别看"}
+      - {speaker: A, text: "我偏要看 还要说", emote: 3}
+
+  nostalgia_beef:
+    participants: 2
+    lines:
+      - {speaker: A, text: "这游戏没以前好玩了"}
+      - {speaker: B, text: "以前也没多好玩 你怀念的是人", emote: 5}
+      - {speaker: A, text: "你懂什么"}
+      - {speaker: B, text: "我懂 我玩得比你还久"}
+      - {speaker: A, text: "玩得久就了不起？"}
+
+  veteran_beef:
+    participants: 2
+    lines:
+      - {speaker: A, text: "你们这帮老玩家整天怀旧", emote: 6}
+      - {speaker: B, text: "我们怀念的是真的", emote: 4}
+      - {speaker: A, text: "怀念个鬼 就是不肯承认自己老了"}
+      - {speaker: B, text: "你再说一遍"}
+      - {speaker: A, text: "我说了 怎么着"}
+
+  newbie_beef:
+    participants: 2
+    lines:
+      - {speaker: A, text: "新玩家根本不懂", emote: 6}
+      - {speaker: B, text: "你教过吗", emote: 5}
+      - {speaker: A, text: "我凭什么教"}
+      - {speaker: B, text: "你不教还嫌别人不懂"}
+      - {speaker: A, text: "关你什么事", emote: 4}
+
+  pedantic_beef:
+    participants: 2
+    lines:
+      - {speaker: A, text: "你这就是抬杠", emote: 6}
+      - {speaker: B, text: "我这是讲道理", emote: 5}
+      - {speaker: A, text: "你讲道理能讲到三小时？"}
+      - {speaker: B, text: "说明道理复杂", emote: 3}
+      - {speaker: A, text: "说明你闲", emote: 4}
+
+  talk_over_beef:
+    participants: 2
+    lines:
+      - {speaker: A, text: "说完了吗 说完了轮到我了", emote: 5}
+      - {speaker: B, text: "你说 我听着", emote: 4}
+      - {speaker: A, text: "你根本没在听", emote: 4}
+      - {speaker: B, text: "我在听 你说", emote: 6}
+      - {speaker: A, text: "你这种态度没法聊"}
+
+  i_dont_want_to_fight_beef:
+    participants: 2
+    lines:
+      - {speaker: A, text: "我不想跟你吵", emote: 4}
+      - {speaker: B, text: "那你别说话"}
+      - {speaker: A, text: "我说的是事实", emote: 6}
+      - {speaker: B, text: "你的事实就是我的错误？"}
+      - {speaker: A, text: "对 就是这样", emote: 6}
+
+  you_win_beef:
+    participants: 2
+    lines:
+      - {speaker: A, text: "你赢了行了吧"}
+      - {speaker: B, text: "本来就是我赢"}
+      - {speaker: A, text: "你赢了 你开心了"}
+      - {speaker: B, text: "我当然开心", emote: 3}
+      - {speaker: A, text: "你这种人活该没朋友"}
+
+  three_way_breakup:
+    participants: 3
+    lines:
+      - {speaker: A, text: "你们俩吵够没有", emote: 6}
+      - {speaker: B, text: "他先抢我怪的", emote: 5}
+      - {speaker: C, text: "明明是我先打的", emote: 5}
+      - {speaker: A, text: "行了 怪早刷没了", emote: 3}
+      - {speaker: B, text: "都别吵了 丢人"}
+      - {speaker: C, text: "我先来的 别吵了", emote: 3}
+
+  three_way_sides:
+    participants: 3
+    lines:
+      - {speaker: A, text: "我说句公道话"}
+      - {speaker: B, text: "你闭嘴", emote: 3}
+      - {speaker: C, text: "让他说完"}
+      - {speaker: A, text: "你俩都有问题", emote: 5}
+      - {speaker: B, text: "我没问题 是他的问题"}
+      - {speaker: C, text: "行了都少说两句", emote: 5}
+
+  three_way_who_first:
+    participants: 3
+    lines:
+      - {speaker: A, text: "这图谁先来的", emote: 6}
+      - {speaker: B, text: "我先"}
+      - {speaker: C, text: "我也先"}
+      - {speaker: A, text: "你们俩别同时说话"}
+      - {speaker: B, text: "反正不是他", emote: 4}
+      - {speaker: C, text: "那就是我"}
+
+  three_way_pick_side:
+    participants: 3
+    lines:
+      - {speaker: A, text: "你站哪边的"}
+      - {speaker: B, text: "我中立", emote: 5}
+      - {speaker: C, text: "中立就是帮凶", emote: 5}
+      - {speaker: A, text: "我招谁惹谁了", emote: 3}
+      - {speaker: B, text: "你站错边了兄弟"}
+      - {speaker: C, text: "别拉我下水", emote: 6}
