@@ -1142,8 +1142,11 @@ public class TrainingBot extends BotSM implements GrindTickRegistry.Participant 
         try {
             String line = BotDialogueHandler.getRandomResolvedLine(dialoguePath, botType, node, chr, player);
             if (line != null) {
+                // getRunning() too: converting this bot (e.g. to a FollowerBot) keeps the Character
+                // and its map, so a map-only gate would let the old type keep talking seconds after
+                // it was replaced.
                 BotTiming.chain()
-                        .stopUnless(() -> chr.getMap() != null)
+                        .stopUnless(() -> chr.getMap() != null && getRunning())
                         .pause(BotTiming.typingPauseFor(line))
                         .run(() -> BotSpeak(chr, line))
                         .start();

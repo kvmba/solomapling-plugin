@@ -367,6 +367,26 @@ public class SocialBot extends BotSM {
         }
     }
 
+    // Guards the menu-reply window. A reply is now paced by a random typing beat, so a player who
+    // types again while it is pending would start a SECOND chain with its own random delay - two
+    // replies racing, often out of order. RESPONDING (already the meaning "a reply is in flight")
+    // makes extra lines wait; endReply restores AWAITING_CHOICE when the reply has played.
+    //
+    // If the chain is dropped by its gate (conversation reset, bot stopped), endReply never runs
+    // and the state stays RESPONDING - but the conversation is over in that case too, and
+    // checkConversationTimeout's resetConversation() is the backstop that clears it. Same window
+    // the pre-existing LLM reply path already had.
+    private void beginReply(Character player) {
+        socialState = SocialBotState.RESPONDING;
+    }
+
+    private void endReply(Character player) {
+        if (isConversationWith(player)) {
+            showInteractiveOptions(player);
+        }
+        socialState = SocialBotState.AWAITING_CHOICE;
+    }
+
     private void handleDialogueChoice(String content, Character player) {
         String lower = content.trim().toLowerCase();
 
@@ -448,14 +468,12 @@ public class SocialBot extends BotSM {
                 reply -> deliverLlmReply(player, botId, playerId, reply),
                 () -> {
                     if (SocialLlmConfig.fallbackToYaml()) {
+                        // already RESPONDING; the YAML reply's chain restores the menu
                         respondWithYamlCategory("WhatsUp", player);
                     } else {
                         BotTiming.chain()
                                 .stopUnless(() -> isConversationWith(player))
-                                .run(() -> {
-                                    socialState = SocialBotState.AWAITING_CHOICE;
-                                    showInteractiveOptions(player);
-                                })
+                                .run(() -> endReply(player))
                                 .start();
                     }
                 });
@@ -472,10 +490,7 @@ public class SocialBot extends BotSM {
                 SocialChatSessionStore.addAssistant(botId, playerId, reply);
             });
         }
-        chain.run(() -> {
-            socialState = SocialBotState.AWAITING_CHOICE;
-            showInteractiveOptions(player);
-        });
+        chain.run(() -> endReply(player));
         chain.start();
     }
 
@@ -486,6 +501,7 @@ public class SocialBot extends BotSM {
 
         String line = getRandomLine(category, player);
         int emote = getRandomEmote(category);
+        beginReply(player);
         BotTiming.Chain chain = BotTiming.chain()
                 .stopUnless(() -> isConversationWith(player))
                 .pause(BotTiming.typingPauseFor(line))
@@ -496,7 +512,7 @@ public class SocialBot extends BotSM {
                 chain.pause(400).run(() -> BotEmote(getChr(), emote));
             }
         }
-        chain.run(() -> showInteractiveOptions(player));
+        chain.run(() -> endReply(player));
         chain.start();
     }
 
@@ -510,11 +526,14 @@ public class SocialBot extends BotSM {
                 ? BotRecruitManager.RecruitAnswer.DECLINED // already committed to a party
                 : BotRecruitManager.rollPartyAsk(getChr(), player, BotRecruitManager.SOCIAL_ACCEPT_CHANCE, true);
 
+        // The accept/decline roll is committed here, before the beat: the armed invite window must
+        // start now, not when the line finally plays.
         boolean accepted = ans == BotRecruitManager.RecruitAnswer.ACCEPTED;
         String category = accepted ? "PartyAccept" : "PartyDecline";
         String line = getRandomLine(category, player);
         int emote = getRandomEmote(category);
 
+        beginReply(player);
         BotTiming.Chain chain = BotTiming.chain()
                 .stopUnless(() -> isConversationWith(player))
                 .pause(BotTiming.typingPauseFor(line))
@@ -528,7 +547,7 @@ public class SocialBot extends BotSM {
         if (accepted) {
             chain.run(this::resetConversation); // hint clears; the tick poll now waits for the invite
         } else {
-            chain.run(() -> showInteractiveOptions(player));
+            chain.run(() -> endReply(player));
         }
         chain.start();
     }

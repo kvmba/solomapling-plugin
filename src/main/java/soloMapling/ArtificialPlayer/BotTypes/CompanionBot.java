@@ -267,8 +267,11 @@ public final class CompanionBot extends BotSM implements
         // the typing beat into it would report every turn 3-15s slower than the brain really was.
         long planningLatencyMs =
                 Math.max(0L, (System.nanoTime() - context.startedNanos()) / 1_000_000L);
+        // The gate must also cover the bot being stopped or converted to another type: the Character
+        // keeps its map through both, so a map-only check would let a dead CompanionBot keep
+        // executing its old decision (including ACCEPT_PARTY) seconds after it was replaced.
         BotTiming.chain()
-                .stopUnless(() -> getChr() != null && getChr().getMap() != null)
+                .stopUnless(() -> getChr() != null && getChr().getMap() != null && getRunning())
                 .pause(BotTiming.typingPauseFor(planned.message().content()))
                 .run(() -> playDecision(context, planned, planningLatencyMs))
                 .start();
