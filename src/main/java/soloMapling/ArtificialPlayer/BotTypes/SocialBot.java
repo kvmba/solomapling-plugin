@@ -180,7 +180,7 @@ public class SocialBot extends BotSM {
             // player's conversation (and never come back). Cut it short and head home - the bot should
             // be standing still when it talks to someone.
             if (strolling && strollHomeMapId > 0) {
-                strollHome(getChr(), strollHomeMapId, 0);
+                strollHome(getChr(), strollHomeMapId);
             }
             checkConversationTimeout();
             processMessages();
@@ -218,6 +218,9 @@ public class SocialBot extends BotSM {
             strolling = false;
             strollReturning = false;
             GCMovement.cancelTravel(chr);
+            // Also drop the GC session enable() took for the trip: town bots are old-engine walkers,
+            // and a lingering GC session would hold the shared movement lock the old engine needs.
+            GCMovement.disable(chr);
         }
         super.stopScheduledTask();
     }
@@ -325,7 +328,14 @@ public class SocialBot extends BotSM {
         if (now < nextStrollAtMs) {
             return;
         }
-        List<Integer> options = strollOptions(chr.getMapId());
+        List<Integer> options = new ArrayList<>();
+        for (int neighbor : GCMovement.walkableNeighbors(chr.getMapId())) {
+            // Town maps only: a neighbour carrying mobs is a hunting field, not somewhere a
+            // townsbot goes for a walk. Empty until the world graph exists (never forces its build).
+            if (MapMobIndex.level(neighbor) < 0) {
+                options.add(neighbor);
+            }
+        }
         if (options.isEmpty()) {
             nextStrollAtMs = now + STROLL_MIN_MS; // nowhere to go (or graph not built yet) - try later
             return;
@@ -340,41 +350,31 @@ public class SocialBot extends BotSM {
         TownStation.releaseSpot(chr); // free the ledge for the duration, don't hold it from another town
         GCMovement.travel(chr, dest, ok -> {
             if (!Boolean.TRUE.equals(ok)) {
-                strollHome(chr, home, 0);
+                strollHome(chr, home);
                 return;
             }
-            MethodScheduler.runAfterDelay(() -> strollHome(chr, home, 0), strollDwellMs());
+            MethodScheduler.runAfterDelay(() -> strollHome(chr, home), strollDwellMs());
         });
     }
 
-    // Where this bot may stroll to: one-portal neighbours that are TOWN maps. A neighbour carrying mobs
-    // is a hunting field, not somewhere a townsbot goes for a walk.
-    private List<Integer> strollOptions(int mapId) {
-        List<Integer> options = new ArrayList<>();
-        for (int neighbor : GCMovement.walkableNeighbors(mapId)) {
-            if (MapMobIndex.level(neighbor) < 0) {
-                options.add(neighbor);
-            }
-        }
-        return options;
-    }
-
-    // Come back and re-settle. Retries once on failure: a dropped trip would otherwise leave the bot
-    // parked in a strange map with strolling still true, so it would never drift or stroll again.
-    private void strollHome(Character chr, int home, int attempt) {
+    // Come back and re-settle. On failure the bot stays wherever it got to and re-claims a ledge there:
+    // strolling must still end, or the bot would never drift or stroll again.
+    private void strollHome(Character chr, int home) {
         if (!strolling || strollReturning) {
             return; // converted away / stopped while out, or a return is already under way
         }
         strollReturning = true;
         GCMovement.travel(chr, home, ok -> {
-            if (!Boolean.TRUE.equals(ok) && attempt == 0) {
-                strollReturning = false; // let the retry re-issue the trip
-                strollHome(chr, home, 1);
-                return;
-            }
             strolling = false;
             strollReturning = false;
-            townClaimed = false; // re-claim the home ledge (townAnchor still points at the old map)
+            townClaimed = false; // re-claim a ledge where we ended up (townAnchor points at the old map)
+            // Hand the bot back to the old movement engine. GCMovement.travel() enable()d it for the
+            // trip, and enable() HOLDS the shared movement lock for the whole GC session - which the
+            // in-map drift (TownStation.relocate -> pathFinderAware) needs. Without this the next
+            // relocate silently no-ops on tryAcquireMovementLock, and its finally block then steals
+            // the lock back out from under the GC state. Town bots walk with the old engine; unlike
+            // TrainingBot they do not stay under GC control between trips.
+            GCMovement.disable(chr);
             nextStrollAtMs = System.currentTimeMillis() + STROLL_MIN_MS
                     + (long) (random.nextDouble() * (STROLL_MAX_MS - STROLL_MIN_MS));
         });
