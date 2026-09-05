@@ -231,12 +231,19 @@ final class GCMovementSkills {
         BotMovementManager.broadcastRawMovement(bot, teleportPath(map, origin, dest, stance));
     }
 
-    // The fragment path itself: [numCommands][cmd4 @ origin][cmd3 @ dest][cmd0 settle @ dest].
+    // The fragment path itself: [originX][originY][numCommands][cmd4 @ origin][cmd3 @ dest][cmd0 settle @ dest].
     // Pure byte assembly — pulled out of broadcastTeleport so the layout is directly testable
     // (a wrong fragment order or count is exactly how the sprite silently teleports instead of blinking).
+    //
+    // The two leading shorts are the CMovePath header the client reads first (sub_68A33C:
+    // Decode2 -> x, Decode2 -> y, GetPacketType -> numCommands). They used to be omitted, so the
+    // client consumed the numCommands byte as x and the first command byte as y, shifting every
+    // fragment by 4 bytes and misreading fh/stance — which also broke the render layer.
     static byte[] teleportPath(MapleMap map, Point origin, Point dest, int stance) {
-        byte[] data = new byte[1 + 10 + 10 + 14];
+        byte[] data = new byte[2 + 2 + 1 + 10 + 10 + 14];
         int i = 0;
+        i = putShort(data, i, origin.x);  // CMovePath header: origin position
+        i = putShort(data, i, origin.y);
         data[i++] = 3; // numCommands
         i = putTeleportFrag(data, i, CMD_TELEPORT_APPEAR, origin.x, origin.y, footholdIdAt(map, origin), stance);
         i = putTeleportFrag(data, i, CMD_TELEPORT_DISAPPEAR, dest.x, dest.y, 0, stance);
