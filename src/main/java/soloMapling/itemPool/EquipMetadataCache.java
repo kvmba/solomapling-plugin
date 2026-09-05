@@ -18,6 +18,8 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
+import static soloMapling.ArtificialPlayer.BotHelpers.itemNameOrNull;
+
 /**
  * One-time startup cache of all equip metadata parsed from WZ.
  * After {@link #initialize()} completes, every query is a pure in-memory
@@ -323,7 +325,7 @@ public class EquipMetadataCache {
                 Map<String, Integer> stats = ii.getEquipStats(id);
                 if (stats == null) continue;  // item doesn't exist in WZ
 
-                String name = ii.getName(id);
+                String name = itemNameOrNull(id);
                 all.add(new EquipEntry(id, eqType, deriveGender(id),
                         stats.getOrDefault("reqLevel", 0),
                         stats.getOrDefault("reqJob", 0),

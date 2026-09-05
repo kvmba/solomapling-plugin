@@ -13,6 +13,7 @@ import soloMapling.itemPool.ItemNode;
 
 import java.util.*;
 
+import static soloMapling.ArtificialPlayer.BotHelpers.isUnusableItem;
 import static soloMapling.FreeMarket.FMEconomyManager.multiplyWzPriceByJobStyle;
 import static soloMapling.itemPool.ItemInformationProviderUtilities.getJobStyleFromItemId;
 import static soloMapling.itemPool.ItemInformationProviderUtilities.getRandomEquipType;
@@ -49,6 +50,10 @@ public class EquipListGenerator {
             }
 
             int itemId = pickRandomVariantId(item.getVariantId());
+            // Half-finished WZ entries have no name - never stock them.
+            if (isUnusableItem(itemId)) {
+                continue;
+            }
             int price = item.getCurrentPrice();
             Equip sellItem = (Equip) generateCleanItemEquip(itemId);
 

@@ -1,7 +1,6 @@
 package soloMapling.ArtificialPlayer.BotTypes;
 
 import org.gms.client.Character;
-import org.gms.server.ItemInformationProvider;
 import org.gms.server.maps.MapleMap;
 import soloMapling.ArtificialPlayer.BotDialogueHandler;
 import soloMapling.ArtificialPlayer.BotMessagingSystem.CharacterStorage;
@@ -16,7 +15,9 @@ import java.util.Random;
 
 import static soloMapling.ArtificialPlayer.BotCommandsPack.SocialCommands.BotEmote;
 import static soloMapling.ArtificialPlayer.BotCommandsPack.SocialCommands.BotSpeak;
+import static soloMapling.ArtificialPlayer.BotHelpers.convertItemIdToName;
 import static soloMapling.ArtificialPlayer.BotHelpers.isBot;
+import static soloMapling.ArtificialPlayer.BotHelpers.isUnusableItem;
 import static soloMapling.ArtificialPlayer.BotMovementSystem.MovementCommands.botFaceTowardsPoint;
 
 public class DropGameSpectatorSystem {
@@ -43,8 +44,10 @@ public class DropGameSpectatorSystem {
         dropCounter = 0;
         nextReactionAt = COOLDOWN_MIN_DROPS + random.nextInt(COOLDOWN_MAX_DROPS - COOLDOWN_MIN_DROPS + 1);
 
-        String itemName = ItemInformationProvider.getInstance().getName(itemId);
-        if (itemName == null || itemName.isEmpty()) return;
+        // Unnamed drops are half-finished WZ data - nothing to cheer about.
+        if (isUnusableItem(itemId)) return;
+
+        String itemName = convertItemIdToName(itemId);
 
         MapleMap map = dropGameBot.getMap();
         if (map == null) return;

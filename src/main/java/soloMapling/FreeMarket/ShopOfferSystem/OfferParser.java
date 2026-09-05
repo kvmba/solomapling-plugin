@@ -1,12 +1,13 @@
 package soloMapling.FreeMarket.ShopOfferSystem;
 
-import org.gms.server.ItemInformationProvider;
 import org.gms.server.maps.PlayerShopItem;
 
 import java.util.ArrayList;
 import java.util.List;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+
+import static soloMapling.ArtificialPlayer.BotHelpers.itemNameOrNull;
 
 public class OfferParser {
 
@@ -38,7 +39,6 @@ public class OfferParser {
 
         String lower = message.toLowerCase();
         int requestedOrdinal = extractOrdinal(lower);
-        ItemInformationProvider ii = ItemInformationProvider.getInstance();
 
         String matchedName = null;
         List<Integer> matchingIndices = new ArrayList<>();
@@ -47,7 +47,9 @@ public class OfferParser {
             PlayerShopItem item = shopItems.get(i);
             if (!item.isExist() || item.getBundles() <= 0) continue;
 
-            String itemName = ii.getName(item.getItem().getItemId());
+            // itemNameOrNull also absorbs the host's non-thread-safe DOM read,
+            // which would otherwise NPE out of the whole parse.
+            String itemName = itemNameOrNull(item.getItem().getItemId());
             if (itemName == null || itemName.isEmpty()) continue;
 
             if (lower.contains(itemName.toLowerCase())) {

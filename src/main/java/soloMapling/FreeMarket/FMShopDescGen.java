@@ -3,7 +3,6 @@ package soloMapling.FreeMarket;
 import org.gms.client.inventory.Equip;
 import org.gms.client.inventory.InventoryType;
 import org.gms.client.inventory.Item;
-import org.gms.server.ItemInformationProvider;
 import org.gms.server.maps.PlayerShopItem;
 import soloMapling.Environment.LocalizedResources;
 import soloMapling.Environment.PluginResources;
@@ -20,6 +19,10 @@ import java.util.Map;
 import java.util.Random;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ThreadLocalRandom;
+
+import static soloMapling.ArtificialPlayer.BotHelpers.isUnusableItem;
+import static soloMapling.ArtificialPlayer.BotHelpers.isUsableItem;
+import static soloMapling.ArtificialPlayer.BotHelpers.itemNameOrNull;
 
 public class FMShopDescGen {
 
@@ -248,9 +251,12 @@ public class FMShopDescGen {
     }
 
     protected static String advertiseBestEquip(Item bestItem, boolean writeStat) {
-        ItemInformationProvider ii = ItemInformationProvider.getInstance();
         int itemId = bestItem.getItemId();
-        String itemName = ii.getName(itemId);
+        // Unnamed items are half-finished WZ data - never advertise them.
+        if (isUnusableItem(itemId)) {
+            return "";
+        }
+        String itemName = itemNameOrNull(itemId);
         itemName = itemNameAcronymConverter(itemName);
         itemName = trimColorsFromEquipNames(itemName);
 
@@ -274,16 +280,18 @@ public class FMShopDescGen {
         String itemName = "";
         int maxValue = 0;
         int mostExpensiveItemId = 0;
-        ItemInformationProvider ii = ItemInformationProvider.getInstance();
         for (PlayerShopItem psItem : merchant.getItems()) {
-            if (psItem.getItem().getInventoryType() != InventoryType.EQUIP) {
+            if (psItem.getItem().getInventoryType() != InventoryType.EQUIP && isUsableItem(psItem.getItem())) {
                 if (psItem.getPrice() > maxValue) {
                     maxValue = psItem.getPrice();
                     mostExpensiveItemId = psItem.getItem().getItemId();
                 }
             }
         }
-        itemName = ii.getName(mostExpensiveItemId);
+        if (mostExpensiveItemId == 0) {
+            return "";
+        }
+        itemName = itemNameOrNull(mostExpensiveItemId);
         return trimTextFromItemNames(itemName);
     }
 
@@ -293,12 +301,11 @@ public class FMShopDescGen {
     }
 
     protected static Item getMostExpensiveEquipFromShop(HiredMerchantArtificial merchant) {
-        String itemName = "";
         int maxValue = 0;
-        ItemInformationProvider ii = ItemInformationProvider.getInstance();
         Item mostExpensiveItem = null;
         for (PlayerShopItem psItem : merchant.getItems()) {
-            if (psItem.getItem().getInventoryType() == InventoryType.EQUIP) {
+            // Unnamed items are half-finished WZ data - don't headline them.
+            if (psItem.getItem().getInventoryType() == InventoryType.EQUIP && isUsableItem(psItem.getItem())) {
                 if (psItem.getPrice() > maxValue) {
                     maxValue = psItem.getPrice();
                     mostExpensiveItem = psItem.getItem();

@@ -23,6 +23,7 @@ import static soloMapling.FreeMarket.EquipListGenerator.generateEquipList;
 import static soloMapling.FreeMarket.EquipListGenerator.generateEquipListIIPU;
 import static soloMapling.FreeMarket.FMEconomyManager.adjustFMPrices;
 import static soloMapling.FreeMarket.FMEconomyManager.adjustFMQuantity;
+import static soloMapling.ArtificialPlayer.BotHelpers.isUnusableItem;
 import static soloMapling.itemPool.ItemSelector.getRandomItemFull;
 import static soloMapling.itemPool.ItemSelector.pickRandomVariantId;
 import static soloMapling.itemPool.QuantitySelector.distributedTierSelector;
@@ -199,6 +200,7 @@ public class ArtificialShopGenerator {
             int price = item.getCurrentPrice();
             itemList.add(new FMItem(itemId, price, 1));
         }
+        removeDuplicates(itemList);
         return itemList;
     }
 
@@ -343,6 +345,10 @@ public class ArtificialShopGenerator {
     }
 
     private static void addItemToShop(HiredMerchantArtificial merchant, Item sellItem, int quantity, int price) {
+        // Unnamed items are half-finished WZ data - never put them on a shelf.
+        if (isUnusableItem(sellItem.getItemId())) {
+            return;
+        }
         short bundles = (short) adjustFMQuantity(merchant, quantity);
         int adjustedPrice = adjustFMPrices(merchant, price);
         PlayerShopItem shopItem = new PlayerShopItem(sellItem, bundles, adjustedPrice);
@@ -360,8 +366,10 @@ public class ArtificialShopGenerator {
 
         while (iterator.hasNext()) {
             FMItem currentItem = iterator.next();
-            if (!seenItemIds.add(currentItem.getItemId())) {
-                // If itemId is already in the set, remove the duplicate
+            // Unnamed ids are half-finished WZ data - drop them along with
+            // duplicates so no generator can hand one to a shop or a merchant.
+            if (isUnusableItem(currentItem.getItemId())
+                    || !seenItemIds.add(currentItem.getItemId())) {
                 iterator.remove();
             }
         }

@@ -29,6 +29,7 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.function.Supplier;
 
+import static soloMapling.ArtificialPlayer.BotHelpers.itemNameOrNull;
 import static soloMapling.itemPool.ItemInformationProviderUtilities.getReqJobViaJobStyle;
 
 /**
@@ -322,7 +323,7 @@ public final class CompanionGearController {
         Map<String, Integer> metadata = provider.getEquipStats(itemId);
         EquipType type = EquipType.getEquipTypeById(itemId);
         return new CompanionGearPolicy.GearItem(
-                itemId, provider.getName(itemId),
+                itemId, itemNameOrNull(itemId),
                 CompanionGearPolicy.slotFor(type),
                 deriveGender(itemId),
                 value(metadata, "reqLevel"),

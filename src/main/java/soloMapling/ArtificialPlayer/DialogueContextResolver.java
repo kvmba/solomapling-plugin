@@ -169,7 +169,7 @@ public final class DialogueContextResolver {
             if (dropId.isEmpty()) {
                 return Optional.empty();
             }
-            return nonBlank(ItemInformationProvider.getInstance().getName(dropId.getAsInt()));
+            return nonBlank(BotHelpers.itemNameOrNull(dropId.getAsInt()));
         }
 
         private OptionalInt focusMob() {
@@ -211,7 +211,7 @@ public final class DialogueContextResolver {
         if (w == null) {
             return Optional.empty();
         }
-        return nonBlank(ItemInformationProvider.getInstance().getName(w.getItemId()));
+        return nonBlank(BotHelpers.itemNameOrNull(w.getItemId()));
     }
 
     private static Optional<String> petName(Character c) {
@@ -254,7 +254,7 @@ public final class DialogueContextResolver {
         if (tier.isEmpty()) {
             return Optional.empty();
         }
-        return nonBlank(ItemInformationProvider.getInstance().getName(tier.get(random.nextInt(tier.size()))));
+        return nonBlank(BotHelpers.itemNameOrNull(tier.get(random.nextInt(tier.size()))));
     }
 
     // A worn Cash Shop cosmetic (cash overlay slots), for "where'd u get that NX?" flavor.
@@ -268,7 +268,7 @@ public final class DialogueContextResolver {
         if (cash.isEmpty()) {
             return Optional.empty();
         }
-        return nonBlank(ItemInformationProvider.getInstance().getName(cash.get(random.nextInt(cash.size()))));
+        return nonBlank(BotHelpers.itemNameOrNull(cash.get(random.nextInt(cash.size()))));
     }
 
     // ── Mob / drop helpers (bot's map) ──

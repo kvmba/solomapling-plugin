@@ -54,12 +54,80 @@ public class BotHelpers {
         return id > 20000;
     }
 
-    public static String convertItemIdToName(int itemId) {
-        String itemName = ItemInformationProvider.getInstance().getName(itemId);
-        if (itemName == null) {
-            return "NULL";
+    /**
+     * Host item-name lookup. Returns null when the item has no usable name.
+     * <p>
+     * Three separate things make the raw {@code ItemInformationProvider.getName}
+     * call unsafe from a bot tick, and all three mean the same thing to us -
+     * "this item has no name":
+     * <ul>
+     *   <li>the id is a half-finished WZ entry with no String.wz record
+     *       (getName already returns null for it),</li>
+     *   <li>the record exists but its name is empty/blank,</li>
+     *   <li>the host's XML DOM walk ({@code XMLDomMapleData.getChildByPath})
+     *       is not thread safe and bot ticks share those provider trees across
+     *       virtual threads, so a concurrent read surfaces an NPE instead of a
+     *       value.</li>
+     * </ul>
+     */
+    public static String itemNameOrNull(int itemId) {
+        try {
+            return ItemInformationProvider.getInstance().getName(itemId);
+        } catch (RuntimeException e) {  // host DOM race - see javadoc
+            return null;
         }
-        return itemName;
+    }
+
+    /**
+     * Whether a raw name from the host counts as a real name. Pure, so the
+     * usable/unusable contract is testable without loading WZ.
+     */
+    static boolean hasUsableName(String itemName) {
+        return itemName != null && !itemName.isBlank();
+    }
+
+    /**
+     * Item name for display/logging. Never null: several call sites immediately
+     * call {@code .toLowerCase()} on the result. Unnameable items resolve to
+     * {@code "NULL"} - use {@link #isUsableItem(int)} when the caller cares
+     * whether the item is real rather than just printable.
+     */
+    public static String convertItemIdToName(int itemId) {
+        String itemName = itemNameOrNull(itemId);
+        return hasUsableName(itemName) ? itemName : "NULL";
+    }
+
+    /**
+     * Whether an item is a finished item with a real name.
+     * <p>
+     * Unnamed ids are half-finished WZ data: they must not be bought, listed
+     * for sale, traded, dropped or equipped by a bot - there is nothing a
+     * player could do with one anyway.
+     */
+    public static boolean isUsableItem(int itemId) {
+        return hasUsableName(itemNameOrNull(itemId));
+    }
+
+    /**
+     * Inverse of {@link #isUsableItem(int)} - reads better at guard sites.
+     */
+    public static boolean isUnusableItem(int itemId) {
+        return !isUsableItem(itemId);
+    }
+
+    /**
+     * Whether an {@link org.gms.client.inventory.Item} is a finished item with
+     * a real name. Null items are unusable.
+     */
+    public static boolean isUsableItem(org.gms.client.inventory.Item item) {
+        return item != null && isUsableItem(item.getItemId());
+    }
+
+    /**
+     * Inverse of {@link #isUsableItem(org.gms.client.inventory.Item)}.
+     */
+    public static boolean isUnusableItem(org.gms.client.inventory.Item item) {
+        return !isUsableItem(item);
     }
 
     public static Point adjustCenterPositionXAxis(Point center, int currIndex, int initialIncrement, int subsequentIncrement, int offset) {

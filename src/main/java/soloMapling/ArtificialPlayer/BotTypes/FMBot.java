@@ -32,6 +32,7 @@ import static soloMapling.ArtificialPlayer.BotCommandsPack.WarpCommands.botExitF
 import static soloMapling.ArtificialPlayer.BotDialogueHandler.getRandomResolvedLine;
 import static soloMapling.server.SoloMaplingUtilities.generateRandomNumber;
 import static soloMapling.ArtificialPlayer.BotHelpers.convertItemIdToName;
+import static soloMapling.ArtificialPlayer.BotHelpers.isUnusableItem;
 import static soloMapling.ArtificialPlayer.BotLogic.isInsideFM;
 import static soloMapling.ArtificialPlayer.BotLogic.isInsideFMRooms;
 import static soloMapling.ArtificialPlayer.BotLogic.isPointNear;
@@ -315,6 +316,10 @@ public class FMBot extends BotSM {
             }
             Item thisItem = pItem.getItem();
             int itemId = thisItem.getItemId();
+            // Unnamed items are half-finished data - never worth a purchase.
+            if (isUnusableItem(itemId)) {
+                continue;
+            }
             String itemName = convertItemIdToName(itemId);
             int itemPrice = pItem.getPrice(); // item's FM price
             Integer itemMarketValue = ItemUtilities.getItemMarketValue(thisItem);

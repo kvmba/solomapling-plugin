@@ -14,6 +14,8 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
+import static soloMapling.ArtificialPlayer.BotHelpers.itemNameOrNull;
+
 /** Builds a bounded snapshot of one companion's own native inventory. */
 public final class CompanionInventoryPerception {
     private static final int MAX_FACTS = 512;
@@ -49,7 +51,7 @@ public final class CompanionInventoryPerception {
         for (MutableStack stack : stacks.values()) {
             Item item = stack.item;
             facts.add(new CompanionInventoryItem(
-                    item.getItemId(), itemName(provider, item.getItemId()),
+                    item.getItemId(), itemName(item.getItemId()),
                     stack.type.name(), item.getPosition(), stack.quantity,
                     false, false, tradeable(provider, item), "", 0));
         }
@@ -76,7 +78,7 @@ public final class CompanionInventoryPerception {
             }
             EquipType equipType = EquipType.getEquipTypeById(item.getItemId());
             facts.add(new CompanionInventoryItem(
-                    item.getItemId(), itemName(provider, item.getItemId()),
+                    item.getItemId(), itemName(item.getItemId()),
                     type.name(), item.getPosition(), 1, equipped, true,
                     !equipped && tradeable(provider, item),
                     equipType == null ? "UNKNOWN" : equipType.name(),
@@ -98,8 +100,8 @@ public final class CompanionInventoryPerception {
                 && (item.getFlag() & FORBIDDEN_GIFT_FLAGS) == 0;
     }
 
-    private static String itemName(ItemInformationProvider provider, int itemId) {
-        String name = provider.getName(itemId);
+    private static String itemName(int itemId) {
+        String name = itemNameOrNull(itemId);
         return name == null || name.isBlank() ? "item-" + itemId : name;
     }
 
