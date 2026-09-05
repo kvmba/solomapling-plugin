@@ -170,7 +170,12 @@ public final class GCMovement {
     }
 
     /* Hard-teleport the bot to solid ground at/under (x,y) on its current map, resetting nav state so the
-     * driver resumes cleanly from the new spot. For recovery when a bot is wedged and can't path out. */
+     * driver resumes cleanly from the new spot. For recovery when a bot is wedged and can't path out.
+     *
+     * Visible cuts are rendered as a blink (vanish at the origin, reappear at the destination) rather
+     * than a plain position update — recovery snaps used to go out as a single absolute fragment, which
+     * the client applies in one frame as a silent sprite jump: the "the bot just teleported" glitch.
+     * Sub-frame corrections and unobserved maps still take the cheap plain path. */
     public static void teleportTo(Character bot, int x, int y) {
         if (bot == null) {
             return;
@@ -180,10 +185,20 @@ public final class GCMovement {
         if (st == null) {
             return;
         }
+        Point origin = bot.getPosition();
         Point ground = BotPhysicsEngine.findGroundPoint(bot.getMap(), new Point(x, y));
-        BotPhysicsEngine.teleportTo(st, bot, ground != null ? ground : new Point(x, y));
+        Point dest = (ground != null) ? ground : new Point(x, y);
+        BotPhysicsEngine.teleportTo(st, bot, dest);
         BotMovementManager.resetEntryStateAfterTeleport(st);
-        BotMovementManager.broadcastMovement(st);
+        switch (TeleportCutPolicy.choose(ObserverTracker.isActiveMap(bot.getMapId()), origin, dest)) {
+            case ANIMATED -> GCMovementSkills.teleportCut(st, bot, origin, dest);
+            case NONE -> {
+                // Unobserved: keep the broadcast suppressed, but leave the snapshot stale so the
+                // first observed tick re-announces the new position (mirrors doBroadcastMovement).
+                BotMovementManager.invalidateBroadcastSnapshot(st);
+            }
+            default -> BotMovementManager.broadcastMovement(st);
+        }
     }
 
     /* Flag the bot as combat-alerted so it renders the 5s ALERT pose. The observing client already starts

@@ -225,15 +225,48 @@ final class GCMovementSkills {
     // ── Broadcast (client-verified fragment layouts; see the Fable handoff doc Appendix A) ──
 
     // 3 fragments: cmd4 @ origin (origin fh), cmd3 @ dest (fh 0 = arrival airborne), cmd0 settle @ dest.
-    private static void broadcastTeleport(Character bot, Point origin, Point dest, int stance) {
+    // Also the recovery-snap renderer (see teleportCut) — a bare cmd-0 would slide the sprite there.
+    static void broadcastTeleport(Character bot, Point origin, Point dest, int stance) {
         MapleMap map = bot.getMap();
+        BotMovementManager.broadcastRawMovement(bot, teleportPath(map, origin, dest, stance));
+    }
+
+    // The fragment path itself: [numCommands][cmd4 @ origin][cmd3 @ dest][cmd0 settle @ dest].
+    // Pure byte assembly — pulled out of broadcastTeleport so the layout is directly testable
+    // (a wrong fragment order or count is exactly how the sprite silently teleports instead of blinking).
+    static byte[] teleportPath(MapleMap map, Point origin, Point dest, int stance) {
         byte[] data = new byte[1 + 10 + 10 + 14];
         int i = 0;
         data[i++] = 3; // numCommands
         i = putTeleportFrag(data, i, CMD_TELEPORT_APPEAR, origin.x, origin.y, footholdIdAt(map, origin), stance);
         i = putTeleportFrag(data, i, CMD_TELEPORT_DISAPPEAR, dest.x, dest.y, 0, stance);
         putAbsoluteFrag(data, i, dest.x, dest.y, 0, 0, footholdIdAt(map, dest), stance, MOVE_DURATION_MS);
-        BotMovementManager.broadcastRawMovement(bot, data);
+        return data;
+    }
+
+    /*
+     * Render a position CUT the driver did with teleportTo (grind anchor return, wedge repair,
+     * companion position repair) — moves the bot did for recovery reasons, which historically went
+     * out as a single absolute cmd-0 fragment and so arrived at observers as a silent sprite jump.
+     *
+     * Reuses the mage blink's disappear/appear fragments so the client plays a puff at the origin
+     * and a reappear at the destination instead. Falls back to the driver's plain broadcast for a
+     * sub-frame cut (see TeleportCutPolicy). Callers must have already moved the bot to `dest`.
+     */
+    static void teleportCut(BotMovementState st, Character bot, Point origin, Point dest) {
+        if (bot == null || bot.getMap() == null) {
+            return;
+        }
+        int hdir = (origin != null && dest != null && dest.x < origin.x) ? -1 : 1;
+        int stance = (origin != null && dest != null && dest.y > origin.y + 8)
+                ? proneStance(hdir)
+                : standStance(hdir);
+        broadcastTeleport(bot, origin, dest, stance);
+        // Re-seed the driver's dedup snapshot from the rendered pose, or its next plain broadcast
+        // compares against pre-cut coords and re-emits the same position as a second jump.
+        if (st != null) {
+            BotMovementManager.invalidateBroadcastSnapshot(st);
+        }
     }
 
     // cmd 0 absolute: x,y,velX,velY,fh,stance,duration (same layout as sendMovementPacket's single fragment).

@@ -863,6 +863,18 @@ class BotMovementManager {
         }
     }
 
+    /*
+     * Force the next broadcast to re-send the bot's current position even if it hasn't moved.
+     * Used after a hand-authored fragment path (recovery teleport / blink) painted the client from a
+     * different origin: the cached snapshot still holds pre-cut coords, so an unchanged-position
+     * comparison would either suppress a needed frame or re-emit the cut as a second plain jump.
+     */
+    static void invalidateBroadcastSnapshot(BotMovementState entry) {
+        if (entry != null) {
+            entry.movementBroadcastValid = false;
+        }
+    }
+
     private static void doBroadcastMovement(BotMovementState entry) {
         Character bot = entry.bot;
         // Ours (Fable Phase 1, F4): the physics core still reaches here for unobserved

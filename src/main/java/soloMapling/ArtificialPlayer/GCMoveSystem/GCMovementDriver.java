@@ -595,9 +595,22 @@ final class GCMovementDriver {
         Point goal = entry.moveTarget != null ? entry.moveTarget : entry.navTargetPos;
         Point base = goal != null ? goal : pos;
         Point ground = BotPhysicsEngine.findGroundPoint(map, new Point(base.x, base.y - 1));
-        BotPhysicsEngine.teleportTo(entry, entry.bot, ground != null ? ground : pos);
+        Point dest = (ground != null) ? ground : pos;
+        BotPhysicsEngine.teleportTo(entry, entry.bot, dest);
         BotMovementManager.resetEntryStateAfterTeleport(entry);
-        broadcastIfObserved(entry);
+        renderRecoveryCut(entry, entry.bot, pos, dest);
+    }
+
+    /*
+     * Broadcast a driver-owned recovery snap. Same reasoning as GCMovement.teleportTo: on an observed
+     * map a bare absolute fragment is a one-frame sprite jump, so cut like a blink instead.
+     */
+    private static void renderRecoveryCut(BotMovementState entry, Character bot, Point origin, Point dest) {
+        switch (TeleportCutPolicy.choose(ObserverTracker.isActiveMap(bot.getMapId()), origin, dest)) {
+            case ANIMATED -> GCMovementSkills.teleportCut(entry, bot, origin, dest);
+            case NONE -> BotMovementManager.invalidateBroadcastSnapshot(entry);
+            default -> broadcastIfObserved(entry);
+        }
     }
 
     // Live fall-off-map recovery: if the bot has left the map's VR bounds by more than a slack margin (fell
@@ -631,12 +644,13 @@ final class GCMovementDriver {
                 ? new Point(goal.x, goal.y)
                 : new Point(Math.max(vr.x, Math.min(vr.x + vr.width, pos.x)), vr.y);
         Point ground = BotPhysicsEngine.findGroundPoint(map, new Point(base.x, base.y - 1));
-        BotPhysicsEngine.teleportTo(entry, bot, ground != null ? ground : base);
+        Point dest = (ground != null) ? ground : base;
+        BotPhysicsEngine.teleportTo(entry, bot, dest);
         BotMovementManager.resetEntryStateAfterTeleport(entry);
         // De-thrash: resetEntryStateAfterTeleport only clears NAV state, leaving moveTarget — so the bot
         // would re-aim at the same too-far-below goal and re-fire the same doomed descent (teleport loop =
         // the "glitchy" fall on tall maps). Drop the goal too so the brain re-decides a safe target next tick.
         entry.moveTarget = null;
-        broadcastIfObserved(entry);
+        renderRecoveryCut(entry, bot, pos, dest);
     }
 }
