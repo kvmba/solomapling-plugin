@@ -93,19 +93,25 @@ public class BotHelpers {
      * whether the item is real rather than just printable.
      */
     public static String convertItemIdToName(int itemId) {
+        if (itemId == 0) {  // meso: no String.wz entry, but not a nameless item
+            return "Meso";
+        }
         String itemName = itemNameOrNull(itemId);
         return hasUsableName(itemName) ? itemName : "NULL";
     }
 
     /**
-     * Whether an item is a finished item with a real name.
+     * Whether an id is a finished item with a real name.
      * <p>
      * Unnamed ids are half-finished WZ data: they must not be bought, listed
-     * for sale, traded, dropped or equipped by a bot - there is nothing a
-     * player could do with one anyway.
+     * for sale or traded by a bot - there is nothing a player could do with one
+     * anyway.
+     * <p>
+     * itemId 0 is meso - drop tables encode a meso drop that way - and is
+     * always usable despite having no String.wz name.
      */
     public static boolean isUsableItem(int itemId) {
-        return hasUsableName(itemNameOrNull(itemId));
+        return itemId == 0 || hasUsableName(itemNameOrNull(itemId));
     }
 
     /**
@@ -113,6 +119,23 @@ public class BotHelpers {
      */
     public static boolean isUnusableItem(int itemId) {
         return !isUsableItem(itemId);
+    }
+
+    /**
+     * Whether an id may be sold by a bot: a real named item, and not meso.
+     * <p>
+     * Meso (itemId 0) is legal to drop but is currency, not merchandise -
+     * listing it would put a "Meso" lot in a shop.
+     */
+    public static boolean isSellableItem(int itemId) {
+        return itemId != 0 && isUsableItem(itemId);
+    }
+
+    /**
+     * Inverse of {@link #isSellableItem(int)} - reads better at guard sites.
+     */
+    public static boolean isUnsellableItem(int itemId) {
+        return !isSellableItem(itemId);
     }
 
     /**

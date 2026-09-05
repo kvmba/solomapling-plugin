@@ -61,6 +61,60 @@ class ItemUsabilityTest {
     }
 
     /**
+     * Meso is encoded as item id 0 in drop tables (MonsterDropEntry,
+     * ReactorDropEntry), so it shares the int with real item ids - but it has
+     * no String.wz name on purpose. It must NOT be caught by the
+     * "unnamed means half-finished data" rule.
+     */
+    @Test
+    void mesoIsUsableDespiteHavingNoName() {
+        // getName(0) returns null, yet meso stays usable.
+        assertFalse(BotHelpers.hasUsableName(null));
+        assertTrue(BotHelpers.isUsableItem(0));
+        assertFalse(BotHelpers.isUnusableItem(0));
+    }
+
+    @Test
+    void mesoHasPrintableName() {
+        assertEquals("Meso", BotHelpers.convertItemIdToName(0));
+    }
+
+    /**
+     * The three rules differ, and the difference is exactly what meso does:
+     *
+     * <ul>
+     *   <li>dropping - legality only, so meso is allowed</li>
+     *   <li>player trade - legality only, so meso is allowed</li>
+     *   <li>hired-merchant listing - legal AND not meso, since currency is not
+     *       merchandise and would show up as a "Meso" lot in a shop</li>
+     * </ul>
+     *
+     * Only the classification is pinned here; the WZ lookup needs a loaded WZ.
+     */
+    @Test
+    void mesoIsDroppableAndTradeableButNotListable() {
+        // legality: meso passes, so both drop and trade accept it
+        assertTrue(BotHelpers.isUsableItem(0));
+        assertFalse(BotHelpers.isUnusableItem(0));
+
+        // listing: meso fails the stricter sellable check
+        assertFalse(BotHelpers.isSellableItem(0));
+        assertTrue(BotHelpers.isUnsellableItem(0));
+    }
+
+    /**
+     * sellable = usable AND not meso, so the two can only ever disagree on
+     * meso. Id 0 short-circuits before the WZ lookup, so the real methods can
+     * be asserted here; a real named id would need a loaded WZ.
+     */
+    @Test
+    void sellableIsStricterThanUsable() {
+        assertTrue(BotHelpers.isUsableItem(0));      // droppable
+        assertTrue(BotHelpers.isUsableItem(0));      // tradeable
+        assertFalse(BotHelpers.isSellableItem(0));   // but not listable
+    }
+
+    /**
      * Same sentinel decision {@code convertItemIdToName} makes, exercised
      * directly so it stays covered without loading WZ.
      */

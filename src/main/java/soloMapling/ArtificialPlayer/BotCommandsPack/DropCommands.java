@@ -16,6 +16,7 @@ import java.awt.*;
 import java.util.Arrays;
 import java.util.List;
 
+import static soloMapling.ArtificialPlayer.BotHelpers.isUnusableItem;
 import static soloMapling.ArtificialPlayer.BotLogic.checkForItemsOnFloor;
 
 public class DropCommands {
@@ -39,18 +40,27 @@ public class DropCommands {
 
     // Meso, Equip, Item, Item Qty - FFA Player Drop - Anyone can loot
 
+    // Dropping only requires the id to be legal: half-finished WZ entries with
+    // no name are not, but meso (itemId 0) is - it is a legitimate drop even
+    // though it has no String.wz name.
 
     public static void botDropMeso(Character fakechar, int meso) {
         fakechar.getMap().spawnMesoDrop(meso, fakechar.getPosition(), fakechar, fakechar, true, (byte) 2, (short) 0);
     }
 
     public static void botDropEquip(Character fakechar, int itemId) {
+        if (isUnusableItem(itemId)) {
+            return;
+        }
         Item itemToDrop = BotLogic.generateCleanItemEquip(itemId);
         fakechar.getMap().spawnItemDrop(fakechar, fakechar, itemToDrop,
                 fakechar.getPosition(), true, true);
     }
 
     public static void botDropItem(Character fakechar, int itemId) {
+        if (isUnusableItem(itemId)) {
+            return;
+        }
         Item itemToDrop = BotLogic.generateCleanItem(itemId);
         fakechar.getMap().spawnItemDrop(fakechar, fakechar, itemToDrop,
                 fakechar.getPosition(), true, true);
@@ -59,6 +69,9 @@ public class DropCommands {
     private static final long PICKUP_GRACE_PERIOD_MS = 3000;
 
     public static MapItem botDropItemWithExpiry(Character fakechar, int itemId, boolean isEquip, long expiryMs) {
+        if (isUnusableItem(itemId)) {
+            return null;
+        }
         Item itemToDrop = isEquip ? BotLogic.generateCleanItemEquip(itemId) : BotLogic.generateCleanItem(itemId);
         MapItem drop = fakechar.getMap().spawnItemDropNoExpire(fakechar, fakechar, itemToDrop,
                 fakechar.getPosition(), true, true);
@@ -78,6 +91,9 @@ public class DropCommands {
     }
 
     public static void botDropItemQty(Character fakechar, int itemId, int qty) {
+        if (isUnusableItem(itemId)) {
+            return;
+        }
         Item itemToDrop = BotLogic.generateCleanItemWithQty(itemId, qty);
         fakechar.getMap().spawnItemDrop(fakechar, fakechar, itemToDrop,
                 fakechar.getPosition(), true, true);
@@ -96,12 +112,18 @@ public class DropCommands {
     }
 
     public static void botThrowEquip(Character fakechar, int itemId, Point throwPos) {
+        if (isUnusableItem(itemId)) {
+            return;
+        }
         Item itemToDrop = BotLogic.generateCleanItemEquip(itemId);
         fakechar.getMap().spawnItemDrop(fakechar, fakechar, itemToDrop,
                 throwPos, true, false);
     }
 
     public static Item botThrowItem(Character fakechar, int itemId, Point throwPos) {
+        if (isUnusableItem(itemId)) {
+            return null;
+        }
         Item itemToDrop = BotLogic.generateCleanItem(itemId);
         fakechar.getMap().spawnItemDrop(fakechar, fakechar, itemToDrop,
                 throwPos, true, false);
@@ -109,12 +131,18 @@ public class DropCommands {
     }
 
     public static MapItem botThrowItemNoExpire(Character fakechar, int itemId, Point throwPos) {
+        if (isUnusableItem(itemId)) {
+            return null;
+        }
         Item itemToDrop = BotLogic.generateCleanItem(itemId);
         return fakechar.getMap().spawnItemDropNoExpire(fakechar, fakechar, itemToDrop,
                 throwPos, true, false);
     }
 
     public static MapItem botThrowItemNoExpireOwnerOnly(Character fakechar, int itemId, Point throwPos) {
+        if (isUnusableItem(itemId)) {
+            return null;
+        }
         Item itemToDrop = BotLogic.generateCleanItem(itemId);
         MapItem drop = fakechar.getMap().spawnItemDropNoExpire(fakechar, fakechar, itemToDrop,
                 throwPos, false, false);
@@ -123,6 +151,9 @@ public class DropCommands {
     }
 
     public static void botDropItemQtyOwnerOnly(Character fakechar, int itemId, int qty) {
+        if (isUnusableItem(itemId)) {
+            return;
+        }
         Item itemToDrop = BotLogic.generateCleanItemWithQty(itemId, qty);
         MapItem drop = fakechar.getMap().spawnItemDropNoExpire(fakechar, fakechar, itemToDrop,
                 fakechar.getPosition(), false, false);
@@ -130,12 +161,18 @@ public class DropCommands {
     }
 
     public static void botThrowItemQty(Character fakechar, int itemId, int qty, Point throwPos) {
+        if (isUnusableItem(itemId)) {
+            return;
+        }
         Item itemToDrop = BotLogic.generateCleanItemWithQty(itemId, qty);
         fakechar.getMap().spawnItemDrop(fakechar, fakechar, itemToDrop,
                 throwPos, true, false);
     }
 
     public static void botThrowItemToOwner(Character dropper, int itemId, Point throwPos, Character owner) {
+        if (isUnusableItem(itemId)) {
+            return;
+        }
         Item itemToDrop = BotLogic.generateCleanItem(itemId);
         MapItem drop = dropper.getMap().spawnItemDropNoExpire(dropper, owner, itemToDrop,
                 throwPos, false, false);
@@ -151,18 +188,27 @@ public class DropCommands {
     }
 
     public static void botThrowToOwnerEquip(Character fakechar, int itemId, Character owner) {
+        if (isUnusableItem(itemId)) {
+            return;
+        }
         Item itemToDrop = BotLogic.generateCleanItemEquip(itemId);
         fakechar.getMap().spawnItemDrop(fakechar, owner, itemToDrop,
                 owner.getPosition(), false, false);
     }
 
     public static void botThrowToOwnerItem(Character fakechar, int itemId, Character owner) {
+        if (isUnusableItem(itemId)) {
+            return;
+        }
         Item itemToDrop = BotLogic.generateCleanItem(itemId);
         fakechar.getMap().spawnItemDrop(fakechar, owner, itemToDrop,
                 owner.getPosition(), false, false);
     }
 
     public static void botThrowToOwnerItemQty(Character fakechar, int itemId, int qty, Character owner) {
+        if (isUnusableItem(itemId)) {
+            return;
+        }
         Item itemToDrop = BotLogic.generateCleanItemWithQty(itemId, qty);
         fakechar.getMap().spawnItemDrop(fakechar, owner, itemToDrop,
                 owner.getPosition(), false, false);

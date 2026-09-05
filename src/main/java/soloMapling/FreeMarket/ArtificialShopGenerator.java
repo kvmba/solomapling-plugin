@@ -23,7 +23,7 @@ import static soloMapling.FreeMarket.EquipListGenerator.generateEquipList;
 import static soloMapling.FreeMarket.EquipListGenerator.generateEquipListIIPU;
 import static soloMapling.FreeMarket.FMEconomyManager.adjustFMPrices;
 import static soloMapling.FreeMarket.FMEconomyManager.adjustFMQuantity;
-import static soloMapling.ArtificialPlayer.BotHelpers.isUnusableItem;
+import static soloMapling.ArtificialPlayer.BotHelpers.isUnsellableItem;
 import static soloMapling.itemPool.ItemSelector.getRandomItemFull;
 import static soloMapling.itemPool.ItemSelector.pickRandomVariantId;
 import static soloMapling.itemPool.QuantitySelector.distributedTierSelector;
@@ -346,7 +346,7 @@ public class ArtificialShopGenerator {
 
     private static void addItemToShop(HiredMerchantArtificial merchant, Item sellItem, int quantity, int price) {
         // Unnamed items are half-finished WZ data - never put them on a shelf.
-        if (isUnusableItem(sellItem.getItemId())) {
+        if (isUnsellableItem(sellItem.getItemId())) {
             return;
         }
         short bundles = (short) adjustFMQuantity(merchant, quantity);
@@ -368,7 +368,7 @@ public class ArtificialShopGenerator {
             FMItem currentItem = iterator.next();
             // Unnamed ids are half-finished WZ data - drop them along with
             // duplicates so no generator can hand one to a shop or a merchant.
-            if (isUnusableItem(currentItem.getItemId())
+            if (isUnsellableItem(currentItem.getItemId())
                     || !seenItemIds.add(currentItem.getItemId())) {
                 iterator.remove();
             }

@@ -14,6 +14,7 @@ import java.util.List;
 import static soloMapling.ArtificialPlayer.BotCommandsPack.SocialCommands.BotEmote;
 import static soloMapling.ArtificialPlayer.BotCommandsPack.SocialCommands.BotSpeak;
 import static soloMapling.ArtificialPlayer.BotHelpers.convertItemIdToName;
+import static soloMapling.ArtificialPlayer.BotHelpers.isUnusableItem;
 import static soloMapling.ArtificialPlayer.BotTradeSystem.BotTradeCommands.getTradePartnerCharacter;
 import static soloMapling.DebugUtilities.debugprint;
 import static soloMapling.FreeMarket.FMEconomyManager.formatPriceToShorthand;
@@ -281,7 +282,9 @@ public class BotTradeSM {
 
     protected boolean postItemsForSale() {
         Item itemForSale = getParent().getTradeInventory().getMainItemForSale();
-        if (itemForSale == null) {
+        // A player trade may carry meso as well as real items, so this gate is
+        // legality only - the no-meso rule applies to hired-merchant listings.
+        if (itemForSale == null || isUnusableItem(itemForSale.getItemId())) {
             BotTradeCommands.writeTradeChat(getChr(), BotMessages.get("trade.nothing_for_sale"));
             return false;
         }
