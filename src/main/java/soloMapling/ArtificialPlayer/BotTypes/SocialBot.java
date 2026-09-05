@@ -6,6 +6,7 @@ import soloMapling.ArtificialPlayer.ConversationManager;
 import soloMapling.ArtificialPlayer.BotDialogueHandler;
 import soloMapling.ArtificialPlayer.BotFlavorSystem.BotFlavor;
 import soloMapling.ArtificialPlayer.BotFlavorSystem.LevelUpCongrats;
+import soloMapling.ArtificialPlayer.BotGrindSystem.MapMobIndex;
 import soloMapling.ArtificialPlayer.LlmSystem.SocialChatSessionStore;
 import soloMapling.ArtificialPlayer.LlmSystem.SocialLlmConfig;
 import soloMapling.ArtificialPlayer.LlmSystem.SocialLlmService;
@@ -26,6 +27,7 @@ import org.gms.util.PacketCreator;
 import soloMapling.Environment.BotMessages;
 
 import java.awt.Point;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -78,6 +80,21 @@ public class SocialBot extends BotSM {
     private volatile boolean relocating = false; // owns movement during a drift walk; blocks ambient actions
     private volatile long nextChairActionMs = 0;
     private volatile long nextRelocateAtMs = 0;
+    private volatile long nextStrollAtMs = 0;
+
+    // Occasional walk to a neighbouring town map (Henesys Market/Park and the like) and back. In-map
+    // relocation can never leave the current map - the nav graph drops cross-map portals - so without
+    // this a bot stationed on one street of a town never sees the rest of it.
+    private static final long STROLL_MIN_MS = 240_000;         // 4 min
+    private static final long STROLL_MAX_MS = 660_000;         // 11 min
+    private static final long STROLL_DWELL_MIN_MS = 30_000;    // browse the neighbouring map 30-90 s
+    private static final long STROLL_DWELL_MAX_MS = 90_000;
+    private volatile boolean strolling = false; // owns movement for the whole outing; blocks ambient actions
+    private volatile int strollHomeMapId = -1;  // where to come back to (and where to bail to if engaged)
+    // Guards the return trip: strollHome can be reached twice (a player engaging mid-stroll, and the
+    // dwell timer firing), and GCTravel.travel() cancels the trip in flight, so a second call would
+    // restart the walk from wherever the first one had got to.
+    private volatile boolean strollReturning = false;
 
     // Loiter tuning (candidates for a live !env chatter/loiter readout). Chair sit/stand is rare so it reads
     // as a real person resting, not a metronome; relocation is a slow per-bot drift, biased to happen while
@@ -126,7 +143,7 @@ public class SocialBot extends BotSM {
         // Single source of truth for every ambient system. isInConversation covers the scripted
         // multi-bot cluster convos (ConversationManager); folding it in here stops BotChatter (which
         // gates only on availability) from grabbing a bot mid cluster-conversation -> double bubbles.
-        return !hasActiveRespondant() && !relocating && !BotChatter.isEngaged(getChr())
+        return !hasActiveRespondant() && !relocating && !strolling && !BotChatter.isEngaged(getChr())
                 && !ConversationManager.getInstance().isInConversation(getChr().getId());
     }
 
@@ -159,6 +176,12 @@ public class SocialBot extends BotSM {
         checkPrioritySpeed();
 
         if (hasActiveRespondant()) {
+            // Conversations run outside the ambient gate, so a stroll would keep walking under the
+            // player's conversation (and never come back). Cut it short and head home - the bot should
+            // be standing still when it talks to someone.
+            if (strolling && strollHomeMapId > 0) {
+                strollHome(getChr(), strollHomeMapId, 0);
+            }
             checkConversationTimeout();
             processMessages();
         }
@@ -171,6 +194,7 @@ public class SocialBot extends BotSM {
             BotChatter.maybeStartChatter(this); // occasional short back-and-forth with a nearby town bot
             maybeIdleChair(); // occasional sit/stand while idle - a resting townsperson
             maybeRelocate(); // last: rare drift to a fresh anchor-weighted spot (may block the tick's walk)
+            maybeStroll(); // walk to a neighbouring town map and back (cross-map; relocation can't)
         }
         pollRecruitInvite(); // last: a JOINED poll converts this bot to a FollowerBot
     }
@@ -188,6 +212,13 @@ public class SocialBot extends BotSM {
         Character chr = getChr();
         BotChatter.forget(chr);
         TownStation.releaseSpot(chr);
+        // A stroll in flight is driven by GCTravel's own pool, not by this tick, so it would survive
+        // teardown and dump the bot into a strange map after it was stopped or converted.
+        if (strolling) {
+            strolling = false;
+            strollReturning = false;
+            GCMovement.cancelTravel(chr);
+        }
         super.stopScheduledTask();
     }
 
@@ -209,6 +240,8 @@ public class SocialBot extends BotSM {
         long now = System.currentTimeMillis();
         nextChairActionMs = now + (long) (random.nextDouble() * IDLE_CHAIR_COOLDOWN_MAX_MS);
         nextRelocateAtMs = now + RELOCATE_MIN_MS + (long) (random.nextDouble() * (RELOCATE_MAX_MS - RELOCATE_MIN_MS));
+        // Same desync for the first stroll, so a freshly-spawned cohort doesn't all walk out at once.
+        nextStrollAtMs = now + STROLL_MIN_MS + (long) (random.nextDouble() * (STROLL_MAX_MS - STROLL_MIN_MS));
         townClaimed = true;
     }
 
@@ -267,6 +300,88 @@ public class SocialBot extends BotSM {
             nextRelocateAtMs = System.currentTimeMillis() + RELOCATE_MIN_MS
                     + (long) (random.nextDouble() * (RELOCATE_MAX_MS - RELOCATE_MIN_MS));
         }
+    }
+
+    // Occasional walk to a town map next door (Henesys main street -> Market -> Park -> home). In-map
+    // relocation can never leave the current map: the nav graph drops cross-map portals, so a bot
+    // stationed on one street would otherwise never see the rest of the town.
+    //
+    // Unlike relocation this is NOT deferred while observed - walking into a portal and coming back is
+    // ordinary town behaviour, and a bot that only ever moves when nobody is looking would look frozen to
+    // the players who are actually there. The travel itself is driven by GCTravel's own pool, so the bot's
+    // tick is never blocked by the walk.
+    private void maybeStroll() {
+        if (!isAvailableForAmbientActions()) {
+            return;
+        }
+        Character chr = getChr();
+        if (chr == null || chr.getMap() == null) {
+            return;
+        }
+        if (BotRecruitManager.isArmed(chr.getId())) {
+            return; // a player is mid-invite: never wander out from under them
+        }
+        long now = System.currentTimeMillis();
+        if (now < nextStrollAtMs) {
+            return;
+        }
+        List<Integer> options = strollOptions(chr.getMapId());
+        if (options.isEmpty()) {
+            nextStrollAtMs = now + STROLL_MIN_MS; // nowhere to go (or graph not built yet) - try later
+            return;
+        }
+        int dest = options.get(random.nextInt(options.size()));
+        int home = chr.getMapId();
+        strolling = true;
+        strollHomeMapId = home;
+        if (chr.getChair() > 0) {
+            botCancelChair(chr); // can't walk out of a chair
+        }
+        TownStation.releaseSpot(chr); // free the ledge for the duration, don't hold it from another town
+        GCMovement.travel(chr, dest, ok -> {
+            if (!Boolean.TRUE.equals(ok)) {
+                strollHome(chr, home, 0);
+                return;
+            }
+            MethodScheduler.runAfterDelay(() -> strollHome(chr, home, 0), strollDwellMs());
+        });
+    }
+
+    // Where this bot may stroll to: one-portal neighbours that are TOWN maps. A neighbour carrying mobs
+    // is a hunting field, not somewhere a townsbot goes for a walk.
+    private List<Integer> strollOptions(int mapId) {
+        List<Integer> options = new ArrayList<>();
+        for (int neighbor : GCMovement.walkableNeighbors(mapId)) {
+            if (MapMobIndex.level(neighbor) < 0) {
+                options.add(neighbor);
+            }
+        }
+        return options;
+    }
+
+    // Come back and re-settle. Retries once on failure: a dropped trip would otherwise leave the bot
+    // parked in a strange map with strolling still true, so it would never drift or stroll again.
+    private void strollHome(Character chr, int home, int attempt) {
+        if (!strolling || strollReturning) {
+            return; // converted away / stopped while out, or a return is already under way
+        }
+        strollReturning = true;
+        GCMovement.travel(chr, home, ok -> {
+            if (!Boolean.TRUE.equals(ok) && attempt == 0) {
+                strollReturning = false; // let the retry re-issue the trip
+                strollHome(chr, home, 1);
+                return;
+            }
+            strolling = false;
+            strollReturning = false;
+            townClaimed = false; // re-claim the home ledge (townAnchor still points at the old map)
+            nextStrollAtMs = System.currentTimeMillis() + STROLL_MIN_MS
+                    + (long) (random.nextDouble() * (STROLL_MAX_MS - STROLL_MIN_MS));
+        });
+    }
+
+    private long strollDwellMs() {
+        return STROLL_DWELL_MIN_MS + (long) (random.nextDouble() * (STROLL_DWELL_MAX_MS - STROLL_DWELL_MIN_MS));
     }
 
     private Point resolveTownAnchor(Character chr) {

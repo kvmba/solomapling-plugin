@@ -322,6 +322,14 @@ public final class GCMovement {
         return GCTravel.isTraveling(bot);
     }
 
+    /* Maps reachable by walking through ONE portal from mapId (the visually-adjacent maps). Empty
+     * until the world graph happens to exist — this never triggers the graph build, so callers get
+     * "nowhere to go" rather than paying a multi-second scan. Excludes taxi/scripted hops: these are
+     * the neighbours a bot can reach by physically stepping through a portal. */
+    public static int[] walkableNeighbors(int mapId) {
+        return GCWorldGraph.portalNeighbors(mapId);
+    }
+
     public static void cancelTravel(Character bot) {
         GCTravel.cancel(bot);
     }
