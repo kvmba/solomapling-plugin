@@ -26,11 +26,7 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Pins the on-disk nav-graph cache against two distinct corruption modes.
- *
- * <p>Both bugs live in the gap between the four-dimensional {@code GraphCacheKey}
- * (mapId, speed, jump, snowShoes) and the three-dimensional cache filename
- * ({@code <mapId>-s<speed>-j<jump>.bin}), which drops {@code snowShoes} entirely.
+ * Pins the on-disk nav-graph cache against two distinct corruption modes, both now fixed.
  *
  * <p><b>1. Torn write.</b> Two builds of the same key can reach the disk at once: an async warm
  * on the warmup executor and a {@code !gcmove bake} (rebuildGraph) on the command thread. Writing
@@ -40,12 +36,15 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * DIFFERENT sizes, 15/15 runs produced either a StreamCorruptedException or a truncated-but-
  * parseable file. Same-size writers always produced a byte-identical file, because
  * ObjectOutputStream is deterministic and every writer starts at offset 0 — so the bug needs
- * writers whose serialized sizes differ, which the snowshoe collision below also supplies.
+ * writers whose serialized sizes differ, which a bake with a GM's profile supplies against a
+ * bot's warm. Fixed by writing a temp file and renaming.
  *
- * <p><b>2. Snowshoe collision.</b> On a slippery map, {@code canonicalProfile} keeps the
- * snowShoes flag, so a shod and an unshod bot get different keys — but {@code graphFile} writes
- * both to the same file. They then overwrite each other forever, and the loser's next boot reads
- * back a graph whose physics disagrees with its profile.
+ * <p><b>2. Snowshoe collision.</b> {@code GraphCacheKey} has four dimensions —
+ * (mapId, speed, jump, snowShoes) — but {@code graphFile} emitted only three, dropping
+ * snowShoes. On a slippery map, where {@code canonicalProfile} keeps the flag, a shod and an
+ * unshod bot got different keys but the SAME file and overwrote each other on every visit;
+ * loadGraph validated only three dimensions, so it handed back a graph whose physics disagreed
+ * with the requested profile. Fixed by encoding snowShoes in the filename and validating it.
  *
  * <p>saveGraph is private and CACHE_DIR is a static final field of a fixed path, so this test
  * drives them through reflection against a redirected CACHE_DIR.
@@ -138,10 +137,29 @@ class BotNavigationGraphCacheWriteTest {
         }
     }
 
-    /** The on-disk file for (mapId, speed, jump), derived the same way graphFile() does. */
-    private static Path cacheFile(Path tmpRoot, int mapId, int speed, int jump) {
-        return tmpRoot.resolve("cache").resolve("bot-nav").resolve("v61")
-                .resolve(mapId + "-s" + speed + "-j" + jump + ".bin");
+    /** The on-disk file for a full cache key, derived the same way graphFile() does. */
+    private static Path cacheFile(Path tmpRoot, int mapId, int speed, int jump, boolean snowShoes) {
+        return cacheDirFor(tmpRoot).resolve(mapId + "-s" + speed + "-j" + jump
+                + "-ss" + (snowShoes ? 1 : 0) + ".bin");
+    }
+
+    /*
+     * Read GRAPH_VERSION rather than hardcoding "v61": the cache directory is derived from it, so a
+     * hardcoded literal would silently point the test at the wrong directory after any version bump.
+     */
+    private static Path cacheDirFor(Path tmpRoot) {
+        int version = graphVersion();
+        return tmpRoot.resolve("cache").resolve("bot-nav").resolve("v" + version);
+    }
+
+    private static int graphVersion() {
+        try {
+            Field f = BotNavigationGraphProvider.class.getDeclaredField("GRAPH_VERSION");
+            f.setAccessible(true);
+            return (int) f.get(null);
+        } catch (ReflectiveOperationException e) {
+            throw new AssertionError("GRAPH_VERSION not found", e);
+        }
     }
 
     private static void invokeSave(BotNavigationGraph graph) {
@@ -169,7 +187,7 @@ class BotNavigationGraphCacheWriteTest {
      */
     @Test
     void targetFileIsNeverWrittenInPlace() throws Exception {
-        Path file = cacheFile(tmpRoot, 4_000_000, 140, 110);
+        Path file = cacheFile(tmpRoot, 4_000_000, 140, 110, false);
 
         // Seed a valid, complete cache file so the target exists before the race.
         invokeSave(graphFor(4_000_000, 140, 110, SMALL_REGION_COUNT, false, null));
@@ -260,7 +278,7 @@ class BotNavigationGraphCacheWriteTest {
         }
         assertTrue(failures.isEmpty(), "writers threw: " + failures);
 
-        Path file = cacheFile(tmpRoot, 1_000_000, 140, 110);
+        Path file = cacheFile(tmpRoot, 1_000_000, 140, 110, false);
         assertTrue(Files.isRegularFile(file), "cache file missing at " + file);
 
         // The whole point: a torn file either throws here (StreamCorruptedException /
@@ -287,9 +305,12 @@ class BotNavigationGraphCacheWriteTest {
     }
 
     /**
-     * SnowShoes is part of the cache key but NOT the filename, so a shod and an unshod graph for
-     * the same (mapId, speed, jump) collide on one file. Both graphs here are the same size, which
-     * isolates the collision from the tearing bug above.
+     * SnowShoes is part of the cache key, so it must also be part of the filename. It used to be
+     * dropped, so on a slippery map — where canonicalProfile keeps the flag — a shod and an unshod
+     * bot hashed to different keys but the SAME file, overwriting each other on every visit.
+     *
+     * <p>loadGraph only validated three dimensions, so it happily handed back a graph whose physics
+     * disagreed with the profile the caller asked for.
      */
     @Test
     void snowShoeFlagIsPartOfTheKeySoItMustBePartOfTheFileName() throws Exception {
@@ -302,17 +323,20 @@ class BotNavigationGraphCacheWriteTest {
         invokeSave(shod);
         invokeSave(bare);
 
-        // graphFile() drops snowShoes, so these two keys resolve to the same path. Assert the
-        // collision is real, then assert the two graphs are not silently interchangeable.
-        Path shodFile = cacheFile(tmpRoot, 3_000_000, 140, 110);
-        Path bareFile = cacheFile(tmpRoot, 3_000_000, 140, 110);
-        assertEquals(shodFile, bareFile,
-                "graphFile() ignores snowShoes, so both keys collide on one file");
+        Path shodFile = cacheFile(tmpRoot, 3_000_000, 140, 110, true);
+        Path bareFile = cacheFile(tmpRoot, 3_000_000, 140, 110, false);
+        assertNotEquals(shodFile, bareFile,
+                "snowShoes is part of the key, so the two profiles must not share a file");
 
+        // Both survive, each with its own profile intact.
         try (ObjectInputStream in = new ObjectInputStream(Files.newInputStream(shodFile))) {
-            BotNavigationGraph winner = (BotNavigationGraph) in.readObject();
-            // Whichever won, the loser's profile is gone from disk — the collision is silent.
-            assertEquals(3_000_000, winner.mapId);
+            BotNavigationGraph g = (BotNavigationGraph) in.readObject();
+            assertTrue(g.movementProfile.snowShoes(), "shod graph lost its snowShoes flag");
+        }
+        try (ObjectInputStream in = new ObjectInputStream(Files.newInputStream(bareFile))) {
+            BotNavigationGraph g = (BotNavigationGraph) in.readObject();
+            org.junit.jupiter.api.Assertions.assertFalse(g.movementProfile.snowShoes(),
+                    "unshod graph gained a snowShoes flag");
         }
     }
 
@@ -324,7 +348,7 @@ class BotNavigationGraphCacheWriteTest {
         invokeSave(graphFor(2_000_000, 155, 123, SMALL_REGION_COUNT, false));
 
         for (int[] key : new int[][]{{130, 110}, {145, 120}, {155, 123}}) {
-            Path f = cacheFile(tmpRoot, 2_000_000, key[0], key[1]);
+            Path f = cacheFile(tmpRoot, 2_000_000, key[0], key[1], false);
             assertTrue(Files.isRegularFile(f), "missing cache file for s" + key[0] + "-j" + key[1]);
             try (ObjectInputStream in = new ObjectInputStream(Files.newInputStream(f))) {
                 BotNavigationGraph g = (BotNavigationGraph) in.readObject();
@@ -352,7 +376,7 @@ class BotNavigationGraphCacheWriteTest {
     void redirectCacheDir(@TempDir Path tmp) {
         tmpRoot = tmp;
         originalCacheDir = readCacheDir();
-        Path redirected = tmp.resolve("cache").resolve("bot-nav").resolve("v61");
+        Path redirected = cacheDirFor(tmp);
         writeCacheDir(redirected);
         try {
             Files.createDirectories(redirected);
