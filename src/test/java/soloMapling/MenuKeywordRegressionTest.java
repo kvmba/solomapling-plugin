@@ -75,4 +75,35 @@ class MenuKeywordRegressionTest {
         // English must survive: the YAML aliases extend the Java list, they do not replace it.
         assertTrue(party.contains("party"), "English keywords must survive, got " + party);
     }
+
+    // Mirror of the party case for the FOLLOW option of the partied training menu ("跟我来！").
+    // Its English list ("follow"/"come"/"lead") is not transliterated and the label alone only
+    // matches that exact phrase, so "跟我走" - the wording a Chinese player reaches for first -
+    // used to miss the menu entirely and look like a dead bot.
+    @Test
+    void chineseFollowPhrasingsReachTheFollowOption() {
+        SoloMaplingLanguageConfig.setLanguageTag("zh-CN");
+        String[] suffixes = {"training", "follow", "goodbye"};
+        String[][] english = {
+                {"hows", "how is", "how goes"},
+                {"follow", "come", "lead"},
+                {"bye", "goodbye", "cya", "later"}
+        };
+        List<List<String>> kw = BotMessages.keywords("menu.training_party", suffixes, english);
+        List<String> follow = kw.get(1);
+
+        for (String typed : new String[]{"跟我走", "跟着我", "跟我来", "跟我", "跟着", "跟上", "跟紧我",
+                "走这边", "来这边", "过来", "过来这边", "带路", "一起走", "我带你"}) {
+            assertTrue(follow.stream().anyMatch(typed::contains),
+                    "follow option should match \"" + typed + "\", got " + follow);
+        }
+        assertTrue(follow.contains("follow"), "English keywords must survive, got " + follow);
+
+        // The neighbouring options must not be hijacked: match() walks options IN ORDER with
+        // contains(), so a follow alias that also reads as training/goodbye would win on ordering.
+        for (String typed : new String[]{"再见", "练得怎么样", "走了", "溜了"}) {
+            assertFalse(follow.stream().anyMatch(typed::contains),
+                    "follow keywords hijacked \"" + typed + "\": " + follow);
+        }
+    }
 }

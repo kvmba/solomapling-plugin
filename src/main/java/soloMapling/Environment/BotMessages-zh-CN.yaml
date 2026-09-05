@@ -40,6 +40,20 @@ menu.training_party.goodbye: "再见"
 menu.training_solo.party.keywords:
   - ["组队", "组我", "带我", "一起", "上车", "刷怪"]
 
+# Extra typeable aliases for the training menu's follow option ("跟我来！").
+#
+# Same reasoning as the party list above: the English keywords in TrainingBot
+# ("follow"/"come"/"lead") are always matched, but they are not transliterated, and the label
+# alone ("跟我来") only matches when that exact phrase is typed. "跟我走" - the wording a
+# Chinese-speaking player reaches for first - missed entirely before this list existed.
+#
+# Keep these narrow: BotOptionMenu.match() walks the options IN ORDER with contains(), so an
+# alias that also appears in "练得怎么样？" or "再见" would win or lose on ordering rather than
+# on meaning. Two characters minimum - a bare "走"/"来" would swallow half the chat.
+menu.training_party.follow.keywords:
+  - ["跟我走", "跟着我", "跟我来", "跟我", "跟着", "跟上", "跟紧我",
+     "走这边", "来这边", "过来", "过来这边", "带路", "一起走", "我带你"]
+
 menu.follower.train: "在这儿陪我练！"
 menu.follower.nevermind: "没事了"
 
