@@ -237,6 +237,10 @@ public class FollowerBot extends BotSM {
             }
             sayNode("StationHere", player);
             menu.close(player);
+            // The player is ending the ride by hand and the bot is deliberately staying on THIS map,
+            // so drop the return-to-origin handoff. Left in place it would be consumed the next time
+            // this bot becomes a follower and drag it back to a map nobody asked it to return to.
+            BotRecruitManager.clearHandoffs(chr.getId());
             BotRecruitManager.markStationHere(chr.getId());
             GCMovement.stop(chr);
             BotTypeManager.convertBotType(chr, BotTypeManager.BotType.TRAINING_BOT);

@@ -15,6 +15,7 @@ import org.slf4j.LoggerFactory;
 import soloMapling.ArtificialPlayer.BotAttackSystem.BotBuffDriver;
 import soloMapling.ArtificialPlayer.BotBuffRequestSystem.BotBuffRequestHandler;
 import soloMapling.ArtificialPlayer.BotMessagingSystem.CharacterStorage;
+import soloMapling.ArtificialPlayer.BotPartySystem.BotRecruitManager;
 import soloMapling.companion.CompanionRoster;
 import soloMapling.server.SoloMaplingConstants;
 import soloMapling.server.SoloMaplingUtilities;
@@ -358,6 +359,9 @@ public class BotGeneration {
         channel.removePlayer(fakechar);
         world.getPlayerStorage().removePlayer(fakechar.getId());
         CharacterStorage.removeActiveBot(fakechar.getId());//
+        // A removed bot never converts back out, so its recruit handoffs would linger in the
+        // static maps forever (and a reused character id could inherit them).
+        BotRecruitManager.clearHandoffs(fakechar.getId());
         BotBuffDriver.clearBot(fakechar.getId());   // Phase 3a: release buff recast timers
         BotBuffRequestHandler.clearBot(fakechar.getId());   // release chat-buff-request cooldown
     }
