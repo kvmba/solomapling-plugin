@@ -29,14 +29,25 @@ record BotMovementProfile(int totalSpeedStat, int totalJumpStat, boolean snowSho
     static final BotMovementProfile BASE = new BotMovementProfile(BASE_TOTAL_STAT, BASE_TOTAL_STAT);
 
     // Class-aware "effective Haste". Bots' Haste buff is cosmetic (no stat), so thief speed/jump is
-    // modelled here: haste-thieves ramp to the cap early, and a bot sharing a party with a high-level
-    // haste-thief inherits max speed. See Documents/Movement - 2026-07-06 Class-Aware Speed and Jump.
-    static final int HASTE_MAX_SPEED = 155;                    // our effective speed cap (≈ real 140% held-down feel)
+    // modelled here: thieves are the fast class, and a bot sharing a party with a high-level
+    // haste-thief inherits the thief speed.
+    // See Documents/Movement - 2026-07-06 Class-Aware Speed and Jump.
+    //
+    // SPEED SCALE — calibrated against the real client, where 100% = WALK_VEL (125 px/s).
+    // These baselines REPLACE the 100 floor rather than stacking on top of it (equip/buff speed
+    // still adds), so the tier number IS the bot's walking speed in %.
+    //
+    // Speed is CLASS-BASED, not level-based: every non-thief walks the same NORMAL_SPEED
+    // regardless of level, thieves walk THIEF_SPEED (they're the Haste class). With thieves at
+    // ~31% of the population that puts the population mean at ~110, inside the 100-120 band real
+    // players occupy. Only speed gear / buffs (stacked on top via getTotalMoveSpeedStat() - 100)
+    // can push a bot past this.
+    static final int NORMAL_SPEED = 105;                       // every non-thief, all levels
+    static final int THIEF_SPEED = 120;                        // thieves: the Haste class
     static final int HASTE_MAX_JUMP = MAX_EFFECTIVE_JUMP_STAT; // 123
-    static final int YOUNG_THIEF_SPEED = 150;                  // 2nd-job thief (30-54): hasted, not yet capped
-    static final int YOUNG_THIEF_JUMP = 115;
     static final int HASTE_SELF_MAX_LEVEL = 55;                // haste-thief at/above this = max speed+jump
     static final int PARTY_HASTE_THIEF_LEVEL = 60;             // a haste-thief party member at/above this grants party Haste
+    static final int YOUNG_THIEF_JUMP = 115;
 
     BotMovementProfile {
         totalSpeedStat = bucketStat(totalSpeedStat);
@@ -60,29 +71,31 @@ record BotMovementProfile(int totalSpeedStat, int totalJumpStat, boolean snowSho
         if (hasForcedBaseMovementStats(character)) {
             return BASE;
         }
-        // SoloMapling: scale the walk-speed / jump baseline by bot level AND class so higher-level and
-        // Haste-class (thief) bots roam faster and jump higher. The baseline replaces the flat 100; any
-        // equip/real-buff speed/jump (getTotal*Stat - 100) still stacks on top. Bucketed to the nearest 5
-        // by the canonical constructor, so the tiers below land on exact graph buckets.
+        // Speed is CLASS-BASED, not level-based — see the SPEED SCALE note above.
+        // Jump still scales with level (and class, for thieves) so higher-level bots leap higher.
+        // The baseline replaces the flat 100; any equip/real-buff speed/jump
+        // (getTotal*Stat - 100) still stacks on top. Bucketed to the nearest 5 by the canonical
+        // constructor, so the tiers above land on exact graph buckets.
         int level = character.getLevel();
-        boolean hasteThief = hasHasteSkill(character.getJob());
+        Job job = character.getJob();
 
-        int speedBaseline;
+        // Speed follows the Haste SKILL, not the class: a 1st-job thief (THIEF, 400) has not
+        // learned Haste yet, so it walks at the ordinary NORMAL_SPEED like everyone else. Only
+        // 2nd-job-and-up thieves (ASSASSIN/BANDIT lineages) get THIEF_SPEED.
+        int speedBaseline = hasHasteSkill(job) ? THIEF_SPEED : NORMAL_SPEED;
         int jumpBaseline;
-        if (hasteThief && level >= HASTE_SELF_MAX_LEVEL) {
-            speedBaseline = HASTE_MAX_SPEED;   // capped thief: full effective Haste
-            jumpBaseline = HASTE_MAX_JUMP;
-        } else if (hasteThief) {
-            speedBaseline = YOUNG_THIEF_SPEED; // 2nd-job thief (30-54): Haste in effect, ramping to cap
+        if (isThief(job) && level >= HASTE_SELF_MAX_LEVEL) {
+            jumpBaseline = HASTE_MAX_JUMP;         // capped thief: full effective Haste
+        } else if (isThief(job)) {
             jumpBaseline = YOUNG_THIEF_JUMP;
         } else {
-            speedBaseline = levelSpeedStat(level);
             jumpBaseline = levelJumpStat(level);
         }
         // Party Haste (immersion): a bot partied with a high-level haste-thief inherits max SPEED (not
-        // jump). Pure roster logic — the thief never travels to cast it. max() so a young thief still gets 155.
+        // jump). Pure roster logic — the thief never travels to cast it. max() so a young thief still
+        // gets the full Haste speed rather than being dragged down to it.
         if (partyGrantsHaste(character)) {
-            speedBaseline = Math.max(speedBaseline, HASTE_MAX_SPEED);
+            speedBaseline = Math.max(speedBaseline, THIEF_SPEED);
         }
 
         int totalSpeed = speedBaseline + (character.getTotalMoveSpeedStat() - BASE_TOTAL_STAT);
@@ -90,8 +103,16 @@ record BotMovementProfile(int totalSpeedStat, int totalJumpStat, boolean snowSho
         return new BotMovementProfile(totalSpeed, totalJump, wearsSnowShoes(character));
     }
 
-    // Haste-thief lineage: Assassin→Hermit→Night Lord and Bandit→Chief Bandit→Shadower all learn Haste at
-    // 2nd job (level 30+). isA covers the whole lineage and excludes first-job Rogue (no Haste).
+    // Thief lineage: THIEF(400) -> ASSASSIN(410)/BANDIT(420) -> ... -> NIGHTLORD(412)/SHADOWER(422).
+    // isA covers the whole branch. Used for the JUMP baseline (any thief leaps a bit higher).
+    private static boolean isThief(Job job) {
+        return job != null && job.isA(Job.THIEF);
+    }
+
+    // Haste-thief lineage: Assassin→Hermit→Night Lord and Bandit→Chief Bandit→Shadower all learn
+    // Haste at 2nd job (level 30+). isA covers the whole lineage and excludes first-job Rogue
+    // (no Haste) — which is exactly the SPEED distinction: an unhasted 1st-job thief runs at the
+    // ordinary NORMAL_SPEED, same as a warrior or mage.
     private static boolean hasHasteSkill(Job job) {
         return job != null && (job.isA(Job.ASSASSIN) || job.isA(Job.BANDIT));
     }
@@ -107,37 +128,18 @@ record BotMovementProfile(int totalSpeedStat, int totalJumpStat, boolean snowSho
             if (member == null || member.getId() == character.getId() || !member.isOnline()) {
                 continue;
             }
-            if (member.getLevel() >= PARTY_HASTE_THIEF_LEVEL && hasHasteSkill(member.getJob())) {
+            if (member.getLevel() >= PARTY_HASTE_THIEF_LEVEL && isThief(member.getJob())) {
                 return true;
             }
         }
         return false;
     }
 
-    // Level -> walk-speed % baseline. Values are multiples of STAT_BUCKET_SIZE so they land exactly
-    // on graph buckets and stay under MAX_EFFECTIVE_SPEED_STAT.
-    private static int levelSpeedStat(int level) {
-        if (level <= 9) {
-            return 115;
-        }
-        if (level <= 29) {
-            return 125;
-        }
-        if (level <= 50) {
-            return 130;
-        }
-        if (level <= 69) {
-            return 135;
-        }
-        if (level <= 100) {
-            return 145;
-        }
-        return 155;
-    }
-
-    // Level -> jump % baseline (non-thief). Parallels levelSpeedStat within the 100..123 jump range so
-    // higher-level bots also leap higher; ≤9 stays 100 so low-level bots are unchanged. Multiples of
-    // STAT_BUCKET_SIZE (except the 123 cap) so they land on exact graph buckets.
+    // Level -> jump % baseline (non-thief). Parallels the old speed ladder within the 100..123 jump
+    // range so higher-level bots leap higher; ≤9 stays 100 so low-level bots are unchanged. Multiples
+    // of STAT_BUCKET_SIZE (except the 123 cap) so they land on exact graph buckets.
+    // NOTE: there is deliberately no levelSpeedStat() counterpart any more — walk speed is
+    // class-based (NORMAL_SPEED / THIEF_SPEED), not level-based.
     private static int levelJumpStat(int level) {
         if (level <= 9) {
             return 100;
