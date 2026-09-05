@@ -42,7 +42,8 @@ import java.util.Map;
  * drop loot ourselves: the vanilla path only drops for damagers passing isLoggedinWorld(),
  * which a headless bot fails, so a bot kill would otherwise drop nothing. Loot keeps
  * vanilla ownership (owner = bot; party-shared if grouped, else owner ~15s then FFA) at
- * world drop rates.
+ * world drop rates, but only for the mob's non-quest rows: a bot has no quests, so quest
+ * items are skipped entirely (see dropMobLootAt).
  */
 public final class BotAttackEffects {
 
@@ -296,31 +297,33 @@ public final class BotAttackEffects {
         final int mobX = deathPos.x;
         final int mobY = deathPos.y;
 
-        // Normal vs quest drops, split exactly like sortDropEntries(): a quest item the
-        // bot needs is "visible", one it does not need still drops but is not shown to it.
+        // Bots drop normal loot only — never quest items.
         //
-        // KNOWN LIMITATION: vanilla's spawnDrop carries the questid into MapItem, and both
-        // its spawnAndAddRangedMapObject callback and MapItem.sendSpawnData gate the drop
-        // packet on chr.needQuestItem(questid, itemId) - so a quest item is only *rendered*
-        // for players that actually need it (broadcastItemDropMessage itself does not gate,
-        // it broadcasts to everyone in range). spawnDrop is private, there is no public
-        // spawnItemDrop overload taking a questid, and MapItem has no setter for it, so a
-        // plugin cannot reproduce this: our quest items drop with questid 0, which
-        // needQuestItem treats as "needed by everyone", making them visible map-wide.
-        // Visibility only - canBePickedBy() ignores questid, so pickup rights are unchanged
-        // and nobody can loot something they should not. Needs a host API change to fix.
+        // Vanilla splits the mob's table three ways: non-quest -> normal, quest item the
+        // killer needs -> visible, quest item it does not need -> still dropped but hidden
+        // from it. All three are dropped; only the *rendering* differs. We drop none of
+        // them, for two reasons:
+        //
+        // 1. A bot has no quests, so needQuestItem() is always false and every quest row
+        //    lands in the "otherQuest" bucket — items it can never use, that pile up in its
+        //    inventory or rot on the floor. Vanilla only tolerates this because a real
+        //    player progresses through the quest; a bot never does.
+        // 2. The drops are owner-protected to the bot (killDropType 0/1), so a quest item
+        //    spawned by a bot kill would sit untouchable for the 15s owner window and, worse,
+        //    render for everyone: vanilla's spawnDrop carries the questid into MapItem and
+        //    gates the drop packet on chr.needQuestItem(questid, itemId), but spawnDrop is
+        //    private, there is no public spawnItemDrop overload taking a questid, and MapItem
+        //    has no setter for it — so our quest items would carry questid 0, which
+        //    needQuestItem treats as "needed by everyone", making them visible map-wide.
+        //    Skipping the group sidesteps that host-API limitation instead of working around
+        //    it. A player who wants the quest item kills the mob; a bot kill is not a
+        //    quest-progression event.
         final List<MonsterDropEntry> normal = new ArrayList<>();
-        final List<MonsterDropEntry> visibleQuest = new ArrayList<>();
-        final List<MonsterDropEntry> otherQuest = new ArrayList<>();
         final ItemInformationProvider ii = ItemInformationProvider.getInstance();
         if (lootEntry != null) {
             for (MonsterDropEntry mde : lootEntry) {
                 if (!ii.isQuestItem(mde.itemId)) {
                     normal.add(mde);
-                } else if (bot.needQuestItem(mde.questid, mde.itemId)) {
-                    visibleQuest.add(mde);
-                } else {
-                    otherQuest.add(mde);
                 }
             }
         }
@@ -341,11 +344,9 @@ public final class BotAttackEffects {
         if (hasItemDrop) {
             dropGlobalGroup(bot, mob, globalEntry, dropType, mobX, mobY, index);
         }
-        dropEntryGroup(bot, mob, visibleQuest, chRate, mesoRate, dropType, mobX, mobY, index);
-        dropEntryGroup(bot, mob, otherQuest, chRate, mesoRate, dropType, mobX, mobY, index);
     }
 
-    /* Rolls one MonsterDropEntry list (normal / visible-quest / other-quest) at chRate. */
+    /* Rolls one MonsterDropEntry list (the mob's non-quest rows) at chRate. */
     private static void dropEntryGroup(Character bot, Monster mob, List<MonsterDropEntry> entries,
                                        float chRate, float mesoRate, byte dropType,
                                        int mobX, int mobY, int[] index) {
