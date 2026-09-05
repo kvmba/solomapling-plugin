@@ -59,6 +59,22 @@ class BotRecruitManagerReturnOriginTest {
                 "the re-posted handoff must not keep the grinder flag, or the bot re-posts forever");
     }
 
+    // A player ending the ride by hand ("Train here with me!") must drop the pending origin: the
+    // bot is deliberately staying put, and a stale entry would be consumed the next time it becomes
+    // a follower, dragging it back to a map the player never asked it to return to.
+    @Test
+    void clearHandoffsDropsAPendingOriginBeforeAStationHereHandoff() {
+        BotRecruitManager.setReturnOrigin(BOT, 100000000, true);
+        BotRecruitManager.clearHandoffs(BOT);
+        BotRecruitManager.markStationHere(BOT);
+
+        assertEquals(-1, BotRecruitManager.consumeReturnHome(BOT),
+                "a stale origin must not survive a hand-ended ride");
+        assertFalse(BotRecruitManager.consumeReturnGrinder(BOT));
+        assertTrue(BotRecruitManager.consumeStationHere(BOT),
+                "clearHandoffs must not disturb the station-here handoff set right after it");
+    }
+
     // Each consume is one-shot: a bot must not inherit a stale origin from an earlier ride.
     @Test
     void consumeClearsSoTheNextRideStartsClean() {

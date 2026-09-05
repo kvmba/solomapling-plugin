@@ -59,6 +59,15 @@ public class SocialBot extends BotSM {
 
     private static final double RARE_LINE_CHANCE = 0.01;
     private static final double GOODBYE_SIT_CHANCE = 0.40;
+
+    // Smack talk ("你 120 级还穿这破烂"): the server-rat flavour, but gated hard. It only fires
+    // when the OUTMATCHED check passes (a bully picks on someone weaker, not on a 200-geared
+    // player), only sometimes, and only once per player per cooldown - a player who keeps talking
+    // to a bot should not get roasted every single time.
+    private static final double SMACK_TALK_CHANCE = 0.25;
+    private static final int SMACK_TALK_LEVEL_GAP = 15;   // bot must lead by this much
+    private static final long SMACK_TALK_COOLDOWN_MS = 300_000; // 5 min per player
+    private final Map<Integer, Long> smackTalkCooldowns = new ConcurrentHashMap<>();
     private volatile boolean wasSittingBeforeInteraction = false;
     private volatile int originalChairId = 0;
 
@@ -581,6 +590,9 @@ public class SocialBot extends BotSM {
             BotSpeak(chr, line);
         }
         BotRecruitManager.setPendingLeader(chr.getId(), recruiterId);
+        // Remember the town this bot belongs to (it has no travel of its own) so the ride can end
+        // back here instead of stranding it wherever the leader stopped.
+        BotRecruitManager.setReturnOrigin(chr.getId(), chr.getMapId(), false);
         BotTypeManager.convertBotType(chr, BotTypeManager.BotType.FOLLOWER_BOT);
     }
 
@@ -589,7 +601,7 @@ public class SocialBot extends BotSM {
     // no visible difference, and it keeps the chain steps to pure packet sends.
 
     private void appendSingleResponse(BotTiming.Chain chain, Character player) {
-        String category = random.nextDouble() < RARE_LINE_CHANCE ? "Rare" : "SingleResponse";
+        String category = pickResponseCategory(player);
         String line = getRandomLine(category, player);
         int emote = getRandomEmote(category);
         if (line != null) {
@@ -602,6 +614,44 @@ public class SocialBot extends BotSM {
         chain.run(() -> botFaceTowardsPoint(getChr(), player.getPosition()));
         appendResit(chain);
         chain.run(this::resetConversation);
+    }
+
+    /**
+     * Picks which pool the bot answers from. Normally {@code SingleResponse} (with a rare
+     * flavour line), but a bot that clearly out-levels the player may instead smack talk.
+     *
+     * <p>The level gate is the point: a bully picks on someone weaker. Without it, a 30-level bot
+     * would talk down to a 200-level player, which reads as broken rather than as attitude.
+     */
+    private String pickResponseCategory(Character player) {
+        if (random.nextDouble() < RARE_LINE_CHANCE) {
+            return "Rare";
+        }
+        if (canSmackTalk(player)) {
+            return "SmackTalk";
+        }
+        return "SingleResponse";
+    }
+
+    private boolean canSmackTalk(Character player) {
+        Character chr = getChr();
+        if (chr == null || player == null) {
+            return false;
+        }
+        if (random.nextDouble() >= SMACK_TALK_CHANCE) {
+            return false;
+        }
+        // Only when the bot clearly out-levels the player - see pickResponseCategory().
+        if (chr.getLevel() - player.getLevel() < SMACK_TALK_LEVEL_GAP) {
+            return false;
+        }
+        Long until = smackTalkCooldowns.get(player.getId());
+        long now = System.currentTimeMillis();
+        if (until != null && now < until) {
+            return false;
+        }
+        smackTalkCooldowns.put(player.getId(), now + SMACK_TALK_COOLDOWN_MS);
+        return true;
     }
 
     private void appendGreeting(BotTiming.Chain chain, Character player) {
@@ -737,6 +787,8 @@ public class SocialBot extends BotSM {
         long now = System.currentTimeMillis();
         if (now - lastCleanupTime < TRACKER_CLEANUP_INTERVAL_MS) return;
         lastCleanupTime = now;
+        // Smack-talk cooldowns are per player id; without this the map grows for the bot's lifetime.
+        smackTalkCooldowns.values().removeIf(until -> until <= now);
         interactionTrackers.entrySet().removeIf(e -> e.getValue().isExpired());
     }
 
