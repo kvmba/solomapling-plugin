@@ -106,4 +106,48 @@ class MenuKeywordRegressionTest {
                     "follow keywords hijacked \"" + typed + "\": " + follow);
         }
     }
+
+    // The follower menu's "在这儿陪我练！" option had no Chinese aliases at all, so the whole
+    // point of the party-broadcast path (address your own bots by keyword, no name) was unreachable
+    // in Chinese for a bot that is already following you.
+    @Test
+    void chineseFollowerTrainPhrasingsReachTheTrainOption() {
+        SoloMaplingLanguageConfig.setLanguageTag("zh-CN");
+        String[] suffixes = {"train", "nevermind"};
+        String[][] english = {
+                {"train", "grind", "station"},
+                {"nevermind", "bye", "nah", "nope"}
+        };
+        List<List<String>> kw = BotMessages.keywords("menu.follower", suffixes, english);
+        List<String> train = kw.get(0);
+
+        for (String typed : new String[]{"在这儿练", "这里练", "这练", "在这儿", "在这练",
+                "就地练", "留这儿", "别走了", "停下"}) {
+            assertTrue(train.stream().anyMatch(typed::contains),
+                    "follower train option should match \"" + typed + "\", got " + train);
+        }
+        assertTrue(train.contains("train"), "English keywords must survive, got " + train);
+
+        // NOTE: no "here" keyword - "there" contains "here", so a casual "hi there" would trigger
+        // it. Same trap in Chinese: a bare "练" or "这" would swallow ordinary party chatter.
+        assertFalse(train.stream().anyMatch("再见"::contains),
+                "follower train keywords hijacked goodbye: " + train);
+    }
+
+    @Test
+    void englishFollowerTrainPhrasingsReachTheTrainOption() {
+        SoloMaplingLanguageConfig.setLanguageTag(SoloMaplingLanguageConfig.DEFAULT);
+        String[] suffixes = {"train", "nevermind"};
+        String[][] english = {
+                {"train", "grind", "station"},
+                {"nevermind", "bye", "nah", "nope"}
+        };
+        List<List<String>> kw = BotMessages.keywords("menu.follower", suffixes, english);
+        List<String> train = kw.get(0);
+
+        for (String typed : new String[]{"train here", "grind here", "stay here", "camp here"}) {
+            assertTrue(train.stream().anyMatch(typed::contains),
+                    "follower train option should match \"" + typed + "\", got " + train);
+        }
+    }
 }

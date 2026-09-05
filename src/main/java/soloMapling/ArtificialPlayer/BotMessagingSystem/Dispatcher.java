@@ -9,7 +9,6 @@ import soloMapling.ArtificialPlayer.BotTypes.CompanionBot;
 
 import java.awt.Point;
 import java.util.Collection;
-import java.util.Objects;
 import java.util.concurrent.*;
 
 import static soloMapling.ArtificialPlayer.BotCommandsPack.SocialCommands.expirePlayerChatCommands;
@@ -106,11 +105,9 @@ public class Dispatcher implements Runnable {
         BotSM fallback = null;
         int fallbackDistSq = Integer.MAX_VALUE;
         Point origin = sender.getPosition();
-        for (Character member : party.getMembers().stream()
-                .map(PartyCharacter::getPlayer)
-                .filter(Objects::nonNull)
-                .toList()) {
-            if (member.getId() == namedBotId || !isBot(member)) {
+        for (PartyCharacter pc : party.getMembers()) {
+            Character member = pc == null ? null : pc.getPlayer();
+            if (member == null || member.getId() == namedBotId || !isBot(member)) {
                 continue;
             }
             if (member.getMapId() != sender.getMapId()) {
