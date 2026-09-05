@@ -12,8 +12,10 @@ import java.awt.*;
 import java.io.IOException;
 import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
+import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -611,13 +613,39 @@ final class BotNavigationGraphProvider {
     }
 
     private static void saveGraph(BotNavigationGraph graph) {
+        Path target = graphFile(GraphCacheKey.from(graph.mapId, graph.movementProfile));
+        // Two builds of the same key can race here: an async warm on the warmup executor and a
+        // !gcmove bake (rebuildGraph) on the command thread. Writing straight to `target` opens it
+        // with TRUNCATE_EXISTING, so the two ObjectOutputStreams interleave into one truncated
+        // file and the next loadGraph fails on a half-written stream (silently — it logs at
+        // debug). Write a private temp file and rename instead: the rename makes `target` always
+        // either the previous complete graph or a complete new one, never a torn mixture.
+        // No lock is needed — the loser's bytes are simply replaced by the winner's, and both
+        // wrote equivalent data (same mapId + profile).
+        Path tmp = null;
         try {
             Files.createDirectories(CACHE_DIR);
-            try (ObjectOutputStream out = new ObjectOutputStream(Files.newOutputStream(graphFile(GraphCacheKey.from(graph.mapId, graph.movementProfile))))) {
+            tmp = Files.createTempFile(CACHE_DIR, target.getFileName() + ".", ".tmp");
+            try (ObjectOutputStream out = new ObjectOutputStream(Files.newOutputStream(tmp))) {
                 out.writeObject(graph);
+            }
+            try {
+                Files.move(tmp, target, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+            } catch (AtomicMoveNotSupportedException e) {
+                // Some network/overlay mounts cannot rename atomically. A non-atomic replace of a
+                // complete file is still far better than two interleaved writes.
+                Files.move(tmp, target, StandardCopyOption.REPLACE_EXISTING);
             }
         } catch (IOException e) {
             log.debug("Failed to save bot nav graph cache for map {}", graph.mapId, e);
+        } finally {
+            if (tmp != null) {
+                try {
+                    Files.deleteIfExists(tmp); // no-op once the rename succeeded
+                } catch (IOException ignored) {
+                    // best-effort: a leftover temp file is harmless, just untidy
+                }
+            }
         }
     }
 
