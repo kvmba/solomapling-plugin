@@ -68,23 +68,47 @@ public class SocialHotPotatoManager {
 
     private static final String[] MEGA_CATEGORIES = {
             "BirthdayMessages", "ItemSales", "GuildRecruitment", "PQRecruitment",
-            "RWTSpam", "Flex", "RandomAnnouncements", "SocialMessages"
+            "RWTSpam", "Flex", "RandomAnnouncements", "SocialMessages",
+            "BeefCallouts"
     };
 
-    // Weights for mega category selection (must match MEGA_CATEGORIES order)
+    // Weights for mega category selection (must match MEGA_CATEGORIES order, sum to 100).
+    //
+    // BeefCallouts takes 12 - loud enough that server drama is visible, low enough that the
+    // feed does not read like a constant flame war. The other categories give back roughly in
+    // proportion to how much content they now hold.
     private static final int[] MEGA_WEIGHTS = {
-            5,   // BirthdayMessages
-            7,   // ItemSales
-            7,   // GuildRecruitment
-            7,   // PQRecruitment
-            19,  // RWTSpam
-            19,  // Flex
-            18,  // RandomAnnouncements
-            18   // SocialMessages
+            4,   // BirthdayMessages
+            6,   // ItemSales
+            6,   // GuildRecruitment
+            6,   // PQRecruitment
+            16,  // RWTSpam
+            16,  // Flex
+            16,  // RandomAnnouncements
+            18,  // SocialMessages
+            12   // BeefCallouts
     };
-    private static final int MEGA_WEIGHT_TOTAL = 100;
+     private static final int MEGA_WEIGHT_TOTAL = 100;
 
-    private SocialHotPotatoManager() {}
+     // Adding a category without rebalancing the weights silently skews every draw (the total
+     // stays 100 while the arrays disagree), which shows up only as "why is everyone spamming
+     // X". Fail at class load instead of shipping a lopsided feed.
+     static {
+         int sum = 0;
+         for (int w : MEGA_WEIGHTS) {
+             sum += w;
+         }
+         if (MEGA_CATEGORIES.length != MEGA_WEIGHTS.length) {
+             throw new IllegalStateException("MEGA_CATEGORIES/MEGA_WEIGHTS length mismatch: "
+                     + MEGA_CATEGORIES.length + " vs " + MEGA_WEIGHTS.length);
+         }
+         if (sum != MEGA_WEIGHT_TOTAL) {
+             throw new IllegalStateException("MEGA_WEIGHTS must sum to " + MEGA_WEIGHT_TOTAL
+                     + " but sums to " + sum);
+         }
+     }
+
+     private SocialHotPotatoManager() {}
 
     public static synchronized SocialHotPotatoManager getInstance() {
         if (instance == null) {

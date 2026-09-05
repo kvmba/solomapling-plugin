@@ -10,6 +10,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import org.gms.client.Character;
 import com.esotericsoftware.yamlbeans.YamlReader;
 import soloMapling.ArtificialPlayer.BotTypes.DiceBot;
+import soloMapling.Environment.SoloMaplingLanguageConfig;
 
 import java.util.Map;
 import java.io.IOException;
@@ -174,6 +175,9 @@ public class BotDialogueHandler {
     /** Drop cached dialogue YAML (after a hot-edit of a dialogue pack). */
     public static void invalidateDialogueCache() {
         DIALOGUE_ROOT_CACHE.clear();
+        // Node entries are built FROM the roots; leaving them behind would keep serving
+        // text parsed from the previous file.
+        CON_CACHE.clear();
     }
 
     // Sentinel for "this pack could not be read". ConcurrentHashMap cannot store a
@@ -182,9 +186,19 @@ public class BotDialogueHandler {
     // permanent, so that would re-open the resource and re-throw on every bot tick.
     private static final Map<String, Object> MISSING_PACK = Map.of();
 
+    // Cache keys are namespaced by language tag: the same file name resolves to a DIFFERENT file
+    // per language (BotDialoguePack/ vs BotDialoguePack-zh-CN/), and a node that is absent from one
+    // pack may exist in another. Without the tag, a node first looked up in English cached its
+    // "missing" sentinel and stayed missing after a switch to Chinese - and a node first read in
+    // Chinese kept serving Chinese text to an English client.
+    private static String langPrefix() {
+        return SoloMaplingLanguageConfig.languageTag() + "|";
+    }
+
     /** Parsed root of one dialogue pack; the MISSING_PACK sentinel when unreadable. Cached. */
     private static Map<String, Object> readDialogueRoot(String dialoguePack) {
-        Map<String, Object> cached = DIALOGUE_ROOT_CACHE.get(dialoguePack);
+        String cacheKey = langPrefix() + dialoguePack;
+        Map<String, Object> cached = DIALOGUE_ROOT_CACHE.get(cacheKey);
         if (cached != null) {
             return cached;
         }
@@ -199,7 +213,7 @@ public class BotDialogueHandler {
             System.err.println("[BotDialogueHandler] failed to load " + dialoguePack + ": " + e.getMessage());
             parsed = MISSING_PACK; // cache the failure: it will not fix itself
         }
-        Map<String, Object> winner = DIALOGUE_ROOT_CACHE.putIfAbsent(dialoguePack, parsed);
+        Map<String, Object> winner = DIALOGUE_ROOT_CACHE.putIfAbsent(cacheKey, parsed);
         return winner != null ? winner : parsed;
     }
 
@@ -218,7 +232,7 @@ public class BotDialogueHandler {
      * exist rather than null, so the miss is cached too.
      */
     public static DialogueConstructor getDialogueCon(String BotTypeDialoguePath, String BotType, String DialogueNodeName) {
-        String cacheKey = BotTypeDialoguePath + "|" + BotType + "|" + DialogueNodeName;
+        String cacheKey = langPrefix() + BotTypeDialoguePath + "|" + BotType + "|" + DialogueNodeName;
         DialogueConstructor cached = CON_CACHE.get(cacheKey);
         if (cached != null) {
             return cached == MISSING_NODE ? null : cached;
