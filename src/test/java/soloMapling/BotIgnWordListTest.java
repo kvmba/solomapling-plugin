@@ -101,6 +101,69 @@ class BotIgnWordListTest {
             assertFalse(name.contains(" ") || name.contains("\t"),
                     "name '" + name + "' contains whitespace");
             assertTrue(containsCjk(name), "name '" + name + "' has no Chinese characters");
+            assertRenderable(name);
+        }
+    }
+
+    // Characters the v83-era client font can actually draw. A name is rendered with the game's
+    // own font, so anything outside this set shows up as '?' or a tofu box - which is exactly
+    // how "?等等等等" reached players: the pool had picked up U+10E6 GEORGIAN (ღ), modern-looking
+    // dingbats (✨ ❥ ❦ ❧) and spare Misc Symbols (☀ ☁ ☂ ☃ ◈ ◉) that no 2008-2010 client can draw.
+    //
+    // Deliberately conservative: an unusual glyph renders as garbage, whereas a plain name is
+    // always fine. When adding a symbol, check it against the fonts an old MapleStory client
+    // uses (宋体 / MS Gothic), not against a modern system font.
+    private static final Set<Integer> ALLOWED_SYMBOLS = Set.of(
+            0x4E36,  // 丶
+            0x7070,  // 灬
+            0x4E28,  // 丨
+            0x306E,  // の
+            0x309B,  // ゛
+            0x309C,  // ゜
+            0x301C,  // 〜
+            0xFF5E,  // ～
+            0x00B0,  // °
+            0x266A,  // ♪
+            0x2605,  // ★
+            0x2606,  // ☆
+            0x2661,  // ♡
+            0x2665,  // ♥
+            0x273F,  // ✿
+            0x2740,  // ❀
+            0x2741,  // ❁
+            0x273E,  // ✾
+            0x25C6,  // ◆
+            0x25C7,  // ◇
+            0x25CB,  // ○
+            0x25CF   // ●
+    );
+
+    private static void assertRenderable(String name) {
+        for (int i = 0; i < name.length(); i++) {
+            int cp = name.codePointAt(i);
+            Character.UnicodeBlock block = Character.UnicodeBlock.of(cp);
+            if (block == Character.UnicodeBlock.CJK_UNIFIED_IDEOGRAPHS) {
+                continue;
+            }
+            if (block == Character.UnicodeBlock.BASIC_LATIN) {
+                boolean alnum = (cp >= 'a' && cp <= 'z') || (cp >= 'A' && cp <= 'Z')
+                        || (cp >= '0' && cp <= '9');
+                assertTrue(alnum,
+                        "name '" + name + "' has ASCII punctuation '" + (char) cp
+                                + "' - names may not carry . / \\ $ ? ~ * ( ) [ ] or similar");
+                continue;
+            }
+            assertTrue(ALLOWED_SYMBOLS.contains(cp),
+                    String.format("name '%s' has U+%04X (%s), which the v83 client font cannot "
+                            + "render - it would show as '?' in game", name, cp, block));
+        }
+    }
+
+    // Guards against the specific regression: no name may display a '?' or tofu box.
+    @Test
+    void noNameContainsUnrenderableGlyphs() throws IOException {
+        for (String name : read(LOCALIZED)) {
+            assertRenderable(name);
         }
     }
 

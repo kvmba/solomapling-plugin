@@ -36,6 +36,21 @@ characters, and shop titles are laid out by display width:
 | Java `String.length()` | ≤ 12, else the name never gets drawn |
 | No spaces or tabs | names are matched as typed |
 
+**Characters** — a name is drawn with the game's own font, so anything that font lacks renders as
+`?` or a tofu box. `BotIgnWordListTest` enforces a whitelist; keep to it:
+
+- CJK ideographs, ASCII letters and digits — always fine.
+- CJK/kana decoration players used in 非主流 names: `丶 灬 丨 の ゛ ゜ 〜 ～ °`
+- The classic note/star/heart/flower set: `♪ ★ ☆ ♡ ♥ ✿ ❀ ❁ ✾`
+- Plain geometric fills: `◆ ◇ ○ ●`
+
+Nothing else. In particular **no ASCII punctuation** — that rules out the ASCII faces (`^_^`,
+`T_T`, `-_-`, `=.=`) as *names*, since they are built from `. ^ * = _ -`. And no exotic symbols:
+`ღ ✨ ❥ ❦ ❧ ❖ ❤ ☀ ☁ ☂ ☃ ◈ ◉ ❃ ❄ ❋ ❦ ☘ ☙ ☾` were all tried and removed — they came out as
+`?` in game. When adding a symbol, check it against the fonts an old client uses (宋体 / MS
+Gothic), not against a modern system font. An unusual glyph renders as garbage; a plain name is
+always fine.
+
 Keep entries short (roughly 4–10 characters). Two entries can be concatenated into one shop
 title, and `FMClans.txt` names additionally get `[X]` emblem + ASCII borders, which throws
 above 17 characters.
