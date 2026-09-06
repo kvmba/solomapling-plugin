@@ -312,6 +312,34 @@ waves:
         maps:
           - {map: 701000200, count: 8}
 
+      - name: Mushroom Shrine
+        level_lo: 30
+        level_hi: 90
+        wanderers: 5
+        maps:
+          - {map: 800000000, count: 8}
+
+      - name: Showa Village
+        level_lo: 30
+        level_hi: 90
+        wanderers: 4
+        maps:
+          - {map: 801000000, count: 7}
+
+      - name: Trend Zone
+        level_lo: 30
+        level_hi: 90
+        wanderers: 5
+        maps:
+          - {map: 550000000, count: 7}
+
+      - name: Kampung Village
+        level_lo: 30
+        level_hi: 90
+        wanderers: 4
+        maps:
+          - {map: 551000000, count: 5}
+
       - name: El Nath
         level_lo: 50
         level_hi: 85

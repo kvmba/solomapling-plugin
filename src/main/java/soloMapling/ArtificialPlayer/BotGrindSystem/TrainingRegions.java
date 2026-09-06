@@ -36,6 +36,12 @@ public final class TrainingRegions {
                                         // Not Rien (里恩, 140000000): that one stays out, see docs.
             {600000000, 601000000, 1},  // New Leaf City — reachable by subway from Kerning
             {540000000, 542000000, 1},  // Singapore (CBD) — reachable by plane from Kerning
+            {800000000, 802000000, 30}, // Japan: Mushroom Shrine (古代神社) + Showa Village (昭和村).
+                                        // Reached through the Maple Travel Agency (9000020), which
+                                        // stands in every major town. No hunting grounds here — a
+                                        // sightseeing continent, so it takes townsfolk, not grinders.
+            {550000000, 552000000, 30}, // Malaysia: Trend Zone (吉隆大都市) + Kampung (甘榜村), via the
+                                        // same agency from Boat Quay Town (541000000).
             {270000000, 271000000, 90}, // Time Temple — only as a dragon, via the Halfling in Leafre
     };
 

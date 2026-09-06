@@ -99,6 +99,22 @@ final class GCTaxi {
             {104000000, 1002002, 110000000, 1},  // Lith Harbour -> Gold Beach
             {200000000, 2010005, 110000000, 1},  // Orbis -> Gold Beach
             {220000000, 2040048, 110000000, 1},  // Ludibrium -> Gold Beach
+            // Maple Travel Agency (9000020): a guide standing in every major town, who runs the
+            // world tour to Japan. She decides the destination from the map she is standing on, so
+            // each town gets its own row. From Boat Quay Town she runs to Malaysia instead — same
+            // NPC, different leg, which is why that row points somewhere else.
+            {100000000, 9000020, 800000000, 30}, // Henesys -> Mushroom Shrine
+            {101000000, 9000020, 800000000, 30}, // Ellinia -> Mushroom Shrine
+            {102000000, 9000020, 800000000, 30}, // Perion -> Mushroom Shrine
+            {103000000, 9000020, 800000000, 30}, // Kerning -> Mushroom Shrine
+            {104000000, 9000020, 800000000, 30}, // Lith -> Mushroom Shrine
+            {200000000, 9000020, 800000000, 30}, // Orbis -> Mushroom Shrine
+            {220000000, 9000020, 800000000, 30}, // Ludibrium -> Mushroom Shrine
+            {240000000, 9000020, 800000000, 30}, // Leafre -> Mushroom Shrine
+            {250000000, 9000020, 800000000, 30}, // Mu Lung -> Mushroom Shrine
+            {260000000, 9000020, 800000000, 30}, // Ariant -> Mushroom Shrine
+            {701000000, 9000020, 800000000, 30}, // Shanghai Bund -> Mushroom Shrine
+            {541000000, 9000020, 550000000, 30}, // Boat Quay Town -> Malaysia
     };
 
     /*
