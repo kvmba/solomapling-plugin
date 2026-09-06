@@ -100,6 +100,19 @@ waves:
       map: 100000000
       hops: 1
     cohorts:
+      # Beginner island (彩虹岛): bots start their life on these hunting grounds.
+      - {map: 50001, count: 10, level_lo: 1, level_hi: 10}    # 南港西郊平原
+      - {map: 40000, count: 8,  level_lo: 1, level_hi: 8}     # 小树林
+      - {map: 2,     count: 6,  level_lo: 1, level_hi: 6}     # 番茄田
+      # Hunting-ground continents that were missing any hub at all.
+      - {map: 240070100, count: 15, level_lo: 70, level_hi: 100} # 未来之城 (23 maps)
+      - {map: 240070000, count: 10, level_lo: 70, level_hi: 95}  # 塔拉森林 (6)
+      - {map: 240050000, count: 12, level_lo: 70, level_hi: 115} # 生命之穴 (8)
+      - {map: 261020000, count: 12, level_lo: 30, level_hi: 80}  # 卡帕莱特研究所 (9)
+      - {map: 261010000, count: 8,  level_lo: 30, level_hi: 80}  # 蒙特鸠研究所 (6)
+      - {map: 600010100, count: 8,  level_lo: 30, level_hi: 70}  # 马莱尼西亚岛 (6)
+      - {map: 600020100, count: 6,  level_lo: 30, level_hi: 80}  # 内部齿轮装置 (5)
+      - {map: 701220000, count: 6,  level_lo: 30, level_hi: 80}  # 少林寺 (1)
       - {map: 104000000, count: 5, level_lo: 1, level_hi: 15}
       - {map: 100000000, count: 30, level_lo: 10, level_hi: 95}
       - {map: 103000000, count: 30, level_lo: 10, level_hi: 65}
@@ -353,6 +366,161 @@ waves:
         wanderers: 4
         maps:
           - {map: 551000000, count: 5}
+
+      - name: Shanghai City Plaza
+        level_lo: 30
+        level_hi: 80
+        wanderers: 4
+        maps:
+          - {map: 701000100, count: 6}
+
+      - name: Mahavira Hall
+        level_lo: 30
+        level_hi: 80
+        wanderers: 3
+        maps:
+          - {map: 702100000, count: 5}
+
+      - name: Showa Shopping Street
+        level_lo: 30
+        level_hi: 90
+        wanderers: 4
+        maps:
+          - {map: 801000300, count: 6}
+
+      - name: Orbis Park
+        level_lo: 30
+        level_hi: 86
+        wanderers: 4
+        maps:
+          - {map: 200000200, count: 5}
+
+      - name: El Nath Chief Hall
+        level_lo: 50
+        level_hi: 85
+        wanderers: 3
+        maps:
+          - {map: 211000001, count: 4}
+
+      - name: Mu Lung Temple
+        level_lo: 30
+        level_hi: 95
+        wanderers: 3
+        maps:
+          - {map: 250000100, count: 4}
+
+      - name: Priest Forest
+        level_lo: 70
+        level_hi: 120
+        wanderers: 3
+        maps:
+          - {map: 240010501, count: 4}
+
+      - name: Ariant Residence
+        level_lo: 30
+        level_hi: 90
+        wanderers: 3
+        maps:
+          - {map: 260000200, count: 4}
+
+      - name: Alchemist House
+        level_lo: 30
+        level_hi: 90
+        wanderers: 3
+        maps:
+          - {map: 261000001, count: 4}
+
+      - name: Defense HQ Hangar
+        level_lo: 30
+        level_hi: 80
+        wanderers: 3
+        maps:
+          - {map: 221000200, count: 4}
+
+      - name: NLC Shopping Centre
+        level_lo: 30
+        level_hi: 95
+        wanderers: 4
+        maps:
+          - {map: 600000001, count: 6}
+
+      - name: Henesys Park
+        level_lo: 10
+        level_hi: 60
+        wanderers: 4
+        maps:
+          - {map: 100000200, count: 5}
+
+      - name: Henesys Pet Park
+        level_lo: 10
+        level_hi: 60
+        wanderers: 4
+        maps:
+          - {map: 100000202, count: 6}
+
+      - name: Kerning Night Market
+        level_lo: 15
+        level_hi: 70
+        wanderers: 4
+        maps:
+          - {map: 103000007, count: 5}
+
+      - name: Kerning Thief Hall
+        level_lo: 15
+        level_hi: 70
+        wanderers: 3
+        maps:
+          - {map: 103000009, count: 4}
+
+      - name: Henesys Archer Hall
+        level_lo: 10
+        level_hi: 60
+        wanderers: 3
+        maps:
+          - {map: 100000205, count: 4}
+
+      - name: Perion Warrior Hall
+        level_lo: 10
+        level_hi: 65
+        wanderers: 3
+        maps:
+          - {map: 102000005, count: 4}
+
+      - name: Ellinia Magician Hall
+        level_lo: 10
+        level_hi: 60
+        wanderers: 3
+        maps:
+          - {map: 101000005, count: 4}
+
+      - name: Beginner Island
+        level_lo: 1
+        level_hi: 10
+        wanderers: 4
+        maps:
+          - {map: 60000, count: 5}   # 南港
+          - {map: 2, count: 3}       # 番茄田
+
+      - name: Kerning Line 3 Site
+        level_lo: 15
+        level_hi: 50
+        wanderers: 3
+        maps:
+          - {map: 103000900, count: 4}
+
+      - name: Excavation Camp
+        level_lo: 20
+        level_hi: 60
+        wanderers: 3
+        maps:
+          - {map: 101030104, count: 4}
+
+      - name: Henesys East Brushwood
+        level_lo: 10
+        level_hi: 40
+        wanderers: 3
+        maps:
+          - {map: 100020000, count: 4}
 
       - name: El Nath
         level_lo: 50
