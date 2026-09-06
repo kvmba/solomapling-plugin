@@ -54,6 +54,53 @@ public final class TrainingRegions {
         return region != null && level >= region[2];
     }
 
+    /*
+     * Where a bot should move its home once it has outgrown the continent it is standing on.
+     *
+     * A training bot only ever looks for grind maps within a few hops of where it stands, so without
+     * this a bot that outlevels its landmass grinds the same trivial mobs forever. This picks the
+     * next continent whose mobs are still worth the bot's level — which is how a player leaves
+     * Victoria for Orbis, and Orbis for Leafre.
+     *
+     * Ordered by the level a bot needs, so the answer is always "one step up", never a leap to the
+     * deepest content. Returns 0 when the current continent still has mobs this bot can use.
+     */
+    /*
+     * The rungs, in the order a bot outgrows them. Level is when this landmass stops being worth it:
+     * the beginner island at 8 (which is also when Sanks will take you), Victoria around 35 — its
+     * fields top out near 60, but players are on a boat to Orbis long before then — and so on up.
+     */
+    private static final int BEGINNER_MIGRATE_LEVEL = 8;
+    private static final int[][] MIGRATION_LADDER = {
+            {100000000, 35},   // Victoria Island
+            {200000000, 75},   // Orbis / El Nath
+            {240000000, 100},  // Leafre
+            {270000000, 999},  // Time Temple: the end of the ladder
+    };
+
+    public static int migrationTarget(int homeMapId, int level) {
+        // The beginner island is anywhere below Victoria's id range; a bot leaves it the moment it
+        // can, which is also the level Sanks asks for.
+        if (homeMapId < 100000) {
+            return level >= BEGINNER_MIGRATE_LEVEL ? 100000000 : 0;
+        }
+        int current = -1;
+        for (int i = 0; i < MIGRATION_LADDER.length; i++) {
+            if (MIGRATION_LADDER[i][0] == homeMapId) {
+                current = i;
+                break;
+            }
+        }
+        // Not on the ladder (a sub-town, or a continent with no further rung): nothing to migrate to.
+        if (current < 0) {
+            return 0;
+        }
+        if (level < MIGRATION_LADDER[current][1]) {
+            return 0; // still gets along here
+        }
+        return current + 1 < MIGRATION_LADDER.length ? MIGRATION_LADDER[current + 1][0] : 0;
+    }
+
     private static int[] regionOf(int mapId) {
         for (int[] window : ALLOWED) {
             if (mapId >= window[0] && mapId < window[1]) {

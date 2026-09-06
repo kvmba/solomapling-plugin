@@ -24,6 +24,7 @@ import soloMapling.ArtificialPlayer.BotGrindSystem.DeepHub;
 import soloMapling.ArtificialPlayer.BotGrindSystem.GrindBrain;
 import soloMapling.ArtificialPlayer.BotGrindSystem.GrindTickRegistry;
 import soloMapling.ArtificialPlayer.BotGrindSystem.MapMobIndex;
+import soloMapling.ArtificialPlayer.BotGrindSystem.TrainingRegions;
 import soloMapling.ArtificialPlayer.BotGrindSystem.TrainingMapChooser;
 import soloMapling.ArtificialPlayer.BotGrindSystem.SpotFinder;
 import soloMapling.ArtificialPlayer.BotGrindSystem.TrainingMap;
@@ -464,9 +465,36 @@ public class TrainingBot extends BotSM implements GrindTickRegistry.Participant 
             enterPhase(Phase.SHOP_TRAVEL);
         } else if (homeMapId == MapId.SLEEPYWOOD && rng.nextDouble() < SHOP_VISIT_CHANCE) {
             startSaunaTrip(); // Sleepywood has no stores — its errand is a trip to the hotel sauna
+        } else if (startMigration()) {
+            return; // outgrown this continent — heading for one whose mobs still bite
         } else {
             enterPhase(Phase.DECIDE);
         }
+    }
+
+    /*
+     * Outgrown the continent: when this landmass has nothing left worth fighting, move to one that
+     * does, the way a player eventually takes a boat out of Victoria. The trip is an ordinary travel,
+     * so it rides the same crossings — ferry, Hak, the travel agency — and the bot is visible waiting
+     * at the terminal and aboard like anyone else. Returns true if a migration was started.
+     */
+    private boolean startMigration() {
+        Character chr = getChr();
+        if (homeMapId < 0 || currentTrainMapId < 0) {
+            return false; // not settled anywhere yet
+        }
+        int dest = TrainingRegions.migrationTarget(homeMapId, chr.getLevel());
+        if (dest <= 0 || dest == homeMapId) {
+            return false; // this continent still has mobs worth the bot's time
+        }
+        debugChat("MIGRATE: outgrown map " + homeMapId + " at lv " + chr.getLevel() + " -> " + dest);
+        // Home is the new continent from the moment we set out: a migration that gets turned back
+        // (crowd, no route) still leaves the bot deciding from where it stands, not from a town it
+        // has already left behind.
+        homeMapId = dest;
+        clearTrainTarget();
+        doTravel(dest, Phase.IN_TOWN, Phase.DECIDE);
+        return true;
     }
 
     // Decide this town stop's store itinerary: nothing, just potions, just equips, or both in either order.
