@@ -160,6 +160,19 @@ final class GCTravel {
         return bot != null && TRIPS.containsKey(bot.getId());
     }
 
+    /*
+     * True while a trip is parked somewhere the ride itself must resolve — waiting for boarding to
+     * open, or standing on the deck mid-crossing. The bot is making no map progress on purpose, so
+     * callers that treat stillness as a stall (TrainingBot's travel watchdog) must not count it.
+     */
+    static boolean isWaitingForTransit(Character bot) {
+        if (bot == null) {
+            return false;
+        }
+        Trip t = TRIPS.get(bot.getId());
+        return t != null && t.waitingForTransit;
+    }
+
     private static void tick(Trip trip) {
         Character bot = trip.bot;
         if (bot == null || bot.getMap() == null) {

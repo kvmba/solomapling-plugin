@@ -322,6 +322,15 @@ public final class GCMovement {
         return GCTravel.isTraveling(bot);
     }
 
+    /*
+     * True while a trip is parked for a scheduled ride rather than walking: waiting for boarding to
+     * open, or standing on the deck mid-crossing. A boarding wait can run minutes, so callers that
+     * treat stillness as a stall must exempt it rather than cancel the trip.
+     */
+    public static boolean isWaitingForTransit(Character bot) {
+        return GCTravel.isWaitingForTransit(bot);
+    }
+
     /* Maps reachable by walking through ONE portal from mapId (the visually-adjacent maps). Empty
      * until the world graph happens to exist — this never triggers the graph build, so callers get
      * "nowhere to go" rather than paying a multi-second scan. Excludes taxi/scripted hops: these are

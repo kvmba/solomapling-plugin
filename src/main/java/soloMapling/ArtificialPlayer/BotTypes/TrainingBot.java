@@ -705,7 +705,10 @@ public class TrainingBot extends BotSM implements GrindTickRegistry.Participant 
         // Progress-aware watchdog: while the bot is advancing maps OR moving across the current one, it's
         // travelling fine (a big map / long route is expected) — keep pushing the deadline out. Only a trip
         // that makes no progress at all for the whole window is wedged; abandon it and re-plan (no teleport).
-        if (madeTravelProgress(chr)) {
+        if (madeTravelProgress(chr) || GCMovement.isWaitingForTransit(chr)) {
+            // Waiting for a boat to board or to dock is stillness by design, and a cycle runs minutes —
+            // counting it as no-progress would cancel the crossing and re-plan forever. GCTravel's own
+            // transit ceiling is what bounds this, so just keep the deadline out.
             phaseDeadlineMs = now() + TRAVEL_TIMEOUT_MS;
         } else if (now() > phaseDeadlineMs) {
             debugChat("travel STUCK: no progress for " + (TRAVEL_TIMEOUT_MS / 1000) + "s -> " + onFail);
