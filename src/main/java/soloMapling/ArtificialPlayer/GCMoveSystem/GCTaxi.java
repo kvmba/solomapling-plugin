@@ -69,6 +69,16 @@ final class GCTaxi {
             {251000000, 2090005, 250000100}, // Hak: Herb Town -> Mu Lung
             {102000000, 9310000, 701000000}, // Pilot Hong: Perion -> Shanghai Bund
             {701000100, 9310013, 102000000}, // Pilot Hong: Shanghai Plaza -> Perion
+            // Ticket counters: a waiting room has no portal into it, so the only way in is the
+            // clerk standing on the pier, who warps you inside outright. This is the first half of
+            // a scheduled ride — the second half is VEHICLE_RIDES below, which boards from there.
+            {220000110, 2041000, 220000111}, // Ludibrium pier -> waiting room (train to Orbis)
+            {200000121, 2012013, 200000122}, // Orbis pier -> waiting room (train to Ludibrium)
+            {200000151, 2012025, 200000152}, // Orbis pier -> airport (genie to Ariant)
+            {260000100, 2102000, 260000110}, // Ariant platform -> waiting room (genie to Orbis)
+            {600010001, 9201068, 600010002}, // NLC station -> waiting room (subway to Kerning)
+            {540010000, 9270038, 540010001}, // CBD airport -> waiting room (plane to Kerning)
+            {103000000, 9270041, 540010100}, // Kerning City -> airport (plane to CBD)
     };
 
     /*
