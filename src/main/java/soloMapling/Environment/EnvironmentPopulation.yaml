@@ -169,6 +169,10 @@ waves:
         wanderers: 8
         maps:
           - {map: 103000000, count: 14}
+          - {map: 103000007, count: 5}
+          - {map: 103000009, count: 4}
+          - {map: 103040000, count: 5}
+          - {map: 103000900, count: 4}
 
       - name: Ellinia
         level_lo: 10
@@ -176,6 +180,7 @@ waves:
         wanderers: 6
         maps:
           - {map: 101000000, count: 10}
+          - {map: 101000005, count: 4}
 
       - name: Perion
         level_lo: 10
@@ -183,6 +188,7 @@ waves:
         wanderers: 6
         maps:
           - {map: 102000000, count: 10}
+          - {map: 102000005, count: 4}
 
       - name: Sleepywood
         level_lo: 25
@@ -197,6 +203,8 @@ waves:
         wanderers: 8
         maps:
           - {map: 200000000, count: 12}
+          - {map: 200000200, count: 5}
+          - {map: 200000301, count: 3}
 
       - name: Ludibrium
         level_lo: 30
@@ -204,6 +212,8 @@ waves:
         wanderers: 9
         maps:
           - {map: 220000000, count: 14}
+          - {map: 220000300, count: 4}
+          - {map: 220000003, count: 3}
 
       - name: Korean Folk Town
         level_lo: 30
@@ -218,6 +228,8 @@ waves:
         wanderers: 4
         maps:
           - {map: 230000000, count: 4}
+          - {map: 230000001, count: 3}
+          - {map: 230000002, count: 3}
 
       - name: Leafre
         level_lo: 70
@@ -232,6 +244,7 @@ waves:
         wanderers: 8
         maps:
           - {map: 250000000, count: 11}
+          - {map: 250000100, count: 4}
 
       - name: Herb Town
         level_lo: 40
@@ -246,6 +259,8 @@ waves:
         wanderers: 8
         maps:
           - {map: 260000000, count: 11}
+          - {map: 260000200, count: 4}
+          - {map: 260000303, count: 3}
 
       - name: Magatia
         level_lo: 30
@@ -253,6 +268,8 @@ waves:
         wanderers: 6
         maps:
           - {map: 261000000, count: 9}
+          - {map: 261000001, count: 4}
+          - {map: 261000002, count: 3}
 
       - name: Arta Camp
         level_lo: 30
@@ -274,6 +291,7 @@ waves:
         wanderers: 9
         maps:
           - {map: 600000000, count: 14}
+          - {map: 600000001, count: 6}
 
       - name: Singapore CBD
         level_lo: 30
@@ -304,7 +322,10 @@ waves:
         level_hi: 60
         wanderers: 5
         maps:
-          - {map: 110000000, count: 6}
+          - {map: 120000000, count: 4}
+          - {map: 120000100, count: 2}
+          - {map: 120000200, count: 2}
+          - {map: 120000300, count: 2}
 
       - name: Mushroom Forest Path
         level_lo: 10
