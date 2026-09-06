@@ -128,6 +128,8 @@ waves:
       - {map: 270000000, count: 10, level_lo: 90, level_hi: 150} # Time Temple (gate 90)
       - {map: 600000000, count: 14, level_lo: 30, level_hi: 95}  # New Leaf City
       - {map: 540000000, count: 8,  level_lo: 30, level_hi: 80}  # Singapore CBD
+      - {map: 110000000, count: 8,  level_lo: 20, level_hi: 60}  # Gold Beach (crab beaches)
+      - {map: 221000000, count: 8,  level_lo: 30, level_hi: 80}  # Earth Defense HQ
 
   town_presence:
     enabled: true
@@ -274,6 +276,41 @@ waves:
           - {map: 120000100, count: 2}   # 上层走廊
           - {map: 120000200, count: 2}   # 中央走廊
           - {map: 120000300, count: 2}   # 下层走廊
+
+      - name: Gold Beach
+        level_lo: 20
+        level_hi: 60
+        wanderers: 4
+        maps:
+          - {map: 110000000, count: 6}
+
+      - name: Mushroom Forest Path
+        level_lo: 10
+        level_hi: 40
+        wanderers: 3
+        maps:
+          - {map: 106020000, count: 5}
+
+      - name: Earth Defense HQ
+        level_lo: 30
+        level_hi: 80
+        wanderers: 4
+        maps:
+          - {map: 221000000, count: 8}
+
+      - name: Boat Quay Town
+        level_lo: 30
+        level_hi: 80
+        wanderers: 4
+        maps:
+          - {map: 541000000, count: 6}
+
+      - name: Shanghai Yu Garden
+        level_lo: 30
+        level_hi: 80
+        wanderers: 4
+        maps:
+          - {map: 701000200, count: 8}
 
       - name: El Nath
         level_lo: 50

@@ -94,6 +94,11 @@ final class GCTaxi {
             // The dragon flight only ever leads to the Time Temple, so it carries the Temple's bar:
             // a bot that hasn't earned that continent shouldn't reach it by turning into a dragon.
             {240000110, 2082003, 200090500, TIME_TEMPLE_LEVEL},
+            // Gold Beach: a holiday island with no portal in, so the three boats that run to it
+            // (from Lith Harbour, Orbis and Ludibrium) are the only way there.
+            {104000000, 1002002, 110000000, 1},  // Lith Harbour -> Gold Beach
+            {200000000, 2010005, 110000000, 1},  // Orbis -> Gold Beach
+            {220000000, 2040048, 110000000, 1},  // Ludibrium -> Gold Beach
     };
 
     /*
