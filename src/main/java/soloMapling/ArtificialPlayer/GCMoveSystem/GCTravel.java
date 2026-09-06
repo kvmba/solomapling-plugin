@@ -112,7 +112,6 @@ final class GCTravel {
         // terminal waiting for boarding to open. The hop ceiling is sized for walking, so a bot
         // patiently waiting out a sailing would otherwise be warped off its own ride.
         boolean waitingForTransit;
-        long waitStartAtMs;
         boolean shoutedAtAttack;  // one shout per crossing, not one per poll
 
         Trip(Character bot, int destMapId, Consumer<Boolean> callback) {
@@ -199,7 +198,6 @@ final class GCTravel {
             trip.hopStartAtMs = nowMs();
             trip.boardingAtMs = 0L;   // this hop's cab is a different cab — board afresh
             trip.waitingForTransit = false;  // new map, new wait — don't inherit the old exemption
-            trip.waitStartAtMs = 0L;
             // Stepped off the vehicle (the event landed us, or something moved us): drop the deck
             // stroll so the bot walks its next hop instead of idling in wander mode.
             if (!GCTransit.isVehicleMap(cur) && BotWanderSystem.isWandering(bot)) {
@@ -214,8 +212,13 @@ final class GCTravel {
         // skipping the crossing entirely.
         if (GCTransit.isVehicleMap(cur)) {
             trip.waitingForTransit = true;
-            if (trip.waitStartAtMs == 0L) {
-                trip.waitStartAtMs = nowMs();
+            // The crossing is the event's to finish, so nothing here walks; but it can also never
+            // finish (event stopped, script missing), which would strand the bot on the deck for
+            // good. Bound the wait here — approachAndAct's ceiling is unreachable once we return.
+            if (nowMs() - trip.hopStartAtMs >= WAIT_MAX_MS) {
+                warp(bot, trip.destMapId, "TRANSIT-WAIT-TIMEOUT: stuck aboard map " + cur
+                        + " for " + (WAIT_MAX_MS / 1000) + "s");
+                return;
             }
             if (GCTransit.isUnderAttack(bot)) {
                 reactToAttack(trip, bot);
@@ -252,8 +255,8 @@ final class GCTravel {
                     () -> GCPortals.enter(bot, portal)); // walk to the portal, stand a beat, step through
             return;
         }
-        GCTaxi.VehicleEdge vehicle = GCTaxi.vehicle(cur);
-        if (vehicle != null && vehicle.toMapId() == nextHop) {
+        GCTaxi.VehicleEdge vehicle = GCTaxi.vehicle(cur, nextHop);
+        if (vehicle != null) {
             Point npcPos = GCTaxi.npcPos(bot.getMap(), vehicle.npcId());
             if (npcPos == null) {
                 warp(bot, nextHop, "vehicle npc " + vehicle.npcId() + " not on map " + cur);
@@ -335,9 +338,6 @@ final class GCTravel {
      */
     private static void awaitVehicle(Trip trip, Character bot, GCTaxi.VehicleEdge vehicle) {
         trip.waitingForTransit = true;
-        if (trip.waitStartAtMs == 0L) {
-            trip.waitStartAtMs = nowMs();
-        }
         if (!isBoarding(bot, vehicle.eventName())) {
             return; // gate still closed — keep standing at the counter
         }

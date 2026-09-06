@@ -53,13 +53,19 @@ public final class GCTransit {
         return SPACIOUS.contains(mapId);
     }
 
+    // Only the boat is ever attacked mid-crossing (Boats.js spawns a Balrog on its decks); the
+    // other events carry passengers without incident, so this stays keyed to the boat's decks.
+    private static final Set<Integer> ATTACKABLE = Set.of(
+            200090000, 200090001, 200090010, 200090011
+    );
+
     /*
-     * Whether something has boarded mid-crossing. The boat event flags this when the Balrog shows up,
-     * and only the boat does — the other vehicles cross unmolested.
+     * Whether something has boarded mid-crossing. Only the boat does this, and it flags it on the
+     * event so the decks can react; every other vehicle crosses unmolested.
      */
     public static boolean isUnderAttack(Character bot) {
         MapleMap map = bot == null ? null : bot.getMap();
-        if (map == null || map.getChannelServer() == null || !VEHICLE_MAPS.contains(bot.getMapId())) {
+        if (map == null || map.getChannelServer() == null || !ATTACKABLE.contains(bot.getMapId())) {
             return false;
         }
         EventManager em = map.getChannelServer().getEventSM().getEventManager("Boats");
@@ -79,14 +85,8 @@ public final class GCTransit {
     }
     /*
      * The deck a bot steps onto when boarding, per the event's takeoff(): each terminal loads the
-     * vehicle heading the other way. Keyed by the ride's destination, which is what says which way
-     * it is going — the Orbis terminal alone dispatches three different vehicles.
-     */
-    /*
-     * The deck a bot steps onto when boarding, per the event's takeoff(): each terminal loads the
-     * vehicle heading the other way. Keyed by the ride's destination, which is what says which way
-     * it is going — several terminals dispatch more than one vehicle, and Kerning dispatches both a
-     * subway and a plane to different places.
+     * vehicle heading the other way. Keyed on the vehicle first and then the direction — several
+     * terminals dispatch more than one vehicle, and Kerning dispatches both a subway and a plane.
      */
     static int deckFor(GCTaxi.VehicleEdge vehicle) {
         return switch (vehicle.eventName()) {

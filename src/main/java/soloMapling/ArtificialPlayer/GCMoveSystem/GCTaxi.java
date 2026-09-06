@@ -87,34 +87,35 @@ final class GCTaxi {
     };
 
     /*
-     * Scheduled vehicles: {terminalMapId, ticketNpcId, arrivalMapId, eventName}. These are not
-     * warps — boarding only opens while the event's "entry" is true, and it is the event, not us,
-     * that moves the bot onto the deck and later off it (takeoff/arrived warp the whole map).
-     * So the bot walks to the ticket NPC and then waits; see GCTravel.awaitVehicle.
+     * Scheduled vehicles: a waiting room, the inspector who boards you there, where the ride lands,
+     * and the event that sails it. These are not warps — boarding only opens while the event's
+     * "entry" is true, and it is the event, not us, that moves the bot onto the deck and later off
+     * it (takeoff/arrived warp the whole map). So the bot walks to the inspector and then waits;
+     * see GCTravel.awaitVehicle. Getting into the room in the first place is a ticket-counter row
+     * in NPC_RIDES above.
      */
-    private static final Object[][] VEHICLE_RIDES = {
-            {101000301, 1032009, 200000100, "Boats"},  // Ellinia terminal -> Orbis Station
-            {200000112, 2012002, 101000300, "Boats"},  // Orbis terminal -> Ellinia dock
-            {200000122, 2041001, 220000100, "Trains"}, // Orbis terminal -> Ludibrium Station
-            {220000111, 2041001, 200000100, "Trains"}, // Ludibrium terminal -> Orbis Station
-            {200000132, 2012022, 240000100, "Cabin"},  // Orbis terminal -> Leafre station
-            {240000111, 2082002, 200000100, "Cabin"},  // Leafre terminal -> Orbis Station
-            {200000152, 2012024, 260000100, "Genie"},  // Orbis airport -> Ariant Station
-            {260000110, 2102001, 200000100, "Genie"},  // Ariant terminal -> Orbis Station
-            {103000100, 9201057, 600010001, "Subway"}, // Kerning subway -> New Leaf City station
-            {600010002, 9201057, 103000100, "Subway"}, // NLC terminal -> Kerning subway
-            {540010100, 9270017, 540010000, "AirPlane"}, // Kerning airport -> CBD (Singapore)
-            {540010001, 9270018, 103000000, "AirPlane"}, // CBD terminal -> Kerning City
+    private static final VehicleEdge[] VEHICLE_RIDES = {
+            new VehicleEdge(101000301, 1032009, 200000100, "Boats"),    // Ellinia -> Orbis Station
+            new VehicleEdge(200000112, 2012002, 101000300, "Boats"),    // Orbis -> Ellinia dock
+            new VehicleEdge(200000122, 2041001, 220000100, "Trains"),   // Orbis -> Ludibrium
+            new VehicleEdge(220000111, 2041001, 200000100, "Trains"),   // Ludibrium -> Orbis
+            new VehicleEdge(200000132, 2012022, 240000100, "Cabin"),    // Orbis -> Leafre station
+            new VehicleEdge(240000111, 2082002, 200000100, "Cabin"),    // Leafre -> Orbis
+            new VehicleEdge(200000152, 2012024, 260000100, "Genie"),    // Orbis -> Ariant
+            new VehicleEdge(260000110, 2102001, 200000100, "Genie"),    // Ariant -> Orbis
+            new VehicleEdge(103000100, 9201057, 600010001, "Subway"),   // Kerning -> New Leaf City
+            new VehicleEdge(600010002, 9201057, 103000100, "Subway"),   // NLC -> Kerning
+            new VehicleEdge(540010100, 9270017, 540010000, "AirPlane"), // Kerning -> CBD
+            new VehicleEdge(540010001, 9270018, 103000000, "AirPlane"), // CBD -> Kerning City
     };
 
-    /* A scheduled vehicle boarding at mapId, or null if none leaves from there. */
-    static VehicleEdge vehicle(int mapId) {
-        for (Object[] ride : VEHICLE_RIDES) {
-            if ((Integer) ride[0] == mapId
-                    && isPortalinCurrentVersion((Integer) ride[0])
-                    && isPortalinCurrentVersion((Integer) ride[2])) {
-                return new VehicleEdge((Integer) ride[0], (Integer) ride[1],
-                        (Integer) ride[2], (String) ride[3]);
+    /* The scheduled vehicle from mapId to toMapId, or null if none leaves there for it. */
+    static VehicleEdge vehicle(int fromMapId, int toMapId) {
+        for (VehicleEdge ride : VEHICLE_RIDES) {
+            if (ride.fromMapId() == fromMapId && ride.toMapId() == toMapId
+                    && isPortalinCurrentVersion(ride.fromMapId())
+                    && isPortalinCurrentVersion(ride.toMapId())) {
+                return ride;
             }
         }
         return null;
