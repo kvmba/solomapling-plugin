@@ -99,6 +99,13 @@ final class GCTaxi {
             // the cave mouth to the entrance, and 2083001 from there into the 97-110 maze.
             {240040700, 2081005, 240050000, 70},
             {240050000, 2083001, 240050100, 70},
+            // The mazes are separate rooms with no doors between them, so the same keeper is what
+            // moves you from one to the next — without these a bot is stuck in the room it lands in.
+            {240050100, 2083001, 240050101, 70},
+            {240050100, 2083001, 240050102, 70},
+            {240050100, 2083001, 240050103, 70},
+            {240050100, 2083001, 240050104, 70},
+            {240050100, 2083001, 240050105, 70},
             // Gold Beach: a holiday island with no portal in, so the three boats that run to it
             // (from Lith Harbour, Orbis and Ludibrium) are the only way there.
             {104000000, 1002002, 110000000, 1},  // Lith Harbour -> Gold Beach
