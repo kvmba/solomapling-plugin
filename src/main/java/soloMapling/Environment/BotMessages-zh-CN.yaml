@@ -57,13 +57,21 @@ menu.training_party.follow.keywords:
 menu.follower.train: "在这儿陪我练！"
 menu.follower.nevermind: "没事了"
 
-# Typeable aliases for the follower menu's "在这儿陪我练！" option. The English keywords in
-# FollowerBot ("train"/"grind"/"station") are always matched but are not transliterated, and
-# the label alone only matches that exact phrase. Two characters minimum - a bare "练" would
-# swallow half of a party chat line.
+# Typeable aliases for the follower menu's "在这儿陪我练！" option, mirroring the en-US pack.
+#
+# The English keywords in FollowerBot ("train"/"grind"/"station") are always matched and the
+# label alone only matches that exact phrase, so "开打" - the wording a Chinese player actually
+# types to mean "start grinding right here" - used to do nothing at all.
+#
+# Two characters minimum and no bare filler: match() is contains-based and walks options IN ORDER,
+# so a lone "这里" ("我这里有个东西") or "升级" ("我升级了") would fire the menu on ordinary
+# party chat. Only phrasings where the spot or the fighting is the actual point are listed.
 menu.follower.train.keywords:
-  - ["在这儿练", "这里练", "这练", "在这儿", "在这练", "就地练", "就这练",
-     "留这儿", "留这里", "别走了", "停下", "站住"]
+  - ["开打", "开干", "开始打", "开始练", "开练", "开刷",
+     "杀怪", "打怪", "刷怪", "练级", "打怪升级", "在这升级",
+     "就这里", "就这儿", "就这", "在这里打", "在这打", "在这儿打",
+     "这里练", "这儿练", "这练", "在这儿练", "在这儿", "在这练", "就这练", "就地练",
+     "留这儿", "留这里", "别走了", "停这", "停下", "站住"]
 
 menu.social.whatsup: "最近咋样？"
 menu.social.interesting: "有啥新鲜事？"

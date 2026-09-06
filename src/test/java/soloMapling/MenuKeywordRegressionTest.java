@@ -122,7 +122,8 @@ class MenuKeywordRegressionTest {
         List<String> train = kw.get(0);
 
         for (String typed : new String[]{"在这儿练", "这里练", "这练", "在这儿", "在这练",
-                "就地练", "留这儿", "别走了", "停下"}) {
+                "就地练", "留这儿", "别走了", "停下",
+                "开打", "开干", "杀怪", "打怪", "刷怪", "练级", "就这里", "就这", "在这打"}) {
             assertTrue(train.stream().anyMatch(typed::contains),
                     "follower train option should match \"" + typed + "\", got " + train);
         }
@@ -132,6 +133,12 @@ class MenuKeywordRegressionTest {
         // it. Same trap in Chinese: a bare "练" or "这" would swallow ordinary party chatter.
         assertFalse(train.stream().anyMatch("再见"::contains),
                 "follower train keywords hijacked goodbye: " + train);
+        // Bare filler must not match either: contains() would fire this option on "我这里有个东西"
+        // or "我升级了", and it is the destructive one - it stops the follower and converts it.
+        for (String typed : new String[]{"这里", "这儿", "升级", "开始", "别走"}) {
+            assertFalse(train.stream().anyMatch(typed::contains),
+                    "follower train keywords are too broad, matched \"" + typed + "\": " + train);
+        }
     }
 
     @Test
@@ -150,4 +157,5 @@ class MenuKeywordRegressionTest {
                     "follower train option should match \"" + typed + "\", got " + train);
         }
     }
+
 }
