@@ -1,6 +1,7 @@
 package soloMapling.ArtificialPlayer.GCMoveSystem;
 
 import org.gms.client.Character;
+import org.gms.scripting.event.EventManager;
 import org.gms.server.maps.MapleMap;
 import org.gms.server.maps.Portal;
 import soloMapling.ArtificialPlayer.BotTravelSystem.BotScriptedWarp;
@@ -68,6 +69,11 @@ final class GCTravel {
     // Absolute per-hop wall-clock ceiling — the backstop no movement pattern can evade. The
     // longest legitimate hop (huge map, detours, climbs) stays well under this.
     private static final long HOP_MAX_MS = 90_000;
+    // Same ceiling for a bot that a scheduled ride must resolve instead of its own walking: a boat
+    // cycle is ~19 min (board + depart + sail). Departure and arrival are event-driven and the
+    // world travel rate is configurable, so this is sized past the longest cycle rather than
+    // derived from it — it only fires if a ride never completes at all.
+    private static final long WAIT_MAX_MS = 25 * 60 * 1000;
 
     private static final ScheduledExecutorService POOL = Executors.newScheduledThreadPool(2, r -> {
         Thread t = new Thread(r, "gctravel-poll");
@@ -100,6 +106,11 @@ final class GCTravel {
         // bot "drives off". 0 = not boarding. Rides need this dwell to read as a ride — see GCTaxi.
         long boardingAtMs;
         long boardDwellMs;
+        // Set while the bot is somewhere the ride itself must resolve: on a vehicle deck, or in a
+        // terminal waiting for boarding to open. The hop ceiling is sized for walking, so a bot
+        // patiently waiting out a sailing would otherwise be warped off its own ride.
+        boolean waitingForTransit;
+        long waitStartAtMs;
 
         Trip(Character bot, int destMapId, Consumer<Boolean> callback) {
             this.bot = bot;
@@ -171,7 +182,21 @@ final class GCTravel {
             trip.softLockSinceMs = 0L;
             trip.hopStartAtMs = nowMs();
             trip.boardingAtMs = 0L;   // this hop's cab is a different cab — board afresh
+            trip.waitingForTransit = false;  // new map, new wait — don't inherit the old exemption
+            trip.waitStartAtMs = 0L;
             GCMovement.clearMoveIntent(bot);
+        }
+
+        // Already aboard a vehicle: the ride itself moves the bot, so there is no hop to walk and
+        // no portal to find — the only correct move is to stay put until the event lands it.
+        // Without this the route lookup below finds no path off the deck and warps the bot away,
+        // skipping the crossing entirely.
+        if (GCTransit.isVehicleMap(cur)) {
+            trip.waitingForTransit = true;
+            if (trip.waitStartAtMs == 0L) {
+                trip.waitStartAtMs = nowMs();
+            }
+            return;
         }
 
         List<Integer> route = GCWorldGraph.route(cur, trip.destMapId, MAX_HOPS);
@@ -193,6 +218,18 @@ final class GCTravel {
             approachAndAct(trip, bot, portal.getPosition(), nextHop,
                     "portal " + portal.getId() + " -> map " + nextHop,
                     () -> GCPortals.enter(bot, portal)); // walk to the portal, stand a beat, step through
+            return;
+        }
+        GCTaxi.VehicleEdge vehicle = GCTaxi.vehicle(cur);
+        if (vehicle != null && vehicle.toMapId() == nextHop) {
+            Point npcPos = GCTaxi.npcPos(bot.getMap(), vehicle.npcId());
+            if (npcPos == null) {
+                warp(bot, nextHop, "vehicle npc " + vehicle.npcId() + " not on map " + cur);
+                return;
+            }
+            approachAndAct(trip, bot, npcPos, nextHop,
+                    "vehicle " + vehicle.eventName() + " npc " + vehicle.npcId() + " -> map " + nextHop,
+                    () -> awaitVehicle(trip, bot, vehicle));
             return;
         }
         GCTaxi.TransitEdge taxi = GCTaxi.edge(cur, nextHop);
@@ -257,6 +294,37 @@ final class GCTravel {
     }
 
     /*
+     * Board a scheduled vehicle: stand at the ticket NPC, then wait for boarding to open. The bot
+     * is not warped from here — once "entry" is true the vehicle event moves everyone in the
+     * terminal onto the deck, and later off it at the destination, exactly as it does for players.
+     *
+     * Boarding windows are event-driven (and scaled by the world travel rate), so this never times
+     * the schedule itself; the transit ceiling in approachAndAct is the only backstop.
+     */
+    private static void awaitVehicle(Trip trip, Character bot, GCTaxi.VehicleEdge vehicle) {
+        trip.waitingForTransit = true;
+        if (trip.waitStartAtMs == 0L) {
+            trip.waitStartAtMs = nowMs();
+        }
+        if (!isBoarding(bot, vehicle.eventName())) {
+            return; // gate still closed — keep standing at the counter
+        }
+        // Doors open: step onto the deck the way the event would take us, then let it sail.
+        warp(bot, GCTransit.deckFor(vehicle), "boarding " + vehicle.eventName()
+                + " " + bot.getMapId() + " -> " + vehicle.toMapId());
+    }
+
+    /* Whether the vehicle's boarding gate is open right now (the event's "entry" property). */
+    private static boolean isBoarding(Character bot, String eventName) {
+        MapleMap map = bot.getMap();
+        if (map == null || map.getChannelServer() == null) {
+            return false; // can't see the schedule — keep waiting rather than warping blind
+        }
+        EventManager em = map.getChannelServer().getEventSM().getEventManager(eventName);
+        return em != null && "true".equals(em.getProperty("entry"));
+    }
+
+    /*
      * Walk the bot to dest, wait until it has arrived AND finished the walk (not mid-stride),
      * stand a short dwell, then run action (enter the portal / ride the cab). Progress-aware:
      * a bot still closing the distance OR just moving across the map is never cut off; only a bot that stays
@@ -267,9 +335,14 @@ final class GCTravel {
         long now = nowMs();
 
         // Absolute per-hop ceiling: whatever the physics looked like, a hop this old has failed.
-        if (now - trip.hopStartAtMs >= HOP_MAX_MS) {
-            warp(bot, nextHop, "HOP-CEILING: hop " + (HOP_MAX_MS / 1000) + "s old on map "
-                    + bot.getMapId() + " at (" + bp.x + "," + bp.y + "), intent: " + intent);
+        // A bot waiting out a scheduled ride is standing exactly where it should be, so it gets the
+        // longer transit ceiling instead — WAIT_MAX_MS outlives the longest vehicle cycle (a boat:
+        // 4 min boarding + 5 min to depart + 10 min sailing) and only fires if a ride never ends.
+        long ceiling = trip.waitingForTransit ? WAIT_MAX_MS : HOP_MAX_MS;
+        if (now - trip.hopStartAtMs >= ceiling) {
+            warp(bot, nextHop, (trip.waitingForTransit ? "TRANSIT-WAIT-TIMEOUT" : "HOP-CEILING")
+                    + ": hop " + (ceiling / 1000) + "s old on map " + bot.getMapId()
+                    + " at (" + bp.x + "," + bp.y + "), intent: " + intent);
             return;
         }
 

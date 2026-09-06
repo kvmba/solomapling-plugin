@@ -71,6 +71,33 @@ final class GCTaxi {
             {701000100, 9310013, 102000000}, // Pilot Hong: Shanghai Plaza -> Perion
     };
 
+    /*
+     * Scheduled vehicles: {terminalMapId, ticketNpcId, arrivalMapId, eventName}. These are not
+     * warps — boarding only opens while the event's "entry" is true, and it is the event, not us,
+     * that moves the bot onto the deck and later off it (takeoff/arrived warp the whole map).
+     * So the bot walks to the ticket NPC and then waits; see GCTravel.awaitVehicle.
+     */
+    private static final Object[][] VEHICLE_RIDES = {
+            {101000301, 1032009, 200000100, "Boats"}, // Ellinia terminal -> Orbis Station
+            {200000112, 2012002, 101000300, "Boats"}, // Orbis terminal -> Ellinia dock
+    };
+
+    /* A scheduled vehicle boarding at mapId, or null if none leaves from there. */
+    static VehicleEdge vehicle(int mapId) {
+        for (Object[] ride : VEHICLE_RIDES) {
+            if ((Integer) ride[0] == mapId
+                    && isPortalinCurrentVersion((Integer) ride[0])
+                    && isPortalinCurrentVersion((Integer) ride[2])) {
+                return new VehicleEdge((Integer) ride[0], (Integer) ride[1],
+                        (Integer) ride[2], (String) ride[3]);
+            }
+        }
+        return null;
+    }
+
+    record VehicleEdge(int fromMapId, int npcId, int toMapId, String eventName) {
+    }
+
     private static final Map<Integer, List<TransitEdge>> BY_FROM = buildEdges();
 
     private static Map<Integer, List<TransitEdge>> buildEdges() {
