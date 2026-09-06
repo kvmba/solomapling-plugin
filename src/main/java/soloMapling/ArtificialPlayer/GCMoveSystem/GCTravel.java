@@ -13,6 +13,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 
@@ -95,6 +96,10 @@ final class GCTravel {
         long softLockSinceMs;   // when the current soft-lock window opened (0 = unset)
         long hopStartAtMs;      // when the current hop's map was entered — feeds the absolute ceiling
         int lastMapId = -1;
+        // Cab boarding: set once the bot has reached the cab NPC, then held for the dwell before the
+        // bot "drives off". 0 = not boarding. Rides need this dwell to read as a ride — see GCTaxi.
+        long boardingAtMs;
+        long boardDwellMs;
 
         Trip(Character bot, int destMapId, Consumer<Boolean> callback) {
             this.bot = bot;
@@ -165,6 +170,7 @@ final class GCTravel {
             trip.nearTargetSinceMs = 0L;
             trip.softLockSinceMs = 0L;
             trip.hopStartAtMs = nowMs();
+            trip.boardingAtMs = 0L;   // this hop's cab is a different cab — board afresh
             GCMovement.clearMoveIntent(bot);
         }
 
@@ -196,9 +202,11 @@ final class GCTravel {
                 warp(bot, nextHop, "taxi npc " + taxi.npcId() + " not on map " + cur);
                 return;
             }
+            // Walk to the cab, then BOARD it (stand there a few seconds before driving off) — the
+            // dwell is what makes the hop read as a cab ride instead of a bare warp.
             approachAndAct(trip, bot, npcPos, nextHop,
                     "taxi npc " + taxi.npcId() + " -> map " + nextHop,
-                    () -> warp(bot, nextHop, "taxi ride " + cur + " -> " + nextHop)); // walk to cab, ride
+                    () -> boardTaxi(trip, bot, taxi));
             return;
         }
         // Curated scripted-warp portal (e.g. subway entrance): its WZ target is a script, so findPortalTo
@@ -217,6 +225,35 @@ final class GCTravel {
             return;
         }
         warp(bot, nextHop, "no walkable portal/taxi/scripted-warp on map " + cur + " to " + nextHop);
+    }
+
+    /*
+     * Board the cab: stand at it for the dwell, then drive off (warp) to the destination town.
+     *
+     * The dwell is the whole point. GCTravel's hop executor is otherwise uniform — walk to a spot,
+     * stand 350ms so the warp packet can't out-run the walk packets, changeMap — which is right for a
+     * portal (the client has no concept of "entering" one) but wrong for a cab: a player watching the
+     * bot sees it walk up and BLINK OUT the same frame, which is indistinguishable from the bare warp
+     * it actually is. Standing there a few seconds reads as paying the driver.
+     *
+     * Called every poll while the bot is at the cab: the first call opens the boarding clock (and
+     * returns — the bot just stands there), the polls after it wait the dwell out, and the first one
+     * past it drives off.
+     */
+    private static void boardTaxi(Trip trip, Character bot, GCTaxi.TaxiEdge taxi) {
+        long now = nowMs();
+        if (trip.boardingAtMs == 0L) {
+            trip.boardingAtMs = now;
+            trip.boardDwellMs = ThreadLocalRandom.current()
+                    .nextLong(GCTaxi.BOARD_DWELL_MIN_MS, GCTaxi.BOARD_DWELL_MAX_MS);
+            return; // just got in — wait for the next poll to see if the dwell is up
+        }
+        if (now - trip.boardingAtMs < trip.boardDwellMs) {
+            return; // still boarding — the cab hasn't left yet
+        }
+        trip.boardingAtMs = 0L;
+        warp(bot, taxi.toMapId(), "taxi ride " + bot.getMapId() + " -> " + taxi.toMapId()
+                + " (npc " + taxi.npcId() + ")");
     }
 
     /*

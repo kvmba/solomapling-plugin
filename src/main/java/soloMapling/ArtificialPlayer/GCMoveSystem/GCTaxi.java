@@ -24,6 +24,18 @@ final class GCTaxi {
     private GCTaxi() {
     }
 
+    /*
+     * How long a bot stands at the cab before it "drives off" (random inside this band).
+     *
+     * NOT shared with PORTAL_ENTER_DWELL_MS: stepping through a portal is instantaneous in the
+     * client's eyes (the sprite is simply on the next map), so 350 ms there is only packet-ordering
+     * slack. A cab ride is a transaction — a player walks up, talks to the driver, pays, and the
+     * screen fades — so a bot that vanishes the instant it reaches the cab reads exactly like the
+     * bare warp it actually is. Standing at the cab for a few seconds is what sells "it took a cab".
+     */
+    static final long BOARD_DWELL_MIN_MS = 2_000;
+    static final long BOARD_DWELL_MAX_MS = 6_000;
+
     /* A cab ride: stand near npcId on fromMapId, ride to toMapId. */
     record TaxiEdge(int fromMapId, int npcId, int toMapId) {
     }
