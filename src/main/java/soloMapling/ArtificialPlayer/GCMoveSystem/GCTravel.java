@@ -1,7 +1,6 @@
 package soloMapling.ArtificialPlayer.GCMoveSystem;
 
 import org.gms.client.Character;
-import org.gms.scripting.event.EventManager;
 import org.gms.server.maps.MapleMap;
 import org.gms.server.maps.Portal;
 import soloMapling.ArtificialPlayer.BotTravelSystem.BotScriptedWarp;
@@ -264,7 +263,7 @@ final class GCTravel {
             }
             approachAndAct(trip, bot, npcPos, nextHop,
                     "vehicle " + vehicle.eventName() + " npc " + vehicle.npcId() + " -> map " + nextHop,
-                    () -> awaitVehicle(trip, bot, vehicle));
+                    () -> awaitVehicle(trip));
             return;
         }
         GCTaxi.TransitEdge taxi = GCTaxi.edge(cur, nextHop);
@@ -329,21 +328,17 @@ final class GCTravel {
     }
 
     /*
-     * Board a scheduled vehicle: stand at the ticket NPC, then wait for boarding to open. The bot
-     * is not warped from here — once "entry" is true the vehicle event moves everyone in the
-     * terminal onto the deck, and later off it at the destination, exactly as it does for players.
+     * Wait for a scheduled vehicle: stand at the inspector and stay there. Nothing here moves the
+     * bot onto the deck — takeoff() warps everyone in the waiting room aboard at once, so boarding
+     * "by hand" would put a bot on an empty deck minutes before the other passengers, and it would
+     * be missing from the moment the room empties, which is the one thing players actually see.
      *
      * Boarding windows are event-driven (and scaled by the world travel rate), so this never times
      * the schedule itself; the transit ceiling in approachAndAct is the only backstop.
      */
-    private static void awaitVehicle(Trip trip, Character bot, GCTaxi.VehicleEdge vehicle) {
+    private static void awaitVehicle(Trip trip) {
+        // Standing at the counter is the whole behaviour: the event does the rest.
         trip.waitingForTransit = true;
-        if (!isBoarding(bot, vehicle.eventName())) {
-            return; // gate still closed — keep standing at the counter
-        }
-        // Doors open: step onto the deck the way the event would take us, then let it sail.
-        warp(bot, GCTransit.deckFor(vehicle), "boarding " + vehicle.eventName()
-                + " " + bot.getMapId() + " -> " + vehicle.toMapId());
     }
 
     /*
@@ -370,15 +365,6 @@ final class GCTravel {
             "whoa what was that", "is that a balrog", "everyone get inside", "no way, not today"
     };
 
-    /* Whether the vehicle's boarding gate is open right now (the event's "entry" property). */
-    private static boolean isBoarding(Character bot, String eventName) {
-        MapleMap map = bot.getMap();
-        if (map == null || map.getChannelServer() == null) {
-            return false; // can't see the schedule — keep waiting rather than warping blind
-        }
-        EventManager em = map.getChannelServer().getEventSM().getEventManager(eventName);
-        return em != null && "true".equals(em.getProperty("entry"));
-    }
 
     /*
      * Walk the bot to dest, wait until it has arrived AND finished the walk (not mid-stride),

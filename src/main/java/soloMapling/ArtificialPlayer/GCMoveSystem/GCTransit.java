@@ -53,10 +53,11 @@ public final class GCTransit {
         return SPACIOUS.contains(mapId);
     }
 
-    // Only the boat is ever attacked mid-crossing (Boats.js spawns a Balrog on its decks); the
-    // other events carry passengers without incident, so this stays keyed to the boat's decks.
+    // Only the boat is ever attacked mid-crossing, and only on its decks: Boats.js spawns the
+    // Balrog on Boat_to_Ellinia / Boat_to_Orbis and never in the cabins, which is what makes the
+    // cabin a place to take shelter. Every other vehicle crosses unmolested.
     private static final Set<Integer> ATTACKABLE = Set.of(
-            200090000, 200090001, 200090010, 200090011
+            200090000, 200090010 // boat decks: to Ellinia, to Orbis
     );
 
     /*
@@ -82,21 +83,5 @@ public final class GCTransit {
         }
         Portal hatch = map.getPortal("in00");
         return hatch == null ? null : hatch.getPosition();
-    }
-    /*
-     * The deck a bot steps onto when boarding, per the event's takeoff(): each terminal loads the
-     * vehicle heading the other way. Keyed on the vehicle first and then the direction — several
-     * terminals dispatch more than one vehicle, and Kerning dispatches both a subway and a plane.
-     */
-    static int deckFor(GCTaxi.VehicleEdge vehicle) {
-        return switch (vehicle.eventName()) {
-            case "Boats" -> vehicle.toMapId() == 200000100 ? 200090010 : 200090000;
-            case "Trains" -> vehicle.toMapId() == 200000100 ? 200090110 : 200090100;
-            case "Cabin" -> vehicle.toMapId() == 200000100 ? 200090210 : 200090200;
-            case "Genie" -> vehicle.toMapId() == 200000100 ? 200090410 : 200090400;
-            case "Subway" -> vehicle.toMapId() == 600010001 ? 600010003 : 600010005;
-            case "AirPlane" -> vehicle.toMapId() == 540010000 ? 540010101 : 540010002;
-            default -> vehicle.toMapId() == 200000100 ? 200090010 : 200090000;
-        };
     }
 }
