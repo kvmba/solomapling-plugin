@@ -1,37 +1,553 @@
-# FollowerBot dialogue — a recruited companion tailing its leader. Spoken observed-only.
+# FollowerBot dialogue - a recruited companion tailing its leader. Spoken observed-only.
 # Nodes with a live player context may use {PLAYER_NAME}; LeaderLost/PartyFarewell fire with no
-# player (the leader just vanished), so those stay token-free — a token line with no player to
+# player (the leader just vanished), so those stay token-free - a token line with no player to
 # resolve against is dropped by the engine.
+# PlayerReaction is driven by the movement driver's BotPlayerReaction layer (a real player
+# walked into range), not by this bot's own tick.
 
 FollowerBot:
 
+
   FollowStart:
     text:
-      - {line: "right behind u {PLAYER_NAME}!", emote: 2}
-      - "lead the way, ill keep up"
-      - {line: "ok {PLAYER_NAME} where we headed?", emote: 2}
-      - "party time, im with u"
-      - {line: "dont walk too fast lol, short legs", emote: 6}
-      - "lets go lets go ^^"
-      - {line: "im sticking with u {PLAYER_NAME}, dont lose me", emote: 2}
-      - "following! this is way better than standing around town"
-      - "ooh adventure time"
-      - {line: "u pick the map, ill bring the vibes", emote: 3}
+      - "right behind u, lets go"
+      - "ok im following, dont lose me"
+      - "yes! finally something to do"
+      - "lead the way boss"
+      - "im ur shadow now"
+      - "alright im all yours"
+      - "sweet, i was bored outta my mind"
+      - "following! dont go too fast"
+      - "ok but if we die its on u"
+      - {line: "got my pots, im ready", emote: 3}
+      - "im comin im comin hold on"
+      - "fine, u talked me into it"
+      - "tag along mode: activated"
+      - "ok im in, where we headed"
+      - "this beats standing in town"
+      - {line: "im ur hype man now", emote: 3}
+      - "ight im followin"
+      - "u lead, i follow, simple"
+      - "ok im trusting u here"
+      - {line: "lets roll", emote: 0}
+      - "im in, try not to get us killed"
+      - "finally, some action"
+      - "im right here, go"
+      - "alright, im ur problem now"
+      - "following u, no questions asked"
+      - "ok but i get first dibs on drops"
+      - {line: "im on ur tail", emote: 2}
+      - "yes, lets actually do something"
+      - "im in, u drive"
+      - {line: "ok im comin, wait up", emote: 0}
+      - {line: "sweet, free carry", emote: 0}
+      - {line: "ight, im stuck to u now", emote: 2}
+      - "u go, i follow, i nap"
+      - "ok im in, dont make me regret it"
+      - {line: "lead on, im right here", emote: 3}
+      - "following, and i brought snacks"
+      - "ok lets see where this goes"
+      - "im in, im ur backpack now"
+      - "alright, im all in"
+      - {line: "following u, keep me alive", emote: 0}
+      - "yes, adventure time"
+      - "im yourn now, good luck"
+      - "ok im followin, dont run"
+      - "ight, u got a follower"
+      - "im in, this better be good"
+      - "ok, im following"
+      - "ok, im comin"
+      - "ok, im in"
+      - {line: "ok, im right behind u", emote: 0}
+      - "ok, im ur shadow now"
+      - {line: "ok, lets go", emote: 2}
+      - {line: "ok, where we headed", emote: 3}
+      - {line: "ight, im following", emote: 0}
+      - {line: "ight, im comin", emote: 2}
+      - {line: "ight, im in", emote: 2}
+      - {line: "ight, im right behind u", emote: 2}
+      - {line: "ight, im ur shadow now", emote: 0}
+      - "ight, lets go"
+      - {line: "ight, where we headed", emote: 3}
+      - "sweet, im following"
+      - "sweet, im comin"
+      - "sweet, im in"
+      - "sweet, im right behind u"
+      - "sweet, im ur shadow now"
+      - "sweet, lets go"
+      - "sweet, where we headed"
+      - "fine, im following"
+      - "fine, im comin"
+      - "fine, im in"
+      - {line: "fine, im right behind u", emote: 0}
+      - "fine, im ur shadow now"
+      - {line: "fine, lets go", emote: 3}
+      - {line: "fine, where we headed", emote: 0}
+      - "alright, im following"
+      - "alright, im comin"
+      - "alright, im in"
+      - {line: "alright, im right behind u", emote: 3}
+      - {line: "alright, im ur shadow now", emote: 0}
+      - "alright, lets go"
+      - "alright, where we headed"
+      - "yes, im following"
+      - "yes, im comin"
+      - "yes, im in"
+      - "yes, im right behind u"
+      - {line: "yes, im ur shadow now", emote: 0}
+      - "yes, lets go"
+      - {line: "yes, where we headed", emote: 2}
+      - "good, im following"
+      - "good, im comin"
+      - {line: "good, im in", emote: 3}
+      - "good, im right behind u"
+      - "good, im ur shadow now"
+      - "good, lets go"
+      - "good, where we headed"
+      - "im following, dont lose me"
+      - {line: "im following, dont go too fast", emote: 2}
+      - "im following, keep me alive"
+      - {line: "im following, no questions asked", emote: 2}
+      - "im following, try not to get us killed"
+      - "im following, wait up"
+      - "im right behind u, dont lose me"
+      - "im right behind u, dont go too fast"
+      - {line: "im right behind u, keep me alive", emote: 2}
+      - "im right behind u, no questions asked"
+      - "im right behind u, try not to get us killed"
+      - "im right behind u, wait up"
+      - "im on ur tail, dont lose me"
+      - "im on ur tail, dont go too fast"
+      - {line: "im on ur tail, keep me alive", emote: 3}
+      - {line: "im on ur tail, no questions asked", emote: 2}
+      - "im on ur tail, try not to get us killed"
+      - {line: "im on ur tail, wait up", emote: 3}
+      - "im all yours, dont lose me"
+      - {line: "im all yours, dont go too fast", emote: 3}
+      - "im all yours, keep me alive"
+      - "im all yours, no questions asked"
+      - "im all yours, try not to get us killed"
+      - "im all yours, wait up"
+      - "im stuck to u, dont lose me"
+      - "im stuck to u, dont go too fast"
+      - "im stuck to u, keep me alive"
+      - "im stuck to u, no questions asked"
+      - {line: "im stuck to u, try not to get us killed", emote: 0}
+      - "im stuck to u, wait up"
+      - "im ur hype man, dont lose me"
+      - "im ur hype man, dont go too fast"
+      - "im ur hype man, keep me alive"
+      - "im ur hype man, no questions asked"
+      - "im ur hype man, try not to get us killed"
+      - "im ur hype man, wait up"
+      - {line: "im ur backpack, dont lose me", emote: 3}
+      - "im ur backpack, dont go too fast"
+      - "im ur backpack, keep me alive"
+      - "im ur backpack, no questions asked"
+      - {line: "im ur backpack, try not to get us killed", emote: 0}
+      - "im ur backpack, wait up"
+      - {line: "this beats standing around", emote: 3}
+      - "this beats doing nothing"
+      - "this beats waiting for trade"
+      - {line: "finally standing in town", emote: 3}
+      - "finally standing around"
+      - "finally doing nothing"
+      - "finally waiting for trade"
+      - {line: "anything is better than standing in town", emote: 0}
+      - "anything is better than standing around"
+      - "anything is better than doing nothing"
+      - "anything is better than waiting for trade"
+      - "god yes standing in town"
+      - {line: "god yes standing around", emote: 3}
+      - {line: "god yes doing nothing", emote: 2}
+      - "god yes waiting for trade"
     emote:
-      - 2
       - 0
+      - 2
+      - 3
+    wait: 1
+
+  FollowAmbient:
+    text:
+      - "so where are we going anyway"
+      - "this beats standing in town all day"
+      - "k im right behind u, keep going"
+      - {line: "i shoulda bought more pots before we left", emote: 3}
+      - {line: "u walk fast, im dying back here lol", emote: 2}
+      - "nice view from back here at least"
+      - {line: "hey if u find a good map just say the word", emote: 2}
+      - "following u is way less work"
+      - "i think i need new shoes"
+      - "this map looks familiar, ur good"
+      - {line: "pls dont walk into that mob pile", emote: 0}
+      - "u sure theres mobs this way"
+      - "im cheering for u from the back"
+      - "slow down a bit, im low on pots"
+      - "i am 100% just a backpack with legs"
+      - "this places busy today"
+      - "ima need a town trip for pots soon"
+      - "ur level shows, u move fast"
+      - "im just here for the exp"
+      - "dont mind me im slow"
+      - "is that a boss up there"
+      - "my inventory is gettin full"
+      - "be careful, i cant fight for u"
+      - "one hit from that thing and im gone"
+      - "im just here to loot honestly"
+      - "servers a little laggy today"
+      - {line: "how far we grindin today", emote: 3}
+      - "my gears embarrassing next to urs"
+      - "having a party actually feels nice"
+      - "dont lose me man"
+      - {line: "whoa this maps packed with mobs", emote: 3}
+      - "u go first, i got the rear"
+      - "ill just spam nice job then"
+      - "can we take a break soon"
+      - "never been to this map before"
+      - "u sure can run"
+      - "im shufflin along back here"
+      - "dont jump off anything, i cant fly"
+      - {line: "i feel like weve looped three times", emote: 2}
+      - "are we lost"
+      - "u know the way, im chill"
+      - "how many pots u got left"
+      - "should we restock first"
+      - "ur exp bar moves so fast"
+      - {line: "i dont even have to look for mobs", emote: 0}
+      - {line: "hows the drop rate here", emote: 3}
+      - "carry me to a boss sometime"
+      - {line: "im basically ur intern now", emote: 0}
+      - "dont sell me out ok"
+      - {line: "i get tired just watching u", emote: 3}
+      - "keep movin keep movin"
+      - "im too low lvl for this pace"
+      - {line: "wait up, let me breathe", emote: 2}
+      - "following u is so low effort"
+      - "this map good for training"
+      - "dont turn around, im still here"
+      - {line: "got stuff in my bag, want any", emote: 0}
+      - {line: "that gear set cost u a lot huh", emote: 2}
+      - "im just here for the ride"
+      - "these mobs are a bit high lvl"
+      - "u walkin like ur late for something"
+      - "weve walked a thousand miles"
+      - "i know this map well"
+      - {line: "take me somewhere good pls", emote: 0}
+      - "i think im gainin exp"
+      - "im just lootin the leftovers"
+      - "pls dont ditch me"
+      - "ur speed is unreal"
+      - {line: "my gear is sad next to urs", emote: 0}
+      - "u tank, i hide, good system"
+      - "so boss, where we headed"
+      - {line: "im just along for the ride", emote: 2}
+      - "slow down, short legs"
+      - {line: "these mobs respawn fast", emote: 2}
+      - "im just here for the scenery"
+      - "wait, drinking a pot"
+      - "im here for the free exp"
+      - "dont go in that cave"
+      - "i think im about to lvl"
+      - "following u is enough for me"
+      - "following u is gettin full"
+      - {line: "following u is packed with mobs", emote: 3}
+      - "following u is unreal"
+      - "following u moves so fast"
+      - {line: "following u is gettin low", emote: 0}
+      - "following u is nice tho"
+      - "im just here is way less work"
+      - {line: "im just here is enough for me", emote: 2}
+      - "im just here is gettin full"
+      - "im just here is packed with mobs"
+      - "im just here is unreal"
+      - "im just here moves so fast"
+      - "im just here is gettin low"
+      - "im just here is nice tho"
+      - "honestly is way less work"
+      - "honestly is enough for me"
+      - "honestly is gettin full"
+      - "honestly is packed with mobs"
+      - "honestly is unreal"
+      - {line: "honestly moves so fast", emote: 3}
+      - "honestly is gettin low"
+      - "honestly is nice tho"
+      - {line: "this map is way less work", emote: 3}
+      - "this map is enough for me"
+      - "this map is gettin full"
+      - "this map is packed with mobs"
+      - "this map is unreal"
+      - "this map moves so fast"
+      - "this map is gettin low"
+      - "this map is nice tho"
+      - "u walk so fast is way less work"
+      - {line: "u walk so fast is enough for me", emote: 3}
+      - "u walk so fast is gettin full"
+      - "u walk so fast is packed with mobs"
+      - "u walk so fast is unreal"
+      - "u walk so fast moves so fast"
+      - {line: "u walk so fast is gettin low", emote: 0}
+      - "u walk so fast is nice tho"
+      - "i feel like is way less work"
+      - "i feel like is enough for me"
+      - "i feel like is gettin full"
+      - "i feel like is packed with mobs"
+      - "i feel like is unreal"
+      - {line: "i feel like moves so fast", emote: 3}
+      - "i feel like is gettin low"
+      - "i feel like is nice tho"
+      - "my inventory is way less work"
+      - "my inventory is enough for me"
+      - "my inventory is packed with mobs"
+      - "my inventory is unreal"
+      - "my inventory moves so fast"
+      - "my inventory is gettin low"
+      - "my inventory is nice tho"
+      - "ur exp bar is way less work"
+      - "ur exp bar is enough for me"
+      - "ur exp bar is gettin full"
+      - "ur exp bar is packed with mobs"
+      - {line: "ur exp bar is unreal", emote: 3}
+      - {line: "ur exp bar is gettin low", emote: 3}
+      - {line: "ur exp bar is nice tho", emote: 2}
+      - "k, im right behind u"
+      - "k, keep going"
+      - "k, slow down a bit"
+      - "k, dont lose me"
+      - {line: "k, lets restock soon", emote: 2}
+      - "k, i need a pot break"
+      - "k, im low on pots"
+      - {line: "ok, im right behind u", emote: 0}
+      - "ok, keep going"
+      - {line: "ok, slow down a bit", emote: 3}
+      - {line: "ok, dont lose me", emote: 0}
+      - {line: "ok, lets restock soon", emote: 0}
+      - {line: "ok, i need a pot break", emote: 0}
+      - "ok, im low on pots"
+      - {line: "pls, im right behind u", emote: 3}
+      - "pls, keep going"
+      - "pls, slow down a bit"
+      - "pls, dont lose me"
+      - {line: "pls, lets restock soon", emote: 3}
+      - "pls, i need a pot break"
+      - "pls, im low on pots"
+      - {line: "hey, im right behind u", emote: 3}
+      - {line: "hey, keep going", emote: 0}
+      - {line: "hey, slow down a bit", emote: 2}
+      - "hey, dont lose me"
+      - "hey, lets restock soon"
+      - {line: "hey, i need a pot break", emote: 0}
+      - "hey, im low on pots"
+      - "yo, im right behind u"
+      - "yo, keep going"
+      - "yo, slow down a bit"
+      - "yo, dont lose me"
+      - "yo, lets restock soon"
+      - {line: "yo, i need a pot break", emote: 2}
+      - "yo, im low on pots"
+      - {line: "ima be real, im right behind u", emote: 2}
+      - "ima be real, keep going"
+      - "ima be real, slow down a bit"
+      - {line: "ima be real, dont lose me", emote: 3}
+      - {line: "ima be real, lets restock soon", emote: 2}
+      - "ima be real, i need a pot break"
+      - "ima be real, im low on pots"
+      - "im basically ur intern"
+      - "im basically a backpack with legs"
+      - "im basically just here for the exp"
+      - "im basically just lootin"
+      - "im basically the hype man"
+      - {line: "im basically dead weight lol", emote: 3}
+      - "im essentially ur intern"
+      - "im essentially a backpack with legs"
+      - "im essentially just here for the exp"
+      - {line: "im essentially just lootin", emote: 2}
+      - "im essentially the hype man"
+      - {line: "im essentially dead weight lol", emote: 2}
+      - {line: "im honestly ur intern", emote: 2}
+      - {line: "im honestly a backpack with legs", emote: 2}
+      - "im honestly just here for the exp"
+      - "im honestly just lootin"
+      - "im honestly the hype man"
+      - "im honestly dead weight lol"
+      - {line: "im pretty much ur intern", emote: 2}
+      - "im pretty much a backpack with legs"
+      - "im pretty much just here for the exp"
+      - "im pretty much just lootin"
+      - "im pretty much the hype man"
+      - {line: "im pretty much dead weight lol", emote: 0}
+      - "dont walk into that mob pile"
+      - "dont lose me"
+      - "dont ditch me"
+      - "dont jump off anything"
+      - {line: "dont sell me out", emote: 0}
+      - {line: "pls dont lose me", emote: 0}
+      - "pls dont jump off anything"
+      - "pls dont go in that cave"
+      - "pls dont sell me out"
+      - {line: "try not to walk into that mob pile", emote: 2}
+      - "try not to lose me"
+      - "try not to ditch me"
+      - {line: "try not to jump off anything", emote: 2}
+      - {line: "try not to go in that cave", emote: 2}
+      - {line: "try not to sell me out", emote: 3}
+      - "can we not walk into that mob pile"
+      - {line: "can we not lose me", emote: 0}
+      - "can we not ditch me"
+      - {line: "can we not jump off anything", emote: 2}
+      - {line: "can we not go in that cave", emote: 2}
+      - "can we not sell me out"
+    emote:
+      - 0
+      - 2
+      - 3
     wait: 1
 
   StationHere:
     text:
-      - {line: "this map? looks good {PLAYER_NAME}, ill set up here", emote: 2}
-      - "ok! grinding time, ill hold this spot down"
-      - {line: "nice pick {PLAYER_NAME}, mobs everywhere, lets farm", emote: 2}
-      - "alright im clocking in, lets get this exp"
-      - {line: "settling in here then, dont mind my ksing lol", emote: 3}
-      - "good spot. pots ready. lets grind ^^"
-      - {line: "here? perfect, i was getting tired of walking anyway", emote: 2}
-      - "deal, ill start clearing, u take whatever side u want"
+      - {line: "this map? looks good, ill set up here", emote: 3}
+      - "ok! grinding time, ill hold this spot"
+      - {line: "nice pick, mobs everywhere, lets farm", emote: 3}
+      - "alright im clockin in, lets get this exp"
+      - "settling in here then, dont mind my ksing lol"
+      - {line: "good spot. pots ready. lets grind", emote: 2}
+      - "here? perfect, i was tired of walking anyway"
+      - "deal, ill start clearing, u take a side"
+      - "this is my spot now, dont @ me"
+      - "ok im planting my flag right here"
+      - {line: "this maps dense, good call", emote: 2}
+      - "ill take this corner, u take that one"
+      - "alright, im home"
+      - "this is it, im not movin again"
+      - "good map, i can work with this"
+      - "im staying right here till i lvl"
+      - "sweet, mobs on mobs"
+      - {line: "ok im settin up shop", emote: 3}
+      - "this spot is mine now, fight me"
+      - {line: "alright, im makin this my home", emote: 3}
+      - "nice, i can grind here for hours"
+      - {line: "im diggin in, lets go", emote: 3}
+      - "this is a solid training map"
+      - {line: "ok, camp set, time to work", emote: 2}
+      - "ill hold this half, u hold that half"
+      - "found my home, thanks boss"
+      - "good pick, ill take the left side"
+      - "im never leaving this spot"
+      - "ill clear this area, watch my back"
+      - "ok im parked, time to grind"
+      - {line: "this map is perfect, seriously", emote: 3}
+      - "alright, u found us a good one"
+      - "im settin up right here, dont move me"
+      - {line: "ok, im officially a resident", emote: 2}
+      - {line: "nice, i can lvl here easy", emote: 3}
+      - "claimin this spot, see u at 200"
+      - {line: "this is the spot, i can feel it", emote: 3}
+      - "alright, im unpacking"
+      - "this map and me, were gonna be close"
+      - "ok im rooted, lets do this"
+      - "good call, ill grind here all day"
+      - "im makin this my territory"
+      - "this is way better than the last map"
+      - {line: "ok, im home, dont rob me", emote: 2}
+      - "ill stay here n hold it down"
+      - "this map, ill set up here"
+      - "this map, ill hold this spot"
+      - "this map, lets farm"
+      - "this map, im clockin in"
+      - "this map, im stayin"
+      - "this map, ill grind here"
+      - "this map, im plantin my flag"
+      - {line: "nice pick, ill set up here", emote: 2}
+      - "nice pick, ill hold this spot"
+      - "nice pick, lets farm"
+      - "nice pick, im clockin in"
+      - {line: "nice pick, im stayin", emote: 2}
+      - {line: "nice pick, ill grind here", emote: 3}
+      - "nice pick, im plantin my flag"
+      - "good spot, ill set up here"
+      - {line: "good spot, ill hold this spot", emote: 2}
+      - "good spot, lets farm"
+      - {line: "good spot, im clockin in", emote: 3}
+      - "good spot, im stayin"
+      - "good spot, ill grind here"
+      - "good spot, im plantin my flag"
+      - "alright, ill set up here"
+      - "alright, ill hold this spot"
+      - {line: "alright, lets farm", emote: 2}
+      - "alright, im clockin in"
+      - "alright, im stayin"
+      - "alright, ill grind here"
+      - "alright, im plantin my flag"
+      - "deal, ill set up here"
+      - "deal, ill hold this spot"
+      - "deal, lets farm"
+      - {line: "deal, im clockin in", emote: 2}
+      - "deal, im stayin"
+      - "deal, ill grind here"
+      - "deal, im plantin my flag"
+      - {line: "ok, ill set up here", emote: 3}
+      - "ok, ill hold this spot"
+      - "ok, lets farm"
+      - {line: "ok, im clockin in", emote: 3}
+      - "ok, im stayin"
+      - "ok, ill grind here"
+      - "ok, im plantin my flag"
+      - "sweet, ill set up here"
+      - "sweet, ill hold this spot"
+      - {line: "sweet, lets farm", emote: 2}
+      - "sweet, im clockin in"
+      - "sweet, im stayin"
+      - "sweet, ill grind here"
+      - "sweet, im plantin my flag"
+      - {line: "this is my spot now, im not movin", emote: 3}
+      - "this is my spot now, i can lvl here"
+      - "this is my spot now, i can work with this"
+      - "this is my spot now, i can feel it"
+      - {line: "this is my home, dont @ me", emote: 3}
+      - "this is my home, im not movin"
+      - "this is my home, i can lvl here"
+      - {line: "this is my home, i can work with this", emote: 3}
+      - "this is my home, i can feel it"
+      - "this is my territory, dont @ me"
+      - "this is my territory, im not movin"
+      - {line: "this is my territory, i can lvl here", emote: 2}
+      - "this is my territory, i can work with this"
+      - {line: "this is my territory, i can feel it", emote: 2}
+      - {line: "this is a solid map, dont @ me", emote: 2}
+      - "this is a solid map, im not movin"
+      - "this is a solid map, i can lvl here"
+      - "this is a solid map, i can work with this"
+      - "this is a solid map, i can feel it"
+      - "this is perfect, dont @ me"
+      - {line: "this is perfect, im not movin", emote: 2}
+      - {line: "this is perfect, i can lvl here", emote: 3}
+      - "this is perfect, i can work with this"
+      - {line: "this is perfect, i can feel it", emote: 2}
+      - "this is the spot, dont @ me"
+      - {line: "this is the spot, im not movin", emote: 2}
+      - {line: "this is the spot, i can lvl here", emote: 3}
+      - "this is the spot, i can work with this"
+      - "ok, im parked"
+      - {line: "ok, im rooted", emote: 2}
+      - "ok, im unpacking"
+      - "ok, im settin up shop"
+      - "ok, im diggin in"
+      - "alright, im parked"
+      - "alright, im rooted"
+      - "alright, im settin up shop"
+      - "alright, im diggin in"
+      - "alright, im officially a resident"
+      - {line: "right, im parked", emote: 3}
+      - "right, im rooted"
+      - {line: "right, im unpacking", emote: 2}
+      - {line: "right, im settin up shop", emote: 3}
+      - "right, im diggin in"
+      - {line: "right, im officially a resident", emote: 2}
+      - "sure, im parked"
+      - "sure, im rooted"
+      - "sure, im unpacking"
+      - "sure, im settin up shop"
+      - "sure, im diggin in"
+      - "sure, im officially a resident"
     emote:
       - 2
       - 3
@@ -40,80 +556,978 @@ FollowerBot:
   LeaderLost:
     text:
       - "uh... hello? where'd u go"
-      - {line: "wait- did i just lose them??", emote: 6}
+      - {line: "wait- did i just lose them??", emote: 7}
       - "hmm they were JUST here"
       - "ill wait here a bit i guess..."
-      - {line: "great, separated. classic me.", emote: 7}
-      - "maybe they went to change channels or smth"
+      - "great, separated. classic me."
+      - {line: "maybe they went to change channels or smth", emote: 0}
       - "hellooo? anyone?"
-      - {line: "ok dont panic, they'll be back... right?", emote: 6}
+      - "ok dont panic, theyll be back... right?"
+      - "did they dc? that was fast"
+      - {line: "i looked away for ONE second", emote: 7}
+      - "so this is how it ends"
+      - "boss? boss where u at"
+      - "i blinked and they vanished"
+      - "abandoned. again. cool cool cool"
+      - {line: "was it something i said", emote: 6}
+      - "im alone out here boys"
+      - "guess i live here now"
+      - {line: "they just... evaporated", emote: 6}
+      - "well this is awkward"
+      - "one minute ur here next minute poof"
+      - {line: "i swear they were right there", emote: 6}
+      - "did i follow the wrong person"
+      - "ok so now what"
+      - "this is fine, everything is fine"
+      - "im just gonna stand here then"
+      - {line: "chat did u see where they went", emote: 7}
+      - {line: "they went poof. actual poof.", emote: 6}
+      - "im officially a stray now"
+      - "wtf just happened"
+      - {line: "guess ill just vibe here", emote: 7}
+      - "i took my eyes off for a sec"
+      - "this is my life now"
+      - {line: "boss come back im scared", emote: 0}
+      - {line: "ah yes, abandoned in a field", emote: 6}
+      - "did they fall off the map"
+      - {line: "im talking to myself now", emote: 0}
+      - "rip me i guess"
+      - "ok im waitin, dont leave me hangin"
+      - "they ghosted me, literal ghosted"
+      - "this map is now my prison"
+      - "hello? echo? anything?"
+      - {line: "i think i heard a portal... maybe", emote: 7}
+      - "nope, definitely alone"
+      - "and just like that, solo again"
+      - "im gonna wait, theyll be back"
+      - {line: "uh where'd u go", emote: 7}
+      - {line: "uh did i lose them", emote: 6}
+      - "uh they were just here"
+      - {line: "uh im alone now", emote: 0}
+      - "uh i live here now"
+      - "uh they vanished"
+      - "wait where'd u go"
+      - "wait did i lose them"
+      - "wait they were just here"
+      - {line: "wait im alone now", emote: 0}
+      - "wait i live here now"
+      - "wait they vanished"
+      - "hmm where'd u go"
+      - "hmm did i lose them"
+      - {line: "hmm they were just here", emote: 6}
+      - "hmm im alone now"
+      - "hmm i live here now"
+      - {line: "hmm they vanished", emote: 0}
+      - "ok so where'd u go"
+      - {line: "ok so did i lose them", emote: 0}
+      - "ok so they were just here"
+      - {line: "ok so im alone now", emote: 0}
+      - "ok so i live here now"
+      - "ok so they vanished"
+      - "guess where'd u go"
+      - "guess did i lose them"
+      - "guess they were just here"
+      - {line: "guess im alone now", emote: 0}
+      - "guess they vanished"
+      - "hellooo anyone?"
+      - {line: "hellooo u there?", emote: 6}
+      - "hellooo where u at"
+      - "hellooo come back"
+      - "hellooo see that?"
+      - {line: "hellooo im scared", emote: 6}
+      - {line: "boss anyone?", emote: 6}
+      - "boss u there?"
+      - {line: "boss where u at", emote: 6}
+      - "boss come back"
+      - "boss see that?"
+      - "boss im scared"
+      - "chat anyone?"
+      - "chat u there?"
+      - "chat where u at"
+      - "chat come back"
+      - "chat see that?"
+      - "chat im scared"
+      - "hey anyone?"
+      - "hey u there?"
+      - {line: "hey where u at", emote: 7}
+      - {line: "hey come back", emote: 7}
+      - "hey see that?"
+      - "hey im scared"
+      - {line: "yo anyone?", emote: 7}
+      - "yo u there?"
+      - "yo where u at"
+      - {line: "yo come back", emote: 7}
+      - {line: "yo see that?", emote: 0}
+      - {line: "yo im scared", emote: 6}
+      - "great, separated again"
+      - "great, abandoned again"
+      - {line: "great, im a stray now", emote: 7}
+      - "great, this is my life now"
+      - {line: "great, solo again", emote: 6}
+      - "great, i guess"
+      - "well, separated again"
+      - {line: "well, abandoned again", emote: 0}
+      - "well, im a stray now"
+      - "well, this is my life now"
+      - "well, solo again"
+      - {line: "well, i guess", emote: 0}
+      - "rip me, separated again"
+      - "rip me, abandoned again"
+      - "rip me, im a stray now"
+      - "rip me, this is my life now"
+      - "rip me, solo again"
+      - {line: "rip me, i guess", emote: 0}
+      - "cool, separated again"
+      - "cool, abandoned again"
+      - {line: "cool, im a stray now", emote: 7}
+      - {line: "cool, this is my life now", emote: 0}
+      - "cool, solo again"
+      - {line: "cool, i guess", emote: 7}
+      - "nice, separated again"
+      - "nice, abandoned again"
+      - {line: "nice, im a stray now", emote: 0}
+      - {line: "nice, this is my life now", emote: 7}
+      - "nice, solo again"
+      - "nice, i guess"
+      - {line: "classic, separated again", emote: 7}
+      - "classic, abandoned again"
+      - "classic, im a stray now"
+      - "classic, this is my life now"
+      - "classic, solo again"
+      - "classic, i guess"
+      - "i looked away for one second"
+      - "i looked away and they vanished"
+      - "i looked away and they were gone"
+      - "i looked away they were here"
+      - "i blinked for one second"
+      - "i blinked and they were gone"
+      - "i blinked they were here"
+      - "i took my eyes off for one second"
+      - "i took my eyes off and they vanished"
+      - {line: "i took my eyes off and they were gone", emote: 7}
+      - "i took my eyes off they were here"
+      - "one minute for one second"
+      - {line: "one minute and they vanished", emote: 0}
+      - "one minute and they were gone"
+      - {line: "one minute they were here", emote: 0}
     emote:
-      - 6
       - 0
+      - 6
+      - 7
     wait: 1
 
   PartyFarewell:
     text:
       - "guess the party's over, was fun tho"
-      - {line: "aw, solo life again", emote: 4}
-      - "ok! good runs everyone, cya around"
+      - {line: "aw, solo life again", emote: 0}
+      - {line: "ok! good runs everyone, cya around", emote: 0}
       - "welp, back to my own grind i guess"
-      - {line: "party disbanded huh... it was nice while it lasted", emote: 4}
-      - "gl out there! ill manage on my own ^^"
+      - "party disbanded huh... it was nice while it lasted"
+      - {line: "gl out there! ill manage on my own", emote: 4}
       - "no party no problem, ive got mobs to hit"
-      - {line: "and just like that im a free agent again", emote: 0}
+      - "and just like that im a free agent again"
+      - {line: "back to the solo grind, gg", emote: 0}
+      - "that was fun while it lasted, cya"
+      - {line: "gg everyone, thanks for the exp", emote: 4}
+      - "welp, im on my own again"
+      - "party over, back to reality"
+      - {line: "thx for the run, take care out there", emote: 0}
+      - {line: "see yall around, it was real", emote: 0}
+      - {line: "good run, im out", emote: 0}
+      - {line: "back to being a lone wolf", emote: 0}
+      - "party's done, mobs are still here"
+      - "thanks for carryin me, gl"
+      - "it was good while it lasted"
+      - "aight, im headin out, gg"
+      - {line: "cya, dont be a stranger", emote: 4}
+      - {line: "party disbanded, i return to the shadows", emote: 0}
+      - "that was a good run, thanks"
+      - {line: "time to go find my own mobs again", emote: 0}
+      - "gg wp, im off"
+      - "alright, solo queue it is"
+      - "thanks for havin me, cya"
+      - "party's over, i got exp to chase"
+      - "was nice bein part of something"
+      - "see u around, good luck out there"
+      - "im out, thanks for everything"
+      - "that's a wrap, gg all"
+      - {line: "back to my corner of the world", emote: 0}
+      - {line: "party done, i go back to my cave", emote: 4}
+      - "thanks for the company, cya"
+      - "welp, freedom, i guess"
+      - "good run yall, stay safe"
+      - "im off to grind alone again"
+      - {line: "party over, thanks for the memories", emote: 0}
+      - "cya later, it was a blast"
+      - "im headin back to my spot"
+      - "gg, thanks for the carry"
+      - {line: "that was fun, see yall", emote: 4}
+      - "back to solo life, no hard feelings"
+      - {line: "gg, everyone", emote: 0}
+      - {line: "gg, for the exp", emote: 0}
+      - "gg, for the carry"
+      - "gg, out there"
+      - "gg, around"
+      - "gg, for havin me"
+      - "gg, later"
+      - "cya, everyone"
+      - {line: "cya, for the exp", emote: 4}
+      - "cya, for the carry"
+      - {line: "cya, out there", emote: 0}
+      - "cya, around"
+      - {line: "cya, for havin me", emote: 4}
+      - "cya, later"
+      - "gl, everyone"
+      - "gl, for the exp"
+      - "gl, for the carry"
+      - {line: "gl, out there", emote: 0}
+      - {line: "gl, around", emote: 4}
+      - "gl, for havin me"
+      - {line: "gl, later", emote: 0}
+      - "thx, everyone"
+      - {line: "thx, for the exp", emote: 0}
+      - "thx, for the carry"
+      - "thx, out there"
+      - "thx, around"
+      - "thx, for havin me"
+      - "thx, later"
+      - {line: "thanks, everyone", emote: 0}
+      - "thanks, for the exp"
+      - {line: "thanks, for the carry", emote: 0}
+      - "thanks, out there"
+      - "thanks, around"
+      - {line: "thanks, for havin me", emote: 4}
+      - "thanks, later"
+      - {line: "see yall, everyone", emote: 0}
+      - "see yall, for the exp"
+      - {line: "see yall, for the carry", emote: 4}
+      - "see yall, out there"
+      - "see yall, around"
+      - "see yall, for havin me"
+      - "see yall, later"
+      - "good run, everyone"
+      - "good run, for the exp"
+      - "good run, for the carry"
+      - {line: "good run, out there", emote: 0}
+      - {line: "good run, around", emote: 0}
+      - "good run, for havin me"
+      - "good run, later"
+      - "welp, back to my own grind"
+      - "welp, solo life again"
+      - "welp, back to reality"
+      - {line: "welp, im headin out", emote: 0}
+      - "welp, time to go"
+      - "well, back to my own grind"
+      - {line: "well, im on my own again", emote: 4}
+      - "well, solo life again"
+      - "well, back to reality"
+      - "well, im headin out"
+      - "well, time to go"
+      - {line: "aight, back to my own grind", emote: 4}
+      - {line: "aight, im on my own again", emote: 0}
+      - "aight, solo life again"
+      - "aight, back to reality"
+      - {line: "aight, im headin out", emote: 0}
+      - {line: "aight, time to go", emote: 4}
+      - "ok, back to my own grind"
+      - {line: "ok, im on my own again", emote: 0}
+      - "ok, solo life again"
+      - "ok, back to reality"
+      - "ok, im headin out"
+      - "ok, time to go"
+      - "guess, back to my own grind"
+      - "guess, im on my own again"
+      - "guess, solo life again"
+      - "guess, back to reality"
+      - "guess, im headin out"
+      - {line: "guess, time to go", emote: 0}
+      - "party's over, back to reality"
+      - "party's over, i return to the shadows"
+      - "party's over, no hard feelings"
+      - "party's over, thanks for the memories"
+      - "party's done, back to reality"
+      - "party's done, i got exp to chase"
+      - {line: "party's done, i return to the shadows", emote: 0}
+      - "party's done, no hard feelings"
+      - "party's done, thanks for the memories"
+      - "party's disbanded, back to reality"
+      - "party's disbanded, i got exp to chase"
+      - "party's disbanded, i return to the shadows"
+      - "party's disbanded, no hard feelings"
+      - {line: "party's disbanded, thanks for the memories", emote: 0}
+      - "party's a wrap, back to reality"
+      - {line: "party's a wrap, i got exp to chase", emote: 4}
+      - "party's a wrap, i return to the shadows"
+      - {line: "party's a wrap, no hard feelings", emote: 0}
+      - {line: "party's a wrap, thanks for the memories", emote: 0}
     emote:
-      - 4
       - 0
+      - 4
     wait: 1
 
   LoyalToLeader:
     text:
       - "sry, im already with someone"
-      - {line: "cant, im {PLAYER_NAME}... wait no, im someone else's party lol", emote: 7}
-      - "im spoken for! party rules"
-      - {line: "ask my party leader, i just follow orders ^^", emote: 2}
-      - "loyal to the party, sry"
-      - "cant leave my crew hanging"
+      - {line: "cant, im spoken for lol", emote: 0}
+      - "im taken, ask someone else"
+      - "sorry, i already said yes to someone"
+      - "nope, i stick with my party"
+      - "i got a boss already, sry"
+      - "im booked, try another bot"
+      - "sry, i dont team hop"
+      - {line: "i gave my word, cant leave now", emote: 7}
+      - "already committed, my bad"
+      - "sry, im someones follower already"
+      - "cant do it, im on a job"
+      - "i already signed on with someone"
+      - {line: "sorry, my partys countin on me", emote: 7}
+      - {line: "nope, i dont bail on people", emote: 2}
+      - "i got a leader, sry"
+      - {line: "im already assigned, find another", emote: 2}
+      - {line: "sry, i got someone waitin", emote: 2}
+      - "cant, i made a promise"
+      - "im with my crew right now"
+      - "nope, im currently employed lol"
+      - "sorry, i dont switch sides"
+      - "i got a commitment, my bad"
+      - "already followin someone, sry"
+      - {line: "cant, i owe them one", emote: 0}
+      - "im locked in with my party"
+      - "sry, i got a boss to answer to"
+      - "im taken, good luck tho"
+      - {line: "nope, i ride with my team", emote: 7}
+      - {line: "i already committed, sorry", emote: 7}
+      - "im on contract, cant leave"
+      - "sry, my party needs me"
+      - "cant do it, im already claimed"
+      - "i got tied down already, sry"
+      - {line: "im someones now, ask around", emote: 0}
+      - {line: "sry, im spoken for", emote: 0}
+      - "sry, im taken"
+      - "sry, i already committed"
+      - "sry, i made a promise"
+      - "sry, i got a boss"
+      - {line: "sorry, im already with someone", emote: 0}
+      - "sorry, im spoken for"
+      - "sorry, im taken"
+      - {line: "sorry, i already committed", emote: 2}
+      - "sorry, i made a promise"
+      - "sorry, i dont team hop"
+      - {line: "sorry, i got a boss", emote: 7}
+      - "cant, im already with someone"
+      - {line: "cant, im spoken for", emote: 0}
+      - "cant, im taken"
+      - {line: "cant, i already committed", emote: 2}
+      - "cant, i dont team hop"
+      - "cant, i got a boss"
+      - "nope, im already with someone"
+      - "nope, im spoken for"
+      - "nope, im taken"
+      - "nope, i already committed"
+      - "nope, i made a promise"
+      - "nope, i dont team hop"
+      - "nope, i got a boss"
+      - "my bad, im already with someone"
+      - "my bad, im spoken for"
+      - "my bad, im taken"
+      - "my bad, i already committed"
+      - "my bad, i made a promise"
+      - "my bad, i dont team hop"
+      - "my bad, i got a boss"
+      - "sorry, i stick with my party"
+      - "sorry, i dont bail on people"
+      - "sorry, im locked in with my party"
+      - "sorry, i ride with my team"
+      - "sorry, my party needs me"
+      - "sorry, i owe them one"
+      - {line: "sry, i stick with my party", emote: 7}
+      - "sry, i dont bail on people"
+      - {line: "sry, im locked in with my party", emote: 0}
+      - {line: "sry, i ride with my team", emote: 0}
+      - "sry, i owe them one"
+      - {line: "cant, i stick with my party", emote: 0}
+      - "cant, i dont bail on people"
+      - {line: "cant, im locked in with my party", emote: 0}
+      - "cant, i ride with my team"
+      - {line: "cant, my party needs me", emote: 7}
+      - "nope, im locked in with my party"
+      - {line: "nope, my party needs me", emote: 7}
+      - "nope, i owe them one"
+      - "im already assigned, sry"
+      - "im already assigned, sorry"
+      - "im already assigned, good luck tho"
+      - "im already assigned, ask around"
+      - {line: "im already assigned, try another bot", emote: 7}
+      - {line: "im on contract, sry", emote: 7}
+      - "im on contract, sorry"
+      - "im on contract, good luck tho"
+      - {line: "im on contract, ask around", emote: 2}
+      - "im on contract, find another"
+      - "im on contract, try another bot"
+      - {line: "im currently employed, sry", emote: 7}
+      - "im currently employed, sorry"
+      - "im currently employed, good luck tho"
+      - "im currently employed, ask around"
+      - "im currently employed, find another"
+      - "im currently employed, try another bot"
+      - "im booked, sry"
+      - "im booked, sorry"
+      - {line: "im booked, good luck tho", emote: 2}
+      - {line: "im booked, ask around", emote: 7}
+      - {line: "im booked, find another", emote: 2}
+      - "im claimed, sry"
+      - "im claimed, sorry"
+      - "im claimed, good luck tho"
+      - {line: "im claimed, ask around", emote: 2}
+      - "im claimed, find another"
+      - {line: "im claimed, try another bot", emote: 0}
+      - {line: "im someones now, sry", emote: 0}
+      - "im someones now, sorry"
+      - "im someones now, good luck tho"
+      - {line: "im someones now, find another", emote: 7}
+      - "im someones now, try another bot"
     emote:
       - 0
       - 2
+      - 7
     wait: 1
 
   NoMobsHere:
     text:
       - "train HERE? theres nothing to fight lol"
-      - {line: "uh... i dont see any mobs {PLAYER_NAME}", emote: 6}
+      - "uh... i dont see any mobs"
       - "id love to but the mobs said no (theres none)"
-      - "find us a map with actual monsters first ^^"
-      - {line: "swing at what exactly? the air?", emote: 3}
+      - "find us a map with actual monsters first"
+      - "swing at what exactly? the air?"
       - "no mobs no grind, lead on"
+      - "im lookin around, zero mobs"
+      - "this is a safe zone my dude"
+      - "what am i supposed to hit, the scenery?"
+      - "u brought me to a ghost town"
+      - "not a single snail in sight"
+      - "theres literally nothing here"
+      - {line: "i can hear crickets, no mobs", emote: 6}
+      - "this maps emptier than my wallet"
+      - "u sure this is the right map?"
+      - {line: "ill just fight the air then", emote: 3}
+      - "zero mobs, zero exp, zero point"
+      - "brother there is nothing to kill"
+      - "this is a dating spot not a training spot"
+      - "no mobs here, i checked twice"
+      - "ive been standing here a full minute"
+      - "did someone already farm this clean?"
+      - "i think the mobs are on vacation"
+      - {line: "u prankin me right?", emote: 6}
+      - "this map couldnt kill a fly"
+      - "i could take a nap here safely"
+      - "train where? on the grass?"
+      - "not even a slime, cmon"
+      - "this is a lobby, not a map"
+      - "u want me to grind the npc?"
+      - {line: "i see zero mobs, u see any?", emote: 3}
+      - "this map is dead, straight up"
+      - {line: "wheres the mobs, u ate em?", emote: 6}
+      - "i aint gainin exp off vibes"
+      - "this place is mobs-free certified"
+      - "put me somewhere with actual danger"
+      - "i could scream here and nothing hears me"
+      - "there is nothing to swing at"
+      - "u said grind, i said where"
+      - "this maps got npcs and that's it"
+      - "i think u took a wrong portal"
+      - "zero mobs, maybe try next door"
+      - {line: "this is the safest ive ever felt", emote: 3}
+      - {line: "i can train my patience here i guess", emote: 6}
+      - {line: "no mobs, no exp, no deal", emote: 6}
+      - "theres nothing to fight"
+      - "theres zero mobs"
+      - {line: "theres no mobs", emote: 3}
+      - "theres not a single snail"
+      - "theres nothing here"
+      - "theres nothing to swing at"
+      - "i see nothing to fight"
+      - "i see zero mobs"
+      - {line: "i see no mobs", emote: 3}
+      - "i see not a single snail"
+      - "i see nothing here"
+      - "i see nothing to swing at"
+      - {line: "i count nothing to fight", emote: 3}
+      - "i count zero mobs"
+      - "i count no mobs"
+      - {line: "i count not a single snail", emote: 6}
+      - "i count nothing here"
+      - "i count nothing to swing at"
+      - "theres literally nothing to fight"
+      - {line: "theres literally zero mobs", emote: 6}
+      - {line: "theres literally no mobs", emote: 3}
+      - {line: "theres literally not a single snail", emote: 6}
+      - "theres literally nothing to swing at"
+      - "swing at what? the air?"
+      - "swing at what? the scenery?"
+      - "swing at what? the grass?"
+      - {line: "swing at what? the npc?", emote: 3}
+      - {line: "swing at what? vibes?", emote: 6}
+      - {line: "swing at what? nothing?", emote: 6}
+      - "train where? the air?"
+      - {line: "train where? the scenery?", emote: 6}
+      - {line: "train where? the grass?", emote: 6}
+      - "train where? the npc?"
+      - "train where? vibes?"
+      - {line: "train where? nothing?", emote: 3}
+      - {line: "grind what? the air?", emote: 6}
+      - {line: "grind what? the scenery?", emote: 3}
+      - {line: "grind what? the grass?", emote: 3}
+      - {line: "grind what? the npc?", emote: 3}
+      - {line: "grind what? vibes?", emote: 3}
+      - "grind what? nothing?"
+      - {line: "hit what? the air?", emote: 6}
+      - "hit what? the scenery?"
+      - "hit what? the grass?"
+      - "hit what? the npc?"
+      - "hit what? vibes?"
+      - {line: "hit what? nothing?", emote: 3}
+      - {line: "this map, is a safe zone", emote: 3}
+      - "this map, is emptier than my wallet"
+      - "this map, is a ghost town"
+      - "this map, is dead straight up"
+      - {line: "this map, is mobs-free certified", emote: 3}
+      - "this map, couldnt kill a fly"
+      - "this place, is a safe zone"
+      - "this place, is emptier than my wallet"
+      - {line: "this place, is a ghost town", emote: 3}
+      - "this place, is dead straight up"
+      - {line: "this place, is mobs-free certified", emote: 3}
+      - "this place, couldnt kill a fly"
+      - "this spot, is a safe zone"
+      - "this spot, is emptier than my wallet"
+      - {line: "this spot, is a ghost town", emote: 3}
+      - {line: "this spot, is dead straight up", emote: 3}
+      - "this spot, is mobs-free certified"
+      - "this spot, couldnt kill a fly"
+      - "brother this map, is a safe zone"
+      - "brother this map, is emptier than my wallet"
+      - "brother this map, is a ghost town"
+      - "brother this map, is dead straight up"
+      - "brother this map, is mobs-free certified"
+      - {line: "brother this map, couldnt kill a fly", emote: 3}
+      - "u sure, this is the right map"
+      - "u sure, u took a wrong portal"
+      - {line: "u sure, already farmed this clean", emote: 6}
+      - {line: "u sure, the mobs are on vacation", emote: 6}
+      - {line: "u sure, u prankin me", emote: 3}
+      - {line: "i think, this is the right map", emote: 6}
+      - {line: "i think, u took a wrong portal", emote: 6}
+      - {line: "i think, already farmed this clean", emote: 3}
+      - {line: "i think, the mobs are on vacation", emote: 3}
+      - "i think, u prankin me"
+      - "did someone, this is the right map"
+      - "did someone, u took a wrong portal"
+      - {line: "did someone, already farmed this clean", emote: 6}
+      - {line: "did someone, the mobs are on vacation", emote: 3}
+      - "did someone, u prankin me"
+      - "maybe, this is the right map"
+      - "maybe, u took a wrong portal"
+      - {line: "maybe, already farmed this clean", emote: 3}
+      - "maybe, the mobs are on vacation"
+      - "maybe, u prankin me"
     emote:
-      - 6
       - 3
+      - 6
     wait: 1
 
   Goodbye:
     text:
-      - "ok! ill keep following"
-      - {line: "cya, im right behind u anyway lol", emote: 2}
+      - {line: "ok! ill keep following", emote: 0}
+      - "cya, im right behind u anyway lol"
       - "np, lead on"
-      - "alright, onward ^^"
-      - {line: "ok {PLAYER_NAME}, just say the word when u find a spot", emote: 2}
-      - "got it, still tagging along"
+      - "alright, onward"
+      - {line: "got it, still tagging along", emote: 0}
+      - {line: "ok, back to being ur shadow", emote: 2}
+      - "fine, ill shut up and follow"
+      - "k, im still here if u need me"
+      - "no worries, im not goin anywhere"
+      - "ight, im right here"
+      - "sure thing, following"
+      - "ok, u do u, im followin"
+      - "alright, im quiet now"
+      - "gotcha, ill keep up"
+      - "ok, back to lurking"
+      - "fine, ill just watch ur back"
+      - {line: "k, im trailin u again", emote: 0}
+      - {line: "np, ill be right here", emote: 0}
+      - "ok, u got it boss"
+      - {line: "alright, im your silent partner", emote: 2}
+      - "fine, im followin, no more talkin"
+      - "k, im stickin close"
+      - {line: "ok, ill be ur shadow again", emote: 2}
+      - "ight, im on ur tail"
+      - "sure, ill just vibe back here"
+      - "np, enjoy the free company"
+      - "ok, im goin back to afk-following"
+      - {line: "alright, ill stay quiet", emote: 0}
+      - {line: "got it, im not leavin", emote: 2}
+      - "fine, ill be the quiet type"
+      - "k, u lead ill follow, nuff said"
+      - {line: "ok, ill keep my mouth shut", emote: 2}
+      - {line: "sure thing, im right behind", emote: 2}
+      - "alright, back to business"
+      - "no prob, ill just keep up"
+      - {line: "k, ill stop yappin", emote: 0}
+      - {line: "ok, im ur backpack again", emote: 2}
+      - "fine, im following, happy?"
+      - {line: "np, ill just hang back here", emote: 0}
+      - "ight, u go, i follow, done talkin"
+      - {line: "ok, im back to my post", emote: 2}
+      - "got it, still ur follower"
+      - {line: "alright, ill follow in silence", emote: 0}
+      - "k, im here, as always"
+      - "sure, ill be right behind u"
+      - "ok, ill keep following"
+      - "ok, im right behind u"
+      - {line: "ok, still tagging along", emote: 2}
+      - "ok, im not goin anywhere"
+      - {line: "ok, im still here", emote: 0}
+      - "ok, im stickin close"
+      - "k, ill keep following"
+      - "k, im right behind u"
+      - {line: "k, still tagging along", emote: 2}
+      - "k, im not goin anywhere"
+      - "k, im still here"
+      - {line: "ight, ill keep following", emote: 0}
+      - {line: "ight, im right behind u", emote: 0}
+      - "ight, still tagging along"
+      - "ight, im not goin anywhere"
+      - "ight, im still here"
+      - "ight, im stickin close"
+      - "np, ill keep following"
+      - {line: "np, im right behind u", emote: 0}
+      - "np, still tagging along"
+      - {line: "np, im not goin anywhere", emote: 0}
+      - "np, im still here"
+      - {line: "np, im stickin close", emote: 2}
+      - {line: "fine, ill keep following", emote: 2}
+      - "fine, im right behind u"
+      - {line: "fine, still tagging along", emote: 2}
+      - "fine, im not goin anywhere"
+      - "fine, im still here"
+      - "fine, im stickin close"
+      - "alright, ill keep following"
+      - "alright, im right behind u"
+      - "alright, still tagging along"
+      - "alright, im not goin anywhere"
+      - "alright, im still here"
+      - "alright, im stickin close"
+      - "sure, ill keep following"
+      - "sure, im right behind u"
+      - {line: "sure, still tagging along", emote: 0}
+      - "sure, im not goin anywhere"
+      - "sure, im still here"
+      - "sure, im stickin close"
+      - "got it, ill keep following"
+      - "got it, im right behind u"
+      - {line: "got it, im not goin anywhere", emote: 0}
+      - "got it, im still here"
+      - {line: "got it, im stickin close", emote: 2}
+      - "ok, u do u"
+      - "ok, ill shut up and follow"
+      - "ok, im quiet now"
+      - "ok, ill stop yappin"
+      - "ok, ill stay quiet"
+      - "k, u do u"
+      - "k, ill shut up and follow"
+      - "k, im quiet now"
+      - {line: "k, ill keep my mouth shut", emote: 0}
+      - "k, ill stay quiet"
+      - {line: "fine, u do u", emote: 2}
+      - "fine, im quiet now"
+      - "fine, ill keep my mouth shut"
+      - {line: "fine, ill stop yappin", emote: 2}
+      - "fine, ill stay quiet"
+      - "alright, u do u"
+      - "alright, ill shut up and follow"
+      - "alright, ill keep my mouth shut"
+      - "alright, ill stop yappin"
+      - "no worries, u do u"
+      - "no worries, ill shut up and follow"
+      - "no worries, im quiet now"
+      - "no worries, ill keep my mouth shut"
+      - {line: "no worries, ill stop yappin", emote: 0}
+      - "no worries, ill stay quiet"
+      - "ok, im your silent partner"
+      - "ok, ill be the quiet type"
+      - "ok, back to my post"
+      - "k, back to being ur shadow"
+      - {line: "k, back to lurking", emote: 2}
+      - "k, im your silent partner"
+      - "k, ill be the quiet type"
+      - {line: "k, im ur backpack again", emote: 2}
+      - "k, back to my post"
+      - "sure, back to being ur shadow"
+      - "sure, back to lurking"
+      - "sure, im your silent partner"
+      - "sure, ill be the quiet type"
+      - "sure, im ur backpack again"
+      - {line: "sure, back to my post", emote: 0}
+      - "got it, back to being ur shadow"
+      - {line: "got it, back to lurking", emote: 0}
+      - "got it, im your silent partner"
+      - "got it, ill be the quiet type"
+      - {line: "got it, im ur backpack again", emote: 0}
+      - "got it, back to my post"
+      - "np, back to being ur shadow"
+      - {line: "np, back to lurking", emote: 0}
+      - "np, im your silent partner"
+      - "np, ill be the quiet type"
+      - "np, im ur backpack again"
+      - {line: "np, back to my post", emote: 2}
     emote:
-      - 2
       - 0
+      - 2
     wait: 1
 
   PartyJoined:
     text:
-      - "party accepted! now we're official ^^"
-      - {line: "joined ur party {PLAYER_NAME}, now the exp flows", emote: 2}
+      - "party accepted! now were official"
+      - "joined ur party, now the exp flows"
       - "in! ok now take me somewhere good"
-      - {line: "officially partied up with {PLAYER_NAME}, lets go", emote: 2}
-      - "accepted, we're a real party now hehe"
+      - "officially partied up, lets go"
+      - "accepted, were a real party now hehe"
       - "party get! lead on"
+      - "im in the party, i got a team now"
+      - "accepted! i feel legit now"
+      - "party up! time to actually lvl"
+      - "im in, thanks for the invite"
+      - "official member, reporting for duty"
+      - "party joined, exp share online"
+      - "in the crew now, lets ride"
+      - "accepted, i aint solo no more"
+      - "party get, im someone's teammate now"
+      - "im in, this is my party now too"
+      - "joined! finally got a squad"
+      - "party accepted, i feel important"
+      - {line: "in! now i got people to grind with", emote: 2}
+      - "accepted, lets make this party work"
+      - {line: "party joined, im officially not a stray", emote: 2}
+      - "im in the group, gg"
+      - "got a party! exp rain here we come"
+      - "accepted, now i got backup"
+      - "party up, i brought nothing but vibes"
+      - "im in, u got a follower AND a member"
+      - "joined, im officially employed"
+      - "party get, this is way better than solo"
+      - "in! now i can die with company"
+      - "accepted, im part of the team now"
+      - "party joined, exp please"
+      - "im in, thanks for adoptin me"
+      - "official party member, at ur service"
+      - "joined up, lets get this exp"
+      - "party accepted, i got a family now"
+      - "im in, now i got a reason to lvl"
+      - {line: "accepted! the grind just got easier", emote: 2}
+      - "party up, im ur teammate now"
+      - "joined, i feel like a real player"
+      - {line: "in! thanks for the carry in advance", emote: 3}
+      - {line: "party get, now i can blame someone else", emote: 2}
+      - {line: "im in, this is officially a squad", emote: 2}
+      - "accepted, exp sharing engaged"
+      - "party joined, i belong now"
+      - "im in, lets make some exp happen"
+      - {line: "party accepted! the exp flows", emote: 2}
+      - "party accepted! now i got a team"
+      - {line: "party accepted! i feel legit now", emote: 3}
+      - "party accepted! i aint solo no more"
+      - {line: "party accepted! i belong now", emote: 3}
+      - "joined! now were official"
+      - "joined! the exp flows"
+      - "joined! now i got a team"
+      - {line: "joined! i feel legit now", emote: 2}
+      - {line: "joined! i aint solo no more", emote: 2}
+      - "joined! i belong now"
+      - "in! now were official"
+      - {line: "in! the exp flows", emote: 2}
+      - {line: "in! now i got a team", emote: 2}
+      - {line: "in! i feel legit now", emote: 3}
+      - {line: "in! i aint solo no more", emote: 3}
+      - "in! i belong now"
+      - "accepted! now were official"
+      - "accepted! the exp flows"
+      - "accepted! now i got a team"
+      - "accepted! i aint solo no more"
+      - {line: "accepted! i belong now", emote: 2}
+      - "party get! now were official"
+      - "party get! the exp flows"
+      - "party get! now i got a team"
+      - "party get! i feel legit now"
+      - {line: "party get! i aint solo no more", emote: 2}
+      - "party get! i belong now"
+      - "party up! now were official"
+      - "party up! the exp flows"
+      - {line: "party up! now i got a team", emote: 3}
+      - "party up! i feel legit now"
+      - "party up! i aint solo no more"
+      - {line: "party up! i belong now", emote: 2}
+      - "im in! now were official"
+      - {line: "im in! the exp flows", emote: 3}
+      - "im in! now i got a team"
+      - "im in! i feel legit now"
+      - "im in! i aint solo no more"
+      - "im in! i belong now"
+      - "im in, i got a team now"
+      - "im in, finally got a squad"
+      - "im in, im officially employed"
+      - "im in, i feel important"
+      - "im in, i feel like a real player"
+      - "joined, thanks for the invite"
+      - "joined, i got a team now"
+      - "joined, finally got a squad"
+      - "joined, i feel important"
+      - {line: "accepted, thanks for the invite", emote: 3}
+      - "accepted, i got a team now"
+      - "accepted, finally got a squad"
+      - "accepted, im officially employed"
+      - "accepted, i feel important"
+      - "accepted, i feel like a real player"
+      - "party joined, thanks for the invite"
+      - "party joined, i got a team now"
+      - "party joined, finally got a squad"
+      - "party joined, im officially employed"
+      - {line: "party joined, i feel important", emote: 3}
+      - {line: "party joined, i feel like a real player", emote: 2}
+      - "party up, exp rain here we come"
+      - "party up, this is way better than solo"
+      - "party up, i can die with company"
+      - "party up, the grind just got easier"
+      - {line: "party get, exp rain here we come", emote: 3}
+      - "party get, i brought nothing but vibes"
+      - "party get, i can die with company"
+      - "party get, the grind just got easier"
+      - {line: "joined up, exp rain here we come", emote: 2}
+      - "joined up, this is way better than solo"
+      - {line: "joined up, i brought nothing but vibes", emote: 2}
+      - "joined up, i can die with company"
+      - "joined up, the grind just got easier"
+      - "im in, exp rain here we come"
+      - {line: "im in, this is way better than solo", emote: 3}
+      - {line: "im in, i brought nothing but vibes", emote: 2}
+      - {line: "im in, i can die with company", emote: 3}
+      - {line: "im in, the grind just got easier", emote: 3}
     emote:
       - 2
+      - 3
+    wait: 1
+
+  PlayerReaction:
+    text:
+      - "oh hey"
+      - {line: "oh? a real one", emote: 5}
+      - "wait someones actually here"
+      - {line: "yo", emote: 2}
+      - "hey, u grindin this map too?"
+      - "someones here, i feel alive"
+      - "ohh, company"
+      - {line: "hey man", emote: 5}
+      - "oh look, a person"
+      - {line: "i see u", emote: 2}
+      - {line: "hey dont sneak up like that", emote: 5}
+      - "oh? a rare sighting"
+      - "this map finally got visitors"
+      - {line: "well hello there", emote: 0}
+      - {line: "oh, another human", emote: 5}
+      - "someone actually showed up"
+      - "oh? whos this"
+      - {line: "where u come from", emote: 5}
+      - {line: "someones here, time to look busy", emote: 2}
+      - "oh? we got action"
+      - "hey, i see u over there"
+      - "someones here, dont pretend u dont see me"
+      - "ohh, a big shot walked in"
+      - "hey, ur real right?"
+      - {line: "hey, stop right there", emote: 2}
+      - {line: "someone walked by, say hi", emote: 2}
+      - "oh, a player not a mob"
+      - {line: "hey, u here too?", emote: 5}
+      - "well well well"
+      - "someone, i saw that"
+      - "huh, this maps got people"
+      - {line: "oh? u here to grind too?", emote: 0}
+      - "hey man, dont leave"
+      - "someones here, im standin up"
+      - "ohh, finally not alone"
+      - {line: "hey, come say something", emote: 5}
+      - "i see u, dont hide"
+      - {line: "oh, we got company", emote: 5}
+      - "huh? who goes there"
+      - "hey, hows it goin"
+      - "someones here, let me say hi"
+      - "oh? this maps poppin now"
+      - {line: "hey, freeze", emote: 5}
+      - "someone here, holler"
+      - {line: "ohh, is that a teammate", emote: 0}
+      - {line: "oh, someones here", emote: 5}
+      - {line: "oh, a real one", emote: 2}
+      - "oh, u grindin this map too"
+      - "oh, look who it is"
+      - "oh, i see u"
+      - {line: "hey, someones here", emote: 2}
+      - "hey, a real one"
+      - "hey, u grindin this map too"
+      - "hey, look who it is"
+      - "hey, i see u"
+      - "hey, a player not a mob"
+      - "hey, we got company"
+      - "yo, someones here"
+      - {line: "yo, a real one", emote: 0}
+      - "yo, u grindin this map too"
+      - "yo, look who it is"
+      - "yo, i see u"
+      - "yo, a player not a mob"
+      - "yo, we got company"
+      - "huh, someones here"
+      - "huh, a real one"
+      - {line: "huh, u grindin this map too", emote: 2}
+      - "huh, look who it is"
+      - "huh, i see u"
+      - "huh, a player not a mob"
+      - "huh, we got company"
+      - "well, someones here"
+      - "well, a real one"
+      - {line: "well, u grindin this map too", emote: 5}
+      - "well, look who it is"
+      - "well, i see u"
+      - "well, a player not a mob"
+      - "well, we got company"
+      - "this map got visitors"
+      - {line: "this map got people", emote: 2}
+      - "this map is poppin now"
+      - {line: "this map not alone", emote: 5}
+      - {line: "finally got visitors", emote: 2}
+      - "finally got people"
+      - "finally is poppin now"
+      - "finally not alone"
+      - "today got visitors"
+      - "today got people"
+      - "today is poppin now"
+      - {line: "today not alone", emote: 0}
+      - "ok so got visitors"
+      - "ok so got people"
+      - {line: "ok so is poppin now", emote: 5}
+      - "ok so not alone"
+      - "hey, dont sneak up like that"
+      - "hey, dont leave"
+      - "oh, dont sneak up like that"
+      - "oh, i see u over there"
+      - "oh, come say something"
+      - "oh, stop right there"
+      - "oh, dont leave"
+      - {line: "oh, hows it goin", emote: 5}
+      - "yo, dont sneak up like that"
+      - "yo, i see u over there"
+      - "yo, come say something"
+      - "yo, stop right there"
+      - "yo, dont leave"
+      - {line: "yo, hows it goin", emote: 0}
+    emote:
+      - 0
+      - 2
+      - 5
     wait: 1
