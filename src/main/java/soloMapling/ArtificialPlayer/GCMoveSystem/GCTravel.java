@@ -527,9 +527,11 @@ final class GCTravel {
         // Clear the travel's move intent only — never tear down an active follow session (a
         // follow-driven trip arriving on the target's map must let GCFollow resume same-map follow).
         GCMovement.clearMoveIntent(trip.bot);
-        // A trip can also end mid-crossing (cancelled, or the deck wait timed out): make sure the
-        // bot doesn't keep strolling a deck it is no longer riding.
-        if (BotWanderSystem.isWandering(trip.bot)) {
+        // A trip can also end mid-crossing (cancelled, or the deck wait timed out), and the stroll
+        // must not outlive the ride. Only stop it if the bot is still aboard, though: a trip that
+        // ends on land may be handing the bot straight to something else that wants it walking
+        // (a training bot browsing a shop), and that wander isn't ours to cancel.
+        if (GCTransit.isVehicleMap(trip.bot.getMapId())) {
             BotWanderSystem.stop(trip.bot);
         }
         fire(trip.callback, ok);
