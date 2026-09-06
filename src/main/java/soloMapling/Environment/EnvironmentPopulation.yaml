@@ -138,7 +138,6 @@ waves:
       - {map: 551000000, count: 10, level_lo: 59, level_hi: 100} # Malaysia: Kampung (59-94)
       - {map: 541000000, count: 8,  level_lo: 43, level_hi: 70}  # Boat Quay Town (43-68)
       - {map: 106020000, count: 12, level_lo: 17, level_hi: 60}  # Mushroom Castle (17-59)
-      - {map: 110000000, count: 8,  level_lo: 37, level_hi: 50}  # Gold Beach (37-48)
 
   town_presence:
     enabled: true
