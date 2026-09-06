@@ -166,62 +166,49 @@ waves:
       - name: Kerning City
         level_lo: 15
         level_hi: 70
-        wanderers: 8
+        wanderers: 14
         maps:
-          - {map: 103000000, count: 14}
-          - {map: 103000007, count: 5}
-          - {map: 103000009, count: 4}
-          - {map: 103040000, count: 5}
-          - {map: 103000900, count: 4}
-
+          - {map: 103000000, count: 22}
+          - {map: 103000007, count: 9}
+          - {map: 103040000, count: 9}
       - name: Ellinia
         level_lo: 10
         level_hi: 60
-        wanderers: 6
+        wanderers: 9
         maps:
-          - {map: 101000000, count: 10}
-          - {map: 101000005, count: 4}
-
+          - {map: 101000000, count: 18}
       - name: Perion
         level_lo: 10
         level_hi: 65
-        wanderers: 6
+        wanderers: 9
         maps:
-          - {map: 102000000, count: 10}
-          - {map: 102000005, count: 4}
-
+          - {map: 102000000, count: 18}
       - name: Sleepywood
         level_lo: 25
         level_hi: 80
         wanderers: 6
         maps:
           - {map: 105040300, count: 10}
-
       - name: Orbis
         level_lo: 30
         level_hi: 86
-        wanderers: 8
+        wanderers: 9
         maps:
-          - {map: 200000000, count: 12}
-          - {map: 200000200, count: 5}
-          - {map: 200000301, count: 3}
-
+          - {map: 200000000, count: 14}
+          - {map: 200000200, count: 6}
       - name: Ludibrium
         level_lo: 30
         level_hi: 90
-        wanderers: 9
+        wanderers: 10
         maps:
-          - {map: 220000000, count: 14}
-          - {map: 220000300, count: 4}
-          - {map: 220000003, count: 3}
-
+          - {map: 220000000, count: 16}
+          - {map: 220000300, count: 5}
       - name: Korean Folk Town
         level_lo: 30
         level_hi: 70
         wanderers: 8
         maps:
           - {map: 222000000, count: 13}
-
       - name: Aquarium
         level_lo: 30
         level_hi: 80
@@ -230,14 +217,12 @@ waves:
           - {map: 230000000, count: 4}
           - {map: 230000001, count: 3}
           - {map: 230000002, count: 3}
-
       - name: Leafre
         level_lo: 70
         level_hi: 120
         wanderers: 8
         maps:
           - {map: 240000000, count: 11}
-
       - name: Mu Lung
         level_lo: 30
         level_hi: 95
@@ -245,14 +230,12 @@ waves:
         maps:
           - {map: 250000000, count: 11}
           - {map: 250000100, count: 4}
-
       - name: Herb Town
         level_lo: 40
         level_hi: 90
         wanderers: 5
         maps:
           - {map: 251000000, count: 8}
-
       - name: Ariant
         level_lo: 30
         level_hi: 90
@@ -261,7 +244,6 @@ waves:
           - {map: 260000000, count: 11}
           - {map: 260000200, count: 4}
           - {map: 260000303, count: 3}
-
       - name: Magatia
         level_lo: 30
         level_hi: 90
@@ -270,21 +252,18 @@ waves:
           - {map: 261000000, count: 9}
           - {map: 261000001, count: 4}
           - {map: 261000002, count: 3}
-
       - name: Arta Camp
         level_lo: 30
         level_hi: 70
         wanderers: 4
         maps:
           - {map: 300000000, count: 4}
-
       - name: Time Temple
         level_lo: 90
         level_hi: 150
         wanderers: 4
         maps:
           - {map: 270000000, count: 4}
-
       - name: New Leaf City
         level_lo: 30
         level_hi: 95
@@ -292,31 +271,27 @@ waves:
         maps:
           - {map: 600000000, count: 14}
           - {map: 600000001, count: 6}
-
       - name: Singapore CBD
         level_lo: 30
         level_hi: 80
         wanderers: 8
         maps:
           - {map: 540000000, count: 12}
-
       - name: Shanghai Bund
         level_lo: 30
         level_hi: 80
         wanderers: 7
         maps:
           - {map: 701000000, count: 10}
-
       - name: Nautilus
         level_lo: 10
         level_hi: 70
         wanderers: 5
         maps:
-          - {map: 120000000, count: 4}   # 诺特勒斯号码头 (main deck, taxi)
-          - {map: 120000100, count: 2}   # 上层走廊
-          - {map: 120000200, count: 2}   # 中央走廊
-          - {map: 120000300, count: 2}   # 下层走廊
-
+          - {map: 120000000, count: 4}
+          - {map: 120000100, count: 2}
+          - {map: 120000200, count: 2}
+          - {map: 120000300, count: 2}
       - name: Gold Beach
         level_lo: 30
         level_hi: 60
@@ -326,217 +301,156 @@ waves:
           - {map: 120000100, count: 2}
           - {map: 120000200, count: 2}
           - {map: 120000300, count: 2}
-
       - name: Mushroom Forest Path
         level_lo: 10
         level_hi: 40
         wanderers: 4
         maps:
           - {map: 106020000, count: 5}
-
       - name: Earth Defense HQ
         level_lo: 30
         level_hi: 80
         wanderers: 5
         maps:
           - {map: 221000000, count: 8}
-
       - name: Boat Quay Town
         level_lo: 30
         level_hi: 80
         wanderers: 5
         maps:
           - {map: 541000000, count: 6}
-
       - name: Shanghai Yu Garden
         level_lo: 30
         level_hi: 80
         wanderers: 5
         maps:
           - {map: 701000200, count: 8}
-
       - name: Songshan Town
         level_lo: 30
         level_hi: 90
         wanderers: 7
         maps:
           - {map: 702000000, count: 10}
-
       - name: Mushroom Shrine
         level_lo: 30
         level_hi: 90
         wanderers: 6
         maps:
           - {map: 800000000, count: 8}
-
       - name: Showa Village
         level_lo: 30
         level_hi: 90
         wanderers: 5
         maps:
           - {map: 801000000, count: 7}
-
       - name: Trend Zone
         level_lo: 30
         level_hi: 90
         wanderers: 5
         maps:
           - {map: 550000000, count: 7}
-
       - name: Kampung Village
         level_lo: 30
         level_hi: 90
         wanderers: 4
         maps:
           - {map: 551000000, count: 5}
-
       - name: Shanghai City Plaza
         level_lo: 30
         level_hi: 80
         wanderers: 4
         maps:
           - {map: 701000100, count: 6}
-
       - name: Mahavira Hall
         level_lo: 30
         level_hi: 80
         wanderers: 3
         maps:
           - {map: 702100000, count: 5}
-
       - name: Showa Shopping Street
         level_lo: 30
         level_hi: 90
         wanderers: 4
         maps:
           - {map: 801000300, count: 6}
-
       - name: Orbis Park
         level_lo: 30
         level_hi: 86
         wanderers: 4
         maps:
           - {map: 200000200, count: 5}
-
       - name: El Nath Chief Hall
         level_lo: 50
         level_hi: 85
         wanderers: 3
         maps:
           - {map: 211000001, count: 4}
-
       - name: Mu Lung Temple
         level_lo: 30
         level_hi: 95
         wanderers: 3
         maps:
           - {map: 250000100, count: 4}
-
       - name: Priest Forest
         level_lo: 70
         level_hi: 120
         wanderers: 3
         maps:
           - {map: 240010501, count: 4}
-
       - name: Ariant Residence
         level_lo: 30
         level_hi: 90
         wanderers: 3
         maps:
           - {map: 260000200, count: 4}
-
       - name: Alchemist House
         level_lo: 30
         level_hi: 90
         wanderers: 3
         maps:
           - {map: 261000001, count: 4}
-
       - name: Defense HQ Hangar
         level_lo: 30
         level_hi: 80
         wanderers: 3
         maps:
           - {map: 221000200, count: 4}
-
       - name: NLC Shopping Centre
         level_lo: 30
         level_hi: 95
         wanderers: 4
         maps:
           - {map: 600000001, count: 6}
-
       - name: Henesys Park
         level_lo: 10
         level_hi: 60
-        wanderers: 4
+        wanderers: 5
         maps:
-          - {map: 100000200, count: 5}
-
+          - {map: 100000200, count: 9}
       - name: Henesys Pet Park
         level_lo: 10
         level_hi: 60
         wanderers: 4
         maps:
           - {map: 100000202, count: 6}
-
       - name: Kerning Night Market
         level_lo: 15
         level_hi: 70
         wanderers: 4
         maps:
           - {map: 103000007, count: 5}
-
-      - name: Kerning Thief Hall
-        level_lo: 15
-        level_hi: 70
-        wanderers: 3
-        maps:
-          - {map: 103000009, count: 4}
-
-      - name: Henesys Archer Hall
-        level_lo: 10
-        level_hi: 60
-        wanderers: 3
-        maps:
-          - {map: 100000205, count: 4}
-
-      - name: Perion Warrior Hall
-        level_lo: 10
-        level_hi: 65
-        wanderers: 3
-        maps:
-          - {map: 102000005, count: 4}
-
-      - name: Ellinia Magician Hall
-        level_lo: 10
-        level_hi: 60
-        wanderers: 3
-        maps:
-          - {map: 101000005, count: 4}
-
-      - name: Kerning Line 3 Site
-        level_lo: 15
-        level_hi: 50
-        wanderers: 3
-        maps:
-          - {map: 103000900, count: 4}
-
       - name: Excavation Camp
         level_lo: 20
         level_hi: 60
         wanderers: 3
         maps:
           - {map: 101030104, count: 4}
-
       - name: Henesys East Brushwood
         level_lo: 10
         level_hi: 40
         wanderers: 3
         maps:
           - {map: 100020000, count: 4}
-
       - name: El Nath
         level_lo: 50
         level_hi: 85

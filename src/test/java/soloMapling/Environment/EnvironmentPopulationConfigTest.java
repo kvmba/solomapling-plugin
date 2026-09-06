@@ -36,7 +36,7 @@ class EnvironmentPopulationConfigTest {
         assertTrue(plan.loadedFrom() != null && !plan.loadedFrom().isBlank());
 
         var towns = TownPresenceConfig.towns();
-        assertEquals(51, towns.size());
+        assertEquals(46, towns.size());
         int social = towns.stream().flatMap(t -> t.maps().stream()).mapToInt(m -> m.count()).sum();
         int wanderers = towns.stream().mapToInt(t -> t.wanderers()).sum();
         assertEquals(442, social);
