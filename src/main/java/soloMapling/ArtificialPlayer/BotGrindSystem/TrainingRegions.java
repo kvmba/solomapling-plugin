@@ -67,16 +67,32 @@ public final class TrainingRegions {
      */
     /*
      * The rungs, in the order a bot outgrows them. Level is when this landmass stops being worth it:
-     * the beginner island at 8 (which is also when Sanks will take you), Victoria around 35 — its
-     * fields top out near 60, but players are on a boat to Orbis long before then — and so on up.
+     * the beginner island at 8 (also the level Sanks asks for), Victoria at 31 — second job is 30,
+     * and that is when players take the boat out, well before its fields top out — and so on up.
      */
     private static final int BEGINNER_MIGRATE_LEVEL = 8;
     private static final int[][] MIGRATION_LADDER = {
-            {100000000, 35},   // Victoria Island
+            // Victoria at 31: second job is 30, and that is when players stop training on the island
+            // and take the boat to Orbis — not when its fields finally top out.
+            {100000000, 31},
             {200000000, 75},   // Orbis / El Nath
             {240000000, 100},  // Leafre
             {270000000, 999},  // Time Temple: the end of the ladder
     };
+
+    /**
+     * One rung back down, for a bot that feels like visiting: players drift back to the continents
+     * they came from, and without it the low continents are emptied of everyone but beginners.
+     * Returns 0 for the bottom rung, which has nowhere to go back to.
+     */
+    public static int returnTarget(int homeMapId) {
+        for (int i = 0; i < MIGRATION_LADDER.length; i++) {
+            if (MIGRATION_LADDER[i][0] == homeMapId) {
+                return i > 0 ? MIGRATION_LADDER[i - 1][0] : 0;
+            }
+        }
+        return 0; // not on the ladder
+    }
 
     public static int migrationTarget(int homeMapId, int level) {
         // The beginner island is anywhere below Victoria's id range; a bot leaves it the moment it

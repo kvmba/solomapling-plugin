@@ -478,12 +478,33 @@ public class TrainingBot extends BotSM implements GrindTickRegistry.Participant 
      * so it rides the same crossings — ferry, Hak, the travel agency — and the bot is visible waiting
      * at the terminal and aboard like anyone else. Returns true if a migration was started.
      */
+    /*
+     * Chance a settled bot drifts back to the continent below instead of pressing on upward, and
+     * how long it stays once it has: without the visit the low continents keep nobody but beginners,
+     * and without a long stay it would be bounced straight back out by its own level the moment it
+     * arrived. Getting there is a boat or a flight, so a visit is an afternoon at least — a bot that
+     * crossed the world for ten minutes would look silly.
+     */
+    private static final double RETURN_VISIT_CHANCE = 0.20;
+    private static final long RETURN_VISIT_MIN_MS = 90 * 60 * 1000L;   // 1.5 h
+    private static final long RETURN_VISIT_MAX_MS = 240 * 60 * 1000L;  // 4 h
+    private long returnVisitUntilMs;
+
     private boolean startMigration() {
         Character chr = getChr();
         if (homeMapId < 0 || currentTrainMapId < 0) {
             return false; // not settled anywhere yet
         }
         int dest = TrainingRegions.migrationTarget(homeMapId, chr.getLevel());
+        if (dest <= 0 && now() > returnVisitUntilMs
+                && rng.nextDouble() < RETURN_VISIT_CHANCE) {
+            // Not outgrowing anything — just feel like going back for a while.
+            dest = TrainingRegions.returnTarget(homeMapId);
+            if (dest > 0) {
+                returnVisitUntilMs = now() + RETURN_VISIT_MIN_MS
+                        + (long) (rng.nextDouble() * (RETURN_VISIT_MAX_MS - RETURN_VISIT_MIN_MS));
+            }
+        }
         if (dest <= 0 || dest == homeMapId) {
             return false; // this continent still has mobs worth the bot's time
         }
