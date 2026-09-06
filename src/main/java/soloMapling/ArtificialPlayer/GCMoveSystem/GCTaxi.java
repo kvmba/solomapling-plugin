@@ -57,12 +57,18 @@ final class GCTaxi {
      * Hak (2090005) flies the whale route between the continents. Orbis Sky<->Mu Lung runs through
      * the Hak event; Mu Lung<->Herb Town is a plain warp on the same NPC, but reads identically to
      * the bot (walk up, stand a beat, arrive), so it rides the same edge shape.
+     *
+     * The Shanghai flight needs the zh-CN script pack: 9310000 flies Perion -> Bund and 9310013
+     * flies back from the Plaza. Outbound and inbound are different NPCs because each one only
+     * offers the leg that starts on its own continent.
      */
     private static final int[][] NPC_RIDES = {
             {200000141, 2090005, 250000100}, // Hak: Orbis Sky -> Mu Lung
             {250000100, 2090005, 200000141}, // Hak: Mu Lung -> Orbis Sky
             {250000100, 2090005, 251000000}, // Hak: Mu Lung -> Herb Town
             {251000000, 2090005, 250000100}, // Hak: Herb Town -> Mu Lung
+            {102000000, 9310000, 701000000}, // Pilot Hong: Perion -> Shanghai Bund
+            {701000100, 9310013, 102000000}, // Pilot Hong: Shanghai Plaza -> Perion
     };
 
     private static final Map<Integer, List<TransitEdge>> BY_FROM = buildEdges();
@@ -80,17 +86,20 @@ final class GCTaxi {
                     edges.add(new TransitEdge(from[0], from[1], to[0]));
                 }
             }
-            byFrom.put(from[0], List.copyOf(edges));
+            byFrom.put(from[0], edges);
         }
         for (int[] ride : NPC_RIDES) {
             // same version gate: don't offer a ride into or out of gated content
             if (!isPortalinCurrentVersion(ride[0]) || !isPortalinCurrentVersion(ride[2])) {
                 continue;
             }
+            // a ride may start in a town that already has cabs — append, don't replace
             byFrom.computeIfAbsent(ride[0], k -> new ArrayList<>())
                     .add(new TransitEdge(ride[0], ride[1], ride[2]));
         }
-        return Map.copyOf(byFrom);
+        Map<Integer, List<TransitEdge>> frozen = new HashMap<>();
+        byFrom.forEach((k, v) -> frozen.put(k, List.copyOf(v)));
+        return Map.copyOf(frozen);
     }
 
     static List<TransitEdge> from(int mapId) {

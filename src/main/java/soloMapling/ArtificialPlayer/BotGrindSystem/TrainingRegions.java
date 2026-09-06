@@ -17,6 +17,7 @@ public final class TrainingRegions {
             {211000000, 212000000}, // El Nath (town + dungeon: Ice Valley, Wolf Territory, Sharp Cliff, Dead Mine)
             {220000000, 223000000}, // Ludibrium continent: Ludibrium + Eos Tower + Deep Ludi, plus Omega Sector / Korean Folk Town (original v83)
             {250000000, 252000000}, // Mu Lung + Herb Town — reachable via Hak (2090005) from Orbis Sky
+            {700000000, 783000000}, // Shanghai: Bund, Plaza, and the mainland maps behind them (up to 782000002)
     };
 
     public static boolean isAllowed(int mapId) {
