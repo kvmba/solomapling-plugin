@@ -26,6 +26,7 @@ import static soloMapling.FreeMarket.ArtificialShopGenerator.generateItem;
 import static soloMapling.FreeMarket.ArtificialShopGenerator.generatePotionsList;
 import static soloMapling.FreeMarket.ArtificialShopGenerator.generateScrollsList;
 import static soloMapling.FreeMarket.ArtificialShopGenerator.generateThiefStarsList;
+import static soloMapling.FreeMarket.FMEconomyManager.formatPriceToShorthand;
 import static soloMapling.FreeMarket.FMEconomyManager.priceAdjustmentRules;
 import static soloMapling.itemPool.ItemInformationProviderUtilities.getItemName;
 import static soloMapling.itemPool.ItemUtilities.getItemMarketValue;
@@ -114,19 +115,60 @@ public class SellingMerchantBot extends BotSM {
         }
         String itemName = getItemName(itm.getItemId());
         if (itemName != null) {
-            String msg = buildSellingMessage(this, itemName);
+            String msg = buildSellingMessage(this, itemName, itm.getPrice());
             if (msg != null) {
                 SocialCommands.BotSpeak(getChr(), msg);
             }
         }
     }
 
-    static String buildSellingMessage(BotSM bot, String itemName) {
-        String template = getRandomResolvedLine(bot, "SellAdvertise");
+    /**
+     * Draws a SellAdvertise template that asks for offers instead of quoting a price
+     * ("卖 X 你出价"). Used when the item has no price set.
+     *
+     * <p>Only a minority of templates are price-free, so this redraws a few times before giving up;
+     * the caller then falls back to quoting a made-up price.
+     */
+    private static String pickBargainingTemplate(BotSM bot) {
+        String last = null;
+        for (int attempt = 0; attempt < 6; attempt++) {
+            String template = getRandomResolvedLine(bot, "SellAdvertise");
+            if (template == null) {
+                return null;
+            }
+            if (!template.contains("%PRICE%")) {
+                return template;
+            }
+            last = template;
+        }
+        return last;
+    }
+
+    /** A plausible asking price for an item whose price is unset - see buildSellingMessage. */
+    private static int makeUpPrice() {
+        return 5_000_000 + random.nextInt(45_000_000);
+    }
+
+    /**
+     * Builds the shout from a SellAdvertise template, substituting {@code %ITEM%} and
+     * {@code %PRICE%}.
+     *
+     * <p>Templates may carry {@code %ITEM%} and {@code %PRICE%}; both must be substituted before the
+     * line is spoken, or the bot shouts a literal placeholder. When the item has no usable price
+     * ({@code -1}, the FMItem unset sentinel) we prefer a bargaining template ("卖 X 你出价") over
+     * quoting a number, and only fall back to a made-up price - never a bare "%PRICE%".
+     */
+    static String buildSellingMessage(BotSM bot, String itemName, int price) {
+        String template = price > 0
+                ? getRandomResolvedLine(bot, "SellAdvertise")
+                : pickBargainingTemplate(bot);
         if (template == null) {
             return null;
         }
-        String msg = template.replace("%ITEM%", itemName);
+        int advertised = price > 0 ? price : makeUpPrice();
+        String msg = template
+                .replace("%ITEM%", itemName)
+                .replace("%PRICE%", formatPriceToShorthand(advertised));
 
         int fillerCount = random.nextInt(4);
         for (int i = 0; i < fillerCount; i++) {
