@@ -121,15 +121,24 @@ waves:
       - {map: 230000000, count: 12, level_lo: 30, level_hi: 80}  # Aquarium
       - {map: 240000000, count: 20, level_lo: 70, level_hi: 120} # Leafre (gate 70)
       - {map: 250000000, count: 14, level_lo: 30, level_hi: 95}  # Mu Lung
-      - {map: 251000000, count: 10, level_lo: 30, level_hi: 80}  # Herb Town
+      - {map: 251000000, count: 10, level_lo: 40, level_hi: 90}  # Herb Town (lowest mob 47)
       - {map: 260000000, count: 14, level_lo: 30, level_hi: 90}  # Ariant
       - {map: 261000000, count: 10, level_lo: 30, level_hi: 90}  # Magatia
       - {map: 300000000, count: 8,  level_lo: 30, level_hi: 70}  # Arta Camp
       - {map: 270000000, count: 10, level_lo: 90, level_hi: 150} # Time Temple (gate 90)
       - {map: 600000000, count: 14, level_lo: 30, level_hi: 95}  # New Leaf City
       - {map: 540000000, count: 8,  level_lo: 30, level_hi: 80}  # Singapore CBD
-      - {map: 110000000, count: 8,  level_lo: 20, level_hi: 60}  # Gold Beach (crab beaches)
+      - {map: 110000000, count: 8,  level_lo: 30, level_hi: 60}  # Gold Beach (lowest mob 37)
       - {map: 221000000, count: 8,  level_lo: 30, level_hi: 80}  # Earth Defense HQ
+      - {map: 702000000, count: 14, level_lo: 30, level_hi: 100} # Songshan Town (30 hunting maps)
+      - {map: 701000200, count: 10, level_lo: 30, level_hi: 90}  # Shanghai Yu Garden
+      - {map: 800000000, count: 12, level_lo: 30, level_hi: 90}  # Mushroom Shrine (lv 8-115)
+      - {map: 801000000, count: 10, level_lo: 45, level_hi: 120} # Showa Village (lv 43-130)
+      - {map: 550000000, count: 8,  level_lo: 45, level_hi: 70}  # Malaysia: Trend Zone (45-65)
+      - {map: 551000000, count: 10, level_lo: 59, level_hi: 100} # Malaysia: Kampung (59-94)
+      - {map: 541000000, count: 8,  level_lo: 43, level_hi: 70}  # Boat Quay Town (43-68)
+      - {map: 106020000, count: 12, level_lo: 17, level_hi: 60}  # Mushroom Castle (17-59)
+      - {map: 110000000, count: 8,  level_lo: 37, level_hi: 50}  # Gold Beach (37-48)
 
   town_presence:
     enabled: true
@@ -212,8 +221,8 @@ waves:
           - {map: 250000000, count: 11}
 
       - name: Herb Town
-        level_lo: 30
-        level_hi: 80
+        level_lo: 40
+        level_hi: 90
         wanderers: 4
         maps:
           - {map: 251000000, count: 8}
@@ -278,7 +287,7 @@ waves:
           - {map: 120000300, count: 2}   # 下层走廊
 
       - name: Gold Beach
-        level_lo: 20
+        level_lo: 30
         level_hi: 60
         wanderers: 4
         maps:
@@ -311,6 +320,13 @@ waves:
         wanderers: 4
         maps:
           - {map: 701000200, count: 8}
+
+      - name: Songshan Town
+        level_lo: 30
+        level_hi: 90
+        wanderers: 5
+        maps:
+          - {map: 702000000, count: 10}
 
       - name: Mushroom Shrine
         level_lo: 30

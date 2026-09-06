@@ -19,15 +19,16 @@ public final class TrainingRegions {
     private static final int[][] ALLOWED = {
             {0, 60002, 1},              // Beginner island: Mushroom Town, Snail Garden, Southperry and
                                         // their hunting grounds (map ids run 0..60001, below Victoria)
-            {110000000, 110040001, 1},  // Gold Beach (黄金海滩): reached by boat from Lith, Orbis or
-                                        // Ludibrium; its crab beaches are the only hunting grounds.
+            {110000000, 110040001, 30}, // Gold Beach (黄金海滩): reached by boat from Lith, Orbis or
+                                        // Ludibrium. Gated at 30 — its lowest mob is 37.
             {120000000, 120010001, 1},  // Nautilus (诺特勒斯号码头): the pirate town, walked to from
                                         // Henesys' east woods. All town, no hunting grounds.
             {100000000, 110000000, 1},  // Victoria Island + Sleepywood (Henesys/Ellinia/Perion/Kerning/Lith + fields/dungeons)
             {200000000, 201000000, 30}, // Orbis (town, tower, cloud park, sky fields)
             {211000000, 212000000, 30}, // El Nath (town + dungeon: Ice Valley, Wolf Territory, Sharp Cliff, Dead Mine)
             {220000000, 223000000, 30}, // Ludibrium continent: Ludibrium + Eos Tower + Deep Ludi, plus Omega Sector / Korean Folk Town (original v83)
-            {250000000, 252000000, 30}, // Mu Lung + Herb Town — reachable via Hak (2090005) from Orbis Sky
+            {250000000, 251000000, 30}, // Mu Lung — reachable via Hak (2090005) from Orbis Sky
+            {251000000, 252000000, 40}, // Herb Town (百草堂) — its own gate: lowest mob is 47
             {700000000, 783000000, 1},  // Shanghai: Bund, Plaza, and the mainland maps behind them (up to 782000002)
             {230000000, 231000000, 30}, // Aquarium — plain portals in from Orbis Tower / the storybook well
             {240000000, 241000000, 70}, // Leafre — reachable via the Cabin from Orbis
@@ -36,6 +37,8 @@ public final class TrainingRegions {
                                         // Not Rien (里恩, 140000000): that one stays out, see docs.
             {600000000, 601000000, 1},  // New Leaf City — reachable by subway from Kerning
             {540000000, 542000000, 1},  // Singapore (CBD) — reachable by plane from Kerning
+            {702000000, 703000000, 1},  // Songshan Town (嵩山镇, Mount Song / Shaolin): reached
+                                        // through the travel agency's "东方神州" list.
             {800000000, 802000000, 30}, // Japan: Mushroom Shrine (古代神社) + Showa Village (昭和村).
                                         // Reached through the Maple Travel Agency (9000020), which
                                         // stands in every major town. No hunting grounds here — a
