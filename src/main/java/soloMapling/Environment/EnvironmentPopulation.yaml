@@ -100,7 +100,9 @@ waves:
       map: 100000000
       hops: 1
     cohorts:
-      # Beginner island (彩虹岛): bots start their life on these hunting grounds.
+      # Beginner island (彩虹岛): where bots start, and where they grind the few levels they need
+      # before Sanks rows them out. Nobody lives here — it gets training cohorts but no townsfolk,
+      # since a bot that stays on the island is a bot that never left.
       - {map: 50001, count: 10, level_lo: 1, level_hi: 10}    # 南港西郊平原
       - {map: 40000, count: 8,  level_lo: 1, level_hi: 8}     # 小树林
       - {map: 2,     count: 6,  level_lo: 1, level_hi: 6}     # 番茄田
@@ -492,14 +494,6 @@ waves:
         wanderers: 3
         maps:
           - {map: 101000005, count: 4}
-
-      - name: Beginner Island
-        level_lo: 1
-        level_hi: 10
-        wanderers: 4
-        maps:
-          - {map: 60000, count: 5}   # 南港
-          - {map: 2, count: 3}       # 番茄田
 
       - name: Kerning Line 3 Site
         level_lo: 15
