@@ -21,6 +21,7 @@ import java.util.List;
 import static soloMapling.ArtificialPlayer.BotCommandsPack.SocialCommands.BotSpeak;
 import static soloMapling.ArtificialPlayer.BotHelpers.isBot;
 import static soloMapling.BotLogger.log;
+import static soloMapling.server.SoloMaplingUtilities.random;
 
 // A recruited companion: follows one real player everywhere. The heavy lifting is the GC follow
 // engine (50ms same-map tailing + 400ms cross-map session that travels portal chains and redirects
@@ -40,6 +41,12 @@ public class FollowerBot extends BotSM {
     private static final long FOLLOW_TICK_MS = 750;
     private static final long LEADER_LOST_GRACE_MS = 90_000;
 
+    // Idle chatter while tailing the leader, so the ride isn't a silent walk. Tighter than
+    // TrainingBot's GrindAmbient (2-4 min): the leader is a person walking alongside, and a
+    // companion that only speaks every few minutes reads as broken mid-conversation.
+    private static final long AMBIENT_MIN_MS = 60_000;       // min gap between follow lines (1 min)
+    private static final long AMBIENT_MAX_MS = 180_000;      // max gap (3 min)
+
     private enum FollowPhase { INIT, FOLLOW, LEADER_LOST }
 
     // Written on the macro tick, read from menu callbacks - keep volatile.
@@ -48,6 +55,7 @@ public class FollowerBot extends BotSM {
     private volatile long leaderLostSinceMs = 0;
     private volatile boolean wasPartied = false;
     private volatile boolean pausedForTrade = false;
+    private long nextChatterMs = 0;        // throttle gate for the follow-ambient line
 
     // Simulated potion use: a follower walks into its leader's fights and takes the
     // same contact damage, with no survival loop of its own to recover from it.
@@ -165,6 +173,10 @@ public class FollowerBot extends BotSM {
         wasPartied = chr.getParty() != null;
         GCMovement.follow(chr, leader);
         sayNode("FollowStart", leader);
+        // Arm the ambient gate now: otherwise the first FOLLOW tick (750ms later) would fire a
+        // FollowAmbient line right on top of the FollowStart greeting.
+        nextChatterMs = now() + AMBIENT_MIN_MS
+                + (long) (random.nextDouble() * (AMBIENT_MAX_MS - AMBIENT_MIN_MS));
         followPhase = FollowPhase.FOLLOW;
     }
 
@@ -190,6 +202,22 @@ public class FollowerBot extends BotSM {
             // the freshly resolved leader Character makes the new session current).
             GCMovement.follow(chr, leader);
         }
+        maybeFollowChatter(leader);
+    }
+
+    // Occasional mutter while tailing the leader (FollowAmbient). Spoken on the move - no movement
+    // change, the follow session keeps driving. sayNode holds the observed gate, so an unobserved
+    // walker stays silent; the timer advances regardless so it doesn't re-roll every 750ms tick.
+    private void maybeFollowChatter(Character leader) {
+        long t = now();
+        if (t < nextChatterMs) {
+            return;
+        }
+        nextChatterMs = t + AMBIENT_MIN_MS + (long) (random.nextDouble() * (AMBIENT_MAX_MS - AMBIENT_MIN_MS));
+        if (menu.isActive()) {
+            return; // the player is reading the menu - don't talk over the options
+        }
+        sayNode("FollowAmbient", leader);
     }
 
     private void doLeaderLost() {
