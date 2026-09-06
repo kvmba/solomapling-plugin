@@ -49,7 +49,7 @@ public final class GCTransit {
     }
 
     /* True if this vehicle is big enough that a bot should stroll it rather than stand still. */
-    public static boolean isSpaciousVehicle(int mapId) {
+    static boolean isSpaciousVehicle(int mapId) {
         return SPACIOUS.contains(mapId);
     }
 
@@ -63,7 +63,7 @@ public final class GCTransit {
      * Whether something has boarded mid-crossing. Only the boat does this, and it flags it on the
      * event so the decks can react; every other vehicle crosses unmolested.
      */
-    public static boolean isUnderAttack(Character bot) {
+    static boolean isUnderAttack(Character bot) {
         MapleMap map = bot == null ? null : bot.getMap();
         if (map == null || map.getChannelServer() == null || !ATTACKABLE.contains(bot.getMapId())) {
             return false;
@@ -76,7 +76,7 @@ public final class GCTransit {
      * Where to go when something boards: the hatch down to the cabin (the deck's "in00" portal),
      * which is the same way players duck below. Null if this map has no hatch.
      */
-    public static Point hatchPos(MapleMap map) {
+    static Point hatchPos(MapleMap map) {
         if (map == null) {
             return null;
         }
