@@ -105,57 +105,49 @@ class BotIgnWordListTest {
         }
     }
 
-    // Characters the v83-era client font can actually draw. A name is rendered with the game's
-    // own font, so anything outside this set shows up as '?' or a tofu box - which is exactly
-    // how "?等等等等" reached players: the pool had picked up U+10E6 GEORGIAN (ღ), modern-looking
-    // dingbats (✨ ❥ ❦ ❧) and spare Misc Symbols (☀ ☁ ☂ ☃ ◈ ◉) that no 2008-2010 client can draw.
-    //
-    // Deliberately conservative: an unusual glyph renders as garbage, whereas a plain name is
-    // always fine. When adding a symbol, check it against the fonts an old MapleStory client
-    // uses (宋体 / MS Gothic), not against a modern system font.
-    private static final Set<Integer> ALLOWED_SYMBOLS = Set.of(
-            0x4E36,  // 丶
-            0x7070,  // 灬
-            0x4E28,  // 丨
-            0x306E,  // の
-            0x309B,  // ゛
-            0x309C,  // ゜
-            0x301C,  // 〜
-            0xFF5E,  // ～
-            0x00B0,  // °
-            0x266A,  // ♪
-            0x2605,  // ★
-            0x2606,  // ☆
-            0x2661,  // ♡
-            0x2665,  // ♥
-            0x273F,  // ✿
-            0x2740,  // ❀
-            0x2741,  // ❁
-            0x273E,  // ✾
-            0x25C6,  // ◆
-            0x25C7,  // ◇
-            0x25CB,  // ○
-            0x25CF   // ●
+    // Mirrors CompanionProvisioningInput.STROKE_DECORATION. These sit inside the CJK block, so a
+    // "is it a Chinese character?" check lets them through - they have to be named one by one.
+    // Keep the two lists in step: a stroke character allowed here is a name the provisioner
+    // would reject, and the pool and the validator would disagree about what is legal.
+    private static final Set<Character> STROKE_DECORATION = Set.of(
+            '\u4e36',  // 丶
+            '\u4e28',  // 丨
+            '\u706c',  // 灬
+            '\u4e3f',  // 丿
+            '\u4e40',  // 乀
+            '\u4e85',  // 亅
+            '\u5f61',  // 彡
+            '\u4e42'   // 乂
     );
+
+    // Allowed characters, full stop: ASCII letters, ASCII digits, and simplified-Chinese
+    // ideographs (CJK Unified Ideographs, U+4E00-U+9FA5), minus the stroke decoration above.
+    // Nothing else is a legal name.
+    //
+    // This used to whitelist a set of "decoration" symbols (♪ ★ ♡ の ゛ ゜ 〜 ° 丶 灬 丨 ...)
+    // because real players decorated names that way. They are gone now: any of them can come
+    // out of the v83 client font as '?' or a tofu box, and a name that renders as garbage is
+    // worse than a plain one. A plain name is always fine.
+    //
+    // The whitelist is deliberately closed rather than "reject known-bad": an unrecognised
+    // glyph must fail the build, not ship.
+    private static boolean isAllowed(char ch) {
+        if (STROKE_DECORATION.contains(ch)) {
+            return false;
+        }
+        return (ch >= 'a' && ch <= 'z')
+                || (ch >= 'A' && ch <= 'Z')
+                || (ch >= '0' && ch <= '9')
+                || (ch >= '\u4e00' && ch <= '\u9fa5');
+    }
 
     private static void assertRenderable(String name) {
         for (int i = 0; i < name.length(); i++) {
-            int cp = name.codePointAt(i);
-            Character.UnicodeBlock block = Character.UnicodeBlock.of(cp);
-            if (block == Character.UnicodeBlock.CJK_UNIFIED_IDEOGRAPHS) {
-                continue;
-            }
-            if (block == Character.UnicodeBlock.BASIC_LATIN) {
-                boolean alnum = (cp >= 'a' && cp <= 'z') || (cp >= 'A' && cp <= 'Z')
-                        || (cp >= '0' && cp <= '9');
-                assertTrue(alnum,
-                        "name '" + name + "' has ASCII punctuation '" + (char) cp
-                                + "' - names may not carry . / \\ $ ? ~ * ( ) [ ] or similar");
-                continue;
-            }
-            assertTrue(ALLOWED_SYMBOLS.contains(cp),
-                    String.format("name '%s' has U+%04X (%s), which the v83 client font cannot "
-                            + "render - it would show as '?' in game", name, cp, block));
+            char ch = name.charAt(i);
+            assertTrue(isAllowed(ch),
+                    String.format("name '%s' has U+%04X (%s) - only A-Z, a-z, 0-9 and simplified "
+                            + "Chinese ideographs are allowed", name, (int) ch,
+                            Character.UnicodeBlock.of(ch)));
         }
     }
 
@@ -167,23 +159,29 @@ class BotIgnWordListTest {
         }
     }
 
+    // The rule is a whitelist, so invisible ASCII is rejected with everything else - but it is
+    // the failure nobody notices by eye (a name looks fine in an editor and breaks in game),
+    // so assert it directly rather than trusting the whitelist to cover it.
+    @Test
+    void noNameContainsInvisibleOrControlCharacters() throws IOException {
+        for (String name : read(LOCALIZED)) {
+            for (int i = 0; i < name.length(); i++) {
+                char ch = name.charAt(i);
+                boolean invisible = ch < 0x20 || ch == 0x7F
+                        || Character.isWhitespace(ch) || Character.isSpaceChar(ch);
+                assertFalse(invisible,
+                        String.format("name '%s' has an invisible/control character U+%04X at "
+                                + "index %d", name, (int) ch, i));
+            }
+        }
+    }
+
     @Test
     void namesAreUnique() throws IOException {
         List<String> names = read(LOCALIZED);
         Set<String> unique = new HashSet<>(names);
         assertEquals(names.size(), unique.size(),
                 "duplicated names shrink the pool and make bots share identities");
-    }
-
-    @Test
-    void someNamesCarryDecorationButMostDoNot() throws IOException {
-        List<String> names = read(LOCALIZED);
-        long decorated = names.stream().filter(BotIgnWordListTest::isDecorated).count();
-        double pct = decorated * 100.0 / names.size();
-        assertTrue(decorated > 0, "some names should carry a symbol, as real players do");
-        // A list where every name is decorated reads as machine-generated spam.
-        assertTrue(pct < 40.0,
-                "too many decorated names: " + String.format("%.1f", pct) + "%");
     }
 
     // Mirrors FMShopDescGen.displayWidth(): CJK counts as two cells.
@@ -199,15 +197,6 @@ class BotIgnWordListTest {
     private static boolean containsCjk(String s) {
         return s.codePoints().anyMatch(c -> Character.UnicodeBlock.of(c)
                 == Character.UnicodeBlock.CJK_UNIFIED_IDEOGRAPHS);
-    }
-
-    /** True when the name carries a symbol outside ASCII and CJK (note, star, kaomoji, ...). */
-    private static boolean isDecorated(String s) {
-        return s.codePoints().anyMatch(c -> {
-            Character.UnicodeBlock b = Character.UnicodeBlock.of(c);
-            return b != Character.UnicodeBlock.BASIC_LATIN
-                    && b != Character.UnicodeBlock.CJK_UNIFIED_IDEOGRAPHS;
-        });
     }
 
     private static List<String> read(String path) throws IOException {

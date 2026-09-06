@@ -36,20 +36,28 @@ characters, and shop titles are laid out by display width:
 | Java `String.length()` | ≤ 12, else the name never gets drawn |
 | No spaces or tabs | names are matched as typed |
 
-**Characters** — a name is drawn with the game's own font, so anything that font lacks renders as
-`?` or a tofu box. `BotIgnWordListTest` enforces a whitelist; keep to it:
+**Characters** — a name may contain only:
 
-- CJK ideographs, ASCII letters and digits — always fine.
-- CJK/kana decoration players used in 非主流 names: `丶 灬 丨 の ゛ ゜ 〜 ～ °`
-- The classic note/star/heart/flower set: `♪ ★ ☆ ♡ ♥ ✿ ❀ ❁ ✾`
-- Plain geometric fills: `◆ ◇ ○ ●`
+- `A-Z`, `a-z`, `0-9`
+- simplified-Chinese ideographs (`U+4E00`-`U+9FA5`)
 
-Nothing else. In particular **no ASCII punctuation** — that rules out the ASCII faces (`^_^`,
-`T_T`, `-_-`, `=.=`) as *names*, since they are built from `. ^ * = _ -`. And no exotic symbols:
-`ღ ✨ ❥ ❦ ❧ ❖ ❤ ☀ ☁ ☂ ☃ ◈ ◉ ❃ ❄ ❋ ❦ ☘ ☙ ☾` were all tried and removed — they came out as
-`?` in game. When adding a symbol, check it against the fonts an old client uses (宋体 / MS
-Gothic), not against a modern system font. An unusual glyph renders as garbage; a plain name is
-always fine.
+Nothing else. Every other character is rejected, because a name is drawn with the game's own
+font and anything that font lacks renders as `?` or a tofu box. The rule is a whitelist, so it
+rejects by default rather than by enumeration — kana (`の パ`), full-width forms (`２`), CJK
+punctuation, symbols (`♪ ★ ♡ 〜 ° 丶 灬 丨`) and every invisible or control character (zero-width
+space, BOM, `0x00`-`0x1F`, `0x7F`, spaces) all fail on the same rule.
+
+Two things are easy to get wrong and are worth naming:
+
+- **Stroke characters are not words.** `丶 丨 灬 丿 乀 亅 彡 乂` sit *inside* the CJK block, so a
+  plain "is it a Chinese character?" test lets them through. Players use them as name decoration,
+  and they render inconsistently, so they are subtracted explicitly in
+  `CompanionProvisioningInput.STROKE_DECORATION` and mirrored in `BotIgnWordListTest`.
+- **`灬` is `U+706C`, not `U+7070`.** `U+7070` is `灰`, an ordinary character that appears in
+  legitimate names such as `骨灰捡漏`. Confusing the two silently deletes good names.
+
+Both lists must stay in step: if the pool allows a character the provisioner rejects, a generated
+name can fail validation at runtime.
 
 Keep entries short (roughly 4–10 characters). Two entries can be concatenated into one shop
 title, and `FMClans.txt` names additionally get `[X]` emblem + ASCII borders, which throws
