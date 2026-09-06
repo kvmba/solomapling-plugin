@@ -28,19 +28,19 @@ class EnvironmentPopulationConfigTest {
     void loadsBundledYamlFromClasspathOrFs() {
         var plan = EnvironmentPopulationConfig.reload();
         assertTrue(plan.training().enabled());
-        assertEquals(16, plan.training().cohorts().size());
-        assertEquals(270, plan.trainingCohortTotal());
+        assertEquals(27, plan.training().cohorts().size());
+        assertEquals(402, plan.trainingCohortTotal());
         assertTrue(plan.essentials().enabled());
         assertEquals("henesys", plan.essentials().fmRegion());
         assertEquals(5, plan.essentials().fmEntrance().m1());
         assertTrue(plan.loadedFrom() != null && !plan.loadedFrom().isBlank());
 
         var towns = TownPresenceConfig.towns();
-        assertEquals(8, towns.size());
+        assertEquals(20, towns.size());
         int social = towns.stream().flatMap(t -> t.maps().stream()).mapToInt(m -> m.count()).sum();
         int wanderers = towns.stream().mapToInt(t -> t.wanderers()).sum();
-        assertEquals(90, social);      // 14+10+10+10+12+14+10(Nautilus: 4+2+2+2)+10
-        assertEquals(42, wanderers);   // 6+5+5+5+6+6+4+5
+        assertEquals(201, social);
+        assertEquals(97, wanderers);
     }
 
     @Test
