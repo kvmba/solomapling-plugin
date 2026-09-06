@@ -195,7 +195,7 @@ final class GCTravel {
                     () -> GCPortals.enter(bot, portal)); // walk to the portal, stand a beat, step through
             return;
         }
-        GCTaxi.TaxiEdge taxi = GCTaxi.edge(cur, nextHop);
+        GCTaxi.TransitEdge taxi = GCTaxi.edge(cur, nextHop);
         if (taxi != null) {
             Point npcPos = GCTaxi.npcPos(bot.getMap(), taxi.npcId());
             if (npcPos == null) {
@@ -240,7 +240,7 @@ final class GCTravel {
      * returns — the bot just stands there), the polls after it wait the dwell out, and the first one
      * past it drives off.
      */
-    private static void boardTaxi(Trip trip, Character bot, GCTaxi.TaxiEdge taxi) {
+    private static void boardTaxi(Trip trip, Character bot, GCTaxi.TransitEdge taxi) {
         long now = nowMs();
         if (trip.boardingAtMs == 0L) {
             trip.boardingAtMs = now;

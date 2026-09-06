@@ -12,12 +12,11 @@ import java.util.Map;
 import static soloMapling.server.MapleVersionManager.isPortalinCurrentVersion;
 
 /*
- * Basic taxi connectivity: the Victoria Island town cab network. Town↔town has no walkable portal
- * path, so GCTravel can't reach e.g. Henesys→Kerning by walking. This adds those edges (so routing
- * finds them) and the executor rides them by walking to the cab NPC, then warping to the
- * destination town — "stand near the cab, ride." No fares/economy (pure-movement scope).
- *
- * Cab NPC ids mirror the Victoria cab scripts. Each town's cab connects to the other five.
+ * NPC rides: connectivity the walkable portal graph can't express. Town↔town on Victoria Island has
+ * no walkable portal path, and neither does a whale flight between continents, so GCTravel can't
+ * reach them by walking. This adds those edges (so routing finds them) and the executor rides them
+ * by walking to the NPC, standing there a moment, then moving to the destination — "walk up, ride."
+ * No fares/economy (pure-movement scope).
  */
 // Ported from GreenCatMS. Credit: NutNNut.
 final class GCTaxi {
@@ -36,8 +35,8 @@ final class GCTaxi {
     static final long BOARD_DWELL_MIN_MS = 2_000;
     static final long BOARD_DWELL_MAX_MS = 6_000;
 
-    /* A cab ride: stand near npcId on fromMapId, ride to toMapId. */
-    record TaxiEdge(int fromMapId, int npcId, int toMapId) {
+    /* An NPC ride: stand near npcId on fromMapId, then ride to toMapId. */
+    record TransitEdge(int fromMapId, int npcId, int toMapId) {
     }
 
     // {townMapId, cabNpcId} — the fully-connected Victoria Island cab network.
@@ -50,33 +49,57 @@ final class GCTaxi {
             {120000000, 1092014}, // Nautilus Harbor
     };
 
-    private static final Map<Integer, List<TaxiEdge>> BY_FROM = buildEdges();
+    /*
+     * Point-to-point NPC rides: {fromMapId, npcId, toMapId}. Unlike the cab network these are not
+     * fully connected — each row is one direction of one route, and the return trip needs its own
+     * row even when the same NPC runs it.
+     *
+     * Hak (2090005) flies the whale route between the continents. Orbis Sky<->Mu Lung runs through
+     * the Hak event; Mu Lung<->Herb Town is a plain warp on the same NPC, but reads identically to
+     * the bot (walk up, stand a beat, arrive), so it rides the same edge shape.
+     */
+    private static final int[][] NPC_RIDES = {
+            {200000141, 2090005, 250000100}, // Hak: Orbis Sky -> Mu Lung
+            {250000100, 2090005, 200000141}, // Hak: Mu Lung -> Orbis Sky
+            {250000100, 2090005, 251000000}, // Hak: Mu Lung -> Herb Town
+            {251000000, 2090005, 250000100}, // Hak: Herb Town -> Mu Lung
+    };
 
-    private static Map<Integer, List<TaxiEdge>> buildEdges() {
-        Map<Integer, List<TaxiEdge>> byFrom = new HashMap<>();
+    private static final Map<Integer, List<TransitEdge>> BY_FROM = buildEdges();
+
+    private static Map<Integer, List<TransitEdge>> buildEdges() {
+        Map<Integer, List<TransitEdge>> byFrom = new HashMap<>();
         for (int[] from : VICTORIA_CABS) {
             if (!isPortalinCurrentVersion(from[0])) {
                 continue; // never ride from a town gated out of this version
             }
-            List<TaxiEdge> edges = new ArrayList<>();
+            List<TransitEdge> edges = new ArrayList<>();
             for (int[] to : VICTORIA_CABS) {
                 // skip self, and any destination town gated out of the current server version
                 if (from[0] != to[0] && isPortalinCurrentVersion(to[0])) {
-                    edges.add(new TaxiEdge(from[0], from[1], to[0]));
+                    edges.add(new TransitEdge(from[0], from[1], to[0]));
                 }
             }
             byFrom.put(from[0], List.copyOf(edges));
         }
+        for (int[] ride : NPC_RIDES) {
+            // same version gate: don't offer a ride into or out of gated content
+            if (!isPortalinCurrentVersion(ride[0]) || !isPortalinCurrentVersion(ride[2])) {
+                continue;
+            }
+            byFrom.computeIfAbsent(ride[0], k -> new ArrayList<>())
+                    .add(new TransitEdge(ride[0], ride[1], ride[2]));
+        }
         return Map.copyOf(byFrom);
     }
 
-    static List<TaxiEdge> from(int mapId) {
+    static List<TransitEdge> from(int mapId) {
         return BY_FROM.getOrDefault(mapId, List.of());
     }
 
-    /* The cab edge from one town to another, or null if no cab drives that route. */
-    static TaxiEdge edge(int fromMapId, int toMapId) {
-        for (TaxiEdge e : from(fromMapId)) {
+    /* The NPC ride from one map to another, or null if no NPC drives that route. */
+    static TransitEdge edge(int fromMapId, int toMapId) {
+        for (TransitEdge e : from(fromMapId)) {
             if (e.toMapId() == toMapId) {
                 return e;
             }
@@ -84,9 +107,9 @@ final class GCTaxi {
         return null;
     }
 
-    /* All taxi destination map ids reachable from mapId (for world-graph connectivity). */
+    /* All ride destination map ids reachable from mapId (for world-graph connectivity). */
     static int[] destinations(int mapId) {
-        List<TaxiEdge> edges = from(mapId);
+        List<TransitEdge> edges = from(mapId);
         int[] dests = new int[edges.size()];
         for (int i = 0; i < edges.size(); i++) {
             dests[i] = edges.get(i).toMapId();
