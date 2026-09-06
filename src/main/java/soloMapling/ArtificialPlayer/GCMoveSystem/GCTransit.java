@@ -27,7 +27,9 @@ public final class GCTransit {
             200090200, 200090210, // cabin to Leafre, cabin to Orbis
             200090400, 200090410, // genie to Ariant, genie to Orbis
             222020110, 222020111, // Helios elevator going up: waiting car, moving car
-            222020210, 222020211  // Helios elevator going down: waiting car, moving car
+            222020210, 222020211, // Helios elevator going down: waiting car, moving car
+            600010003, 600010005, // subway to New Leaf City, subway to Kerning
+            540010101, 540010002  // plane to CBD, plane to Kerning
     );
 
     /*
@@ -37,7 +39,8 @@ public final class GCTransit {
     private static final Set<Integer> SPACIOUS = Set.of(
             200090000, 200090001, 200090010, 200090011,
             200090100, 200090110, 200090200, 200090210,
-            200090400, 200090410
+            200090400, 200090410,
+            600010003, 600010005 // subway cars — roomy enough to stroll
     );
 
     /* True if mapId is inside a vehicle rather than a place a bot can walk around. */
@@ -79,18 +82,21 @@ public final class GCTransit {
      * vehicle heading the other way. Keyed by the ride's destination, which is what says which way
      * it is going — the Orbis terminal alone dispatches three different vehicles.
      */
+    /*
+     * The deck a bot steps onto when boarding, per the event's takeoff(): each terminal loads the
+     * vehicle heading the other way. Keyed by the ride's destination, which is what says which way
+     * it is going — several terminals dispatch more than one vehicle, and Kerning dispatches both a
+     * subway and a plane to different places.
+     */
     static int deckFor(GCTaxi.VehicleEdge vehicle) {
-        return switch (vehicle.toMapId()) {
-            case 200000100 -> switch (vehicle.eventName()) {           // heading to Orbis
-                case "Boats" -> 200090010;
-                case "Trains" -> 200090110;
-                case "Cabin" -> 200090210;
-                default -> 200090410;                                  // Genie
-            };
-            case 101000300 -> 200090000;                               // boat to Ellinia
-            case 220000100 -> 200090100;                               // train to Ludibrium
-            case 240000100 -> 200090200;                               // cabin to Leafre
-            default -> 200090400;                                      // genie to Ariant
+        return switch (vehicle.eventName()) {
+            case "Boats" -> vehicle.toMapId() == 200000100 ? 200090010 : 200090000;
+            case "Trains" -> vehicle.toMapId() == 200000100 ? 200090110 : 200090100;
+            case "Cabin" -> vehicle.toMapId() == 200000100 ? 200090210 : 200090200;
+            case "Genie" -> vehicle.toMapId() == 200000100 ? 200090410 : 200090400;
+            case "Subway" -> vehicle.toMapId() == 600010001 ? 600010003 : 600010005;
+            case "AirPlane" -> vehicle.toMapId() == 540010000 ? 540010101 : 540010002;
+            default -> vehicle.toMapId() == 200000100 ? 200090010 : 200090000;
         };
     }
 }

@@ -86,6 +86,10 @@ final class GCTaxi {
             {240000111, 2082002, 200000100, "Cabin"},  // Leafre terminal -> Orbis Station
             {200000152, 2012024, 260000100, "Genie"},  // Orbis airport -> Ariant Station
             {260000110, 2102001, 200000100, "Genie"},  // Ariant terminal -> Orbis Station
+            {103000100, 9201057, 600010001, "Subway"}, // Kerning subway -> New Leaf City station
+            {600010002, 9201057, 103000100, "Subway"}, // NLC terminal -> Kerning subway
+            {540010100, 9270017, 540010000, "AirPlane"}, // Kerning airport -> CBD (Singapore)
+            {540010001, 9270018, 103000000, "AirPlane"}, // CBD terminal -> Kerning City
     };
 
     /* A scheduled vehicle boarding at mapId, or null if none leaves from there. */
