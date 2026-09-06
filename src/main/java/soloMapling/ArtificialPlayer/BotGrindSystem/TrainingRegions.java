@@ -12,6 +12,8 @@ public final class TrainingRegions {
 
     // Each row is [minInclusive, maxExclusive].
     private static final int[][] ALLOWED = {
+            {0, 60002},          // Beginner island: Mushroom Town, Snail Garden, Southperry and their
+                                 // hunting grounds (map ids run 0..60001, below Victoria's 100000000)
             {100000000, 110000000}, // Victoria Island + Sleepywood (Henesys/Ellinia/Perion/Kerning/Lith/Sleepywood + fields/dungeons)
             {200000000, 201000000}, // Orbis (town, tower, cloud park, sky fields)
             {211000000, 212000000}, // El Nath (town + dungeon: Ice Valley, Wolf Territory, Sharp Cliff, Dead Mine)

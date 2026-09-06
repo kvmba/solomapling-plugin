@@ -61,12 +61,17 @@ final class GCTaxi {
      * The Shanghai flight needs the zh-CN script pack: 9310000 flies Perion -> Bund and 9310013
      * flies back from the Plaza. Outbound and inbound are different NPCs because each one only
      * offers the leg that starts on its own continent.
+     *
+     * Sanks (22000) rows the beginner island's boat out to Lith Harbor. There is deliberately no
+     * return row: his own script says you can never come back, and nothing in the game leads into
+     * the island anyway, so a return edge would be a promise the server can't keep.
      */
     private static final int[][] NPC_RIDES = {
             {200000141, 2090005, 250000100}, // Hak: Orbis Sky -> Mu Lung
             {250000100, 2090005, 200000141}, // Hak: Mu Lung -> Orbis Sky
             {250000100, 2090005, 251000000}, // Hak: Mu Lung -> Herb Town
             {251000000, 2090005, 250000100}, // Hak: Herb Town -> Mu Lung
+            {60000, 22000, 104000000},      // Southperry: Sanks' boat out to Lith Harbor
             {102000000, 9310000, 701000000}, // Pilot Hong: Perion -> Shanghai Bund
             {701000100, 9310013, 102000000}, // Pilot Hong: Shanghai Plaza -> Perion
             // Ticket counters: a waiting room has no portal into it, so the only way in is the
