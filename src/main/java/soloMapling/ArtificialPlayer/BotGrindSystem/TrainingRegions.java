@@ -35,17 +35,7 @@ public final class TrainingRegions {
             {270000000, 271000000, 90}, // Time Temple — only as a dragon, via the Halfling in Leafre
     };
 
-    // Level a bot must have reached before it may leave the beginner island at all. Sanks himself
-    // asks for 7 (his script checks level > 6); the bar here is a little higher so a bot has spent
-    // some time on the island's hunting grounds before it goes.
-    public static final int LEAVE_BEGINNER_LEVEL = 8;
-
-    /** Whether mapId is in a region bots use at all, ignoring level. */
-    public static boolean isKnownRegion(int mapId) {
-        return regionOf(mapId) != null;
-    }
-
-    /** Whether a bot of this level may treat mapId as a destination. */
+    // Level a bot must have reached before it may treat mapId as a destination.
     public static boolean isAllowed(int mapId, int level) {
         int[] region = regionOf(mapId);
         return region != null && level >= region[2];

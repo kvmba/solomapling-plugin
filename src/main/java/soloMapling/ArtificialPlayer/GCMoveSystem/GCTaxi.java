@@ -50,7 +50,7 @@ final class GCTaxi {
     };
 
     /*
-     * Point-to-point NPC rides: {fromMapId, npcId, toMapId}. Unlike the cab network these are not
+     * Point-to-point NPC rides: {fromMapId, npcId, toMapId, minLevel}. Unlike the cab network these are not
      * fully connected — each row is one direction of one route, and the return trip needs its own
      * row even when the same NPC runs it.
      *
@@ -66,22 +66,34 @@ final class GCTaxi {
      * return row: his own script says you can never come back, and nothing in the game leads into
      * the island anyway, so a return edge would be a promise the server can't keep.
      */
+    /*
+     * Leaving the beginner island earns its own bar: Sanks asks only 7 (his script checks level > 6),
+     * but this keeps a bot on the island's hunting grounds a little longer before it goes.
+     */
+    static final int LEAVE_BEGINNER_LEVEL = 8;
+
+    /* The Time Temple's bar, mirrored here for the dragon flight that is its only way in. */
+    private static final int TIME_TEMPLE_LEVEL = 90;
+
+    // {fromMapId, npcId, toMapId, minLevel}
     private static final int[][] NPC_RIDES = {
-            {200000141, 2090005, 250000100, 1},
-            {250000100, 2090005, 200000141, 1},
-            {250000100, 2090005, 251000000, 1},
-            {251000000, 2090005, 250000100, 1},
-            {60000, 22000, 104000000, 8},
-            {102000000, 9310000, 701000000, 1},
-            {701000100, 9310013, 102000000, 1},
-            {220000110, 2041000, 220000111, 1},
-            {200000121, 2012013, 200000122, 1},
-            {200000151, 2012025, 200000152, 1},
-            {260000100, 2102000, 260000110, 1},
-            {600010001, 9201068, 600010002, 1},
-            {540010000, 9270038, 540010001, 1},
-            {103000000, 9270041, 540010100, 1},
-            {240000110, 2082003, 200090500, 1},
+            {200000141, 2090005, 250000100, 1},  // Hak: Orbis Sky -> Mu Lung
+            {250000100, 2090005, 200000141, 1},  // Hak: Mu Lung -> Orbis Sky
+            {250000100, 2090005, 251000000, 1},  // Hak: Mu Lung -> Herb Town
+            {251000000, 2090005, 250000100, 1},  // Hak: Herb Town -> Mu Lung
+            {60000, 22000, 104000000, LEAVE_BEGINNER_LEVEL}, // Sanks' boat off Southperry
+            {102000000, 9310000, 701000000, 1},  // Pilot Hong: Perion -> Shanghai Bund
+            {701000100, 9310013, 102000000, 1},  // Pilot Hong: Shanghai Plaza -> Perion
+            {220000110, 2041000, 220000111, 1},  // Ludibrium pier -> waiting room (train)
+            {200000121, 2012013, 200000122, 1},  // Orbis pier -> waiting room (train)
+            {200000151, 2012025, 200000152, 1},  // Orbis pier -> airport (genie)
+            {260000100, 2102000, 260000110, 1},  // Ariant platform -> waiting room (genie)
+            {600010001, 9201068, 600010002, 1},  // NLC station -> waiting room (subway)
+            {540010000, 9270038, 540010001, 1},  // CBD airport -> waiting room (plane)
+            {103000000, 9270041, 540010100, 1},  // Kerning City -> airport (plane)
+            // The dragon flight only ever leads to the Time Temple, so it carries the Temple's bar:
+            // a bot that hasn't earned that continent shouldn't reach it by turning into a dragon.
+            {240000110, 2082003, 200090500, TIME_TEMPLE_LEVEL},
     };
 
     /*
