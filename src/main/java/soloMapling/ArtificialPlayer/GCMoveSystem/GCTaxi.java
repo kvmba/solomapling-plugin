@@ -94,6 +94,11 @@ final class GCTaxi {
             // The dragon flight only ever leads to the Time Temple, so it carries the Temple's bar:
             // a bot that hasn't earned that continent shouldn't reach it by turning into a dragon.
             {240000110, 2082003, 200090500, TIME_TEMPLE_LEVEL},
+            // Cave of Life (生命之穴): Leafre's endgame. The maze rooms have no way out at all, so
+            // the two NPCs that move you through the cave are the only way in — 2081005 takes you from
+            // the cave mouth to the entrance, and 2083001 from there into the 97-110 maze.
+            {240040700, 2081005, 240050000, 70},
+            {240050000, 2083001, 240050100, 70},
             // Gold Beach: a holiday island with no portal in, so the three boats that run to it
             // (from Lith Harbour, Orbis and Ludibrium) are the only way there.
             {104000000, 1002002, 110000000, 1},  // Lith Harbour -> Gold Beach

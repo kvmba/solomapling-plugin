@@ -109,6 +109,7 @@ waves:
       # Hunting-ground continents that were missing any hub at all.
       - {map: 240070100, count: 15, level_lo: 70, level_hi: 100} # 未来之城 (23 maps)
       - {map: 240070000, count: 10, level_lo: 70, level_hi: 95}  # 塔拉森林 (6)
+      - {map: 240050100, count: 12, level_lo: 95, level_hi: 130} # 生命之穴迷宫 (97-110)
       - {map: 240050000, count: 12, level_lo: 70, level_hi: 115} # 生命之穴 (8)
       - {map: 261020000, count: 12, level_lo: 30, level_hi: 80}  # 卡帕莱特研究所 (9)
       - {map: 261010000, count: 8,  level_lo: 30, level_hi: 80}  # 蒙特鸠研究所 (6)
