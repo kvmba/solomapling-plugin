@@ -76,6 +76,10 @@ final class GCTravel {
     // world travel rate is configurable, so this is sized past the longest cycle rather than
     // derived from it — it only fires if a ride never completes at all.
     private static final long WAIT_MAX_MS = 25 * 60 * 1000;
+    // Share of a vehicle's passengers who take up a spot at the rail instead of walking about.
+    private static final double SIGHTSEE_SHARE = 0.34;
+    // How close counts as "at the rail" — generous on Y, since a ledge's centre may sit below it.
+    private static final int RAIL_REACH_PX = 60;
 
     private static final ScheduledExecutorService POOL = Executors.newScheduledThreadPool(2, r -> {
         Thread t = new Thread(r, "gctravel-poll");
@@ -114,6 +118,8 @@ final class GCTravel {
         boolean waitingForTransit;
         boolean shoutedAtAttack;  // one shout per crossing, not one per poll
         boolean sheltering;      // took cover below during an attack — stay there until it clears
+        Boolean sightseer;       // null undecided; true = watches from the rail, false = strolls
+        Boolean railSide;        // null undecided; true = the left rail, false = the right
 
         Trip(Character bot, int destMapId, Consumer<Boolean> callback) {
             this.bot = bot;
@@ -237,8 +243,17 @@ final class GCTravel {
             // ride reads as a stalled bot. Stroll the deck instead, the way players do while
             // waiting to dock — the wander keeps to reachable footholds, so it stays on board.
             // An elevator is a short ride in a small box with a portal back out, so it just waits.
-            if (GCTransit.isSpaciousVehicle(cur) && !BotWanderSystem.isWandering(bot)) {
-                BotWanderSystem.start(bot);
+            if (GCTransit.isSpaciousVehicle(cur)) {
+                if (trip.sightseer == null) {
+                    // Roughly a third of a boat's passengers end up at the rail rather than
+                    // walking about; decided once, so a bot doesn't change its mind every poll.
+                    trip.sightseer = ThreadLocalRandom.current().nextDouble() < SIGHTSEE_SHARE;
+                }
+                if (trip.sightseer) {
+                    watchTheWater(trip, bot);
+                } else if (!BotWanderSystem.isWandering(bot)) {
+                    BotWanderSystem.start(bot);
+                }
             }
             return;
         }
@@ -356,6 +371,35 @@ final class GCTravel {
      * actually do when a Balrog shows up mid-crossing, and it keeps a bot from strolling into it.
      * The bot stays a passenger — it watches from the cabin, it does not fight.
      */
+    /*
+     * Take a spot at the rail and stay there, the way players lean on it for the whole crossing:
+     * walk to the outermost ledge, turn to face the water, and let the idle fidget supply the odd
+     * turn or hop. A bot that walked to the rail and then stood rigid would look worse than one
+     * that never moved at all.
+     */
+    private static void watchTheWater(Trip trip, Character bot) {
+        if (trip.railSide == null) {
+            trip.railSide = ThreadLocalRandom.current().nextBoolean();
+        }
+        GCMovement.Ledge rail = GCTransit.railLedge(bot.getMap(), trip.railSide);
+        if (rail == null) {
+            return; // terrain not readable — nothing to lean on
+        }
+        Point bp = bot.getPosition();
+        boolean atRail = Math.abs(bp.x - rail.centerX()) <= RAIL_REACH_PX
+                && Math.abs(bp.y - rail.centerY()) <= RAIL_REACH_PX * 3;
+        if (atRail) {
+            if (!GCMovement.isMoving(bot)) {
+                GCMovement.face(bot, trip.railSide);   // face the water, not the deck
+                GCMovement.setFidget(bot, true);
+            }
+            return;
+        }
+        if (!GCMovement.isMoving(bot)) {
+            GCMovement.move(bot, rail.centerX(), rail.centerY());
+        }
+    }
+
     private static void reactToAttack(Trip trip, Character bot) {
         if (BotWanderSystem.isWandering(bot)) {
             BotWanderSystem.stop(bot);

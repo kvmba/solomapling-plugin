@@ -5,6 +5,7 @@ import org.gms.client.Character;
 import org.gms.scripting.event.EventManager;
 import org.gms.server.maps.MapleMap;
 import org.gms.server.maps.Portal;
+import java.util.List;
 import java.util.Set;
 
 /*
@@ -72,6 +73,26 @@ public final class GCTransit {
         }
         EventManager em = map.getChannelServer().getEventSM().getEventManager("Boats");
         return em != null && "true".equals(em.getProperty("haveBalrog"));
+    }
+
+    /*
+     * A spot at the rail, for a bot that would rather watch the water than pace the deck: the
+     * outermost ledge on one side of the ship. Players lean on the rail the whole way across, so
+     * some bots should too. Null when the map's terrain can't be read.
+     */
+    static GCMovement.Ledge railLedge(MapleMap map, boolean left) {
+        if (map == null) {
+            return null;
+        }
+        List<GCMovement.Ledge> ledges = GCMovement.walkableLedges(map);
+        GCMovement.Ledge best = null;
+        for (GCMovement.Ledge l : ledges) {
+            if (best == null
+                    || (left ? l.minX() < best.minX() : l.maxX() > best.maxX())) {
+                best = l;
+            }
+        }
+        return best;
     }
 
     /*
