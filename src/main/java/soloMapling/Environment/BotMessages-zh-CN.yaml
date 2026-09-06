@@ -265,3 +265,12 @@ opq.box_ordinal.7: "7"
 # Training bot chalkboard (shown while the bot is on a break)
 # ---------------------------------------------------------------------------
 training.break_sign: "马上回来"
+
+# ---------------------------------------------------------------------------
+# 船上遭遇巴洛古时喊的话（每个 bot 每趟只喊一次）
+# ---------------------------------------------------------------------------
+transit.attack_shout.0: "刚刚那是什么东西"
+transit.attack_shout.1: "那是巴洛古吗"
+transit.attack_shout.2: "大家快下去"
+transit.attack_shout.3: "不是吧，偏偏今天"
+transit.attack_shout.4: "那家伙也太大了"

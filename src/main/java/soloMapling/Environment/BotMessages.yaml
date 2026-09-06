@@ -252,3 +252,12 @@ opq.box_ordinal.7: "7th"
 # Training bot chalkboard (shown while the bot is on a break)
 # ---------------------------------------------------------------------------
 training.break_sign: "brb"
+
+# ---------------------------------------------------------------------------
+# Aboard a boat when a Balrog boards mid-crossing (one shout per bot per ride)
+# ---------------------------------------------------------------------------
+transit.attack_shout.0: "whoa what was that"
+transit.attack_shout.1: "is that a balrog"
+transit.attack_shout.2: "everyone get below"
+transit.attack_shout.3: "no way, not today"
+transit.attack_shout.4: "that thing is huge"

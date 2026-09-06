@@ -23,7 +23,8 @@ public final class TrainingRegions {
             {230000000, 231000000}, // Aquarium — reachable overland from Leafre
             {240000000, 241000000}, // Leafre — reachable via the Cabin from Orbis
             {260000000, 262000000}, // Ariant — reachable via the Genie from Orbis
-            {300000000, 301000000}, // Rien / Arta camp — behind the Helios elevator's time gate
+            {300000000, 301000000}, // Arta camp (阿尔泰营地) — behind the Helios elevator's time gate
+                                    // Not Rien (里恩, 140000000): that one stays out, see docs.
             {600000000, 601000000}, // New Leaf City — reachable by subway from Kerning
             {540000000, 542000000}, // Singapore (CBD) — reachable by plane from Kerning
     };

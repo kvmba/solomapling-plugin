@@ -7,6 +7,7 @@ import soloMapling.ArtificialPlayer.BotTravelSystem.BotScriptedWarp;
 import soloMapling.ArtificialPlayer.BotWanderSystem.BotWanderSystem;
 import soloMapling.ArtificialPlayer.BotCommandsPack.SocialCommands;
 import soloMapling.BotLogger;
+import soloMapling.Environment.BotMessages;
 
 import java.awt.Point;
 import java.util.List;
@@ -112,6 +113,7 @@ final class GCTravel {
         // patiently waiting out a sailing would otherwise be warped off its own ride.
         boolean waitingForTransit;
         boolean shoutedAtAttack;  // one shout per crossing, not one per poll
+        boolean sheltering;      // took cover below during an attack — stay there until it clears
 
         Trip(Character bot, int destMapId, Consumer<Boolean> callback) {
             this.bot = bot;
@@ -197,6 +199,7 @@ final class GCTravel {
             trip.hopStartAtMs = nowMs();
             trip.boardingAtMs = 0L;   // this hop's cab is a different cab — board afresh
             trip.waitingForTransit = false;  // new map, new wait — don't inherit the old exemption
+            trip.sheltering = false;         // new crossing, new threat — don't inherit the old cover
             // Stepped off the vehicle (the event landed us, or something moved us): drop the deck
             // stroll so the bot walks its next hop instead of idling in wander mode.
             if (!GCTransit.isVehicleMap(cur) && BotWanderSystem.isWandering(bot)) {
@@ -220,7 +223,14 @@ final class GCTravel {
                 return;
             }
             if (GCTransit.isUnderAttack(bot)) {
+                trip.sheltering = true;
                 reactToAttack(trip, bot);
+                return;
+            }
+            // Taking shelter means staying sheltered: the cabin's only way out is back onto the
+            // deck, so a stroll down here would walk a bot straight back to what it fled from and
+            // the hatch would only send it below again. Stay put until the decks are clear.
+            if (trip.sheltering) {
                 return;
             }
             // A boat crossing is minutes long, so a bot frozen at its boarding spot for the whole
@@ -352,8 +362,8 @@ final class GCTravel {
         }
         if (!trip.shoutedAtAttack) {
             trip.shoutedAtAttack = true;
-            SocialCommands.BotSpeak(bot,
-                    ATTACK_SHOUTS[ThreadLocalRandom.current().nextInt(ATTACK_SHOUTS.length)]);
+            SocialCommands.BotSpeak(bot, BotMessages.get("transit.attack_shout."
+                    + ThreadLocalRandom.current().nextInt(ATTACK_SHOUTS)));
         }
         Point hatch = GCTransit.hatchPos(bot.getMap());
         if (hatch != null && !GCMovement.isMoving(bot)) {
@@ -361,9 +371,9 @@ final class GCTravel {
         }
     }
 
-    private static final String[] ATTACK_SHOUTS = {
-            "whoa what was that", "is that a balrog", "everyone get inside", "no way, not today"
-    };
+    // How many attack shouts exist, as transit.attack_shout.N in BotMessages (localized).
+    private static final int ATTACK_SHOUTS = 5;
+
 
 
     /*
