@@ -5,6 +5,7 @@ import org.gms.scripting.event.EventManager;
 import org.gms.server.maps.MapleMap;
 import org.gms.server.maps.Portal;
 import soloMapling.ArtificialPlayer.BotTravelSystem.BotScriptedWarp;
+import soloMapling.ArtificialPlayer.BotWanderSystem.BotWanderSystem;
 import soloMapling.BotLogger;
 
 import java.awt.Point;
@@ -184,6 +185,11 @@ final class GCTravel {
             trip.boardingAtMs = 0L;   // this hop's cab is a different cab — board afresh
             trip.waitingForTransit = false;  // new map, new wait — don't inherit the old exemption
             trip.waitStartAtMs = 0L;
+            // Stepped off the vehicle (the event landed us, or something moved us): drop the deck
+            // stroll so the bot walks its next hop instead of idling in wander mode.
+            if (!GCTransit.isVehicleMap(cur) && BotWanderSystem.isWandering(bot)) {
+                BotWanderSystem.stop(bot);
+            }
             GCMovement.clearMoveIntent(bot);
         }
 
@@ -195,6 +201,12 @@ final class GCTravel {
             trip.waitingForTransit = true;
             if (trip.waitStartAtMs == 0L) {
                 trip.waitStartAtMs = nowMs();
+            }
+            // A crossing is minutes long, so a bot frozen at its boarding spot for the whole ride
+            // reads as a stalled bot. Stroll the deck instead, the way players do while waiting to
+            // dock — the wander keeps to reachable footholds, so it stays on board by itself.
+            if (!BotWanderSystem.isWandering(bot)) {
+                BotWanderSystem.start(bot);
             }
             return;
         }
@@ -471,6 +483,11 @@ final class GCTravel {
         // Clear the travel's move intent only — never tear down an active follow session (a
         // follow-driven trip arriving on the target's map must let GCFollow resume same-map follow).
         GCMovement.clearMoveIntent(trip.bot);
+        // A trip can also end mid-crossing (cancelled, or the deck wait timed out): make sure the
+        // bot doesn't keep strolling a deck it is no longer riding.
+        if (BotWanderSystem.isWandering(trip.bot)) {
+            BotWanderSystem.stop(trip.bot);
+        }
         fire(trip.callback, ok);
     }
 
