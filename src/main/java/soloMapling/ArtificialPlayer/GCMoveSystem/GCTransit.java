@@ -1,5 +1,10 @@
 package soloMapling.ArtificialPlayer.GCMoveSystem;
 
+import java.awt.Point;
+import org.gms.client.Character;
+import org.gms.scripting.event.EventManager;
+import org.gms.server.maps.MapleMap;
+import org.gms.server.maps.Portal;
 import java.util.Set;
 
 /*
@@ -28,6 +33,30 @@ public final class GCTransit {
         return VEHICLE_MAPS.contains(mapId);
     }
 
+    /*
+     * Whether something has boarded mid-crossing. The boat event flags this when the Balrog shows up,
+     * and only the boat does — the other vehicles cross unmolested.
+     */
+    public static boolean isUnderAttack(Character bot) {
+        MapleMap map = bot == null ? null : bot.getMap();
+        if (map == null || map.getChannelServer() == null || !VEHICLE_MAPS.contains(bot.getMapId())) {
+            return false;
+        }
+        EventManager em = map.getChannelServer().getEventSM().getEventManager("Boats");
+        return em != null && "true".equals(em.getProperty("haveBalrog"));
+    }
+
+    /*
+     * Where to go when something boards: the hatch down to the cabin (the deck's "in00" portal),
+     * which is the same way players duck below. Null if this map has no hatch.
+     */
+    public static Point hatchPos(MapleMap map) {
+        if (map == null) {
+            return null;
+        }
+        Portal hatch = map.getPortal("in00");
+        return hatch == null ? null : hatch.getPosition();
+    }
     /*
      * The deck a bot steps onto when boarding, per the event's takeoff(): each terminal loads the
      * vehicle heading the other way. Keyed by the ride's destination, which is what says which way

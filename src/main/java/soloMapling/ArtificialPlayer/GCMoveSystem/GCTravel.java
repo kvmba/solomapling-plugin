@@ -6,6 +6,7 @@ import org.gms.server.maps.MapleMap;
 import org.gms.server.maps.Portal;
 import soloMapling.ArtificialPlayer.BotTravelSystem.BotScriptedWarp;
 import soloMapling.ArtificialPlayer.BotWanderSystem.BotWanderSystem;
+import soloMapling.ArtificialPlayer.BotCommandsPack.SocialCommands;
 import soloMapling.BotLogger;
 
 import java.awt.Point;
@@ -112,6 +113,7 @@ final class GCTravel {
         // patiently waiting out a sailing would otherwise be warped off its own ride.
         boolean waitingForTransit;
         long waitStartAtMs;
+        boolean shoutedAtAttack;  // one shout per crossing, not one per poll
 
         Trip(Character bot, int destMapId, Consumer<Boolean> callback) {
             this.bot = bot;
@@ -201,6 +203,10 @@ final class GCTravel {
             trip.waitingForTransit = true;
             if (trip.waitStartAtMs == 0L) {
                 trip.waitStartAtMs = nowMs();
+            }
+            if (GCTransit.isUnderAttack(bot)) {
+                reactToAttack(trip, bot);
+                return;
             }
             // A crossing is minutes long, so a bot frozen at its boarding spot for the whole ride
             // reads as a stalled bot. Stroll the deck instead, the way players do while waiting to
@@ -325,6 +331,30 @@ final class GCTravel {
         warp(bot, GCTransit.deckFor(vehicle), "boarding " + vehicle.eventName()
                 + " " + bot.getMapId() + " -> " + vehicle.toMapId());
     }
+
+    /*
+     * Something boarded: stop the deck stroll, shout once, and head below. This mirrors what players
+     * actually do when a Balrog shows up mid-crossing, and it keeps a bot from strolling into it.
+     * The bot stays a passenger — it watches from the cabin, it does not fight.
+     */
+    private static void reactToAttack(Trip trip, Character bot) {
+        if (BotWanderSystem.isWandering(bot)) {
+            BotWanderSystem.stop(bot);
+        }
+        if (!trip.shoutedAtAttack) {
+            trip.shoutedAtAttack = true;
+            SocialCommands.BotSpeak(bot,
+                    ATTACK_SHOUTS[ThreadLocalRandom.current().nextInt(ATTACK_SHOUTS.length)]);
+        }
+        Point hatch = GCTransit.hatchPos(bot.getMap());
+        if (hatch != null && !GCMovement.isMoving(bot)) {
+            GCMovement.move(bot, hatch.x, hatch.y);
+        }
+    }
+
+    private static final String[] ATTACK_SHOUTS = {
+            "whoa what was that", "is that a balrog", "everyone get inside", "no way, not today"
+    };
 
     /* Whether the vehicle's boarding gate is open right now (the event's "entry" property). */
     private static boolean isBoarding(Character bot, String eventName) {
