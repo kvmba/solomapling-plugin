@@ -108,7 +108,7 @@ waves:
       - {map: 105040300, count: 25, level_lo: 25, level_hi: 95}  # Sleepywood
       - {map: 105070001, count: 20, level_lo: 40, level_hi: 95}  # Ant Tunnel Park (deep hub)
       - {map: 200000000, count: 25, level_lo: 30, level_hi: 86}  # Orbis
-      - {map: 220000000, count: 20, level_lo: 25, level_hi: 95}  # Ludibrium
+      - {map: 220000000, count: 20, level_lo: 30, level_hi: 95}  # Ludibrium (30: region gate, see TrainingRegions)
       - {map: 220050300, count: 15, level_lo: 70, level_hi: 95}  # Path of Time hub
       - {map: 211000000, count: 20, level_lo: 50, level_hi: 80}  # El Nath
       - {map: 211040300, count: 20, level_lo: 60, level_hi: 90}  # Sharp Cliff I
