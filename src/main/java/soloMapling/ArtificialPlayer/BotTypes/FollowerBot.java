@@ -77,10 +77,21 @@ public class FollowerBot extends BotSM {
             BotMessages.keywords("menu.follower", MENU_SUFFIXES, MENU_KEYWORDS),
             this::onMenuSelect);
 
+    // "Follow me" words, shared with the TrainingBot menu that offers the same thing - a follower is
+    // ALREADY doing it, so it claims the line and ignores it rather than letting the Dispatcher fall
+    // back to showing a menu nobody needs (see deliverToPartyBots). Resolved per instance: a static
+    // would freeze at class-load and stop following the configured language.
+    private static final String[] FOLLOW_SUFFIXES = {"follow"};
+    private static final String[][] FOLLOW_KEYWORDS = {{"follow", "come", "lead"}};
+    private final List<String> followWords;
+
     public FollowerBot(Character character) {
         super(character);
         botType = "FollowerBot";
         dialoguePath = "FollowerBotDialogue.yaml";
+        List<List<String>> resolved =
+                BotMessages.keywords("menu.training_party", FOLLOW_SUFFIXES, FOLLOW_KEYWORDS);
+        followWords = resolved.isEmpty() ? List.of() : resolved.get(0);
     }
 
     // Pinned cadence, observed or not: supervision (re-arm/relog/party checks) must never sleep 36-48s.
@@ -245,9 +256,27 @@ public class FollowerBot extends BotSM {
     }
 
     // Party broadcast: same keyword matcher as the menu, no hint balloon shown.
+    //
+    // A "follow me" line is claimed and ignored: this bot is already following, so the instruction is
+    // a no-op - but claiming it stops the Dispatcher treating the line as unrecognised chatter and
+    // popping this bot's option menu ("train here / nevermind") over a player who only said "come on".
+    // The menu is still shown for a genuine menu word, and for a name call (displayCommands).
     @Override
     public boolean offerKeyword(Character player, String content) {
+        if (content != null && isFollowWord(content)) {
+            return true;
+        }
         return menu.offerDirect(player, content);
+    }
+
+    private boolean isFollowWord(String content) {
+        String lower = content.trim().toLowerCase();
+        for (String word : followWords) {
+            if (lower.contains(word)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private void onMenuSelect(int idx, Character player) {
