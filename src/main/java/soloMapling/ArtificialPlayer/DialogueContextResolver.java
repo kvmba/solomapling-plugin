@@ -1,10 +1,10 @@
 package soloMapling.ArtificialPlayer;
 
 import org.gms.client.Character;
+import org.gms.client.Job;
 import org.gms.client.inventory.Item;
 import org.gms.client.inventory.InventoryType;
 import org.gms.client.inventory.Pet;
-import org.gms.constants.game.GameConstants;
 import org.gms.constants.inventory.ItemConstants;
 import org.gms.net.server.guild.Guild;
 import org.gms.server.ItemInformationProvider;
@@ -198,8 +198,22 @@ public final class DialogueContextResolver {
         return street.isPresent() ? street : nonBlank(map.getMapName());
     }
 
+    /**
+     * The player/bot job name, in the server's configured language.
+     *
+     * <p>Deliberately reads {@code Job.getName()} rather than {@code GameConstants.getJobName(id)}.
+     * The latter derives the name from the Java enum constant and capitalises it, so it always
+     * yields English ("Magician", "Bowman") even on a zh-CN server - which is how bots came to
+     * say "玩 Magician 打成这样" in the middle of Chinese lines. {@code Job} already carries the
+     * localised name (loaded from {@code i18n/message_zh_CN.properties}, "英雄", "弓箭手"), so use
+     * that and let the server's language setting decide.
+     */
     private static Optional<String> jobName(Character c) {
-        return nonBlank(GameConstants.getJobName(c.getJob().getId()));
+        Job job = c.getJob();
+        if (job == null) {
+            return Optional.empty();
+        }
+        return nonBlank(job.getName());
     }
 
     private static Optional<String> levelStr(Character c) {
