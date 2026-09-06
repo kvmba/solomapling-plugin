@@ -169,6 +169,16 @@ waves:
         maps:
           - {map: 220000000, count: 14}
 
+      - name: Nautilus
+        level_lo: 10
+        level_hi: 70
+        wanderers: 4
+        maps:
+          - {map: 120000000, count: 4}   # 诺特勒斯号码头 (main deck, taxi)
+          - {map: 120000100, count: 2}   # 上层走廊
+          - {map: 120000200, count: 2}   # 中央走廊
+          - {map: 120000300, count: 2}   # 下层走廊
+
       - name: El Nath
         level_lo: 50
         level_hi: 85

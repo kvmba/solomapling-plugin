@@ -19,6 +19,8 @@ public final class TrainingRegions {
     private static final int[][] ALLOWED = {
             {0, 60002, 1},              // Beginner island: Mushroom Town, Snail Garden, Southperry and
                                         // their hunting grounds (map ids run 0..60001, below Victoria)
+            {120000000, 120010001, 1},  // Nautilus (诺特勒斯号码头): the pirate town, walked to from
+                                        // Henesys' east woods. All town, no hunting grounds.
             {100000000, 110000000, 1},  // Victoria Island + Sleepywood (Henesys/Ellinia/Perion/Kerning/Lith + fields/dungeons)
             {200000000, 201000000, 30}, // Orbis (town, tower, cloud park, sky fields)
             {211000000, 212000000, 30}, // El Nath (town + dungeon: Ice Valley, Wolf Territory, Sharp Cliff, Dead Mine)
