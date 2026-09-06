@@ -7,18 +7,37 @@
 
 ## 一、总量概览
 
-| 大类 | 数量 | 说明 |
-|---|--:|---|
-| TrainingBot（练级） | **270** | 16 个 cohort，配置驱动 |
-| SocialBot（城镇驻点） | **80** | 7 个城镇 |
-| TownWandererBot（漫游） | **38** | 同上，每城 5–6 |
-| HenesysBot（弓箭手村） | **34** | main/market/park/social 四区 |
-| FMBot（自由市场入口） | **45** | 3 区域 × (m1+m2+m5) × 5 |
-| 商人（卖/买/NX） | **45** | 卖 20 + 买 20 + NX 5 |
-| 其余（赌场/教程/游戏区等） | 少量 | 按 wave 布尔开关，数量内置 |
+**合计约 1253 个**（`scale=1.0`，配置注释里写的 "~1k bots" 即指此）。
 
-**合计约 520+**（不含 wave 里数量内置的 blackjack / drop game / OPQ / 教程等）。
-`scale` 可整体缩放（Henesys / FM / 商人 / 训练），`0.25–0.5` 适合轻量试点。
+| # | 大类 | 数量 | 来源 |
+|:--:|---|--:|---|
+| 1 | TrainingBot（练级） | 270 | 16 个 cohort |
+| 2 | SocialBot（城镇驻点） | 80 | 7 个城镇 |
+| 3 | TownWandererBot（漫游） | 38 | 每城 5–6 |
+| 4 | HenesysBot | 69 | w3 + w5 **累加**（非覆盖） |
+| 5 | FMBot（自由市场入口） | 45 | 3 区域 × 15 |
+| 6 | 商人（卖/买/NX） | 45 | 卖20 + 买20 + NX5 |
+| 7 | **自由市场房间** | **577** | **最大头，见下** |
+| 8 | Henesys filler SocialBot | 129 | 5 处 `spawnFillerBots*` 硬编码基数 |
+
+### 自由市场是最大头（577 = 房间 × 每房位置）
+
+| 区域 | 房间 | 每房位置 | 小计 |
+|---|--:|--:|--:|
+| henesys | 6 | 24 | 144 |
+| ludi | 6 | 28 | 168 |
+| perion | 5 | 26 | 130 |
+| elnath | 5 | 27 | 135 |
+| **合计** | **22** | — | **577** |
+
+位置来自 `FMShopInfoManager`，每个位置按概率生成雇佣商人商店或 bot 商店
+（`hiredMerchantChance`），2% 随机跳过。
+
+> 注意：HenesysBot 在 wave 3 和 wave 5 各调用一次 `spawnHenesysBotsBatch`，
+> 每次都**新建**而非覆盖，所以是 23 + 33 = 56（social 部分按 3 个 spot 均摊后为 69）。
+
+`scale` 只缩放 Henesys / FM / 商人 / 训练四类（不含 `town_presence.towns`）；
+`0.25–0.5` 适合轻量试点。
 
 ---
 
@@ -27,9 +46,9 @@
 | 类型 | 数量 | 区域 | 驱动方式 |
 |---|---:|---|---|
 | `TRAINING_BOT` | 270 | 见下表 | YAML cohort |
-| `SOCIAL_BOT` | 80 | 7 城镇 | `town_presence` |
+| `SOCIAL_BOT` | 80 + 129 | 7 城镇 + 弓箭手村 filler | `town_presence` + `spawnFillerBots*` |
 | `TOWN_WANDERER_BOT` | 38 | 7 城镇 | `town_presence.wanderers` |
-| `HENESYS_BOT` | 34 | 弓箭手村 | `waves.henesys` |
+| `HENESYS_BOT` | 69 | 弓箭手村 | `waves.henesys`（w3+w5 累加） |
 | `HENESYS_JQ_BOT` | 少量 | 宠物公园 | `jq_pet_park: true` |
 | `FM_BOT` | 45 | 自由市场入口 | `fm_entrance` |
 | `SELLING_MERCHANT_BOT` | 20 | 自由市场 | `merchants.selling` |
