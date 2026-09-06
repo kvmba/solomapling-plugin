@@ -25,12 +25,29 @@ public final class GCTransit {
             200090010, 200090011, // boat to Orbis: deck, cabin
             200090100, 200090110, // train to Ludibrium, train to Orbis
             200090200, 200090210, // cabin to Leafre, cabin to Orbis
-            200090400, 200090410  // genie to Ariant, genie to Orbis
+            200090400, 200090410, // genie to Ariant, genie to Orbis
+            222020110, 222020111, // Helios elevator going up: waiting car, moving car
+            222020210, 222020211  // Helios elevator going down: waiting car, moving car
+    );
+
+    /*
+     * Vehicles with room to walk around: a deck or a train car you can stroll while crossing. An
+     * elevator is ridden out standing in a small box, so it is waited, not wandered.
+     */
+    private static final Set<Integer> SPACIOUS = Set.of(
+            200090000, 200090001, 200090010, 200090011,
+            200090100, 200090110, 200090200, 200090210,
+            200090400, 200090410
     );
 
     /* True if mapId is inside a vehicle rather than a place a bot can walk around. */
     public static boolean isVehicleMap(int mapId) {
         return VEHICLE_MAPS.contains(mapId);
+    }
+
+    /* True if this vehicle is big enough that a bot should stroll it rather than stand still. */
+    public static boolean isSpaciousVehicle(int mapId) {
+        return SPACIOUS.contains(mapId);
     }
 
     /*

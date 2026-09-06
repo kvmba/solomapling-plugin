@@ -21,6 +21,7 @@ public final class TrainingRegions {
             {230000000, 231000000}, // Aquarium — reachable overland from Leafre
             {240000000, 241000000}, // Leafre — reachable via the Cabin from Orbis
             {260000000, 262000000}, // Ariant — reachable via the Genie from Orbis
+            {300000000, 301000000}, // Rien / Arta camp — behind the Helios elevator's time gate
     };
 
     public static boolean isAllowed(int mapId) {

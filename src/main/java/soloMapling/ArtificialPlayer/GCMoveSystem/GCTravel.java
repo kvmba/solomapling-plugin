@@ -221,10 +221,11 @@ final class GCTravel {
                 reactToAttack(trip, bot);
                 return;
             }
-            // A crossing is minutes long, so a bot frozen at its boarding spot for the whole ride
-            // reads as a stalled bot. Stroll the deck instead, the way players do while waiting to
-            // dock — the wander keeps to reachable footholds, so it stays on board by itself.
-            if (!BotWanderSystem.isWandering(bot)) {
+            // A boat crossing is minutes long, so a bot frozen at its boarding spot for the whole
+            // ride reads as a stalled bot. Stroll the deck instead, the way players do while
+            // waiting to dock — the wander keeps to reachable footholds, so it stays on board.
+            // An elevator is a short ride in a small box with a portal back out, so it just waits.
+            if (GCTransit.isSpaciousVehicle(cur) && !BotWanderSystem.isWandering(bot)) {
                 BotWanderSystem.start(bot);
             }
             return;

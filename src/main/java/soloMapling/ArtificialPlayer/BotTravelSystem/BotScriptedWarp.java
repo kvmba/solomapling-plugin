@@ -30,6 +30,11 @@ public final class BotScriptedWarp {
             // portal 3). The way back (103000101 "out00" -> booth) is a plain portal already in the graph,
             // so this one inbound edge reconnects the whole subway.
             new WarpEdge(103000100, "in00", 103000101, 3),
+            // Helios Tower elevator: its "in00" is scripted (elevator.js) and puts you in the waiting
+            // car, not on the 99th floor — the Elevator event then rides the car up and lands it, so
+            // the edge targets the car (222020110/222020210) and GCTravel waits it out from there.
+            new WarpEdge(222020100, "in00", 222020110, 0), // 2F -> car going up
+            new WarpEdge(222020200, "in00", 222020210, 0), // 99F -> car going down
     };
 
     private static final Map<Integer, List<WarpEdge>> BY_FROM = buildEdges();
