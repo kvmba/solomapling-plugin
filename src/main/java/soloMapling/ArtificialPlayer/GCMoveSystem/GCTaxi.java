@@ -78,8 +78,14 @@ final class GCTaxi {
      * So the bot walks to the ticket NPC and then waits; see GCTravel.awaitVehicle.
      */
     private static final Object[][] VEHICLE_RIDES = {
-            {101000301, 1032009, 200000100, "Boats"}, // Ellinia terminal -> Orbis Station
-            {200000112, 2012002, 101000300, "Boats"}, // Orbis terminal -> Ellinia dock
+            {101000301, 1032009, 200000100, "Boats"},  // Ellinia terminal -> Orbis Station
+            {200000112, 2012002, 101000300, "Boats"},  // Orbis terminal -> Ellinia dock
+            {200000122, 2041001, 220000100, "Trains"}, // Orbis terminal -> Ludibrium Station
+            {220000111, 2041001, 200000100, "Trains"}, // Ludibrium terminal -> Orbis Station
+            {200000132, 2012022, 240000100, "Cabin"},  // Orbis terminal -> Leafre station
+            {240000111, 2082002, 200000100, "Cabin"},  // Leafre terminal -> Orbis Station
+            {200000152, 2012024, 260000100, "Genie"},  // Orbis airport -> Ariant Station
+            {260000110, 2102001, 200000100, "Genie"},  // Ariant terminal -> Orbis Station
     };
 
     /* A scheduled vehicle boarding at mapId, or null if none leaves from there. */

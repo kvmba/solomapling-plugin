@@ -18,6 +18,9 @@ public final class TrainingRegions {
             {220000000, 223000000}, // Ludibrium continent: Ludibrium + Eos Tower + Deep Ludi, plus Omega Sector / Korean Folk Town (original v83)
             {250000000, 252000000}, // Mu Lung + Herb Town — reachable via Hak (2090005) from Orbis Sky
             {700000000, 783000000}, // Shanghai: Bund, Plaza, and the mainland maps behind them (up to 782000002)
+            {230000000, 231000000}, // Aquarium — reachable overland from Leafre
+            {240000000, 241000000}, // Leafre — reachable via the Cabin from Orbis
+            {260000000, 262000000}, // Ariant — reachable via the Genie from Orbis
     };
 
     public static boolean isAllowed(int mapId) {
