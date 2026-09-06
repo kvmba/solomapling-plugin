@@ -157,6 +157,28 @@ blackjack.table_full: "牌桌满了。"
 blackjack.casino_defame: "【蘑菇赌场】你把赌注拿回去了。蘑菇赌场扣除了你的人气。"
 blackjack.bet_announce: "{0} 押注 {1}！"
 
+# 荷官的口语台词。原先硬编码在 BlackjackDealerBot 里，导致中文服务端上荷官只说英文；
+# 这些是荷官自己的话，和 BlackjackDealerBotDialogue.yaml 里 AI 玩家的反应台词是两回事。
+blackjack.your_turn: "{0}：{1}。你要怎么做？"
+blackjack.too_many: "{0}：{1} 爆了。"
+blackjack.twenty_one: "{0}：21！"
+blackjack.dealer_points: "{0}。"
+blackjack.dealer_twenty_one: "我 21 点 :P"
+
+# 每家玩家的结算行，由 BlackjackRules.formatOutcomeMessage() 组装。{0} 是玩家名，
+# 各行用 blackjack.outcome_separator 拼成一句话。
+blackjack.outcome.bust: "{0}：爆牌。"
+blackjack.outcome.lose_dealer_blackjack: "{0}：输了。庄家二十一点。"
+blackjack.outcome.lose: "{0}：输了。庄家赢。"
+blackjack.outcome.win_dealer_bust: "{0}：赢了！庄家爆牌。"
+blackjack.outcome.win: "{0}：赢了！"
+blackjack.outcome.blackjack: "{0}：二十一点！"
+blackjack.outcome.push: "{0}：平局。"
+blackjack.outcome.unexpected: "{0}：结果异常。"
+blackjack.outcome_separator: " | "
+# 一局里多名玩家下注时，用来拼接各人的下注播报。
+blackjack.bet_list_separator: " | "
+
 # ---------------------------------------------------------------------------
 # Dice
 # ---------------------------------------------------------------------------

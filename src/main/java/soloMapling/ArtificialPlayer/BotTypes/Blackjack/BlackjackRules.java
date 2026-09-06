@@ -1,5 +1,7 @@
 package soloMapling.ArtificialPlayer.BotTypes.Blackjack;
 
+import soloMapling.Environment.BotMessages;
+
 import java.util.List;
 
 public class BlackjackRules {
@@ -102,24 +104,29 @@ public class BlackjackRules {
         }
     }
 
+    /**
+     * One player's result line, read from the message pack so the announcement follows the
+     * configured language. These were hardcoded English, which left an English-only result
+     * readout on a localized server.
+     */
     public static String formatOutcomeMessage(String playerName, Outcome outcome, List<String> playerHand, List<String> dealerHand) {
         int playerValue = calculateHandValue(playerHand);
         int dealerValue = calculateHandValue(dealerHand);
 
         switch (outcome) {
             case LOSE:
-                if (playerValue > 21) return playerName + ": Busted.";
-                if (isBlackjack(dealerHand)) return playerName + ": Lose. Dealer Blackjack.";
-                return playerName + ": Lose. Dealer wins.";
+                if (playerValue > 21) return BotMessages.get("blackjack.outcome.bust", playerName);
+                if (isBlackjack(dealerHand)) return BotMessages.get("blackjack.outcome.lose_dealer_blackjack", playerName);
+                return BotMessages.get("blackjack.outcome.lose", playerName);
             case WIN:
-                if (dealerValue > 21) return playerName + ": Win! Dealer busts.";
-                return playerName + ": Win!";
+                if (dealerValue > 21) return BotMessages.get("blackjack.outcome.win_dealer_bust", playerName);
+                return BotMessages.get("blackjack.outcome.win", playerName);
             case BLACKJACK_WIN:
-                return playerName + ": Blackjack!";
+                return BotMessages.get("blackjack.outcome.blackjack", playerName);
             case PUSH:
-                return playerName + ": Push.";
+                return BotMessages.get("blackjack.outcome.push", playerName);
             default:
-                return playerName + ": Unexpected result.";
+                return BotMessages.get("blackjack.outcome.unexpected", playerName);
         }
     }
 }

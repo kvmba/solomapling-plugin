@@ -138,6 +138,29 @@ blackjack.table_full: "Table is full."
 blackjack.casino_defame: "[Mushroom Casino] You have stolen your bets. You have been defamed by the Mushroom Casino."
 blackjack.bet_announce: "{0} bets on {1}!"
 
+# Spoken table patter. Hardcoded in BlackjackDealerBot until now, which left an English-only
+# dealer on a localized server; these are the dealer's own lines, distinct from the AI-player
+# reactions that live in BlackjackDealerBotDialogue.yaml.
+blackjack.your_turn: "{0}: {1}. What will you do?"
+blackjack.too_many: "{0}: {1} Too Many."
+blackjack.twenty_one: "{0}: 21!"
+blackjack.dealer_points: "{0}."
+blackjack.dealer_twenty_one: "21 for me :P"
+
+# Per-player result lines, built by BlackjackRules.formatOutcomeMessage(). Each carries the
+# player's name in {0} and is joined into one line with blackjack.outcome_separator.
+blackjack.outcome.bust: "{0}: Busted."
+blackjack.outcome.lose_dealer_blackjack: "{0}: Lose. Dealer Blackjack."
+blackjack.outcome.lose: "{0}: Lose. Dealer wins."
+blackjack.outcome.win_dealer_bust: "{0}: Win! Dealer busts."
+blackjack.outcome.win: "{0}: Win!"
+blackjack.outcome.blackjack: "{0}: Blackjack!"
+blackjack.outcome.push: "{0}: Push."
+blackjack.outcome.unexpected: "{0}: Unexpected result."
+blackjack.outcome_separator: " | "
+# Joins one player's bet announcement to the next when several players bet in a round.
+blackjack.bet_list_separator: " | "
+
 # ---------------------------------------------------------------------------
 # Dice
 # ---------------------------------------------------------------------------

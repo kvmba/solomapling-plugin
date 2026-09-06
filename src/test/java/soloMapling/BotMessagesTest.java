@@ -2,6 +2,7 @@ package soloMapling;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
+import soloMapling.ArtificialPlayer.BotTypes.Blackjack.BlackjackRules;
 import soloMapling.Environment.BotMessages;
 import soloMapling.Environment.SoloMaplingLanguageConfig;
 import soloMapling.Environment.YesNo;
@@ -148,6 +149,14 @@ class BotMessagesTest {
                 "gamezone.talk_again", "gamezone.no_such_drink",
                 "blackjack.table_full", "blackjack.already_at_table", "blackjack.again",
                 "blackjack.waiting_for_players", "blackjack.place_bets", "blackjack.bust",
+                // The dealer's spoken patter, hardcoded in BlackjackDealerBot until this fix.
+                "blackjack.your_turn", "blackjack.too_many", "blackjack.twenty_one",
+                "blackjack.dealer_points", "blackjack.dealer_twenty_one",
+                // Per-result lines assembled by BlackjackRules.formatOutcomeMessage().
+                "blackjack.outcome.bust", "blackjack.outcome.lose_dealer_blackjack",
+                "blackjack.outcome.lose", "blackjack.outcome.win_dealer_bust",
+                "blackjack.outcome.win", "blackjack.outcome.blackjack",
+                "blackjack.outcome.push", "blackjack.outcome.unexpected",
                 "dice.select_han_cho", "dice.no_bet", "dice.casino_defame", "dice.roll",
                 "dropgame.rules", "dropgame.too_slow", "dropgame.invite_timeout",
                 "dropgame.trade_cancelled", "dropgame.wrong_amount",
@@ -164,5 +173,33 @@ class BotMessagesTest {
                 }
             }
         }
+    }
+
+    // The reported bug: the dealer asked "What will you do?" in English on a Chinese server.
+    @Test
+    void dealerTurnPromptIsLocalized() {
+        SoloMaplingLanguageConfig.setLanguageTag("zh-CN");
+        assertEquals("小明：17。你要怎么做？",
+                BotMessages.get("blackjack.your_turn", "小明", 17));
+        SoloMaplingLanguageConfig.setLanguageTag("en-US");
+        assertEquals("Thumper: 17. What will you do?",
+                BotMessages.get("blackjack.your_turn", "Thumper", 17));
+    }
+
+    // Result lines are assembled per player by BlackjackRules.formatOutcomeMessage(), so they
+    // must be read from the message pack rather than built with English literals.
+    @Test
+    void outcomeLinesAreLocalized() {
+        SoloMaplingLanguageConfig.setLanguageTag("zh-CN");
+        assertEquals("小明：二十一点！",
+                BlackjackRules.formatOutcomeMessage("小明",
+                        BlackjackRules.Outcome.BLACKJACK_WIN, List.of("AH", "KD"), List.of("2H", "3D")));
+        assertEquals("小明：平局。",
+                BlackjackRules.formatOutcomeMessage("小明",
+                        BlackjackRules.Outcome.PUSH, List.of("AH", "9D"), List.of("2H", "8D")));
+        SoloMaplingLanguageConfig.setLanguageTag("en-US");
+        assertEquals("Thumper: Blackjack!",
+                BlackjackRules.formatOutcomeMessage("Thumper",
+                        BlackjackRules.Outcome.BLACKJACK_WIN, List.of("AH", "KD"), List.of("2H", "3D")));
     }
 }

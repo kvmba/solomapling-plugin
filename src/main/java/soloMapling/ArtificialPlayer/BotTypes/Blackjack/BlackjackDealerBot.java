@@ -220,7 +220,7 @@ public class BlackjackDealerBot extends BotSM {
         }
 
         botFaceTowardsPoint(getChr(), currentPlayer.getCharacter().getPosition());
-        SocialCommands.BotSpeak(getChr(), playerName + ": " + handValue + ". What will you do?");
+        SocialCommands.BotSpeak(getChr(), BotMessages.get("blackjack.your_turn", playerName, handValue));
         if (!isBot(currentPlayer.getCharacter())) {
             showPlayerActionHint(currentPlayer.getCharacter());
         }
@@ -232,7 +232,7 @@ public class BlackjackDealerBot extends BotSM {
         dprint("BUST: " + name + " handValue=" + handValue + " hand=" + player.getHand());
         player.setResponseStatus("RESPONDED");
         player.setStatus(BlackjackPlayer.PlayerStatus.BUST);
-        SocialCommands.BotSpeak(getChr(), name + ": " + handValue + " Too Many.");
+        SocialCommands.BotSpeak(getChr(), BotMessages.get("blackjack.too_many", name, handValue));
         triggerAIPlayerReaction(player, "PlayerBust");
 
         Character kicked = lootLoserBets(player);
@@ -256,7 +256,7 @@ public class BlackjackDealerBot extends BotSM {
         dprint("AUTO_STAND (21): " + name + " hand=" + player.getHand());
         player.setResponseStatus("RESPONDED");
         player.setStatus(BlackjackPlayer.PlayerStatus.STAND);
-        SocialCommands.BotSpeak(getChr(), name + ": 21!");
+        SocialCommands.BotSpeak(getChr(), BotMessages.get("blackjack.twenty_one", name));
 
         table.incrementToNextPlayer();
         if (table.isCurrentPlayerDealer()) {
@@ -322,18 +322,18 @@ public class BlackjackDealerBot extends BotSM {
         dprint("DEALER_TURN: starting hand=" + dealer.getHand() + " value=" + handValue);
 
         while (BlackjackRules.shouldDealerHit(handValue)) {
-            SocialCommands.BotSpeak(getChr(), handValue + ".");
+            SocialCommands.BotSpeak(getChr(), BotMessages.get("blackjack.dealer_points", handValue));
             dealCardToPlayer(dealer);
             handValue = dealer.getHandValue();
             blockingSleep(500);
         }
 
-        SocialCommands.BotSpeak(getChr(), handValue + ".");
+        SocialCommands.BotSpeak(getChr(), BotMessages.get("blackjack.dealer_points", handValue));
         if (handValue > 21) {
             SocialCommands.BotSpeak(getChr(), BotMessages.get("blackjack.bust"));
             triggerDealerReaction("DealerLoss");
         } else if (handValue == 21) {
-            SocialCommands.BotSpeak(getChr(), "21 for me :P");
+            SocialCommands.BotSpeak(getChr(), BotMessages.get("blackjack.dealer_twenty_one"));
             SocialCommands.BotEmote(getChr(), 3);
         }
 
@@ -359,7 +359,7 @@ public class BlackjackDealerBot extends BotSM {
             lines.add(BlackjackRules.formatOutcomeMessage(player.getName(), outcome, player.getHand(), dealerHand));
         }
         if (!lines.isEmpty()) {
-            SocialCommands.BotSpeak(getChr(), String.join(" | ", lines));
+            SocialCommands.BotSpeak(getChr(), String.join(BotMessages.get("blackjack.outcome_separator"), lines));
         }
 
         boolean dealerBusted = table.getDealer().getHandValue() > 21;
@@ -525,7 +525,7 @@ public class BlackjackDealerBot extends BotSM {
             }
         }
         if (!betLines.isEmpty()) {
-            SocialCommands.BotSpeak(getChr(), String.join(" | ", betLines));
+            SocialCommands.BotSpeak(getChr(), String.join(BotMessages.get("blackjack.bet_list_separator"), betLines));
         }
         for (Character chr : toKick) {
             kickPlayer(chr);
