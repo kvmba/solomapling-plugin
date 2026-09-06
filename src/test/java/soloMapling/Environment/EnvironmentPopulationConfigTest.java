@@ -28,8 +28,8 @@ class EnvironmentPopulationConfigTest {
     void loadsBundledYamlFromClasspathOrFs() {
         var plan = EnvironmentPopulationConfig.reload();
         assertTrue(plan.training().enabled());
-        assertEquals(37, plan.training().cohorts().size());
-        assertEquals(502, plan.trainingCohortTotal());
+        assertEquals(38, plan.training().cohorts().size());
+        assertEquals(868, plan.trainingCohortTotal());
         assertTrue(plan.essentials().enabled());
         assertEquals("henesys", plan.essentials().fmRegion());
         assertEquals(5, plan.essentials().fmEntrance().m1());
@@ -40,7 +40,7 @@ class EnvironmentPopulationConfigTest {
         int social = towns.stream().flatMap(t -> t.maps().stream()).mapToInt(m -> m.count()).sum();
         int wanderers = towns.stream().mapToInt(t -> t.wanderers()).sum();
         assertEquals(271, social);
-        assertEquals(139, wanderers);
+        assertEquals(185, wanderers);
     }
 
     @Test
