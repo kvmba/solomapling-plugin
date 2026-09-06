@@ -9,7 +9,7 @@ import java.util.Set;
  *
  * Ids come from the vehicle event scripts, which map each ride's onboard maps.
  */
-final class GCTransit {
+public final class GCTransit {
     private GCTransit() {
     }
 
@@ -24,7 +24,7 @@ final class GCTransit {
     );
 
     /* True if mapId is inside a vehicle rather than a place a bot can walk around. */
-    static boolean isVehicleMap(int mapId) {
+    public static boolean isVehicleMap(int mapId) {
         return VEHICLE_MAPS.contains(mapId);
     }
 

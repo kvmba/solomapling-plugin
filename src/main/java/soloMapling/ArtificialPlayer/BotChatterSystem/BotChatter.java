@@ -8,6 +8,7 @@ import soloMapling.ArtificialPlayer.BotMessagingSystem.CharacterStorage;
 import soloMapling.ArtificialPlayer.BotTypes.SocialBot;
 import soloMapling.ArtificialPlayer.BotTypes.TownWandererBot;
 import soloMapling.ArtificialPlayer.GCMoveSystem.GCMovement;
+import soloMapling.ArtificialPlayer.GCMoveSystem.GCTransit;
 import soloMapling.server.BotTiming;
 
 import java.awt.Point;
@@ -44,6 +45,9 @@ public final class BotChatter {
     public static volatile double CHATTER_CHANCE = 0.10;
     // Only bots this close are a plausible partner (visibly adjacent, not shouting across the map).
     public static volatile int CHATTER_RADIUS = 180;
+    // Radius used aboard a vehicle instead: a deck is one room holding everyone making the crossing,
+    // so 180px would rarely put two bots in range even with a full boat.
+    public static volatile int CHATTER_RADIUS_ABOARD = 600;
     // Self-expiring engagement deadline: a pair that dies mid-chain (release beat dropped by the gate)
     // frees itself within this window even if forget() is missed. Must exceed the max chain duration
     // (opening + turns * TURN_PAUSE_MAX) so a normally-completing chat always releases via its terminal
@@ -152,7 +156,11 @@ public final class BotChatter {
     private static BotSM findPartner(BotSM initiator, Character me) {
         MapleMap map = me.getMap();
         Point mp = me.getPosition();
-        double bestSq = (double) CHATTER_RADIUS * CHATTER_RADIUS;
+        // A vehicle deck is one big room with everyone aboard in it, so the town radius (which keeps
+        // chatter to visibly adjacent bots) would leave a boat full of bots silent. Widen it there
+        // only — streets and plazas keep the tight radius.
+        int radius = GCTransit.isVehicleMap(me.getMapId()) ? CHATTER_RADIUS_ABOARD : CHATTER_RADIUS;
+        double bestSq = (double) radius * radius;
         BotSM best = null;
         for (Character chr : map.getAllPlayers()) {
             if (chr == null || chr.getId() == me.getId() || !isBot(chr)) {
