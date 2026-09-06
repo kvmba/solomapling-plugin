@@ -36,7 +36,7 @@ final class GCTaxi {
     static final long BOARD_DWELL_MAX_MS = 6_000;
 
     /* An NPC ride: stand near npcId on fromMapId, then ride to toMapId. */
-    record TransitEdge(int fromMapId, int npcId, int toMapId) {
+    record TransitEdge(int fromMapId, int npcId, int toMapId, int minLevel) {
     }
 
     // {townMapId, cabNpcId} — the fully-connected Victoria Island cab network.
@@ -67,23 +67,21 @@ final class GCTaxi {
      * the island anyway, so a return edge would be a promise the server can't keep.
      */
     private static final int[][] NPC_RIDES = {
-            {200000141, 2090005, 250000100}, // Hak: Orbis Sky -> Mu Lung
-            {250000100, 2090005, 200000141}, // Hak: Mu Lung -> Orbis Sky
-            {250000100, 2090005, 251000000}, // Hak: Mu Lung -> Herb Town
-            {251000000, 2090005, 250000100}, // Hak: Herb Town -> Mu Lung
-            {60000, 22000, 104000000},      // Southperry: Sanks' boat out to Lith Harbor
-            {102000000, 9310000, 701000000}, // Pilot Hong: Perion -> Shanghai Bund
-            {701000100, 9310013, 102000000}, // Pilot Hong: Shanghai Plaza -> Perion
-            // Ticket counters: a waiting room has no portal into it, so the only way in is the
-            // clerk standing on the pier, who warps you inside outright. This is the first half of
-            // a scheduled ride — the second half is VEHICLE_RIDES below, which boards from there.
-            {220000110, 2041000, 220000111}, // Ludibrium pier -> waiting room (train to Orbis)
-            {200000121, 2012013, 200000122}, // Orbis pier -> waiting room (train to Ludibrium)
-            {200000151, 2012025, 200000152}, // Orbis pier -> airport (genie to Ariant)
-            {260000100, 2102000, 260000110}, // Ariant platform -> waiting room (genie to Orbis)
-            {600010001, 9201068, 600010002}, // NLC station -> waiting room (subway to Kerning)
-            {540010000, 9270038, 540010001}, // CBD airport -> waiting room (plane to Kerning)
-            {103000000, 9270041, 540010100}, // Kerning City -> airport (plane to CBD)
+            {200000141, 2090005, 250000100, 1},
+            {250000100, 2090005, 200000141, 1},
+            {250000100, 2090005, 251000000, 1},
+            {251000000, 2090005, 250000100, 1},
+            {60000, 22000, 104000000, 8},
+            {102000000, 9310000, 701000000, 1},
+            {701000100, 9310013, 102000000, 1},
+            {220000110, 2041000, 220000111, 1},
+            {200000121, 2012013, 200000122, 1},
+            {200000151, 2012025, 200000152, 1},
+            {260000100, 2102000, 260000110, 1},
+            {600010001, 9201068, 600010002, 1},
+            {540010000, 9270038, 540010001, 1},
+            {103000000, 9270041, 540010100, 1},
+            {240000110, 2082003, 200090500, 1},
     };
 
     /*
@@ -136,7 +134,7 @@ final class GCTaxi {
             for (int[] to : VICTORIA_CABS) {
                 // skip self, and any destination town gated out of the current server version
                 if (from[0] != to[0] && isPortalinCurrentVersion(to[0])) {
-                    edges.add(new TransitEdge(from[0], from[1], to[0]));
+                    edges.add(new TransitEdge(from[0], from[1], to[0], 1));
                 }
             }
             byFrom.put(from[0], edges);
@@ -148,7 +146,7 @@ final class GCTaxi {
             }
             // a ride may start in a town that already has cabs — append, don't replace
             byFrom.computeIfAbsent(ride[0], k -> new ArrayList<>())
-                    .add(new TransitEdge(ride[0], ride[1], ride[2]));
+                    .add(new TransitEdge(ride[0], ride[1], ride[2], ride[3]));
         }
         Map<Integer, List<TransitEdge>> frozen = new HashMap<>();
         byFrom.forEach((k, v) -> frozen.put(k, List.copyOf(v)));
@@ -160,9 +158,9 @@ final class GCTaxi {
     }
 
     /* The NPC ride from one map to another, or null if no NPC drives that route. */
-    static TransitEdge edge(int fromMapId, int toMapId) {
+    static TransitEdge edge(int fromMapId, int toMapId, int level) {
         for (TransitEdge e : from(fromMapId)) {
-            if (e.toMapId() == toMapId) {
+            if (e.toMapId() == toMapId && level >= e.minLevel()) {
                 return e;
             }
         }

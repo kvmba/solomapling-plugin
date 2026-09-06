@@ -29,7 +29,8 @@ public final class GCTransit {
             222020110, 222020111, // Helios elevator going up: waiting car, moving car
             222020210, 222020211, // Helios elevator going down: waiting car, moving car
             600010003, 600010005, // subway to New Leaf City, subway to Kerning
-            540010101, 540010002  // plane to CBD, plane to Kerning
+            540010101, 540010002, // plane to CBD, plane to Kerning
+            200090500, 200090510  // dragon flight to the Time Temple: flying form, and the gate map
     );
 
     /*

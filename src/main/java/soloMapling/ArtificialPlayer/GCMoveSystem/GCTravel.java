@@ -276,7 +276,7 @@ final class GCTravel {
                     () -> awaitVehicle(trip));
             return;
         }
-        GCTaxi.TransitEdge taxi = GCTaxi.edge(cur, nextHop);
+        GCTaxi.TransitEdge taxi = GCTaxi.edge(cur, nextHop, bot.getLevel());
         if (taxi != null) {
             Point npcPos = GCTaxi.npcPos(bot.getMap(), taxi.npcId());
             if (npcPos == null) {

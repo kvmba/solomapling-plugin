@@ -68,7 +68,7 @@ public final class TrainingMapFinder {
             if (MiniDungeonInfo.isDungeonMap(mapId)) {
                 continue; // single-person mini-dungeon instance — bots must never grind/warp here
             }
-            if (!TrainingRegions.isAllowed(mapId)) {
+            if (!TrainingRegions.isAllowed(mapId, level)) {
                 continue; // outside original-content regions (Leafre / Aqua Road / new-school etc.)
             }
             MapMobIndex.MapMobInfo info = MapMobIndex.info(mapId);

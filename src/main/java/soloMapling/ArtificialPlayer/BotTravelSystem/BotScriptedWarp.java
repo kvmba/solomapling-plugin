@@ -35,6 +35,9 @@ public final class BotScriptedWarp {
             // the edge targets the car (222020110/222020210) and GCTravel waits it out from there.
             new WarpEdge(222020100, "in00", 222020110, 0), // 2F -> car going up
             new WarpEdge(222020200, "in00", 222020210, 0), // 99F -> car going down
+            // Time Temple: as a dragon, the "in00" on 200090510 is scripted (templeenter.js ->
+            // warp 270000100 "out00"). The way back is a plain portal, so this one edge opens it.
+            new WarpEdge(200090510, "in00", 270000100, 2),
     };
 
     private static final Map<Integer, List<WarpEdge>> BY_FROM = buildEdges();
