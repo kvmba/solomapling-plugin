@@ -7,7 +7,10 @@ import soloMapling.Environment.PluginResources;
 
 public class MapleVersionManager {
 
-    public static int version = 55;
+    // Content-trim threshold for NPC/portal release tables. The server itself runs the real v83
+    // (ServerConstants.VERSION), so trimming at 55 wrongly hides later content such as Time Temple (72),
+    // Nautilus (62), Ereve (73) and Tera Forest (83) — keep this aligned with the server version.
+    public static int version = 83;
     public static int itemPoolVersion = 55;
 
     private static Map<String, String> npcReleaseVersions;
