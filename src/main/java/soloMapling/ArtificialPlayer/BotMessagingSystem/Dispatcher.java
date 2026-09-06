@@ -3,6 +3,7 @@ package soloMapling.ArtificialPlayer.BotMessagingSystem;
 import org.gms.client.Character;
 import org.gms.net.server.world.Party;
 import org.gms.net.server.world.PartyCharacter;
+import soloMapling.ArtificialPlayer.BotPartySystem.BotRecruitManager;
 import soloMapling.ArtificialPlayer.BotSM;
 import soloMapling.ArtificialPlayer.BotTypes.SocialBot;
 import soloMapling.ArtificialPlayer.BotTypes.CompanionBot;
@@ -68,6 +69,13 @@ public class Dispatcher implements Runnable {
             if (characterFound) {
                 handleBotRunning(botToCall[0], message);
             } else {
+                // Nobody was named, but the line may still be an open party offer ("anyone want to
+                // party?"). Hand it to every bot inside the speaker's viewport so a player can
+                // recruit a crowd without learning anyone's name first. Runs before the respondant/
+                // inquirer path and never replaces it.
+                if (BotRecruitManager.isRecruitShout(message.getContent())) {
+                    BotRecruitManager.broadcastRecruit(message.getSender(), message.getContent());
+                }
                 handleMessageWithNoBotName(message);
             }
             // Runs in ADDITION to a name call, not instead of it: "Tiger 跟我来" should still

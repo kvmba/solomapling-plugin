@@ -437,6 +437,17 @@ public abstract class BotSM implements EventSubscriber {
         return false;
     }
 
+    // Shouted party offer with nobody named: the player is a stranger (no shared party) standing
+    // within viewport range and BotRecruitManager is broadcasting the line to every nearby bot.
+    // Returns true when this bot answered, which counts against the per-shout reply cap; false
+    // when it stayed quiet, so the slot is free for a bot that did speak.
+    //
+    // Default is silence: only bot types that actually recruit override this, so every other type
+    // (merchants, dealers, guides...) is untouched by a shout.
+    public boolean offerRecruit(Character player, String content) {
+        return false;
+    }
+
     //
 
     protected void checkForTrades() {

@@ -4,6 +4,10 @@ import org.gms.client.Character;
 import soloMapling.ArtificialPlayer.BotMessagingSystem.CharacterStorage;
 import soloMapling.ArtificialPlayer.BotSM;
 
+import java.awt.Point;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
@@ -24,6 +28,20 @@ public class BotRecruitManager {
     public static final int FOLLOWER_CAP = 30;
     public static final double SOCIAL_ACCEPT_CHANCE = 0.70;
     public static final double TRAINING_ACCEPT_CHANCE = 0.80;
+
+    // ── Shout recruiting (no bot name typed) ─────────────────────────────────
+    // A player who shouts "anyone want to party?" is heard by every bot inside the client
+    // viewport, which is 1280x720 centred on the speaker. Half-extents are what the range check
+    // needs; the raw ints (rather than a Rectangle) keep the per-bot test allocation-free.
+    public static final int VIEW_HALF_W = 640;
+    public static final int VIEW_HALF_H = 360;
+    // At most this many bots answer one shout - enough that a crowd feels alive, few enough that
+    // a shout doesn't bury the chat. Nearest bots win (see broadcastRecruit).
+    public static final int MAX_SHOUT_REPLIES = 6;
+    // Deliberately short and generic: a shout is a bare offer, so anything that reads as "come
+    // join us" qualifies. The localized menu labels ("要组队吗？") already carry the Chinese
+    // wording, so a Chinese-speaking player's natural shout matches on 组队 without a second list.
+    private static final String[] RECRUIT_KEYWORDS = {"party", "team", "join", "group", "组队", "一起"};
     // Kept comfortably above the InviteCoordinator's ~3-min silent timeout so the accept window no
     // longer races it - the coordinator now backstops staleness (a late accept just NOT_FOUNDs
     // harmlessly). This also keeps isArmed() true across the whole realistic invite window, which
@@ -124,6 +142,91 @@ public class BotRecruitManager {
         if (bot != null) {
             bot.nudgeSoon(300);
         }
+    }
+
+    // ── Shout recruiting (a stranger shouts; nobody was named) ───────────────
+
+    // Whether a chat line reads as an open party offer. Matched case-insensitively on the whole
+    // line, so "anyone want to party?" and "party" both qualify. Called only on the unnamed-chat
+    // path, so ordinary chatter never reaches it.
+    public static boolean isRecruitShout(String content) {
+        if (content == null || content.isBlank()) {
+            return false;
+        }
+        String lower = content.toLowerCase();
+        for (String kw : RECRUIT_KEYWORDS) {
+            if (lower.contains(kw)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    // Hands one shouted offer to every eligible bot inside the speaker's viewport, nearest first,
+    // stopping once MAX_SHOUT_REPLIES of them actually answered. Returns how many answered.
+    //
+    // Nearest-first is what makes the cap behave: with a crowd on screen the ones the player is
+    // practically standing next to reply, and the ones on the far edge stay quiet, which reads as
+    // "the people who heard you" rather than an arbitrary slice of the map.
+    //
+    // A bot that declines is still a reply - "nah, I'm training" is the interesting half of the
+    // answer, not a wasted slot. Bots that stay silent on purpose (already partied, mid-conversation,
+    // on cooldown, follower cap full) return false and leave their slot for someone else.
+    public static int broadcastRecruit(Character sender, String content) {
+        if (sender == null || sender.getMap() == null) {
+            return 0;
+        }
+        Point origin = sender.getPosition();
+        if (origin == null) {
+            return 0;
+        }
+        int senderMap = sender.getMapId();
+        // Sorted rather than capped-while-scanning: we need the nearest N, and the cheapest honest
+        // way to know that is to look at all of them. Bot counts are small (tens), and this only
+        // runs on a line that already matched a recruit keyword.
+        List<BotSM> inView = new ArrayList<>();
+        for (BotSM bot : CharacterStorage.getAllBots().values()) {
+            Character chr = bot.getChr();
+            if (chr == null) {
+                continue;
+            }
+            if (chr.getMapId() != senderMap || !bot.getRunning()) {
+                continue;
+            }
+            if (CharacterStorage.checkIfInvisibleBot(chr.getId())) {
+                continue; // hidden bots are not on screen, so they cannot have been shouted at
+            }
+            Point p = chr.getPosition();
+            if (p == null || Math.abs(p.x - origin.x) > VIEW_HALF_W
+                    || Math.abs(p.y - origin.y) > VIEW_HALF_H) {
+                continue; // outside the 1280x720 viewport
+            }
+            inView.add(bot);
+        }
+        if (inView.isEmpty()) {
+            return 0;
+        }
+        inView.sort(Comparator.comparingInt(b -> distanceSq(origin, b.getChr().getPosition())));
+        int replies = 0;
+        for (BotSM bot : inView) {
+            if (replies >= MAX_SHOUT_REPLIES) {
+                break;
+            }
+            try {
+                if (bot.offerRecruit(sender, content)) {
+                    replies++;
+                }
+            } catch (Exception e) {
+                debugprint("broadcastRecruit: " + bot.getChr().getName() + " threw: " + e.getMessage());
+            }
+        }
+        return replies;
+    }
+
+    private static int distanceSq(Point a, Point b) {
+        int dx = a.x - b.x;
+        int dy = a.y - b.y;
+        return dx * dx + dy * dy;
     }
 
     public static boolean isArmed(int botId) {

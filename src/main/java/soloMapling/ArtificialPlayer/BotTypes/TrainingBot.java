@@ -317,6 +317,28 @@ public class TrainingBot extends BotSM implements GrindTickRegistry.Participant 
         return (getChr().getParty() != null ? partyMenu : soloMenu).offerDirect(player, content);
     }
 
+    // Shouted offer from a stranger in range: no menu, no conversation - the shout IS the
+    // question, so roll it and answer on the spot. A yes arms the usual invite window and the
+    // existing pollRecruitInvite/checkPrioritySpeed path takes it from there, unchanged.
+    @Override
+    public boolean offerRecruit(Character player, String content) {
+        Character chr = getChr();
+        if (chr == null || chr.getParty() != null) {
+            return false; // already committed to a party - nothing to offer
+        }
+        BotRecruitManager.RecruitAnswer ans = BotRecruitManager.rollPartyAsk(
+                chr, player, BotRecruitManager.TRAINING_ACCEPT_CHANCE, false);
+        // Silence rather than a repeat excuse: this player asked recently and got a no, or the
+        // world is full of followers. A bot shouting the same refusal at every passer-by is noise,
+        // and staying quiet leaves the reply slot for a bot that has something to say.
+        if (ans == BotRecruitManager.RecruitAnswer.ON_COOLDOWN
+                || ans == BotRecruitManager.RecruitAnswer.FOLLOWERS_FULL) {
+            return false;
+        }
+        sayRecruit(ans == BotRecruitManager.RecruitAnswer.ACCEPTED ? "PartyAccept" : "PartyDecline", player);
+        return true;
+    }
+
     // Mid-recruit: a conversation is open or the bot said "invite me" and the window is live.
     // Grind self-repair (teleport/bail), crowd-bail, and the session-end walk-off all hold during
     // this - a bot that says yes and then blinks across the map breaks the exchange.

@@ -1239,6 +1239,14 @@ SocialBot:
       - "deal! shoot me the invite"
       - {line: "sure ^^ i was getting tired of this town anyway, invite me {PLAYER_NAME}", emote: 2}
       - "ok but im warning u, im gonna talk the WHOLE time. invite me hehe"
+      - "did someone say party?! over here!! invite me"
+      - {line: "ooh yes pls, ive been stood on this spot for an hour. invite me {PLAYER_NAME}", emote: 2}
+      - "me me me!! i volunteer as tribute, send it"
+      - "yknow what, sure. worst case u kick me later lol, invite me"
+      - {line: "a party?? for me?? invite me before u change ur mind", emote: 3}
+      - "ok im in! let me just say bye to this lamp post"
+      - "aye ill come!! been looking for a reason to leave town honestly"
+      - {line: "yes!! but i get to pick the music. invite me {PLAYER_NAME} ^^", emote: 2}
     emote:
       - 2
       - 3
@@ -1259,6 +1267,14 @@ SocialBot:
       - "nah im good, the town needs me (it doesnt, but still)"
       - "cant rn, im mid-afk technically lol"
       - {line: "ask me again some other time, today's a no from me", emote: 0}
+      - "aw i cant, im holding this exact spot for someone"
+      - {line: "no thx {PLAYER_NAME}, i dont really leave town. gl finding someone!", emote: 0}
+      - "sry, i get motion sickness on hunting maps lol"
+      - "pass! i'd just stand there looking pretty anyway"
+      - {line: "cant, im counting the people who walk by. its important", emote: 4}
+      - "nahh, i promised the npc id keep him company"
+      - "today's my day off. ask the ones with weapons lol"
+      - {line: "sry! i only party with people who beat me at rock paper scissors", emote: 7}
     emote:
       - 0
       - 4

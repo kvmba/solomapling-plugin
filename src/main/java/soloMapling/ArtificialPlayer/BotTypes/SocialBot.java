@@ -647,6 +647,35 @@ public class SocialBot extends BotSM {
 
     // --- Party recruiting ---
 
+    // Shouted offer from a stranger in range: the townsperson's half of the no-name broadcast.
+    // Rolls through the same shared brain as the menu path but without opening a conversation -
+    // the shout is the question, so there is no respondant, no hint balloon and no menu.
+    //
+    // Deliberately NOT handlePartyAsk(): that one drives the respondant/endReply state machine and
+    // repaints the option menu, which is exactly what a shout must not do.
+    @Override
+    public boolean offerRecruit(Character player, String content) {
+        Character chr = getChr();
+        // Already partied, or already talking to somebody: a townsperson mid-conversation with
+        // another player does not answer a shout from across the street.
+        if (chr == null || chr.getParty() != null || hasActiveRespondant()) {
+            return false;
+        }
+        BotRecruitManager.RecruitAnswer ans = BotRecruitManager.rollPartyAsk(
+                chr, player, BotRecruitManager.SOCIAL_ACCEPT_CHANCE, true);
+        if (ans == BotRecruitManager.RecruitAnswer.ON_COOLDOWN
+                || ans == BotRecruitManager.RecruitAnswer.FOLLOWERS_FULL) {
+            return false; // asked-and-refused recently, or the world is at its follower cap
+        }
+        String line = getRandomLine(
+                ans == BotRecruitManager.RecruitAnswer.ACCEPTED ? "PartyAccept" : "PartyDecline", player);
+        if (line == null) {
+            return false; // no dialogue node -> nothing to say, leave the slot to another bot
+        }
+        speakAfterBeat(player, line); // read-and-type beat, so a crowd doesn't answer in lockstep
+        return true;
+    }
+
     // "Wanna team up?": roll accept/decline via the shared recruit brain. Accept arms a 60s window
     // for THIS player's party invite (pollRecruitInvite answers it) and ends the conversation;
     // decline speaks a flavored excuse and loops back to the options like any other category.

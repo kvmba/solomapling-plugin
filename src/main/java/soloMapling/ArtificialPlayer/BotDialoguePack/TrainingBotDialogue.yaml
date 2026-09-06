@@ -1626,6 +1626,14 @@ TrainingBot:
       - "yeah ok! this map's better with two anyway, send it"
       - {line: "sure thing {PLAYER_NAME}, invite me, ill hold this side down", emote: 2}
       - "ok but i already claimed this ledge, u can have the rest lol. invite me!"
+      - "yo over here!! yeah ill come, send it"
+      - {line: "heard u, im in. invite me {PLAYER_NAME} n lets move", emote: 2}
+      - "wait me too!! pick me, ive been solo all day"
+      - "ok ok, hold on, let me finish this {MOB} first. invite me!"
+      - {line: "u had me at party. send the invite {PLAYER_NAME}", emote: 3}
+      - "aye, count me in. i know where the good spawns are"
+      - "sure! fair warning i steal kills by accident lol, invite me"
+      - {line: "yoo a party?! inv mee, been waiting for an excuse to leave this map", emote: 2}
     emote:
       - 2
       - 3
@@ -1647,6 +1655,14 @@ TrainingBot:
       - {line: "pass! but ur welcome to half the map {PLAYER_NAME}", emote: 0}
       - "solo grind hits different, sry"
       - "gonna pass rn, im way too deep in the zone sry"
+      - "not me, i only got an hour n i aint wasting it chatting"
+      - {line: "no thx {PLAYER_NAME}, i run solo, no exceptions. gl tho", emote: 0}
+      - "sry!! just started a rotation, breaking it mid-way kills the rates"
+      - "nah, my {JOB} rotation gets messy with people around lol"
+      - {line: "someone else will, promise. im mid-{LEVEL} crisis over here", emote: 3}
+      - "cant, im already carrying a guildie's alt on my back"
+      - "pass, last time i partied i spent 20 min explaining the map"
+      - {line: "aw i wish, but im parked here till i hit {LEVEL}. ask later?", emote: 4}
     emote:
       - 0
       - 4
