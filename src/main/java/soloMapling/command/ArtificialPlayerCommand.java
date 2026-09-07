@@ -666,6 +666,9 @@ public class ArtificialPlayerCommand extends Command {
         List<Integer> spawned = new ArrayList<>();
         for (int i = 0; i < count; i++) {
             int botId = BotGeneration.createBot(pos, map, baseClass, band[0], band[1]);
+            if (botId <= 0) {
+                continue; // every channel is at capacity - the bot was not created
+            }
             if (autoAttack) {
                 Character fakechar = BotHelpers.getCharFromChannelStorage(botId);
                 if (fakechar != null) {

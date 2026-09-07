@@ -439,7 +439,9 @@ public class BotGeneration {
      */
     public static Character createBotPollReadiness(Point position, int mapId) {
         int botId = BotGeneration.createBot(position, getMapleMapById(mapId));
-
+        if (botId <= 0) {
+            return null; // every channel is at capacity - nothing was created to wait for
+        }
         for (int i = 0; i < 30; i++) { // 30 * 100ms = 3000ms max
             Character fakechar = BotHelpers.getCharFromChannelStorage(botId);
             if (fakechar != null) {
