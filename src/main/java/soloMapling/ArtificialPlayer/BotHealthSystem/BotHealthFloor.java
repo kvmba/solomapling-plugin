@@ -18,7 +18,7 @@ package soloMapling.ArtificialPlayer.BotHealthSystem;
 public final class BotHealthFloor {
 
     /** Fraction of max HP a living artificial player keeps as its minimum. */
-    public static final double HP_FLOOR_RATIO = 0.05;
+    private static final double HP_FLOOR_RATIO = 0.05;
 
     private BotHealthFloor() {
     }
