@@ -75,11 +75,30 @@ class BotChannelRouterTest {
     @Test
     void existingRealPlayersCountTowardLoad() {
         // ch1 already holds 500 real players: bots must favour the emptier channels.
-        // ch2 (w .3) and ch3 (w .2) are both empty, so both read ratio 0 and the tie goes to
-        // the highest id - ch3, the most starved.
+        // ch2 (w .3) and ch3 (w .2) are both empty, so both read ratio 0 and the lowest id
+        // wins - ch2.
         int[] load = {500, 0, 0};
         int p = BotChannelRouter.pickChannel(load, BotChannelRouter.weights(3), 1000);
-        assertEquals(2, p, "should avoid the loaded ch1, picked=" + p);
+        assertEquals(1, p, "should avoid the loaded ch1, picked=" + p);
+    }
+
+    @Test
+    void emptyServerFillsLowestChannelFirst() {
+        // "Lower id = more bots" must hold while the population is coming up, not only once it
+        // settles. On an empty server ch1 has to take the very first bot.
+        int[] load = {0, 0, 0};
+        int first = BotChannelRouter.pickChannel(load, BotChannelRouter.weights(3), 1000);
+        assertEquals(0, first, "first bot should land on ch1, got ch" + (first + 1));
+
+        // And ch1 must never be behind a higher id at any prefix of the spawn.
+        int[] running = new int[3];
+        double[] w = BotChannelRouter.weights(3);
+        for (int k = 0; k < 30; k++) {
+            running[BotChannelRouter.pickChannel(running, w, 1000)]++;
+            assertTrue(running[0] >= running[1] && running[1] >= running[2],
+                    "shape inverted at bot " + (k + 1) + ": "
+                            + running[0] + "/" + running[1] + "/" + running[2]);
+        }
     }
 
     @Test

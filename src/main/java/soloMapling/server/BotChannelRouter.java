@@ -23,8 +23,9 @@ import org.gms.net.server.world.World;
  *
  * <p>Load is read live from each channel's player storage (O(1)), so nothing has to be tracked
  * here and no counter can drift as bots log off for a rest. Allocation picks the channel with the
- * lowest {@code load / weight} ratio that still has room; ties go to the highest id (the most
- * starved), which is what makes the taper come out as 6:4 / 5:3:2 rather than starving the tail.
+ * lowest {@code load / weight} ratio that still has room, which lands on 6:4 (two channels) and
+ * 5:3:2 (three) at steady state. Ties go to the lowest id, so the "lower id = fuller" shape holds
+ * while the population is still coming up and not only once it settles.
  */
 public final class BotChannelRouter {
 
@@ -70,6 +71,12 @@ public final class BotChannelRouter {
     /**
      * Index of the channel that should take the next bot, or -1 when they are all full.
      * Pure, so the split is testable without a server.
+     *
+     * <p>Scanned low id -&gt; high with a strict {@code <}, so on an equal ratio the LOWEST id
+     * wins. That keeps "lower id = more bots" true at every point in time, not just at
+     * steady state: with the opposite tie-break the empty server fills tail-first (3,2,1,...),
+     * which inverts the intended shape while the population is still coming up. The steady
+     * split is the same either way — 6:4 / 5:3:2 — only the fill order differs.
      */
     static int pickChannel(int[] load, double[] w, int cap) {
         if (load == null || w == null || load.length != w.length) {
@@ -77,7 +84,7 @@ public final class BotChannelRouter {
         }
         int pick = -1;
         double best = Double.MAX_VALUE;
-        for (int i = w.length - 1; i >= 0; i--) {
+        for (int i = 0; i < w.length; i++) {
             if (load[i] >= cap) {
                 continue; // channel full
             }
