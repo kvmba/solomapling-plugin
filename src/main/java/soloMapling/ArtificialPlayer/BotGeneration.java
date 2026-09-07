@@ -17,6 +17,7 @@ import soloMapling.ArtificialPlayer.BotBuffRequestSystem.BotBuffRequestHandler;
 import soloMapling.ArtificialPlayer.BotMessagingSystem.CharacterStorage;
 import soloMapling.ArtificialPlayer.BotPartySystem.BotRecruitManager;
 import soloMapling.companion.CompanionRoster;
+import soloMapling.server.BotChannelRouter;
 import soloMapling.server.SoloMaplingConstants;
 import soloMapling.server.SoloMaplingUtilities;
 
@@ -186,14 +187,34 @@ public class BotGeneration {
         // Taken BEFORE the expensive work so the wait is the cheap part.
         BotSpawnThrottle.acquire();
 
+        // Spread bots over the open channels (ch1 heaviest) instead of stacking them all on
+        // channel 1. NONE means every channel is at capacity - skip the spawn rather than
+        // squeezing one in past the cap.
+        int channel = BotChannelRouter.nextChannel();
+        if (channel == BotChannelRouter.NONE) {
+            return -1;
+        }
+
         int cid = templateCharacterId();
 
         Character bot = null;
-        bot = Character.loadCharFromDB(cid, getBotClient(), false);
+        bot = Character.loadCharFromDB(cid, BotClientHandler.clientFor(channel), false);
         int botId = SoloMaplingConstants.GameConstants.BOT_BASE_ID + currentBotCount.getAndIncrement();
         bot = setBotStats(bot, botId); // Bot onDemandBot
         addBotToServer(bot);
-        placeBotOnMap(bot, pos, map);
+        // Re-resolve the map on the bot's OWN channel. Callers pass a map instance taken from
+        // whichever channel they were on (a GM's, or channel 1's), and a map is a per-channel
+        // object: putting the bot in another channel's instance would broadcast it to that
+        // channel's players instead of the ones who should see it.
+        MapleMap ownMap = map;
+        if (map != null) {
+            MapleMap resolved = bot.getClient().getChannelServer()
+                    .getMapFactory().getMap(map.getId());
+            if (resolved != null) {
+                ownMap = resolved;
+            }
+        }
+        placeBotOnMap(bot, pos, ownMap);
         // Decorate before the drop-down plays so the bot arrives fully dressed
         // (decoration is an in-memory cache lookup, takes microseconds).
         if (baseClass <= 0) {
@@ -226,9 +247,14 @@ public class BotGeneration {
             return existing;
         }
 
-        Client companionClient = new BotClient(
-                SoloMaplingConstants.GameConstants.WORLD_SCANIA,
-                SoloMaplingConstants.GameConstants.CHANNEL_1);
+        // Companions are bots too: route them through the same channel spread instead of
+        // pinning every one of them to channel 1.
+        int channel = BotChannelRouter.nextChannel();
+        if (channel == BotChannelRouter.NONE) {
+            throw new IllegalStateException("All channels are at capacity; cannot load companion "
+                    + characterId);
+        }
+        Client companionClient = BotClientHandler.clientFor(channel);
         Character companion =
                 Character.loadCharFromDB(characterId, companionClient, true);
         if (companion == null) {
@@ -348,7 +374,12 @@ public class BotGeneration {
 
     private static Character setBotStats(Character baseChr, int botId) {
         Character onDemandBot = baseChr; // Character.getDefault(c)
-        onDemandBot.setClient(getBotClient());
+        // Keep the channel-specific client loadCharFromDB was given: overwriting it with the
+        // channel-1 client would put the bot back on channel 1 (and its ChannelServer, map
+        // factory and player storage would all resolve there).
+        if (onDemandBot.getClient() == null) {
+            onDemandBot.setClient(getBotClient());
+        }
         onDemandBot.setName(getRandomCharacterIGN());
         onDemandBot.setId(botId);
         return onDemandBot;
@@ -356,7 +387,14 @@ public class BotGeneration {
 
     public static void removeBotFromServer(Character fakechar) {
         fakechar.getMap().removePlayer(fakechar);
-        channel.removePlayer(fakechar);
+        // Remove from the channel this bot actually lives on. Removing from a fixed channel
+        // would leave a ghost entry behind on every other channel once bots are spread out.
+        Client owner = fakechar.getClient();
+        if (owner != null && owner.getChannelServer() != null) {
+            owner.getChannelServer().removePlayer(fakechar);
+        } else {
+            channel.removePlayer(fakechar);
+        }
         world.getPlayerStorage().removePlayer(fakechar.getId());
         CharacterStorage.removeActiveBot(fakechar.getId());//
         // A removed bot never converts back out, so its recruit handoffs would linger in the
@@ -371,7 +409,14 @@ public class BotGeneration {
         // Avoid setEnteredChannelWorld() — it touches PartySearch / playerAway maps
         // and deadlocks under mass parallel spawn.
         fakechar.markPresentInWorld();
-        channel.addPlayer(fakechar);
+        // Register on the bot's OWN channel. The fixed `channel` (channel 1) would put every
+        // bot in one channel's player storage no matter which channel its client reports.
+        Client owner = fakechar.getClient();
+        if (owner != null && owner.getChannelServer() != null) {
+            owner.getChannelServer().addPlayer(fakechar);
+        } else {
+            channel.addPlayer(fakechar);
+        }
         world.getPlayerStorage().addPlayer(fakechar);
     }
 

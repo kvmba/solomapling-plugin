@@ -252,8 +252,11 @@ public class BotTypeManager {
     }
 
     public static void createBots(Client c) {
-//        MapleMap map = c.getPlayer().getMap();
-        MapleMap map = Server.getInstance().getChannel(0, 1).getMapFactory().getMap(c.getPlayer().getMapId());
+        // Use the requesting player's OWN channel: a fixed channel-1 factory would hand back a
+        // map instance from another channel, and the bot would be placed somewhere the player
+        // cannot see it.
+        MapleMap map = c.getPlayer().getClient().getChannelServer()
+                .getMapFactory().getMap(c.getPlayer().getMapId());
         Point pos = c.getPlayer().getPosition();
         runAsync(() -> BotGeneration.createBot(pos, map));
     }

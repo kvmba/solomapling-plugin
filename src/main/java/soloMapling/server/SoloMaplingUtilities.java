@@ -51,13 +51,13 @@ public class SoloMaplingUtilities {
     }
 
     public static org.gms.client.Character getChr(int userId) {
-        Character chr = SoloMaplingConstants.mainChannel.getPlayerStorage().getCharacterById(userId);
-        return chr;
+        // O(1) across every channel: the world keeps its own cross-channel player storage and
+        // every bot is registered in it.
+        return BotChannelRouter.findCharacter(userId);
     }
 
     public static Character getChr(String name) {
-        Character chr = SoloMaplingConstants.mainChannel.getPlayerStorage().getCharacterByName(name);
-        return chr;
+        return BotChannelRouter.findCharacter(name);
     }
 
     public static String getTextAfterColon(String input) {
@@ -133,8 +133,7 @@ public class SoloMaplingUtilities {
     }
 
     public static MapleMap getMapleMapById(int id) {
-        MapleMap map = Server.getInstance().getChannel(0, 1).getMapFactory().getMap(id);
-        return map;
+        return SoloMaplingConstants.mainChannel().getMapFactory().getMap(id);
     }
 
 }

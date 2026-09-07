@@ -3,12 +3,11 @@ package soloMapling.ArtificialPlayer;
 import org.gms.client.Character;
 import org.gms.client.Client;
 import org.gms.extension.api.ArtificialCharacters;
-import org.gms.net.server.Server;
-import org.gms.net.server.channel.Channel;
 import org.gms.server.ItemInformationProvider;
 import org.gms.server.maps.MapItem;
 import org.gms.server.maps.MapObject;
 import soloMapling.Environment.SoloMaplingLanguageConfig;
+import soloMapling.server.BotChannelRouter;
 
 import java.awt.*;
 import java.util.List;
@@ -19,8 +18,10 @@ public class BotHelpers {
     // BotHelpers - bot related stuff with regards to programming (object manipulation, etc)
 
     public static Character getCharFromChannelStorage(int cid) {
-        Channel channel = Server.getInstance().getChannel(0, 1);
-        Character exact = channel.getPlayerStorage().getCharacterById(cid);
+        // One O(1) lookup across every channel: the world keeps a cross-channel player storage
+        // and every bot is registered in it. Scanning channels one by one would only see the
+        // slice of the population living on the channel being checked.
+        Character exact = BotChannelRouter.findCharacter(cid);
         if (isBot(exact)) {
             return exact;
         }
@@ -29,7 +30,7 @@ public class BotHelpers {
         // commonly omit that prefix. Prefer the exact id first so native
         // persistent companions such as cid=5 remain addressable.
         if (cid < 1000) {
-            Character legacy = channel.getPlayerStorage().getCharacterById(cid + 20000);
+            Character legacy = BotChannelRouter.findCharacter(cid + 20000);
             if (isBot(legacy)) {
                 return legacy;
             }
