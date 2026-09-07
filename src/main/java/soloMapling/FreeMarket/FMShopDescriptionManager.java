@@ -441,7 +441,7 @@ public class FMShopDescriptionManager {
     Design Notes
     2. Create Shop Title Description
     [x] descriptive title (Zak helm, +10 Sauna Robe, Craven, 60% GFA)
-    - advertisement (www.G4meK00.c0m - 1b=$5)
+    - advertisement (in-game only - never render a website/URL; see advertiseRWTWebsites())
     [x] guild advertisement ( [S]LAYERS )
     [x] ascii art / border ('~.Rogues Den.~')
     [] randomize ign's: pro names, 1 word ign's, ly's, 'ings, pokemon i gns, anime characters, numbered igns, xXx xXx igns, classic maplestory famous ign's, other igns for fun
