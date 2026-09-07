@@ -70,6 +70,8 @@ public final class CompanionBot extends BotSM implements
     private long lastPlayedTurnId;
     private final GrindBrain grind = new GrindBrain(message -> { });
     private final SoloGrindController soloGrind = new SoloGrindController(grind);
+    /** Whether this companion is currently on the shared combat sweep for solo grinding. */
+    private boolean soloFightRegistered;
     private final CompanionCombatLifecycle combatLifecycle = new CompanionCombatLifecycle();
     private final CompanionSurvivalController survival =
             new CompanionSurvivalController();
@@ -209,13 +211,16 @@ public final class CompanionBot extends BotSM implements
         } else {
             soloGrind.tick(getChr());
         }
-        // The combat sweep is shared, and registering is what makes real fighting
-        // happen on an observed map. Track the controller's engagement so the
-        // companion is on the sweep exactly while it has a session to run and
-        // off it the moment the session ends — a companion left registered would
-        // be swept forever, long after it stopped grinding.
-        if (soloGrind.engaged() != wasEngaged) {
-            if (soloGrind.engaged()) {
+        // The combat sweep is shared, and registering is what makes real
+        // fighting happen on an observed map. Register only for the phase that
+        // actually fights: a companion walking to its hunting ground, or resting
+        // between sessions, has nothing for the sweep to do and would be woken
+        // four times a second to decline.
+        boolean fights = getChr() != null
+                && soloGrind.isGrindingOn(getChr().getMapId());
+        if (fights != soloFightRegistered) {
+            soloFightRegistered = fights;
+            if (fights) {
                 GrindTickRegistry.getInstance().register(this);
             } else {
                 GrindTickRegistry.getInstance().unregister(this);
@@ -451,7 +456,10 @@ public final class CompanionBot extends BotSM implements
             // the companion fights for itself. Only on observed maps — when no
             // player can see it, SoloGrindController credits the same time
             // arithmetically instead of paying for combat nobody watches.
-            if (!soloGrind.active() || !GCMovement.isMapObserved(companion.getMapId())) {
+            // isGrindingOn also carries the phase check: a companion walking to
+            // its ground, or resting between sessions, is not fighting here.
+            if (!soloGrind.isGrindingOn(companion.getMapId())
+                    || !GCMovement.isMapObserved(companion.getMapId())) {
                 return;
             }
             grind.tick(companion);
@@ -500,6 +508,7 @@ public final class CompanionBot extends BotSM implements
     public synchronized void stopScheduledTask() {
         stopTraining();
         soloGrind.stop(getChr());
+        soloFightRegistered = false;
         GrindTickRegistry.getInstance().unregister(this);
         survival.cancel();
         gear.cancel();

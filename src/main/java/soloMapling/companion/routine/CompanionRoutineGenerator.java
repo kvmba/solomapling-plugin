@@ -149,8 +149,8 @@ public final class CompanionRoutineGenerator {
     }
 
     /**
-     * Splits the day's online minutes into sessions, spending about
-     * {@link #TRAIN_SHARE} of them on training.
+     * Splits the day's online minutes into sessions, spending
+     * {@link #TRAIN_SHARE_MIN}–{@link #TRAIN_SHARE_MAX} of them on training.
      *
      * <p>Training and the rest are split as two independent budgets so the share
      * is met by time. Both are then handed to {@link #share}, which keeps

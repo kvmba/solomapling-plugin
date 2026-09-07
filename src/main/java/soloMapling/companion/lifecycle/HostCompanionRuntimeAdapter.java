@@ -195,10 +195,10 @@ public final class HostCompanionRuntimeAdapter implements CompanionRuntimeAdapte
             OfflineProgressionSettlement settlement) {
         Character character = unwrap(companion);
         if (CompanionNoviceLevel.isNovice(character.getLevel())) {
-            // Still a novice: no offline reward at all. The settlement's
+            // Still a novice: nothing at all, mesos included. The settlement's
             // settledThrough is still recorded upstream, so this time is not
-            // banked for later — a companion that finally reaches 10 does not
-            // collect a backlog for the weeks it spent below it.
+            // banked for later — a companion that finally reaches the bar does
+            // not collect a backlog for the weeks it spent below it.
             log.debug("Companion offline settlement skipped for novice cid={} level={} below={}",
                     character.getId(), character.getLevel(), CompanionNoviceLevel.VALUE);
             return;
@@ -215,13 +215,14 @@ public final class HostCompanionRuntimeAdapter implements CompanionRuntimeAdapte
     }
 
     /**
-     * The most EXP one settlement may grant at this level: half a level, by the
-     * host's own table, and never more than the flat cap.
+     * The most EXP one settlement may grant at this level: a fifth of a level,
+     * by the host's own table, and never more than the flat cap.
      *
      * <p>Read from {@link ExpTable} rather than assumed, so a host that retunes
-     * its curve is followed automatically. A missing or nonsensical row falls
-     * back to the flat cap rather than to zero — an over-generous settlement is
-     * recoverable, a companion that can never gain offline experience is not.</p>
+     * its curve is followed automatically. A level past the end of the table
+     * falls back to the flat cap rather than to zero — an over-generous
+     * settlement is recoverable, a companion that can never gain offline
+     * experience is not.</p>
      */
     static long experienceCap(int level) {
         final int needed;

@@ -261,32 +261,10 @@ public final class SoloMaplingExtension implements ServerExtension {
                     intervalSeconds);
             return;
         }
-        // Guarded, not fatal: a bad intake setting must not take the rest of
-        // onServerReady down with it — the ambient population spawns after this.
-        int maxTotal = runtime.config()
-                .getInt("solomapling.companion-intake.max-total", 20);
-        if (maxTotal <= 0) {
-            log.warn("SoloMapling companion intake disabled: max-total must be positive, got {}",
-                    maxTotal);
-            return;
-        }
-        int worldId = runtime.config()
-                .getInt("solomapling.companion-intake.world-id", 0);
-        if (worldId < 0) {
-            log.warn("SoloMapling companion intake disabled: world-id must not be negative, got {}",
-                    worldId);
-            return;
-        }
-        final String timezone;
-        try {
-            timezone = CompanionProvisioningInput.validateTimezone(
-                    runtime.config().getString(
-                            "solomapling.companion-intake.timezone",
-                            CompanionProvisionRequest.DEFAULT_TIMEZONE));
-        } catch (IllegalArgumentException e) {
-            log.warn("SoloMapling companion intake disabled: {}", e.getMessage());
-            return;
-        }
+        // One guard instead of one per setting: the service rejects a bad
+        // max-total, world-id or timezone itself, and a bad intake setting must
+        // not take the rest of onServerReady down with it — the ambient
+        // population spawns after this.
         try {
             CompanionIntakeService intake = new CompanionIntakeService(
                     new CompanionProvisioningService(
@@ -297,13 +275,16 @@ public final class SoloMaplingExtension implements ServerExtension {
                     // sees walking around, so a newcomer does not stand out.
                     FMShopDescGen::getRandomCharacterIGN,
                     intervalSeconds * 1000L,
-                    maxTotal,
-                    worldId,
-                    timezone);
+                    runtime.config().getInt("solomapling.companion-intake.max-total", 20),
+                    runtime.config().getInt("solomapling.companion-intake.world-id", 0),
+                    CompanionProvisioningInput.validateTimezone(
+                            runtime.config().getString(
+                                    "solomapling.companion-intake.timezone",
+                                    CompanionProvisionRequest.DEFAULT_TIMEZONE)));
             intake.start();
             companionIntake = intake;
         } catch (RuntimeException e) {
-            log.warn("SoloMapling companion intake failed to start: {}", e.toString());
+            log.warn("SoloMapling companion intake disabled: {}", e.getMessage());
         }
     }
 

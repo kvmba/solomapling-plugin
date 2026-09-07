@@ -75,6 +75,9 @@ public final class CompanionIntakeService {
         if (maxTotal <= 0) {
             throw new IllegalArgumentException("maxTotal must be positive");
         }
+        if (worldId < 0) {
+            throw new IllegalArgumentException("worldId must not be negative");
+        }
         this.intervalMs = intervalMs;
         this.maxTotal = maxTotal;
         this.worldId = worldId;
@@ -127,6 +130,12 @@ public final class CompanionIntakeService {
                         baseline + registered, maxTotal);
                 spawnNow(result.characterId());
                 return;
+            } catch (CompanionProvisioningService.ProvisioningUnavailableException e) {
+                // The host cannot provision at all, so no name will work. Burning
+                // the remaining attempts would only repeat the same failure five
+                // times and bury the reason under duplicate warnings.
+                log.warn("Companion intake unavailable, skipping interval: {}", e.getMessage());
+                break;
             } catch (Exception e) {
                 // A name collision is ordinary: the pool is finite and a bot can
                 // share a name with a player's character. Anything else is worth

@@ -78,14 +78,24 @@ public final class SoloGrindController {
         this.grind = java.util.Objects.requireNonNull(grind, "grind");
     }
 
-    /** True while this controller owns the companion's combat. */
-    public boolean active() {
-        return phase == Phase.TRAVELLING || phase == Phase.GRINDING;
+    /**
+     * True when the companion is working this particular map.
+     *
+     * <p>Only the GRINDING phase counts. TRAVELLING is deliberately excluded:
+     * the companion is on its way, standing in whatever town or field the route
+     * crosses, and reporting that as active would have the combat sweep start
+     * fights there on the way to the ground that was actually chosen.</p>
+     *
+     * <p>The map is compared too, because a companion can be warped off its
+     * ground while its phase still says it is grinding.</p>
+     */
+    public boolean isGrindingOn(int mapId) {
+        return phase == Phase.GRINDING && targetMapId == mapId;
     }
 
     /**
-     * True while this controller owns the companion's combat, including the rest
-     * between two of its own sessions.
+     * True while a solo session is running, including travel to and rest between
+     * grounds.
      *
      * <p>RESTING counts as engaged: it is this controller's own pause, and the
      * caller must not start something else on top of it. IDLE is the only phase
@@ -126,10 +136,14 @@ public final class SoloGrindController {
                 if (companion.getMapId() == targetMapId) {
                     beginGrinding(companion, now);
                 } else if (now > phaseUntilMs) {
-                    // Never arrived. Drop it and rest, rather than leaving the
-                    // companion registered for combat on a map it is not on.
+                    // Never arrived. Cancel the crossing as well as dropping the
+                    // session: the trip is still in flight, and if it is left
+                    // alone it will deliver the companion to a hunting ground
+                    // this controller has already given up on — arriving on a
+                    // map nothing is grinding, and staying there.
                     log.info("Companion solo grind travel timed out cid={} target={} at={}",
                             companion.getId(), targetMapId, companion.getMapId());
+                    GCMovement.cancelTravel(companion);
                     endSession(companion, now);
                 }
             }
@@ -158,6 +172,11 @@ public final class SoloGrindController {
 
     /** Releases any claim this controller holds. Safe to call at any time. */
     public void stop(Character companion) {
+        // A trip in flight outlives the session that asked for it, and would
+        // walk the companion to a hunting ground nothing is grinding any more.
+        if (phase == Phase.TRAVELLING && companion != null) {
+            GCMovement.cancelTravel(companion);
+        }
         // Only release through the character when there is one: a companion that
         // was never given a body cannot have a live grind claim, and handing
         // null to the grind brain would only push the problem deeper.
