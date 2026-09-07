@@ -92,6 +92,10 @@ public abstract class BotSM implements EventSubscriber {
                     updateScheduleDelay(death().tickDelayMs());
                     return;
                 }
+                // Just stood up: let its own cadence take over again. Our death pacing left
+                // currentDelay at the corpse's few seconds, and updateScheduleDelay would
+                // otherwise skip re-applying an identical value.
+                currentDelay = 0;
             }
             if (isWaiting()) {
                 return; // FSM-requested pause (waitFor) - skip the tick entirely
