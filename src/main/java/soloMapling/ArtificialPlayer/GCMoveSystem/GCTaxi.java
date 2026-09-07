@@ -89,6 +89,9 @@ final class GCTaxi {
             {200000151, 2012025, 200000152, 1},  // Orbis pier -> airport (genie)
             {260000100, 2102000, 260000110, 1},  // Ariant platform -> waiting room (genie)
             {600010001, 9201068, 600010002, 1},  // NLC station -> waiting room (subway)
+            // The Kerning end of the same ride: the counter is in the station hall, and the train is
+            // boarded from the waiting room behind it, not from the hall — same two-stage shape.
+            {103000100, 9201057, 600010004, 1},  // Kerning station -> waiting room
             {540010000, 9270038, 540010001, 1},  // CBD airport -> waiting room (plane)
             {103000000, 9270041, 540010100, 1},  // Kerning City -> airport (plane)
             // The dragon flight only ever leads to the Time Temple, so it carries the Temple's bar:
@@ -164,7 +167,7 @@ final class GCTaxi {
             new VehicleEdge(240000111, 2082002, 200000100, "Cabin"),    // Leafre -> Orbis
             new VehicleEdge(200000152, 2012024, 260000100, "Genie"),    // Orbis -> Ariant
             new VehicleEdge(260000110, 2102001, 200000100, "Genie"),    // Ariant -> Orbis
-            new VehicleEdge(103000100, 9201057, 600010001, "Subway"),   // Kerning -> New Leaf City
+            new VehicleEdge(600010004, 9201057, 600010001, "Subway"),   // Kerning -> New Leaf City
             new VehicleEdge(600010002, 9201057, 103000100, "Subway"),   // NLC -> Kerning
             new VehicleEdge(540010100, 9270017, 540010000, "AirPlane"), // Kerning -> CBD
             new VehicleEdge(540010001, 9270018, 103000000, "AirPlane"), // CBD -> Kerning City
