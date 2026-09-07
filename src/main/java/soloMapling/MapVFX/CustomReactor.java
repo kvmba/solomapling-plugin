@@ -16,6 +16,7 @@ import java.awt.*;
 import java.util.ArrayList;
 import java.util.List;
 
+import static soloMapling.ArtificialPlayer.BotHelpers.isUnusableItem;
 import static soloMapling.ArtificialPlayer.BotLogic.isPointNear;
 import static soloMapling.DebugUtilities.debugprint;
 import static soloMapling.itemPool.GachaFillerSystem.getRandomMesoGachaFiller;
@@ -78,6 +79,9 @@ public class CustomReactor {
      */
     public static void dropItemAtReactor(MapleMap map, int oid, int itemId, Character owner) {
         if (map == null || owner == null) return;
+        // Same discipline as DropCommands: an id with no localized name is half-finished WZ
+        // data, and letting one through puts a raw-English item on the floor for players.
+        if (isUnusableItem(itemId)) return;
         Reactor reactor = map.getReactorByOid(oid);
         if (reactor == null) return;
 
@@ -134,14 +138,17 @@ public class CustomReactor {
 
         byte p = 1;
         for (ReactorDropEntry d : drops) {
-            dropPos.x = posX + ((p % 2 == 0) ? (25 * ((p + 1) / 2)) : -(25 * (p / 2)));
-            p++;
-
             if (d.itemId == 0) {
+                dropPos.x = posX + ((p % 2 == 0) ? (25 * ((p + 1) / 2)) : -(25 * (p / 2)));
+                p++;
                 int mesoDrop = (int) (1000 * owner.getWorldServer().getMesoRate());
                 reactor.getMap().spawnMesoDrop(mesoDrop, reactor.getMap().calcDropPos(dropPos,
                         reactor.getPosition()), reactor, owner, false, (byte) 2, (short) 0);
+            } else if (isUnusableItem(d.itemId)) {
+                continue; // skip the entry entirely — no gap left in the spray
             } else {
+                dropPos.x = posX + ((p % 2 == 0) ? (25 * ((p + 1) / 2)) : -(25 * (p / 2)));
+                p++;
                 Item drop;
 
                 if (ItemConstants.getInventoryType(d.itemId) != InventoryType.EQUIP) {
@@ -185,6 +192,9 @@ public class CustomReactor {
         short delay = 0;
         int dropIndex = 0;
         for (ReactorDropEntry d : drops) {
+            if (isUnusableItem(d.itemId)) {
+                continue; // skip the entry entirely — no gap in the spray, no delay burned on it
+            }
             center2 = adjustCenterPositionXAxis(center2, dropIndex, dropSprayLength, dropSprayFullWidth, itemDropOffset);
             if (d.itemId == 0) {
                 int mesoDrop = getRandomMesoGachaFiller();
@@ -212,6 +222,9 @@ public class CustomReactor {
         dropPos.x -= (12 * drops.size());
         short delay = 0;
         for (ReactorDropEntry d : drops) {
+            if (isUnusableItem(d.itemId)) {
+                continue; // skip the entry entirely — no gap in the spray, no delay burned on it
+            }
             if (d.itemId == 0) {
                 int mesoDrop = 1000 * worldMesoRate;
                 reactor.getMap().spawnMesoDrop(mesoDrop, reactor.getMap().calcDropPos(dropPos, reactor.getPosition()), reactor, owner,

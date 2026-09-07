@@ -42,8 +42,12 @@ public class GachaFillerSystem {
 
     public static List<Integer> createGachaListWithPrize(int prize_id) {
         List<Integer> list = createGachaFillerList();
-        int halfwayPoint = list.size() / 4;
-        int insertPosition = halfwayPoint + (int)(Math.random() * (list.size() - halfwayPoint + 1));
+        // Prize lands in the back half of the spray so the pop builds instead of
+        // peaking on drop #3. This used to be size/4 despite the name, which put
+        // the jackpot as early as index 2 of 11.
+        int earliestPrizeIndex = list.size() / 2;
+        int insertPosition = earliestPrizeIndex
+                + random.nextInt(list.size() - earliestPrizeIndex + 1);
         list.add(insertPosition, prize_id);
         return list;
     }
