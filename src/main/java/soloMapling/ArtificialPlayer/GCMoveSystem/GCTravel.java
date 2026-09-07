@@ -230,9 +230,10 @@ final class GCTravel {
             // takes twice as long to dock, and a fixed ceiling would warp passengers off a boat
             // that was still perfectly on schedule. The rate has a floor of 1, so this never
             // tightens below the ordinary cycle.
-            if (nowMs() - trip.hopStartAtMs >= waitCeilingMs()) {
+            long aboardCeiling = waitCeilingMs();
+            if (nowMs() - trip.hopStartAtMs >= aboardCeiling) {
                 warp(bot, trip.destMapId, "TRANSIT-WAIT-TIMEOUT: stuck aboard map " + cur
-                        + " for " + (WAIT_MAX_MS / 1000) + "s");
+                        + " for " + (aboardCeiling / 1000) + "s");
                 return;
             }
             if (GCTransit.isUnderAttack(bot)) {
