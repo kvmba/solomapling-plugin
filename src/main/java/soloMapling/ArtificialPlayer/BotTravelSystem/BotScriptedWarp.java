@@ -38,6 +38,9 @@ public final class BotScriptedWarp {
             // Time Temple: as a dragon, the "in00" on 200090510 is scripted (templeenter.js ->
             // warp 270000100 "out00"). The way back is a plain portal, so this one edge opens it.
             new WarpEdge(200090510, "in00", 270000100, 2),
+            // Time control room: the Time Gate into the Temple of Time's past. Its portal's target is
+            // move_elin.js, so the way in has to be named here for anyone to find it at all.
+            new WarpEdge(222020400, "in01", 300000100, 0),
     };
 
     private static final Map<Integer, List<WarpEdge>> BY_FROM = buildEdges();

@@ -85,7 +85,20 @@ final class GCTaxi {
             {102000000, 9310000, 701000000, 1},  // Pilot Hong: Perion -> Shanghai Bund
             {701000100, 9310013, 102000000, 1},  // Pilot Hong: Shanghai Plaza -> Perion
             {220000110, 2041000, 220000111, 1},  // Ludibrium pier -> waiting room (train)
+            // Ellinia's end of the boat works differently from the others: the seller at the pier only
+            // hands over a ticket, and it is the checker beside him who lets you through to the
+            // waiting room. Wiring the seller would send bots to an NPC that never moves anyone.
+            {101000300, 1032008, 101000301, 1},  // Ellinia pier -> waiting room (boat to Orbis)
+            {200000111, 2012001, 200000112, 1},  // Orbis pier -> waiting room (boat to Ellinia)
+            // The ticket hall has no walkable door to any platform: its guide asks which one you want
+            // and sends you there, so without these a bot reaches Orbis and can never leave again.
+            {200000100, 2012006, 200000110, 1},  // hall -> Ellinia platform passage
+            {200000100, 2012006, 200000120, 1},  // hall -> Ludibrium platform passage
+            {200000100, 2012006, 200000130, 1},  // hall -> Leafre platform passage
+            {200000100, 2012006, 200000140, 1},  // hall -> Mu Lung platform passage
+            {200000100, 2012006, 200000150, 1},  // hall -> Ariant platform passage
             {200000121, 2012013, 200000122, 1},  // Orbis pier -> waiting room (train)
+            {200000131, 2012021, 200000132, 1},  // Orbis pier -> waiting room (cabin to Leafre)
             {200000151, 2012025, 200000152, 1},  // Orbis pier -> airport (genie)
             {260000100, 2102000, 260000110, 1},  // Ariant platform -> waiting room (genie)
             {600010001, 9201068, 600010002, 1},  // NLC station -> waiting room (subway)
