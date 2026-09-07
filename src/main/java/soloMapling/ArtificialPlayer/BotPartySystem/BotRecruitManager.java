@@ -93,9 +93,24 @@ public class BotRecruitManager {
             return RecruitAnswer.ACCEPTED;
         }
         DECLINED_UNTIL.put(pairKey, System.currentTimeMillis() + DECLINE_COOLDOWN_MS);
+        sweepExpiredDeclines();
         debugprint("rollPartyAsk: " + botChr.getName() + " DECLINED " + player.getName()
                 + " (rolled no, " + (DECLINE_COOLDOWN_MS / 60000) + "min cooldown)");
         return RecruitAnswer.DECLINED;
+    }
+
+    /*
+     * Drop the cooldowns that have already run out.
+     *
+     * A refusal is remembered per (bot, player) pair and never read again once it expires, so the map
+     * would otherwise keep one entry for every bot every passing player has ever been refused by —
+     * growing for as long as the server stays up, with player ids arriving forever. Sweeping on the
+     * way in keeps it bounded without a thread of its own; entries are short-lived, so a sweep is
+     * cheap and the odd one that outlives a sweep is simply caught by the next.
+     */
+    private static void sweepExpiredDeclines() {
+        long now = System.currentTimeMillis();
+        DECLINED_UNTIL.entrySet().removeIf(e -> e.getValue() == null || e.getValue() <= now);
     }
 
     // Per-tick invite drain for recruit-enabled bots. BotPartyQueue is last-wins per bot, so a

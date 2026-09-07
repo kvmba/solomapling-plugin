@@ -378,8 +378,10 @@ final class GCTravel {
         float rate = 1f;
         try {
             rate = Server.getInstance().getWorld(0).getTransportationTime(1000) / 1000f;
-        } catch (Exception ignored) {
-            // No world to ask (unit test, shutting down): the unscaled ceiling is fine.
+        } catch (Throwable ignored) {
+            // No world to ask: before it starts up, after it shuts down, or in a test. The class can
+            // be uninitializable rather than merely absent, so this catches errors too — the
+            // unscaled ceiling is correct either way.
         }
         if (!(rate >= 1f)) {
             rate = 1f;   // a rate below 1 would only ever shorten the wait
