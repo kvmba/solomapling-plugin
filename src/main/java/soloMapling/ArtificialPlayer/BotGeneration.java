@@ -261,28 +261,16 @@ public class BotGeneration {
             throw new IllegalStateException("Unable to load companion character " + characterId);
         }
         companionClient.setPlayer(companion);
-        // Re-resolve the loaded map on the companion's OWN channel: the map comes from the
-        // database and would otherwise be a channel-1 instance, leaving the companion in a
-        // foreign channel's map where the players who should see it see nothing.
-        MapleMap companionMap = companion.getMap();
-        if (companionMap != null && companion.getClient() != null
-                && companion.getClient().getChannelServer() != null) {
-            MapleMap resolved = companion.getClient().getChannelServer()
-                    .getMapFactory().getMap(companionMap.getId());
-            if (resolved != null) {
-                // Same pattern as placeBotOnMap: re-point the character at its own channel's
-                // instance. addPlayer() only sets the map id, it does not swap the reference.
-                companion.setMap(resolved);
-                companionMap = resolved;
-            }
-        }
-        if (companionMap == null) {
+        // No map re-resolve here: loadCharFromDB was called with channelServer=true, so the
+        // host already resolved the map through this client's own channel (falling back to
+        // Henesys when the recorded map is missing).
+        if (companion.getMap() == null) {
             throw new IllegalStateException("Companion has no valid map: " + characterId);
         }
 
         addBotToServer(companion);
         try {
-            companionMap.addPlayer(companion);
+            companion.getMap().addPlayer(companion);
             // Character.loadCharFromDB creates a fresh Character instance, while an
             // existing PartyCharacter may still reference the instance from before a
             // companion restart. Publish the live instance through the host's normal
@@ -292,7 +280,7 @@ public class BotGeneration {
             }
         } catch (RuntimeException | Error failure) {
             try {
-                companionMap.removePlayer(companion);
+                companion.getMap().removePlayer(companion);
             } catch (Throwable cleanupFailure) {
                 failure.addSuppressed(cleanupFailure);
             }

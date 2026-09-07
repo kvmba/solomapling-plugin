@@ -1,9 +1,12 @@
 package soloMapling.server;
 
+import org.gms.client.Character;
 import org.gms.config.GameConfig;
 import org.gms.net.server.Server;
 import org.gms.net.server.channel.Channel;
 import org.gms.net.server.world.World;
+
+import java.util.Collection;
 
 /**
  * Picks the channel a newly created bot lives on.
@@ -14,10 +17,15 @@ import org.gms.net.server.world.World;
  *
  * <p>Rules (per product decision):
  * <ul>
- *   <li>Lower channel id = more population, so bots taper off by id (ch1 heaviest).</li>
- *   <li>Load is a channel's TOTAL population - real players and bots together.</li>
- *   <li>A channel never takes more than {@code channel_capacity}.</li>
- *   <li>When every channel is full the bot is dropped, not squeezed in.</li>
+ *   <li>Lower channel id = more bots, so bots taper off by id (ch1 heaviest): 6:4 on two
+ *       channels, 5:3:2 on three.</li>
+ *   <li>The taper is a rule about BOTS. Real players must not skew it, or a busy ch1 would end
+ *       up with the fewest bots - the exact inversion of the rule above.</li>
+ *   <li>Capacity is a rule about HEADCOUNT and does include real players: a channel at
+ *       {@code channel_capacity} takes no more.</li>
+ *   <li>Bot counts are read live, so nothing has to be tracked here and no counter can drift as
+ *       bots log off for a rest.</li>
+ *   <li>When every channel is at the cap the bot is dropped, not squeezed in.</li>
  *   <li>A bot never switches channels, so it stays where it was created.</li>
  * </ul>
  *
@@ -56,12 +64,22 @@ public final class BotChannelRouter {
             if (n <= 0 || cap <= 0) {
                 return DEFAULT_CHANNEL;
             }
-            int[] load = new int[n];
+            int[] bots = new int[n];
+            int[] population = new int[n];
             for (int i = 0; i < n; i++) {
                 Channel ch = world.getChannel(i + 1); // channel ids are 1-based
-                load[i] = (ch == null) ? 0 : ch.getPlayerStorage().getSize();
+                if (ch == null) {
+                    continue;
+                }
+                Collection<Character> chars = ch.getPlayerStorage().getAllCharacters();
+                population[i] = chars.size();
+                for (Character c : chars) {
+                    if (isArtificial(c)) {
+                        bots[i]++;
+                    }
+                }
             }
-            int pick = pickChannel(load, weights(n), cap);
+            int pick = pickChannel(bots, weights(n), population, cap);
             return pick < 0 ? NONE : pick + 1;
         } catch (RuntimeException e) {
             return DEFAULT_CHANNEL; // never let routing break a spawn
@@ -69,8 +87,30 @@ public final class BotChannelRouter {
     }
 
     /**
+     * Whether a character is one of ours. Goes through the host registry rather than a plugin
+     * class so this package stays independent of the bot packages.
+     *
+     * <p>The plugin registers its classifier in {@code onLoad}, before any bot exists, so this
+     * is reliable by the time routing runs. If it were ever called before registration it would
+     * report nobody as a bot, and the taper would flatten onto channel 1 — degraded, but no
+     * worse than the old fixed-channel behaviour.
+     */
+    private static boolean isArtificial(Character chr) {
+        return chr != null && org.gms.extension.api.ArtificialCharacters.isArtificial(chr.getId());
+    }
+
+    /**
      * Index of the channel that should take the next bot, or -1 when they are all full.
      * Pure, so the split is testable without a server.
+     *
+     * <p>The two inputs answer different questions and must not be conflated:
+     * <ul>
+     *   <li>{@code bots} drives the PROPORTION. Only bots are counted, because the taper
+     *       (6:4, 5:3:2) is a rule about where bots go. Feeding real players into it would
+     *       invert the shape: a busy ch1 would then receive the FEWEST bots.</li>
+     *   <li>{@code population} drives the CAPACITY GATE. It includes real players, because
+     *       what must not be exceeded is the channel's total headcount.</li>
+     * </ul>
      *
      * <p>Scanned low id -&gt; high with a strict {@code <}, so on an equal ratio the LOWEST id
      * wins. That keeps "lower id = more bots" true at every point in time, not just at
@@ -78,17 +118,18 @@ public final class BotChannelRouter {
      * which inverts the intended shape while the population is still coming up. The steady
      * split is the same either way — 6:4 / 5:3:2 — only the fill order differs.
      */
-    static int pickChannel(int[] load, double[] w, int cap) {
-        if (load == null || w == null || load.length != w.length) {
+    static int pickChannel(int[] bots, double[] w, int[] population, int cap) {
+        if (bots == null || w == null || population == null
+                || bots.length != w.length || population.length != w.length) {
             return -1;
         }
         int pick = -1;
         double best = Double.MAX_VALUE;
         for (int i = 0; i < w.length; i++) {
-            if (load[i] >= cap) {
-                continue; // channel full
+            if (population[i] >= cap) {
+                continue; // channel is full - real players included
             }
-            double ratio = load[i] / w[i];
+            double ratio = bots[i] / w[i];
             if (ratio < best) {
                 best = ratio;
                 pick = i;
