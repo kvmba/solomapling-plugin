@@ -44,8 +44,8 @@ import soloMapling.companion.persistence.JdbcCompanionProfileRepository;
 import soloMapling.companion.routine.OfflineProgressionPolicy;
 import soloMapling.companion.execution.CompanionRuntimeCapabilities;
 import soloMapling.companion.gear.GearDropSourceProvider;
+import soloMapling.companion.intake.CompanionIntakeConfig;
 import soloMapling.companion.intake.CompanionIntakeService;
-import soloMapling.companion.provisioning.CompanionProvisionRequest;
 import soloMapling.companion.provisioning.CompanionProvisioningInput;
 import soloMapling.companion.provisioning.CompanionProvisioningService;
 import soloMapling.companion.provisioning.HostRuntimeCompanionProvisioner;
@@ -246,19 +246,19 @@ public final class SoloMaplingExtension implements ServerExtension {
     }
 
     /*
-     * Newcomers, at a trickle. interval-seconds is the switch: above zero a
-     * companion is provisioned every that-many seconds, zero or absent means the
-     * world keeps only the companions it already has.
+     * Newcomers, at a trickle. The settings come from the plugin's own
+     * Environment/CompanionIntake.yaml, not from the host's application.yml:
+     * a plugin should not need its host edited to be configured. interval-seconds
+     * is the switch — above zero a companion is provisioned every that-many
+     * seconds, zero or absent means the world keeps the companions it has.
      *
-     * Read once, at startup — there is no hot reload, so the value is decided
-     * here and never revisited.
+     * Read once, at startup: there is no hot reload.
      */
     private void startCompanionIntake() {
-        int intervalSeconds = runtime.config()
-                .getInt("solomapling.companion-intake.interval-seconds", 0);
-        if (intervalSeconds <= 0) {
-            log.info("SoloMapling companion intake disabled (interval-seconds={})",
-                    intervalSeconds);
+        CompanionIntakeConfig config = CompanionIntakeConfig.load();
+        if (!config.enabled()) {
+            log.info("SoloMapling companion intake disabled (interval-seconds={}, source={})",
+                    config.intervalSeconds(), config.source());
             return;
         }
         // One guard instead of one per setting: the service rejects a bad
@@ -274,15 +274,14 @@ public final class SoloMaplingExtension implements ServerExtension {
                     // The ambient bots' own name pool: the same list a player
                     // sees walking around, so a newcomer does not stand out.
                     FMShopDescGen::getRandomCharacterIGN,
-                    intervalSeconds * 1000L,
-                    runtime.config().getInt("solomapling.companion-intake.max-total", 20),
-                    runtime.config().getInt("solomapling.companion-intake.world-id", 0),
-                    CompanionProvisioningInput.validateTimezone(
-                            runtime.config().getString(
-                                    "solomapling.companion-intake.timezone",
-                                    CompanionProvisionRequest.DEFAULT_TIMEZONE)));
+                    config.intervalSeconds() * 1000L,
+                    config.maxTotal(),
+                    config.worldId(),
+                    CompanionProvisioningInput.validateTimezone(config.timezone()));
             intake.start();
             companionIntake = intake;
+            log.info("SoloMapling companion intake started every {}s up to {} (source={})",
+                    config.intervalSeconds(), config.maxTotal(), config.source());
         } catch (RuntimeException e) {
             log.warn("SoloMapling companion intake disabled: {}", e.getMessage());
         }
@@ -336,6 +335,18 @@ public final class SoloMaplingExtension implements ServerExtension {
             companionLifecycleAccess.register(lifecycle);
             log.info("SoloMapling persistent companion lifecycle started");
             startCompanionIntake();
+        } else {
+            // The plugin's own file may ask for newcomers while the host has not
+            // opened the companion system, leaving no lifecycle coordinator to
+            // bring them online. Say so, rather than leave an operator watching
+            // an empty island with a config that looks switched on.
+            CompanionIntakeConfig intakeConfig = CompanionIntakeConfig.load();
+            if (intakeConfig.enabled()) {
+                log.warn("SoloMapling companion intake is configured (interval-seconds={}) but "
+                                + "solomapling.companions.enabled is false on the host — no "
+                                + "companion will be provisioned",
+                        intakeConfig.intervalSeconds());
+            }
         }
         if (spawn) {
             MethodScheduler.runAfterDelay(() -> {

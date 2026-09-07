@@ -1,0 +1,41 @@
+# SoloMapling companion intake — new companions on the beginner island.
+#
+# Loaded by CompanionIntakeConfig through PluginResources, so it resolves like
+# every other packaged SoloMapling resource:
+#
+#   1. data/solomapling/override/Environment/CompanionIntake.yaml   (hot edits, no rebuild)
+#   2. src/main/java/soloMapling/Environment/CompanionIntake.yaml   (dev checkout)
+#   3. classpath soloMapling/Environment/CompanionIntake.yaml       (packaged in the plugin jar)
+#
+# It is read once, at server ready. There is no hot reload: change it and restart,
+# or edit the override copy before the server starts.
+#
+# Nothing here needs a host setting. The plugin owns this file.
+
+# Seconds between newcomers. This is the switch:
+#
+#   > 0   one companion is provisioned every this-many seconds
+#   0     no new companions; the world keeps the ones it already has
+#
+# Each arrival is a real account, a real character with its sub-tables and a
+# profile — one host transaction — followed by a spawn. A handful of them
+# released at once would starve the connection pool and make the server
+# unresponsive to real players, which is why this paces them instead of
+# provisioning the whole population at startup.
+#
+# 0 = off. This is the shipped default: a world should not start filling itself
+# with companions until somebody decides it should. Set it to, say, 60 for one
+# newcomer a minute, or something smaller only to watch it work.
+interval-seconds: 0
+
+# Ceiling on the world's whole companion population, counting the ones that
+# already existed when the server started. Intake stops for good once it is
+# reached, so a restart cannot top a full world up to twice its size.
+max-total: 2000
+
+# World the newcomer's character is created in.
+world-id: 0
+
+# Zone the newcomer's generated routine is written in. Its sessions are wall
+# clock times, so this is the clock they are read against.
+timezone: Asia/Shanghai

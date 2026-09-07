@@ -88,13 +88,6 @@ solomapling:
   plugins-enabled: true
   plugins-dir: plugins
   spawn-bots-on-startup: true
-  companions:
-    enabled: true          # required: persistent companions are opt-in
-  companion-intake:
-    interval-seconds: 60   # >0 provisions a new companion this often; 0/absent = off
-    max-total: 20          # stop once the world holds this many companions
-    world-id: 0
-    timezone: Asia/Shanghai
   language: zh-CN   # optional; defaults to gms.service.language (en-US | zh-CN)
   llm:
     enabled: false
@@ -123,10 +116,11 @@ Client library: [simple-openai](https://github.com/sashirestela/simple-openai) (
 
 ### Newcomers on the beginner island
 
-With `companions.enabled` and a positive `companion-intake.interval-seconds`,
-the world fills up on its own: one companion is provisioned per interval until
-`max-total` is reached. Each one is a real account, a real character and a
-profile, created in a single host transaction, and:
+The host has to open the companion system first (`solomapling.companions.enabled`
+— the one host setting companions need). Once it has, the world fills up on its
+own: one companion is provisioned per interval until the population reaches its
+cap. Each one is a real account, a real character and a profile, created in a
+single host transaction, and:
 
 - **is born on Maple Island** — the provisioner forces `characters.map` to
   `10000` (Mushroom Town) inside the same transaction. The host's
@@ -146,9 +140,21 @@ profile, created in a single host transaction, and:
 - **leaves when it is ready** — at level 8 a companion can walk the island to
   Southperry and take Sanks' boat to Lith Harbor, like a player.
 
+The intake's own settings live in the plugin's file, not the host's — see
+[`Environment/CompanionIntake.yaml`](src/main/java/soloMapling/Environment/CompanionIntake.yaml):
+
+```yaml
+interval-seconds: 0    # >0 provisions a new companion this often; 0 = off (default)
+max-total: 2000        # ceiling on the world's whole companion population
+world-id: 0
+timezone: Asia/Shanghai
+```
+
 `interval-seconds` is the switch: above zero intake runs, zero or absent means
-the world keeps only the companions it already has. Read once at startup; there
-is no hot reload.
+the world keeps only the companions it already has. It is read once at startup;
+there is no hot reload. To change it without rebuilding, drop a copy at
+`data/solomapling/override/Environment/CompanionIntake.yaml` and restart — the
+same override path every packaged SoloMapling resource uses.
 
 ## SPI entry
 
