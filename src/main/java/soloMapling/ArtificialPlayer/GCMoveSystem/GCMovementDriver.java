@@ -209,9 +209,9 @@ final class GCMovementDriver {
         // killed mid-rest must stop resting. This branch does their job better — it is the
         // stricter one — so let it win.
         if (bot.getHp() <= 0) {
-            // Only settle it once. Re-settling every tick would re-broadcast the same frame
-            // (cheap, deduped, but pointless) and, worse, would fight the fall-off-map recovery
-            // that a bot dropped in mid-air still needs.
+            // Settle it once, not every tick: re-settling re-broadcasts the same frame (cheap
+            // and deduped, but pointless) and would pin a bot that is still legitimately
+            // falling to its death spot mid-air.
             if (entry.inAir || entry.climbing || entry.moveDir != 0 || entry.resting) {
                 BotPhysicsEngine.idleOnGround(entry, bot);
             }
