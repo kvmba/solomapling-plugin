@@ -66,7 +66,7 @@ final class GrindLoot {
     // classes blink/dash to the near end first. Returns true when there is loot to deal with this tick (so the
     // caller skips chasing a mob / holds its lull); false = nothing collectable, do your dry behaviour.
     boolean tryWalkAndLoot(Character chr, int x0, int x1, int searchRangePx) {
-        List<MapItem> drops = collectableDrops(chr, searchRangePx, x0, x1, LOOT_SAME_LEDGE_Y);
+        List<MapItem> drops = collectableDrops(chr, searchRangePx, x0, x1, LOOT_SAME_LEDGE_Y, false);
         if (drops.isEmpty()) {
             return false;
         }
@@ -107,16 +107,90 @@ final class GrindLoot {
         // Drive-by walk to the far end — no GCMovement.stop. Re-issue only when the far target shifts past the
         // epsilon (existing retarget pattern) so the walk runs uninterrupted across ticks.
         b.engaged = false;
+        walkToFarthestOnSide(chr, drops, near, far, x0, x1, "sweeping through a chain of drops");
+        vacuumWhileSweeping(chr);
+        return true;
+    }
+
+    /**
+     * Post-kill collection: walk onto the drop the mob just left and wait out its settle there.
+     *
+     * <p>A kill clears the target, so the next tick would normally acquire a fresh mob and walk to it —
+     * leaving the drop behind, since it is not collectable for LOOT_SETTLE_MS and the bot is out of
+     * at-feet range long before that. The pile then only gets picked up during a lull, and the lull sweep
+     * keeps losing its move to the next spawn, which reads as the bot shuffling sideways instead of
+     * looting. Doing it right after the kill is both what a player does and what makes the drop reachable.
+     *
+     * <p>Walks to drops that have not settled yet (the settle gate only gates the pickup, not the walk),
+     * so the bot is standing on the loot by the time it can be grabbed. Returns true while there is loot
+     * to collect, so the caller skips chasing a mob this tick.
+     */
+    boolean collectAfterKill(Character chr, int x0, int x1, int searchRangePx) {
+        List<MapItem> drops = collectableDrops(chr, searchRangePx, x0, x1, LOOT_SAME_LEDGE_Y, true);
+        if (drops.isEmpty()) {
+            return false;
+        }
+        Point pos = chr.getPosition();
+        if (pos == null) {
+            return false;
+        }
+        // Whatever has already settled at our feet comes in first — standing on the pile is the point.
+        grabLootAtFeet(chr);
+        MapItem near = drops.get(0);
+        double nearSq = pos.distanceSq(near.getPosition());
+        for (MapItem mi : drops) {
+            double dsq = pos.distanceSq(mi.getPosition());
+            if (dsq < nearSq) {
+                nearSq = dsq;
+                near = mi;
+            }
+        }
+        // Close enough already: hold position and let the settle finish (grabLootAtFeet picks it up).
+        if (Math.abs(near.getPosition().x - pos.x) <= LOOT_PICKUP_PX
+                && Math.abs(near.getPosition().y - pos.y) <= LOOT_PICKUP_PX) {
+            b.engaged = false;
+            return true;
+        }
+        Point nearGp = GCMovement.groundPointBelow(chr.getMap(), near.getPosition().x, near.getPosition().y);
+        int nearY = (nearGp != null) ? nearGp.y : near.getPosition().y;
+        if (b.engage.skillMoveToward(chr, near.getPosition().x, nearY)) {
+            b.engaged = false;
+            return true;
+        }
+        b.engaged = false;
+        // Walk onto the NEAREST drop, not the far end of a chain: this is one kill's loot, not a lull
+        // sweep, so the bot should grab it and get back to fighting rather than tour the pile.
+        int tx = GrindBrain.clamp(near.getPosition().x, x0, x1);
+        if (Math.abs(tx - b.lastMoveTargetX) >= GrindBrain.ROAM_RETARGET_EPS) {
+            Point gp = GCMovement.groundPointBelow(chr.getMap(), near.getPosition().x, near.getPosition().y);
+            int ty = (gp != null) ? gp.y : near.getPosition().y;
+            GCMovement.move(chr, tx, ty);
+            b.lastMoveTargetX = tx;
+            narrateLoot("collecting the drop I just made");
+        }
+        return true;
+    }
+
+    /** Walk to the chain's far end on the near end's side (see tryWalkAndLoot for the routing). */
+    private void walkToFarthestOnSide(Character chr, List<MapItem> drops, MapItem near, MapItem seed,
+                                      int x0, int x1, String narration) {
+        Point pos = chr.getPosition();
+        boolean sweepRight = near.getPosition().x >= pos.x;
+        MapItem far = seed;
+        for (MapItem mi : drops) {
+            int mx = mi.getPosition().x;
+            if (sweepRight ? mx > far.getPosition().x : mx < far.getPosition().x) {
+                far = mi;
+            }
+        }
         int tx = GrindBrain.clamp(far.getPosition().x, x0, x1);
         if (Math.abs(tx - b.lastMoveTargetX) >= GrindBrain.ROAM_RETARGET_EPS) {
             Point gp = GCMovement.groundPointBelow(chr.getMap(), far.getPosition().x, far.getPosition().y);
             int ty = (gp != null) ? gp.y : far.getPosition().y;
             GCMovement.move(chr, tx, ty);
             b.lastMoveTargetX = tx;
-            narrateLoot("sweeping through a chain of drops");
+            narrateLoot(narration);
         }
-        vacuumWhileSweeping(chr);
-        return true;
     }
 
     private MapItem nearestCollectableDrop(Character chr, int rangePx, int x0, int x1, int yLimit) {
@@ -149,8 +223,12 @@ final class GrindLoot {
     }
 
     // Every eligible drop in [x0, x1] within rangePx and the same-ledge Y band — the multi-drop counterpart to
-    // nearestCollectableDrop (identical botCanLoot / settle / leash / ledge filters), used to plan a whole sweep.
-    private List<MapItem> collectableDrops(Character chr, int rangePx, int x0, int x1, int yLimit) {
+    // nearestCollectableDrop (identical botCanLoot / leash / ledge filters), used to plan a whole sweep.
+    // `includeUnsettled` skips the settle check for callers that only want to WALK to a drop: a kill leaves
+    // its loot on the ground for LOOT_SETTLE_MS before it may be picked up, and a bot that walks off to the
+    // next mob in the meantime is outside the at-feet range by the time it could have been grabbed.
+    private List<MapItem> collectableDrops(Character chr, int rangePx, int x0, int x1, int yLimit,
+                                           boolean includeUnsettled) {
         Point pos = chr.getPosition();
         if (pos == null) {
             return List.of();
@@ -162,7 +240,7 @@ final class GrindLoot {
             if (!DropCommands.botCanLoot(chr, mi)) {
                 continue;
             }
-            if (now() - mi.getDropTime() < LOOT_SETTLE_MS) {
+            if (!includeUnsettled && now() - mi.getDropTime() < LOOT_SETTLE_MS) {
                 continue; // too fresh — let it land first; the pass-over grabs whatever has settled by then
             }
             Point ip = mi.getPosition();

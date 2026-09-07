@@ -45,6 +45,9 @@ class CampStrategy implements GrindStrategy {
     private static final long REANCHOR_WINDOW_MS = 15_000;    // a fresh off-anchor within this of a hard return -> spot is a trap, relocate
 
     // ── Intra-spot spacing (sharers hold personal bands of a wide spot) ──
+    // How long after a kill the bot still tidies up that kill's drop before walking to the next mob.
+    // Long enough to cover the drop's settle, short enough that an unreachable drop can't stall the fight.
+    private static final long COLLECT_AFTER_KILL_MS = 2_500;
     private static final long BAND_FALLBACK_MS = 2_500;      // personal band empty this long -> hunt spot-wide until it feeds again
     private static final int BAND_RECENTER_EPS = 100;        // WAIT walks back to the band center beyond this offset
 
@@ -345,6 +348,18 @@ class CampStrategy implements GrindStrategy {
             b.markProgress(); // walking home is productive, not wedged
             return;
         }
+        // About to walk to a mob out of attack range. A nearby mob is always swung first (the branch
+        // above returns before this), so this is the "I have to move" case - and it is exactly the move
+        // that abandons the drop the last kill left. Collect that first, the way a player tidies up
+        // before running to the next spawn. Bounded by COLLECT_AFTER_KILL_MS so an unreachable drop can
+        // never keep the bot looting instead of fighting.
+        if (now() - b.lastKillMs <= COLLECT_AFTER_KILL_MS) {
+            int[] leash = leash(chr);
+            if (b.loot.collectAfterKill(chr, leash[0], leash[1], 2 * s.radius())) {
+                b.markProgress(); // collecting is productive, not wedged
+                return;
+            }
+        }
         approachLeashed(chr, s, t);
         if (b.madeApproachProgress(chr)) {
             b.markProgress(); // closing on the mob -> not stuck
@@ -356,6 +371,10 @@ class CampStrategy implements GrindStrategy {
 
     private void enterWait(Character chr, Spot s) {
         b.engaged = false;
+        // Drop any approach target from the fight: the lull sweep below aims at drops, and sharing
+        // one "last move target" with the approach made the bot flip direction whenever it swapped
+        // between chasing a mob and walking to a drop - the sideways shuffle after a kill.
+        b.lastMoveTargetX = Integer.MIN_VALUE;
         waitStartedMs = now();
         // On a shared spot, spend the lull standing at the personal band's center: sharers on a long
         // platform then hold visibly spaced positions instead of bunching wherever the last kill landed.
@@ -386,6 +405,9 @@ class CampStrategy implements GrindStrategy {
         if (t != null) {
             b.targetOid = t.getObjectId();
             b.resetApproachProgress(chr);
+            // Mirror of enterWait: clear the sweep's target so the approach re-issues its own move
+            // instead of comparing against a drop position it was walking to.
+            b.lastMoveTargetX = Integer.MIN_VALUE;
             b.narrate("FIGHT " + label());
             state = State.FIGHT;
             return;
