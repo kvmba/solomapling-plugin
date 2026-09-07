@@ -12,8 +12,4 @@ public class BotPartyLogic {
         }
         return BotPartyCommands.botAcceptPartyInvite(fakechar);
     }
-
-    public static void clearPartyInvite(Character fakechar) {
-        BotPartyQueue.getInstance().removePartyInvite(fakechar);
-    }
 }

@@ -21,6 +21,7 @@ public class ShopOfferWelcome {
 
     private static final double WELCOME_CHANCE = 0.60;
     private static final int HINT_AFTER_MESSAGES = 2;
+    private static final int MAX_TRACKED_VISITS = 20_000;   // see preventUnboundedGrowth
 
     private static final Map<String, Integer> playerMessageCounts = new ConcurrentHashMap<>();
     private static final Set<String> hintedPlayers = ConcurrentHashMap.newKeySet();
@@ -55,6 +56,7 @@ public class ShopOfferWelcome {
         String key = ownerId + "_" + player.getId();
         if (hintedPlayers.contains(key)) return;
 
+        preventUnboundedGrowth();
         int count = playerMessageCounts.merge(key, 1, Integer::sum);
         if (count >= HINT_AFTER_MESSAGES) {
             hintedPlayers.add(key);
@@ -66,6 +68,24 @@ public class ShopOfferWelcome {
                     shop.chat(shop.getOwner(), hint);
                 }
             }, delay);
+        }
+    }
+
+    /*
+     * Keep the two per-visitor maps from growing without end.
+     *
+     * A visitor's counter is only read while they are still in the shop, and there is no leave hook
+     * here to clear it on the way out, so the entry outlives the visit and every new player id adds
+     * another. Over months that is an unbounded map for a number nobody will look at again.
+     *
+     * Clearing past a high-water mark costs nothing that matters: the count exists only to trip a
+     * single hint, so losing it means a visitor who has been here for months might be hinted once
+     * more. The alternative — a map that grows for the life of the server — is not worth it.
+     */
+    private static void preventUnboundedGrowth() {
+        if (playerMessageCounts.size() > MAX_TRACKED_VISITS) {
+            playerMessageCounts.clear();
+            hintedPlayers.clear();
         }
     }
 
