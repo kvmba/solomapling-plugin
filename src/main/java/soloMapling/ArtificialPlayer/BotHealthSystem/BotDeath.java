@@ -261,6 +261,10 @@ public final class BotDeath {
             if (chr.getChair() > 0) {
                 botCancelChair(chr);
             }
+            // A rope rest hold would outlive the death: it is only cleared when a break ends,
+            // and a break does not end — the bot died hanging there. Left set, the movement
+            // driver freezes the bot on the rope forever once it is on its feet again.
+            GCMovement.setRestHold(chr, false);
             GCMovement.stop(chr);
         } catch (RuntimeException ignored) {
             // one overdue clean-up must not cost us the death handling
