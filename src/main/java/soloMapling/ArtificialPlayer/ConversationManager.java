@@ -199,6 +199,10 @@ public class ConversationManager {
 
     private List<Character> findClusterOnMap(int mapId) {
         try {
+            // Channel 1's instance of the map, so this sees only the bots living on that
+            // channel. That is deliberate: ch1 carries the largest bot share, so a cluster can
+            // still be filled from it, and sweeping every channel's copy of the map would cost
+            // a full cross-channel scan for a cosmetic filler.
             MapleMap map = soloMapling.server.SoloMaplingUtilities.getMapleMapById(mapId);
             if (map == null) return null;
 

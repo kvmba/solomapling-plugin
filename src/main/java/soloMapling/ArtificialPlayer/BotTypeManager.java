@@ -252,11 +252,10 @@ public class BotTypeManager {
     }
 
     public static void createBots(Client c) {
-        // Use the requesting player's OWN channel: a fixed channel-1 factory would hand back a
-        // map instance from another channel, and the bot would be placed somewhere the player
-        // cannot see it.
-        MapleMap map = c.getPlayer().getClient().getChannelServer()
-                .getMapFactory().getMap(c.getPlayer().getMapId());
+        // Same as massCreateBots: hand over a map looked up by id and let createBot route the
+        // bot to a channel and re-resolve the map on it. Resolving the player's own channel
+        // here would be undone by that routing anyway.
+        MapleMap map = getMapleMapById(c.getPlayer().getMapId());
         Point pos = c.getPlayer().getPosition();
         runAsync(() -> BotGeneration.createBot(pos, map));
     }

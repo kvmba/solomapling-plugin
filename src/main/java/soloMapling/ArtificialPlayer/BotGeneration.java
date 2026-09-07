@@ -270,6 +270,8 @@ public class BotGeneration {
             MapleMap resolved = companion.getClient().getChannelServer()
                     .getMapFactory().getMap(companionMap.getId());
             if (resolved != null) {
+                // Same pattern as placeBotOnMap: re-point the character at its own channel's
+                // instance. addPlayer() only sets the map id, it does not swap the reference.
                 companion.setMap(resolved);
                 companionMap = resolved;
             }

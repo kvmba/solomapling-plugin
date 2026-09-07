@@ -26,7 +26,6 @@ import java.util.List;
 import java.util.Random;
 import java.util.concurrent.TimeUnit;
 
-import static soloMapling.ArtificialPlayer.BotClientHandler.getBotClient;
 import static soloMapling.ArtificialPlayer.BotCommandsPack.WarpCommands.botWarpMapOnPortal;
 import static soloMapling.ArtificialPlayer.BotCommandsPack.WarpCommands.mapForBot;
 import static soloMapling.ArtificialPlayer.BotGeneration.warpBotToLocation;

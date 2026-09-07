@@ -43,9 +43,8 @@ public class BotClientHandler {
 
     /**
      * The channel-1 client: the default for anything that doesn't care which channel it is on.
-     * Built on first use (idempotent), because callers such as
-     * {@code BotGeneration.loadPersistentBot} treat a null here as "not initialised yet".
-     * Must run after the channels exist, since the client reports its world/channel for routing.
+     * Built on first use (idempotent) — never null, so a spawn is never blocked by nobody having
+     * called {@link #initHeadlessBotClient()} yet.
      */
     public static Client getBotClient() {
         return clientFor(GameConstants.CHANNEL_1);

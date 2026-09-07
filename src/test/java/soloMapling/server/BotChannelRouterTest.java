@@ -75,9 +75,11 @@ class BotChannelRouterTest {
     @Test
     void existingRealPlayersCountTowardLoad() {
         // ch1 already holds 500 real players: bots must favour the emptier channels.
+        // ch2 (w .3) and ch3 (w .2) are both empty, so both read ratio 0 and the tie goes to
+        // the highest id - ch3, the most starved.
         int[] load = {500, 0, 0};
         int p = BotChannelRouter.pickChannel(load, BotChannelRouter.weights(3), 1000);
-        assertTrue(p > 0, "should avoid the loaded ch1, picked=" + p);
+        assertEquals(2, p, "should avoid the loaded ch1, picked=" + p);
     }
 
     @Test
