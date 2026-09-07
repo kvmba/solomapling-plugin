@@ -152,9 +152,20 @@ timezone: Asia/Shanghai
 
 `interval-seconds` is the switch: above zero intake runs, zero or absent means
 the world keeps only the companions it already has. It is read once at startup;
-there is no hot reload. To change it without rebuilding, drop a copy at
-`data/solomapling/override/Environment/CompanionIntake.yaml` and restart — the
-same override path every packaged SoloMapling resource uses.
+there is no hot reload.
+
+To change it without rebuilding the plugin, drop a copy at any of these — the
+first one found wins:
+
+1. `data/solomapling/override/Environment/CompanionIntake.yaml`
+2. `src/main/java/soloMapling/Environment/CompanionIntake.yaml` (a dev checkout)
+3. `./CompanionIntake.yaml` — flat, in the server's working directory
+4. the copy packaged in the plugin jar
+
+The same places `EnvironmentPopulation.yaml` is looked for, in a slightly
+different order: that one reaches its override copy only after the dev-checkout
+and flat paths, a leftover from predating `PluginResources`. Here the override
+comes first, which is what its name promises.
 
 ## SPI entry
 

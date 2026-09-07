@@ -46,6 +46,49 @@ class CompanionIntakeConfigTest {
         assertEquals(defaults.timezone(), shipped.timezone());
     }
 
+    /**
+     * A flat copy in the server's working directory also wins over the packaged
+     * one. EnvironmentPopulation.yaml resolves there too, and the two files
+     * behaving differently would be a trap for whoever runs the server.
+     *
+     * <p>Only meaningful when the test's working directory has no dev-checkout
+     * copy at {@code src/main/java/soloMapling/...}, which would otherwise win
+     * first — that is how a deployed server looks, and this test asserts what a
+     * deployment sees rather than what a checkout sees.</p>
+     */
+    @Test
+    void flatCopyInTheWorkingDirectoryIsRead() throws Exception {
+        Path devCheckout = Path.of(
+                soloMapling.Environment.PluginResources.LEGACY_FS_ROOT
+                        + CompanionIntakeConfig.RESOURCE_PATH);
+        org.junit.jupiter.api.Assumptions.assumeFalse(Files.isRegularFile(devCheckout),
+                "a dev-checkout copy outranks the flat one here");
+
+        Path flat = Path.of(CompanionIntakeConfig.FLAT_FS_NAME);
+        boolean existed = Files.isRegularFile(flat);
+        byte[] previous = existed ? Files.readAllBytes(flat) : null;
+        try {
+            Files.writeString(flat, """
+                    interval-seconds: 30
+                    max-total: 111
+                    world-id: 0
+                    timezone: Asia/Shanghai
+                    """, StandardCharsets.UTF_8);
+
+            CompanionIntakeConfig config = CompanionIntakeConfig.load();
+            assertEquals(30, config.intervalSeconds());
+            assertEquals(111, config.maxTotal());
+            assertTrue(config.source().endsWith(CompanionIntakeConfig.FLAT_FS_NAME),
+                    "source should name the flat file: " + config.source());
+        } finally {
+            if (existed) {
+                Files.write(flat, previous);
+            } else {
+                Files.deleteIfExists(flat);
+            }
+        }
+    }
+
     @Test
     void zeroIntervalMeansDisabled() {
         CompanionIntakeConfig config = new CompanionIntakeConfig(0, 2000, 0, "UTC", "test");

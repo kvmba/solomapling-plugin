@@ -5,7 +5,13 @@
 #
 #   1. data/solomapling/override/Environment/CompanionIntake.yaml   (hot edits, no rebuild)
 #   2. src/main/java/soloMapling/Environment/CompanionIntake.yaml   (dev checkout)
-#   3. classpath soloMapling/Environment/CompanionIntake.yaml       (packaged in the plugin jar)
+#   3. ./CompanionIntake.yaml                                       (flat, server working dir)
+#   4. classpath soloMapling/Environment/CompanionIntake.yaml       (packaged in the plugin jar)
+#
+# The same places EnvironmentPopulation.yaml is looked for, in a slightly
+# different order: that one reaches its override copy only after the dev-checkout
+# and flat paths, a leftover from predating PluginResources. Here the override
+# comes first, which is what its name promises.
 #
 # It is read once, at server ready. There is no hot reload: change it and restart,
 # or edit the override copy before the server starts.

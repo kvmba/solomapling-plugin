@@ -29,6 +29,9 @@ public final class CompanionIntakeConfig {
     /** Relative to the {@code soloMapling/} package root — see {@link PluginResources}. */
     static final String RESOURCE_PATH = "Environment/CompanionIntake.yaml";
 
+    /** Flat file name, looked for in the server's working directory. */
+    static final String FLAT_FS_NAME = "CompanionIntake.yaml";
+
     /** Off until somebody turns it on: a world should not fill itself unbidden. */
     private static final int DEFAULT_INTERVAL_SECONDS = 0;
     private static final int DEFAULT_MAX_TOTAL = 2000;
@@ -122,11 +125,24 @@ public final class CompanionIntakeConfig {
 
     private static volatile String sourceLabel = "(unknown)";
 
+    /**
+     * Resolution order, mirroring {@code EnvironmentPopulation.yaml} so the two
+     * config files behave the same way for whoever runs the server:
+     * <ol>
+     *   <li>{@code data/solomapling/override/Environment/CompanionIntake.yaml}</li>
+     *   <li>{@code src/main/java/soloMapling/Environment/CompanionIntake.yaml} (a dev checkout)</li>
+     *   <li>{@code ./CompanionIntake.yaml} — flat, in the server's working directory</li>
+     *   <li>the copy packaged in the plugin jar</li>
+     * </ol>
+     * The last three are what {@link PluginResources} already does; the flat one
+     * is spelled out here because dropping a file next to the server is the
+     * quickest way to change a value, and PopulationConfig offers it too.
+     */
     private static Reader openReader() throws Exception {
-        // Mirror of PluginResources' own resolution order, done here only so the
+        // Spelled out rather than going straight to PluginResources, so the
         // startup line can say which of them won — otherwise an operator who
-        // edited the override copy would see it reported as the packaged file
-        // and not know their edit was the one in force.
+        // edited a copy would see it reported as the packaged file and not know
+        // their edit was the one in force.
         Path override = Path.of(PluginResources.OVERRIDE_FS_ROOT + RESOURCE_PATH);
         if (Files.isRegularFile(override)) {
             sourceLabel = override.toAbsolutePath().toString();
@@ -136,6 +152,11 @@ public final class CompanionIntakeConfig {
         if (Files.isRegularFile(legacy)) {
             sourceLabel = legacy.toAbsolutePath().toString();
             return Files.newBufferedReader(legacy, StandardCharsets.UTF_8);
+        }
+        Path workingDir = Path.of(FLAT_FS_NAME);
+        if (Files.isRegularFile(workingDir)) {
+            sourceLabel = workingDir.toAbsolutePath().toString();
+            return Files.newBufferedReader(workingDir, StandardCharsets.UTF_8);
         }
         if (PluginResources.exists(RESOURCE_PATH)) {
             sourceLabel = "plugin:" + RESOURCE_PATH;
