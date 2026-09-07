@@ -89,6 +89,11 @@ public class ShopOfferWelcome {
         }
     }
 
+    /*
+     * Precise cleanup for one shop: called by whoever tears a shop down, if they do. Nothing is
+     * required to — preventUnboundedGrowth already keeps the maps bounded — but a host that knows
+     * a shop is gone can spare its visitors' entries the wait.
+     */
     public static void clearShopData(int ownerId) {
         playerMessageCounts.entrySet().removeIf(e -> e.getKey().startsWith(ownerId + "_"));
         hintedPlayers.removeIf(k -> k.startsWith(ownerId + "_"));
