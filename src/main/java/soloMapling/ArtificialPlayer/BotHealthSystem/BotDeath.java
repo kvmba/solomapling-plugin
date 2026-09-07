@@ -9,6 +9,7 @@ import soloMapling.ArtificialPlayer.BotClientBinding;
 import soloMapling.ArtificialPlayer.BotGrindSystem.MapMobIndex;
 import soloMapling.ArtificialPlayer.BotSM;
 import soloMapling.ArtificialPlayer.GCMoveSystem.GCMovement;
+import soloMapling.companion.CompanionRoster;
 
 import java.util.concurrent.ThreadLocalRandom;
 
@@ -45,19 +46,22 @@ public final class BotDeath {
 
     // Lie here before being carried home: long enough to read as a corpse rather than a
     // stumble, varied so a field of bodies does not all stand up on the same tick.
-    private static final long DOWN_MIN_MS = 30_000L;
-    private static final long DOWN_MAX_MS = 120_000L;
+    static final long DOWN_MIN_MS = 30_000L;
+    static final long DOWN_MAX_MS = 120_000L;
 
     // Grumble cadence while down.
-    private static final long GRUMBLE_MIN_MS = 8_000L;
-    private static final long GRUMBLE_MAX_MS = 15_000L;
+    static final long GRUMBLE_MIN_MS = 8_000L;
+    static final long GRUMBLE_MAX_MS = 15_000L;
 
     // Fail-safe: nothing should keep a bot dead this long. If it does something is wedged, and
     // standing up is better than a permanent corpse.
-    private static final long DOWN_MAX_HARD_MS = 5 * 60_000L;
+    static final long DOWN_MAX_HARD_MS = 5 * 60_000L;
 
     private final Character chr;
-    private boolean down;
+    // Volatile, and always written LAST (see markDown): the movement thread ends the bot while
+    // the macro thread runs the episode, so this is the hand-off between them — reading it true
+    // must also mean the timers below are already visible.
+    private volatile boolean down;
     private long passOutAtMs;      // start of the whole episode (fail-safe clock)
     private long standUpAtMs;
     private long nextGrumbleAtMs;
@@ -72,29 +76,52 @@ public final class BotDeath {
     }
 
     /**
-     * Marks the bot dead, starting the down timer immediately.
+     * Marks this bot as having been killed. Called only from the damage layer.
      *
-     * <p>The world node for the grumbling is sampled now rather than on each line, because the
-     * "kind" of death is about where it happened: the same map is not reclassified later.
+     * <p>Stopping the movement is done here rather than left to {@code GCMovementDriver}
+     * because a driver only exists for a bot that has movement enabled, and the driver's job is
+     * to move — not to notice it should not.
      */
-    void markDown() {
-        long now = System.currentTimeMillis();
-        if (down) {
-            return; // already down — a second killing blow must not restart the wait
+    public void kill() {
+        Character chr = this.chr;
+        if (chr == null || !BotHelpers.isBot(chr)) {
+            return; // only artificial characters have this lifecycle
         }
-        down = true;
+        // Persistent companions are excluded: they are real characters with a real inventory,
+        // saved progress, and their own survival loop (potions, supply runs, a controller that
+        // already stops when isAlive() is false). Knocking one over here would cost its owner
+        // experience and leave it lying where a player might be relying on it. They keep the
+        // 5% floor and simply never die from contact.
+        if (CompanionRoster.isCompanion(chr.getId())) {
+            return;
+        }
+        if (down) {
+            return; // already dead — a second killing blow must not restart the wait
+        }
+        // Zero first, so the world sees a corpse on the tick this happens. Everything below is
+        // inert by comparison and can afford to fail.
+        BotClientBinding.runWithBoundPlayer(chr, () -> chr.updateHp(0));
+        chr.updatePartyMemberHP(); // headless bots never receive their own stat packet
+        markDown();
+    }
+
+    private void markDown() {
+        long now = System.currentTimeMillis();
+        // Every timestamp first, then the flag: 'down' is what the macro thread reads, and it
+        // must never observe a death whose timers are still the previous episode's.
         passOutAtMs = now;
         standUpAtMs = now + DOWN_MIN_MS + ThreadLocalRandom.current().nextLong(DOWN_MAX_MS - DOWN_MIN_MS);
         nextGrumbleAtMs = now; // let it complain right away
-        stopCrumbling();
+        down = true;
+        stillTheCorpse(chr);
     }
 
     /** Stand up, reset everything, and hand control back to this bot's own behaviour. */
     private void clearDown() {
-        down = false;
         passOutAtMs = 0L;
         standUpAtMs = 0L;
         nextGrumbleAtMs = 0L;
+        down = false; // last, for the same reason as above
     }
 
     /**
@@ -182,20 +209,62 @@ public final class BotDeath {
         clearDown();
     }
 
+    /**
+     * How the bot's own tick should be paced while it is dead.
+     *
+     * <p>Why this is not simply left alone: a grinder's unobserved cadence is 4-8 minutes, and
+     * the whole point of that stretch is that nothing time-critical happens while nobody is
+     * watching. A death is nothing but a timer, so at the stretched cadence a bot in an empty
+     * field would lie there for a quarter of an hour instead of the intended half-minute to two
+     * minutes. Living bots keep their cadence; only the corpse is paced by its own clock.
+     */
+    public long tickDelayMs() {
+        return delayForRemaining(standUpAtMs - System.currentTimeMillis());
+    }
+
+    /**
+     * Pure form of {@link #tickDelayMs}, so the pacing can be tested without waiting.
+     *
+     * <p>Floored at a second so a bot standing up does not spin, and never longer than the time
+     * actually left — a delay past that would add a whole extra wait to every death.
+     */
+    long delayForRemainingForTest(long remainingMs) {
+        return delayForRemaining(remainingMs);
+    }
+
+    private static long delayForRemaining(long remainingMs) {
+        if (remainingMs < TICK_FLOOR_MS) {
+            return TICK_FLOOR_MS;
+        }
+        return Math.min(remainingMs, TICK_CEILING_MS);
+    }
+
+    static final long TICK_FLOOR_MS = 1_000L;
+    // Wake a few times while lying down: often enough that the wait lands near the intended
+    // moment rather than up to a whole extra interval late.
+    static final long TICK_CEILING_MS = 15_000L;
+
     /** The sanctuary this map points at, or 0 when it has none. */
     static int sanctuaryOf(Character chr) {
         int homeId = chr.getMap().getReturnMapId();
         return homeId != MapId.NONE ? homeId : 0;
     }
 
-    /** Stop anything that keeps changing the corpse while it lies there. */
-    private void stopCrumbling() {
-        Character chr = this.chr;
+    /**
+     * Stop everything that would keep moving a corpse.
+     *
+     * <p>The chair matters most: a seated bot is healed by a host timer that knows nothing
+     * about death, so a bot killed mid-sit would stand itself back up out of the chair's own
+     * recovery task. Cancelling the movement cancels the wander with it.
+     */
+    private void stillTheCorpse(Character chr) {
         if (chr == null || chr.getMap() == null) {
             return;
         }
         try {
-            botCancelChair(chr); // a seated bot keeps healing — see Character.startChairTask
+            if (chr.getChair() > 0) {
+                botCancelChair(chr);
+            }
             GCMovement.stop(chr);
         } catch (RuntimeException ignored) {
             // one overdue clean-up must not cost us the death handling
@@ -216,17 +285,4 @@ public final class BotDeath {
         return owner == null ? null : owner.death();
     }
 
-    /**
-     * The lethal-blow entry point: called by the damage layer when a hit is more than the bot
-     * could drink through. Nothing else may set {@link #down}.
-     */
-    public void kill() {
-        Character chr = this.chr;
-        if (chr == null || !BotHelpers.isBot(chr)) {
-            return; // only artificial characters have this lifecycle
-        }
-        BotClientBinding.runWithBoundPlayer(chr, () -> chr.updateHp(0));
-        chr.updatePartyMemberHP(); // headless bots never receive their own stat packet
-        markDown();
-    }
 }

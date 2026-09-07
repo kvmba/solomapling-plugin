@@ -194,20 +194,18 @@ public class TrainingBot extends BotSM implements GrindTickRegistry.Participant 
             return; // gated; removal happens in leaveGrind()/stopScheduledTask()
         }
         // The shared combat ticker does not go through BotSM's tick gate, so a dead grinder
-        // would keep swinging from the floor. Release the grind too, so nothing is left
-        // holding a spot claim or a combat heartbeat while the bot is down.
-        if (death() != null && death().isDead()) {
-            if (!releasedForDeath) {
-                releasedForDeath = true;
+        // would keep swinging from the floor. Hand the grind back once (dropping the spot claim
+        // and the map's occupancy slot) and step out of GRIND: the macro tick is suspended by
+        // the death anyway, and resuming a released brain would fight over its spot claim.
+        if (death().isDead()) {
+            if (phase == Phase.GRIND) {
                 leaveGrind();
+                enterPhase(Phase.DECIDE); // re-picks a map when the bot is on its feet again
             }
             return;
         }
-        releasedForDeath = false;
         grind.tick(chr); // observed → spot grind (FIGHT⇄WAIT); unobserved → no-op (the macro tick accrues abstract EXP)
     }
-
-    private boolean releasedForDeath;
 
     // ── Macro brain state ────────────────────────────────────────────────────
     private enum Phase { INIT, IN_TOWN, SHOP_TRAVEL, SHOP_DWELL, SHOP_RETURN, DECIDE, GO_TRAIN, GRIND, GO_TOWN,

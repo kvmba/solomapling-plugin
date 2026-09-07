@@ -83,8 +83,13 @@ public abstract class BotSM implements EventSubscriber {
             // wander or follow. Checked here rather than in each of the twenty-odd bot types
             // so the rule is stated once. Trading is let through on purpose - a dead bot in a
             // trade window would strand the player's side of it.
+            //
+            // The tick is also re-paced while down: an unobserved grinder otherwise ticks on a
+            // 4-8 minute cadence, which is right for its abstract grinding but would stretch a
+            // half-minute death into a quarter of an hour.
             if (death().isDead() && state != BotState.TRADING) {
                 if (death().tick()) {
+                    updateScheduleDelay(death().tickDelayMs());
                     return;
                 }
             }

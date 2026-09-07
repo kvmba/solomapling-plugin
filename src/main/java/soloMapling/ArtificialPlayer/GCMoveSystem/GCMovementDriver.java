@@ -201,11 +201,18 @@ final class GCMovementDriver {
         }
 
         // Dead: hold the corpse still. Everything below — steering, navigation, the contact-
-        // damage tick, the player-reaction glance — would drag the body around or hip-fire a
-        // hurt packet at a bot that is past hurting. The DEAD wire stance needs no work here:
+        // damage tick, the player-reaction glance — would drag the body around or fire a hurt
+        // packet at a bot that is past hurting. The DEAD wire stance needs no work here:
         // BotPhysicsEngine.resolveStance picks it from hp <= 0 on its own.
+        //
+        // Placed above the chair/resting holds: those keep a bot deliberately still, and a bot
+        // killed mid-rest must stop resting. This branch does their job better — it is the
+        // stricter one — so let it win.
         if (bot.getHp() <= 0) {
-            if (entry.inAir || entry.climbing || entry.moveDir != 0) {
+            // Only settle it once. Re-settling every tick would re-broadcast the same frame
+            // (cheap, deduped, but pointless) and, worse, would fight the fall-off-map recovery
+            // that a bot dropped in mid-air still needs.
+            if (entry.inAir || entry.climbing || entry.moveDir != 0 || entry.resting) {
                 BotPhysicsEngine.idleOnGround(entry, bot);
             }
             broadcastIfObserved(entry);
