@@ -198,8 +198,12 @@ public final class CompanionBot extends BotSM implements
         boolean wasEngaged = soloGrind.engaged();
         if (trainingTarget != null) {
             // A player owns its attention; drop any solo claim so the two never
-            // fight over movement.
-            if (soloGrind.active()) {
+            // fight over movement. Unconditional on *whether it has a claim* —
+            // a controller resting between sessions still holds a reserved slot
+            // on a hunting ground, and leaving it would leak that slot for as
+            // long as the player keeps the companion — but skipped once it is
+            // already idle, since this runs every tick.
+            if (wasEngaged) {
                 soloGrind.stop(getChr());
             }
         } else {

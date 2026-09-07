@@ -46,6 +46,7 @@ import soloMapling.companion.execution.CompanionRuntimeCapabilities;
 import soloMapling.companion.gear.GearDropSourceProvider;
 import soloMapling.companion.intake.CompanionIntakeService;
 import soloMapling.companion.provisioning.CompanionProvisionRequest;
+import soloMapling.companion.provisioning.CompanionProvisioningInput;
 import soloMapling.companion.provisioning.CompanionProvisioningService;
 import soloMapling.companion.provisioning.HostRuntimeCompanionProvisioner;
 import soloMapling.companion.provisioning.SecureCompanionIdentityGenerator;
@@ -260,27 +261,50 @@ public final class SoloMaplingExtension implements ServerExtension {
                     intervalSeconds);
             return;
         }
+        // Guarded, not fatal: a bad intake setting must not take the rest of
+        // onServerReady down with it — the ambient population spawns after this.
         int maxTotal = runtime.config()
                 .getInt("solomapling.companion-intake.max-total", 20);
+        if (maxTotal <= 0) {
+            log.warn("SoloMapling companion intake disabled: max-total must be positive, got {}",
+                    maxTotal);
+            return;
+        }
         int worldId = runtime.config()
                 .getInt("solomapling.companion-intake.world-id", 0);
-        String timezone = runtime.config().getString(
-                "solomapling.companion-intake.timezone",
-                CompanionProvisionRequest.DEFAULT_TIMEZONE);
-        CompanionIntakeService intake = new CompanionIntakeService(
-                new CompanionProvisioningService(
-                        new HostRuntimeCompanionProvisioner(runtime),
-                        new SecureCompanionIdentityGenerator()),
-                companionLifecycleAccess,
-                // The ambient bots' own name pool: the same list a player sees
-                // walking around, so a newcomer does not stand out.
-                FMShopDescGen::getRandomCharacterIGN,
-                intervalSeconds * 1000L,
-                maxTotal,
-                worldId,
-                timezone);
-        intake.start();
-        companionIntake = intake;
+        if (worldId < 0) {
+            log.warn("SoloMapling companion intake disabled: world-id must not be negative, got {}",
+                    worldId);
+            return;
+        }
+        final String timezone;
+        try {
+            timezone = CompanionProvisioningInput.validateTimezone(
+                    runtime.config().getString(
+                            "solomapling.companion-intake.timezone",
+                            CompanionProvisionRequest.DEFAULT_TIMEZONE));
+        } catch (IllegalArgumentException e) {
+            log.warn("SoloMapling companion intake disabled: {}", e.getMessage());
+            return;
+        }
+        try {
+            CompanionIntakeService intake = new CompanionIntakeService(
+                    new CompanionProvisioningService(
+                            new HostRuntimeCompanionProvisioner(runtime),
+                            new SecureCompanionIdentityGenerator()),
+                    companionLifecycleAccess,
+                    // The ambient bots' own name pool: the same list a player
+                    // sees walking around, so a newcomer does not stand out.
+                    FMShopDescGen::getRandomCharacterIGN,
+                    intervalSeconds * 1000L,
+                    maxTotal,
+                    worldId,
+                    timezone);
+            intake.start();
+            companionIntake = intake;
+        } catch (RuntimeException e) {
+            log.warn("SoloMapling companion intake failed to start: {}", e.toString());
+        }
     }
 
     private static Character findOnlineCharacter(int characterId) {

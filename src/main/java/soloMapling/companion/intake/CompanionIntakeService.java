@@ -2,12 +2,12 @@ package soloMapling.companion.intake;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import soloMapling.companion.CompanionRoster;
 import soloMapling.companion.lifecycle.CompanionLifecycleAccess;
 import soloMapling.companion.lifecycle.CompanionLifecycleCoordinator;
 import soloMapling.companion.lifecycle.CompanionLifecycleStatus;
 import soloMapling.companion.provisioning.CompanionProvisionResult;
 import soloMapling.companion.provisioning.CompanionProvisioningService;
-import soloMapling.companion.provisioning.CompanionProvisioningInput;
 import soloMapling.server.MethodScheduler;
 
 import java.util.Objects;
@@ -49,6 +49,13 @@ public final class CompanionIntakeService {
 
     private int registered;
     private int failed;
+    /**
+     * Companions the world already held when intake started, from the roster the
+     * plugin loaded at startup. max-total is a ceiling on the world's whole
+     * companion population, not on how many this process happens to add, so a
+     * restart must not top a world of 20 up to 40.
+     */
+    private final int baseline;
 
     public CompanionIntakeService(
             CompanionProvisioningService provisioning,
@@ -72,6 +79,7 @@ public final class CompanionIntakeService {
         this.maxTotal = maxTotal;
         this.worldId = worldId;
         this.timezone = Objects.requireNonNull(timezone, "timezone");
+        this.baseline = CompanionRoster.characterIds().size();
     }
 
     /** Draws character names. Separate so a test can hand out fixed names. */
@@ -92,15 +100,16 @@ public final class CompanionIntakeService {
     /** Stops after the current interval; no new companion is registered. */
     public void stop() {
         if (running.compareAndSet(true, false)) {
-            log.info("Companion intake stopped registered={} failed={}", registered, failed);
+            log.info("Companion intake stopped added={} failed={} population={}/{}",
+                registered, failed, baseline + registered, maxTotal);
         }
     }
 
     /** One registration attempt. Visible for tests. */
     void registerOne() {
-        if (registered >= maxTotal) {
-            log.info("Companion intake reached its cap maxTotal={} registered={} failed={}",
-                    maxTotal, registered, failed);
+        if (baseline + registered >= maxTotal) {
+            log.info("Companion intake reached its cap maxTotal={} existing={} added={} failed={}",
+                    maxTotal, baseline, registered, failed);
             stop();
             return;
         }
@@ -113,8 +122,9 @@ public final class CompanionIntakeService {
                 CompanionProvisionResult result =
                         provisioning.provision(name, null, worldId, timezone);
                 registered++;
-                log.info("Companion intake registered cid={} name={} registered={}/{}",
-                        result.characterId(), result.displayName(), registered, maxTotal);
+                log.info("Companion intake registered cid={} name={} population={}/{}",
+                        result.characterId(), result.displayName(),
+                        baseline + registered, maxTotal);
                 spawnNow(result.characterId());
                 return;
             } catch (Exception e) {
@@ -173,7 +183,7 @@ public final class CompanionIntakeService {
         }, intervalMs);
     }
 
-    /** Companions registered by this service. */
+    /** Companions this service has added since it started. */
     public int registered() {
         return registered;
     }
@@ -181,15 +191,5 @@ public final class CompanionIntakeService {
     /** Intervals that produced no companion. */
     public int failed() {
         return failed;
-    }
-
-    /** Validates a name the way provisioning will, so a bad draw is not attempted. */
-    public static boolean isUsableName(String name) {
-        try {
-            CompanionProvisioningInput.validateCharacterName(name);
-            return true;
-        } catch (IllegalArgumentException e) {
-            return false;
-        }
     }
 }

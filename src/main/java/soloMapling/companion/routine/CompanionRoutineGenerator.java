@@ -153,7 +153,7 @@ public final class CompanionRoutineGenerator {
      * {@link #TRAIN_SHARE} of them on training.
      *
      * <p>Training and the rest are split as two independent budgets so the share
-     * is met by time. Both are then handed to {@link #splitRange}, which keeps
+     * is met by time. Both are then handed to {@link #share}, which keeps
      * every session inside [{@link #MIN_BLOCK_MINUTES}, {@link #MAX_BLOCK_MINUTES}]
      * by construction rather than by clamping.</p>
      *
@@ -179,10 +179,12 @@ public final class CompanionRoutineGenerator {
         int trainMinutes = Math.max(low, Math.min(high, wantedTrainMinutes));
 
         List<Session> sessions = new ArrayList<>();
-        for (int minutes : splitRange(trainMinutes, trainCount, random)) {
+        for (int minutes : share(trainMinutes, trainCount,
+                    MIN_BLOCK_MINUTES, MAX_BLOCK_MINUTES, random)) {
             sessions.add(new Session(minutes, true));
         }
-        for (int minutes : splitRange(totalMinutes - trainMinutes, otherCount, random)) {
+        for (int minutes : share(totalMinutes - trainMinutes, otherCount,
+                    MIN_BLOCK_MINUTES, MAX_BLOCK_MINUTES, random)) {
             sessions.add(new Session(minutes, false));
         }
         Collections.shuffle(sessions, random);
@@ -190,34 +192,31 @@ public final class CompanionRoutineGenerator {
     }
 
     /**
-     * Splits {@code total} into {@code parts} shares, each inside
-     * [{@link #MIN_BLOCK_MINUTES}, {@link #MAX_BLOCK_MINUTES}].
+     * Shares {@code total} out over {@code parts} shares, each inside
+     * [{@code min}, {@code max}].
      *
-     * <p>The bounds are honoured by construction rather than by clamping: the
-     * requested total is first narrowed to what {@code parts} shares can
-     * actually express, then shared out by drawing each share from the range
-     * still feasible for it. Clamping instead would pile any excess onto the
-     * final share, so a bot wanting 8 hours in two sittings would get one short
-     * block and one absurdly long one.</p>
+     * <p>The bounds are honoured by construction rather than by clamping: each
+     * share is drawn from the range still feasible for it, given that every
+     * later share needs at least {@code min} and can absorb at most {@code max}.
+     * Clamping instead would pile any excess onto the final share, so a bot
+     * wanting eight hours in two sittings would get one short block and one
+     * absurdly long one.</p>
      */
-    private static List<Integer> splitRange(int total, int parts, Random random) {
-        int budget = Math.min(total, MAX_BLOCK_MINUTES * parts);
-        budget = Math.max(budget, MIN_BLOCK_MINUTES * parts);
+    private static List<Integer> share(int total, int parts, int min, int max, Random random) {
         List<Integer> shares = new ArrayList<>();
-        int remaining = budget;
+        int remaining = Math.min(total, max * parts);
+        remaining = Math.max(remaining, min * parts);
         int remainingParts = parts;
         for (int i = 0; i < parts; i++) {
             if (i == parts - 1) {
                 shares.add(remaining);
                 break;
             }
-            int min = Math.max(MIN_BLOCK_MINUTES,
-                    remaining - MAX_BLOCK_MINUTES * (remainingParts - 1));
-            int max = Math.min(MAX_BLOCK_MINUTES,
-                    remaining - MIN_BLOCK_MINUTES * (remainingParts - 1));
-            int share = min >= max ? min : min + random.nextInt(max - min + 1);
-            shares.add(share);
-            remaining -= share;
+            int low = Math.max(min, remaining - max * (remainingParts - 1));
+            int high = Math.min(max, remaining - min * (remainingParts - 1));
+            int value = low >= high ? low : low + random.nextInt(high - low + 1);
+            shares.add(value);
+            remaining -= value;
             remainingParts--;
         }
         return shares;
@@ -244,7 +243,7 @@ public final class CompanionRoutineGenerator {
             int high = Math.min(slack, MAX_GAP_MINUTES * gapCount);
             int low = Math.min(high, MIN_GAP_MINUTES * gapCount);
             gapTotal = low >= high ? low : low + random.nextInt(high - low + 1);
-            gaps.addAll(splitGaps(gapTotal, gapCount, random));
+            gaps.addAll(share(gapTotal, gapCount, MIN_GAP_MINUTES, MAX_GAP_MINUTES, random));
         }
         int lead = slack - gapTotal;
         int cursor = DAY_START_MINUTE + (lead > 0 ? random.nextInt(lead + 1) : 0);
@@ -260,27 +259,6 @@ public final class CompanionRoutineGenerator {
         return starts;
     }
 
-    /** Shares a gap budget out, each gap inside [MIN_GAP_MINUTES, MAX_GAP_MINUTES]. */
-    private static List<Integer> splitGaps(int total, int parts, Random random) {
-        List<Integer> shares = new ArrayList<>();
-        int remaining = total;
-        int remainingParts = parts;
-        for (int i = 0; i < parts; i++) {
-            if (i == parts - 1) {
-                shares.add(remaining);
-                break;
-            }
-            int min = Math.max(MIN_GAP_MINUTES,
-                    remaining - MAX_GAP_MINUTES * (remainingParts - 1));
-            int max = Math.min(MAX_GAP_MINUTES,
-                    remaining - MIN_GAP_MINUTES * (remainingParts - 1));
-            int share = min >= max ? min : min + random.nextInt(max - min + 1);
-            shares.add(share);
-            remaining -= share;
-            remainingParts--;
-        }
-        return shares;
-    }
 
     /**
      * A non-training activity, never the same as the session before it: two

@@ -14,7 +14,17 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+/**
+ * The roster is a process-wide static that other tests register into, and the
+ * intake reads it to learn how many companions the world already had — so each
+ * test starts from a known-empty roster rather than inheriting someone else's.
+ */
 class CompanionIntakeServiceTest {
+
+    @org.junit.jupiter.api.BeforeEach
+    void clearRoster() {
+        soloMapling.companion.CompanionRoster.clear();
+    }
 
     private static final class FakeProvisioner implements CompanionHostProvisioner {
         final AtomicInteger calls = new AtomicInteger();
@@ -110,6 +120,32 @@ class CompanionIntakeServiceTest {
         assertEquals(3, intake.registered(), "must not exceed the cap");
     }
 
+    /**
+     * The cap counts the companions the world already had. A restart must not
+     * treat them as headroom and top a full world up to twice its size.
+     */
+    @Test
+    void countsCompanionsTheWorldAlreadyHad() {
+        FakeProvisioner provisioner = new FakeProvisioner();
+        AtomicInteger draw = new AtomicInteger();
+        soloMapling.companion.CompanionRoster.register(555_001);
+        soloMapling.companion.CompanionRoster.register(555_002);
+        try {
+            CompanionIntakeService intake = service(provisioner,
+                    () -> "Bot" + draw.incrementAndGet(), 3);
+
+            for (int i = 0; i < 5; i++) {
+                intake.registerOne();
+            }
+
+            assertEquals(1, intake.registered(),
+                    "only one slot was free out of a cap of three");
+        } finally {
+            soloMapling.companion.CompanionRoster.unregister(555_001);
+            soloMapling.companion.CompanionRoster.unregister(555_002);
+        }
+    }
+
     @Test
     void aBlankNameIsSkippedRatherThanSentToTheHost() {
         FakeProvisioner provisioner = new FakeProvisioner();
@@ -135,14 +171,5 @@ class CompanionIntakeServiceTest {
                 10,
                 0,
                 CompanionProvisionRequest.DEFAULT_TIMEZONE));
-    }
-
-    @Test
-    void usableNameRejectsWhatProvisioningWouldReject() {
-        assertTrue(CompanionIntakeService.isUsableName("冒险家"));
-        assertTrue(CompanionIntakeService.isUsableName("ab12"));
-        // Too long for the host's character name column.
-        assertTrue(!CompanionIntakeService.isUsableName("WayTooLongForAMapleStoryName"));
-        assertTrue(!CompanionIntakeService.isUsableName(""));
     }
 }

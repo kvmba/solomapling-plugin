@@ -16,6 +16,7 @@ import soloMapling.companion.persistence.CompanionProfile;
 import soloMapling.companion.progression.CompanionBuildAllocator;
 import soloMapling.companion.progression.CompanionCareerBuild;
 import soloMapling.companion.progression.CompanionCareerPath;
+import soloMapling.companion.routine.CompanionNoviceLevel;
 import soloMapling.companion.routine.OfflineProgressionSettlement;
 
 import java.sql.Connection;
@@ -33,22 +34,13 @@ public final class HostCompanionRuntimeAdapter implements CompanionRuntimeAdapte
     private static final int MAX_ADVANCEMENTS_PER_RECONCILE = 4;
 
     /**
-     * A companion below this level is still on the beginner island, and it earns
-     * nothing while it is away.
-     *
-     * <p>Two reasons. The island is the tutorial: a bot that comes back from a
-     * night offline two levels higher skipped the part where it was supposed to
-     * learn to swing. And it is a one-way trip out — a companion that never
-     * plays the island never reaches level 8, never takes Sanks' boat, and stays
-     * on Maple Island forever. Settling it forward would freeze it there.</p>
-     *
-     * <p>Matches the level Sanks asks for, so the bar lines up with the gate the
-     * island already has.</p>
-     */
-    public static final int NOVICE_SETTLEMENT_LEVEL = 10;
-
-    /**
      * Most of one level a settlement may grant.
+     *
+     * <p>A companion below {@link CompanionNoviceLevel#VALUE} gets nothing at
+     * all: it is still on the beginner island, and the island is the tutorial.
+     * A bot that came back from a night offline two levels higher skipped the
+     * part where it was supposed to learn to swing — and since the island is a
+     * one-way trip out, settling it forward would strand it there.</p>
      *
      * <p>Deliberately small, and for a reason that has changed: a companion no
      * longer relies on offline time to advance. While it is online it levels by
@@ -202,13 +194,13 @@ public final class HostCompanionRuntimeAdapter implements CompanionRuntimeAdapte
             LoadedCompanion companion,
             OfflineProgressionSettlement settlement) {
         Character character = unwrap(companion);
-        if (character.getLevel() < NOVICE_SETTLEMENT_LEVEL) {
+        if (CompanionNoviceLevel.isNovice(character.getLevel())) {
             // Still a novice: no offline reward at all. The settlement's
             // settledThrough is still recorded upstream, so this time is not
             // banked for later — a companion that finally reaches 10 does not
             // collect a backlog for the weeks it spent below it.
             log.debug("Companion offline settlement skipped for novice cid={} level={} below={}",
-                    character.getId(), character.getLevel(), NOVICE_SETTLEMENT_LEVEL);
+                    character.getId(), character.getLevel(), CompanionNoviceLevel.VALUE);
             return;
         }
         int experience = Math.toIntExact(Math.min(
@@ -232,10 +224,12 @@ public final class HostCompanionRuntimeAdapter implements CompanionRuntimeAdapte
      * recoverable, a companion that can never gain offline experience is not.</p>
      */
     static long experienceCap(int level) {
-        int needed;
+        final int needed;
         try {
+            // The host's table is a plain array indexed by level, so the only
+            // way this fails is a level past its end.
             needed = ExpTable.getExpNeededForLevel(Math.max(0, level));
-        } catch (RuntimeException | StackOverflowError ignored) {
+        } catch (IndexOutOfBoundsException ignored) {
             return HARD_EXPERIENCE_CAP;
         }
         if (needed <= 0) {

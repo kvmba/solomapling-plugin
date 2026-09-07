@@ -8,7 +8,7 @@ import soloMapling.ArtificialPlayer.BotGrindSystem.GrindBrain;
 import soloMapling.ArtificialPlayer.BotGrindSystem.TrainingMap;
 import soloMapling.ArtificialPlayer.BotGrindSystem.TrainingMapChooser;
 import soloMapling.ArtificialPlayer.GCMoveSystem.GCMovement;
-import soloMapling.companion.lifecycle.HostCompanionRuntimeAdapter;
+import soloMapling.companion.routine.CompanionNoviceLevel;
 
 import java.util.Set;
 import java.util.concurrent.ThreadLocalRandom;
@@ -52,13 +52,6 @@ public final class SoloGrindController {
      */
     private static final double KILLS_PER_MIN = 15.0;
 
-    /**
-     * Below this level a companion does not solo at all. It is the same bar that
-     * gates the offline settlement: on the beginner island a companion should be
-     * doing the island's own content, not being handed levels in its sleep.
-     */
-    private static final int MIN_SOLO_LEVEL = HostCompanionRuntimeAdapter.NOVICE_SETTLEMENT_LEVEL;
-
     /** How long to keep working one map before considering a move. */
     private static final long SESSION_MIN_MS = 4 * 60_000L;
     private static final long SESSION_MAX_MS = 11 * 60_000L;
@@ -70,21 +63,9 @@ public final class SoloGrindController {
     /** How long to wait before retrying when no hunting ground can be found. */
     private static final long RETRY_MS = 90_000L;
 
-    /** Cap on remembered unproductive maps, so the set cannot grow forever. */
-    private static final int EXCLUDED_LIMIT = 8;
-
     private enum Phase { IDLE, TRAVELLING, GRINDING, RESTING }
 
     private final GrindBrain grind;
-    /** Working set of maps this session found unproductive. Bounded: a long-lived
-     * companion would otherwise accumulate a set that excludes everything. */
-    private final Set<Integer> excluded = java.util.Collections.newSetFromMap(
-            new java.util.LinkedHashMap<Integer, Boolean>() {
-                @Override
-                protected boolean removeEldestEntry(java.util.Map.Entry<Integer, Boolean> eldest) {
-                    return size() > EXCLUDED_LIMIT;
-                }
-            });
 
     private Phase phase = Phase.IDLE;
     private int targetMapId = -1;
@@ -103,10 +84,18 @@ public final class SoloGrindController {
     }
 
     /**
-     * True while this controller is mid-session: unlike {@link #active()} this
-     * stays true through the rest between sessions, so the caller knows not to
-     * let anything else take the companion's attention and start a competing
-     * session while it waits.
+     * True while this controller owns the companion's combat, including the rest
+     * between two of its own sessions.
+     *
+     * <p>RESTING counts as engaged: it is this controller's own pause, and the
+     * caller must not start something else on top of it. IDLE is the only phase
+     * that is genuinely free — in every other phase the controller has a session
+     * in progress or one it is about to resume.</p>
+     *
+     * <p>{@link #stop(Character)} therefore returns to IDLE, not RESTING: a stop
+     * is someone else taking over, and leaving the controller in a phase that
+     * reads as engaged would have the caller register the companion for combat
+     * sweep at the very moment it stopped grinding.</p>
      */
     public boolean engaged() {
         return phase != Phase.IDLE;
@@ -115,27 +104,23 @@ public final class SoloGrindController {
     /**
      * Runs one decision tick. Callers gate this on survival/gear being idle and
      * on no player having asked the companion to train with them.
-     *
-     * @return true when the companion's attention is spoken for this tick
      */
-    public boolean tick(Character companion) {
+    public void tick(Character companion) {
         if (companion == null || companion.getMap() == null) {
-            return false;
+            return;
         }
         long now = System.currentTimeMillis();
         switch (phase) {
             case IDLE -> {
                 if (now < phaseUntilMs) {
-                    return false;
+                    return;
                 }
-                return startSession(companion, now);
+                startSession(companion, now);
             }
             case RESTING -> {
-                if (now < phaseUntilMs) {
-                    return true;
+                if (now >= phaseUntilMs) {
+                    phase = Phase.IDLE;
                 }
-                phase = Phase.IDLE;
-                return false;
             }
             case TRAVELLING -> {
                 if (companion.getMapId() == targetMapId) {
@@ -147,12 +132,11 @@ public final class SoloGrindController {
                             companion.getId(), targetMapId, companion.getMapId());
                     endSession(companion, now);
                 }
-                return true;
             }
             case GRINDING -> {
                 if (companion.getMapId() != targetMapId) {
                     endSession(companion, now); // warped away mid-session
-                    return true;
+                    return;
                 }
                 if (GCMovement.isMapObserved(companion.getMapId())) {
                     // A player can see it: let the real combat tick own the
@@ -161,51 +145,54 @@ public final class SoloGrindController {
                     if (now > phaseUntilMs) {
                         endSession(companion, now);
                     }
-                    return true;
+                    return;
                 }
                 accrueSimulatedExperience(companion, now);
                 if (now > phaseUntilMs) {
                     endSession(companion, now);
                 }
-                return true;
             }
-            default -> {
-                phase = Phase.IDLE;
-                return false;
-            }
+            default -> phase = Phase.IDLE;
         }
     }
 
     /** Releases any claim this controller holds. Safe to call at any time. */
     public void stop(Character companion) {
-        if (grindRegistered) {
+        // Only release through the character when there is one: a companion that
+        // was never given a body cannot have a live grind claim, and handing
+        // null to the grind brain would only push the problem deeper.
+        if (grindRegistered && companion != null) {
             grind.release(companion);
             GCMovement.setGrinding(companion, false);
-            grindRegistered = false;
         }
+        grindRegistered = false;
         releaseReservation();
-        excluded.clear();
         targetMapId = -1;
         targetMobLevel = 0;
-        phase = Phase.RESTING;
-        phaseUntilMs = System.currentTimeMillis() + REST_MIN_MS;
+        // IDLE, not RESTING: a stop means someone else is taking over, and a
+        // RESTING controller is one that still claims the companion.
+        phase = Phase.IDLE;
+        phaseUntilMs = 0L;
     }
 
-    private boolean startSession(Character companion, long now) {
-        if (companion.getLevel() < MIN_SOLO_LEVEL) {
+    private void startSession(Character companion, long now) {
+        if (CompanionNoviceLevel.isNovice(companion.getLevel())) {
             // Too new to solo. Check again later, not every tick.
             phase = Phase.RESTING;
             phaseUntilMs = now + RETRY_MS;
-            return false;
+            return;
         }
+        // No excluded set: the chooser already watches how many bots target each
+        // map and picks another when one is full, so a per-bot memory of
+        // "unproductive" maps would only duplicate that and shrink the field.
         TrainingMap pick = TrainingMapChooser.choose(
-                companion, companion.getMapId(), excluded, message -> { });
+                companion, companion.getMapId(), Set.of(), message -> { });
         if (pick == null) {
             phase = Phase.RESTING;
             phaseUntilMs = now + RETRY_MS;
             log.debug("Companion solo grind found no hunting ground cid={} level={} at={}",
                     companion.getId(), companion.getLevel(), companion.getMapId());
-            return false;
+            return;
         }
         targetMapId = pick.mapId();
         targetMobLevel = pick.mobLevel();
@@ -213,12 +200,11 @@ public final class SoloGrindController {
         phaseUntilMs = now + TRAVEL_TIMEOUT_MS;
         if (companion.getMapId() == targetMapId) {
             beginGrinding(companion, now);
-            return true;
+            return;
         }
         GCMovement.travel(companion, targetMapId, null);
         log.info("Companion solo grind travelling cid={} from={} to={} mobLevel={}",
                 companion.getId(), companion.getMapId(), targetMapId, targetMobLevel);
-        return true;
     }
 
     private void beginGrinding(Character companion, long now) {
@@ -236,15 +222,11 @@ public final class SoloGrindController {
     }
 
     private void endSession(Character companion, long now) {
-        if (grindRegistered) {
+        if (grindRegistered && companion != null) {
             grind.release(companion);
             GCMovement.setGrinding(companion, false);
-            grindRegistered = false;
         }
-        // A map that produced nothing is not worth another try this session.
-        if (targetMapId >= 0 && now - lastAccrualMs > SESSION_MIN_MS) {
-            excluded.add(targetMapId);
-        }
+        grindRegistered = false;
         releaseReservation();
         targetMapId = -1;
         targetMobLevel = 0;

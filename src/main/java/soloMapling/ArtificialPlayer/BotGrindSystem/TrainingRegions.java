@@ -17,8 +17,14 @@ public final class TrainingRegions {
 
     // Each row is {minInclusive, maxExclusive, minLevel}.
     private static final int[][] ALLOWED = {
-            {0, 60002, 1},              // Beginner island: Mushroom Town, Snail Garden, Southperry and
-                                        // their hunting grounds (map ids run 0..60001, below Victoria)
+            // Beginner island: Mushroom Town, Snail Garden, Rainbow Village, Southperry
+            // and their hunting grounds. The island's map ids are not a single
+            // run: the walk from the spawn (10000) to Southperry (2000000) climbs
+            // through 1000000/1010000/1020000, so a window that stopped at 60001
+            // left the far half of the island — the half a companion must cross
+            // to reach Sanks' boat — outside the maps a bot may train in.
+            // 2010001 clears the island's last map (2000001, the armour store).
+            {0, 2010001, 1},
             {110000000, 110040001, 30}, // Gold Beach (黄金海滩): reached by boat from Lith, Orbis or
                                         // Ludibrium. Gated at 30 — its lowest mob is 37.
             {120000000, 120010001, 1},  // Nautilus (诺特勒斯号码头): the pirate town, walked to from
@@ -71,6 +77,8 @@ public final class TrainingRegions {
      * and that is when players take the boat out, well before its fields top out — and so on up.
      */
     private static final int BEGINNER_MIGRATE_LEVEL = 8;
+    /** Victoria Island's first map id — everything below it is the beginner island. */
+    private static final int VICTORIA_ISLAND_START = 100_000_000;
     private static final int[][] MIGRATION_LADDER = {
             // Victoria at 31: second job is 30, and that is when players stop training on the island
             // and take the boat to Orbis — not when its fields finally top out.
@@ -95,9 +103,12 @@ public final class TrainingRegions {
     }
 
     public static int migrationTarget(int homeMapId, int level) {
-        // The beginner island is anywhere below Victoria's id range; a bot leaves it the moment it
-        // can, which is also the level Sanks asks for.
-        if (homeMapId < 100000) {
+        // The beginner island is every map below the Victoria range — and that
+        // range is not a small one: the walk to Southperry runs through
+        // 1000000/1010000/1020000 up to 2000000, all still below Victoria's
+        // 100000000. A bound of 100000 left a bot standing on Southperry's dock
+        // thinking it had already left the island, so it never took the boat.
+        if (homeMapId < VICTORIA_ISLAND_START) {
             return level >= BEGINNER_MIGRATE_LEVEL ? 100000000 : 0;
         }
         int current = -1;

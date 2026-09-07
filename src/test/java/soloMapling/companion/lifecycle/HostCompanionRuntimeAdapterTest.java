@@ -2,6 +2,7 @@ package soloMapling.companion.lifecycle;
 
 import org.gms.constants.game.ExpTable;
 import org.junit.jupiter.api.Test;
+import soloMapling.companion.routine.CompanionNoviceLevel;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -62,10 +63,10 @@ class HostCompanionRuntimeAdapterTest {
 
     @Test
     void novicesEarnNothingOffline() {
-        // The bar is a level, and it lines up with the island's own gate: Sanks
-        // asks for 7, and this leaves a companion the island's content rather
-        // than handing it levels it did not fight for.
-        assertTrue(HostCompanionRuntimeAdapter.NOVICE_SETTLEMENT_LEVEL >= 7,
+        // The bar lines up with the island's own gate: Sanks asks for 7, and
+        // this leaves a companion the island's content rather than handing it
+        // levels it did not fight for.
+        assertTrue(CompanionNoviceLevel.VALUE >= 7,
                 "the novice bar should not sit below the island's own gate");
     }
 }
