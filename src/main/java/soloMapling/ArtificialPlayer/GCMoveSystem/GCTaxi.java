@@ -75,6 +75,10 @@ final class GCTaxi {
     /* The Time Temple's bar, mirrored here for the dragon flight that is its only way in. */
     private static final int TIME_TEMPLE_LEVEL = 90;
 
+    /* The Cave of Life's bar. Leafre opens at 70, but its mazes hold 97-110, so the gate on the
+     * whole continent would let in bots that get torn apart the moment a maze opens. */
+    private static final int CAVE_OF_LIFE_LEVEL = 95;
+
     // {fromMapId, npcId, toMapId, minLevel}
     private static final int[][] NPC_RIDES = {
             {200000141, 2090005, 250000100, 1},  // Hak: Orbis Sky -> Mu Lung
@@ -114,14 +118,14 @@ final class GCTaxi {
             // the two NPCs that move you through the cave are the only way in — 2081005 takes you from
             // the cave mouth to the entrance, and 2083001 from there into the 97-110 maze.
             {240040700, 2081005, 240050000, 70},
-            {240050000, 2083001, 240050100, 70},
+            {240050000, 2083001, 240050100, CAVE_OF_LIFE_LEVEL},
             // The mazes are separate rooms with no doors between them, so the same keeper is what
             // moves you from one to the next — without these a bot is stuck in the room it lands in.
-            {240050100, 2083001, 240050101, 70},
-            {240050100, 2083001, 240050102, 70},
-            {240050100, 2083001, 240050103, 70},
-            {240050100, 2083001, 240050104, 70},
-            {240050100, 2083001, 240050105, 70},
+            {240050100, 2083001, 240050101, CAVE_OF_LIFE_LEVEL},
+            {240050100, 2083001, 240050102, CAVE_OF_LIFE_LEVEL},
+            {240050100, 2083001, 240050103, CAVE_OF_LIFE_LEVEL},
+            {240050100, 2083001, 240050104, CAVE_OF_LIFE_LEVEL},
+            {240050100, 2083001, 240050105, CAVE_OF_LIFE_LEVEL},
             // Gold Beach: a holiday island with no portal in, so the three boats that run to it
             // (from Lith Harbour, Orbis and Ludibrium) are the only way there.
             {104000000, 1002002, 110000000, 1},  // Lith Harbour -> Gold Beach
