@@ -6,11 +6,9 @@ import soloMapling.ArtificialPlayer.BotSpotClaims;
 import soloMapling.ArtificialPlayer.GCMoveSystem.GCMovement;
 
 import java.awt.Point;
-import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
-import static soloMapling.ArtificialPlayer.BotMovementSystem.MovementCommands.pathFinderAware;
 
 // Positional life for OLD-engine stationed town bots (SocialBot) without a GC retrofit: hold a claimed
 // ledge in town and occasionally drift to a fresh anchor-weighted spot, so a town crowd looks alive rather
@@ -20,7 +18,12 @@ import static soloMapling.ArtificialPlayer.BotMovementSystem.MovementCommands.pa
 // terrain-only GCMovement.regionIdAt that never GC-drives the bot), so it shares the SAME registry and keys
 // as TownLoiter (which returning training bots use). That is what makes cross-cohort coordination fall out:
 // a stationed SocialBot and a returning TrainingBot now see each other and won't stack past CAPACITY on one
-// ledge. relocate() is old-engine specific (pathFinderAware walk) - only call it on old-engine bots.
+// ledge.
+//
+// The drift walk itself no longer lives here. It used to be relocate() -> pathFinderAware (old-engine
+// pathfind over recorded movement packets), which silently no-opped on every town in
+// EnvironmentPopulation.yaml - those maps have no recordings - so stationed bots never moved at all.
+// SocialBot now drifts with GCMovement.move (GC engine, WZ terrain, no recordings).
 //
 // Our own creation (not a GreenCat extraction).
 public final class TownStation {
@@ -77,35 +80,6 @@ public final class TownStation {
         synchronized (CLAIM_LOCK) {
             releaseLocked(bot.getId());
         }
-    }
-
-    // Drift the bot to ONE fresh anchor-weighted spot (near shops, consistent with initial placement), then
-    // re-claim wherever it ends up. Old-engine walk (pathFinderAware) - BLOCKING, so the caller must invoke
-    // this off the wheel or accept the tick blocking through the walk (deliberate synchronous choreography;
-    // the bot is intentionally inert while it strolls). Best-effort: if sampling / paths fail, the bot stays
-    // put. Returns true if a walk was attempted.
-    public static boolean relocate(Character bot, Point townAnchor) {
-        if (bot == null || bot.getMap() == null) {
-            return false;
-        }
-        MapleMap map = bot.getMap();
-        int mapId = bot.getMapId();
-        Point anchor = townAnchor != null ? townAnchor : bot.getPosition();
-
-        List<Point> spots = TownPresenceSampler.sample(map, anchor, 1, TownPresenceConfig.overridesFor(mapId));
-        if (spots.isEmpty()) {
-            return false; // nav graph not baked / no eligible ledge - stay put
-        }
-        Point dest = spots.get(0);
-
-        releaseSpot(bot); // free the old ledge before the walk so it isn't held stale mid-stroll
-        try {
-            pathFinderAware(bot, dest); // blocking old-engine walk (observed = visible; unobserved = off-screen)
-        } catch (Exception e) {
-            // pathing failed - fall through and re-claim wherever we are
-        }
-        claimSpot(bot); // claim the ledge we actually ended on
-        return true;
     }
 
     public static boolean isStationed(Character bot) {

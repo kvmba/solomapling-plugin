@@ -15,6 +15,8 @@ import soloMapling.ArtificialPlayer.BotMessagingSystem.MessageQueue;
 import soloMapling.ArtificialPlayer.BotPartySystem.BotPartyQueue;
 import soloMapling.ArtificialPlayer.BotPartySystem.BotRecruitManager;
 import soloMapling.ArtificialPlayer.BotSM;
+import soloMapling.ArtificialPlayer.BotTownSystem.TownPresenceConfig;
+import soloMapling.ArtificialPlayer.BotTownSystem.TownPresenceSampler;
 import soloMapling.ArtificialPlayer.BotTownSystem.TownStation;
 import soloMapling.ArtificialPlayer.BotTypeManager;
 import soloMapling.ArtificialPlayer.GCMoveSystem.GCMovement;
@@ -32,6 +34,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
+import org.gms.server.maps.MapleMap;
 
 import static soloMapling.ArtificialPlayer.BotCommandsPack.SocialCommands.*;
 import static soloMapling.ArtificialPlayer.BotHelpers.isBot;
@@ -78,6 +81,7 @@ public class SocialBot extends BotSM {
     private volatile boolean townClaimed = false;
     private volatile Point townAnchor = null; // spawn portal - the reference point relocation samples around
     private volatile boolean relocating = false; // owns movement during a drift walk; blocks ambient actions
+    private volatile long relocateStartedAtMs = 0; // start of the in-flight drift, for the timeout net
     private volatile long nextChairActionMs = 0;
     private volatile long nextRelocateAtMs = 0;
     private volatile long nextStrollAtMs = 0;
@@ -97,15 +101,24 @@ public class SocialBot extends BotSM {
     private volatile boolean strollReturning = false;
 
     // Loiter tuning (candidates for a live !env chatter/loiter readout). Chair sit/stand is rare so it reads
-    // as a real person resting, not a metronome; relocation is a slow per-bot drift, biased to happen while
-    // unobserved so players just find bots in fresh spots.
+    // as a real person resting, not a metronome; relocation is a slow per-bot drift either way - observed
+    // it reads as a stroll, unobserved the player just finds the bot standing somewhere new.
     private static final double IDLE_CHAIR_CHANCE = 0.04;      // per eligible observed tick
     private static final long IDLE_CHAIR_COOLDOWN_MIN_MS = 60_000;
     private static final long IDLE_CHAIR_COOLDOWN_MAX_MS = 180_000;
     private static final long RELOCATE_MIN_MS = 180_000;       // 3 min
     private static final long RELOCATE_MAX_MS = 480_000;       // 8 min
-    private static final double OBSERVED_RELOCATE_CHANCE = 0.15; // usually defer a drift while watched
-    private static final long OBSERVED_DEFER_MS = 30_000;      // retry window when we defer an observed drift
+    // Safety net for the async drift: when the GC driver abandons an unreachable target it DROPS the
+    // arrival callback, so a bot that can't reach its picked spot would stay inert forever with
+    // relocating still set (which blocks every ambient action). Reclaim those by noticing the walk has
+    // ended instead of by a hard deadline - the widest towns (Korean Folk Town ~7100px) take ~55s to
+    // cross on foot at the slowest walk speed, so any fixed ceiling long enough to never cut a real
+    // stroll short would also leave a wedged bot frozen for that long. A grace short enough to outlast
+    // a nav-edge handover, plus "not moving", catches only the abandoned ones.
+    private static final long RELOCATE_RECLAIM_GRACE_MS = 15_000;
+    // Chance a cross-map stroll becomes a one-way move: the bot settles on the new map instead of coming
+    // home, so a town's crowd slowly redistributes instead of every bot always returning to its street.
+    private static final double ONE_WAY_STROLL_CHANCE = 0.35;
 
     // Interactive menu shown once a player engages. Labels are localized; the keyword sets below
     // are the English ones and stay authoritative (they are matched as substrings, and a couple
@@ -175,10 +188,24 @@ public class SocialBot extends BotSM {
 
         checkPrioritySpeed();
 
+        // Before anything else: a drift the GC driver abandoned never fires its arrival callback, so
+        // reclaim it here or the bot stays inert forever. Ahead of the ambient gate (relocating would
+        // block itself) and ahead of the conversation branch, so a wedged bot is freed mid-conversation.
+        if (relocating && !GCMovement.isMoving(getChr())
+                && System.currentTimeMillis() - relocateStartedAtMs > RELOCATE_RECLAIM_GRACE_MS) {
+            finishRelocation();
+        }
+
         if (hasActiveRespondant()) {
             // Conversations run outside the ambient gate, so a stroll would keep walking under the
             // player's conversation (and never come back). Cut it short and head home - the bot should
             // be standing still when it talks to someone.
+            if (relocating) {
+                // Same for an in-map drift: GCMovement.move() drives the bot with the GC engine while
+                // onFirstInteraction() turns it with the OLD engine's face packet, and the two fighting
+                // over one bot can freeze it mid-walk. Hand it back first, then talk.
+                finishRelocation();
+            }
             if (strolling && strollHomeMapId > 0) {
                 strollHome(getChr(), strollHomeMapId);
             }
@@ -212,6 +239,12 @@ public class SocialBot extends BotSM {
         Character chr = getChr();
         BotChatter.forget(chr);
         TownStation.releaseSpot(chr);
+        // A walk in flight is driven by GC's own pool, not by this tick, so it would survive teardown and
+        // dump the bot into a strange spot after it was stopped or converted.
+        if (relocating) {
+            relocating = false;
+            GCMovement.disable(chr);
+        }
         // A stroll in flight is driven by GCTravel's own pool, not by this tick, so it would survive
         // teardown and dump the bot into a strange map after it was stopped or converted.
         if (strolling) {
@@ -272,10 +305,14 @@ public class SocialBot extends BotSM {
     }
 
     // Rare drift to a fresh anchor-weighted spot ("stand near the potion shop a while, then wander to the
-    // smithy"). Preferably fires while unobserved (bots just appear in new spots); a watched stroll is
-    // allowed but rare. The walk is a BLOCKING old-engine pathfind, run synchronously on the tick as
-    // deliberate choreography (the bot is intentionally inert while it strolls; relocating gates it out of
-    // other ambient actions and partner selection).
+    // smithy"), so a town crowd redistributes instead of standing on its spawn pixels forever.
+    //
+    // The walk is the GC engine (WZ terrain, no recordings), issued asynchronously: the bot keeps its
+    // macro tick and settles via the arrival callback, with the RELOCATE_TIMEOUT_MS net in updateState()
+    // for the case the driver abandons the target. It used to be a blocking old-engine pathfind, which
+    // silently no-opped on every town in EnvironmentPopulation.yaml - those maps have no recorded
+    // movement packets, so stationed bots never moved at all. relocating gates the bot out of the other
+    // ambient actions and partner selection for the duration.
     private void maybeRelocate() {
         if (!isAvailableForAmbientActions()) {
             return; // don't walk a bot that a chatter chain just engaged this tick
@@ -284,25 +321,47 @@ public class SocialBot extends BotSM {
         if (chr == null || chr.getMap() == null) {
             return;
         }
+        if (BotRecruitManager.isArmed(chr.getId())) {
+            return; // a player is mid-invite: never walk out from under them
+        }
         long now = System.currentTimeMillis();
         if (now < nextRelocateAtMs) {
             return;
         }
-        if (GCMovement.isMapObserved(chr.getMapId()) && random.nextDouble() >= OBSERVED_RELOCATE_CHANCE) {
-            nextRelocateAtMs = now + OBSERVED_DEFER_MS; // defer: prefer to drift while nobody's watching
+        MapleMap map = chr.getMap();
+        List<Point> spots = TownPresenceSampler.sample(map, townAnchor != null ? townAnchor : chr.getPosition(),
+                1, TownPresenceConfig.overridesFor(chr.getMapId()));
+        if (spots.isEmpty()) {
+            nextRelocateAtMs = now + RELOCATE_MIN_MS; // no baked nav graph yet - try again later
             return;
         }
-        relocating = true;
-        try {
-            if (chr.getChair() > 0) {
-                botCancelChair(chr); // can't stroll from a chair
-            }
-            TownStation.relocate(chr, townAnchor);
-        } finally {
-            relocating = false;
-            nextRelocateAtMs = System.currentTimeMillis() + RELOCATE_MIN_MS
-                    + (long) (random.nextDouble() * (RELOCATE_MAX_MS - RELOCATE_MIN_MS));
+        if (chr.getChair() > 0) {
+            botCancelChair(chr); // can't stroll from a chair
         }
+        relocating = true;
+        relocateStartedAtMs = now;
+        Point dest = spots.get(0);
+        GCMovement.move(chr, dest.x, dest.y, this::finishRelocation);
+    }
+
+    // Arrival / abort of a drift walk: hand the bot back to the old engine and re-claim wherever it
+    // ended up. Idempotent - reachable from the arrival callback, the timeout net, a player engaging
+    // mid-walk, and teardown, and only the first of those actually had movement in flight.
+    private void finishRelocation() {
+        Character chr = getChr();
+        if (chr != null) {
+            settleAfterMove(chr);
+        }
+        relocating = false;
+        nextRelocateAtMs = System.currentTimeMillis() + RELOCATE_MIN_MS
+                + (long) (random.nextDouble() * (RELOCATE_MAX_MS - RELOCATE_MIN_MS));
+    }
+
+    // Common end-of-walk housekeeping: release the GC session (it holds the shared movement lock the old
+    // engine needs for chair / face packets) and re-claim a ledge where we actually landed.
+    private void settleAfterMove(Character chr) {
+        GCMovement.disable(chr);
+        townClaimed = false; // re-claim a ledge where we ended up (townAnchor points at the old map)
     }
 
     // Occasional walk to a town map next door (Henesys main street -> Market -> Park -> home). In-map
@@ -342,6 +401,9 @@ public class SocialBot extends BotSM {
         }
         int dest = options.get(random.nextInt(options.size()));
         int home = chr.getMapId();
+        // Most outings come home; sometimes the bot just stays where it wandered to and settles there, so
+        // a town's crowd slowly redistributes across its maps instead of everyone always returning.
+        int settleOn = random.nextDouble() < ONE_WAY_STROLL_CHANCE ? dest : home;
         strolling = true;
         strollHomeMapId = home;
         if (chr.getChair() > 0) {
@@ -353,12 +415,13 @@ public class SocialBot extends BotSM {
                 strollHome(chr, home);
                 return;
             }
-            MethodScheduler.runAfterDelay(() -> strollHome(chr, home), strollDwellMs());
+            MethodScheduler.runAfterDelay(() -> strollHome(chr, settleOn), strollDwellMs());
         });
     }
 
-    // Come back and re-settle. On failure the bot stays wherever it got to and re-claims a ledge there:
-    // strolling must still end, or the bot would never drift or stroll again.
+    // Re-settle at `home`. Passed the strolled-to map on a one-way outing, where GCTravel short-circuits
+    // (already there) and the bot just settles in place. On failure the bot stays wherever it got to and
+    // re-claims a ledge there: strolling must still end, or the bot would never drift or stroll again.
     private void strollHome(Character chr, int home) {
         if (!strolling || strollReturning) {
             return; // converted away / stopped while out, or a return is already under way
@@ -367,14 +430,12 @@ public class SocialBot extends BotSM {
         GCMovement.travel(chr, home, ok -> {
             strolling = false;
             strollReturning = false;
-            townClaimed = false; // re-claim a ledge where we ended up (townAnchor points at the old map)
             // Hand the bot back to the old movement engine. GCMovement.travel() enable()d it for the
             // trip, and enable() HOLDS the shared movement lock for the whole GC session - which the
-            // in-map drift (TownStation.relocate -> pathFinderAware) needs. Without this the next
-            // relocate silently no-ops on tryAcquireMovementLock, and its finally block then steals
-            // the lock back out from under the GC state. Town bots walk with the old engine; unlike
-            // TrainingBot they do not stay under GC control between trips.
-            GCMovement.disable(chr);
+            // in-map drift (GCMovement.move) and the old-engine chair / face packets all need. Town
+            // bots walk with the old engine; unlike TrainingBot they do not stay under GC control
+            // between trips.
+            settleAfterMove(chr);
             nextStrollAtMs = System.currentTimeMillis() + STROLL_MIN_MS
                     + (long) (random.nextDouble() * (STROLL_MAX_MS - STROLL_MIN_MS));
         });
