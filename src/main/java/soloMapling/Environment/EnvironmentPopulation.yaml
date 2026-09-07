@@ -115,7 +115,7 @@ waves:
       - {map: 260010000, count: 12, level_lo: 30, level_hi: 80}  # 阿里安特 西门外
       - {map: 600010100, count: 8,  level_lo: 30, level_hi: 70}  # 马莱尼西亚岛 (6)
       - {map: 600020100, count: 6,  level_lo: 30, level_hi: 80}  # 内部齿轮装置 (5)
-      - {map: 701220000, count: 6,  level_lo: 30, level_hi: 80}  # 少林寺 (1)
+      - {map: 702070200, count: 6,  level_lo: 120, level_hi: 135}  # 藏经阁三到四层 (120-125)
       - {map: 104000000, count: 19, level_lo: 1, level_hi: 15}
       - {map: 100000000, count: 33, level_lo: 10, level_hi: 95}
       - {map: 103000000, count: 28, level_lo: 10, level_hi: 65}
@@ -143,8 +143,7 @@ waves:
       - {map: 702010000, count: 5, level_lo: 80, level_hi: 95}   # 嵩山 山脚 (80-90)
       - {map: 702050000, count: 8,  level_lo: 95, level_hi: 110}  # 嵩山 广场 (100-105)
       - {map: 702070100, count: 7,  level_lo: 115, level_hi: 135} # 藏经阁 (120-130)
-      - {map: 701210100, count: 5,  level_lo: 30, level_hi: 70}   # 上少林 山脚
-      - {map: 701220000, count: 5, level_lo: 30, level_hi: 80}
+      - {map: 702080000, count: 5,  level_lo: 100, level_hi: 110}  # 塔林 (100-105)
       - {map: 230000000, count: 34, level_lo: 30, level_hi: 80}
       - {map: 250000000, count: 30, level_lo: 30, level_hi: 95}
       - {map: 251000000, count: 16, level_lo: 40, level_hi: 90}
