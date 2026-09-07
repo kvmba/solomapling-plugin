@@ -1,6 +1,7 @@
 package soloMapling.ArtificialPlayer.GCMoveSystem;
 
 import org.gms.client.Character;
+import org.gms.net.server.Server;
 import org.gms.server.maps.MapleMap;
 import org.gms.server.maps.Portal;
 import soloMapling.ArtificialPlayer.BotTravelSystem.BotScriptedWarp;
@@ -223,7 +224,13 @@ final class GCTravel {
             // The crossing is the event's to finish, so nothing here walks; but it can also never
             // finish (event stopped, script missing), which would strand the bot on the deck for
             // good. Bound the wait here — approachAndAct's ceiling is unreachable once we return.
-            if (nowMs() - trip.hopStartAtMs >= WAIT_MAX_MS) {
+            //
+            // The bound has to follow the server's travel rate. Every leg of a scheduled ride is
+            // scaled by it (getTransportationTime), so a world running boats at twice the pace
+            // takes twice as long to dock, and a fixed ceiling would warp passengers off a boat
+            // that was still perfectly on schedule. The rate has a floor of 1, so this never
+            // tightens below the ordinary cycle.
+            if (nowMs() - trip.hopStartAtMs >= waitCeilingMs()) {
                 warp(bot, trip.destMapId, "TRANSIT-WAIT-TIMEOUT: stuck aboard map " + cur
                         + " for " + (WAIT_MAX_MS / 1000) + "s");
                 return;
@@ -361,6 +368,25 @@ final class GCTravel {
      * Boarding windows are event-driven (and scaled by the world travel rate), so this never times
      * the schedule itself; the transit ceiling in approachAndAct is the only backstop.
      */
+    /*
+     * How long to trust a scheduled ride before giving up on it: WAIT_MAX_MS, stretched by the
+     * world's travel rate so a slower world isn't judged by a faster one's clock. Read fresh each
+     * time because the rate is set by a GM command and can change under us.
+     */
+    private static long waitCeilingMs() {
+        float rate = 1f;
+        try {
+            rate = Server.getInstance().getWorld(0).getTransportationTime(1000) / 1000f;
+        } catch (Exception ignored) {
+            // No world to ask (unit test, shutting down): the unscaled ceiling is fine.
+        }
+        if (!(rate >= 1f)) {
+            rate = 1f;   // a rate below 1 would only ever shorten the wait
+        }
+        long scaled = (long) (WAIT_MAX_MS * rate);
+        return scaled > WAIT_MAX_MS ? scaled : WAIT_MAX_MS;
+    }
+
     private static void awaitVehicle(Trip trip) {
         // Standing at the counter is the whole behaviour: the event does the rest.
         trip.waitingForTransit = true;
@@ -434,7 +460,7 @@ final class GCTravel {
         // A bot waiting out a scheduled ride is standing exactly where it should be, so it gets the
         // longer transit ceiling instead — WAIT_MAX_MS outlives the longest vehicle cycle (a boat:
         // 4 min boarding + 5 min to depart + 10 min sailing) and only fires if a ride never ends.
-        long ceiling = trip.waitingForTransit ? WAIT_MAX_MS : HOP_MAX_MS;
+        long ceiling = trip.waitingForTransit ? waitCeilingMs() : HOP_MAX_MS;
         if (now - trip.hopStartAtMs >= ceiling) {
             warp(bot, nextHop, (trip.waitingForTransit ? "TRANSIT-WAIT-TIMEOUT" : "HOP-CEILING")
                     + ": hop " + (ceiling / 1000) + "s old on map " + bot.getMapId()
