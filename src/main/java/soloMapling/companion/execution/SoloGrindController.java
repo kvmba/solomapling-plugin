@@ -67,12 +67,23 @@ public final class SoloGrindController {
 
     private final GrindBrain grind;
 
-    private Phase phase = Phase.IDLE;
-    private int targetMapId = -1;
-    private int targetMobLevel = 0;
-    private long phaseUntilMs = 0L;
-    private boolean grindRegistered = false;
-    private long lastAccrualMs = 0L;
+    /*
+     * Every field below is read and written from two different pools: the bot's
+     * own state machine (seconds apart) and the shared 250ms combat sweep that
+     * asks whether this companion is fighting. They are volatile for the same
+     * reason TrainingBot's phase is — without it the sweep can keep acting on a
+     * session the state machine has already ended.
+     *
+     * Volatile is enough here and a lock would be wrong: the sweep only reads,
+     * and the single writer is the state machine tick. There is no pair of
+     * fields that must move together.
+     */
+    private volatile Phase phase = Phase.IDLE;
+    private volatile int targetMapId = -1;
+    private volatile int targetMobLevel = 0;
+    private volatile long phaseUntilMs = 0L;
+    private volatile boolean grindRegistered = false;
+    private volatile long lastAccrualMs = 0L;
 
     public SoloGrindController(GrindBrain grind) {
         this.grind = java.util.Objects.requireNonNull(grind, "grind");

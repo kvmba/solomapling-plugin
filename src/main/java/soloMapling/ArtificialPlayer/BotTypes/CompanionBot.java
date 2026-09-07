@@ -70,8 +70,9 @@ public final class CompanionBot extends BotSM implements
     private long lastPlayedTurnId;
     private final GrindBrain grind = new GrindBrain(message -> { });
     private final SoloGrindController soloGrind = new SoloGrindController(grind);
-    /** Whether this companion is currently on the shared combat sweep for solo grinding. */
-    private boolean soloFightRegistered;
+    /** Whether this companion is currently on the shared combat sweep for solo grinding.
+     *  Written from the state machine and read by the 250ms sweep, hence volatile. */
+    private volatile boolean soloFightRegistered;
     private final CompanionCombatLifecycle combatLifecycle = new CompanionCombatLifecycle();
     private final CompanionSurvivalController survival =
             new CompanionSurvivalController();
