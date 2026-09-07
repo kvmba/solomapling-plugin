@@ -6,6 +6,7 @@ import org.gms.server.maps.MapObject;
 import org.gms.server.maps.MapleMap;
 import soloMapling.ArtificialPlayer.BotAttackSystem.ThrowingStarSelector;
 import soloMapling.ArtificialPlayer.BotCommandsPack.SocialCommands;
+import soloMapling.ArtificialPlayer.BotHealthSystem.BotDeath;
 import soloMapling.ArtificialPlayer.BotMessagingSystem.ChatMessage;
 import soloMapling.ArtificialPlayer.BotMessagingSystem.MessageQueue;
 import soloMapling.ArtificialPlayer.BotTradeSystem.BotTradeHandler;
@@ -69,9 +70,24 @@ public abstract class BotSM implements EventSubscriber {
 
     private static MessageQueue messageQueue = MessageQueue.getInstance();
 
+    /**
+     * This bot's death episode — the one piece of state that suspends all the others.
+     * Declared before the tick body below references it.
+     */
+    private final BotDeath death;
+
     // One shared tick body for every (re)schedule path - start / priority change / nudge.
     private final Runnable tickRunnable = () -> {
         try {
+            // Death outranks everything the bot would otherwise do: a corpse does not grind,
+            // wander or follow. Checked here rather than in each of the twenty-odd bot types
+            // so the rule is stated once. Trading is let through on purpose - a dead bot in a
+            // trade window would strand the player's side of it.
+            if (death().isDead() && state != BotState.TRADING) {
+                if (death().tick()) {
+                    return;
+                }
+            }
             if (isWaiting()) {
                 return; // FSM-requested pause (waitFor) - skip the tick entirely
             }
@@ -138,7 +154,18 @@ public abstract class BotSM implements EventSubscriber {
         // Roll the throwing star now: the Character is fully decorated by the time a BotSM is built
         // (createBot decorates, setAndStartBots then constructs us), so weapon/level/job are set.
         this.chosenStarId = ThrowingStarSelector.selectFor(chr);
+        this.death = new BotDeath(chr);
         debugprint(("Bot Initialized: " + this.character.getName() + ", " + this.character.getId()));
+    }
+
+    /**
+     * This bot's death episode. Public so the damage layer (a different package) can end this
+     * bot when a hit is more than it could drink through, and visible to bot types so the ones
+     * with a second tick path outside this class can stand down too. {@code isDead()} is what
+     * anyone merely asking "is it down?" wants.
+     */
+    public BotDeath death() {
+        return death;
     }
 
     private void setState(BotState state) {

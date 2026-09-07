@@ -1,0 +1,291 @@
+# Bot death dialogue — spoken by ANY bot type while it lies dead on the ground.
+# Not bot-type flavor: death is a universal behavior, so this pack stays generic and
+# is read directly by BotDeath (not through a bot type's own dialoguePath).
+#
+# Two mutually exclusive pools, chosen from STATIC WZ data (MapMobIndex), never guessed:
+#   FieldDeath — the map is defined to spawn mobs (MapMobIndex.level(mapId) >= 0).
+#                The bot got killed where you'd expect to get killed: blame the mob.
+#   TownDeath  — the map has NO mobs in WZ (level < 0), so something BRING mobs in:
+#                a player kited one, a GM spawned one, a summon. Blame people.
+#
+# Context tokens (resolved by DialogueContextResolver, same as every other pack):
+#   {MOB} = a live hostile mob on this map, else a mob the map is defined to spawn
+#   {MAP} = the map's name
+# Every token-bearing line has plain siblings; the engine re-rolls to a plain line
+# when a token can't resolve, so a raw {TOKEN} never reaches chat.
+#
+# Emotion mix across each pool (keeps 120 lines from sounding like one person reading
+# a list): blame ~30%, self-roast ~25%, injustice ~20%, flat resignation ~15%, threats ~10%.
+# Node-level `emote` is a random mood palette decoupled from the picked line.
+
+BotDeath:
+
+  # ── A. Killed in the field (this map is SUPPOSED to have mobs) ──────────────
+  FieldDeath:
+    text:
+      # — blame the mob —
+      - {line: "{MOB} actually killed me. im not okay", emote: 5}
+      - {line: "that {MOB} is a war criminal and i want it on record", emote: 5}
+      - {line: "{MOB} you absolute coward, fight me fair", emote: 5}
+      - "i died. to a mob. in a field. thanks for asking"
+      - {line: "someone tell {MOB} it can't just DO that", emote: 4}
+      - {line: "that {MOB} has NO right being that strong", emote: 5}
+      - {line: "{MOB} is cheating. that's the only explanation", emote: 5}
+      - {line: "i want a rematch with {MOB} and i want it rigged in my favor", emote: 3}
+      - {line: "{MOB} hit me with what, its whole bodyweight?", emote: 5}
+      - "died to pve. new low even for me"
+      - {line: "that {MOB} crit me into another dimension", emote: 6}
+      - {line: "{MOB} woke up today and chose violence", emote: 5}
+      - {line: "respectfully, {MOB} can get absolutely wrecked", emote: 5}
+      - {line: "i didnt lose to {MOB}, i was ambushed. big difference", emote: 3}
+      - {line: "{MOB} got lucky. ONCE. it wont happen twice", emote: 3}
+      - {line: "ok {MOB} that was genuinely uncalled for", emote: 5}
+      - {line: "somebody nerf {MOB} please i am BEGGING", emote: 6}
+      - {line: "that {MOB} targeted me specifically. i felt it", emote: 5}
+      - {line: "{MOB} really saw me at 5% hp and went for the throat", emote: 5}
+      - {line: "there are LAWS against what {MOB} just did", emote: 5}
+      - {line: "{MOB} i will remember this. i will not forgive", emote: 3}
+      - {line: "that {MOB} has main character energy and i hate it", emote: 5}
+      - {line: "{MOB} hit like it pays rent here", emote: 5}
+      - "the mob had plot armor, your honor"
+      - {line: "{MOB} didn't even let me finish my potion. rude", emote: 5}
+      - {line: "i want {MOB} removed from the game. petition in bio", emote: 4}
+      - {line: "that {MOB} is BANNED from my spot. permanently", emote: 5}
+      - {line: "{MOB} fought dirty and i have witnesses", emote: 5}
+      - {line: "no cause why is {MOB} built like that", emote: 6}
+      - {line: "{MOB} one-v-one me right now. no adds. no potions", emote: 3}
+      - {line: "that {MOB} is on my list now. a very short, very angry list", emote: 5}
+      - {line: "{MOB} got hands. unfortunately i found out the hard way", emote: 7}
+      - {line: "i blame {MOB}. i blame {MOB} entirely", emote: 5}
+      - {line: "{MOB} hit me so hard my exp bar went backwards", emote: 6}
+
+      # — self-roast / admitting it —
+      - "yeah ok that one was my fault"
+      - "i deserved that. genuinely"
+      - "i walked in there with 5% hp. bold. stupid. but bold"
+      - "i saw my hp. i chose violence anyway."
+      - "my potion key is decorative apparently"
+      - "died doing what i love: not looking at my hp bar"
+      - "i had one job. press the potion button."
+      - {line: "in my defense i was NOT defending", emote: 7}
+      - "i greeded one more hit. one more hit got me"
+      - "that's what i get for tabbing out mid fight"
+      - "i was too busy typing to notice i was dying"
+      - "my own fault. i knew better. did it anyway"
+      - "i thought i could tank it. i could not tank it"
+      - "confidence was my downfall. and by confidence i mean stupidity"
+      - "i had pots. i had SO many pots. why"
+      - "skill issue. straight up skill issue"
+      - "i got what was coming to me, i'll say it"
+      - "that was a certified me moment"
+      - "i really thought i had that. i did not have that"
+      - "i forgot mobs can also hit back. wild concept"
+      - "note to self: 5% hp is NOT full hp"
+      - "i played myself. flawlessly. no notes"
+      - "i had a potion in my inventory the whole time. i just wanted to see"
+      - "honestly? embarrassing. next question"
+      - "i was distracted. by what? by nothing. that's worse"
+      - "this is why my friends dont let me solo"
+      - "i am the reason the party wipes"
+      - "i got cocky. cocky got me killed"
+      - "i didn't die, i made a strategic horizontal decision"
+      - "i respect the mob. i hate myself slightly more"
+
+      # — injustice / disbelief —
+      - "i was at FULL HP a second ago. what happened"
+      - "that damage number was NOT real. i saw it. it wasn't real"
+      - "excuse me?? how much??"
+      - "no because that hit was bigger than my whole hp bar"
+      - "i'd like to speak to whoever balanced this"
+      - "that is not a fair and balanced interaction"
+      - "the numbers on that hit were personal"
+      - "i looked away for ONE second"
+      - "lag. i'm blaming lag. it was lag"
+      - "that hit me through the platform. i know what i saw"
+      - "i was CLEARLY out of range. clearly"
+      - "i'd like a refund on this death please"
+      - "my hp bar lied to me. i trusted it"
+      - "that's not how contact damage works. i read the wiki"
+      - "i want to appeal this death to a higher power"
+      - "statistically that should not have killed me"
+      - "i have never been more betrayed by a hp bar"
+      - "that was a crit. it HAD to be a crit"
+      - "i demand a replay. i demand slow motion"
+      - "somebody explain to me how that killed me"
+      - "this death was preventable and i blame the game"
+      - "my hp went from fine to gone with no steps in between"
+      - "the server decided i die and who am i to argue"
+
+      # — flat resignation —
+      - "welp"
+      - "ok. dead. cool"
+      - "well, that happened"
+      - "yep. im on the floor"
+      - "died. again. moving on"
+      - "this is fine. everything is fine"
+      - "i have accepted this"
+      - "floor time"
+      - "i live here now. on the ground"
+      - "someone tell my spot it's free"
+      - "guess i'm taking a break. a permanent, involuntary break"
+      - "the ground and i are getting to know each other"
+      - "i'd get up but the floor is comfortable actually"
+      - "honestly this is the most rest i've had all week"
+      - "if anyone needs me i'll be horizontal"
+      - "at least the music here is nice"
+      - "dead. but like, chill about it"
+      - "i'm just gonna lie here for a bit. no thoughts"
+      - "this is basically a nap with extra steps"
+      - "tell my {MOB} kills i went out doing what i love"
+
+      # — threats / big talk from the floor —
+      - {line: "im coming back for you {MOB}. mark my words", emote: 3}
+      - {line: "one day {MOB}. one day when im not at 5%", emote: 3}
+      - {line: "{MOB} better sleep with one eye open", emote: 5}
+      - {line: "i'll be back and i'll bring pots this time", emote: 3}
+      - {line: "when i get up, {MOB} is DONE", emote: 5}
+      - {line: "this isn't over {MOB}. this is a nap", emote: 3}
+      - {line: "i'm healing. emotionally and then physically. then you're finished", emote: 3}
+      - {line: "{MOB} enjoy it while it lasts. i'm loading in hot", emote: 5}
+      - {line: "round two {MOB}. i'm bringing a full bar", emote: 3}
+      - {line: "save it {MOB}, i'm not done with you", emote: 5}
+      - {line: "i'm going to respawn SO mad at {MOB}", emote: 5}
+      - {line: "tell {MOB} i said it can run but it can't hide", emote: 3}
+    emote:
+      - 5
+      - 7
+      - 4
+      - 3
+      - 6
+    wait: 1
+
+  # ── B. Killed in TOWN (WZ says this map has no mobs — someone brought one) ──
+  TownDeath:
+    text:
+      # — blame the player who brought it —
+      - "WHO BROUGHT A MOB INTO TOWN"
+      - "this is a SAFE ZONE. safe. zone"
+      - "someone kited this thing into town and i want names"
+      - "i died in TOWN. in town. do you understand the humiliation"
+      - "town is for shopping. you absolute menace"
+      - "whoever dragged that in here, i hope your scrolls break"
+      - "i came here to buy pots. POTS. not to die"
+      - "there are CHILDREN here. and by children i mean me"
+      - "somebody LURED it. that's not an accident, that's a choice"
+      - "i was standing at the portal. the PORTAL. minding my business"
+      - "this is a town square not a boss arena"
+      - "who does that. who brings a mob to a town"
+      - "i hope whoever did this steps on a lego"
+      - "you brought it here and now we ALL suffer"
+      - "i'm naming a name. i'm doing it. it was you"
+      - "this is the safest map in the game and i died in it"
+      - "someone explain to me why there's a mob in {MAP}"
+      - "i didn't sign up for town combat"
+      - "you kited it in, you clean it up"
+      - "i was trying on HATS. hats"
+      - "there's a shop RIGHT THERE. why is it happening here"
+      - "this is a commercial district. show some respect"
+      - "i came to town to NOT die. that was the whole plan"
+      - "whoever did this, i'm putting it in the group chat"
+      - "the town has a monster now. great. love that for us"
+      - "i want to speak to whoever trained this thing on me"
+
+      # — blame the GM / staff / devs —
+      - "this has GM written all over it"
+      - "i'm reporting this to staff. this is not natural"
+      - "GM spawned it. i know a GM spawn when i die to one"
+      - "admins, explain. i'll wait"
+      - "this is an event. a bad event. but an event"
+      - "someone with admin powers is having a laugh"
+      - "i'd like to file a formal complaint"
+      - "devs. devs please. i was shopping"
+      - "this is clearly a bug. i refuse to accept this death"
+      - "patch notes said town is safe. PATCH NOTES LIED"
+      - "i want compensation for emotional damages"
+      - "admin abuse. straight up admin abuse"
+      - "whoever has the spawn command needs it taken away"
+      - "i'm putting this in the ticket system. all of it"
+
+      # — self-roast / disbelief (town edition) —
+      - "died in town. my legacy"
+      - "i'm the first person to die here. i'm a pioneer"
+      - "my gravestone is going in the town square"
+      - "i died in the tutorial of life"
+      - "out of every map, i died HERE"
+      - "i'll never financially recover from this"
+      - "even the NPCs saw that. even the NPCS"
+      - "the shopkeeper watched me die. he'll never let it go"
+      - "i'm a cautionary tale now. 'remember that guy who died in town'"
+      - "this is going in my permanent record"
+      - "i died somewhere people go to FEEL SAFE"
+      - "my friends will never let me hear the end of this"
+      - "i could've died with dignity in a field. no. i chose town"
+      - "historically bad death. worst in the region"
+      - "i have peaked. this is my peak. dying in town"
+      - "somebody screenshot this so i can feel worse later"
+      - "i'm not even mad. i'm just deeply embarrassed"
+      - "i was browsing. BROWSING"
+      - "the irony of dying in a place called safe"
+
+      # — injustice / demands —
+      - "this is false advertising. the map is called a town"
+      - "i want a refund on my death"
+      - "i'd like the mob removed and my dignity restored"
+      - "somebody please kill it. it's still THERE"
+      - "i'm dead and it's still walking around. do something"
+      - "i demand the town guard. WHERE IS THE TOWN GUARD"
+      - "why is there no guard. this town has no guard"
+      - "i pay taxes in this town metaphorically. protect me"
+      - "i want it on record that i died unfairly"
+      - "this violates several things i'm sure"
+      - "the mob is still in town. nobody is doing anything"
+      - "i can see it from the floor. it's mocking me"
+      - "somebody revive me before it comes back"
+      - "i'm lying here and it's just strolling around. the audacity"
+      - "can someone at least APOLOGIZE"
+
+      # — flat resignation (town edition) —
+      - "dead in town. sure. why not"
+      - "i live in {MAP} now. on the floor"
+      - "someone step over me, i'm not getting up"
+      - "tell the shop i'll be late"
+      - "i'm part of the town decor now"
+      - "the cobblestone is surprisingly comfortable"
+      - "i'd go home but i'm technically already there"
+      - "fine. i'll just die in town. normal tuesday"
+      - "at least the respawn is close"
+      - "i'm not moving until that thing leaves"
+      - "someone put a hat on me, i'm staying"
+      - "this is my spot now. the floor spot"
+      - "i'm on the ground in {MAP}. come find me"
+      - "im gonna lie here til whatever that was goes away"
+
+      # — threats (town edition) —
+      - "im getting up and im telling EVERYONE who did this"
+      - "when i respawn i'm posting about it"
+      - "i'm reporting whoever lured that in here"
+      - "someone's getting named and shamed. publicly"
+      - "i'm coming back and i'm bringing the whole guild"
+      - "this town isn't safe and i'm making it everyone's problem"
+      - "whoever did that, i'll be at your shop. with opinions"
+      - "i'm remembering faces. ALL of them"
+      - "im respawning with a grudge and a list"
+      - "that mob is DONE when i get up. town or not"
+      - "i'm filing this under 'things i will not forget'"
+      - {line: "when i'm up, {MAP} gets a very loud review", emote: 5}
+      - {line: "i'm naming this map in my will. badly", emote: 4}
+      - {line: "{MOB} just made the most powerful enemy of its life", emote: 3}
+      - "i'm going to respawn and immediately make it everyone's problem"
+      - {line: "that's it. {MOB} is getting reported to nature itself", emote: 5}
+      - {line: "i'll be back before {MOB} finishes gloating", emote: 3}
+      - "whoever trained that mob on me, watch your back"
+      - {line: "i'm not going to let this go {MOB}. months. years", emote: 3}
+      - {line: "put it in the books: {MOB} started this", emote: 5}
+      - {line: "i'm respawning evil. {MOB} made me this way", emote: 5}
+    emote:
+      - 5
+      - 4
+      - 3
+      - 6
+      - 7
+    wait: 1

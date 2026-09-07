@@ -6,6 +6,8 @@ import org.gms.server.maps.MapObject;
 import org.gms.server.maps.MapObjectType;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import soloMapling.ArtificialPlayer.BotHealthSystem.BotDeath;
+import soloMapling.ArtificialPlayer.BotHealthSystem.BotHealthFloor;
 import soloMapling.companion.CompanionRoster;
 import soloMapling.server.MethodScheduler;
 import org.gms.util.PacketCreator;
@@ -59,6 +61,11 @@ final class BotContactDamage {
     // real HP through resolveMobHitDamage, so TrainingBot and persistent companion semantics agree.
     private static final double DMG_FACTOR  = 0.5;   // multiplier on mob.getPADamage()
     private static final double DMG_SPREAD  = 0.20;  // +/- random variance around the scaled value
+
+    // A bot already scraping the floor that gets hit again has had its chance to drink: this is
+    // the share of those hits that finish it off. The rest leave it pinned at the floor, so a
+    // bot under a mob does not die the instant it touches bottom.
+    private static final double FLOOR_HIT_DEATH_CHANCE = 0.50;
 
     // Per-job-family feel (keyed on Job.getJobNiche(): 1=warrior, 4=thief; mage/bowman/pirate/beginner
     // use the base values). Warriors brace against knockback - the damage number still shows, only the
@@ -152,11 +159,24 @@ final class BotContactDamage {
         double missChance = isThief(bot) ? THIEF_MISS_CHANCE : BASE_MISS_CHANCE;
         int dmg = ThreadLocalRandom.current().nextDouble() < missChance ? 0 : rollMobDamage(mob);
         MobHitKnockback kb = resolveMobHitKnockback(bot.getPosition(), mob.getPosition());
-        MobHitDamage resolved = resolveMobHitDamage(bot.getHp(), dmg);
+        MobHitDamage resolved =
+                resolveMobHitDamage(bot.getHp(), dmg, bot.getCurrentMaxHp());
+        if (resolved.lethal()) {
+            // Beyond saving. Whoever owns this bot's lifecycle takes it from here; if no bot
+            // behaviour is driving it, fall through and leave it pinned at the floor rather
+            // than at zero with nobody to stand it back up.
+            BotDeath owner = BotDeath.of(bot);
+            if (owner != null) {
+                owner.kill();
+            }
+            applyDamage(entry, bot, resolved.broadcastDamage(), -1, mob.getId(),
+                    kb.direction(), kb.airVelX());
+            return;
+        }
         if (resolved.hpDamage() > 0) {
             // safeAddHP is the host Character path: it atomically keeps HP above zero, updates the
             // stat, and runs HP-change hooks. The precomputed cap also makes this behavior explicit
-            // and testable rather than delegating the MVP death policy entirely to host internals.
+            // and testable rather than delegating the MVP floor entirely to host internals.
             bot.safeAddHP(-resolved.hpDamage());
             // The headless BotClient intentionally drops the bot's own STAT_CHANGED packet. Publish
             // party HP directly after the mutation so a real party member can observe the new value;
@@ -171,18 +191,45 @@ final class BotContactDamage {
      * Separates artificial-player HP semantics from the shared visual hit path.
      *
      * <p>The wire damage remains the rolled hit so observers still see the normal hurt effect.
-     * Every artificial-player type receives the HP delta. Contact damage is capped at 1 HP for the
-     * MVP: this gives companions and TrainingBots consistent real attrition while avoiding the host
-     * death routine, which assumes a connected player client. A bot already at 0 HP is filtered by
-     * {@link #tickMobDamage}.</p>
+     * HP loss stops at {@link BotHealthFloor} — a sliver of the pool, so a badly hurt bot reads
+     * as nearly dead instead of showing an empty bar like a corpse. A hit that would take the
+     * bot from above the floor straight through it is {@link #lethal}: there was no chance to
+     * drink, so the damage layer does not clamp it and the bot dies.</p>
      */
-    static MobHitDamage resolveMobHitDamage(int currentHp, int rolledDamage) {
+    static MobHitDamage resolveMobHitDamage(int currentHp, int rolledDamage, int maxHp) {
         int broadcastDamage = Math.max(0, rolledDamage);
         if (broadcastDamage == 0) {
-            return new MobHitDamage(broadcastDamage, 0);
+            return new MobHitDamage(broadcastDamage, 0, false);
         }
-        int hpDamage = Math.min(broadcastDamage, Math.max(0, currentHp - 1));
-        return new MobHitDamage(broadcastDamage, hpDamage);
+        if (lethal(currentHp, broadcastDamage, maxHp)) {
+            return new MobHitDamage(broadcastDamage, broadcastDamage, true);
+        }
+        int floor = BotHealthFloor.floorFor(maxHp);
+        int hpDamage = Math.min(broadcastDamage, Math.max(0, currentHp - floor));
+        return new MobHitDamage(broadcastDamage, hpDamage, false);
+    }
+
+    /**
+     * Whether a hit is beyond what the bot could have drunk through.
+     *
+     * <p>Two ways, because the first one alone almost never fires: a bot's pool is
+     * {@code 50 + 22*(level-1)} (BotPotionSim), so a level-70 bot has ~1568 HP while contact
+     * damage is {@code mob.getPADamage() * 0.5} — a few hundred at most. A single hit that big
+     * is exotic, so "one-shot" by itself would make the whole death state dead code.</p>
+     *
+     * <p>The second way is the ordinary one: the bot was already scraping the floor and this
+     * mob hit it again. Half the time that is the end — it had its chance to drink and did not
+     * get away.</p>
+     */
+    static boolean lethal(int currentHp, int rolledDamage, int maxHp) {
+        if (rolledDamage <= 0) {
+            return false;
+        }
+        if (rolledDamage >= maxHp) {
+            return true; // hit harder than the entire pool — nobody drinks through that
+        }
+        return BotHealthFloor.atFloor(currentHp, maxHp)
+                && ThreadLocalRandom.current().nextDouble() < FLOOR_HIT_DEATH_CHANCE;
     }
 
     // Lightweight touch-damage roll: no defense math yet; artificial-player HP policy is applied separately.
@@ -297,7 +344,7 @@ final class BotContactDamage {
     private record MobHitKnockback(int direction, int airVelX) {
     }
 
-    record MobHitDamage(int broadcastDamage, int hpDamage) {
+    record MobHitDamage(int broadcastDamage, int hpDamage, boolean lethal) {
     }
 
     // Swept-AABB touch detection (anti-tunnel; lower-half mob box only).

@@ -200,6 +200,18 @@ final class GCMovementDriver {
             return;
         }
 
+        // Dead: hold the corpse still. Everything below — steering, navigation, the contact-
+        // damage tick, the player-reaction glance — would drag the body around or hip-fire a
+        // hurt packet at a bot that is past hurting. The DEAD wire stance needs no work here:
+        // BotPhysicsEngine.resolveStance picks it from hp <= 0 on its own.
+        if (bot.getHp() <= 0) {
+            if (entry.inAir || entry.climbing || entry.moveDir != 0) {
+                BotPhysicsEngine.idleOnGround(entry, bot);
+            }
+            broadcastIfObserved(entry);
+            return;
+        }
+
         // Sitting in a chair (e.g. a grinding TrainingBot on a rest break): hold the sit and skip the
         // tick. botSitChair set the SIT stance and broadcast showChair; if the driver kept idling it
         // would reset the stance to standing (idleOnGround -> syncCharacterState) and broadcast that
