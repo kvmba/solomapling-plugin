@@ -58,6 +58,19 @@ public final class SoloMaplingLanguageConfig {
         return isDefaultEnglish(languageTag);
     }
 
+    /**
+     * Whether the server runs in Chinese ({@code zh-CN}, {@code zh-TW}, …), i.e.
+     * String.wz serves Chinese item names.
+     */
+    public static boolean isChinese() {
+        return isChinese(languageTag);
+    }
+
+    /** No allocation on the item-check hot path: case-insensitive prefix compare, not toLowerCase. */
+    static boolean isChinese(String tag) {
+        return tag != null && tag.regionMatches(true, 0, "zh", 0, 2);
+    }
+
     static boolean isDefaultEnglish(String tag) {
         if (tag == null || tag.isBlank()) {
             return true;

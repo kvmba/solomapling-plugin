@@ -1,6 +1,7 @@
 package soloMapling.ArtificialPlayer;
 
 import org.junit.jupiter.api.Test;
+import soloMapling.Environment.SoloMaplingLanguageConfig;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -112,6 +113,48 @@ class ItemUsabilityTest {
         assertTrue(BotHelpers.isUsableItem(0));      // droppable
         assertTrue(BotHelpers.isUsableItem(0));      // tradeable
         assertFalse(BotHelpers.isSellableItem(0));   // but not listable
+    }
+
+    /**
+     * On a Chinese server a translated String.wz name always contains at least
+     * one han character. A name that survived localization still in English is
+     * an unfinished entry and must be treated exactly like an unnamed one.
+     */
+    @Test
+    void chineseServerRejectsNamesWithoutHanCharacters() {
+        SoloMaplingLanguageConfig.setLanguageTag("zh-CN");
+        try {
+            assertFalse(BotHelpers.hasLocalizedName("Ilbi Throwing Stars"));
+            assertFalse(BotHelpers.hasLocalizedName("?"));
+            assertTrue(BotHelpers.hasLocalizedName("褐色落腮胡"));
+            assertTrue(BotHelpers.hasLocalizedName("Lv 70 圣甲虫"));
+        } finally {
+            SoloMaplingLanguageConfig.setLanguageTag(SoloMaplingLanguageConfig.DEFAULT);
+        }
+    }
+
+    /** English servers keep the old contract: any real name passes. */
+    @Test
+    void englishServerKeepsEnglishNamesUsable() {
+        SoloMaplingLanguageConfig.setLanguageTag("en-US");
+        assertTrue(BotHelpers.hasLocalizedName("Ilbi Throwing Stars"));
+        assertTrue(BotHelpers.hasLocalizedName("褐色落腮胡"));
+    }
+
+    /**
+     * Meso (itemId 0) has no name at all, so it must survive the Chinese
+     * rule too - it short-circuits before the name is ever inspected.
+     */
+    @Test
+    void mesoStaysUsableOnChineseServer() {
+        SoloMaplingLanguageConfig.setLanguageTag("zh-CN");
+        try {
+            assertTrue(BotHelpers.isUsableItem(0));
+            assertFalse(BotHelpers.isUnusableItem(0));
+            assertEquals("Meso", BotHelpers.convertItemIdToName(0));
+        } finally {
+            SoloMaplingLanguageConfig.setLanguageTag(SoloMaplingLanguageConfig.DEFAULT);
+        }
     }
 
     /**

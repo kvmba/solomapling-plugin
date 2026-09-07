@@ -5,6 +5,7 @@ import org.junit.jupiter.api.Test;
 import soloMapling.Environment.SoloMaplingLanguageConfig;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class SoloMaplingLanguageConfigTest {
@@ -31,5 +32,18 @@ class SoloMaplingLanguageConfigTest {
     void enAliasUsesDefaultPack() {
         SoloMaplingLanguageConfig.setLanguageTag("en");
         assertEquals("BotDialoguePack", SoloMaplingLanguageConfig.dialoguePackDirectoryName());
+    }
+
+    @Test
+    void chineseIsDetectedFromTag() {
+        assertFalse(SoloMaplingLanguageConfig.isChinese());                      // en-US default
+        SoloMaplingLanguageConfig.setLanguageTag("zh-CN");
+        assertTrue(SoloMaplingLanguageConfig.isChinese());
+        SoloMaplingLanguageConfig.setLanguageTag("zh-TW");
+        assertTrue(SoloMaplingLanguageConfig.isChinese());
+        SoloMaplingLanguageConfig.setLanguageTag("ZH-CN");                       // case-insensitive
+        assertTrue(SoloMaplingLanguageConfig.isChinese());
+        SoloMaplingLanguageConfig.setLanguageTag("en");
+        assertFalse(SoloMaplingLanguageConfig.isChinese());
     }
 }

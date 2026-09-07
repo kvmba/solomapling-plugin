@@ -8,6 +8,7 @@ import org.gms.net.server.channel.Channel;
 import org.gms.server.ItemInformationProvider;
 import org.gms.server.maps.MapItem;
 import org.gms.server.maps.MapObject;
+import soloMapling.Environment.SoloMaplingLanguageConfig;
 
 import java.awt.*;
 import java.util.List;
@@ -107,11 +108,30 @@ public class BotHelpers {
      * for sale or traded by a bot - there is nothing a player could do with one
      * anyway.
      * <p>
+     * On a Chinese server (zh-CN) String.wz serves the localized name, so a
+     * name with no han character in it means the entry was never translated - it
+     * would show up in a shop or a drop as raw English. Those count as
+     * half-finished too. English servers are unaffected.
+     * <p>
      * itemId 0 is meso - drop tables encode a meso drop that way - and is
      * always usable despite having no String.wz name.
      */
     public static boolean isUsableItem(int itemId) {
-        return itemId == 0 || hasUsableName(itemNameOrNull(itemId));
+        return itemId == 0 || hasLocalizedName(itemNameOrNull(itemId));
+    }
+
+    /** On a Chinese server a name is only usable once it actually carries Chinese. */
+    static boolean hasLocalizedName(String itemName) {
+        return hasUsableName(itemName) && (!SoloMaplingLanguageConfig.isChinese() || containsChinese(itemName));
+    }
+
+    private static boolean containsChinese(String itemName) {
+        for (int i = 0; i < itemName.length(); i++) {
+            if (java.lang.Character.isIdeographic(itemName.codePointAt(i))) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**
