@@ -44,6 +44,12 @@ import soloMapling.companion.persistence.JdbcCompanionProfileRepository;
 import soloMapling.companion.routine.OfflineProgressionPolicy;
 import soloMapling.companion.execution.CompanionRuntimeCapabilities;
 import soloMapling.companion.gear.GearDropSourceProvider;
+import soloMapling.companion.intake.CompanionIntakeService;
+import soloMapling.companion.provisioning.CompanionProvisionRequest;
+import soloMapling.companion.provisioning.CompanionProvisioningService;
+import soloMapling.companion.provisioning.HostRuntimeCompanionProvisioner;
+import soloMapling.companion.provisioning.SecureCompanionIdentityGenerator;
+import soloMapling.FreeMarket.FMShopDescGen;
 import soloMapling.itemPool.DesirableEquipList;
 import soloMapling.itemPool.EquipMetadataCache;
 import soloMapling.server.MethodScheduler;
@@ -81,6 +87,7 @@ public final class SoloMaplingExtension implements ServerExtension {
             new CompanionLifecycleAccess();
     private HostRuntime runtime;
     private CompanionLifecycleCoordinator companionLifecycle;
+    private CompanionIntakeService companionIntake;
 
     @Override
     public String id() {
@@ -237,6 +244,45 @@ public final class SoloMaplingExtension implements ServerExtension {
         runtime.commands().register(syntax, level, description, handler);
     }
 
+    /*
+     * Newcomers, at a trickle. interval-seconds is the switch: above zero a
+     * companion is provisioned every that-many seconds, zero or absent means the
+     * world keeps only the companions it already has.
+     *
+     * Read once, at startup — there is no hot reload, so the value is decided
+     * here and never revisited.
+     */
+    private void startCompanionIntake() {
+        int intervalSeconds = runtime.config()
+                .getInt("solomapling.companion-intake.interval-seconds", 0);
+        if (intervalSeconds <= 0) {
+            log.info("SoloMapling companion intake disabled (interval-seconds={})",
+                    intervalSeconds);
+            return;
+        }
+        int maxTotal = runtime.config()
+                .getInt("solomapling.companion-intake.max-total", 20);
+        int worldId = runtime.config()
+                .getInt("solomapling.companion-intake.world-id", 0);
+        String timezone = runtime.config().getString(
+                "solomapling.companion-intake.timezone",
+                CompanionProvisionRequest.DEFAULT_TIMEZONE);
+        CompanionIntakeService intake = new CompanionIntakeService(
+                new CompanionProvisioningService(
+                        new HostRuntimeCompanionProvisioner(runtime),
+                        new SecureCompanionIdentityGenerator()),
+                companionLifecycleAccess,
+                // The ambient bots' own name pool: the same list a player sees
+                // walking around, so a newcomer does not stand out.
+                FMShopDescGen::getRandomCharacterIGN,
+                intervalSeconds * 1000L,
+                maxTotal,
+                worldId,
+                timezone);
+        intake.start();
+        companionIntake = intake;
+    }
+
     private static Character findOnlineCharacter(int characterId) {
         for (World world : Server.getInstance().getWorlds()) {
             Character chr = world.getPlayerStorage().getCharacterById(characterId);
@@ -284,6 +330,7 @@ public final class SoloMaplingExtension implements ServerExtension {
             companionLifecycle = lifecycle;
             companionLifecycleAccess.register(lifecycle);
             log.info("SoloMapling persistent companion lifecycle started");
+            startCompanionIntake();
         }
         if (spawn) {
             MethodScheduler.runAfterDelay(() -> {
@@ -300,6 +347,11 @@ public final class SoloMaplingExtension implements ServerExtension {
     @Override
     public void onUnload() {
         log.info("SoloMapling plugin onUnload");
+        CompanionIntakeService intake = companionIntake;
+        companionIntake = null;
+        if (intake != null) {
+            intake.stop();
+        }
         CompanionLifecycleCoordinator lifecycle = companionLifecycle;
         companionLifecycleAccess.clear(lifecycle);
         companionLifecycle = null;

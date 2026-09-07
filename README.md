@@ -88,6 +88,13 @@ solomapling:
   plugins-enabled: true
   plugins-dir: plugins
   spawn-bots-on-startup: true
+  companions:
+    enabled: true          # required: persistent companions are opt-in
+  companion-intake:
+    interval-seconds: 60   # >0 provisions a new companion this often; 0/absent = off
+    max-total: 20          # stop once the world holds this many companions
+    world-id: 0
+    timezone: Asia/Shanghai
   language: zh-CN   # optional; defaults to gms.service.language (en-US | zh-CN)
   llm:
     enabled: false
@@ -113,6 +120,35 @@ When `solomapling.llm.enabled: true` and an API key is set, **SocialBot** uses D
 LLM calls run on virtual threads and never block the chat packet thread. Replies are capped (~120 chars) for map chat. Session history is in-memory per bot↔player and cleared when the conversation ends.
 
 Client library: [simple-openai](https://github.com/sashirestela/simple-openai) (`SimpleOpenAIDeepseek`), shaded into the plugin jar.
+
+### Newcomers on the beginner island
+
+With `companions.enabled` and a positive `companion-intake.interval-seconds`,
+the world fills up on its own: one companion is provisioned per interval until
+`max-total` is reached. Each one is a real account, a real character and a
+profile, created in a single host transaction, and:
+
+- **is born on Maple Island** — the provisioner forces `characters.map` to
+  `10000` (Mushroom Town) inside the same transaction. The host's
+  `use_beidou_beginner_map` alternative is a dead end with no exit, so a
+  companion left there could never leave.
+- **gets its own routine** — a day of two to four sessions totalling 4–9 hours,
+  about 60–70% of it training, separated by genuine offline gaps. Generated
+  deterministically from the persona seed, so a companion keeps its habits across
+  restarts. Without one, `routine_profile` is blank, the schedule parses as
+  all-offline, and the lifecycle coordinator never spawns it.
+- **levels by fighting, not by waiting** — while online it picks a hunting
+  ground and works it: real combat when a player is watching, simulated kills at
+  the map's own rate when nobody is. The offline settlement is deliberately
+  small (a fifth of a level by the host's `ExpTable`, and nothing at all below
+  level 10) so time away shows as progress without becoming the engine of its
+  career.
+- **leaves when it is ready** — at level 8 a companion can walk the island to
+  Southperry and take Sanks' boat to Lith Harbor, like a player.
+
+`interval-seconds` is the switch: above zero intake runs, zero or absent means
+the world keeps only the companions it already has. Read once at startup; there
+is no hot reload.
 
 ## SPI entry
 

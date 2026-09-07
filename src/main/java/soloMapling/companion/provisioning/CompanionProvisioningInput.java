@@ -1,5 +1,6 @@
 package soloMapling.companion.provisioning;
 
+import java.time.ZoneId;
 import java.util.regex.Pattern;
 
 public final class CompanionProvisioningInput {
@@ -50,5 +51,26 @@ public final class CompanionProvisioningInput {
         } catch (NumberFormatException e) {
             throw new IllegalArgumentException("personaSeed must be a signed 64-bit integer");
         }
+    }
+
+    /**
+     * Validates a routine timezone, falling back to the default when unset.
+     *
+     * <p>{@link java.time.ZoneId#of(String)} is the real check — it rejects a
+     * typo the same way the routine codec would at reconcile time, only here the
+     * failure lands on whoever typed it instead of surfacing days later as a
+     * companion that quietly never spawns.</p>
+     */
+    public static String validateTimezone(String value) {
+        if (value == null || value.isBlank()) {
+            return CompanionProvisionRequest.DEFAULT_TIMEZONE;
+        }
+        String trimmed = value.trim();
+        try {
+            ZoneId.of(trimmed);
+        } catch (RuntimeException e) {
+            throw new IllegalArgumentException("invalid routine timezone: " + trimmed);
+        }
+        return trimmed;
     }
 }

@@ -27,6 +27,16 @@ public final class CompanionProvisioningService {
             String personaSeed,
             int worldId
     ) throws Exception {
+        return provision(characterName, personaSeed, worldId,
+                CompanionProvisionRequest.DEFAULT_TIMEZONE);
+    }
+
+    public CompanionProvisionResult provision(
+            String characterName,
+            String personaSeed,
+            int worldId,
+            String timezone
+    ) throws Exception {
         String validName = CompanionProvisioningInput.validateCharacterName(characterName);
         long seed = personaSeed == null
                 ? generator.nextPersonaSeed()
@@ -39,7 +49,8 @@ public final class CompanionProvisioningService {
         char[] credential = generator.nextCredential();
         try {
             CompanionProvisionResult result = hostProvisioner.provision(
-                    new CompanionProvisionRequest(validName, seed, worldId), accountName, credential);
+                    new CompanionProvisionRequest(validName, seed, worldId, timezone),
+                    accountName, credential);
             CompanionRoster.register(result.characterId());
             return result;
         } finally {

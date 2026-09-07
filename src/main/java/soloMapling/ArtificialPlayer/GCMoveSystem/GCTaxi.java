@@ -85,7 +85,12 @@ final class GCTaxi {
             {250000100, 2090005, 200000141, 1},  // Hak: Mu Lung -> Orbis Sky
             {250000100, 2090005, 251000000, 1},  // Hak: Mu Lung -> Herb Town
             {251000000, 2090005, 250000100, 1},  // Hak: Herb Town -> Mu Lung
-            {60000, 22000, 104000000, LEAVE_BEGINNER_LEVEL}, // Sanks' boat off Southperry
+            // 2000000 is the Southperry a beginner actually walks to: Shanks (22000) stands there,
+            // and the chain 10000 -> 20000 -> 30000 -> 40000 -> 50000 -> 1000000 -> 1010000
+            // -> 1020000 -> 2000000 is the island's portal path. Map 60000 is the old island
+            // (use_beidou_beginner_map) and is unreachable from the spawn, so an edge hung on it
+            // would never fire and GCTravel would bare-warp the bot off the island instead.
+            {2000000, 22000, 104000000, LEAVE_BEGINNER_LEVEL}, // Sanks' boat off Southperry
             {102000000, 9310000, 701000000, 1},  // Pilot Hong: Perion -> Shanghai Bund
             {701000100, 9310013, 102000000, 1},  // Pilot Hong: Shanghai Plaza -> Perion
             {220000110, 2041000, 220000111, 1},  // Ludibrium pier -> waiting room (train)

@@ -31,6 +31,7 @@ import soloMapling.companion.execution.CompanionCombatRecoveryPolicy;
 import soloMapling.companion.execution.CompanionRuntimeCapabilities;
 import soloMapling.companion.execution.CompanionTargetResolver;
 import soloMapling.companion.execution.CompanionTrainingController;
+import soloMapling.companion.execution.SoloGrindController;
 import soloMapling.companion.gear.CompanionGearController;
 import soloMapling.companion.planner.CompanionPlannerResult;
 import soloMapling.companion.survival.CompanionSurvivalController;
@@ -68,6 +69,7 @@ public final class CompanionBot extends BotSM implements
     private TurnContext activeContext;
     private long lastPlayedTurnId;
     private final GrindBrain grind = new GrindBrain(message -> { });
+    private final SoloGrindController soloGrind = new SoloGrindController(grind);
     private final CompanionCombatLifecycle combatLifecycle = new CompanionCombatLifecycle();
     private final CompanionSurvivalController survival =
             new CompanionSurvivalController();
@@ -182,8 +184,39 @@ public final class CompanionBot extends BotSM implements
             return;
         }
         maintainTraining();
+        maintainSoloGrind();
         observePendingInvite();
         maybeInitiateConversation();
+    }
+
+    /**
+     * Training the companion does for itself, when no player asked it to train
+     * with them. Runs behind the player-authorized path: a companion that is
+     * somebody's tag-along stays their tag-along.
+     */
+    private void maintainSoloGrind() {
+        boolean wasEngaged = soloGrind.engaged();
+        if (trainingTarget != null) {
+            // A player owns its attention; drop any solo claim so the two never
+            // fight over movement.
+            if (soloGrind.active()) {
+                soloGrind.stop(getChr());
+            }
+        } else {
+            soloGrind.tick(getChr());
+        }
+        // The combat sweep is shared, and registering is what makes real fighting
+        // happen on an observed map. Track the controller's engagement so the
+        // companion is on the sweep exactly while it has a session to run and
+        // off it the moment the session ends — a companion left registered would
+        // be swept forever, long after it stopped grinding.
+        if (soloGrind.engaged() != wasEngaged) {
+            if (soloGrind.engaged()) {
+                GrindTickRegistry.getInstance().register(this);
+            } else {
+                GrindTickRegistry.getInstance().unregister(this);
+            }
+        }
     }
 
     private void maybeInitiateConversation() {
@@ -404,12 +437,23 @@ public final class CompanionBot extends BotSM implements
     public void grindTick() {
         Character companion = getChr();
         Character target = trainingTarget;
-        if (checkIfNotRunningOrPaused()
-                || !combatLifecycle.active() || companion == null
+        if (checkIfNotRunningOrPaused() || companion == null
+                || companion.getMap() == null
                 || survival.supplyRunActive() || gear.gearRunActive()) {
             return;
         }
-        if (target == null || companion.getMap() == null || target.getMap() == null
+        if (target == null) {
+            // Nobody asked it to train with them: this is the solo case, where
+            // the companion fights for itself. Only on observed maps — when no
+            // player can see it, SoloGrindController credits the same time
+            // arithmetically instead of paying for combat nobody watches.
+            if (!soloGrind.active() || !GCMovement.isMapObserved(companion.getMapId())) {
+                return;
+            }
+            grind.tick(companion);
+            return;
+        }
+        if (!combatLifecycle.active() || target.getMap() == null
                 || companion.getMapId() != target.getMapId()) {
             return;
         }
@@ -451,6 +495,8 @@ public final class CompanionBot extends BotSM implements
     @Override
     public synchronized void stopScheduledTask() {
         stopTraining();
+        soloGrind.stop(getChr());
+        GrindTickRegistry.getInstance().unregister(this);
         survival.cancel();
         gear.cancel();
         GCMovement.disable(getChr());

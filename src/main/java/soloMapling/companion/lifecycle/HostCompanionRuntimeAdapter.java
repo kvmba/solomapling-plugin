@@ -32,6 +32,43 @@ public final class HostCompanionRuntimeAdapter implements CompanionRuntimeAdapte
     private static final int HARD_MESO_CAP = 100_000;
     private static final int MAX_ADVANCEMENTS_PER_RECONCILE = 4;
 
+    /**
+     * A companion below this level is still on the beginner island, and it earns
+     * nothing while it is away.
+     *
+     * <p>Two reasons. The island is the tutorial: a bot that comes back from a
+     * night offline two levels higher skipped the part where it was supposed to
+     * learn to swing. And it is a one-way trip out — a companion that never
+     * plays the island never reaches level 8, never takes Sanks' boat, and stays
+     * on Maple Island forever. Settling it forward would freeze it there.</p>
+     *
+     * <p>Matches the level Sanks asks for, so the bar lines up with the gate the
+     * island already has.</p>
+     */
+    public static final int NOVICE_SETTLEMENT_LEVEL = 10;
+
+    /**
+     * Most of one level a settlement may grant.
+     *
+     * <p>Deliberately small, and for a reason that has changed: a companion no
+     * longer relies on offline time to advance. While it is online it levels by
+     * fighting — really, when a player is watching it, and by simulated kills
+     * when nobody is — so the offline settlement is only meant to show that time
+     * passed, not to be the engine of its career. A fifth of a level keeps it
+     * that way round: a companion that was away a night comes back a little
+     * further along, never a level or three ahead of the one that logged in and
+     * actually fought.</p>
+     *
+     * <p>The old flat 25,000 cap was calibrated for somebody in their 30s and was
+     * absurd at the bottom: at level 1 it is a thousand times the 15 EXP the
+     * island asks for, so one offline night could carry a new companion clean off
+     * the island without it ever swinging. Tying the cap to the host's own EXP
+     * table scales it sensibly instead — about 3 EXP at level 1, 248 at level 10,
+     * 2,695 at level 30. The hard cap still binds at the top, where a level costs
+     * more than it anyway.</p>
+     */
+    static final double SETTLEMENT_LEVEL_FRACTION = 0.2;
+
     @Override
     public int persistedLevel(CompanionProfile profile) {
         String sql = "SELECT level FROM characters WHERE id = ?";
@@ -165,8 +202,17 @@ public final class HostCompanionRuntimeAdapter implements CompanionRuntimeAdapte
             LoadedCompanion companion,
             OfflineProgressionSettlement settlement) {
         Character character = unwrap(companion);
+        if (character.getLevel() < NOVICE_SETTLEMENT_LEVEL) {
+            // Still a novice: no offline reward at all. The settlement's
+            // settledThrough is still recorded upstream, so this time is not
+            // banked for later — a companion that finally reaches 10 does not
+            // collect a backlog for the weeks it spent below it.
+            log.debug("Companion offline settlement skipped for novice cid={} level={} below={}",
+                    character.getId(), character.getLevel(), NOVICE_SETTLEMENT_LEVEL);
+            return;
+        }
         int experience = Math.toIntExact(Math.min(
-                settlement.experience(), HARD_EXPERIENCE_CAP));
+                settlement.experience(), experienceCap(character.getLevel())));
         int mesos = Math.toIntExact(Math.min(settlement.mesos(), HARD_MESO_CAP));
         if (experience > 0) {
             grantOfflineExperience((HostLoadedCompanion) companion, experience);
@@ -174,6 +220,29 @@ public final class HostCompanionRuntimeAdapter implements CompanionRuntimeAdapte
         if (mesos > 0) {
             character.gainMeso(mesos, false, false, false);
         }
+    }
+
+    /**
+     * The most EXP one settlement may grant at this level: half a level, by the
+     * host's own table, and never more than the flat cap.
+     *
+     * <p>Read from {@link ExpTable} rather than assumed, so a host that retunes
+     * its curve is followed automatically. A missing or nonsensical row falls
+     * back to the flat cap rather than to zero — an over-generous settlement is
+     * recoverable, a companion that can never gain offline experience is not.</p>
+     */
+    static long experienceCap(int level) {
+        int needed;
+        try {
+            needed = ExpTable.getExpNeededForLevel(Math.max(0, level));
+        } catch (RuntimeException | StackOverflowError ignored) {
+            return HARD_EXPERIENCE_CAP;
+        }
+        if (needed <= 0) {
+            return HARD_EXPERIENCE_CAP;
+        }
+        long scaled = Math.round(needed * SETTLEMENT_LEVEL_FRACTION);
+        return Math.max(1, Math.min(HARD_EXPERIENCE_CAP, scaled));
     }
 
     private static void grantOfflineExperience(HostLoadedCompanion companion, int experience) {

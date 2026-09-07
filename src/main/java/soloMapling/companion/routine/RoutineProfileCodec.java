@@ -16,7 +16,7 @@ import java.util.Locale;
  * backwards-compatible safe default: an all-offline schedule.</p>
  */
 public final class RoutineProfileCodec {
-    private static final String VERSION_PREFIX = "v1|";
+    static final String VERSION_PREFIX = "v1|";
     private static final DateTimeFormatter TIME_FORMAT =
             DateTimeFormatter.ofPattern("HH:mm", Locale.ROOT)
                     .withResolverStyle(ResolverStyle.STRICT);
