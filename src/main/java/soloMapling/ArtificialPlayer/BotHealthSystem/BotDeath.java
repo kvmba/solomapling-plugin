@@ -228,11 +228,7 @@ public final class BotDeath {
      * <p>Floored at a second so a bot standing up does not spin, and never longer than the time
      * actually left — a delay past that would add a whole extra wait to every death.
      */
-    long delayForRemainingForTest(long remainingMs) {
-        return delayForRemaining(remainingMs);
-    }
-
-    private static long delayForRemaining(long remainingMs) {
+    static long delayForRemaining(long remainingMs) {
         if (remainingMs < TICK_FLOOR_MS) {
             return TICK_FLOOR_MS;
         }
@@ -269,6 +265,31 @@ public final class BotDeath {
         } catch (RuntimeException ignored) {
             // one overdue clean-up must not cost us the death handling
         }
+    }
+
+    /**
+     * Puts this bot back on its feet at once, skipping the rest of the episode.
+     *
+     * <p>Used when the bot is being handed to a different behaviour (a retype). The outgoing
+     * {@code BotDeath} is discarded with its bot — a fresh {@code BotSM} builds a fresh one — so
+     * the character must not be left at zero HP with nobody left to stand it up. Always call
+     * this before the old behaviour is thrown away.
+     */
+    public void abandon() {
+        if (!down) {
+            return;
+        }
+        Character chr = this.chr;
+        if (chr != null && chr.getMap() != null) {
+            int full = Math.max(1, chr.getCurrentMaxHp());
+            try {
+                BotClientBinding.runWithBoundPlayer(chr, () -> chr.updateHp(full));
+                chr.updatePartyMemberHP();
+            } catch (RuntimeException ignored) {
+                // the character is going away anyway — just do not leave it at zero
+            }
+        }
+        clearDown();
     }
 
     /**

@@ -229,6 +229,11 @@ public class BotTypeManager {
                 debugprint("convertBotType: refused, bot is mid-trade: " + fakechar.getName());
                 return false;
             }
+            // A bot killed while a player was recruiting it still gets converted (the chat path
+            // does not go through the death gate). Its death episode dies with this BotSM, so
+            // stand it up here — otherwise the new type starts at zero HP with nobody left to
+            // end the episode, and it walks around as an unkillable corpse.
+            existing.death().abandon();
             manuallyStopBot(fakechar);
         }
         botType.createAndSetBot(fakechar);

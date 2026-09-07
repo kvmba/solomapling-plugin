@@ -56,17 +56,35 @@ class BotDeathTimingTest {
         // Pacing past standUpAtMs would add up to a whole extra interval to every death.
         BotDeath death = new BotDeath(null);
         for (long remaining : new long[]{0L, 500L, 5_000L, 12_000L}) {
-            long delay = death.delayForRemainingForTest(remaining);
+            long delay = BotDeath.delayForRemaining(remaining);
             assertTrue(delay <= remaining || delay <= 15_000L,
                     "delay " + delay + " overshoots remaining " + remaining);
         }
-        assertEquals(1_000L, death.delayForRemainingForTest(0L),
+        assertEquals(1_000L, BotDeath.delayForRemaining(0L),
                 "with no time left, wake almost immediately so the bot stands up on time");
     }
 
     @Test
     void notDeadMeansNoSpecialPacing() {
         BotDeath death = new BotDeath(null);
+        assertFalse(death.isDead());
+    }
+
+    @Test
+    void abandoningADeathIsSafeWithoutACharacter() {
+        // A retype can happen on a bot whose map went away mid-death. Standing it up must not
+        // throw — the old behaviour is being discarded regardless, and the only thing that
+        // matters is that we do not leave the character at zero HP with nobody to end it.
+        BotDeath death = new BotDeath(null);
+        death.abandon(); // not down: nothing to do
+        assertFalse(death.isDead());
+    }
+
+    @Test
+    void abandoningIsIdempotent() {
+        BotDeath death = new BotDeath(null);
+        death.abandon();
+        death.abandon();
         assertFalse(death.isDead());
     }
 }
