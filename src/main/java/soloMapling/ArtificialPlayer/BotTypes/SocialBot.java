@@ -308,8 +308,8 @@ public class SocialBot extends BotSM {
     // smithy"), so a town crowd redistributes instead of standing on its spawn pixels forever.
     //
     // The walk is the GC engine (WZ terrain, no recordings), issued asynchronously: the bot keeps its
-    // macro tick and settles via the arrival callback, with the RELOCATE_TIMEOUT_MS net in updateState()
-    // for the case the driver abandons the target. It used to be a blocking old-engine pathfind, which
+    // macro tick and settles via the arrival callback, with the reclaim check in updateState() for the
+    // case the driver abandons the target. It used to be a blocking old-engine pathfind, which
     // silently no-opped on every town in EnvironmentPopulation.yaml - those maps have no recorded
     // movement packets, so stationed bots never moved at all. relocating gates the bot out of the other
     // ambient actions and partner selection for the duration.
@@ -338,6 +338,7 @@ public class SocialBot extends BotSM {
         if (chr.getChair() > 0) {
             botCancelChair(chr); // can't stroll from a chair
         }
+        TownStation.releaseSpot(chr); // free the old ledge for the walk, don't hold it stale (as stroll does)
         relocating = true;
         relocateStartedAtMs = now;
         Point dest = spots.get(0);
@@ -345,7 +346,7 @@ public class SocialBot extends BotSM {
     }
 
     // Arrival / abort of a drift walk: hand the bot back to the old engine and re-claim wherever it
-    // ended up. Idempotent - reachable from the arrival callback, the timeout net, a player engaging
+    // ended up. Idempotent - reachable from the arrival callback, the reclaim check, a player engaging
     // mid-walk, and teardown, and only the first of those actually had movement in flight.
     private void finishRelocation() {
         Character chr = getChr();
@@ -357,11 +358,20 @@ public class SocialBot extends BotSM {
                 + (long) (random.nextDouble() * (RELOCATE_MAX_MS - RELOCATE_MIN_MS));
     }
 
-    // Common end-of-walk housekeeping: release the GC session (it holds the shared movement lock the old
-    // engine needs for chair / face packets) and re-claim a ledge where we actually landed.
+    // Common end-of-walk housekeeping: release the GC session and take a claim where we actually landed.
+    // Releasing is required, not tidy-up - enable() HOLDS the shared movement lock for the whole GC
+    // session, and the old engine needs that lock for the chair / face packets town bots live on.
+    // claimSpot() is idempotent (it frees the previous claim first), so this also covers the pre-walk
+    // release when the caller didn't do one. Leaves townClaimed TRUE on purpose: flipping it false would
+    // make ensureTownClaim() re-seed nextStrollAtMs on the next tick, so a bot drifting every 3-8 min
+    // would keep resetting its 4-11 min stroll cooldown and rarely ever stroll at all.
     private void settleAfterMove(Character chr) {
         GCMovement.disable(chr);
-        townClaimed = false; // re-claim a ledge where we ended up (townAnchor points at the old map)
+        if (chr.getMap() != null) {
+            townAnchor = resolveTownAnchor(chr); // a one-way stroll lands us on a different map
+        }
+        TownStation.claimSpot(chr);
+        townClaimed = true;
     }
 
     // Occasional walk to a town map next door (Henesys main street -> Market -> Park -> home). In-map
