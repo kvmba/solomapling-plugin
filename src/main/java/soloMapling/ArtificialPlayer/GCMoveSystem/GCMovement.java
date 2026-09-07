@@ -74,6 +74,16 @@ public final class GCMovement {
         GCFidget.cancel(bot);
         BotMovementState st = STATES.remove(bot.getId());
         if (st != null) {
+            // Settle into the idle stance BEFORE the state is dropped. A bot that is still
+            // mid-walk carries a WALK stance, and nothing would ever clear it: this entry is
+            // about to be removed, so the tick that would have run idleOnGround() can no
+            // longer reach it. The client keeps rendering the walk animation on a bot that is
+            // standing still - the "walking on the spot" town bot. Worst on maps with no
+            // movement recordings, where the old engine never sends a packet that overwrites it.
+            if (st.moveDir != 0 || st.groundBrakeDir != 0) {
+                BotPhysicsEngine.idleOnGround(st, bot);
+                BotMovementManager.broadcastMovement(st);
+            }
             GCMovementDriver.stop(st);
             MovementCommands.releaseMovementLock(bot);
         }
