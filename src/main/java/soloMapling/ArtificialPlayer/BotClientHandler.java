@@ -24,7 +24,7 @@ public class BotClientHandler {
      * the channels exist, since the client reports {@code WORLD_SCANIA} / the channel id
      * for routing.
      */
-    public static synchronized void initHeadlessBotClient() {
+    public static void initHeadlessBotClient() {
         clientFor(GameConstants.CHANNEL_1);
     }
 
@@ -35,14 +35,10 @@ public class BotClientHandler {
      */
     public static Client clientFor(int channel) {
         int ch = channel > 0 ? channel : GameConstants.CHANNEL_1;
-        Client existing = BOT_CLIENTS.get(ch);
-        if (existing != null) {
-            return existing;
-        }
-        synchronized (BotClientHandler.class) {
-            return BOT_CLIENTS.computeIfAbsent(ch,
-                    c -> new BotClient(GameConstants.WORLD_SCANIA, c));
-        }
+        // computeIfAbsent is atomic, so concurrent callers for the same channel can never build
+        // two clients - every bot on a channel must share exactly one.
+        return BOT_CLIENTS.computeIfAbsent(ch,
+                c -> new BotClient(GameConstants.WORLD_SCANIA, c));
     }
 
     /**

@@ -188,12 +188,10 @@ public final class BotAttackEffects {
             final int killMapId = map.getId();
             final Point deathPos = new Point(target.getPosition());
             final Runnable lootTask = () -> {
-                // Use the captured Character directly: re-looking it up by id would go
-                // through SoloMaplingUtilities.getChr, which is pinned to mainChannel
-                // (world 0 / channel 1). A bot living on any other channel would resolve
-                // to null, or to a different character with the same id, and silently
-                // lose the loot. Channel.removePlayer only drops the map entry, so this
-                // reference stays valid even if the bot is despawned meanwhile.
+                // Use the captured Character directly rather than re-looking it up by id: a
+                // lookup is another chance to miss (the bot may already be despawned), and
+                // this reference stays valid regardless — Channel.removePlayer only drops the
+                // map entry, it does not invalidate the object.
                 if (bot.getMap() == null || bot.getMapId() != killMapId) {
                     return; // bot warped away or left - no loot at the corpse
                 }
