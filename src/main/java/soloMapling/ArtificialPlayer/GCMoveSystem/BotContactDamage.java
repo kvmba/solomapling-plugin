@@ -169,8 +169,13 @@ final class BotContactDamage {
             if (owner != null) {
                 owner.kill();
             }
-            applyDamage(entry, bot, resolved.broadcastDamage(), -1, mob.getId(),
-                    kb.direction(), kb.airVelX());
+            // Still show the number that did it. Deliberately not the shared applyDamage:
+            // that also poses the bot as combat-alerted and launches it into the air, and a
+            // corpse should do neither.
+            bot.getMap().broadcastMessage(bot,
+                    PacketCreator.damagePlayer(-1, mob.getId(), bot.getId(), resolved.broadcastDamage(),
+                            0, kb.direction(), false, 0, false, 0, 0, 0), false);
+            entry.mobHitCooldownMs = BotMovementManager.delayAfterCurrentTick(MOB_HIT_COOLDOWN_MS);
             return;
         }
         if (resolved.hpDamage() > 0) {
