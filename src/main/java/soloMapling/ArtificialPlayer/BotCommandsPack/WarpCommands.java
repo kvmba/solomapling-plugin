@@ -1,6 +1,7 @@
 package soloMapling.ArtificialPlayer.BotCommandsPack;
 
 import org.gms.client.Character;
+import org.gms.client.Client;
 import org.gms.server.maps.MapObject;
 import org.gms.server.maps.MapleMap;
 import org.gms.server.maps.Portal;
@@ -16,6 +17,19 @@ import static soloMapling.ArtificialPlayer.BotMovementSystem.MovementCommands.Bo
 
 public class WarpCommands {
 
+    /**
+     * The map a bot should warp to: resolved on the bot's OWN channel.
+     *
+     * <p>A map is a per-channel object. Taking it from the channel-1 client (the old behaviour)
+     * would move a bot living on another channel into a foreign channel's map instance, where
+     * its broadcasts go to the wrong players and the players who should see it see nothing.
+     */
+    public static MapleMap mapForBot(Character bot, int mapId) {
+        // A bot always carries its channel's client, but fall back to the shared channel-1
+        // client rather than NPE if one is ever seen without it.
+        Client client = (bot != null && bot.getClient() != null) ? bot.getClient() : getBotClient();
+        return client.getChannelServer().getMapFactory().getMap(mapId);
+    }
 
     public static Map<Integer, Integer> FMRoomWarpPortalId = new HashMap<>();
 
@@ -45,7 +59,7 @@ public class WarpCommands {
         Portal portal = fakechar.getMap().findClosestPortal(fakechar.getPosition());
         MapleMap to;
         if (fakechar.getEventInstance() == null) {
-            to = getBotClient().getChannelServer().getMapFactory().getMap(portal.getTargetMapId());
+            to = mapForBot(fakechar, portal.getTargetMapId());
         } else {
             to = fakechar.getEventInstance().getMapInstance(portal.getTargetMapId());
         }
@@ -68,13 +82,13 @@ public class WarpCommands {
 
     public static void botEnterFMRoom(Character fakechar, int roomNumber) {
         int freeMarketRoom = 910000000 + roomNumber;
-        MapleMap warpMap = getBotClient().getChannelServer().getMapFactory().getMap(freeMarketRoom);
+        MapleMap warpMap = mapForBot(fakechar, freeMarketRoom);
         botWarpMapOnPortal(fakechar, warpMap, FMRoomWarpPortalId.get(roomNumber));
     }
 
     public static void botExitFMRoom(Character fakechar, int doorNumber) {
         int freeMarketEntrance = 910000000;
-        MapleMap warpMap = getBotClient().getChannelServer().getMapFactory().getMap(freeMarketEntrance);
+        MapleMap warpMap = mapForBot(fakechar, freeMarketEntrance);
         botWarpMapOnPortal(fakechar, warpMap, getFMEntrancePortal(doorNumber).getId());
     }
 
@@ -111,7 +125,7 @@ public class WarpCommands {
 
     //test only
     public static void botMoveMap(Character fakechar, int mapId) {
-        MapleMap warpMap = getBotClient().getChannelServer().getMapFactory().getMap(mapId);
+        MapleMap warpMap = mapForBot(fakechar, mapId);
         fakechar.changeMap(warpMap, warpMap.getPortal(11));
 
 ////        MapleMap target = fakechar.getClient().getChannelServer().getMapFactory().getMap(gotomaps.get(params[0]));

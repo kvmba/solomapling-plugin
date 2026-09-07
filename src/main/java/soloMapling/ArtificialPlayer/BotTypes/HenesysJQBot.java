@@ -20,6 +20,7 @@ import static soloMapling.ArtificialPlayer.BotClientHandler.getBotClient;
 import static soloMapling.ArtificialPlayer.BotCommandsPack.SocialCommands.BotEmote;
 import static soloMapling.ArtificialPlayer.BotCommandsPack.SocialCommands.BotSpeak;
 import static soloMapling.ArtificialPlayer.BotCommandsPack.WarpCommands.botWarpMapOnPortal;
+import static soloMapling.ArtificialPlayer.BotCommandsPack.WarpCommands.mapForBot;
 import static soloMapling.ArtificialPlayer.BotDialogueHandler.getRandomDialogueLine;
 import static soloMapling.ArtificialPlayer.BotMovementSystem.InPacketReader.getMovementRecording;
 import static soloMapling.ArtificialPlayer.BotMovementSystem.MovementCommands.BotMoveStream;
@@ -274,7 +275,7 @@ public class HenesysJQBot extends BotSM {
         try {
             pathFinderAware(getChr(), getChr().getMap().getPortal(EXIT_PORTAL_ID).getPosition());
             BotHelpers.blockingSleep(1000 + random.nextInt(1000));
-            MapleMap destMap = getBotClient().getChannelServer().getMapFactory().getMap(HENESYS_PARK_MAP);
+            MapleMap destMap = mapForBot(getChr(), HENESYS_PARK_MAP);
             BotHelpers.blockingSleep(1000 + random.nextInt(1000));
             botWarpMapOnPortal(getChr(), destMap, EXIT_DEST_PORTAL_ID);
             BotHelpers.blockingSleep(1000);

@@ -20,6 +20,7 @@ import static soloMapling.ArtificialPlayer.BotClientHandler.getBotClient;
 import static soloMapling.ArtificialPlayer.BotCommandsPack.SocialCommands.BotEmote;
 import static soloMapling.ArtificialPlayer.BotCommandsPack.SocialCommands.BotSpeak;
 import static soloMapling.ArtificialPlayer.BotCommandsPack.WarpCommands.botWarpMapOnPortal;
+import static soloMapling.ArtificialPlayer.BotCommandsPack.WarpCommands.mapForBot;
 import static soloMapling.ArtificialPlayer.BotDialogueHandler.getRandomResolvedLine;
 import static soloMapling.ArtificialPlayer.BotMovementSystem.MovementCommands.nudgeAwayFromOverlap;
 import static soloMapling.ArtificialPlayer.BotMovementSystem.MovementCommands.pathFinderAware;
@@ -271,7 +272,7 @@ public class HenesysBot extends BotSM {
         try {
             // Move to the portal position, then warp
             pathFinderAware(getChr(), getChr().getMap().getPortal(portalId).getPosition());
-            MapleMap destMap = getBotClient().getChannelServer().getMapFactory().getMap(route.destMapId());
+            MapleMap destMap = mapForBot(getChr(), route.destMapId());
             botWarpMapOnPortal(getChr(), destMap, route.destPortalId());
             checkPrioritySpeed();
             log(getChr().getName() + " changing map to " + targetMapId + " via portal " + portalId);

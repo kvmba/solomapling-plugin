@@ -28,6 +28,7 @@ import java.util.concurrent.TimeUnit;
 
 import static soloMapling.ArtificialPlayer.BotClientHandler.getBotClient;
 import static soloMapling.ArtificialPlayer.BotCommandsPack.WarpCommands.botWarpMapOnPortal;
+import static soloMapling.ArtificialPlayer.BotCommandsPack.WarpCommands.mapForBot;
 import static soloMapling.ArtificialPlayer.BotGeneration.warpBotToLocation;
 import static soloMapling.ArtificialPlayer.BotHelpers.blockingSleep;
 import static soloMapling.ArtificialPlayer.BotTypes.OPQ.OPQConstants.STAGE_1_COMPLETE_TP;
@@ -844,7 +845,7 @@ public class OPQBot extends BotSM {
         int leaderMap = getPartyLeader().getMapId();
         if (leaderMap == OPQConstants.OPQ_LOBBY) {
             blockingSleep(300);
-            MapleMap lobbyMap = getBotClient().getChannelServer().getMapFactory().getMap(OPQConstants.OPQ_LOBBY);
+            MapleMap lobbyMap = mapForBot(getChr(), OPQConstants.OPQ_LOBBY);
             warpBotToLocation(getChr(), new Point(-233, 174), lobbyMap);
             transitionTo(OPQBotState.LOOP_CHECK, "followed leader to recruitment lobby");
             return;
@@ -852,7 +853,7 @@ public class OPQBot extends BotSM {
 
         // Otherwise warp ourselves to lobby after a short wait
         blockingSleep(500);
-        MapleMap lobbyMap = getBotClient().getChannelServer().getMapFactory().getMap(OPQConstants.OPQ_LOBBY);
+        MapleMap lobbyMap = mapForBot(getChr(), OPQConstants.OPQ_LOBBY);
         warpBotToLocation(getChr(), new Point(-233, 174), lobbyMap);
         blockingSleep(2000);
         List<String> platforms = PlatformPlacement.getMainPlatformIds(getChr().getMapId());
@@ -908,11 +909,11 @@ public class OPQBot extends BotSM {
         sharedContext.clearTaskComplete(botId);
 
         // deliberate synchronous warps (blocking arrival choreography)
-        MapleMap exitMap = getBotClient().getChannelServer().getMapFactory().getMap(OPQConstants.OPQ_EXIT_LOBBY);
+        MapleMap exitMap = mapForBot(getChr(), OPQConstants.OPQ_EXIT_LOBBY);
         warpBotToLocation(getChr(), new Point(-161, 323), exitMap);
         blockingSleep(1500);
 
-        MapleMap lobbyMap = getBotClient().getChannelServer().getMapFactory().getMap(OPQConstants.OPQ_LOBBY);
+        MapleMap lobbyMap = mapForBot(getChr(), OPQConstants.OPQ_LOBBY);
         warpBotToLocation(getChr(), new Point(-233, 174), lobbyMap);
 
         resetOPQBotState();
