@@ -197,9 +197,9 @@ final class BotContactDamage {
      *
      * <p>The wire damage remains the rolled hit so observers still see the normal hurt effect.
      * HP loss stops at {@link BotHealthFloor} — a sliver of the pool, so a badly hurt bot reads
-     * as nearly dead instead of showing an empty bar like a corpse. A hit that would take the
-     * bot from above the floor straight through it is {@link #lethal}: there was no chance to
-     * drink, so the damage layer does not clamp it and the bot dies.</p>
+     * as nearly dead instead of showing an empty bar like a corpse. A hit the bot could not have
+     * drunk through is {@link #lethal}: the HP delta is not applied at all, because the caller
+     * hands the bot to {@code BotDeath} instead, which is what sets it to zero.</p>
      */
     static MobHitDamage resolveMobHitDamage(int currentHp, int rolledDamage, int maxHp) {
         int broadcastDamage = Math.max(0, rolledDamage);
