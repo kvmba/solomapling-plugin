@@ -460,6 +460,13 @@ public final class CompanionBot extends BotSM implements
             // its ground, or resting between sessions, is not fighting here.
             if (!soloGrind.isGrindingOn(companion.getMapId())
                     || !GCMovement.isMapObserved(companion.getMapId())) {
+                // The sweep runs at 4Hz while the state machine that would
+                // unregister us runs every few seconds, so drop off here rather
+                // than waiting a whole tick to be told we are done.
+                if (soloFightRegistered) {
+                    soloFightRegistered = false;
+                    GrindTickRegistry.getInstance().unregister(this);
+                }
                 return;
             }
             grind.tick(companion);
