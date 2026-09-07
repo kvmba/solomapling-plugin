@@ -161,6 +161,20 @@ final class GCTaxi {
             {260000000, 9000020, 701000000, 30}, {260000000, 9000020, 702000000, 30},
             {260000000, 9000020, 541000000, 30}, {260000000, 9000020, 550000000, 30},
             {260000000, 9000020, 800000000, 30},
+
+            // Coming back. Each of these is a dead end without its own way out — the return is a
+            // different NPC (or a different branch of the same one), so a bot that travelled out
+            // would otherwise stay there for good. The agent and the guides remember where you
+            // came from; we send everyone back to the harbour town they set out from.
+            {110000000, 1081001, 104000000, 1},  // Gold Beach: Pison ferries you back
+            {800000000, 9000020, 104000000, 1},  // Mushroom Shrine: the agent returns you
+            {702000000, 9000020, 104000000, 1},  // Songshan: same agent, same trip back
+            {550000000, 9201135, 104000000, 1},  // Malaysia: its guide sends you home
+            {551000000, 9201135, 104000000, 1},  // Kampung: the guide stands here too
+            {801000000, 9120003, 104000000, 1},  // Showa: the shrine maiden sees you off
+            // The Time Temple is the one place with no way back: its keeper has no script and none
+            // of its portals lead anywhere, so a bot that rides the dragon there stays — which is
+            // the same trip a player takes. It is the last rung of the migration ladder anyway.
     };
 
     /*

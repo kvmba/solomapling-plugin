@@ -38,6 +38,15 @@ public final class BotScriptedWarp {
             // Time Temple: as a dragon, the "in00" on 200090510 is scripted (templeenter.js ->
             // warp 270000100 "out00"). The way back is a plain portal, so this one edge opens it.
             new WarpEdge(200090510, "in00", 270000100, 2),
+            // Back the same way. The dragon crossing is the Temple's only door in either direction,
+            // and both ends of it are scripted portals: outTemple.js drops you onto the dragon for
+            // the flight home, and undodraco.js puts you down at the Leafre pier you left from.
+            new WarpEdge(270000100, "out00", 200090510, 0),
+            new WarpEdge(200090500, "down00", 240000110, 2),
+            // The Leafre pier has no walkable door back into town either — west00 runs dracoout.js.
+            // Without this, a bot that lands here (from the cabin or the dragon) is stuck on the
+            // pier: it can enter both rides but can never reach Leafre itself.
+            new WarpEdge(240000110, "west00", 240000100, 0),
             // Time control room: the Time Gate into the Temple of Time's past. Its portal's target is
             // move_elin.js, so the way in has to be named here for anyone to find it at all.
             new WarpEdge(222020400, "in01", 300000100, 0),
