@@ -28,11 +28,12 @@ final class GrindLoot {
     // pickup looks like the item teleports into the bot mid-air. Aged against MapItem.getDropTime() (the
     // server clock stamp set when the drop spawns), so it's "this drop has been on the ground ≥ this long".
     private static final long LOOT_SETTLE_MS = 1_500;
-    // Distance-dependent settle (see settleMsFor): a drop already underfoot needs hardly any wait,
-    // a distant one still waits out the full arc.
+    // Distance-dependent settle (see settleMsFor): a drop already underfoot waits a bit less than
+    // the full 1.5s, a distant one waits the whole arc. Underfoot is 1s rather than near-instant -
+    // faster than that reads as the item snapping into the bot before it has visibly landed.
     private static final int AT_FEET_PX = 24;        // "right underfoot"
     private static final int FAR_PX = 120;           // at or beyond this, the full wait applies
-    private static final long AT_FEET_SETTLE_MS = 250;
+    private static final long AT_FEET_SETTLE_MS = 1_000;
     /** Squared bounds, so the hot path can stay on distSq without a sqrt. */
     private static final double AT_FEET_SQ = (double) AT_FEET_PX * AT_FEET_PX;
     private static final double FAR_SQ = (double) FAR_PX * FAR_PX;
@@ -211,8 +212,8 @@ final class GrindLoot {
      * it for a second and a half before bending down looks wrong, and it is also what let kills
      * look like they dropped nothing (the bot walks to the next mob before the loot is legal).
      *
-     * <p>So: right underfoot is nearly instant, further away waits the full arc - a distant drop
-     * is one the bot walks to, and by the time it arrives the wait has passed anyway. Scales
+     * <p>So: right underfoot waits 1s instead of 1.5s, further away waits the full arc - a distant
+     * drop is one the bot walks to, and by the time it arrives the wait has passed anyway. Scales
      * linearly between the two so there is no visible step.
      */
     private static long settleMsFor(double distSq) {

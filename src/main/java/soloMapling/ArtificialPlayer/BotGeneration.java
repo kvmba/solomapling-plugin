@@ -199,17 +199,14 @@ public class BotGeneration {
         // spawn_rate_per_second in EnvironmentPopulation.yaml (<=0 = unlimited).
         // Taken BEFORE the expensive work so the wait is the cheap part.
         BotSpawnThrottle.acquire();
-        System.out.println("[CB] 1acquire ch=" + channel);
 
         int cid = templateCharacterId();
 
         Character bot = null;
         bot = Character.loadCharFromDB(cid, BotClientHandler.clientFor(channel), false);
-        System.out.println("[CB] 2loaded ch=" + channel);
         int botId = SoloMaplingConstants.GameConstants.BOT_BASE_ID + currentBotCount.getAndIncrement();
         bot = setBotStats(bot, botId); // Bot onDemandBot
         addBotToServer(bot);
-        System.out.println("[CB] 3added ch=" + channel);
         // Re-resolve the map on the bot's OWN channel. Callers pass a map instance taken from
         // whichever channel they were on (a GM's, or channel 1's), and a map is a per-channel
         // object: putting the bot in another channel's instance would broadcast it to that
@@ -223,7 +220,6 @@ public class BotGeneration {
             }
         }
         placeBotOnMap(bot, pos, ownMap);
-        System.out.println("[CB] 4placed ch=" + channel);
         // Decorate before the drop-down plays so the bot arrives fully dressed
         // (decoration is an in-memory cache lookup, takes microseconds).
         if (baseClass <= 0) {
@@ -231,7 +227,6 @@ public class BotGeneration {
         } else {
             setBotVariables(bot, baseClass, minLevel, maxLevel, forcedJobId);
         }
-        System.out.println("[CB] 5decorated ch=" + channel);
         // Choreography sleeps ~2.5-6s in total; play it on a virtual thread so
         // mass spawning isn't gated on each bot's arrival animation. Drop-down ->
         // turn-around ordering is preserved because it's one sequential task.
