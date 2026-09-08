@@ -29,11 +29,8 @@ import java.util.Collection;
  *   <li>A bot never switches channels, so it stays where it was created.</li>
  * </ul>
  *
- * <p>Load is read live from each channel's player storage (O(1)), so nothing has to be tracked
- * here and no counter can drift as bots log off for a rest. Allocation picks the channel with the
- * lowest {@code load / weight} ratio that still has room, which lands on 6:4 (two channels) and
- * 5:3:2 (three) at steady state. Ties go to the lowest id, so the "lower id = fuller" shape holds
- * while the population is still coming up and not only once it settles.
+ * <p>Allocation picks the channel with the lowest {@code bots / weight} ratio that still has
+ * headroom. See {@link #pickChannel} for why the two inputs stay separate.
  */
 public final class BotChannelRouter {
 
@@ -69,6 +66,11 @@ public final class BotChannelRouter {
             for (int i = 0; i < n; i++) {
                 Channel ch = world.getChannel(i + 1); // channel ids are 1-based
                 if (ch == null) {
+                    // Treat a missing channel as full, not as empty: leaving it at 0 would make it
+                    // look like the emptiest option and route the bot onto a channel that isn't
+                    // there. (getChannel only returns null for an index past the list, which the
+                    // loop never passes - this is a guard, not a live case.)
+                    population[i] = cap;
                     continue;
                 }
                 Collection<Character> chars = ch.getPlayerStorage().getAllCharacters();
