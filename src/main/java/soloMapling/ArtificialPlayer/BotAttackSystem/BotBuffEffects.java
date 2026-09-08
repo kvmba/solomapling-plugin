@@ -39,15 +39,20 @@ public final class BotBuffEffects {
     public static int showBuff(Character bot, int skillId) {
         if (bot == null || bot.getMap() == null) return 0;
 
-        // The cast animation only needs the skill id - fire it regardless of
-        // whether the StatEffect resolves, so the visual is never skipped.
+        // Gate on the skill existing in Skill.wz BEFORE broadcasting: the client looks the id up
+        // to play the cast animation, and an id that isn't there is a client crash for everyone
+        // watching. Ids reach here straight from !bot castbuff/givebuff, so they are not trusted.
+        //
+        // This is only an existence check - the cast animation is still fired for a skill with no
+        // resolvable StatEffect, so a legitimate buff's visual is never skipped.
+        Skill skill = SkillFactory.getSkill(skillId);
+        if (skill == null) return 0;
+
         bot.getMap().broadcastMessage(bot,
                 PacketCreator.showBuffEffect(bot.getId(), skillId, CAST_EFFECT_ID), false);
 
         // The persistent aura needs the buff's stat list (cheap memoized lookup,
         // no applyTo). Skip silently if the skill has no stat ups.
-        Skill skill = SkillFactory.getSkill(skillId);
-        if (skill == null) return 0;
         StatEffect effect = skill.getEffect(skill.getMaxLevel());
         if (effect == null) return 0;
 
