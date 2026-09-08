@@ -1,8 +1,12 @@
 package soloMapling.Environment;
 
 import org.gms.client.Character;
+import org.gms.net.server.Server;
+import org.gms.net.server.channel.Channel;
+import org.gms.net.server.world.World;
 import org.gms.client.Job;
 import org.gms.server.maps.MapleMap;
+import soloMapling.server.SoloMaplingConstants;
 import soloMapling.ArtificialPlayer.BotGeneration;
 import soloMapling.ArtificialPlayer.BotMovementSystem.MovementCommands;
 import soloMapling.ArtificialPlayer.BotDecoratorSystem.BotDecorate;
@@ -293,6 +297,7 @@ public class EnvironmentManager {
         var w8 = pop.training();
         if (w8.enabled()) {
             List<Runnable> tasks = new ArrayList<>();
+            List<Integer> cohortMapIds = new ArrayList<>();
             var warm = w8.warmNav();
             if (warm != null && warm.hops() > 0 && warm.mapId() > 0) {
                 tasks.add(() -> GCMovement.mapsWithinHops(warm.mapId(), warm.hops()));
@@ -303,10 +308,26 @@ public class EnvironmentManager {
                     continue;
                 }
                 int mapId = cohort.mapId();
+                if (!cohortMapIds.contains(mapId)) {
+                    cohortMapIds.add(mapId);
+                }
                 int lo = cohort.levelLo();
                 int hi = cohort.levelHi();
                 tasks.add(() -> spawnTrainingBotsAt(mapId, n, lo, hi));
             }
+            // Warm every channel's copy of every cohort map FIRST, on this thread, before the wave
+            // fans out. A MapFactory is per channel, so spreading bots across channels means channel
+            // 2..N have never loaded these maps and the first bot to touch one pays the full WZ load -
+            // with 55 tasks in flight that is 55 concurrent cold loads.
+            //
+            // That matters because the host's MapManager.loadMapFromWz is a synchronized method that
+            // takes its own read/write lock around a slow load and then the write lock to cache the
+            // result: it holds the monitor across the slow part, while resetMap() takes the write lock
+            // and then needs that same monitor. Concurrent cold loading is what lets those two paths
+            // meet and deadlock - which is the wave-8 hang (no CPU, no IO, tasks parked).
+            //
+            // Loading them serially here means the parallel wave only ever hits the cached path.
+            warmChannelMaps(cohortMapIds);
             runWave(8, "Training bots", tasks);
         }
 
@@ -445,6 +466,39 @@ public class EnvironmentManager {
      * population is fire-and-forget internally, so its bots may be attributed
      * to a later wave's count.
      */
+    /**
+     * Load every cohort map into every channel's MapFactory, serially, before the parallel wave.
+     * See the call site for why: it keeps concurrent cold loads out of the host's nested
+     * monitor/read-write-lock path in MapManager.
+     */
+    private static void warmChannelMaps(List<Integer> mapIds) {
+        if (mapIds.isEmpty()) {
+            return;
+        }
+        long t0 = System.currentTimeMillis();
+        World world = Server.getInstance()
+                .getWorld(SoloMaplingConstants.GameConstants.WORLD_SCANIA);
+        if (world == null) {
+            return;
+        }
+        for (int ch = 1; ch <= world.getChannelsSize(); ch++) {
+            Channel channel = world.getChannel(ch);
+            if (channel == null) {
+                continue;
+            }
+            for (Integer mapId : mapIds) {
+                try {
+                    channel.getMapFactory().getMap(mapId);
+                } catch (RuntimeException ignored) {
+                    // a map that won't load is the wave's problem, not the warm-up's
+                }
+            }
+        }
+        System.out.println(String.format(
+                "[EnvironmentManager] warmed %d cohort maps across %d channels in %dms",
+                mapIds.size(), world.getChannelsSize(), System.currentTimeMillis() - t0));
+    }
+
     private static void runWave(int number, String name, List<Runnable> tasks) {
         System.out.println(String.format(
                 "[EnvironmentManager] === Wave %d (%s) starting (%d tasks) ===",
