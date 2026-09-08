@@ -1,12 +1,8 @@
 package soloMapling.Environment;
 
 import org.gms.client.Character;
-import org.gms.net.server.Server;
-import org.gms.net.server.channel.Channel;
-import org.gms.net.server.world.World;
 import org.gms.client.Job;
 import org.gms.server.maps.MapleMap;
-import soloMapling.server.SoloMaplingConstants;
 import soloMapling.ArtificialPlayer.BotGeneration;
 import soloMapling.ArtificialPlayer.BotMovementSystem.MovementCommands;
 import soloMapling.ArtificialPlayer.BotDecoratorSystem.BotDecorate;
@@ -297,7 +293,6 @@ public class EnvironmentManager {
         var w8 = pop.training();
         if (w8.enabled()) {
             List<Runnable> tasks = new ArrayList<>();
-            List<Integer> cohortMapIds = new ArrayList<>();
             var warm = w8.warmNav();
             if (warm != null && warm.hops() > 0 && warm.mapId() > 0) {
                 tasks.add(() -> GCMovement.mapsWithinHops(warm.mapId(), warm.hops()));
@@ -308,26 +303,10 @@ public class EnvironmentManager {
                     continue;
                 }
                 int mapId = cohort.mapId();
-                if (!cohortMapIds.contains(mapId)) {
-                    cohortMapIds.add(mapId);
-                }
                 int lo = cohort.levelLo();
                 int hi = cohort.levelHi();
                 tasks.add(() -> spawnTrainingBotsAt(mapId, n, lo, hi));
             }
-            // Warm every channel's copy of every cohort map FIRST, on this thread, before the wave
-            // fans out. A MapFactory is per channel, so spreading bots across channels means channel
-            // 2..N have never loaded these maps and the first bot to touch one pays the full WZ load -
-            // with 55 tasks in flight that is 55 concurrent cold loads.
-            //
-            // That matters because the host's MapManager.loadMapFromWz is a synchronized method that
-            // takes its own read/write lock around a slow load and then the write lock to cache the
-            // result: it holds the monitor across the slow part, while resetMap() takes the write lock
-            // and then needs that same monitor. Concurrent cold loading is what lets those two paths
-            // meet and deadlock - which is the wave-8 hang (no CPU, no IO, tasks parked).
-            //
-            // Loading them serially here means the parallel wave only ever hits the cached path.
-            warmChannelMaps(cohortMapIds);
             runWave(8, "Training bots", tasks);
         }
 
@@ -401,18 +380,15 @@ public class EnvironmentManager {
 
     // Spawn one town's ambient population: its per-map stationed SocialBots plus its roaming wanderers.
     public static void spawnTown(TownPresenceConfig.TownEntry town) {
-        System.out.println(String.format("TownPresence: [enter] town %s (maps=%s, wanderers=%s)", town.name(), town.maps().size(), town.wanderers()));
         for (TownPresenceConfig.MapShare share : town.maps()) {
-            System.out.println(String.format("TownPresence: [enter] %s social x%s on map %s", town.name(), share.count(), share.mapId()));
             int n = spawnSocialCohort(share.mapId(), share.count(), town.levelLo(), town.levelHi());
-            System.out.println(String.format("TownPresence: [exit] %s social x%s on map %s -> created %s", town.name(), share.count(), share.mapId(), n));
+            debugprint(fmt("TownPresence: {} social bots on map {} ({}, lv {}..{})",
+                    n, share.mapId(), town.name(), town.levelLo(), town.levelHi()));
         }
         if (town.wanderers() > 0) {
-            System.out.println(String.format("TownPresence: [enter] %s wanderers x%s on map %s", town.name(), town.wanderers(), town.mainMapId()));
             int w = spawnTownWanderers(town.mainMapId(), town.wanderers(), town.levelLo(), town.levelHi());
-            System.out.println(String.format("TownPresence: [exit] %s wanderers on map %s -> created %s", town.name(), town.mainMapId(), w));
+            debugprint(fmt("TownPresence: {} wanderers on map {} ({})", w, town.mainMapId(), town.name()));
         }
-        System.out.println(String.format("TownPresence: [exit] town %s done", town.name()));
     }
 
     // Spawn n stationed ambient SocialBots on a map at anchor-weighted ground spots (near NPCs/shops, on
@@ -436,27 +412,21 @@ public class EnvironmentManager {
             return 0;
         }
         Point anchor = map.getPortal(0).getPosition();
-        System.out.println(String.format("TownPresence: [enter] sampling %s spots on map %s", n, mapId));
         List<Point> spots = TownPresenceSampler.sample(map, anchor, n, TownPresenceConfig.overridesFor(mapId));
-        System.out.println(String.format("TownPresence: [exit] sampled %s spots on map %s (asked %s)", spots.size(), mapId, n));
         List<Integer> ids = new ArrayList<>();
         for (int i = 0; i < n; i++) {
             Point spawnAt = i < spots.size() ? spots.get(i) : anchor;
             int baseClass = BotDecorate.rollBaseClass(); // weighted 1..4 (Pirate excluded), gear/job set together
-            System.out.println(String.format("TownPresence: [enter] createBot %s/%s on map %s", i + 1, n, mapId));
             try {
                 int botId = BotGeneration.createBot(spawnAt, map, baseClass, loLevel, hiLevel);
                 if (botId > 0) {
                     ids.add(botId);
                 }
-                System.out.println(String.format("TownPresence: [exit] createBot %s/%s on map %s -> id %s", i + 1, n, mapId, botId));
             } catch (Exception e) {
                 debugprint(fmt("TownPresence: create failed on {} ({})", mapId, e.getMessage()));
             }
         }
-        System.out.println(String.format("TownPresence: [enter] setAndStartBots x%s (type %s) on map %s", ids.size(), type, mapId));
         setAndStartBots(ids, type);
-        System.out.println(String.format("TownPresence: [exit] setAndStartBots done on map %s", mapId));
         return ids.size();
     }
 
@@ -471,67 +441,13 @@ public class EnvironmentManager {
      * See the call site for why: it keeps concurrent cold loads out of the host's nested
      * monitor/read-write-lock path in MapManager.
      */
-    private static void warmChannelMaps(List<Integer> mapIds) {
-        if (mapIds.isEmpty()) {
-            return;
-        }
-        long t0 = System.currentTimeMillis();
-        World world = Server.getInstance()
-                .getWorld(SoloMaplingConstants.GameConstants.WORLD_SCANIA);
-        if (world == null) {
-            return;
-        }
-        for (int ch = 1; ch <= world.getChannelsSize(); ch++) {
-            Channel channel = world.getChannel(ch);
-            if (channel == null) {
-                continue;
-            }
-            for (Integer mapId : mapIds) {
-                try {
-                    channel.getMapFactory().getMap(mapId);
-                } catch (RuntimeException ignored) {
-                    // a map that won't load is the wave's problem, not the warm-up's
-                }
-            }
-        }
-        System.out.println(String.format(
-                "[EnvironmentManager] warmed %d cohort maps across %d channels in %dms",
-                mapIds.size(), world.getChannelsSize(), System.currentTimeMillis() - t0));
-    }
-
     private static void runWave(int number, String name, List<Runnable> tasks) {
         System.out.println(String.format(
-                "[EnvironmentManager] === Wave %d (%s) starting (%d tasks) ===",
-                number, name, tasks.size()));
+                "[EnvironmentManager] === Wave %d (%s) starting ===", number, name));
         long start = System.currentTimeMillis();
         int botsBefore = BotGeneration.getBotsCreatedCount();
 
-        // Entry AND exit per task: a task that hangs shows a "start" with no matching "done",
-        // which is the only way to find it in a release build (no class names in a thread dump).
-        java.util.concurrent.atomic.AtomicInteger started = new java.util.concurrent.atomic.AtomicInteger();
-        java.util.concurrent.atomic.AtomicInteger done = new java.util.concurrent.atomic.AtomicInteger();
-        List<Runnable> tracked = new java.util.ArrayList<>(tasks.size());
-        for (Runnable task : tasks) {
-            tracked.add(() -> {
-                int seq = started.incrementAndGet();
-                long t0 = System.currentTimeMillis();
-                System.out.println(String.format(
-                        "[EnvironmentManager]   wave %d task #%d start", number, seq));
-                try {
-                    task.run();
-                } catch (RuntimeException e) {
-                    System.out.println(String.format(
-                            "[EnvironmentManager]   wave %d task #%d FAILED after %dms: %s",
-                            number, seq, System.currentTimeMillis() - t0, e));
-                    throw e;
-                }
-                System.out.println(String.format(
-                        "[EnvironmentManager]   wave %d task #%d done (%dms, %d/%d complete)",
-                        number, seq, System.currentTimeMillis() - t0,
-                        done.incrementAndGet(), tasks.size()));
-            });
-        }
-        runPhase(tracked);
+        runPhase(tasks);
 
         double seconds = (System.currentTimeMillis() - start) / 1000.0;
         int botsSpawned = BotGeneration.getBotsCreatedCount() - botsBefore;
@@ -597,41 +513,12 @@ public class EnvironmentManager {
         NpcSpawner.spawnNpc(NpcId.RPS_ADMIN, casinoMap, 899, 275);
     }
 
-    /**
-     * How many wave tasks may run at once.
-     *
-     * <p>Virtual threads are free, but what the tasks DO is not: each one hammers the database
-     * (~10 queries per bot) and the Druid pool defaults to only 8 connections. Letting a 55-task
-     * wave all go at once does not make it 55x faster - every task past the pool size just waits,
-     * and the queueing makes each one slower than the last (measured: 0.8s for the first tasks,
-     * 20s+ for later ones in the same wave, with the CPU idle because waiting is not work). It
-     * also starves anything else that needs a connection.
-     *
-     * <p>Capping concurrency keeps the pool saturated without oversubscribing it: the same total
-     * work, done steadily, and other work can still get a connection.
-     */
-    private static final int MAX_CONCURRENT_WAVE_TASKS = 8;
-
     private static void runPhase(List<Runnable> tasks) {
         // Virtual threads: wave tasks spend most of their time blocked (spawn
         // choreography sleeps, readiness latches), so they shouldn't occupy
         // the fixed thread pool.
-        java.util.concurrent.Semaphore limiter =
-                new java.util.concurrent.Semaphore(MAX_CONCURRENT_WAVE_TASKS);
         CompletableFuture<?>[] futures = tasks.stream()
-                .map(task -> CompletableFuture.runAsync(() -> {
-                    try {
-                        limiter.acquire();
-                    } catch (InterruptedException e) {
-                        Thread.currentThread().interrupt();
-                        throw new IllegalStateException("wave task interrupted before start", e);
-                    }
-                    try {
-                        task.run();
-                    } finally {
-                        limiter.release();
-                    }
-                }, ExecutorServiceManager.getVirtualThreadExecutorService()))
+                .map(task -> CompletableFuture.runAsync(task, ExecutorServiceManager.getVirtualThreadExecutorService()))
                 .toArray(CompletableFuture[]::new);
         CompletableFuture.allOf(futures).join();
     }
