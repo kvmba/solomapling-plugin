@@ -241,6 +241,37 @@ class GachaPrizePoolTest {
         return s != null && s.codePoints().anyMatch(Character::isIdeographic);
     }
 
+    // --- prize odds ----------------------------------------------------------
+
+    /**
+     * A round must be able to come up empty - otherwise the jackpot is not an
+     * event, it is a given - but it must not be so rare the pool never shows.
+     * Sampled loosely: this is a coin with a known bias, not an exact count.
+     */
+    @Test
+    void someRoundsCarryNoPrizeAtAll() {
+        GachaPrizePool pool = GachaPrizePool.load();
+        int withPrize = 0;
+        int rounds = 4000;
+        for (int i = 0; i < rounds; i++) {
+            if (pool.rollForRound() != null) withPrize++;
+        }
+        double rate = (double) withPrize / rounds;
+        assertTrue(rate > 0.02, "prize never appears: " + rate);
+        assertTrue(rate < 0.40, "prize too common to be an event: " + rate);
+    }
+
+    /** Whatever a round yields is a single usable id, never a pair of them. */
+    @Test
+    void aRoundYieldsAtMostOneUsablePrize() {
+        GachaPrizePool pool = GachaPrizePool.load();
+        for (int i = 0; i < 2000; i++) {
+            GachaPrizePool.Entry entry = pool.rollForRound();
+            assertTrue(entry == null || entry.itemId > 0,
+                    "round produced an unusable prize id");
+        }
+    }
+
     private static Map<String, Object> readPool() {
         try (Reader r = PluginResources.openReader(POOL_PATH)) {
             return (Map<String, Object>) new YamlReader(r).read();

@@ -40,8 +40,19 @@ public class GachaFillerSystem {
         }
     }
 
+    /**
+     * Filler with one prize spliced into the back half.
+     * <p>
+     * {@code prize_id} of 0 means "no prize this round" - the list is returned
+     * untouched. That matters because 0 is also the meso sentinel inside the
+     * filler, so inserting it would quietly hand out an extra meso pile on
+     * exactly the rounds that failed to roll a jackpot.
+     */
     public static List<Integer> createGachaListWithPrize(int prize_id) {
         List<Integer> list = createGachaFillerList();
+        if (prize_id == 0) {
+            return list;
+        }
         // Prize lands in the back half of the spray so the pop builds instead of
         // peaking on drop #3. This used to be size/4 despite the name, which put
         // the jackpot as early as index 2 of 11.

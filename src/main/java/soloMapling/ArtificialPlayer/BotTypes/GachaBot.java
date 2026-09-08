@@ -83,35 +83,27 @@ public class GachaBot extends BotSM {
         }
 
         // Run the roulette drop animation
-        List<Integer> filler = createGachaListWithPrize(rollPrizeId());
-        List<ReactorDropEntry> popDrops = createReactorDropList(filler);
-        // The jackpot is built up front so its stats can be gutted first; it rides
-        // the spray in the slot the filler list already reserved for it.
-        int prizeIndex = filler.indexOf(prizeIdThisRound);
-        Item prize = prizeIndex >= 0 ? GachaPrizePool.buildPrize(prizeIdThisRound) : null;
-        if (prize != null) {
-            gachaPop(getChr(), popDrops, prize, prizeIndex);
-        } else {
-            gachaPop(getChr(), popDrops);
-        }
+        int prizeId = rollPrizeId();
+        List<Integer> filler = createGachaListWithPrize(prizeId);
+        // Equips come back with their stats gutted; the junk items drop as the
+        // wz defines them. gutted() makes that call itself.
+        Item prize = prizeId > 0 ? GachaPrizePool.gutted(prizeId) : null;
+        gachaPop(getChr(), createReactorDropList(filler), prize);
     }
 
-    // The prize pool is the joke: big-name equips whose stats have been cut to
-    // nothing. Fall back to a plain filler spray if the pool ever fails to load,
-    // so a broken yaml degrades the gag rather than the whole bot.
-    private int prizeIdThisRound;
-
+    /**
+     * The prize pool is the joke: big-name equips whose stats have been cut to
+     * nothing. Most rounds carry none at all - a prize has to stay an event, not
+     * a given. Returns 0 (a plain filler spray) when the round misses or the
+     * yaml is missing, so a broken file costs the gag rather than the bot.
+     */
     private int rollPrizeId() {
         GachaPrizePool pool = GachaPrizePool.load();
         if (pool.isEmpty()) {
-            return 0; // meso-only spray
-        }
-        GachaPrizePool.Entry entry = pool.roll();
-        if (entry == null) {
             return 0;
         }
-        prizeIdThisRound = entry.itemId;
-        return entry.itemId;
+        GachaPrizePool.Entry entry = pool.rollForRound();
+        return entry == null ? 0 : entry.itemId;
     }
 
     private void pickupItem() {

@@ -54,6 +54,21 @@ class GachaFillerSystemTest {
         assertEquals(Set.of(EARLIEST_PRIZE_INDEX, 6, 7, 8, 9, 10), seen);
     }
 
+    /**
+     * A round that rolls no prize must not grow the spray. 0 is the meso
+     * sentinel in the filler, so splicing it in would hand out an extra meso
+     * pile on exactly the rounds that missed the jackpot.
+     */
+    @RepeatedTest(20)
+    void noPrizeLeavesTheSprayAtFillerSize() {
+        List<Integer> spray = GachaFillerSystem.createGachaListWithPrize(0);
+
+        assertEquals(FILLER_SIZE, spray.size());
+        assertTrue(spray.stream().noneMatch(id -> id == PRIZE_ID));
+        // Whatever the filler rolled, nothing extra was inserted for the prize.
+        assertEquals(FILLER_SIZE, spray.stream().filter(id -> id != PRIZE_ID).count());
+    }
+
     /** Filler slots stay free of the prize id so the two can't be confused. */
     @RepeatedTest(50)
     void fillerNeverCollidesWithPrizeId() {
