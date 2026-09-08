@@ -162,12 +162,13 @@ public final class BotFlavor {
             return;
         }
         int skillId = profile.skillFor(weapon);
-        if (profile.route == BotAttackProfile.Route.MAGIC) {
-            BotAttack.magicSwing(chr, skillId);
-        } else {
-            // CLOSE and RANGED both render through the close-range pose path; skillSwing falls back to
-            // a plain weapon swing when the skill id is 0.
-            BotAttack.skillSwing(chr, skillId);
+        // Each route has its own packet: melee -> CLOSE_RANGE_ATTACK, ranged -> RANGED_ATTACK (plus a
+        // projectile and a trailing int), magic -> MAGIC_ATTACK (plus the charge int). Sending a ranged
+        // skill down the melee path crashes viewers, so the route must pick the swing, not a two-way split.
+        switch (profile.route) {
+            case MAGIC -> BotAttack.magicSwing(chr, skillId);
+            case RANGED -> BotAttack.rangedSwing(chr, skillId);
+            case CLOSE -> BotAttack.skillSwing(chr, skillId);
         }
     }
 

@@ -99,6 +99,33 @@ public final class BotAttack {
     }
 
     /**
+     * Broadcast a cosmetic RANGED skill shot at the air (bow/crossbow/claw) - the character plays the
+     * shot with no targets and no damage. Must go out as RANGED_ATTACK (0xBB), not the close-range
+     * opcode: ranged differs from melee in three ways - the opcode, a real projectile item id, and a
+     * trailing int. Filling only the projectile while keeping the melee opcode is not enough, since
+     * the client dispatches on the opcode and never reads a ballistic path on the melee branch.
+     * The projectile comes from the bot's weapon (and its chosen star when it is a registered claw
+     * bot), so the arrow/bolt/star the viewers see matches the bot's build. Pure visual.
+     */
+    public static void rangedSwing(Character chr, int skillId) {
+        if (chr == null || chr.getMap() == null || skillId <= 0) return;
+
+        int facingMask = facingLeft(chr) ? BotAttackData.FACING_LEFT_MASK : BotAttackData.FACING_RIGHT_MASK;
+        WeaponType weaponType = resolveEquippedWeaponType(chr);
+        int bodyActionId = BotAttackData.actionFor(skillId, weaponType);
+        int projectile = BotAttackData.projectileFor(weaponType, chr);
+
+        Map<Integer, List<Integer>> emptyTargets = Collections.emptyMap();
+        chr.getMap().broadcastMessage(
+                chr,
+                PacketCreator.rangedAttack(chr, skillId, resolveSkillLevel(skillId), facingMask,
+                        /* numAttackedAndDamage */ 0, projectile, emptyTargets,
+                        BotAttackData.DEFAULT_ATTACK_SPEED, bodyActionId, /* display */ 0),
+                false
+        );
+    }
+
+    /**
      * Broadcast a cosmetic MAGIC skill cast at the air - the character plays the spell cast with no
      * targets and no damage. Carries the charge int (BotAttackData.magicChargeFor); omitting it on a
      * keydown CHARGE skill (Big Bang) over-reads the packet and CRASHES viewers, so it must be sent.
