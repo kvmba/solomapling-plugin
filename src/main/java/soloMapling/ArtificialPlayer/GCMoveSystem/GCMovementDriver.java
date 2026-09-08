@@ -157,6 +157,13 @@ final class GCMovementDriver {
         if (active) {
             return BotPhysicsEngine.cfg.TICK_MS;
         }
+        // Airborne or on a rope: never drop to the slow cadence. The physics integrator is
+        // step-based, so at 1s per tick a bot hangs in the air for ~20 seconds before it lands -
+        // which is what "stuck in the jump pose" and "standing in mid-air" are. It also keeps
+        // isMoving() true, so the bot never reaches the idle branch that would clear the stance.
+        if (entry.inAir || entry.climbing) {
+            return BotPhysicsEngine.cfg.TICK_MS;
+        }
         if (bot != null
                 && !GCMovement.isMoving(bot) && !GCMovement.isTraveling(bot) && !GCMovement.isFollowing(bot)) {
             return UNOBSERVED_IDLE_TICK_MS; // jobless + unseen: idle heartbeat only
@@ -482,6 +489,11 @@ final class GCMovementDriver {
                 && Math.abs(botPos.y - entry.moveTarget.y) <= arrivalDist) {
             entry.moveTarget = null;
             entry.moveTargetPrecise = false;
+            // Drop any committed nav edge too. Arriving is the end of the trip, and a leftover
+            // edge keeps hasGoal true on the next tick, so the bot never takes the idle branch -
+            // and that branch is what clears the walk stance. Without this a bot that stops can
+            // stand still forever still rendering the walk animation.
+            BotMovementManager.clearNavigationState(entry);
             GCMovement.fireArrival(entry);
         }
     }
