@@ -646,13 +646,27 @@ final class BotPhysicsEngine {
             return Map.of();
         }
 
-        return FOOTHOLDS_BY_ID_BY_MAP_ID.computeIfAbsent(map.getId(), ignored -> {
-            Map<Integer, Foothold> footholdsById = new HashMap<>();
-            for (Foothold foothold : map.getFootholds().getAllFootholds()) {
-                footholdsById.put(foothold.getId(), foothold);
-            }
-            return footholdsById;
-        });
+        Map<Integer, Foothold> existing = FOOTHOLDS_BY_ID_BY_MAP_ID.get(map.getId());
+        if (existing != null) {
+            return existing;
+        }
+        // Build OUTSIDE the map, then publish with putIfAbsent.
+        //
+        // This used to be computeIfAbsent, which holds the map's bin lock for the whole build.
+        // That deadlocks: this runs on a bot tick holding that bot's synchronized state monitor,
+        // while a graph build on the warmup pool can be sitting on the same bin lock. Startup hung
+        // with no CPU and no IO, and only when cache/bot-nav was populated - with a warm cache the
+        // graph is ready immediately, so ticks take the full path (and call this) straight away,
+        // whereas a cold start stays in graph-warmup fallback and never gets here.
+        //
+        // Two threads may each build the table under a race; the work is identical and cheap
+        // enough, and putIfAbsent keeps exactly one.
+        Map<Integer, Foothold> footholdsById = new HashMap<>();
+        for (Foothold foothold : map.getFootholds().getAllFootholds()) {
+            footholdsById.put(foothold.getId(), foothold);
+        }
+        Map<Integer, Foothold> race = FOOTHOLDS_BY_ID_BY_MAP_ID.putIfAbsent(map.getId(), footholdsById);
+        return race != null ? race : footholdsById;
     }
 
     private static GroundStepPreview previewGroundStep(MapleMap map, Point currentPos, Foothold foothold, int nextX) {
