@@ -1,6 +1,7 @@
 package soloMapling.ArtificialPlayer.BotTypes;
 
 import org.gms.client.Character;
+import org.gms.client.inventory.Item;
 import org.gms.server.maps.ReactorDropEntry;
 import soloMapling.ArtificialPlayer.BotCommandsPack.SocialCommands;
 import soloMapling.ArtificialPlayer.BotHelpers;
@@ -8,6 +9,7 @@ import soloMapling.ArtificialPlayer.BotMessagingSystem.ChatMessage;
 import soloMapling.ArtificialPlayer.BotMessagingSystem.MessageQueue;
 import soloMapling.ArtificialPlayer.BotMovementSystem.MovementStructures.MovementRecording;
 import soloMapling.ArtificialPlayer.BotSM;
+import soloMapling.itemPool.GachaPrizePool;
 import soloMapling.server.EventMessageSystem.EventBus;
 import soloMapling.server.EventMessageSystem.EventType;
 import soloMapling.server.EventMessageSystem.GameEvent;
@@ -81,12 +83,35 @@ public class GachaBot extends BotSM {
         }
 
         // Run the roulette drop animation
-//        SocialCommands.BotChatbubble(getChr(), "Running roulette!");
-        // todo get prize based on map
-        int prize_id = 1082223; // scg
-        List<ReactorDropEntry> popDrops = createReactorDropList(createGachaListWithPrize(prize_id));
-        gachaPop(getChr(), popDrops);
-//        BotHelpers.blockingSleep(2000); // Simulate roulette animation time
+        List<Integer> filler = createGachaListWithPrize(rollPrizeId());
+        List<ReactorDropEntry> popDrops = createReactorDropList(filler);
+        // The jackpot is built up front so its stats can be gutted first; it rides
+        // the spray in the slot the filler list already reserved for it.
+        int prizeIndex = filler.indexOf(prizeIdThisRound);
+        Item prize = prizeIndex >= 0 ? GachaPrizePool.buildPrize(prizeIdThisRound) : null;
+        if (prize != null) {
+            gachaPop(getChr(), popDrops, prize, prizeIndex);
+        } else {
+            gachaPop(getChr(), popDrops);
+        }
+    }
+
+    // The prize pool is the joke: big-name equips whose stats have been cut to
+    // nothing. Fall back to a plain filler spray if the pool ever fails to load,
+    // so a broken yaml degrades the gag rather than the whole bot.
+    private int prizeIdThisRound;
+
+    private int rollPrizeId() {
+        GachaPrizePool pool = GachaPrizePool.load();
+        if (pool.isEmpty()) {
+            return 0; // meso-only spray
+        }
+        GachaPrizePool.Entry entry = pool.roll();
+        if (entry == null) {
+            return 0;
+        }
+        prizeIdThisRound = entry.itemId;
+        return entry.itemId;
     }
 
     private void pickupItem() {

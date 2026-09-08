@@ -126,11 +126,11 @@ public class CustomReactor {
         Spray Animation - Looks like a fountain dropping items
          */
     public static void sprayFromReactor(MapleMap map, int oid, List<ReactorDropEntry> drops, Character owner) {
-        dropFromReactorCustom(map, oid, drops, owner, true);
+        dropFromReactorCustom(map, oid, drops, owner, true, null);
     }
 
     public static void dropFromReactor(MapleMap map, int oid, List<ReactorDropEntry> drops, Character owner) {
-        dropFromReactorCustom(map, oid, drops, owner, false);
+        dropFromReactorCustom(map, oid, drops, owner, false, null);
     }
 
     private static void notDelayedReactorDrops(Character owner, List<ReactorDropEntry> drops, Reactor reactor, Point dropPos, int posX) {
@@ -186,6 +186,11 @@ public class CustomReactor {
 
     // Uses back-and-forth spray pattern
     private static void delayedReactorDrops(Character owner, List<ReactorDropEntry> drops, Reactor reactor, Point dropPos) {
+        delayedReactorDrops(owner, drops, reactor, dropPos, null);
+    }
+
+    private static void delayedReactorDrops(Character owner, List<ReactorDropEntry> drops, Reactor reactor, Point dropPos,
+                                            java.util.function.IntFunction<Item> override) {
         final int worldMesoRate = (int) owner.getWorldServer().getMesoRate();
 
         Point center2 = dropPos;
@@ -195,8 +200,11 @@ public class CustomReactor {
             if (isUnusableItem(d.itemId)) {
                 continue; // skip the entry entirely — no gap in the spray, no delay burned on it
             }
+            Item supplied = override == null ? null : override.apply(dropIndex);
             center2 = adjustCenterPositionXAxis(center2, dropIndex, dropSprayLength, dropSprayFullWidth, itemDropOffset);
-            if (d.itemId == 0) {
+            if (supplied != null) {
+                reactor.getMap().dropFromReactor(owner, reactor, supplied, center2, (short) d.questid, delay);
+            } else if (d.itemId == 0) {
                 int mesoDrop = getRandomMesoGachaFiller();
                 reactor.getMap().spawnMesoDrop(mesoDrop, reactor.getMap().calcDropPos(center2, reactor.getPosition()), reactor, owner,
                         false, (byte) 2, delay);
@@ -245,7 +253,8 @@ public class CustomReactor {
         }
     }
 
-    private static void dropFromReactorCustom(MapleMap map, int oid, List<ReactorDropEntry> drops, Character owner, boolean delayed) {
+    private static void dropFromReactorCustom(MapleMap map, int oid, List<ReactorDropEntry> drops, Character owner,
+                                              boolean delayed, java.util.function.IntFunction<Item> override) {
         Reactor reactor = map.getReactorByOid(oid);
         int posX = (int) reactor.getPosition().getX();
         int posY = (int) reactor.getPosition().getY();
@@ -267,15 +276,30 @@ public class CustomReactor {
         if (!delayed) {
             notDelayedReactorDrops(owner, drops, reactor, dropPos, posX);
         } else {
-            delayedReactorDrops(owner, drops, reactor, dropPos);
+            delayedReactorDrops(owner, drops, reactor, dropPos, override);
         }
         hitReactor(map, oid);
     }
 
     public static void gachaPop(Character fakechar, List<ReactorDropEntry> drops) {
+        gachaPop(fakechar, drops, null);
+    }
+
+    /**
+     * Gacha spray carrying a prebuilt jackpot. {@code prizeIndex} is the position
+     * in {@code drops} where {@code prize} replaces whatever filler rolled there,
+     * so the reward keeps a real slot in the fountain instead of being bolted on
+     * afterwards. Callers that pass no prize get the plain spray.
+     */
+    public static void gachaPop(Character fakechar, List<ReactorDropEntry> drops, Item prize, int prizeIndex) {
+        gachaPop(fakechar, drops, i -> i == prizeIndex ? prize : null);
+    }
+
+    private static void gachaPop(Character fakechar, List<ReactorDropEntry> drops,
+                                 java.util.function.IntFunction<Item> override) {
         spawnReactor(fakechar);
         int nearestReactor = getNearestReactor(fakechar);
         threeHitReactor(fakechar.getMap(), nearestReactor);
-        sprayFromReactor(fakechar.getMap(), nearestReactor, drops, fakechar);
+        dropFromReactorCustom(fakechar.getMap(), nearestReactor, drops, fakechar, true, override);
     }
 }
