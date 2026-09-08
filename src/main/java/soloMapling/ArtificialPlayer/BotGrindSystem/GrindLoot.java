@@ -28,6 +28,14 @@ final class GrindLoot {
     // pickup looks like the item teleports into the bot mid-air. Aged against MapItem.getDropTime() (the
     // server clock stamp set when the drop spawns), so it's "this drop has been on the ground ≥ this long".
     private static final long LOOT_SETTLE_MS = 1_500;
+    // Distance-dependent settle (see settleMsFor): a drop already underfoot needs hardly any wait,
+    // a distant one still waits out the full arc.
+    private static final int AT_FEET_PX = 24;        // "right underfoot"
+    private static final int FAR_PX = 120;           // at or beyond this, the full wait applies
+    private static final long AT_FEET_SETTLE_MS = 250;
+    /** Squared bounds, so the hot path can stay on distSq without a sqrt. */
+    private static final double AT_FEET_SQ = (double) AT_FEET_PX * AT_FEET_PX;
+    private static final double FAR_SQ = (double) FAR_PX * FAR_PX;
     private static final long LOOT_NARRATE_GAP_MS = 6_000;   // throttle loot lines (pickups are frequent)
 
     private final GrindBrain b;
@@ -193,13 +201,6 @@ final class GrindLoot {
             narrateLoot(narration);
         }
     }
-
-    private static final int AT_FEET_PX = 24;        // "right underfoot"
-    private static final int FAR_PX = 120;           // at or beyond this, the full wait applies
-    private static final long AT_FEET_SETTLE_MS = 250;
-    /** Squared bounds, so the hot path can stay on distSq without a sqrt. */
-    private static final double AT_FEET_SQ = (double) AT_FEET_PX * AT_FEET_PX;
-    private static final double FAR_SQ = (double) FAR_PX * FAR_PX;
 
     /**
      * How long a drop must sit before the bot may grab it, by how far away it is.

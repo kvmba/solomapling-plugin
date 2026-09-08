@@ -46,20 +46,17 @@ public final class BotChannelRouter {
     public static final int NONE = -1;
 
     /**
-     * The channel for the next created bot, or {@link #NONE} when all channels are at the cap.
-     * Falls back to {@link #DEFAULT_CHANNEL} when the channel topology is unavailable.
+     * Live count of bots per channel, maintained by addBotToServer/removeBotFromServer.
+     *
+     * <p>Counting beats scanning: the alternative - walking each channel's characters and testing
+     * every one - takes that channel's PlayerStorage read lock for an O(n) copy on every spawn.
+     * These counters are O(1) and never touch a storage lock.
+     *
+     * <p>They are live rather than cumulative: a bot that logs off for a rest decrements its
+     * channel, so the count cannot drift upward the way "bots ever assigned" would. The trade is
+     * that a bot dropped without going through removeBotFromServer would leave its channel
+     * counting one too many - the same pairing the existing register/unregister already assumes.
      */
-    // Live count of bots per channel, maintained by addBotToServer/removeBotFromServer.
-    //
-    // Counting beats scanning: the alternative (walking every channel's characters and testing
-    // each one) holds that channel's PlayerStorage READ LOCK for an O(n) copy on every single
-    // spawn. PlayerStorage uses a FAIR ReentrantReadWriteLock, so a startup wave - dozens of
-    // tasks spawning in parallel - queues on that lock and most threads sit parked: no CPU used,
-    // no progress visible, the wave looks hung. These counters are O(1) and touched outside any
-    // storage lock.
-    //
-    // They are live, not cumulative: a bot that logs off for a rest decrements its channel, so
-    // the count cannot drift upward the way "bots ever assigned" would.
     private static final java.util.Map<Integer, java.util.concurrent.atomic.AtomicInteger> BOTS_ON_CHANNEL =
             new java.util.concurrent.ConcurrentHashMap<>();
 
@@ -95,6 +92,10 @@ public final class BotChannelRouter {
         return ch > 0 ? ch : DEFAULT_CHANNEL;
     }
 
+    /**
+     * The channel for the next created bot, or {@link #NONE} when all channels are at the cap.
+     * Falls back to {@link #DEFAULT_CHANNEL} when the channel topology is unavailable.
+     */
     public static int nextChannel() {
         try {
             World world = Server.getInstance().getWorld(WORLD);
