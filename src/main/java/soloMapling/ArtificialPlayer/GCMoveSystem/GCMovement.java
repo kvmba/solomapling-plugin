@@ -80,7 +80,12 @@ public final class GCMovement {
             // longer reach it. The client keeps rendering the walk animation on a bot that is
             // standing still - the "walking on the spot" town bot. Worst on maps with no
             // movement recordings, where the old engine never sends a packet that overwrites it.
-            if (st.moveDir != 0 || st.groundBrakeDir != 0) {
+            //
+            // inAir / climbing count too, not just movement intent: a jump clears moveDir on
+            // takeoff (see BotPhysicsEngine), so a bot that hopped in place and is then disabled
+            // has moveDir == 0 but is still airborne - and airborne is what makes the stance
+            // render as JUMP. Testing only moveDir left those bots frozen in the jump pose.
+            if (st.moveDir != 0 || st.groundBrakeDir != 0 || st.inAir || st.climbing) {
                 BotPhysicsEngine.idleOnGround(st, bot);
                 BotMovementManager.broadcastMovement(st);
             }
