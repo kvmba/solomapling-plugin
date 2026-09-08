@@ -398,12 +398,14 @@ public class BotGeneration {
         // Remove from the channel this bot actually lives on. Removing from a fixed channel
         // would leave a ghost entry behind on every other channel once bots are spread out.
         Client owner = fakechar.getClient();
+        int channel = BotChannelRouter.channelOf(fakechar);
         if (owner != null && owner.getChannelServer() != null) {
             owner.getChannelServer().removePlayer(fakechar);
         } else {
-            channel.removePlayer(fakechar);
+            SoloMaplingUtilities.channel.removePlayer(fakechar);
         }
         world.getPlayerStorage().removePlayer(fakechar.getId());
+        BotChannelRouter.noteBotRemoved(channel);
         CharacterStorage.removeActiveBot(fakechar.getId());//
         // A removed bot never converts back out, so its recruit handoffs would linger in the
         // static maps forever (and a reused character id could inherit them).
@@ -420,12 +422,14 @@ public class BotGeneration {
         // Register on the bot's OWN channel. The fixed `channel` (channel 1) would put every
         // bot in one channel's player storage no matter which channel its client reports.
         Client owner = fakechar.getClient();
+        int channel = BotChannelRouter.channelOf(fakechar);
         if (owner != null && owner.getChannelServer() != null) {
             owner.getChannelServer().addPlayer(fakechar);
         } else {
-            channel.addPlayer(fakechar);
+            SoloMaplingUtilities.channel.addPlayer(fakechar);
         }
         world.getPlayerStorage().addPlayer(fakechar);
+        BotChannelRouter.noteBotAdded(channel);
     }
 
     public static void spawnBotFm(Character fakechar, Point pt) {

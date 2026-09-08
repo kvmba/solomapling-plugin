@@ -6,7 +6,6 @@ import org.gms.net.server.Server;
 import org.gms.net.server.channel.Channel;
 import org.gms.net.server.world.World;
 
-import java.util.Collection;
 
 /**
  * Picks the channel a newly created bot lives on.
@@ -50,6 +49,52 @@ public final class BotChannelRouter {
      * The channel for the next created bot, or {@link #NONE} when all channels are at the cap.
      * Falls back to {@link #DEFAULT_CHANNEL} when the channel topology is unavailable.
      */
+    // Live count of bots per channel, maintained by addBotToServer/removeBotFromServer.
+    //
+    // Counting beats scanning: the alternative (walking every channel's characters and testing
+    // each one) holds that channel's PlayerStorage READ LOCK for an O(n) copy on every single
+    // spawn. PlayerStorage uses a FAIR ReentrantReadWriteLock, so a startup wave - dozens of
+    // tasks spawning in parallel - queues on that lock and most threads sit parked: no CPU used,
+    // no progress visible, the wave looks hung. These counters are O(1) and touched outside any
+    // storage lock.
+    //
+    // They are live, not cumulative: a bot that logs off for a rest decrements its channel, so
+    // the count cannot drift upward the way "bots ever assigned" would.
+    private static final java.util.Map<Integer, java.util.concurrent.atomic.AtomicInteger> BOTS_ON_CHANNEL =
+            new java.util.concurrent.ConcurrentHashMap<>();
+
+    /** Record a bot arriving on a channel. Paired with {@link #noteBotRemoved}. */
+    public static void noteBotAdded(int channel) {
+        if (channel > 0) {
+            BOTS_ON_CHANNEL.computeIfAbsent(channel, k -> new java.util.concurrent.atomic.AtomicInteger())
+                    .incrementAndGet();
+        }
+    }
+
+    /** Record a bot leaving a channel. */
+    public static void noteBotRemoved(int channel) {
+        if (channel <= 0) {
+            return;
+        }
+        java.util.concurrent.atomic.AtomicInteger c = BOTS_ON_CHANNEL.get(channel);
+        if (c != null) {
+            c.decrementAndGet();
+        }
+    }
+
+    /** Channel a character lives on, read off its own client. */
+    public static int channelOf(Character chr) {
+        if (chr == null) {
+            return DEFAULT_CHANNEL;
+        }
+        org.gms.client.Client c = chr.getClient();
+        if (c == null) {
+            return DEFAULT_CHANNEL;
+        }
+        int ch = c.getChannel();
+        return ch > 0 ? ch : DEFAULT_CHANNEL;
+    }
+
     public static int nextChannel() {
         try {
             World world = Server.getInstance().getWorld(WORLD);
@@ -64,7 +109,8 @@ public final class BotChannelRouter {
             int[] bots = new int[n];
             int[] population = new int[n];
             for (int i = 0; i < n; i++) {
-                Channel ch = world.getChannel(i + 1); // channel ids are 1-based
+                int channelId = i + 1; // channel ids are 1-based
+                Channel ch = world.getChannel(channelId);
                 if (ch == null) {
                     // Treat a missing channel as full, not as empty: leaving it at 0 would make it
                     // look like the emptiest option and route the bot onto a channel that isn't
@@ -73,32 +119,17 @@ public final class BotChannelRouter {
                     population[i] = cap;
                     continue;
                 }
-                Collection<Character> chars = ch.getPlayerStorage().getAllCharacters();
-                population[i] = chars.size();
-                for (Character c : chars) {
-                    if (isArtificial(c)) {
-                        bots[i]++;
-                    }
-                }
+                // O(1): the size is a map lookup, unlike getAllCharacters() which copies the
+                // whole collection while holding the storage's fair read lock.
+                population[i] = ch.getPlayerStorage().getSize();
+                java.util.concurrent.atomic.AtomicInteger count = BOTS_ON_CHANNEL.get(channelId);
+                bots[i] = count != null ? Math.max(0, count.get()) : 0;
             }
             int pick = pickChannel(bots, weights(n), population, cap);
             return pick < 0 ? NONE : pick + 1;
         } catch (RuntimeException e) {
             return DEFAULT_CHANNEL; // never let routing break a spawn
         }
-    }
-
-    /**
-     * Whether a character is one of ours. Goes through the host registry rather than a plugin
-     * class so this package stays independent of the bot packages.
-     *
-     * <p>The plugin registers its classifier in {@code onLoad}, before any bot exists, so this
-     * is reliable by the time routing runs. If it were ever called before registration it would
-     * report nobody as a bot, and the taper would flatten onto channel 1 — degraded, but no
-     * worse than the old fixed-channel behaviour.
-     */
-    private static boolean isArtificial(Character chr) {
-        return chr != null && org.gms.extension.api.ArtificialCharacters.isArtificial(chr.getId());
     }
 
     /**
