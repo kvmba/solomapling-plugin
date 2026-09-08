@@ -543,12 +543,41 @@ public class EnvironmentManager {
         NpcSpawner.spawnNpc(NpcId.RPS_ADMIN, casinoMap, 899, 275);
     }
 
+    /**
+     * How many wave tasks may run at once.
+     *
+     * <p>Virtual threads are free, but what the tasks DO is not: each one hammers the database
+     * (~10 queries per bot) and the Druid pool defaults to only 8 connections. Letting a 55-task
+     * wave all go at once does not make it 55x faster - every task past the pool size just waits,
+     * and the queueing makes each one slower than the last (measured: 0.8s for the first tasks,
+     * 20s+ for later ones in the same wave, with the CPU idle because waiting is not work). It
+     * also starves anything else that needs a connection.
+     *
+     * <p>Capping concurrency keeps the pool saturated without oversubscribing it: the same total
+     * work, done steadily, and other work can still get a connection.
+     */
+    private static final int MAX_CONCURRENT_WAVE_TASKS = 8;
+
     private static void runPhase(List<Runnable> tasks) {
         // Virtual threads: wave tasks spend most of their time blocked (spawn
         // choreography sleeps, readiness latches), so they shouldn't occupy
         // the fixed thread pool.
+        java.util.concurrent.Semaphore limiter =
+                new java.util.concurrent.Semaphore(MAX_CONCURRENT_WAVE_TASKS);
         CompletableFuture<?>[] futures = tasks.stream()
-                .map(task -> CompletableFuture.runAsync(task, ExecutorServiceManager.getVirtualThreadExecutorService()))
+                .map(task -> CompletableFuture.runAsync(() -> {
+                    try {
+                        limiter.acquire();
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                        throw new IllegalStateException("wave task interrupted before start", e);
+                    }
+                    try {
+                        task.run();
+                    } finally {
+                        limiter.release();
+                    }
+                }, ExecutorServiceManager.getVirtualThreadExecutorService()))
                 .toArray(CompletableFuture[]::new);
         CompletableFuture.allOf(futures).join();
     }
