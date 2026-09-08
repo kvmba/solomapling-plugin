@@ -436,11 +436,6 @@ public class EnvironmentManager {
      * population is fire-and-forget internally, so its bots may be attributed
      * to a later wave's count.
      */
-    /**
-     * Load every cohort map into every channel's MapFactory, serially, before the parallel wave.
-     * See the call site for why: it keeps concurrent cold loads out of the host's nested
-     * monitor/read-write-lock path in MapManager.
-     */
     private static void runWave(int number, String name, List<Runnable> tasks) {
         System.out.println(String.format(
                 "[EnvironmentManager] === Wave %d (%s) starting ===", number, name));
