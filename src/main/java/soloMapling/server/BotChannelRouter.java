@@ -60,10 +60,7 @@ public final class BotChannelRouter {
     private static final java.util.Map<Integer, java.util.concurrent.atomic.AtomicInteger> BOTS_ON_CHANNEL =
             new java.util.concurrent.ConcurrentHashMap<>();
 
-    /** Headcount sample for the capacity gate - see {@link #populationSnapshot}. */
-    private static final long POPULATION_TTL_MS = 1_000L;
-    private static volatile int[] cachedPopulation = null;
-    private static volatile long cachedPopulationAtMs = 0L;
+
 
     /** Record a bot arriving on a channel. Paired with {@link #noteBotRemoved}. */
     public static void noteBotAdded(int channel) {
@@ -113,11 +110,25 @@ public final class BotChannelRouter {
                 return DEFAULT_CHANNEL;
             }
             int[] bots = new int[n];
+            int[] population = new int[n];
             for (int i = 0; i < n; i++) {
-                java.util.concurrent.atomic.AtomicInteger c = BOTS_ON_CHANNEL.get(i + 1);
+                int channelId = i + 1; // channel ids are 1-based
+                Channel ch = world.getChannel(channelId);
+                if (ch == null) {
+                    // Treat a missing channel as full, not as empty: leaving it at 0 would make
+                    // it look like the emptiest option and route the bot onto a channel that
+                    // isn't there. (getChannel only returns null past the end of the list, which
+                    // the loop never passes - a guard, not a live case.)
+                    population[i] = cap;
+                    continue;
+                }
+                // O(1) map lookup. Reading the storage lock once per channel per spawn was
+                // fine once the host's PlayerStorage stopped using a FAIR lock (see the host
+                // change) - the hang was writer starvation, not the cost of these reads.
+                population[i] = ch.getPlayerStorage().getSize();
+                java.util.concurrent.atomic.AtomicInteger c = BOTS_ON_CHANNEL.get(channelId);
                 bots[i] = c != null ? Math.max(0, c.get()) : 0;
             }
-            int[] population = populationSnapshot(world, n, cap);
             int pick = pickChannel(bots, weights(n), population, cap);
             return pick < 0 ? NONE : pick + 1;
         } catch (RuntimeException e) {
@@ -125,42 +136,6 @@ public final class BotChannelRouter {
         }
     }
 
-
-    /**
-     * Per-channel head count, at most {@link #POPULATION_TTL_MS} old.
-     *
-     * <p>Sampled, not read live: a thread dump of the startup hang showed dozens of virtual
-     * threads parked in {@code PlayerStorage.getSize} waiting on its read lock, while the
-     * writers ({@code addPlayer}) sat on the write lock. PlayerStorage uses a FAIR
-     * ReentrantReadWriteLock, so a stream of readers starves the writers - and this call ran
-     * once per channel per bot, which at ~1500 bots is thousands of read acquisitions during
-     * the waves that are doing all the adding.
-     *
-     * <p>Capacity does not need millisecond accuracy, so it is sampled instead.
-     */
-    private static int[] populationSnapshot(World world, int n, int cap) {
-        long now = System.currentTimeMillis();
-        int[] cached = cachedPopulation;
-        if (cached != null && cached.length == n && now - cachedPopulationAtMs < POPULATION_TTL_MS) {
-            return cached;
-        }
-        int[] fresh = new int[n];
-        for (int i = 0; i < n; i++) {
-            Channel ch = world.getChannel(i + 1); // channel ids are 1-based
-            if (ch == null) {
-                // Treat a missing channel as full, not as empty: leaving it at 0 would make it
-                // look like the emptiest option and route the bot onto a channel that isn't
-                // there. (getChannel only returns null past the end of the list, which the
-                // loop never passes - a guard, not a live case.)
-                fresh[i] = cap;
-                continue;
-            }
-            fresh[i] = ch.getPlayerStorage().getSize();
-        }
-        cachedPopulation = fresh;
-        cachedPopulationAtMs = now;
-        return fresh;
-    }
 
     /**
      * Index of the channel that should take the next bot, or -1 when they are all full.
