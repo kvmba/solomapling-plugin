@@ -194,6 +194,37 @@ final class GrindLoot {
         }
     }
 
+    private static final int AT_FEET_PX = 24;        // "right underfoot"
+    private static final int FAR_PX = 120;           // at or beyond this, the full wait applies
+    private static final long AT_FEET_SETTLE_MS = 250;
+    /** Squared bounds, so the hot path can stay on distSq without a sqrt. */
+    private static final double AT_FEET_SQ = (double) AT_FEET_PX * AT_FEET_PX;
+    private static final double FAR_SQ = (double) FAR_PX * FAR_PX;
+
+    /**
+     * How long a drop must sit before the bot may grab it, by how far away it is.
+     *
+     * <p>The settle gate exists so a drop is not yanked out of the air the instant it spawns -
+     * that reads as the item teleporting into the bot. But the wait only has to cover the drop's
+     * flight, and a drop landing AT THE BOT'S FEET is what a kill actually produces: standing on
+     * it for a second and a half before bending down looks wrong, and it is also what let kills
+     * look like they dropped nothing (the bot walks to the next mob before the loot is legal).
+     *
+     * <p>So: right underfoot is nearly instant, further away waits the full arc - a distant drop
+     * is one the bot walks to, and by the time it arrives the wait has passed anyway. Scales
+     * linearly between the two so there is no visible step.
+     */
+    private static long settleMsFor(double distSq) {
+        if (distSq <= AT_FEET_SQ) {
+            return AT_FEET_SETTLE_MS;
+        }
+        if (distSq >= FAR_SQ) {
+            return LOOT_SETTLE_MS;
+        }
+        double t = (Math.sqrt(distSq) - AT_FEET_PX) / (double) (FAR_PX - AT_FEET_PX);
+        return Math.round(AT_FEET_SETTLE_MS + t * (LOOT_SETTLE_MS - AT_FEET_SETTLE_MS));
+    }
+
     private MapItem nearestCollectableDrop(Character chr, int rangePx, int x0, int x1, int yLimit) {
         Point pos = chr.getPosition();
         if (pos == null) {
@@ -207,14 +238,14 @@ final class GrindLoot {
             if (!DropCommands.botCanLoot(chr, mi)) {
                 continue;
             }
-            if (now() - mi.getDropTime() < LOOT_SETTLE_MS) {
-                continue; // too fresh — let it land first; it'll be collected on a later tick
-            }
             Point ip = mi.getPosition();
             if (ip.x < x0 || ip.x > x1 || Math.abs(ip.y - pos.y) > yLimit) {
                 continue; // outside the leash, or on a stacked ledge above/below (unreachable)
             }
             double dsq = pos.distanceSq(ip);
+            if (now() - mi.getDropTime() < settleMsFor(dsq)) {
+                continue; // still settling for this distance — it'll be collected on a later tick
+            }
             if (dsq < bestSq) {
                 bestSq = dsq;
                 best = mi;
