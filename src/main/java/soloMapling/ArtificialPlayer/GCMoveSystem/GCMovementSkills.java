@@ -70,6 +70,13 @@ final class GCMovementSkills {
         if (origin == null) {
             return false;
         }
+        // Mirrors execFlashJump: refuse while airborne or on a rope/ladder. A bot part-way up a
+        // ladder that blinks at a mob above it (the vertical farY case) warps straight off the
+        // ladder to the mob - the "teleported to the monster while climbing" glitch. Callers fall
+        // back to walking, which finishes the climb first.
+        if (st.inAir || st.climbing) {
+            return false;
+        }
         int dx = targetX - origin.x;
         int dy = targetY - origin.y;
         Point dest;
