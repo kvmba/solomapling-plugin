@@ -380,6 +380,7 @@ public class EnvironmentManager {
 
     // Spawn one town's ambient population: its per-map stationed SocialBots plus its roaming wanderers.
     public static void spawnTown(TownPresenceConfig.TownEntry town) {
+        System.out.println("[TP] town start " + town.name());
         for (TownPresenceConfig.MapShare share : town.maps()) {
             int n = spawnSocialCohort(share.mapId(), share.count(), town.levelLo(), town.levelHi());
             debugprint(fmt("TownPresence: {} social bots on map {} ({}, lv {}..{})",
@@ -389,6 +390,7 @@ public class EnvironmentManager {
             int w = spawnTownWanderers(town.mainMapId(), town.wanderers(), town.levelLo(), town.levelHi());
             debugprint(fmt("TownPresence: {} wanderers on map {} ({})", w, town.mainMapId(), town.name()));
         }
+        System.out.println("[TP] town done " + town.name());
     }
 
     // Spawn n stationed ambient SocialBots on a map at anchor-weighted ground spots (near NPCs/shops, on
@@ -412,7 +414,9 @@ public class EnvironmentManager {
             return 0;
         }
         Point anchor = map.getPortal(0).getPosition();
+        System.out.println("[TP] enter map=" + mapId + " n=" + n + " type=" + type);
         List<Point> spots = TownPresenceSampler.sample(map, anchor, n, TownPresenceConfig.overridesFor(mapId));
+        System.out.println("[TP] sampled map=" + mapId + " spots=" + spots.size());
         List<Integer> ids = new ArrayList<>();
         for (int i = 0; i < n; i++) {
             Point spawnAt = i < spots.size() ? spots.get(i) : anchor;
@@ -426,7 +430,9 @@ public class EnvironmentManager {
                 debugprint(fmt("TownPresence: create failed on {} ({})", mapId, e.getMessage()));
             }
         }
+        System.out.println("[TP] creating map=" + mapId + " ids=" + ids.size());
         setAndStartBots(ids, type);
+        System.out.println("[TP] started map=" + mapId + " ids=" + ids.size());
         return ids.size();
     }
 
