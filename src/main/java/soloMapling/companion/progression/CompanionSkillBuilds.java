@@ -16,6 +16,13 @@ import static soloMapling.companion.progression.CompanionSkillBuild.MAX;
 public final class CompanionSkillBuilds {
     private static final Map<CompanionCareerBuild, CompanionSkillBuild> BUILDS = buildAll();
 
+    /**
+     * v83 first-job thief skills the host has no constant for:
+     * 4000000 = 集中术, 4000001 = 远程暗器. Both exist in the v83 Skill.wz.
+     */
+    private static final int FOCUS = 4000000;
+    private static final int RANGED_THROWING = 4000001;
+
     private CompanionSkillBuilds() {
     }
 
@@ -67,19 +74,24 @@ public final class CompanionSkillBuilds {
                     at(Archer.CRITICAL_SHOT, 20, 10),
                     at(Archer.FOCUS, 9, 10),
                     at(Archer.DOUBLE_SHOT, 20, 30, req(Archer.ARROW_BLOW, 1)));
+            // Rogue.NIMBLE_BODY (4001000) and Rogue.KEEN_EYES (4001001) are NOT in the v83 Skill.wz:
+            // v83's Haste ("轻功") is 4101004, a SECOND-job Assassin skill, and there is no Keen Eyes
+            // at all - both host constants are ids from a later version. Spending first-job points on
+            // them puts unresolvable skills on the companion, so the two slots are filled with the v83
+            // first-job skills that do exist (集中术 / 远程暗器).
             case 400 -> career == CompanionCareerBuild.NIGHT_LORD
                     ? List.of(
                             at(Rogue.LUCKY_SEVEN, 20, 10),
-                            at(Rogue.NIMBLE_BODY, 3, 10),
-                            at(Rogue.KEEN_EYES, 8, 10, req(Rogue.NIMBLE_BODY, 3)),
+                            at(FOCUS, 3, 10),
+                            at(RANGED_THROWING, 8, 10, req(FOCUS, 3)),
                             at(Rogue.DISORDER, 3, 10),
                             at(Rogue.DARK_SIGHT, 20, 10, req(Rogue.DISORDER, 3)),
-                            at(Rogue.NIMBLE_BODY, 10, 10))
+                            at(FOCUS, 10, 10))
                     : List.of(
                             at(Rogue.DOUBLE_STAB, 20, 10),
                             at(Rogue.DISORDER, 3, 10),
                             at(Rogue.DARK_SIGHT, 20, 10, req(Rogue.DISORDER, 3)),
-                            at(Rogue.NIMBLE_BODY, 18, 10));
+                            at(FOCUS, 18, 10));
             case 500 -> career == CompanionCareerBuild.BUCCANEER
                     ? List.of(
                             at(Pirate.BULLET_TIME, 20, 10),

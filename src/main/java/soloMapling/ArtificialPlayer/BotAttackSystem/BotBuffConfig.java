@@ -53,9 +53,15 @@ public final class BotBuffConfig {
     // order, so lower-tier buffs naturally resolve before higher-tier ones.
     private static final Map<Job, int[]> BUFFS_BY_JOB = new EnumMap<>(Job.class);
 
+    /** Iron Body ("圣甲术", 1001003). See the note where it is registered. */
+    private static final int IRON_BODY = 1001003;
+
     static {
         // ---- 1st job ----
-        put(Job.WARRIOR,  Warrior.IRON_BODY);                          // 1001003 - W.Def up
+        // The host constant Warrior.IRON_BODY reads 1000003, which is not a skill in the v83
+        // Skill.wz (it resolves to nothing - and broadcasting it crashes an observing client).
+        // 1001003 is Iron Body ("圣甲术"); the host has no constant for it, so it is named here.
+        put(Job.WARRIOR,  IRON_BODY);                                  // 1001003 - W.Def up
         put(Job.MAGICIAN, Magician.MAGIC_GUARD, Magician.MAGIC_ARMOR); // 2001002 / 2001003
         put(Job.BOWMAN,   Archer.FOCUS);                               // 3001003 - acc/avoid up
         // THIEF 1st job: only Dark Sight (hides the bot) -> intentionally none.
