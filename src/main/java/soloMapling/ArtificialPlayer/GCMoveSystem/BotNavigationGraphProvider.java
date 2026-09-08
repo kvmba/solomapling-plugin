@@ -82,16 +82,26 @@ final class BotNavigationGraphProvider {
     private static final Map<Integer, Set<Integer>> COLLIDABLE_WALL_IDS_BY_MAP_ID = new ConcurrentHashMap<>();
     private static final Map<Integer, Set<Integer>> COLLIDABLE_FROM_BELOW_IDS_BY_MAP_ID = new ConcurrentHashMap<>();
     private static final ThreadLocal<BuildProfileBuilder> ACTIVE_BUILD_PROFILE = new ThreadLocal<>();
-    private static final ExecutorService GRAPH_WARMUP_EXECUTOR = Executors.newSingleThreadExecutor(r -> {
-        Thread thread = new Thread(r, "bot-nav-graph-warmup");
-        thread.setDaemon(true);
-        return thread;
-    });
-    private static final ExecutorService FAST_GRAPH_WARMUP_EXECUTOR = Executors.newSingleThreadExecutor(r -> {
-        Thread thread = new Thread(r, "bot-nav-graph-warmup-fast");
-        thread.setDaemon(true);
-        return thread;
-    });
+    // Small fixed pools, NOT single threads.
+    //
+    // A single thread deadlocked: warmGraphsForRouteAsync runs its loop ON the warmup thread and
+    // queues each map's build to that same thread, so the loop is waiting on work that only it can
+    // run - it waits for itself, forever. Startup stopped there with no CPU and no IO, and deleting
+    // cache/bot-nav "fixed" it only by making the loads miss the nested path.
+    //
+    // More than one worker is enough to break that; building is still deduplicated per key by
+    // PENDING_GRAPHS below, so parallel workers never build the same graph twice.
+    private static final ExecutorService GRAPH_WARMUP_EXECUTOR = newFixedPool("bot-nav-graph-warmup");
+    private static final ExecutorService FAST_GRAPH_WARMUP_EXECUTOR = newFixedPool("bot-nav-graph-warmup-fast");
+
+    private static ExecutorService newFixedPool(String name) {
+        return Executors.newFixedThreadPool(Math.max(2, Math.min(4, Runtime.getRuntime().availableProcessors())),
+                r -> {
+                    Thread thread = new Thread(r, name);
+                    thread.setDaemon(true);
+                    return thread;
+                });
+    }
 
     private record GraphCacheKey(int mapId, int totalSpeedStat, int totalJumpStat, boolean snowShoes) {
         static GraphCacheKey from(int mapId, BotMovementProfile profile) {
