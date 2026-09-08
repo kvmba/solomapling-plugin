@@ -82,6 +82,8 @@ final class BotNavigationGraphProvider {
     private static final Map<Integer, Set<Integer>> COLLIDABLE_WALL_IDS_BY_MAP_ID = new ConcurrentHashMap<>();
     private static final Map<Integer, Set<Integer>> COLLIDABLE_FROM_BELOW_IDS_BY_MAP_ID = new ConcurrentHashMap<>();
     private static final ThreadLocal<BuildProfileBuilder> ACTIVE_BUILD_PROFILE = new ThreadLocal<>();
+    /** Serializes cache deserialization - see {@link #loadGraph}. */
+    private static final Object LOAD_LOCK = new Object();
     // Small fixed pools, NOT single threads.
     //
     // A single thread deadlocked: warmGraphsForRouteAsync runs its loop ON the warmup thread and
@@ -602,6 +604,23 @@ final class BotNavigationGraphProvider {
             return null;
         }
 
+        // Serialise the deserialization.
+        //
+        // With cache/bot-nav populated, startup deadlocks (wave 8 and 9 hang, no CPU, no IO) and
+        // deleting the directory is the only way up - so the trigger is reading these files.
+        // ObjectInputStream.readObject resolves classes and runs their initialisers, which takes
+        // JVM-wide locks; doing that from several warmup threads at once is the one shared state
+        // this path touches. Reading one at a time removes the contention.
+        //
+        // Reading is far cheaper than building, so serialising it costs little, and it runs on the
+        // warmup pool's platform threads - not on a virtual thread, where a blocking read inside a
+        // monitor would pin the carrier.
+        synchronized (LOAD_LOCK) {
+            return readGraphFile(file, key);
+        }
+    }
+
+    private static BotNavigationGraph readGraphFile(Path file, GraphCacheKey key) {
         try (ObjectInputStream in = new ObjectInputStream(Files.newInputStream(file))) {
             Object loaded = in.readObject();
             if (!(loaded instanceof BotNavigationGraph graph)) {
