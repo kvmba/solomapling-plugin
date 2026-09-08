@@ -63,6 +63,18 @@ public final class BotChannelRouter {
     private static final java.util.Map<Integer, java.util.concurrent.atomic.AtomicInteger> BOTS_ON_CHANNEL =
             new java.util.concurrent.ConcurrentHashMap<>();
 
+    // Cached channel headcount, refreshed at most once per POPULATION_TTL_MS.
+    //
+    // Reading it live costs a PlayerStorage READ LOCK per channel per spawn - and PlayerStorage
+    // uses a FAIR ReentrantReadWriteLock, so a startup wave (dozens of parallel spawn tasks,
+    // ~1500 bots) queues a few thousand read acquisitions that starve the WRITE lock addPlayer
+    // needs. That is the wave-9 hang: no CPU, no progress, and it only clears when the thread
+    // interleaving happens to favour the writers. Capacity does not need second-by-second
+    // accuracy, so it is sampled instead.
+    private static final long POPULATION_TTL_MS = 1_000L;
+    private static volatile int[] cachedPopulation = null;
+    private static volatile long cachedPopulationAtMs = 0L;
+
     /** Record a bot arriving on a channel. Paired with {@link #noteBotRemoved}. */
     public static void noteBotAdded(int channel) {
         if (channel > 0) {
@@ -106,30 +118,77 @@ public final class BotChannelRouter {
             if (n <= 0 || cap <= 0) {
                 return DEFAULT_CHANNEL;
             }
-            int[] bots = new int[n];
-            int[] population = new int[n];
-            for (int i = 0; i < n; i++) {
-                int channelId = i + 1; // channel ids are 1-based
-                Channel ch = world.getChannel(channelId);
-                if (ch == null) {
-                    // Treat a missing channel as full, not as empty: leaving it at 0 would make it
-                    // look like the emptiest option and route the bot onto a channel that isn't
-                    // there. (getChannel only returns null for an index past the list, which the
-                    // loop never passes - this is a guard, not a live case.)
-                    population[i] = cap;
-                    continue;
-                }
-                // O(1): the size is a map lookup, unlike getAllCharacters() which copies the
-                // whole collection while holding the storage's fair read lock.
-                population[i] = ch.getPlayerStorage().getSize();
-                java.util.concurrent.atomic.AtomicInteger count = BOTS_ON_CHANNEL.get(channelId);
-                bots[i] = count != null ? Math.max(0, count.get()) : 0;
-            }
+            int[] bots = botsPerChannel(n);
+            int[] population = populationSnapshot(world, n, cap);
             int pick = pickChannel(bots, weights(n), population, cap);
-            return pick < 0 ? NONE : pick + 1;
+            if (pick < 0) {
+                logCapacityReached(n, cap, population, bots);
+                return NONE;
+            }
+            return pick + 1;
         } catch (RuntimeException e) {
             return DEFAULT_CHANNEL; // never let routing break a spawn
         }
+    }
+
+    /**
+     * One-shot note when routing starts refusing bots. Without this a wave that spawns nothing
+     * looks identical to a wave that is stuck, and there is no way to tell whether the configured
+     * capacity is simply too small for the configured population.
+     */
+    private static void logCapacityReached(int n, int cap, int[] population, int[] bots) {
+        if (!capacityNoticeLogged.compareAndSet(false, true)) {
+            return;
+        }
+        StringBuilder sb = new StringBuilder("[BotChannelRouter] every channel is at capacity - "
+                + "further bots will be skipped. channels=" + n + " capacityPerChannel=" + cap
+                + " totalCapacity=" + (n * cap) + " headcount=[");
+        for (int i = 0; i < n; i++) {
+            sb.append(i == 0 ? "" : ", ").append(population[i]).append("(bots ").append(bots[i]).append(')');
+        }
+        sb.append("]. Raise channel_capacity or lower the population if this is not intended.");
+        System.out.println(sb);
+    }
+
+    private static final java.util.concurrent.atomic.AtomicBoolean capacityNoticeLogged =
+            new java.util.concurrent.atomic.AtomicBoolean(false);
+
+    /**
+     * Per-channel headcount, at most {@link #POPULATION_TTL_MS} old. See the field note: sampling
+     * is what keeps the routing path off the storage lock.
+     */
+    private static int[] populationSnapshot(World world, int n, int cap) {
+        long now = System.currentTimeMillis();
+        int[] cached = cachedPopulation;
+        if (cached != null && cached.length == n && now - cachedPopulationAtMs < POPULATION_TTL_MS) {
+            return cached;
+        }
+        int[] fresh = new int[n];
+        for (int i = 0; i < n; i++) {
+            Channel ch = world.getChannel(i + 1); // channel ids are 1-based
+            if (ch == null) {
+                // Treat a missing channel as full, not as empty: leaving it at 0 would make it
+                // look like the emptiest option and route the bot onto a channel that isn't
+                // there. (getChannel only returns null past the end of the list, which the loop
+                // never passes - a guard, not a live case.)
+                fresh[i] = cap;
+                continue;
+            }
+            fresh[i] = ch.getPlayerStorage().getSize();
+        }
+        cachedPopulation = fresh;
+        cachedPopulationAtMs = now;
+        return fresh;
+    }
+
+    /** Bots currently on each channel, from the live counters (no storage access). */
+    private static int[] botsPerChannel(int n) {
+        int[] bots = new int[n];
+        for (int i = 0; i < n; i++) {
+            java.util.concurrent.atomic.AtomicInteger c = BOTS_ON_CHANNEL.get(i + 1);
+            bots[i] = c != null ? Math.max(0, c.get()) : 0;
+        }
+        return bots;
     }
 
     /**

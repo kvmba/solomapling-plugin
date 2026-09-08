@@ -380,15 +380,18 @@ public class EnvironmentManager {
 
     // Spawn one town's ambient population: its per-map stationed SocialBots plus its roaming wanderers.
     public static void spawnTown(TownPresenceConfig.TownEntry town) {
+        System.out.println(String.format("TownPresence: [enter] town %s (maps=%s, wanderers=%s)", town.name(), town.maps().size(), town.wanderers()));
         for (TownPresenceConfig.MapShare share : town.maps()) {
+            System.out.println(String.format("TownPresence: [enter] %s social x%s on map %s", town.name(), share.count(), share.mapId()));
             int n = spawnSocialCohort(share.mapId(), share.count(), town.levelLo(), town.levelHi());
-            debugprint(fmt("TownPresence: {} social bots on map {} ({}, lv {}..{})",
-                    n, share.mapId(), town.name(), town.levelLo(), town.levelHi()));
+            System.out.println(String.format("TownPresence: [exit] %s social x%s on map %s -> created %s", town.name(), share.count(), share.mapId(), n));
         }
         if (town.wanderers() > 0) {
+            System.out.println(String.format("TownPresence: [enter] %s wanderers x%s on map %s", town.name(), town.wanderers(), town.mainMapId()));
             int w = spawnTownWanderers(town.mainMapId(), town.wanderers(), town.levelLo(), town.levelHi());
-            debugprint(fmt("TownPresence: {} wanderers on map {} ({})", w, town.mainMapId(), town.name()));
+            System.out.println(String.format("TownPresence: [exit] %s wanderers on map %s -> created %s", town.name(), town.mainMapId(), w));
         }
+        System.out.println(String.format("TownPresence: [exit] town %s done", town.name()));
     }
 
     // Spawn n stationed ambient SocialBots on a map at anchor-weighted ground spots (near NPCs/shops, on
@@ -412,21 +415,27 @@ public class EnvironmentManager {
             return 0;
         }
         Point anchor = map.getPortal(0).getPosition();
+        System.out.println(String.format("TownPresence: [enter] sampling %s spots on map %s", n, mapId));
         List<Point> spots = TownPresenceSampler.sample(map, anchor, n, TownPresenceConfig.overridesFor(mapId));
+        System.out.println(String.format("TownPresence: [exit] sampled %s spots on map %s (asked %s)", spots.size(), mapId, n));
         List<Integer> ids = new ArrayList<>();
         for (int i = 0; i < n; i++) {
             Point spawnAt = i < spots.size() ? spots.get(i) : anchor;
             int baseClass = BotDecorate.rollBaseClass(); // weighted 1..4 (Pirate excluded), gear/job set together
+            System.out.println(String.format("TownPresence: [enter] createBot %s/%s on map %s", i + 1, n, mapId));
             try {
                 int botId = BotGeneration.createBot(spawnAt, map, baseClass, loLevel, hiLevel);
                 if (botId > 0) {
                     ids.add(botId);
                 }
+                System.out.println(String.format("TownPresence: [exit] createBot %s/%s on map %s -> id %s", i + 1, n, mapId, botId));
             } catch (Exception e) {
                 debugprint(fmt("TownPresence: create failed on {} ({})", mapId, e.getMessage()));
             }
         }
+        System.out.println(String.format("TownPresence: [enter] setAndStartBots x%s (type %s) on map %s", ids.size(), type, mapId));
         setAndStartBots(ids, type);
+        System.out.println(String.format("TownPresence: [exit] setAndStartBots done on map %s", mapId));
         return ids.size();
     }
 
@@ -438,11 +447,37 @@ public class EnvironmentManager {
      */
     private static void runWave(int number, String name, List<Runnable> tasks) {
         System.out.println(String.format(
-                "[EnvironmentManager] === Wave %d (%s) starting ===", number, name));
+                "[EnvironmentManager] === Wave %d (%s) starting (%d tasks) ===",
+                number, name, tasks.size()));
         long start = System.currentTimeMillis();
         int botsBefore = BotGeneration.getBotsCreatedCount();
 
-        runPhase(tasks);
+        // Entry AND exit per task: a task that hangs shows a "start" with no matching "done",
+        // which is the only way to find it in a release build (no class names in a thread dump).
+        java.util.concurrent.atomic.AtomicInteger started = new java.util.concurrent.atomic.AtomicInteger();
+        java.util.concurrent.atomic.AtomicInteger done = new java.util.concurrent.atomic.AtomicInteger();
+        List<Runnable> tracked = new java.util.ArrayList<>(tasks.size());
+        for (Runnable task : tasks) {
+            tracked.add(() -> {
+                int seq = started.incrementAndGet();
+                long t0 = System.currentTimeMillis();
+                System.out.println(String.format(
+                        "[EnvironmentManager]   wave %d task #%d start", number, seq));
+                try {
+                    task.run();
+                } catch (RuntimeException e) {
+                    System.out.println(String.format(
+                            "[EnvironmentManager]   wave %d task #%d FAILED after %dms: %s",
+                            number, seq, System.currentTimeMillis() - t0, e));
+                    throw e;
+                }
+                System.out.println(String.format(
+                        "[EnvironmentManager]   wave %d task #%d done (%dms, %d/%d complete)",
+                        number, seq, System.currentTimeMillis() - t0,
+                        done.incrementAndGet(), tasks.size()));
+            });
+        }
+        runPhase(tracked);
 
         double seconds = (System.currentTimeMillis() - start) / 1000.0;
         int botsSpawned = BotGeneration.getBotsCreatedCount() - botsBefore;
