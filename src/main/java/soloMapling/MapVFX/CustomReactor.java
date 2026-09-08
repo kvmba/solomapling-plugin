@@ -126,11 +126,11 @@ public class CustomReactor {
         Spray Animation - Looks like a fountain dropping items
          */
     public static void sprayFromReactor(MapleMap map, int oid, List<ReactorDropEntry> drops, Character owner) {
-        dropFromReactorCustom(map, oid, drops, owner, true);
+        dropFromReactorCustom(map, oid, drops, owner, true, null);
     }
 
     public static void dropFromReactor(MapleMap map, int oid, List<ReactorDropEntry> drops, Character owner) {
-        dropFromReactorCustom(map, oid, drops, owner, false);
+        dropFromReactorCustom(map, oid, drops, owner, false, null);
     }
 
     private static void notDelayedReactorDrops(Character owner, List<ReactorDropEntry> drops, Reactor reactor, Point dropPos, int posX) {
@@ -185,12 +185,14 @@ public class CustomReactor {
     }
 
     // Uses back-and-forth spray pattern
-    private static void delayedReactorDrops(Character owner, List<ReactorDropEntry> drops, Reactor reactor, Point dropPos) {
+    private static void delayedReactorDrops(Character owner, List<ReactorDropEntry> drops, Reactor reactor,
+                                            Point dropPos, Item prize) {
         final int worldMesoRate = (int) owner.getWorldServer().getMesoRate();
 
         Point center2 = dropPos;
         short delay = 0;
         int dropIndex = 0;
+        boolean prizeClaimed = false;
         for (ReactorDropEntry d : drops) {
             if (isUnusableItem(d.itemId)) {
                 continue; // skip the entry entirely — no gap in the spray, no delay burned on it
@@ -201,11 +203,10 @@ public class CustomReactor {
                 reactor.getMap().spawnMesoDrop(mesoDrop, reactor.getMap().calcDropPos(center2, reactor.getPosition()), reactor, owner,
                         false, (byte) 2, delay);
             } else {
-                Item prize = gachaPrize.get();
                 final Item drop;
-                if (prize != null && prize.getItemId() == d.itemId) {
-                    drop = prize;       // already built (and gutted) by the caller
-                    gachaPrize.remove(); // one jackpot per round, even if filler repeats the id
+                if (prize != null && prize.getItemId() == d.itemId && !prizeClaimed) {
+                    drop = prize;         // already built (and gutted) by the caller
+                    prizeClaimed = true; // one jackpot per round, even if filler repeats the id
                 } else if (ItemConstants.getInventoryType(d.itemId) != InventoryType.EQUIP) {
                     drop = new Item(d.itemId, (short) 0, (short) 1);
                 } else {
@@ -249,7 +250,8 @@ public class CustomReactor {
         }
     }
 
-    private static void dropFromReactorCustom(MapleMap map, int oid, List<ReactorDropEntry> drops, Character owner, boolean delayed) {
+    private static void dropFromReactorCustom(MapleMap map, int oid, List<ReactorDropEntry> drops, Character owner,
+                                              boolean delayed, Item prize) {
         Reactor reactor = map.getReactorByOid(oid);
         int posX = (int) reactor.getPosition().getX();
         int posY = (int) reactor.getPosition().getY();
@@ -271,7 +273,7 @@ public class CustomReactor {
         if (!delayed) {
             notDelayedReactorDrops(owner, drops, reactor, dropPos, posX);
         } else {
-            delayedReactorDrops(owner, drops, reactor, dropPos);
+            delayedReactorDrops(owner, drops, reactor, dropPos, prize);
         }
         hitReactor(map, oid);
     }
@@ -293,23 +295,6 @@ public class CustomReactor {
         spawnReactor(fakechar);
         int nearestReactor = getNearestReactor(fakechar);
         threeHitReactor(fakechar.getMap(), nearestReactor);
-        gachaPrize.set(prize);
-        try {
-            dropFromReactorCustom(fakechar.getMap(), nearestReactor, drops, fakechar, true);
-        } finally {
-            gachaPrize.remove();
-        }
+        dropFromReactorCustom(fakechar.getMap(), nearestReactor, drops, fakechar, true, prize);
     }
-
-    /**
-     * The jackpot for the spray being built on this thread - set by
-     * {@link #gachaPop(Character, List, Item)} and read while each drop is
-     * constructed: the first entry whose id matches is swapped for it and the
-     * claim is consumed, so a filler roll that happens to repeat the prize id
-     * cannot turn one jackpot into two.
-     * <p>
-     * Thread-local because drops are sprayed from bot ticks and timer callbacks,
-     * and a prize must not leak between two bots popping at once.
-     */
-    private static final ThreadLocal<Item> gachaPrize = new ThreadLocal<>();
 }

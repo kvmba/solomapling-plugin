@@ -180,20 +180,25 @@ public class BotGeneration {
 
     // forcedJobId > 0 pins the exact job (GM 'trainhere' test spawn); 0 = a random job for the class.
     public static int createBot(Point pos, MapleMap map, int baseClass, int minLevel, int maxLevel, int forcedJobId) {
+        // Spread bots over the open channels (ch1 heaviest) instead of stacking them all on
+        // channel 1. NONE means every channel is at capacity - skip the spawn rather than
+        // squeezing one in past the cap.
+        //
+        // Checked BEFORE the throttle takes a permit: acquire() blocks to enforce
+        // spawn_rate_per_second, and a bot that is about to be skipped must not pay that wait.
+        // Once the channels are full a whole wave would otherwise spend its permits - and its
+        // seconds - queueing for spawns that are then thrown away, which reads as a hang.
+        int channel = BotChannelRouter.nextChannel();
+        if (channel == BotChannelRouter.NONE) {
+            return -1;
+        }
+
         // Pace arrivals. Every spawn below is a full character load (~10+ SQL
         // queries) plus an O(map population) spawn broadcast; an unpaced flood
         // pins the CPU and starves the DB pool. Configured by
         // spawn_rate_per_second in EnvironmentPopulation.yaml (<=0 = unlimited).
         // Taken BEFORE the expensive work so the wait is the cheap part.
         BotSpawnThrottle.acquire();
-
-        // Spread bots over the open channels (ch1 heaviest) instead of stacking them all on
-        // channel 1. NONE means every channel is at capacity - skip the spawn rather than
-        // squeezing one in past the cap.
-        int channel = BotChannelRouter.nextChannel();
-        if (channel == BotChannelRouter.NONE) {
-            return -1;
-        }
 
         int cid = templateCharacterId();
 

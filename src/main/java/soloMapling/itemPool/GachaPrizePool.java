@@ -149,15 +149,15 @@ public class GachaPrizePool {
     // =========================================================================
 
     /**
-     * Build one prize as the joke intends: the wz-clean equip with its stats
-     * gutted. Callers only invoke this for real equips; everything else in the
-     * pool is a plain stack that drops as the wz defines it.
+     * Build one prize for the floor: a wz-clean equip with its stats gutted, or
+     * the plain stack the junk half of the pool is made of. Which of the two it
+     * is comes from the id, not from the caller.
      * <p>
      * Built through the same helper the other drop paths use, so the equip/base
-     * item split stays in one place.
+     * item split stays in one place rather than being re-derived here.
      */
-    public static Item gutted(int equipId) {
-        Item item = BotLogic.generateCleanItemEquip(equipId);
+    public static Item buildPrize(int itemId) {
+        Item item = BotLogic.generateCleanItemEquip(itemId);
         if (item instanceof Equip equip) {
             degrade(equip);
         }

@@ -85,9 +85,9 @@ public class GachaBot extends BotSM {
         // Run the roulette drop animation
         int prizeId = rollPrizeId();
         List<Integer> filler = createGachaListWithPrize(prizeId);
-        // Equips come back with their stats gutted; the junk items drop as the
-        // wz defines them. gutted() makes that call itself.
-        Item prize = prizeId > 0 ? GachaPrizePool.gutted(prizeId) : null;
+        // The pool holds equips and junk side by side; buildPrize guts the
+        // former and passes the latter through untouched.
+        Item prize = prizeId > 0 ? GachaPrizePool.buildPrize(prizeId) : null;
         gachaPop(getChr(), createReactorDropList(filler), prize);
     }
 
