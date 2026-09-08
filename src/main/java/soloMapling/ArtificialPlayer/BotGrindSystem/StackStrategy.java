@@ -328,6 +328,13 @@ final class StackStrategy implements GrindStrategy {
             return;
         }
         b.engaged = false;
+        // Same as camp: a mob in range is always swung first, so this is the walk-out-to-a-mob case,
+        // and it is the walk that abandons the drop the last kill left on this floor.
+        int[] leash = leash(chr);
+        if (b.collectAfterKill(chr, leash[0], leash[1], Math.max(300, (st.x1() - st.x0()) / 2))) {
+            b.markProgress(); // collecting is productive, not wedged
+            return;
+        }
         approachTether(chr, st, t);
         if (b.madeApproachProgress(chr)) {
             b.markProgress();

@@ -22,6 +22,10 @@ public final class GrindBrain {
     // ── Shared approach/engage tunables (read by the strategies + beats) ──
     static final int APPROACH_X = 70;                // melee floor: within this dx -> stop and swing
     static final int APPROACH_Y = 90;                // melee floor: within this dy -> in range
+    // How long after a kill the bot still tidies up that kill's drop before walking to the next mob.
+    // Long enough to cover a drop's settle, short enough that an unreachable drop (one that fell to a
+    // lower floor) cannot keep the bot looting instead of fighting.
+    static final long COLLECT_AFTER_KILL_MS = 2_500;
     private static final double APPROACH_REACH_FRAC = 0.80;  // stop at this fraction of attack reach
     static final int ROAM_RETARGET_EPS = 16;         // skip re-issuing move for tiny shifts
     private static final long TARGET_RETARGET_TIMEOUT = 4_000; // give up walking to an unreachable target/spot after this
@@ -255,6 +259,20 @@ public final class GrindBrain {
 
     void markProgress() {
         lastCombatProgressMs = now();
+    }
+
+    /**
+     * Collect the drop the last kill left, for the strategies to call just before they commit to
+     * walking at a mob that is out of attack range. Shared so every grind style loots the same way,
+     * and so the settle window is bounded in one place.
+     *
+     * <p>Returns true while there is loot to deal with, so the caller skips the approach this tick.
+     */
+    boolean collectAfterKill(Character chr, int x0, int x1, int searchRangePx) {
+        if (now() - lastKillMs > COLLECT_AFTER_KILL_MS) {
+            return false;
+        }
+        return loot.collectAfterKill(chr, x0, x1, searchRangePx);
     }
 
     // The active strategy's movement clamp for the shared engage beats.

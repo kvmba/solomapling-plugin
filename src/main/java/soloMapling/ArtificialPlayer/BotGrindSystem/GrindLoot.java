@@ -134,8 +134,9 @@ final class GrindLoot {
         if (pos == null) {
             return false;
         }
-        // Whatever has already settled at our feet comes in first — standing on the pile is the point.
-        grabLootAtFeet(chr);
+        // The at-feet vacuum already ran this tick (each strategy calls it before engaging), and it is
+        // paced, so a second call here would be a no-op — just walk onto the drop and let that tick's
+        // (or the next one's) vacuum take it once it has settled.
         MapItem near = drops.get(0);
         double nearSq = pos.distanceSq(near.getPosition());
         for (MapItem mi : drops) {

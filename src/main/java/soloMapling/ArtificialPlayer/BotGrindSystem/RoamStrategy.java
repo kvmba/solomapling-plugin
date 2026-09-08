@@ -81,6 +81,13 @@ final class RoamStrategy implements GrindStrategy {
             return;
         }
         b.engaged = false;
+        // Same as camp/stack: a mob in range is always swung first, so this is the walk-out case, and
+        // it is the walk that leaves the last kill's drop behind.
+        int[] leash = leash(chr);
+        if (b.collectAfterKill(chr, leash[0], leash[1], ROAM_LOOT_SEARCH_PX)) {
+            b.markProgress(); // collecting is productive, not wedged
+            return;
+        }
         approachRoam(chr, t);
         if (b.madeApproachProgress(chr)) {
             b.markProgress();
