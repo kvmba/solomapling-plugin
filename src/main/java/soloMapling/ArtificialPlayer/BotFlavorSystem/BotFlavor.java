@@ -61,6 +61,12 @@ public final class BotFlavor {
         if (!GCMovement.isMapObserved(chr.getMapId())) {
             return;
         }
+        // Hard gate: never while on a rope or ladder. A SKILL_SWING mid-climb casts off the rope -
+        // attacks are banned while climbing, and a wanderer's flavour tick is not a combat path, so
+        // nothing else gates it.
+        if (GCMovement.isClimbing(chr)) {
+            return;
+        }
 
         long now = System.currentTimeMillis();
         Long until = cooldownUntil.get(chr.getId());
