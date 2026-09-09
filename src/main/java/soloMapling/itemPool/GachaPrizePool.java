@@ -39,11 +39,11 @@ public class GachaPrizePool {
     private static final int STAT_CAP = 1;
 
     /**
-     * Odds that a given round carries a prize at all. Most pops are filler, so
-     * the jackpot stays an event rather than a given - and when one does land it
-     * is a single item, never two.
+     * Odds that a given round carries a prize at all. Most pops land one, so the
+     * fountain is worth watching, while the misses keep it from feeling like a
+     * routine handout. When a prize does land it is a single item, never two.
      */
-    private static final double PRIZE_CHANCE = 0.15;
+    private static final double PRIZE_CHANCE = 0.60;
 
     private static final Random random = new Random();
 

@@ -257,8 +257,11 @@ class GachaPrizePoolTest {
             if (pool.rollForRound() != null) withPrize++;
         }
         double rate = (double) withPrize / rounds;
-        assertTrue(rate > 0.02, "prize never appears: " + rate);
-        assertTrue(rate < 0.40, "prize too common to be an event: " + rate);
+        // Loose bounds around the configured 60%: this pins the order of
+        // magnitude so the odds cannot silently flip to "always" or "never",
+        // without re-asserting the constant itself.
+        assertTrue(rate > 0.45, "prize rarer than intended: " + rate);
+        assertTrue(rate < 0.75, "prize more common than intended: " + rate);
     }
 
     /** Whatever a round yields is a single usable id, never a pair of them. */
