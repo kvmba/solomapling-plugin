@@ -136,4 +136,21 @@ public class SoloMaplingUtilities {
         return SoloMaplingConstants.mainChannel().getMapFactory().getMap(id);
     }
 
+    /**
+     * How many channels the world has, or 1 when the world isn't up yet.
+     *
+     * <p>Training cohorts spawn one full set per channel, so the startup wave needs the count
+     * before it can fan the cohorts out.
+     */
+    public static int channelCount() {
+        try {
+            org.gms.net.server.world.World world =
+                    org.gms.net.server.Server.getInstance().getWorld(
+                            SoloMaplingConstants.GameConstants.WORLD_SCANIA);
+            int n = world == null ? 0 : world.getChannelsSize();
+            return n > 0 ? n : 1;
+        } catch (RuntimeException e) {
+            return 1;
+        }
+    }
 }

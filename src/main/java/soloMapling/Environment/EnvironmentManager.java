@@ -23,6 +23,8 @@ import soloMapling.ArtificialPlayer.SocialHotPotatoManager;
 import soloMapling.Casino.CasinoChipConfig;
 import soloMapling.server.ExecutorServiceManager;
 import soloMapling.server.NpcSpawner;
+import soloMapling.server.SoloMaplingConstants;
+import soloMapling.server.SoloMaplingUtilities;
 import org.gms.constants.id.MapId;
 import org.gms.constants.id.NpcId;
 
@@ -52,6 +54,7 @@ import static soloMapling.Environment.PlatformPlacement.spawnFillerBotsLockedY;
 import static soloMapling.Environment.PlatformSpawner.findUnoccupiedPoint;
 import static soloMapling.Environment.PlatformSpawner.findUnoccupiedPoints;
 import static soloMapling.FreeMarket.ArtificialFreeMarket.populateFreeMarketRegion;
+import static soloMapling.server.SoloMaplingUtilities.channelCount;
 import static soloMapling.server.SoloMaplingUtilities.getMapleMapById;
 
 import java.util.Random;
@@ -297,6 +300,10 @@ public class EnvironmentManager {
             if (warm != null && warm.hops() > 0 && warm.mapId() > 0) {
                 tasks.add(() -> GCMovement.mapsWithinHops(warm.mapId(), warm.hops()));
             }
+            // A cohort's count is a PER-CHANNEL quota, not a total to divide up: every channel
+            // gets its own full set of grinders, so a player hopping channels finds the hunting
+            // grounds busy wherever they land.
+            int channels = SoloMaplingUtilities.channelCount();
             for (var cohort : w8.cohorts()) {
                 int n = pop.scaled(cohort.count());
                 if (n <= 0) {
@@ -305,7 +312,10 @@ public class EnvironmentManager {
                 int mapId = cohort.mapId();
                 int lo = cohort.levelLo();
                 int hi = cohort.levelHi();
-                tasks.add(() -> spawnTrainingBotsAt(mapId, n, lo, hi));
+                for (int ch = 1; ch <= channels; ch++) {
+                    int channel = ch;
+                    tasks.add(() -> spawnTrainingBotsOnChannel(mapId, n, lo, hi, channel));
+                }
             }
             runWave(8, "Training bots", tasks);
         }
@@ -334,16 +344,40 @@ public class EnvironmentManager {
     // gear set together by the decorator. They self-discover nearby level-appropriate field maps and
     // fan out. A sub-level-10 band spawns Beginners (job 0): the decorator gives them a sword and
     // they fight with a basic skill-0 swing, so low bands are fine (class 1..4 is moot - all sword).
-    private static int spawnTrainingBotsAt(int townMapId, int n, int loLevel, int hiLevel) {
-        MapleMap map = getMapleMapById(townMapId);
+    private static int spawnTrainingBotsOnChannel(int townMapId, int n, int loLevel, int hiLevel,
+                                                  int channel) {
+        MapleMap map = mapOnChannel(townMapId, channel);
         if (map == null || map.getPortal(0) == null) {
-            debugprint(fmt("TrainingBots: no map / spawn portal for {}", townMapId));
+            debugprint(fmt("TrainingBots: no map / spawn portal for {} on ch{}", townMapId, channel));
             return 0;
         }
         Point sp = map.getPortal(0).getPosition();
-        int spawned = spawnScatteredTrainingBots(map, sp, n, loLevel, hiLevel).size();
-        debugprint(fmt("TrainingBots: {} spawned on map {} (lv {}..{})", spawned, townMapId, loLevel, hiLevel));
+        int spawned = spawnScatteredTrainingBots(map, sp, n, loLevel, hiLevel, channel).size();
+        debugprint(fmt("TrainingBots: {} spawned on map {} ch{} (lv {}..{})",
+                spawned, townMapId, channel, loLevel, hiLevel));
         return spawned;
+    }
+
+    // The map instance belonging to one channel. Callers hold an instance from whichever channel
+    // they were on (a GM's, or channel 1's); a bot must be placed in the instance of the channel
+    // it actually lives on, or its spawn is broadcast to the wrong channel's players.
+    private static MapleMap mapOnChannel(int mapId, int channel) {
+        try {
+            org.gms.net.server.Server server = org.gms.net.server.Server.getInstance();
+            org.gms.net.server.world.World world = server.getWorld(SoloMaplingConstants.GameConstants.WORLD_SCANIA);
+            if (world != null) {
+                org.gms.net.server.channel.Channel ch = world.getChannel(channel);
+                if (ch != null) {
+                    MapleMap resolved = ch.getMapFactory().getMap(mapId);
+                    if (resolved != null) {
+                        return resolved;
+                    }
+                }
+            }
+        } catch (RuntimeException e) {
+            debugprint(fmt("TrainingBots: could not resolve map {} on ch{} ({})", mapId, channel, e));
+        }
+        return getMapleMapById(mapId);
     }
 
     // Spawn n training bots scattered across the map's reachable platforms - an organic ground spot per
@@ -352,16 +386,26 @@ public class EnvironmentManager {
     // portal, or a GM's position for a dev dry-run) and is the per-bot fallback when the nav graph yields
     // no eligible ledge (empty/unbaked). Returns the created ids, each already typed + started as a
     // TRAINING_BOT by the time it lands (not batched after the loop - see the comment at the call).
-    public static List<Integer> spawnScatteredTrainingBots(MapleMap map, Point anchor, int n, int loLevel, int hiLevel) {
+    // GM dry-run overload: spawn on the main channel. See the channel-taking form for what
+    // `anchor` means.
+    public static List<Integer> spawnScatteredTrainingBots(MapleMap map, Point anchor, int n,
+                                                            int loLevel, int hiLevel) {
+        return spawnScatteredTrainingBots(map, anchor, n, loLevel, hiLevel,
+                SoloMaplingConstants.GameConstants.CHANNEL_1);
+    }
+
+    public static List<Integer> spawnScatteredTrainingBots(MapleMap map, Point anchor, int n,
+                                                            int loLevel, int hiLevel, int channel) {
         List<Point> spots = BotSpotPicker.pickGroundSpots(map, anchor.x, anchor.y, n);
         List<Integer> ids = new ArrayList<>();
         for (int i = 0; i < n; i++) {
             Point spawnAt = i < spots.size() ? spots.get(i) : anchor;
             int baseClass = BotDecorate.rollBaseClass(); // weighted 1..4 (Thief-heavy, Bowman-rare; Pirate excluded)
             try {
-                // spread = true: TrainingBots fight, so they stay on the channel taper (ch1 heaviest)
-                // instead of all stacking on ch1 with the ambient crowd.
-                int botId = BotGeneration.createBot(spawnAt, map, baseClass, loLevel, hiLevel, 0, true);
+                // On this channel specifically: every channel gets a full cohort, so the spawn
+                // is pinned to the channel the caller is filling.
+                int botId = BotGeneration.createBotOnChannel(spawnAt, map, baseClass, loLevel,
+                        hiLevel, 0, channel);
                 if (botId > 0) {
                     // Start each bot as it lands instead of after the whole cohort: under spawn
                     // throttling a serial cohort loop can run ~100s, and batch-at-the-end would
