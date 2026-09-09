@@ -497,10 +497,18 @@ public class EnvironmentManager {
             setAndStartBots(bots, BotTypeManager.BotType.HENESYS_BOT);
         }
         if (socialCount > 0) {
+            // Spread over the three recorded social ledges (the Nana-fairy corner and its two
+            // neighbours) rather than stacking one of them.
             int perSpot = Math.max(1, socialCount / 3);
-            List<Integer> s1 = spawnBotsOnMapOnPlatform(perSpot, HENESYS, "m4_social");
-            List<Integer> s2 = spawnBotsOnMapOnPlatform(perSpot, HENESYS, "m5_social");
-            List<Integer> s3 = spawnBotsOnMapOnPlatform(perSpot, HENESYS, "m6_social");
+            // Typed and started like every other batch: a bot without a BotSM in
+            // CharacterStorage is never ticked - it stands where it spawned, never speaks or
+            // drifts, and the ambient sweeps (which test getBotById(...) != null) skip it.
+            setAndStartBots(spawnBotsOnMapOnPlatform(perSpot, HENESYS, "m4_social"),
+                    BotTypeManager.BotType.SOCIAL_BOT);
+            setAndStartBots(spawnBotsOnMapOnPlatform(perSpot, HENESYS, "m5_social"),
+                    BotTypeManager.BotType.SOCIAL_BOT);
+            setAndStartBots(spawnBotsOnMapOnPlatform(perSpot, HENESYS, "m6_social"),
+                    BotTypeManager.BotType.SOCIAL_BOT);
         }
     }
 
