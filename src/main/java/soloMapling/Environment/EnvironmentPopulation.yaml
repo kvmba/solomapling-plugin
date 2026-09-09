@@ -109,10 +109,10 @@ waves:
       # Hunting-ground continents that were missing any hub at all.
       - {map: 240070100, count: 17, level_lo: 70, level_hi: 100} # 未来之城 (23 maps)
       - {map: 240050100, count: 13, level_lo: 95, level_hi: 130} # 生命之穴迷宫 (97-110)
-      - {map: 261020000, count: 20, level_lo: 30, level_hi: 80}  # 卡帕莱特研究所 (9)
-      - {map: 261010000, count: 12,  level_lo: 30, level_hi: 80}  # 蒙特鸠研究所 (6)
-      - {map: 260000000, count: 27, level_lo: 30, level_hi: 90}  # 阿里安特 (20 hunting maps, had none)
-      - {map: 260010000, count: 18, level_lo: 30, level_hi: 80}  # 阿里安特 西门外
+      - {map: 261020000, count: 16, level_lo: 30, level_hi: 80}  # 卡帕莱特研究所 (9)
+      - {map: 261010000, count: 10,  level_lo: 30, level_hi: 80}  # 蒙特鸠研究所 (6)
+      - {map: 260000000, count: 22, level_lo: 30, level_hi: 90}  # 阿里安特 (20 hunting maps, had none)
+      - {map: 260010000, count: 14, level_lo: 30, level_hi: 80}  # 阿里安特 西门外
       - {map: 600010100, count: 8,  level_lo: 30, level_hi: 70}  # 马莱尼西亚岛 (6)
       - {map: 600020100, count: 6,  level_lo: 30, level_hi: 80}  # 内部齿轮装置 (5)
       - {map: 702070200, count: 6,  level_lo: 120, level_hi: 135}  # 藏经阁三到四层 (120-125)
