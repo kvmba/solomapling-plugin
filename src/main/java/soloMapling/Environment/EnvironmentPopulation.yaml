@@ -201,33 +201,38 @@ waves:
         maps:
           - {map: 200000000, count: 14}
           - {map: 200000200, count: 6}
+      # 玩具城系 170 个练级 bot 却只有 72 个常驻（比值 0.42，基准 0.65）：
+      # 深层练级点（玩具塔、时间通道）把人吸走了，城里反而空。容量均充裕。
       - name: Ludibrium
         level_lo: 30
         level_hi: 90
-        wanderers: 10
+        wanderers: 14
         maps:
-          - {map: 220000000, count: 16}
-          - {map: 220000300, count: 5}
+          - {map: 220000000, count: 35}
+          - {map: 220000300, count: 12}
       - name: Korean Folk Town
         level_lo: 30
         level_hi: 70
         wanderers: 8
         maps:
-          - {map: 222000000, count: 13}
+          - {map: 222000000, count: 25}
+      # 水下世界 34 练级 / 14 常驻（0.41）。三个甲板按容量分配（142/55/139）。
       - name: Aquarium
         level_lo: 30
         level_hi: 80
-        wanderers: 4
+        wanderers: 6
         maps:
-          - {map: 230000000, count: 4}
-          - {map: 230000001, count: 3}
-          - {map: 230000002, count: 3}
+          - {map: 230000000, count: 12}
+          - {map: 230000001, count: 4}
+          - {map: 230000002, count: 6}
+      # 神木村是 lv70-130 的顶级大陆，练级队列 119 个却只有 15 个驻点——玩家满级
+      # 后回到城里会看到一座空城。容量 242，35 只占 14%，远未站满。
       - name: Leafre
         level_lo: 70
         level_hi: 120
-        wanderers: 8
+        wanderers: 14
         maps:
-          - {map: 240000000, count: 11}
+          - {map: 240000000, count: 35}
       - name: Mu Lung
         level_lo: 30
         level_hi: 95
@@ -263,12 +268,13 @@ waves:
         wanderers: 4
         maps:
           - {map: 300000000, count: 4}
+      # 时间神殿 lv90-150，只有 4 个驻点。容量 73，9 占 12%。
       - name: Time Temple
         level_lo: 90
         level_hi: 150
-        wanderers: 4
+        wanderers: 5
         maps:
-          - {map: 270000000, count: 4}
+          - {map: 270000000, count: 9}
       - name: New Leaf City
         level_lo: 30
         level_hi: 95
@@ -316,9 +322,9 @@ waves:
       - name: Earth Defense HQ
         level_lo: 30
         level_hi: 80
-        wanderers: 5
+        wanderers: 6
         maps:
-          - {map: 221000000, count: 8}
+          - {map: 221000000, count: 18}
       - name: Boat Quay Town
         level_lo: 30
         level_hi: 80
@@ -402,7 +408,7 @@ waves:
         level_hi: 120
         wanderers: 3
         maps:
-          - {map: 240010501, count: 4}
+          - {map: 240010501, count: 8}
       - name: Ariant Residence
         level_lo: 30
         level_hi: 90
@@ -415,12 +421,13 @@ waves:
         wanderers: 3
         maps:
           - {map: 261000001, count: 4}
+      # 容量 311 但 spanX 仅 945——窄而多层，地面分散，所以只小幅加。
       - name: Defense HQ Hangar
         level_lo: 30
         level_hi: 80
         wanderers: 3
         maps:
-          - {map: 221000200, count: 4}
+          - {map: 221000200, count: 8}
       - name: NLC Shopping Centre
         level_lo: 30
         level_hi: 95
