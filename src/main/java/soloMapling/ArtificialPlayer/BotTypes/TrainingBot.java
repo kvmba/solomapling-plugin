@@ -20,6 +20,7 @@ import org.gms.server.maps.MapleMap;
 import org.gms.server.maps.Portal;
 import soloMapling.ArtificialPlayer.BotDialogueHandler;
 import soloMapling.ArtificialPlayer.BotMessagingSystem.CharacterStorage;
+import soloMapling.ArtificialPlayer.BotGrindSystem.BotPlaceNames;
 import soloMapling.ArtificialPlayer.BotGrindSystem.DeepHub;
 import soloMapling.ArtificialPlayer.BotGrindSystem.GrindBrain;
 import soloMapling.ArtificialPlayer.BotGrindSystem.GrindTickRegistry;
@@ -530,7 +531,14 @@ public class TrainingBot extends BotSM implements GrindTickRegistry.Participant 
             movedUntilMs = now() + MOVE_STAY_MIN_MS
                     + (long) (rng.nextDouble() * (MOVE_STAY_MAX_MS - MOVE_STAY_MIN_MS));
         }
-        debugChat("MIGRATE: outgrown map " + homeMapId + " at lv " + chr.getLevel() + " -> " + dest);
+        // stdout, not the in-world chat: this is the one line that says whether a bot ever
+        // decides to leave at all, and it has to be readable without a GM client watching the
+        // map.
+        System.out.println("[MIGRATE] bot=" + chr.getName()
+                + " lv=" + chr.getLevel()
+                + " from=" + homeMapId + "(" + BotPlaceNames.name(homeMapId) + ")"
+                + " dest=" + dest + "(" + BotPlaceNames.name(dest) + ")"
+                + " optional=" + optional);
         // Home is the new continent from the moment we set out: a migration that gets turned back
         // (crowd, no route) still leaves the bot deciding from where it stands, not from a town it
         // has already left behind.
