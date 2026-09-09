@@ -45,6 +45,21 @@ final class GCWorldGraph {
     private static final int[] EMPTY = new int[0];
     private static volatile Map<Integer, int[]> edges;
 
+    /*
+     * Places you go to, not through: a holiday island or a package tour whose only way out is the
+     * boat or the agent that brought you. Routing THROUGH one is what made bots visibly cheat — a
+     * bot bound for Victoria from Orbis would hop to Florina Beach, get ferried to Lith Harbour and
+     * walk the rest, covering a continent in three hops while never boarding the ship it should
+     * have sailed on. They stay reachable as destinations; they just can't be a stepping stone.
+     */
+    private static final Set<Integer> THROUGH_ONLY_IF_DESTINATION = Set.of(
+            110000000,  // Florina Beach (gold beach): Pison ferries you back where you came from
+            800000000,  // Mushroom Shrine: the travel agent returns you
+            550000000,  // Trend Zone: its guide sends you home
+            702000000,  // Songshan: same agent, same trip back
+            541000000   // Boat Quay Town: the agency's Malay end
+    );
+
     static Map<Integer, int[]> get() {
         Map<Integer, int[]> cached = edges;
         if (cached != null) {
@@ -99,6 +114,11 @@ final class GCWorldGraph {
             for (int level = frontier.size(); level > 0; level--) {
                 int current = frontier.poll();
                 for (int next : neighbors(g, current)) {
+                    // A place you only go to is not a shortcut: it is skipped unless it is where we
+                    // are headed. (The start needs no exemption — it is already in cameFrom.)
+                    if (next != toMapId && THROUGH_ONLY_IF_DESTINATION.contains(next)) {
+                        continue;
+                    }
                     if (cameFrom.putIfAbsent(next, current) != null) {
                         continue;
                     }
