@@ -2,8 +2,10 @@ package soloMapling.ArtificialPlayer;
 
 import org.gms.client.Character;
 import org.gms.server.maps.MapleMap;
+import org.gms.util.PacketCreator;
 import soloMapling.ArtificialPlayer.BotMessagingSystem.CharacterStorage;
 import soloMapling.ArtificialPlayer.GCMoveSystem.GCMovement;
+import soloMapling.server.BotTiming;
 import soloMapling.server.ExecutorServiceManager;
 import soloMapling.server.EventMessageSystem.EventBus;
 import soloMapling.server.EventMessageSystem.EventSubscriber;
@@ -61,19 +63,60 @@ public final class BotMapEntryResponder implements EventSubscriber {
                 return;
             }
             GCMovement.markObservedNow(map.getId()); // instant FULL for the GC movement/combat LOD
-            ExecutorServiceManager.runAsync(() -> nudgeBotsOnMap(map));
+            ExecutorServiceManager.runAsync(() -> nudgeBotsOnMap(map, event.getMapleCharacter()));
         } catch (Throwable ignored) {
             // never let a responder failure propagate into MapleMap.addPlayer
         }
     }
 
-    private void nudgeBotsOnMap(MapleMap map) {
+    /**
+     * Re-publishes every party-member bot's HP to the entering player.
+     *
+     * <p>The client only renders a teammate's HP bar once it receives UPDATE_PARTYMEMBER_HP;
+     * a freshly built HUD (login / channel switch) starts empty. The host's own pull
+     * ({@code Character.receivePartyMemberHP}) goes through
+     * {@code getPartyMembersOnSameMap()}, whose {@code isLoggedInWorld()} gate is
+     * {@code isLoggedIn() && !isAwayFromWorld()} — and a template-cloned bot's
+     * {@code loggedIn} is never set (only {@code newClient} and
+     * {@code loadCharFromDB(channelServer=true)} set it, and clones take the
+     * {@code channelServer=false} early return). So the bot is filtered out of the
+     * pull and the bar stays empty until the bot's next HP change pushes it.
+     *
+     * <p>Deliberately scans the map and asks each bot whether the player is on its
+     * roster, rather than asking the player for its party members: that direction is
+     * the very gate that drops bots. Deferred a little because on login the client
+     * only learns its party roster at {@code PlayerLoggedinHandler} LOG_ONOFF, well
+     * after this event fires from {@code addPlayer} — an eager packet would be dropped.
+     */
+    private void pushPartyHpSoon(MapleMap map, Character player) {
+        if (player == null || player.getParty() == null) {
+            return;
+        }
+        BotTiming.afterRandom(NUDGE_MIN_MS, NUDGE_MAX_MS, () -> {
+            try {
+                for (Character chr : map.getAllPlayers()) { // snapshot copy - safe off-thread
+                    if (chr == null || !isBot(chr)) {
+                        continue;
+                    }
+                    if (!chr.isPartyMember(player.getId())) {
+                        continue;
+                    }
+                    player.sendPacket(PacketCreator.updatePartyMemberHP(
+                            chr.getId(), chr.getHp(), chr.getCurrentMaxHp()));
+                }
+            } catch (Throwable ignored) {
+            }
+        });
+    }
+
+    private void nudgeBotsOnMap(MapleMap map, Character entering) {
         try {
             for (Character chr : map.getAllPlayers()) { // snapshot copy - safe to iterate off-thread
                 if (chr != null && isBot(chr)) {
                     nudge(chr);
                 }
             }
+            pushPartyHpSoon(map, entering);
         } catch (Throwable ignored) {
         }
     }
