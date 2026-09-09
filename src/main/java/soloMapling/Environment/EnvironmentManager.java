@@ -350,7 +350,8 @@ public class EnvironmentManager {
     // bot picked by BotSpotPicker (every walkable ledge in the X band, vertical stacking included),
     // instead of stacking everyone on one point. `anchor` seeds the reachability filter (pass the spawn
     // portal, or a GM's position for a dev dry-run) and is the per-bot fallback when the nav graph yields
-    // no eligible ledge (empty/unbaked). Returns the created ids, already typed + started as TRAINING_BOTs.
+    // no eligible ledge (empty/unbaked). Returns the created ids, each already typed + started as a
+    // TRAINING_BOT by the time it lands (not batched after the loop - see the comment at the call).
     public static List<Integer> spawnScatteredTrainingBots(MapleMap map, Point anchor, int n, int loLevel, int hiLevel) {
         List<Point> spots = BotSpotPicker.pickGroundSpots(map, anchor.x, anchor.y, n);
         List<Integer> ids = new ArrayList<>();
@@ -362,13 +363,16 @@ public class EnvironmentManager {
                 // instead of all stacking on ch1 with the ambient crowd.
                 int botId = BotGeneration.createBot(spawnAt, map, baseClass, loLevel, hiLevel, 0, true);
                 if (botId > 0) {
+                    // Start each bot as it lands instead of after the whole cohort: under spawn
+                    // throttling a serial cohort loop can run ~100s, and batch-at-the-end would
+                    // leave the first bot standing idle for all of it.
+                    setAndStartBots(List.of(botId), BotTypeManager.BotType.TRAINING_BOT);
                     ids.add(botId);
                 }
             } catch (Exception e) {
                 debugprint(fmt("TrainingBots: create failed on {} ({})", map.getId(), e.getMessage()));
             }
         }
-        setAndStartBots(ids, BotTypeManager.BotType.TRAINING_BOT);
         return ids;
     }
 
@@ -422,13 +426,14 @@ public class EnvironmentManager {
             try {
                 int botId = BotGeneration.createBot(spawnAt, map, baseClass, loLevel, hiLevel);
                 if (botId > 0) {
+                    // Start each bot as it lands (see spawnScatteredTrainingBots).
+                    setAndStartBots(List.of(botId), type);
                     ids.add(botId);
                 }
             } catch (Exception e) {
                 debugprint(fmt("TownPresence: create failed on {} ({})", mapId, e.getMessage()));
             }
         }
-        setAndStartBots(ids, type);
         return ids.size();
     }
 

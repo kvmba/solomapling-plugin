@@ -27,6 +27,7 @@ import soloMapling.ArtificialPlayer.BotTypes.TrainingBot;
 import soloMapling.ArtificialPlayer.BotTypes.FollowerBot;
 import soloMapling.ArtificialPlayer.BotTypes.CompanionBot;
 import soloMapling.companion.CompanionRoster;
+import soloMapling.DebugUtilities;
 
 import java.awt.*;
 import java.util.List;
@@ -307,7 +308,11 @@ public class BotTypeManager {
     }
 
     public static void setAndStartBots(List<Integer> botIds, BotType botType) {
-        debugprint(fmt("Setting and starting bots to {}. {}", botType, botIds));
+        // Guarded: now called once per bot (not once per batch), and fmt(...) would be
+        // evaluated on every call even with debug printing off.
+        if (DebugUtilities.DEBUG) {
+            debugprint(fmt("Setting and starting bots to {}. {}", botType, botIds));
+        }
         for (Integer id : botIds) {
             Character fakechar = getValidBot(id);
             if (fakechar == null) continue;

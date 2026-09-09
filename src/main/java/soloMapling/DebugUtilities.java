@@ -8,6 +8,11 @@ public class DebugUtilities {
 
     private static final DateTimeFormatter TIME_FORMATTER = DateTimeFormatter.ofPattern("HH:mm:ss.SSS");
 
+    // Compile-time-ish gate for callers that would otherwise build an expensive argument
+    // (e.g. debugprint(fmt(...))) on every call. Java evaluates arguments before entry, so
+    // the early return inside debugprint() cannot save that cost - callers must check this.
+    public static final boolean DEBUG = false;
+
     private static boolean isDebugging() {
         return java.lang.management.ManagementFactory.getRuntimeMXBean()
                 .getInputArguments()
