@@ -130,9 +130,9 @@ public class BuyingMerchantBot extends BotSM {
                 .replace("%ITEM%", itemName)
                 .replace("%PRICE%", formatPriceToShorthand(offerPrice));
 
-        int fillerCount = random.nextInt(3);
-        for (int i = 0; i < fillerCount; i++) {
-            msg += " @@@@@@@@";
+        // Shout padding: at most one short run, so a merchant never trails 24 symbols of "@@@@".
+        if (random.nextInt(2) == 0) {
+            msg += " !!!!";
         }
 
         msg = msg.replace("[", "").replace("]", "");

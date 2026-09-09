@@ -28,8 +28,9 @@ public final class OPQRecruitMessages {
             "OPQ", "Orbis PQ", "Orbis Party Quest", "pq", "Orbis", "OPQ please"
     ));
 
+    // No "@@@@" run here: shout padding draws from this list, and a long @ run reads as spam.
     private static final List<String> FILLERS = new ArrayList<>(Arrays.asList(
-            "@@@@@@@@", "!!!", "plz", "asap"
+            "!!!", "plz", "asap"
     ));
 
     public static String generateRecruitMessage(Character chr) {
