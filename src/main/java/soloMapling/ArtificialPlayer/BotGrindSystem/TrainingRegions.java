@@ -87,6 +87,21 @@ public final class TrainingRegions {
     public static final int FREE_MOVE_LEVEL = 120;
 
     /**
+     * Chance a bot that COULD move takes the trip, when moving is optional.
+     *
+     * <p>Everything except a climb is optional: a bot that has outgrown its continent leaves
+     * because it must, but one that simply can (a free mover, or one fancying a change) also
+     * has somewhere worth staying. Without the roll such a bot would set out on its very next
+     * decision, every time, and spend its life aboard instead of in a hunting ground where a
+     * player might actually meet it.</p>
+     *
+     * <p>It lives here rather than in a bot class because both a training bot and a companion
+     * roll it, and a bot that moves twice as readily as its neighbour is not a tunable anyone
+     * asked for.</p>
+     */
+    public static final double OPTIONAL_MOVE_CHANCE = 0.40;
+
+    /**
      * A continent to move to: any other continent this bot qualifies for, picked at random.
      *
      * Random rather than "one rung up", because a bot's level says what it CAN handle, not which

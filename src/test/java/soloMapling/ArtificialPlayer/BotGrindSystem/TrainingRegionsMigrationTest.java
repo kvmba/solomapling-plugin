@@ -100,6 +100,16 @@ class TrainingRegionsMigrationTest {
     }
 
     @Test
+    void theOptionalMoveChanceIsFortyPercentAndShared() {
+        // Both bot kinds roll the same dice, so the figure lives in one place and neither can
+        // drift into moving twice as readily as the other.
+        assertEquals(0.40, TrainingRegions.OPTIONAL_MOVE_CHANCE, 0.0);
+        assertTrue(TrainingRegions.OPTIONAL_MOVE_CHANCE > 0.0
+                && TrainingRegions.OPTIONAL_MOVE_CHANCE < 1.0,
+                "must be a real chance, not always or never");
+    }
+
+    @Test
     void aBotTooLowForAnywhereElseStaysPut() {
         // Level 20 clears Victoria (1) and nothing else, so there is nowhere to climb to.
         assertEquals(0, TrainingRegions.migrationTarget(100_000_000, 20));

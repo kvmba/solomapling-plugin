@@ -263,31 +263,37 @@ public final class SoloGrindController {
         // companion stands, so it can never find a hunting ground across the water — a companion
         // that stayed where it spawned would grind trivial mobs forever. Take the crossing first;
         // the next tick picks a ground on the far side.
-        //
-        // Paced by a stay window, because at FREE_MOVE_LEVEL a companion always has somewhere
-        // else to go: without the window it would cross, land, and immediately cross again —
-        // never actually grinding. A climb is the same case as a training bot's: it fires when
-        // the companion has outlevelled the place, which is rare enough to need no pacing, and
-        // a companion that is ready to climb should not be held back by its last holiday.
         if (now >= relocatedUntilMs) {
             int continent = TrainingRegions.migrationTarget(
                     companion.getMapId(), companion.getLevel());
             if (continent > 0 && continent != companion.getMapId()) {
+                // A climb (outgrown the continent) is not a choice — it fires as soon as the
+                // companion is able. A free move is, so it rolls the dice like a training bot's
+                // visit: without the roll a companion with anywhere to go would leave on its
+                // very next decision, every time, and never settle long enough to be found.
                 boolean freeMove = companion.getLevel() >= TrainingRegions.FREE_MOVE_LEVEL;
                 if (freeMove) {
-                    relocatedUntilMs = now + STAY_MIN_MS
-                            + (long) (ThreadLocalRandom.current().nextDouble()
-                                    * (STAY_MAX_MS - STAY_MIN_MS));
+                    if (ThreadLocalRandom.current().nextDouble() >= TrainingRegions.OPTIONAL_MOVE_CHANCE) {
+                        relocatedUntilMs = now + RETRY_MS; // not this time — ask again later
+                        continent = 0;
+                    } else {
+                        relocatedUntilMs = now + STAY_MIN_MS
+                                + (long) (ThreadLocalRandom.current().nextDouble()
+                                        * (STAY_MAX_MS - STAY_MIN_MS));
+                    }
                 }
-                relocating = true;
-                targetMapId = continent;
-                targetMobLevel = 0;
-                phase = Phase.TRAVELLING;
-                phaseUntilMs = now + TRAVEL_TIMEOUT_MS;
-                GCMovement.travel(companion, continent, null);
-                log.info("Companion relocating cid={} from={} to={} level={}",
-                        companion.getId(), companion.getMapId(), continent, companion.getLevel());
-                return;
+                if (continent > 0) {
+                    relocating = true;
+                    targetMapId = continent;
+                    targetMobLevel = 0;
+                    phase = Phase.TRAVELLING;
+                    phaseUntilMs = now + TRAVEL_TIMEOUT_MS;
+                    GCMovement.travel(companion, continent, null);
+                    log.info("Companion relocating cid={} from={} to={} level={}",
+                            companion.getId(), companion.getMapId(), continent,
+                            companion.getLevel());
+                    return;
+                }
             }
         }
         // No excluded set: the chooser already watches how many bots target each

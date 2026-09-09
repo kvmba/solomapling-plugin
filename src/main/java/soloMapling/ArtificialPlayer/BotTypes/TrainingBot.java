@@ -490,44 +490,45 @@ public class TrainingBot extends BotSM implements GrindTickRegistry.Participant 
      * at the terminal and aboard like anyone else. Returns true if a migration was started.
      */
     /*
-     * Chance a settled bot picks up and moves to another continent for a while, even though nothing
-     * here has run out, and how long it stays once it has: without the visit the low continents keep
-     * nobody but beginners, and without a long stay a bot would be bounced straight back out by its
-     * own level the moment it arrived. Getting there is a boat or a flight, so a move is an afternoon
-     * at least — a bot that crossed the world for ten minutes would look silly. The same window also
-     * paces a high bot's free moves, which would otherwise fire on every single town visit.
+     * Chance a settled bot picks up and moves to another continent for a while even though nothing
+     * here has run out, and how long it stays once it has. Without the dice the low continents keep
+     * nobody but beginners; without the stay a bot would cross and immediately cross back. Getting
+     * there is a boat or a flight, so a move is an afternoon at least — a bot that crossed the world
+     * for ten minutes would look silly. A CLIMB (outgrown the continent) is not optional and rolls
+     * neither: it fires as soon as the bot is able, and a stay would only strand it where it has
+     * nothing left to fight.
      */
-    private static final double RETURN_VISIT_CHANCE = 0.40;
-    private static final long RETURN_VISIT_MIN_MS = 90 * 60 * 1000L;   // 1.5 h
-    private static final long RETURN_VISIT_MAX_MS = 240 * 60 * 1000L;  // 4 h
-    private long returnVisitUntilMs;
+    private static final long MOVE_STAY_MIN_MS = 90 * 60 * 1000L;   // 1.5 h
+    private static final long MOVE_STAY_MAX_MS = 240 * 60 * 1000L;  // 4 h
+    private long movedUntilMs;
 
     private boolean startMigration() {
         Character chr = getChr();
         if (homeMapId < 0 || currentTrainMapId < 0) {
             return false; // not settled anywhere yet
         }
-        // Past FREE_MOVE_LEVEL a bot may go anywhere, so it has a target on essentially every town
-        // visit — the stay window is what keeps it from living on the boat. A bot that OUTGREW its
-        // continent is a different case: it should still be free to climb again as soon as it is
-        // ready, so a climb never sets the window.
-        boolean freeMove = chr.getLevel() >= TrainingRegions.FREE_MOVE_LEVEL;
-        boolean settled = now() > returnVisitUntilMs; // last move's stay window has run out
+        boolean settled = now() > movedUntilMs; // last move's stay window has run out
+        // A climb — below FREE_MOVE_LEVEL, outgrown this continent — is not a choice: the bot
+        // leaves as soon as it can, and a stay window would only strand it somewhere it has
+        // outlevelled. Every OTHER move is optional, so it rolls the dice and observes the
+        // window, or a bot with anywhere to go would simply live aboard.
+        boolean optional = chr.getLevel() >= TrainingRegions.FREE_MOVE_LEVEL;
         int dest = TrainingRegions.migrationTarget(homeMapId, chr.getLevel());
-        if (dest > 0 && freeMove && !settled) {
-            dest = 0; // still enjoying where it moved to last time
-        }
-        boolean visit = dest <= 0;
-        if (visit && settled && rng.nextDouble() < RETURN_VISIT_CHANCE) {
-            // Not outgrowing anything — just feel like going somewhere else for a while.
-            dest = TrainingRegions.returnTarget(homeMapId, chr.getLevel());
+        if (dest <= 0) {
+            // Nothing to outgrow into, so the only move left is going somewhere else anyway.
+            optional = true;
+            if (settled && rng.nextDouble() < TrainingRegions.OPTIONAL_MOVE_CHANCE) {
+                dest = TrainingRegions.returnTarget(homeMapId, chr.getLevel());
+            }
+        } else if (optional && (!settled || rng.nextDouble() >= TrainingRegions.OPTIONAL_MOVE_CHANCE)) {
+            dest = 0; // this continent still has mobs worth the bot's time — staying put
         }
         if (dest <= 0 || dest == homeMapId) {
-            return false; // this continent still has mobs worth the bot's time
+            return false;
         }
-        if (visit || freeMove) {
-            returnVisitUntilMs = now() + RETURN_VISIT_MIN_MS
-                    + (long) (rng.nextDouble() * (RETURN_VISIT_MAX_MS - RETURN_VISIT_MIN_MS));
+        if (optional) {
+            movedUntilMs = now() + MOVE_STAY_MIN_MS
+                    + (long) (rng.nextDouble() * (MOVE_STAY_MAX_MS - MOVE_STAY_MIN_MS));
         }
         debugChat("MIGRATE: outgrown map " + homeMapId + " at lv " + chr.getLevel() + " -> " + dest);
         // Home is the new continent from the moment we set out: a migration that gets turned back
