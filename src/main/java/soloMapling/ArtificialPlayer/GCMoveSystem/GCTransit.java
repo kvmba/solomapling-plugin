@@ -30,9 +30,14 @@ public final class GCTransit {
             222020110, 222020111, // Helios elevator going up: waiting car, moving car
             222020210, 222020211, // Helios elevator going down: waiting car, moving car
             600010003, 600010005, // subway to New Leaf City, subway to Kerning
-            540010101, 540010002, // plane to CBD, plane to Kerning
-            200090500, 200090510  // dragon flight to the Time Temple: flying form, and the gate map
+            540010101, 540010002  // plane to CBD, plane to Kerning
     );
+
+    // Not the dragon (200090500 / 200090510): it is a transform, not a ride. The Halfling turns a
+    // bot into a dragon and warps it onto the flying map, where it simply walks east through an
+    // ordinary portal to the gate map and on into the Temple — no event ever moves it. Listing it
+    // here made GCTravel wait out a departure that was never going to come, until the transit
+    // ceiling finally bare-warped the bot to the Temple and skipped the flight both ways.
 
     /*
      * Vehicles with room to walk around: a deck or a train car you can stroll while crossing. An

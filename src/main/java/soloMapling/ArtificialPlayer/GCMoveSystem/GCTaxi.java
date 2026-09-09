@@ -119,6 +119,11 @@ final class GCTaxi {
             // The dragon flight only ever leads to the Time Temple, so it carries the Temple's bar:
             // a bot that hasn't earned that continent shouldn't reach it by turning into a dragon.
             {240000110, 2082003, 200090500, TIME_TEMPLE_LEVEL},
+            // Both the cabin and the dragon put you down on Leafre's pier, and the pier has no
+            // walkable door into its own boarding room — the agent standing there (2082001) warps
+            // you in, exactly as the other piers' clerks do. Without this a bot that landed here
+            // could ride the dragon out but never take the cabin back.
+            {240000110, 2082001, 240000111, 1},  // Leafre pier -> waiting room (cabin to Orbis)
             // Cave of Life (生命之穴): Leafre's endgame. The maze rooms have no way out at all, so
             // the two NPCs that move you through the cave are the only way in — 2081005 takes you from
             // the cave mouth to the entrance, and 2083001 from there into the 97-110 maze.
@@ -269,12 +274,27 @@ final class GCTaxi {
         return null;
     }
 
-    /* All ride destination map ids reachable from mapId (for world-graph connectivity). */
+    /* All ride destination map ids reachable from mapId (for world-graph connectivity): the
+     * point-to-point rides plus the landing a scheduled vehicle is waiting to carry a bot to. A
+     * vehicle's own hop is two-stage by nature — a ticket counter walks the bot into the waiting
+     * room (an NPC_RIDES row) and the inspector there boards it — so the arrival has to be a
+     * destination in the graph too, or no route ever crosses. */
     static int[] destinations(int mapId) {
         List<TransitEdge> edges = from(mapId);
-        int[] dests = new int[edges.size()];
+        List<VehicleEdge> rides = new ArrayList<>();
+        for (VehicleEdge ride : VEHICLE_RIDES) {
+            if (ride.fromMapId() == mapId
+                    && isPortalinCurrentVersion(ride.fromMapId())
+                    && isPortalinCurrentVersion(ride.toMapId())) {
+                rides.add(ride);
+            }
+        }
+        int[] dests = new int[edges.size() + rides.size()];
         for (int i = 0; i < edges.size(); i++) {
             dests[i] = edges.get(i).toMapId();
+        }
+        for (int i = 0; i < rides.size(); i++) {
+            dests[edges.size() + i] = rides.get(i).toMapId();
         }
         return dests;
     }
