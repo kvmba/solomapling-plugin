@@ -193,6 +193,10 @@ public final class CompanionSurvivalController {
             supplyRun = null;
             return;
         }
+        // Mid-crossing (waiting to board, or aboard): stillness by design, so the run is not late.
+        if (GCMovement.isWaitingForTransit(companion)) {
+            return;
+        }
         if (now - run.startedAt() > SUPPLY_TIMEOUT_MS) {
             failAndReturn(companion, "timeout");
         }

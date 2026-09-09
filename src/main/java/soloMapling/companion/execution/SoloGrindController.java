@@ -7,6 +7,7 @@ import org.slf4j.LoggerFactory;
 import soloMapling.ArtificialPlayer.BotGrindSystem.GrindBrain;
 import soloMapling.ArtificialPlayer.BotGrindSystem.TrainingMap;
 import soloMapling.ArtificialPlayer.BotGrindSystem.TrainingMapChooser;
+import soloMapling.ArtificialPlayer.BotGrindSystem.TrainingRegions;
 import soloMapling.ArtificialPlayer.GCMoveSystem.GCMovement;
 import soloMapling.companion.routine.CompanionNoviceLevel;
 
@@ -84,6 +85,27 @@ public final class SoloGrindController {
     private volatile long phaseUntilMs = 0L;
     private volatile boolean grindRegistered = false;
     private volatile long lastAccrualMs = 0L;
+    /**
+     * True while TRAVELLING means "changing continent" rather than "walking to a hunting ground".
+     *
+     * <p>The pick this trip is heading for is a continent's town, not a grind map, so arriving
+     * must not start a session there. Written only by the state machine tick, read by the 250ms
+     * combat sweep through {@link #isGrindingOn}, hence volatile like the fields above.</p>
+     */
+    private volatile boolean relocating = false;
+    /**
+     * Until when a companion that can go anywhere should stay where it landed.
+     *
+     * <p>Only free moves set it. Without it a high-level companion has a target on every single
+     * decision, so it would spend its whole life aboard instead of ever reaching a hunting
+     * ground. A companion accompanies players, so it needs to be somewhere long enough to be
+     * found — the same reason a training bot's visit lasts an afternoon rather than a minute.</p>
+     */
+    private volatile long relocatedUntilMs = 0L;
+
+    /** How long a free move keeps a companion on the continent it crossed to. */
+    private static final long STAY_MIN_MS = 90 * 60_000L;   // 1.5 h
+    private static final long STAY_MAX_MS = 240 * 60_000L;  // 4 h
 
     public SoloGrindController(GrindBrain grind) {
         this.grind = java.util.Objects.requireNonNull(grind, "grind");
@@ -144,18 +166,40 @@ public final class SoloGrindController {
                 }
             }
             case TRAVELLING -> {
-                if (companion.getMapId() == targetMapId) {
+                if (companion.getMapId() != targetMapId) {
+                    if (GCMovement.isWaitingForTransit(companion)) {
+                        // Waiting for a boat to board or a crossing to dock is stillness by design,
+                        // and a cycle runs minutes. Counting it as no progress would cancel the
+                        // crossing and re-plan forever — which is why a companion never used to
+                        // reach another continent at all. GCTravel's transit ceiling bounds it.
+                        phaseUntilMs = now + TRAVEL_TIMEOUT_MS;
+                    } else if (now > phaseUntilMs) {
+                        // Never arrived. Cancel the crossing as well as dropping the
+                        // session: the trip is still in flight, and if it is left
+                        // alone it will deliver the companion to a hunting ground
+                        // this controller has already given up on — arriving on a
+                        // map nothing is grinding, and staying there.
+                        log.info("Companion solo grind travel timed out cid={} target={} at={}",
+                                companion.getId(), targetMapId, companion.getMapId());
+                        GCMovement.cancelTravel(companion);
+                        endSession(companion, now);
+                    }
+                } else if (relocating) {
+                    // Landed on another continent's town. It is a place to be, not a ground to
+                    // work, so drop the trip and go straight back to idle — the next tick picks a
+                    // hunting ground here, which is the whole point of having crossed.
+                    log.info("Companion relocated cid={} from={} to={} level={}",
+                            companion.getId(), targetMapId, companion.getMapId(),
+                            companion.getLevel());
+                    relocating = false;
+                    // No reservation was ever taken out on a continent's town: it is not a
+                    // hunting ground, and releasing one here would decrement a counter this
+                    // companion never incremented — skewing that map's capacity for everyone.
+                    targetMapId = -1;
+                    phase = Phase.IDLE;
+                    phaseUntilMs = 0L;
+                } else {
                     beginGrinding(companion, now);
-                } else if (now > phaseUntilMs) {
-                    // Never arrived. Cancel the crossing as well as dropping the
-                    // session: the trip is still in flight, and if it is left
-                    // alone it will deliver the companion to a hunting ground
-                    // this controller has already given up on — arriving on a
-                    // map nothing is grinding, and staying there.
-                    log.info("Companion solo grind travel timed out cid={} target={} at={}",
-                            companion.getId(), targetMapId, companion.getMapId());
-                    GCMovement.cancelTravel(companion);
-                    endSession(companion, now);
                 }
             }
             case GRINDING -> {
@@ -196,6 +240,9 @@ public final class SoloGrindController {
             GCMovement.setGrinding(companion, false);
         }
         grindRegistered = false;
+        // Clear the relocation flag BEFORE releasing: releaseReservation() reads it to decide
+        // whether a reservation was ever taken out on the current target.
+        relocating = false;
         releaseReservation();
         targetMapId = -1;
         targetMobLevel = 0;
@@ -211,6 +258,37 @@ public final class SoloGrindController {
             phase = Phase.RESTING;
             phaseUntilMs = now + RETRY_MS;
             return;
+        }
+        // Outgrown this continent? The chooser only ever looks a few hops around where the
+        // companion stands, so it can never find a hunting ground across the water — a companion
+        // that stayed where it spawned would grind trivial mobs forever. Take the crossing first;
+        // the next tick picks a ground on the far side.
+        //
+        // Paced by a stay window, because at FREE_MOVE_LEVEL a companion always has somewhere
+        // else to go: without the window it would cross, land, and immediately cross again —
+        // never actually grinding. A climb is the same case as a training bot's: it fires when
+        // the companion has outlevelled the place, which is rare enough to need no pacing, and
+        // a companion that is ready to climb should not be held back by its last holiday.
+        if (now >= relocatedUntilMs) {
+            int continent = TrainingRegions.migrationTarget(
+                    companion.getMapId(), companion.getLevel());
+            if (continent > 0 && continent != companion.getMapId()) {
+                boolean freeMove = companion.getLevel() >= TrainingRegions.FREE_MOVE_LEVEL;
+                if (freeMove) {
+                    relocatedUntilMs = now + STAY_MIN_MS
+                            + (long) (ThreadLocalRandom.current().nextDouble()
+                                    * (STAY_MAX_MS - STAY_MIN_MS));
+                }
+                relocating = true;
+                targetMapId = continent;
+                targetMobLevel = 0;
+                phase = Phase.TRAVELLING;
+                phaseUntilMs = now + TRAVEL_TIMEOUT_MS;
+                GCMovement.travel(companion, continent, null);
+                log.info("Companion relocating cid={} from={} to={} level={}",
+                        companion.getId(), companion.getMapId(), continent, companion.getLevel());
+                return;
+            }
         }
         // No excluded set: the chooser already watches how many bots target each
         // map and picks another when one is full, so a per-bot memory of
@@ -257,6 +335,9 @@ public final class SoloGrindController {
             GCMovement.setGrinding(companion, false);
         }
         grindRegistered = false;
+        // Clear the relocation flag BEFORE releasing: releaseReservation() reads it to decide
+        // whether a reservation was ever taken out on the current target.
+        relocating = false;
         releaseReservation();
         targetMapId = -1;
         targetMobLevel = 0;
@@ -269,7 +350,11 @@ public final class SoloGrindController {
     private void releaseReservation() {
         // -1 would decrement the "no map" bucket and permanently skew every
         // other bot's capacity maths for it.
-        if (targetMapId >= 0) {
+        // A relocation holds no reservation at all: its target is a continent's town, not a
+        // hunting ground, so nothing was ever incremented for it. Releasing anyway would
+        // decrement a counter this companion never touched and leave that map's capacity
+        // permanently wrong for every other bot that wants to grind there.
+        if (targetMapId >= 0 && !relocating) {
             TrainingMapChooser.release(targetMapId);
         }
     }

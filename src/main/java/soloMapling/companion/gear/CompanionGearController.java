@@ -115,6 +115,13 @@ public final class CompanionGearController {
     private void advanceShopRun(Character companion, long now) {
         ShopRun run = shopRun;
         if (run == null) return;
+        // A crossing takes minutes (boarding window + sailing), so a companion on a scheduled ride
+        // is exactly where it should be. Without this the trip is cancelled mid-channel and the
+        // companion never reaches the shop on the other continent. GCTravel's transit ceiling is
+        // what bounds it, so just keep the deadline out.
+        if (GCMovement.isWaitingForTransit(companion)) {
+            return;
+        }
         if (now - run.startedAt() > RUN_TIMEOUT_MS) {
             if (run.returning()) {
                 shopRun = null;

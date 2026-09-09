@@ -1,5 +1,7 @@
 package soloMapling.ArtificialPlayer.BotGrindSystem;
 
+import java.util.concurrent.ThreadLocalRandom;
+
 // Which map regions training bots may grind in: original-MapleStory content only (Victoria Island +
 // Sleepywood, Orbis, El Nath, Ludibrium continent). Keeps discovery off Aqua Road / Leafre / Mu Lung /
 // Cygnus / new-school maps even when a portal makes them reachable. Checked in TrainingMapFinder before
@@ -11,6 +13,10 @@ package soloMapling.ArtificialPlayer.BotGrindSystem;
 // low-level bot never targets a far continent, so it stays where it is instead of walking to a
 // terminal and standing there — the gate is applied when targets are chosen, not at the ticket
 // counter, so nothing has to untangle a bot that already arrived somewhere it shouldn't be.
+//
+// The windows double as the migration map: window[0] is the continent's town (where a bot sets up
+// home) and window[2] is the bar for treating it as a destination, so "where could this bot go next"
+// is answered from the same table that decides where it may grind — no second list to drift.
 public final class TrainingRegions {
 
     private TrainingRegions() {}
@@ -64,68 +70,104 @@ public final class TrainingRegions {
      * Where a bot should move its home once it has outgrown the continent it is standing on.
      *
      * A training bot only ever looks for grind maps within a few hops of where it stands, so without
-     * this a bot that outlevels its landmass grinds the same trivial mobs forever. This picks the
-     * next continent whose mobs are still worth the bot's level — which is how a player leaves
-     * Victoria for Orbis, and Orbis for Leafre.
+     * this a bot that outlevels its landmass grinds the same trivial mobs forever. This picks a
+     * continent whose mobs are still worth the bot's level — which is how a player leaves Victoria
+     * for Orbis, and Orbis for Leafre.
      *
-     * Ordered by the level a bot needs, so the answer is always "one step up", never a leap to the
-     * deepest content. Returns 0 when the current continent still has mobs this bot can use.
-     */
-    /*
-     * The rungs, in the order a bot outgrows them. Level is when this landmass stops being worth it:
-     * the beginner island at 8 (also the level Sanks asks for), Victoria at 31 — second job is 30,
-     * and that is when players take the boat out, well before its fields top out — and so on up.
+     * Seed the island: it is a one-way trip out, so it is never a destination a bot comes back to.
      */
     private static final int BEGINNER_MIGRATE_LEVEL = 8;
-    /** Victoria Island's first map id — everything below it is the beginner island. */
+    /** Victoria Island's town — where the boat from the beginner island lands. */
     private static final int VICTORIA_ISLAND_START = 100_000_000;
-    private static final int[][] MIGRATION_LADDER = {
-            // Victoria at 31: second job is 30, and that is when players stop training on the island
-            // and take the boat to Orbis — not when its fields finally top out.
-            {100000000, 31},
-            {200000000, 75},   // Orbis / El Nath
-            {240000000, 100},  // Leafre
-            {270000000, 999},  // Time Temple: the end of the ladder
-    };
+    /**
+     * From this level the ladder stops being a ladder: a bot picks ANY continent it qualifies for,
+     * not just a harder one. 120 is fourth job — past it a player goes where they like, and a bot
+     * that can only ever climb would end up leaving the low continents to beginners for good.
+     */
+    public static final int FREE_MOVE_LEVEL = 120;
 
     /**
-     * One rung back down, for a bot that feels like visiting: players drift back to the continents
-     * they came from, and without it the low continents are emptied of everyone but beginners.
-     * Returns 0 for the bottom rung, which has nowhere to go back to.
+     * A continent to move to: any other continent this bot qualifies for, picked at random.
+     *
+     * Random rather than "one rung up", because a bot's level says what it CAN handle, not which
+     * single place it must be next — and a fixed ladder stranded every bot whose home was a town
+     * that wasn't on it (a sub-town, or a whole continent with no rung at all). The gate is the
+     * window's own minLevel, so a bot still never lands somewhere it is too low for.
+     *
+     * Returns 0 when nothing else is open to it — too low for anywhere new, or already everywhere.
      */
-    public static int returnTarget(int homeMapId) {
-        for (int i = 0; i < MIGRATION_LADDER.length; i++) {
-            if (MIGRATION_LADDER[i][0] == homeMapId) {
-                return i > 0 ? MIGRATION_LADDER[i - 1][0] : 0;
-            }
-        }
-        return 0; // not on the ladder
+    public static int returnTarget(int homeMapId, int level) {
+        return pickOther(homeMapId, level, 0);
     }
 
+    /**
+     * Where a bot that has outgrown its continent should head, or 0 to stay.
+     *
+     * Below {@link #FREE_MOVE_LEVEL} this only moves a bot UP: to a continent with a higher bar
+     * than the one it stands on, so a bot climbs Victoria -> Orbis -> Leafre instead of wandering
+     * between places it has already outlevelled. At {@link #FREE_MOVE_LEVEL} and up it may go
+     * anywhere, including back down — a fourth-job bot has nothing left to climb, and the low
+     * continents need somebody in them.
+     *
+     * The beginner island is every map below the Victoria range — and that range is not a small
+     * one: the walk to Southperry runs through 1000000/1010000/1020000 up to 2000000, all still
+     * below Victoria's 100000000. A bound of 100000 left a bot standing on Southperry's dock
+     * thinking it had already left the island, so it never took the boat.
+     */
     public static int migrationTarget(int homeMapId, int level) {
-        // The beginner island is every map below the Victoria range — and that
-        // range is not a small one: the walk to Southperry runs through
-        // 1000000/1010000/1020000 up to 2000000, all still below Victoria's
-        // 100000000. A bound of 100000 left a bot standing on Southperry's dock
-        // thinking it had already left the island, so it never took the boat.
         if (homeMapId < VICTORIA_ISLAND_START) {
-            return level >= BEGINNER_MIGRATE_LEVEL ? 100000000 : 0;
+            return level >= BEGINNER_MIGRATE_LEVEL ? VICTORIA_ISLAND_START : 0;
         }
-        int current = -1;
-        for (int i = 0; i < MIGRATION_LADDER.length; i++) {
-            if (MIGRATION_LADDER[i][0] == homeMapId) {
-                current = i;
-                break;
-            }
-        }
-        // Not on the ladder (a sub-town, or a continent with no further rung): nothing to migrate to.
-        if (current < 0) {
+        int bar = barOf(homeMapId);
+        // Off the map (a region-less id): nothing to compare against, so nothing to outgrow.
+        if (bar < 0) {
             return 0;
         }
-        if (level < MIGRATION_LADDER[current][1]) {
-            return 0; // still gets along here
+        return level >= FREE_MOVE_LEVEL
+                ? pickOther(homeMapId, level, 0)                      // anywhere it qualifies for
+                : pickOther(homeMapId, level, bar);                   // strictly a harder continent
+    }
+
+    /**
+     * A random continent town other than the bot's own, whose bar this bot clears.
+     *
+     * @param above when non-zero, only continents with a bar strictly HIGHER than this qualify
+     *              (the "climb" case); 0 accepts any bar (the "anywhere" case).
+     */
+    private static int pickOther(int homeMapId, int level, int above) {
+        int home = anchorOf(homeMapId);
+        int chosen = 0;
+        int seen = 0;
+        for (int[] window : ALLOWED) {
+            int anchor = window[0];
+            // The island is a way out, never a way back in, so it is not a destination.
+            // Nor is an anchor an earlier window already swallows — its maps belong to that
+            // continent (702000000 sits inside Shanghai's 700000000-783000000), so naming it
+            // would send a bot "to another continent" that is the one it is standing in.
+            if (anchor == 0 || anchor == home || anchorOf(anchor) != anchor) {
+                continue;
+            }
+            if (level < window[2] || window[2] <= above) {
+                continue;
+            }
+            // Reservoir pick: one pass, no list, uniform over everything that qualified.
+            if (ThreadLocalRandom.current().nextInt(++seen) == 0) {
+                chosen = anchor;
+            }
         }
-        return current + 1 < MIGRATION_LADDER.length ? MIGRATION_LADDER[current + 1][0] : 0;
+        return chosen;
+    }
+
+    /** The town a bot standing anywhere in this continent calls home. -1 when mapId is in no region. */
+    private static int anchorOf(int mapId) {
+        int[] region = regionOf(mapId);
+        return region == null ? -1 : region[0];
+    }
+
+    /** The bar of the continent mapId is in, or -1 when it is in no region. */
+    private static int barOf(int mapId) {
+        int[] region = regionOf(mapId);
+        return region == null ? -1 : region[2];
     }
 
     private static int[] regionOf(int mapId) {
