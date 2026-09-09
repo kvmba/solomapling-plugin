@@ -455,7 +455,7 @@ waves:
         level_hi: 40
         wanderers: 3
         maps:
-          - {map: 100020000, count: 4}
+          - {map: 100020000, count: 3}
       - name: El Nath
         level_lo: 50
         level_hi: 85

@@ -14,7 +14,7 @@
 
 | 归类 | 包含 | 行为依据 |
 |---|---|---|
-| **挂机** | 城镇驻点 SOCIAL_BOT 442、射手村 filler 125、射手村 social 9、宠物公园 Social 14 | `SocialBot` 站定持有个 ledge 占位（`TownStation.claimSpot`）；每 3–8 分钟 `maybeRelocate()` 漂到新点**再站定**；每 4–11 分钟 `maybeStroll()` 去邻图逛 30–90 秒，但 **65% 概率返回原图**（`ONE_WAY_STROLL_CHANCE=0.35`）。本质仍是驻守。 |
+| **挂机** | 城镇驻点 SOCIAL_BOT 441、射手村 filler 148、射手村 social 9、宠物公园 Social 8 | `SocialBot` 站定持有个 ledge 占位（`TownStation.claimSpot`）；每 3–8 分钟 `maybeRelocate()` 漂到新点**再站定**；每 4–11 分钟 `maybeStroll()` 去邻图逛 30–90 秒，但 **65% 概率返回原图**（`ONE_WAY_STROLL_CHANCE=0.35`）。本质仍是驻守。 |
 | **游走** | 城镇漫游 TOWN_WANDERER_BOT 255、射手村 HENESYS_BOT 60 | `TownWandererBot` / `HenesysBot` 的 FSM 一启动就进 `WANDER` / `CHANGE_MAP`：持续巡游 ledge，冷却到了就换子图（90 秒 / 10% 每 tick）。出生即在走。 |
 | **跳 JQ** | 宠物公园 HENESYS_JQ_BOT 15 | `HenesysJQBot` 一出生就 `NAVIGATE_TO_JQ → ATTEMPT_JQ → RECOVER → REST` 循环跑跳跳任务，不是观光漫游。单列。 |
 | **练级** | TRAINING_BOT 997 | 出生在城镇/枢纽 hub，随后自行发现猎场并散开。 |

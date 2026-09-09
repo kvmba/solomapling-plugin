@@ -639,15 +639,33 @@ public class EnvironmentManager {
         int map = HENESYS;
         debugprint("Spawning filler bots in Henesys...");
 
+        // Henesys main street carries half of the Henesys ambient crowd: it is the largest of the
+        // family by a wide margin (WZ: 358 footholds, ~7.4k px of ground vs the market's 5.7k and
+        // the potion shop's 0.8k) and the only one with real foot traffic - 14 of its 20 NPCs are
+        // functional (the travel agency, the dimensional mirror, Nana the love fairy), where the
+        // market has one, the game zone and potion shop none.
+        //
+        // The stretches below are the map's three main ground bands (y=274/334/454) plus the upper
+        // ledges, chosen against the WZ footholds: every span sits on real ground, including the
+        // old (-286,101)->(7,94) one, which follows the tiered upper-left ledges across the tiny
+        // y steps (101/99/102) the WZ splits them into. The added ones are the broad gaps the old
+        // list left empty (938..2596 on y=334, 3638..4382 and 4382..4832 on y=454, 5762..6338 on
+        // the east end). Density stays under 12 bots per 1000px, which is where the busiest
+        // pre-existing stretch (the taxi barrels) already sits.
         List<Integer> allIds = new ArrayList<>();
-        allIds.addAll(spawnFillerBots(randomizeCount(5), map, new Point(-696, 274), new Point(-10, 274)));       // left side
+        allIds.addAll(spawnFillerBots(randomizeCount(6), map, new Point(-696, 274), new Point(-10, 274)));       // left side
+        allIds.addAll(spawnFillerBots(randomizeCount(3), map, new Point(-1028, 274), new Point(-696, 274)));     // left side, past the barrels
         allIds.addAll(spawnFillerBots(randomizeCount(2), map, new Point(-144, 218), new Point(36, 218)));         // left side taxi barrels
         allIds.addAll(spawnFillerBots(randomizeCount(3), map, new Point(-286, 101), new Point(7, 94)));           // left side top plat
+        allIds.addAll(spawnFillerBots(randomizeCount(2), map, new Point(-10, 274), new Point(248, 274)));         // left side, up to the tree
         allIds.addAll(spawnFillerBots(randomizeCount(3), map, new Point(248, 274), new Point(573, 274)));         // left tree under
+        allIds.addAll(spawnFillerBots(randomizeCount(13), map, new Point(938, 334), new Point(2596, 334)));       // the long mid band
         allIds.addAll(spawnFillerBots(randomizeCount(6), map, new Point(2596, 334), new Point(3347, 334)));       // near market portal
         allIds.addAll(spawnFillerBots(randomizeCount(6), map, new Point(3393, 124), new Point(4247, 124)));       // near park portal
-        allIds.addAll(spawnFillerBots(randomizeCount(4), map, new Point(3831, 454), new Point(4382, 454)));       // under park portal
+        allIds.addAll(spawnFillerBots(randomizeCount(6), map, new Point(3638, 454), new Point(4382, 454)));       // under park portal
+        allIds.addAll(spawnFillerBots(randomizeCount(4), map, new Point(4382, 454), new Point(4832, 454)));       // between park portal and maya house
         allIds.addAll(spawnFillerBots(randomizeCount(8), map, new Point(4832, 454), new Point(5762, 454)));       // near maya house
+        allIds.addAll(spawnFillerBots(randomizeCount(6), map, new Point(5762, 454), new Point(6338, 454)));       // east of maya house
         allIds.addAll(spawnFillerBots(randomizeCount(4), map, new Point(5547, -176), new Point(6232, -176)));     // near sleepy portal
         allIds.addAll(spawnFillerBots(randomizeCount(3), map, new Point(4732, -116), new Point(5424, -116)));     // near sleepy portal 2
 
@@ -659,16 +677,20 @@ public class EnvironmentManager {
         int map = HENESYS_MARKET;
         debugprint("Spawning filler bots in Henesys Market...");
 
+        // The market is broad (5.7k px of ground) but thin on reasons to stop: one NPC, both of
+        // its shops (weapon, potion) reached from the street, where main street has fourteen
+        // functional NPCs. So it keeps a shopping crowd rather than a loitering one, weighted
+        // towards the two shop fronts.
         List<Integer> allIds = new ArrayList<>();
-        allIds.addAll(spawnFillerBots(randomizeCount(4), map, new Point(-548, 154), new Point(568, 154)));        // left side
-        allIds.addAll(spawnFillerBots(randomizeCount(3), map, new Point(592, 154), new Point(1148, 154)));        // left side 2
-        allIds.addAll(spawnFillerBots(randomizeCount(3), map, new Point(-105, 154), new Point(568, 154)));        // left side 3
+        allIds.addAll(spawnFillerBots(randomizeCount(3), map, new Point(-548, 154), new Point(568, 154)));        // left side
+        allIds.addAll(spawnFillerBots(randomizeCount(2), map, new Point(592, 154), new Point(1148, 154)));        // left side 2
+        allIds.addAll(spawnFillerBots(randomizeCount(2), map, new Point(-105, 154), new Point(568, 154)));        // left side 3
         allIds.addAll(spawnFillerBots(randomizeCount(3), map, new Point(1340, 214), new Point(2442, 214)));       // near weapon store
         allIds.addAll(spawnFillerBots(randomizeCount(3), map, new Point(1369, -56), new Point(2546, -56)));       // above weapon store
         allIds.addAll(spawnFillerBots(randomizeCount(4), map, new Point(2689, -116), new Point(3636, -116)));     // near potion store
-        allIds.addAll(spawnFillerBots(randomizeCount(5), map, new Point(2744, 94), new Point(3494, 94)));         // below potion store
-        allIds.addAll(spawnFillerBots(randomizeCount(3), map, new Point(3760, 94), new Point(5100, 94)));         // right side
-        allIds.addAll(spawnFillerBots(randomizeCount(3), map, new Point(3852, -176), new Point(4427, -176)));     // top right side
+        allIds.addAll(spawnFillerBots(randomizeCount(4), map, new Point(2744, 94), new Point(3494, 94)));         // below potion store
+        allIds.addAll(spawnFillerBots(randomizeCount(2), map, new Point(3760, 94), new Point(5100, 94)));         // right side
+        allIds.addAll(spawnFillerBots(randomizeCount(2), map, new Point(3852, -176), new Point(4427, -176)));     // top right side
 
         setAndStartBots(allIds, BotTypeManager.BotType.SOCIAL_BOT);
         debugprint("Henesys Market filler bots complete.");
@@ -679,16 +701,14 @@ public class EnvironmentManager {
         debugprint("Spawning filler bots in Henesys Park...");
 
         List<Integer> allIds = new ArrayList<>();
-        allIds.addAll(spawnFillerBots(randomizeCount(4), map, new Point(-53, 454), new Point(597, 454)));         // left side
-        allIds.addAll(spawnFillerBots(randomizeCount(4), map, new Point(982, 424), new Point(1288, 424)));        // near storage keeper
-        allIds.addAll(spawnFillerBots(randomizeCount(5), map, new Point(984, 574), new Point(1606, 574)));        // HPQ bottom
+        allIds.addAll(spawnFillerBots(randomizeCount(3), map, new Point(-53, 454), new Point(597, 454)));         // left side
+        allIds.addAll(spawnFillerBots(randomizeCount(3), map, new Point(982, 424), new Point(1288, 424)));        // near storage keeper
+        allIds.addAll(spawnFillerBots(randomizeCount(4), map, new Point(984, 574), new Point(1606, 574)));        // HPQ bottom
         allIds.addAll(spawnFillerBots(randomizeCount(2), map, new Point(1563, 304), new Point(1769, 304)));       // JQ platform
-        allIds.addAll(spawnFillerBots(randomizeCount(4), map, new Point(1915, 574), new Point(2909, 574)));       // fountain bottom
-        allIds.addAll(spawnFillerBots(randomizeCount(1), map, new Point(2019, 364), new Point(2118, 364)));       // fountain left tomb
+        allIds.addAll(spawnFillerBots(randomizeCount(3), map, new Point(1915, 574), new Point(2909, 574)));       // fountain bottom
         allIds.addAll(spawnFillerBots(randomizeCount(2), map, new Point(2198, 424), new Point(2471, 424)));       // fountain top
-        allIds.addAll(spawnFillerBots(randomizeCount(1), map, new Point(2549, 364), new Point(2663, 364)));       // right tomb
-        allIds.addAll(spawnFillerBots(randomizeCount(2), map, new Point(3233, 334), new Point(3607, 334)));       // right statue TP
-        allIds.addAll(spawnFillerBots(randomizeCount(4), map, new Point(3585, 694), new Point(4390, 694)));       // outside bowman portal
+        allIds.addAll(spawnFillerBots(randomizeCount(1), map, new Point(3233, 334), new Point(3607, 334)));       // right statue TP
+        allIds.addAll(spawnFillerBots(randomizeCount(1), map, new Point(3585, 694), new Point(4390, 694)));       // outside bowman portal
 
         setAndStartBots(allIds, BotTypeManager.BotType.SOCIAL_BOT);
         debugprint("Henesys Park filler bots complete.");
@@ -698,11 +718,13 @@ public class EnvironmentManager {
         int map = HENESYS_GAME_ZONE;
         debugprint("Spawning filler bots in Henesys Game Zone...");
 
+        // The blackjack tables (five of them, dealer plus 2-5 seats each) already own most of this
+        // map's floor, so the standing crowd is only what fits between them.
         List<Integer> allIds = new ArrayList<>();
 //        allIds.addAll(spawnFillerBots(randomizeCount(4), map, new Point(-830, 274), new Point(-62, 274)));        // left side // interferes with table 1
-        allIds.addAll(spawnFillerBots(randomizeCount(4), map, new Point(1027, 394), new Point(1483, 394)));       // right side lower
-        allIds.addAll(spawnFillerBots(randomizeCount(6), map, new Point(-83, 274), new Point(340, 274)));         // center
-        allIds.addAll(spawnFillerBots(randomizeCount(3), map, new Point(263, 64), new Point(929, 64)));           // top platform
+        allIds.addAll(spawnFillerBots(randomizeCount(3), map, new Point(1027, 394), new Point(1483, 394)));       // right side lower
+        allIds.addAll(spawnFillerBots(randomizeCount(4), map, new Point(-83, 274), new Point(340, 274)));         // center
+        allIds.addAll(spawnFillerBots(randomizeCount(2), map, new Point(263, 64), new Point(929, 64)));           // top platform
 
         setAndStartBots(allIds, BotTypeManager.BotType.SOCIAL_BOT);
         debugprint("Henesys Game Zone filler bots complete.");
@@ -712,10 +734,12 @@ public class EnvironmentManager {
         int map = HENESYS_POTION_SHOP;
         debugprint("Spawning filler bots in Henesys Potion Shop...");
 
+        // The potion shop is a room, not a street: 800px across, 35 footholds, no NPCs. Four
+        // browsers is already a crowd in that much space.
         List<Integer> allIds = new ArrayList<>();
-        allIds.addAll(spawnFillerBotsLockedY(randomizeCount(3), map, new Point(-370, 182), new Point(175, 182)));   // bottom left
-        allIds.addAll(spawnFillerBotsLockedY(randomizeCount(2), map, new Point(193, 182), new Point(370, 182)));    // bottom right
-        allIds.addAll(spawnFillerBotsLockedY(randomizeCount(3), map, new Point(-112, -127), new Point(245, -127))); // top bar
+        allIds.addAll(spawnFillerBotsLockedY(randomizeCount(2), map, new Point(-370, 182), new Point(175, 182)));   // bottom left
+        allIds.addAll(spawnFillerBotsLockedY(randomizeCount(1), map, new Point(193, 182), new Point(370, 182)));    // bottom right
+        allIds.addAll(spawnFillerBotsLockedY(randomizeCount(1), map, new Point(-112, -127), new Point(245, -127))); // top bar
 
         setAndStartBots(allIds, BotTypeManager.BotType.SOCIAL_BOT);
         debugprint("Henesys Potion Shop filler bots complete.");
@@ -835,7 +859,9 @@ public class EnvironmentManager {
 
     public static void spawnJQBotsPetPark() {
         debugprint("Spawning JQ Bots in Henesys Pet Park...");
-        List<Integer> botIds = spawnBotsOnMapOnPlatform(scaledAmbient(15), HENESYS_PET_PARK, "m1");
+        // Six runners, not fifteen: they all work the same short obstacle course from the same
+        // start point, so a larger batch read as a queue rather than as people having a go.
+        List<Integer> botIds = spawnBotsOnMapOnPlatform(scaledAmbient(6), HENESYS_PET_PARK, "m1");
         setAndStartBots(botIds, BotTypeManager.BotType.HENESYS_JQ_BOT);
         debugprint(fmt("Pet Park JQ bots spawned: {}", botIds.size()));
     }
@@ -844,16 +870,18 @@ public class EnvironmentManager {
         int map = HENESYS_PET_PARK;
         debugprint("Spawning social bots in Henesys Pet Park...");
 
+        // Pet park has the most footholds in the family (387) but they are stacked up a tall
+        // course rather than spread along a street, and it has no shop or quest NPC to gather
+        // at - it is a place you walk a dog, not a place you loiter. Thinned accordingly;
+        // the JQ runners and the town wanderers are what make it feel busy.
         List<Integer> allIds = new ArrayList<>();
         allIds.addAll(spawnFillerBots(scaledAmbient(1), map, new Point(-194, 34), new Point(184, 34)));
         allIds.addAll(spawnFillerBots(scaledAmbient(2), map, new Point(-449, 154), new Point(369, 154)));
-        allIds.addAll(spawnFillerBots(scaledAmbient(3), map, new Point(618, 154), new Point(1375, 154)));
+        allIds.addAll(spawnFillerBots(scaledAmbient(2), map, new Point(618, 154), new Point(1375, 154)));
         allIds.addAll(spawnFillerBots(scaledAmbient(1), map, new Point(841, -116), new Point(1125, -116)));
         allIds.addAll(spawnFillerBots(scaledAmbient(1), map, new Point(437, -326), new Point(810, -326)));
-        allIds.addAll(spawnFillerBots(scaledAmbient(1), map, new Point(531, -626), new Point(731, -626)));
         allIds.addAll(spawnFillerBots(scaledAmbient(1), map, new Point(790, -506), new Point(993, -506)));
-        allIds.addAll(spawnFillerBots(scaledAmbient(1), map, new Point(1072, -446), new Point(1274, -446)));
-        allIds.addAll(spawnFillerBots(scaledAmbient(3), map, new Point(-1808, 274), new Point(-738, 274)));
+        allIds.addAll(spawnFillerBots(scaledAmbient(1), map, new Point(-1808, 274), new Point(-738, 274)));
 
         setAndStartBots(allIds, BotTypeManager.BotType.SOCIAL_BOT);
         debugprint(fmt("Pet Park social bots spawned: {}", allIds.size()));
