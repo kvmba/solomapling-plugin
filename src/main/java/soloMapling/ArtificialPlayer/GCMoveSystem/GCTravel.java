@@ -2,6 +2,7 @@ package soloMapling.ArtificialPlayer.GCMoveSystem;
 
 import org.gms.client.Character;
 import org.gms.net.server.Server;
+import org.gms.scripting.event.EventManager;
 import org.gms.server.maps.MapleMap;
 import org.gms.server.maps.Portal;
 import soloMapling.ArtificialPlayer.BotTravelSystem.BotScriptedWarp;
@@ -355,9 +356,35 @@ final class GCTravel {
         if (now - trip.boardingAtMs < trip.boardDwellMs) {
             return; // still boarding — the cab hasn't left yet
         }
+        // A ticket counter does not put you on the ride, it puts you in the room the ride leaves
+        // from — and that room has no other way out. The counter's own script only lets you
+        // through while the event has boarding open, so stepping in while it is shut strands the
+        // bot in an empty lounge until the next sailing. Wait at the counter for the door.
+        GCTaxi.VehicleEdge onward = GCTaxi.vehicleFrom(taxi.toMapId());
+        if (onward != null && !boardingOpen(bot, onward.eventName())) {
+            trip.waitingForTransit = true; // stillness by design — see the transit ceiling
+            return;
+        }
         trip.boardingAtMs = 0L;
         warp(bot, taxi.toMapId(), "taxi ride " + bot.getMapId() + " -> " + taxi.toMapId()
                 + " (npc " + taxi.npcId() + ")");
+    }
+
+    /*
+     * Whether the boat/train is letting passengers into its waiting room right now.
+     *
+     * The event says so on itself ("entry"), the same property the counter's own script asks
+     * before it warps a player through. Absent event (not running, wrong channel) reads as
+     * shut rather than open: a bot that walked into a lounge whose ride never came would be
+     * stuck there for good, while one that waits at the counter is still visible and can be
+     * picked up by the next thing that wants it.
+     */
+    private static boolean boardingOpen(Character bot, String eventName) {
+        if (bot == null || bot.getMap() == null || bot.getMap().getChannelServer() == null) {
+            return false;
+        }
+        EventManager em = bot.getMap().getChannelServer().getEventSM().getEventManager(eventName);
+        return em != null && "true".equals(em.getProperty("entry"));
     }
 
     /*

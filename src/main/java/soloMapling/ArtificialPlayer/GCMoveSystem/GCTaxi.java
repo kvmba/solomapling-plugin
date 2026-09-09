@@ -226,6 +226,24 @@ final class GCTaxi {
         return null;
     }
 
+    /*
+     * The scheduled vehicle that leaves from mapId, or null if nothing does.
+     *
+     * Asking "is this a waiting room?" rather than "is there a ride from A to B" — a ticket
+     * counter's destination has to be recognised as a departure lounge before a bot steps into
+     * it, because the lounge has no way out: the only door is the ride itself, and boarding
+     * only opens while the event says it has. Stepping in while it is shut strands the bot
+     * there for a whole cycle.
+     */
+    static VehicleEdge vehicleFrom(int mapId) {
+        for (VehicleEdge ride : VEHICLE_RIDES) {
+            if (ride.fromMapId() == mapId && isPortalinCurrentVersion(mapId)) {
+                return ride;
+            }
+        }
+        return null;
+    }
+
     record VehicleEdge(int fromMapId, int npcId, int toMapId, String eventName) {
     }
 
