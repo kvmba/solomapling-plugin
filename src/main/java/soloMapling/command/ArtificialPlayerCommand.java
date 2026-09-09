@@ -665,7 +665,7 @@ public class ArtificialPlayerCommand extends Command {
 
         List<Integer> spawned = new ArrayList<>();
         for (int i = 0; i < count; i++) {
-            int botId = BotGeneration.createBot(pos, map, baseClass, band[0], band[1]);
+            int botId = BotGeneration.createBot(pos, map, baseClass, band[0], band[1], 0, true);
             if (botId <= 0) {
                 continue; // every channel is at capacity - the bot was not created
             }
@@ -773,7 +773,7 @@ public class ArtificialPlayerCommand extends Command {
         for (int i = 0; i < count; i++) {
             // Decorate ONCE with the forced job (level + class-coherent gear + NX in a single pass, the same
             // path !bot spawn uses) — re-decorating after createBot left the bot showing its base look.
-            int botId = BotGeneration.createBot(pos, map, baseClass, level, level, job.getId());
+            int botId = BotGeneration.createBot(pos, map, baseClass, level, level, job.getId(), true);
             Character bot = BotHelpers.getCharFromChannelStorage(botId);
             if (bot == null) {
                 continue;

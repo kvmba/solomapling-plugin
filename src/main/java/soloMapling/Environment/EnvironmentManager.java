@@ -358,7 +358,9 @@ public class EnvironmentManager {
             Point spawnAt = i < spots.size() ? spots.get(i) : anchor;
             int baseClass = BotDecorate.rollBaseClass(); // weighted 1..4 (Thief-heavy, Bowman-rare; Pirate excluded)
             try {
-                int botId = BotGeneration.createBot(spawnAt, map, baseClass, loLevel, hiLevel);
+                // spread = true: TrainingBots fight, so they stay on the channel taper (ch1 heaviest)
+                // instead of all stacking on ch1 with the ambient crowd.
+                int botId = BotGeneration.createBot(spawnAt, map, baseClass, loLevel, hiLevel, 0, true);
                 if (botId > 0) {
                     ids.add(botId);
                 }

@@ -179,16 +179,31 @@ public class BotGeneration {
     }
 
     // forcedJobId > 0 pins the exact job (GM 'trainhere' test spawn); 0 = a random job for the class.
+    // spread = false pins the bot to channel 1 (see the spread overload); spread = true keeps the taper.
     public static int createBot(Point pos, MapleMap map, int baseClass, int minLevel, int maxLevel, int forcedJobId) {
-        // Spread bots over the open channels (ch1 heaviest) instead of stacking them all on
-        // channel 1. NONE means every channel is at capacity - skip the spawn rather than
+        return createBot(pos, map, baseClass, minLevel, maxLevel, forcedJobId, false);
+    }
+
+    /**
+     * The combat bots (TrainingBot / TestAttackBot) are the only ones that stay on the channel
+     * taper; every other bot is born on channel 1, which is where the ambient world lives.
+     *
+     * <p>Pinning is still subject to capacity: when ch1 is at {@code channel_capacity} the
+     * router falls back to the taper, so a full ch1 pushes bots onto the other channels instead
+     * of dropping them.
+     */
+    public static int createBot(Point pos, MapleMap map, int baseClass, int minLevel, int maxLevel,
+                                int forcedJobId, boolean spread) {
+        // NONE means every channel is at capacity - skip the spawn rather than
         // squeezing one in past the cap.
         //
         // Checked BEFORE the throttle takes a permit: acquire() blocks to enforce
         // spawn_rate_per_second, and a bot that is about to be skipped must not pay that wait.
         // Once the channels are full a whole wave would otherwise spend its permits - and its
         // seconds - queueing for spawns that are then thrown away, which reads as a hang.
-        int channel = BotChannelRouter.nextChannel();
+        int channel = spread
+                ? BotChannelRouter.nextChannel()
+                : BotChannelRouter.nextChannel(BotChannelRouter.DEFAULT_CHANNEL);
         if (channel == BotChannelRouter.NONE) {
             return -1;
         }
@@ -206,7 +221,7 @@ public class BotGeneration {
         bot = Character.loadCharFromDB(cid, BotClientHandler.clientFor(channel), false);
         int botId = SoloMaplingConstants.GameConstants.BOT_BASE_ID + currentBotCount.getAndIncrement();
         bot = setBotStats(bot, botId); // Bot onDemandBot
-        addBotToServer(bot);
+        addBotToServer(bot, spread);
         // Re-resolve the map on the bot's OWN channel. Callers pass a map instance taken from
         // whichever channel they were on (a GM's, or channel 1's), and a map is a per-channel
         // object: putting the bot in another channel's instance would broadcast it to that
@@ -273,7 +288,8 @@ public class BotGeneration {
             throw new IllegalStateException("Companion has no valid map: " + characterId);
         }
 
-        addBotToServer(companion);
+        // Companions always route through the taper (no pinning), so they count towards its split.
+        addBotToServer(companion, true);
         try {
             companion.getMap().addPlayer(companion);
             // Character.loadCharFromDB creates a fresh Character instance, while an
@@ -405,7 +421,7 @@ public class BotGeneration {
             SoloMaplingUtilities.channel.removePlayer(fakechar);
         }
         world.getPlayerStorage().removePlayer(fakechar.getId());
-        BotChannelRouter.noteBotRemoved(channel);
+        BotChannelRouter.forgetBot(fakechar.getId(), channel);
         CharacterStorage.removeActiveBot(fakechar.getId());//
         // A removed bot never converts back out, so its recruit handoffs would linger in the
         // static maps forever (and a reused character id could inherit them).
@@ -415,6 +431,10 @@ public class BotGeneration {
     }
 
     private static void addBotToServer(Character fakechar) {
+        addBotToServer(fakechar, false);
+    }
+
+    private static void addBotToServer(Character fakechar, boolean spread) {
         // Mark bot as present in channel world so isLoggedInWorld() gates pass.
         // Avoid setEnteredChannelWorld() — it touches PartySearch / playerAway maps
         // and deadlocks under mass parallel spawn.
@@ -429,7 +449,9 @@ public class BotGeneration {
             SoloMaplingUtilities.channel.addPlayer(fakechar);
         }
         world.getPlayerStorage().addPlayer(fakechar);
-        BotChannelRouter.noteBotAdded(channel);
+        if (spread) {
+            BotChannelRouter.noteSpreadBot(fakechar.getId(), channel);
+        }
     }
 
     public static void spawnBotFm(Character fakechar, Point pt) {

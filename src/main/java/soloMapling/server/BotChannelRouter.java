@@ -17,13 +17,15 @@ import org.gms.net.server.world.World;
  * <p>Rules (per product decision):
  * <ul>
  *   <li>Lower channel id = more bots, so bots taper off by id (ch1 heaviest): 6:4 on two
- *       channels, 5:3:2 on three.</li>
+ *       channels, 5:3:2 on three. Only the bots the taper places are its business — bots
+ *       pinned straight to a channel (the whole ambient crowd) are placed without it, see
+ *       {@link #nextChannel(int)}.</li>
  *   <li>The taper is a rule about BOTS. Real players must not skew it, or a busy ch1 would end
  *       up with the fewest bots - the exact inversion of the rule above.</li>
  *   <li>Capacity is a rule about HEADCOUNT and does include real players: a channel at
  *       {@code channel_capacity} takes no more.</li>
- *   <li>Bot counts are read live, so nothing has to be tracked here and no counter can drift as
- *       bots log off for a rest.</li>
+ *   <li>Taper-placed bots are counted live, so the count cannot drift upward the way "bots
+ *       ever assigned" would as bots come and go.</li>
  *   <li>When every channel is at the cap the bot is dropped, not squeezed in.</li>
  *   <li>A bot never switches channels, so it stays where it was created.</li>
  * </ul>
@@ -46,38 +48,51 @@ public final class BotChannelRouter {
     public static final int NONE = -1;
 
     /**
-     * Live count of bots per channel, maintained by addBotToServer/removeBotFromServer.
+     * Live count of TAPER-PLACED bots per channel: only bots the taper itself routed
+     * ({@code spread}) are counted.
      *
-     * <p>Counting beats scanning: the alternative - walking each channel's characters and testing
-     * every one - takes that channel's PlayerStorage read lock for an O(n) copy on every spawn.
-     * These counters are O(1) and never touch a storage lock.
+     * <p>The taper's split is a rule about where the taper puts bots, so bots pinned to a
+     * channel must not feed into it: 1560 ambient bots pinned to ch1 would make ch1's
+     * {@code bots / weight} ratio permanently the largest, and every later spread bot would
+     * skip ch1 - inverting "lower id = more bots" into "ch1 gets none". Counting only what
+     * the taper placed keeps the ratio a measure of the taper's own debt.
      *
-     * <p>They are live rather than cumulative: a bot that logs off for a rest decrements its
-     * channel, so the count cannot drift upward the way "bots ever assigned" would. The trade is
-     * that a bot dropped without going through removeBotFromServer would leave its channel
-     * counting one too many - the same pairing the existing register/unregister already assumes.
+     * <p>Counting beats scanning: the alternative - walking each channel's characters and
+     * testing every one - takes that channel's PlayerStorage read lock for an O(n) copy on
+     * every spawn. These counters are O(1) and never touch a storage lock.
      */
     private static final java.util.Map<Integer, java.util.concurrent.atomic.AtomicInteger> BOTS_ON_CHANNEL =
             new java.util.concurrent.ConcurrentHashMap<>();
 
+    /**
+     * Ids of the bots the taper placed, so removal can undo exactly what placement did.
+     * Bots pinned outside the taper are never in here, so removing them is a no-op.
+     */
+    private static final java.util.Set<Integer> SPREAD_BOT_IDS =
+            java.util.concurrent.ConcurrentHashMap.newKeySet();
 
-
-    /** Record a bot arriving on a channel. Paired with {@link #noteBotRemoved}. */
-    public static void noteBotAdded(int channel) {
+    /**
+     * Record a bot the taper placed. Paired with {@link #forgetBot}.
+     * Bots pinned to a channel must not call this - see {@link #BOTS_ON_CHANNEL}.
+     */
+    public static void noteSpreadBot(int botId, int channel) {
         if (channel > 0) {
+            SPREAD_BOT_IDS.add(botId);
             BOTS_ON_CHANNEL.computeIfAbsent(channel, k -> new java.util.concurrent.atomic.AtomicInteger())
                     .incrementAndGet();
         }
     }
 
-    /** Record a bot leaving a channel. */
-    public static void noteBotRemoved(int channel) {
-        if (channel <= 0) {
-            return;
-        }
-        java.util.concurrent.atomic.AtomicInteger c = BOTS_ON_CHANNEL.get(channel);
-        if (c != null) {
-            c.decrementAndGet();
+    /**
+     * Undo {@link #noteSpreadBot} for a bot that is leaving, whichever way it was placed.
+     * Pinned bots were never counted, so this is a no-op for them.
+     */
+    public static void forgetBot(int botId, int channel) {
+        if (channel > 0 && SPREAD_BOT_IDS.remove(botId)) {
+            java.util.concurrent.atomic.AtomicInteger c = BOTS_ON_CHANNEL.get(channel);
+            if (c != null) {
+                c.decrementAndGet();
+            }
         }
     }
 
@@ -99,6 +114,20 @@ public final class BotChannelRouter {
      * Falls back to {@link #DEFAULT_CHANNEL} when the channel topology is unavailable.
      */
     public static int nextChannel() {
+        return nextChannel(0); // 0 = no preference: the plain taper
+    }
+
+    /**
+     * Same as {@link #nextChannel()}, but {@code preferredChannel} (1-based) wins whenever it
+     * still has headroom — the caller asked for it by name, so the taper doesn't apply to it.
+     *
+     * <p>Capacity is still a hard gate in both directions: once the preferred channel is at
+     * {@code channel_capacity} it is skipped and the bot falls through to the normal taper, so
+     * a full ch1 pushes bots onto the other channels instead of dropping them.
+     *
+     * @param preferredChannel 1-based channel id, or {@code <= 0} for no preference.
+     */
+    public static int nextChannel(int preferredChannel) {
         try {
             World world = Server.getInstance().getWorld(WORLD);
             if (world == null) {
@@ -129,7 +158,8 @@ public final class BotChannelRouter {
                 java.util.concurrent.atomic.AtomicInteger c = BOTS_ON_CHANNEL.get(channelId);
                 bots[i] = c != null ? Math.max(0, c.get()) : 0;
             }
-            int pick = pickChannel(bots, weights(n), population, cap);
+            int preferred = (preferredChannel > 0 && preferredChannel <= n) ? preferredChannel - 1 : -1;
+            int pick = pickChannel(bots, weights(n), population, cap, preferred);
             return pick < 0 ? NONE : pick + 1;
         } catch (RuntimeException e) {
             return DEFAULT_CHANNEL; // never let routing break a spawn
@@ -155,7 +185,19 @@ public final class BotChannelRouter {
      * steady state: with the opposite tie-break the empty server fills tail-first (3,2,1,...),
      * which inverts the intended shape while the population is still coming up. The steady
      * split is the same either way — 6:4 / 5:3:2 — only the fill order differs.
+     *
+     * <p>A {@code preferred} index short-circuits the taper: a bot that was asked to live on
+     * that channel goes there first. Headroom is still required, so a preferred channel at the
+     * cap is skipped and the caller falls back to the taper above.
      */
+    static int pickChannel(int[] bots, double[] w, int[] population, int cap, int preferred) {
+        if (preferred >= 0 && preferred < population.length && population[preferred] < cap) {
+            return preferred;
+        }
+        return pickChannel(bots, w, population, cap);
+    }
+
+    /** {@link #pickChannel(int[], double[], int[], int, int)} with no preferred channel. */
     static int pickChannel(int[] bots, double[] w, int[] population, int cap) {
         if (bots == null || w == null || population == null
                 || bots.length != w.length || population.length != w.length) {

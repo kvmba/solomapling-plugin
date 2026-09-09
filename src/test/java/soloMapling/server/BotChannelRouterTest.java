@@ -125,6 +125,71 @@ class BotChannelRouterTest {
     }
 
     @Test
+    void preferredChannelWinsWhileItHasHeadroom() {
+        // A bot asked for ch1 goes there even though the taper owes the others more: pinning is
+        // a placement request, not a share of the taper.
+        for (int k = 0; k < 8; k++) {
+            int[] botCount = {k, 0, 0};
+            int[] population = {k, 0, 0};
+            int p = BotChannelRouter.pickChannel(botCount, BotChannelRouter.weights(3),
+                    population, 1000, 0);
+            assertEquals(0, p, "bot should be pinned to ch1, got ch" + (p + 1));
+        }
+    }
+
+    @Test
+    void preferredChannelAtCapFallsBackToTheTaper() {
+        // Capacity still gates pinning: ch1 holds 99 real players against a cap of 100, so it
+        // takes one more pinned bot and then the rest spill onto ch2/ch3 instead of being dropped.
+        int[] botCount = {0, 0, 0};
+        double[] w = BotChannelRouter.weights(3);
+        int[] population = {99, 0, 0};
+        int first = BotChannelRouter.pickChannel(botCount, w, population, 100, 0);
+        assertEquals(0, first, "the last ch1 slot should take the pinned bot");
+        botCount[0]++;
+        population[0]++;
+
+        int second = BotChannelRouter.pickChannel(botCount, w, population, 100, 0);
+        assertTrue(second > 0, "ch1 is at cap - pinned bots must spill to ch2/ch3, got ch" + (second + 1));
+    }
+
+    @Test
+    void taperIgnoresPinnedBots() {
+        // The bug this guards: the taper counted EVERY bot, so bots pinned to ch1 swamped its
+        // ratio and every later spread bot skipped ch1 - inverting "ch1 heaviest" into
+        // "ch1 gets none". Placement (the preferred path) must not feed the taper's ledger.
+        double[] w = BotChannelRouter.weights(3);
+        int[] tapered = {0, 0, 0};       // only what the taper placed
+        int[] population = {1560, 0, 0}; // 1560 ambient bots already pinned to ch1
+        int cap = 5000;
+        for (int k = 0; k < 997; k++) {
+            int p = BotChannelRouter.pickChannel(tapered, w, population, cap, -1);
+            tapered[p]++;
+            population[p]++;
+        }
+        int total = tapered[0] + tapered[1] + tapered[2];
+        assertEquals(0.50, tapered[0] / (double) total, 0.02, "ch1 lost its share: " + tapered[0]);
+        assertEquals(0.30, tapered[1] / (double) total, 0.02, "ch2 share: " + tapered[1]);
+        assertEquals(0.20, tapered[2] / (double) total, 0.02, "ch3 share: " + tapered[2]);
+    }
+
+    @Test
+    void everythingFullStillDropsEvenWithAPreference() {
+        int[] population = {10, 10, 10};
+        int p = BotChannelRouter.pickChannel(new int[3], BotChannelRouter.weights(3), population, 10, 0);
+        assertEquals(-1, p, "no headroom anywhere - nothing may be placed");
+    }
+
+    @Test
+    void degeneratePreferredIndexIsIgnored() {
+        double[] w3 = BotChannelRouter.weights(3);
+        int[] pop = new int[3];
+        assertEquals(-1, BotChannelRouter.pickChannel(new int[3], w3, pop, 0, 0), "zero cap: no channel qualifies");
+        assertEquals(0, BotChannelRouter.pickChannel(new int[3], w3, pop, 1000, 7), "out-of-range preference ignored");
+        assertEquals(0, BotChannelRouter.pickChannel(new int[3], w3, pop, 1000, -1), "negative preference ignored");
+    }
+
+    @Test
     void weightsSumToOne() {
         for (int n = 1; n <= 8; n++) {
             double sum = 0;
