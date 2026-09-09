@@ -39,7 +39,7 @@ class EnvironmentPopulationConfigTest {
         assertEquals(46, towns.size());
         int social = towns.stream().flatMap(t -> t.maps().stream()).mapToInt(m -> m.count()).sum();
         int wanderers = towns.stream().mapToInt(t -> t.wanderers()).sum();
-        assertEquals(548, social);
+        assertEquals(538, social);
         assertEquals(272, wanderers);
     }
 

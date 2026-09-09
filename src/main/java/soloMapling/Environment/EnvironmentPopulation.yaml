@@ -312,7 +312,7 @@ waves:
         level_hi: 60
         wanderers: 8
         maps:
-          - {map: 110000000, count: 20}
+          - {map: 110000000, count: 10}
       - name: Mushroom Forest Path
         level_lo: 10
         level_hi: 40
