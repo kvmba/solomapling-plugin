@@ -269,10 +269,75 @@ opq.box_ordinal.5: "5"
 opq.box_ordinal.6: "6"
 opq.box_ordinal.7: "7"
 
+# 组队招募喊话：[等级/职业标签] [前缀] [副本名] [后缀]。
+# 数量必须与 OPQRecruitMessages 中的 PREFIXES / PQ_NAMES / FILLERS 一致。
+opq.recruit.level_tag: "{0}级{1}"
+# 国服不喊 "J>/LFP>"，用的是"组队""求组""缺人"这类说法。
+opq.recruit.prefix.0: "组队"
+opq.recruit.prefix.1: "求组"
+opq.recruit.prefix.2: "缺人"
+opq.recruit.prefix.3: "来人"
+opq.recruit.prefix.4: "收人"
+opq.recruit.prefix.5: "带人"
+opq.recruit.prefix.6: "有人吗"
+opq.recruit.prefix.7: "还差人"
+opq.recruit.prefix.8: "来个"
+opq.recruit.prefix.9: "招人"
+opq.recruit.prefix.10: "求带"
+opq.recruit.prefix.11: "开组"
+opq.recruit.prefix.12: "有队吗"
+opq.recruit.prefix.13: "组队了"
+opq.recruit.prefix.14: "差一个"
+opq.recruit.name.0: "天空组队"
+opq.recruit.name.1: "天空之城"
+opq.recruit.name.2: "天空副本"
+opq.recruit.name.3: "组队任务"
+opq.recruit.name.4: "OPQ"
+opq.recruit.name.5: "天空组队任务"
+opq.recruit.name.6: "刷天空"
+opq.recruit.name.7: "天空刷经验"
+opq.recruit.name.8: "天空刷级"
+opq.recruit.name.9: "刷OPQ"
+opq.recruit.name.10: "天空来人"
+opq.recruit.name.11: "天空缺人"
+opq.recruit.name.12: "天空差一个"
+opq.recruit.name.13: "天空来个"
+opq.recruit.name.14: "天空组队了"
+opq.recruit.name.15: "来人刷天空"
+opq.recruit.name.16: "有人刷天空吗"
+opq.recruit.name.17: "天空速刷"
+opq.recruit.name.18: "天空开组"
+opq.recruit.name.19: "天空速通"
+opq.recruit.name.20: "来人刷OPQ"
+opq.recruit.name.21: "OPQ来人"
+opq.recruit.name.22: "OPQ缺人"
+opq.recruit.name.23: "OPQ速刷"
+opq.recruit.name.24: "刷唱片"
+opq.recruit.name.25: "天空收人"
+opq.recruit.name.26: "云片"
+opq.recruit.name.27: "刷云片"
+opq.recruit.name.28: "天空经验"
+opq.recruit.name.29: "来个打天空的"
+opq.recruit.filler.0: "！！！"
+opq.recruit.filler.1: "来人"
+opq.recruit.filler.2: "速来"
+opq.recruit.filler.3: "谢谢"
+opq.recruit.filler.4: "随便来"
+opq.recruit.filler.5: "来就开"
+opq.recruit.filler.6: "差一个"
+opq.recruit.filler.7: "马上开"
+opq.recruit.filler.8: "+++"
+
 # ---------------------------------------------------------------------------
 # Training bot chalkboard (shown while the bot is on a break)
 # ---------------------------------------------------------------------------
 training.break_sign: "马上回来"
+
+# ---------------------------------------------------------------------------
+# 陪玩 bot（LLM）
+# ---------------------------------------------------------------------------
+# 大模型没给出回复时的兜底台词（规划失败或超时）。
+companion.fallback_reply: "等我一下——我还陪着你呢。"
 
 # ---------------------------------------------------------------------------
 # 船上遭遇巴洛古时喊的话（每个 bot 每趟只喊一次）

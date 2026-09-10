@@ -162,9 +162,15 @@ class BotMessagesTest {
                 "dropgame.trade_cancelled", "dropgame.wrong_amount",
                 "gacha.congrats", "gacha.lucky", "gacha.unlucky",
                 "opq.got_record", "opq.dropping_record", "opq.dropping_clouds",
+                // The lobby recruit spam, hardcoded in OPQRecruitMessages until this fix.
+                "opq.recruit.level_tag", "opq.recruit.prefix.0", "opq.recruit.prefix.14",
+                "opq.recruit.name.0", "opq.recruit.name.17", "opq.recruit.name.29",
+                "opq.recruit.filler.0", "opq.recruit.filler.8",
+                "companion.fallback_reply",
                 "training.break_sign"
         };
-        Set<String> properNouns = Set.of("han", "cho");
+        // OPQ is the quest's own acronym, shown that way by the client even on a zh-CN server.
+        Set<String> properNouns = Set.of("han", "cho", "opq");
         for (String key : keys) {
             String value = BotMessages.get(key);
             for (String word : value.toLowerCase().split("[^a-zA-Z]+")) {
@@ -201,5 +207,25 @@ class BotMessagesTest {
         assertEquals("Thumper: Blackjack!",
                 BlackjackRules.formatOutcomeMessage("Thumper",
                         BlackjackRules.Outcome.BLACKJACK_WIN, List.of("AH", "KD"), List.of("2H", "3D")));
+    }
+
+    // A missing recruit key would surface in chat as the raw key ("opq.recruit.prefix.9").
+    @Test
+    void everyRecruitLineResolves() {
+        for (String tag : new String[]{"en-US", "zh-CN"}) {
+            SoloMaplingLanguageConfig.setLanguageTag(tag);
+            for (int i = 0; i < 15; i++) {
+                assertFalse(BotMessages.get("opq.recruit.prefix." + i).startsWith("opq."),
+                        tag + " missing opq.recruit.prefix." + i);
+            }
+            for (int i = 0; i < 30; i++) {
+                assertFalse(BotMessages.get("opq.recruit.name." + i).startsWith("opq."),
+                        tag + " missing opq.recruit.name." + i);
+            }
+            for (int i = 0; i < 9; i++) {
+                assertFalse(BotMessages.get("opq.recruit.filler." + i).startsWith("opq."),
+                        tag + " missing opq.recruit.filler." + i);
+            }
+        }
     }
 }

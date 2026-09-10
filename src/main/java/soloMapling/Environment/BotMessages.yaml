@@ -248,10 +248,74 @@ opq.box_ordinal.5: "5th"
 opq.box_ordinal.6: "6th"
 opq.box_ordinal.7: "7th"
 
+# Lobby recruit-chat generator: [level/job tag] [prefix] [pq name] [filler].
+# Counts must match OPQRecruitMessages (PREFIXES / PQ_NAMES / FILLERS).
+opq.recruit.level_tag: "Lvl {0} {1}"
+opq.recruit.prefix.0: "J>"
+opq.recruit.prefix.1: "Joining>"
+opq.recruit.prefix.2: "J>>"
+opq.recruit.prefix.3: "Join>"
+opq.recruit.prefix.4: "LFP>"
+opq.recruit.prefix.5: "lf>"
+opq.recruit.prefix.6: "LFG>"
+opq.recruit.prefix.7: "lfm>"
+opq.recruit.prefix.8: "Party>"
+opq.recruit.prefix.9: "PQ>"
+opq.recruit.prefix.10: "Need>"
+opq.recruit.prefix.11: "Looking for>"
+opq.recruit.prefix.12: "Anyone>"
+opq.recruit.prefix.13: "Inv>"
+opq.recruit.prefix.14: "Need 1>"
+opq.recruit.name.0: "OPQ"
+opq.recruit.name.1: "Orbis PQ"
+opq.recruit.name.2: "Orbis Party Quest"
+opq.recruit.name.3: "pq"
+opq.recruit.name.4: "Orbis"
+opq.recruit.name.5: "OPQ please"
+opq.recruit.name.6: "orbis pq"
+opq.recruit.name.7: "OPQ OPQ"
+opq.recruit.name.8: "Orbis party quest"
+opq.recruit.name.9: "opq"
+opq.recruit.name.10: "OPQ run"
+opq.recruit.name.11: "Orbis PQ run"
+opq.recruit.name.12: "one more for OPQ"
+opq.recruit.name.13: "OPQ, any level"
+opq.recruit.name.14: "Orbis PQ, need 1"
+opq.recruit.name.15: "OPQ need more"
+opq.recruit.name.16: "Orbis PQ anyone"
+opq.recruit.name.17: "OPQ lobby"
+opq.recruit.name.18: "party quest"
+opq.recruit.name.19: "Party Quest"
+opq.recruit.name.20: "OPQ grind"
+opq.recruit.name.21: "Orbis tower"
+opq.recruit.name.22: "OPQ exp"
+opq.recruit.name.23: "Orbis PQ exp"
+opq.recruit.name.24: "OPQ now"
+opq.recruit.name.25: "OPQ fast"
+opq.recruit.name.26: "Orbis PQ fast"
+opq.recruit.name.27: "OPQ anyone"
+opq.recruit.name.28: "Orbis PQ, come"
+opq.recruit.name.29: "OPQ, need a party"
+opq.recruit.filler.0: "!!!"
+opq.recruit.filler.1: "plz"
+opq.recruit.filler.2: "asap"
+opq.recruit.filler.3: "pls"
+opq.recruit.filler.4: "anyone"
+opq.recruit.filler.5: "come"
+opq.recruit.filler.6: "need 1"
+opq.recruit.filler.7: "now"
+opq.recruit.filler.8: "ty"
+
 # ---------------------------------------------------------------------------
 # Training bot chalkboard (shown while the bot is on a break)
 # ---------------------------------------------------------------------------
 training.break_sign: "brb"
+
+# ---------------------------------------------------------------------------
+# Companion (LLM escort bot)
+# ---------------------------------------------------------------------------
+# Spoken when the brain produced no reply (planning failed or timed out).
+companion.fallback_reply: "Give me a moment—I'm still with you."
 
 # ---------------------------------------------------------------------------
 # Aboard a boat when a Balrog boards mid-crossing (one shout per bot per ride)

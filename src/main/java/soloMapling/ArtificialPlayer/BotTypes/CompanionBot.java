@@ -46,6 +46,8 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 
+import soloMapling.Environment.BotMessages;
+
 import static soloMapling.ArtificialPlayer.BotCommandsPack.SocialCommands.BotSpeak;
 import static soloMapling.ArtificialPlayer.BotHelpers.isBot;
 
@@ -61,7 +63,11 @@ public final class CompanionBot extends BotSM implements
     private static final Duration PLANNING_TIMEOUT = Duration.ofSeconds(12);
     private static final Duration TURN_COOLDOWN = Duration.ofSeconds(2);
     private static final long COMBAT_REPAIR_COOLDOWN_MS = 15_000L;
-    private static final String FALLBACK_REPLY = "Give me a moment—I'm still with you.";
+    // Resolved per use, not cached: a language switch invalidates the message pack, and a
+    // companion spawned before it would otherwise keep answering in the old language.
+    private static String fallbackReply() {
+        return BotMessages.get("companion.fallback_reply");
+    }
 
     private final CompanionBrain brain;
     private final CompanionActionExecutor actionExecutor;
@@ -300,7 +306,7 @@ public final class CompanionBot extends BotSM implements
         activeContext = null;
         if (context == null
                 || context.request().playerCharacterId() != planned.message().playerCharacterId()) {
-            BotSpeak(getChr(), FALLBACK_REPLY);
+            BotSpeak(getChr(), fallbackReply());
             return;
         }
         // A companion that answers the instant planning returns sounds like a script, so the whole
@@ -328,9 +334,9 @@ public final class CompanionBot extends BotSM implements
     private static String plannedReply(TurnCoordinator.PlannedTurn planned) {
         if (planned.result() instanceof CompanionPlannerResult.Success success) {
             String reply = success.decision().reply();
-            return reply == null ? FALLBACK_REPLY : reply;
+            return reply == null ? fallbackReply() : reply;
         }
-        return FALLBACK_REPLY;
+        return fallbackReply();
     }
 
     // Plays one planned turn. The delay is random and longer than the turn cooldown, so a second
@@ -380,7 +386,7 @@ public final class CompanionBot extends BotSM implements
                     context.request().playerCharacterId(), elapsedMs,
                     failure.type(), failure.message(), failure.violations().size());
             ActionExecutionResult execution = actionExecutor.execute(
-                    new CompanionAction.Say(FALLBACK_REPLY),
+                    new CompanionAction.Say(fallbackReply()),
                     getChr(),
                     this,
                     context.resolver());
