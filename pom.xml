@@ -141,6 +141,11 @@
                     <debug>false</debug>
                     <debuglevel>none</debuglevel>
                     <parameters>false</parameters>
+                    <!-- <debug>false</debug> alone does NOT emit -g for javac; strip
+                         line numbers / local variable tables / source file attributes. -->
+                    <compilerArgs>
+                        <arg>-g:none</arg>
+                    </compilerArgs>
                 </configuration>
             </plugin>
             <plugin>
