@@ -29,7 +29,7 @@ class EnvironmentPopulationConfigTest {
         var plan = EnvironmentPopulationConfig.reload();
         assertTrue(plan.training().enabled());
         assertEquals(54, plan.training().cohorts().size());
-        assertEquals(1079, plan.trainingCohortTotal());
+        assertEquals(1081, plan.trainingCohortTotal());
         assertTrue(plan.essentials().enabled());
         assertEquals("henesys", plan.essentials().fmRegion());
         assertEquals(5, plan.essentials().fmEntrance().m1());
