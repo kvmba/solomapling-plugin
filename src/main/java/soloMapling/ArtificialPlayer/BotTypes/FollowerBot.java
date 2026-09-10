@@ -44,8 +44,8 @@ public class FollowerBot extends BotSM {
     // Idle chatter while tailing the leader, so the ride isn't a silent walk. Tighter than
     // TrainingBot's GrindAmbient (2-4 min): the leader is a person walking alongside, and a
     // companion that only speaks every few minutes reads as broken mid-conversation.
-    private static final long AMBIENT_MIN_MS = 60_000;       // min gap between follow lines (1 min)
-    private static final long AMBIENT_MAX_MS = 180_000;      // max gap (3 min)
+    private static final long AMBIENT_MIN_MS = 30_000;       // min gap between follow lines (30 s)
+    private static final long AMBIENT_MAX_MS = 90_000;       // max gap (90 s)
 
     private enum FollowPhase { INIT, FOLLOW, LEADER_LOST }
 
