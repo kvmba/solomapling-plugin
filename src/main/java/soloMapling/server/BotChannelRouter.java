@@ -3,7 +3,6 @@ package soloMapling.server;
 import org.gms.client.Character;
 import org.gms.config.GameConfig;
 import org.gms.net.server.Server;
-import org.gms.net.server.channel.Channel;
 import org.gms.net.server.world.World;
 
 
@@ -21,10 +20,17 @@ import org.gms.net.server.world.World;
  *       full set of grinders.</li>
  * </ul>
  *
- * <p>Capacity is the only shared rule: a channel at {@code channel_capacity} takes no more,
- * counting real players as well as bots, because what must not be exceeded is the channel's
- * total headcount. A bot that cannot be placed is dropped rather than squeezed in past the cap,
- * and a bot never switches channels once created.
+ * <p>Capacity is the only shared rule: a channel at {@code channel_capacity} takes no more.
+ * A bot that cannot be placed is dropped rather than squeezed in past the cap, and a bot never
+ * switches channels once created.
+ *
+ * <p>IMPORTANT - what {@code channel_capacity} counts: BOTS ONLY, not real players. It used to
+ * be total headcount, but that required reading {@code PlayerStorage.getSize()} on every spawn,
+ * and that read is what deadlocked startup (see {@link #BOTS_ON_CHANNEL}). Counting bots with an
+ * atomic counter removes the storage read entirely. So a channel holding many real players still
+ * accepts bots up to the cap, and the total on a channel can exceed {@code channel_capacity}.
+ * That is the intended trade: the population here is overwhelmingly bots, and a gate that cannot
+ * deadlock the server is worth more than one that is exact.
  */
 public final class BotChannelRouter {
 
@@ -54,6 +60,54 @@ public final class BotChannelRouter {
     }
 
     /**
+     * Live count of bots placed on each channel, maintained by the spawn/teardown paths.
+     *
+     * <p>This is the capacity gate's ONLY input, and it is deliberately NOT
+     * {@code PlayerStorage.getSize()}. The storage read is what deadlocked startup: every spawn
+     * read the headcount through the channel's READ lock and then registered the bot through
+     * the same storage's WRITE lock, thousands of times per wave, so the two directions met on
+     * PlayerStorage and the wave parked for good with the CPU and IO idle. Counting bots here
+     * instead means the routing path never touches a storage lock at all.
+     *
+     * <p>The trade, which is intended: real players on a channel are no longer counted, so
+     * {@code channel_capacity} becomes a cap on BOTS per channel rather than a cap on total
+     * headcount. That is the right trade here - the population is overwhelmingly bots, and a
+     * gate that cannot deadlock the server is worth more than one that is exact.
+     */
+    private static final java.util.Map<Integer, java.util.concurrent.atomic.AtomicInteger> BOTS_ON_CHANNEL =
+            new java.util.concurrent.ConcurrentHashMap<>();
+
+    /**
+     * Record a bot arriving on a channel. Paired with {@link #noteBotRemoved}.
+     * Must be called from whichever channel the bot was actually placed on.
+     */
+    public static void noteBotAdded(int channel) {
+        if (channel > 0) {
+            BOTS_ON_CHANNEL.computeIfAbsent(channel, k -> new java.util.concurrent.atomic.AtomicInteger())
+                    .incrementAndGet();
+        }
+    }
+
+    /**
+     * Undo {@link #noteBotAdded} for a bot that is leaving. Must be passed the same channel the
+     * bot was added on, or the count drifts upward and a channel eventually refuses new bots.
+     */
+    public static void noteBotRemoved(int channel) {
+        if (channel > 0) {
+            java.util.concurrent.atomic.AtomicInteger c = BOTS_ON_CHANNEL.get(channel);
+            if (c != null) {
+                c.decrementAndGet();
+            }
+        }
+    }
+
+    /** Bots currently placed on {@code channel}. Negative counts read as 0. */
+    private static int botsOnChannel(int channel) {
+        java.util.concurrent.atomic.AtomicInteger c = BOTS_ON_CHANNEL.get(channel);
+        return c == null ? 0 : Math.max(0, c.get());
+    }
+
+    /**
      * The channel a caller explicitly asked for, or {@link #NONE} when it doesn't exist or is
      * already at {@code channel_capacity}.
      *
@@ -75,7 +129,7 @@ public final class BotChannelRouter {
                 return NONE;
             }
             int cap = GameConfig.getServerInt("channel_capacity");
-            if (cap > 0 && !hasRoom(world, channel, cap)) {
+            if (cap > 0 && !hasRoom(channel, n, cap)) {
                 return NONE; // at capacity - the caller skips this spawn
             }
             return channel;
@@ -109,11 +163,11 @@ public final class BotChannelRouter {
                 return DEFAULT_CHANNEL;
             }
             if (preferredChannel > 0 && preferredChannel <= n
-                    && hasRoom(world, preferredChannel, cap)) {
+                    && hasRoom(preferredChannel, n, cap)) {
                 return preferredChannel;
             }
             for (int channelId = 1; channelId <= n; channelId++) {
-                if (hasRoom(world, channelId, cap)) {
+                if (hasRoom(channelId, n, cap)) {
                     return channelId;
                 }
             }
@@ -123,12 +177,17 @@ public final class BotChannelRouter {
         }
     }
 
-    /** True when the channel is up and below {@code channel_capacity}. */
-    private static boolean hasRoom(World world, int channelId, int cap) {
-        Channel ch = world.getChannel(channelId);
-        // A missing channel counts as full, not empty: treating it as room would route bots
-        // onto a channel that isn't there.
-        return ch != null && ch.getPlayerStorage().getSize() < cap;
+    /**
+     * True when the channel is up and below {@code channel_capacity}.
+     *
+     * <p>Touches no lock on the routing path. It reads the bot counter instead of
+     * {@code PlayerStorage} (see {@link #BOTS_ON_CHANNEL}), and it takes the channel COUNT the
+     * caller already fetched instead of calling {@code world.getChannel()} again - getChannel()
+     * takes World's own read lock, so using it per spawn would just move the contention from one
+     * lock to another. A channel id past the end is treated as missing, which means full.
+     */
+    private static boolean hasRoom(int channelId, int channelCount, int cap) {
+        return channelId > 0 && channelId <= channelCount && botsOnChannel(channelId) < cap;
     }
 
     /**

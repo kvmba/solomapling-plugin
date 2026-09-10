@@ -434,6 +434,9 @@ public class BotGeneration {
             SoloMaplingUtilities.channel.removePlayer(fakechar);
         }
         world.getPlayerStorage().removePlayer(fakechar.getId());
+        // Paired with the noteBotAdded() in addBotToServer. Both take the channel the bot
+        // actually lives on, so the counter cannot drift.
+        BotChannelRouter.noteBotRemoved(channel);
         CharacterStorage.removeActiveBot(fakechar.getId());//
         // A removed bot never converts back out, so its recruit handoffs would linger in the
         // static maps forever (and a reused character id could inherit them).
@@ -457,6 +460,10 @@ public class BotGeneration {
             SoloMaplingUtilities.channel.addPlayer(fakechar);
         }
         world.getPlayerStorage().addPlayer(fakechar);
+        // Capacity gate input. Counted here rather than read from PlayerStorage: the routing
+        // path reads this counter on every spawn, and reading the storage instead is what
+        // deadlocked startup (see BotChannelRouter.BOTS_ON_CHANNEL).
+        BotChannelRouter.noteBotAdded(channel);
     }
 
     public static void spawnBotFm(Character fakechar, Point pt) {
