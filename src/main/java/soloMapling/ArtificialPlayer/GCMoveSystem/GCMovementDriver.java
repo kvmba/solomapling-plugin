@@ -477,9 +477,14 @@ final class GCMovementDriver {
         if (anchor == null) {
             return null;
         }
-        // On a rope the anchor's X IS the rope's X — the bot has to match it exactly to climb along,
-        // so a sideways stand-off there would leave it stranded on the platform beside the rope.
-        if (CharacterStance.isClimbing(entry.owner.getStance())) {
+        // No stand-off while either end is on a rope: the anchor's X IS the rope's X, so the bot has to
+        // match it exactly to climb along. The bot's own climb matters just as much — on a rope its X is
+        // pinned to the rope, and tickClimbing judges the target's X against the rope's X (dxOwner) to
+        // pick both the climb-idle hold and, past FOLLOW_DIST, whether to jump off the rope. A band that
+        // deliberately exceeds FOLLOW_DIST therefore reads as "the leader is far away" and would make a
+        // bot bail off every rope as soon as its leader stood on the platform below, despite the leader
+        // being right there. On a rope the bot can only move vertically, so a lateral offset is moot.
+        if (entry.climbing || CharacterStance.isClimbing(entry.owner.getStance())) {
             return anchor;
         }
         if (entry.followOffsetPx == 0) {
