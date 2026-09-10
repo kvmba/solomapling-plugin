@@ -56,6 +56,7 @@ import soloMapling.itemPool.EquipMetadataCache;
 import soloMapling.server.MethodScheduler;
 
 import java.time.Clock;
+import java.util.concurrent.ScheduledFuture;
 
 /**
  * SPI entry for SoloMapling. Discovered via
@@ -84,11 +85,19 @@ public final class SoloMaplingExtension implements ServerExtension {
                     || id > 20000
                     || id == 999;
 
+    /**
+     * The host publishes ServerReadyEvent when {@code Server.init()} returns, but the
+     * engine is still finishing up behind it. Spawning bots into that contends for CPU
+     * the server still needs to boot; waiting costs nothing since the waves are async.
+     */
+    private static final long ENVIRONMENT_STARTUP_DELAY_MS = 5_000L;
+
     private final CompanionLifecycleAccess companionLifecycleAccess =
             new CompanionLifecycleAccess();
     private HostRuntime runtime;
     private CompanionLifecycleCoordinator companionLifecycle;
     private CompanionIntakeService companionIntake;
+    private ScheduledFuture<?> environmentStartupTask;
 
     @Override
     public String id() {
@@ -349,14 +358,15 @@ public final class SoloMaplingExtension implements ServerExtension {
             }
         }
         if (spawn) {
-            MethodScheduler.runAfterDelay(() -> {
+            environmentStartupTask = MethodScheduler.scheduleAfterDelay(() -> {
                 try {
                     EnvironmentManager.environmentLoadStartup();
                 } catch (Throwable t) {
                     log.error("SoloMapling environmentLoadStartup failed", t);
                 }
-            }, 1000);
-            log.info("SoloMapling scheduled environmentLoadStartup in 1s");
+            }, ENVIRONMENT_STARTUP_DELAY_MS);
+            log.info("SoloMapling scheduled environmentLoadStartup in {}ms",
+                    ENVIRONMENT_STARTUP_DELAY_MS);
         }
     }
 
@@ -378,6 +388,13 @@ public final class SoloMaplingExtension implements ServerExtension {
         CompanionRuntimeCapabilities.clear();
         ArtificialCharacters.unregister(BOT_IDS);
         CompanionRoster.clear();
+        // Disarm a still-pending wave: it would otherwise fire after this point and
+        // spawn bots into a torn-down plugin.
+        ScheduledFuture<?> startupTask = environmentStartupTask;
+        environmentStartupTask = null;
+        if (startupTask != null) {
+            startupTask.cancel(false);
+        }
         runtime = null;
     }
 }

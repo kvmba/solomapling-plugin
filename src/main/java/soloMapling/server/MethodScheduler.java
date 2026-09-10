@@ -1,5 +1,6 @@
 package soloMapling.server;
 
+import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 
 /*
@@ -14,7 +15,17 @@ import java.util.concurrent.TimeUnit;
 public class MethodScheduler {
 
     public static void runAfterDelay(Runnable method, long delayMilliseconds) {
-        ExecutorServiceManager.getScheduledExecutorService().schedule(
+        scheduleAfterDelay(method, delayMilliseconds);
+    }
+
+    /**
+     * Same as {@link #runAfterDelay} but hands back the pending task so a caller that
+     * outlives the delay (startup work, typically) can cancel it. A delayed spawn left
+     * armed across an unload fires into a torn-down plugin: it creates characters and
+     * writes rows after the classifier and roster are already cleared.
+     */
+    public static ScheduledFuture<?> scheduleAfterDelay(Runnable method, long delayMilliseconds) {
+        return ExecutorServiceManager.getScheduledExecutorService().schedule(
                 () -> ExecutorServiceManager.runAsync(() -> {
                     try {
                         method.run();
