@@ -173,34 +173,34 @@ waves:
         level_hi: 70
         wanderers: 14
         maps:
-          - {map: 103000000, count: 44}
-          - {map: 103000007, count: 10}
-          - {map: 103040000, count: 18}
+          - {map: 103000000, count: 22}
+          - {map: 103000007, count: 9}
+          - {map: 103040000, count: 9}
       - name: Ellinia
         level_lo: 10
         level_hi: 60
         wanderers: 9
         maps:
-          - {map: 101000000, count: 36}
+          - {map: 101000000, count: 18}
       - name: Perion
         level_lo: 10
         level_hi: 65
         wanderers: 9
         maps:
-          - {map: 102000000, count: 36}
+          - {map: 102000000, count: 18}
       - name: Sleepywood
         level_lo: 25
         level_hi: 80
         wanderers: 6
         maps:
-          - {map: 105040300, count: 20}
+          - {map: 105040300, count: 10}
       - name: Orbis
         level_lo: 30
         level_hi: 86
         wanderers: 9
         maps:
-          - {map: 200000000, count: 56}
-          - {map: 200000200, count: 24}
+          - {map: 200000000, count: 14}
+          - {map: 200000200, count: 6}
       # 玩具城系 170 个练级 bot 却只有 72 个常驻（比值 0.42，基准 0.65）：
       # 深层练级点（玩具塔、时间通道）把人吸走了，城里反而空。容量均充裕。
       - name: Ludibrium
@@ -208,23 +208,23 @@ waves:
         level_hi: 90
         wanderers: 14
         maps:
-          - {map: 220000000, count: 70}
-          - {map: 220000300, count: 24}
+          - {map: 220000000, count: 35}
+          - {map: 220000300, count: 12}
       - name: Korean Folk Town
         level_lo: 30
         level_hi: 70
         wanderers: 8
         maps:
-          - {map: 222000000, count: 50}
+          - {map: 222000000, count: 25}
       # 水下世界 34 练级 / 14 常驻（0.41）。三个甲板按容量分配（142/55/139）。
       - name: Aquarium
         level_lo: 30
         level_hi: 80
         wanderers: 6
         maps:
-          - {map: 230000000, count: 24}
-          - {map: 230000001, count: 8}
-          - {map: 230000002, count: 12}
+          - {map: 230000000, count: 12}
+          - {map: 230000001, count: 4}
+          - {map: 230000002, count: 6}
       # 神木村是 lv70-130 的顶级大陆，练级队列 119 个却只有 15 个驻点——玩家满级
       # 后回到城里会看到一座空城。容量 242，35 只占 14%，远未站满。
       - name: Leafre
@@ -232,77 +232,77 @@ waves:
         level_hi: 120
         wanderers: 14
         maps:
-          - {map: 240000000, count: 70}
+          - {map: 240000000, count: 35}
       - name: Mu Lung
         level_lo: 30
         level_hi: 95
         wanderers: 8
         maps:
-          - {map: 250000000, count: 22}
-          - {map: 250000100, count: 8}
+          - {map: 250000000, count: 11}
+          - {map: 250000100, count: 4}
       - name: Herb Town
         level_lo: 40
         level_hi: 90
         wanderers: 5
         maps:
-          - {map: 251000000, count: 16}
+          - {map: 251000000, count: 8}
       - name: Ariant
         level_lo: 30
         level_hi: 90
         wanderers: 8
         maps:
-          - {map: 260000000, count: 22}
-          - {map: 260000200, count: 8}
-          - {map: 260000303, count: 6}
+          - {map: 260000000, count: 11}
+          - {map: 260000200, count: 4}
+          - {map: 260000303, count: 3}
       - name: Magatia
         level_lo: 30
         level_hi: 90
         wanderers: 6
         maps:
-          - {map: 261000000, count: 18}
-          - {map: 261000001, count: 8}
-          - {map: 261000002, count: 6}
+          - {map: 261000000, count: 9}
+          - {map: 261000001, count: 4}
+          - {map: 261000002, count: 3}
       - name: Arta Camp
         level_lo: 30
         level_hi: 70
         wanderers: 4
         maps:
-          - {map: 300000000, count: 8}
+          - {map: 300000000, count: 4}
       # 时间神殿 lv90-150，只有 4 个驻点。容量 73，9 占 12%。
       - name: Time Temple
         level_lo: 90
         level_hi: 150
         wanderers: 5
         maps:
-          - {map: 270000000, count: 18}
+          - {map: 270000000, count: 9}
       - name: New Leaf City
         level_lo: 30
         level_hi: 95
         wanderers: 9
         maps:
-          - {map: 600000000, count: 28}
-          - {map: 600000001, count: 12}
+          - {map: 600000000, count: 14}
+          - {map: 600000001, count: 6}
       - name: Singapore CBD
         level_lo: 30
         level_hi: 80
         wanderers: 8
         maps:
-          - {map: 540000000, count: 24}
+          - {map: 540000000, count: 12}
       - name: Shanghai Bund
         level_lo: 30
         level_hi: 80
         wanderers: 7
         maps:
-          - {map: 701000000, count: 20}
+          - {map: 701000000, count: 10}
       - name: Nautilus
         level_lo: 10
         level_hi: 70
         wanderers: 5
         maps:
-          - {map: 120000000, count: 8}
-          - {map: 120000100, count: 4}
-          - {map: 120000200, count: 4}
-          - {map: 120000300, count: 4}
+          - {map: 120000000, count: 4}
+          - {map: 120000100, count: 2}
+          - {map: 120000200, count: 2}
+          - {map: 120000300, count: 2}
       # 黄金海滩：原样复制了诺特勒斯的四张船图（120000000/100/200/300），
       # 于是这个条目的人全落在了船舱里，真正的黄金海滩一个驻站 bot 都没有。
       # 指向海滩自己的地图 110000000：town=1，5 个 NPC（杂货商人拜伦、导游派申），
@@ -312,91 +312,91 @@ waves:
         level_hi: 60
         wanderers: 8
         maps:
-          - {map: 110000000, count: 20}
+          - {map: 110000000, count: 10}
       - name: Mushroom Forest Path
         level_lo: 10
         level_hi: 40
         wanderers: 4
         maps:
-          - {map: 106020000, count: 10}
+          - {map: 106020000, count: 5}
       - name: Earth Defense HQ
         level_lo: 30
         level_hi: 80
         wanderers: 6
         maps:
-          - {map: 221000000, count: 36}
+          - {map: 221000000, count: 18}
       - name: Boat Quay Town
         level_lo: 30
         level_hi: 80
         wanderers: 5
         maps:
-          - {map: 541000000, count: 12}
+          - {map: 541000000, count: 6}
       - name: Shanghai Yu Garden
         level_lo: 30
         level_hi: 80
         wanderers: 5
         maps:
-          - {map: 701000200, count: 16}
+          - {map: 701000200, count: 8}
       - name: Songshan Town
         level_lo: 30
         level_hi: 90
         wanderers: 7
         maps:
-          - {map: 702000000, count: 20}
+          - {map: 702000000, count: 10}
       - name: Mushroom Shrine
         level_lo: 30
         level_hi: 90
         wanderers: 6
         maps:
-          - {map: 800000000, count: 16}
+          - {map: 800000000, count: 8}
       - name: Showa Village
         level_lo: 30
         level_hi: 90
         wanderers: 5
         maps:
-          - {map: 801000000, count: 14}
+          - {map: 801000000, count: 7}
       - name: Trend Zone
         level_lo: 30
         level_hi: 90
         wanderers: 5
         maps:
-          - {map: 550000000, count: 14}
+          - {map: 550000000, count: 7}
       - name: Kampung Village
         level_lo: 30
         level_hi: 90
         wanderers: 4
         maps:
-          - {map: 551000000, count: 10}
+          - {map: 551000000, count: 5}
       - name: Shanghai City Plaza
         level_lo: 30
         level_hi: 80
         wanderers: 4
         maps:
-          - {map: 701000100, count: 12}
+          - {map: 701000100, count: 6}
       - name: Mahavira Hall
         level_lo: 30
         level_hi: 80
         wanderers: 3
         maps:
-          - {map: 702100000, count: 10}
+          - {map: 702100000, count: 5}
       - name: Showa Shopping Street
         level_lo: 30
         level_hi: 90
         wanderers: 4
         maps:
-          - {map: 801000300, count: 12}
+          - {map: 801000300, count: 6}
       - name: Orbis Park
         level_lo: 30
         level_hi: 86
         wanderers: 4
         maps:
-          - {map: 200000200, count: 20}
+          - {map: 200000200, count: 5}
       - name: El Nath Chief Hall
         level_lo: 50
         level_hi: 85
         wanderers: 3
         maps:
-          - {map: 211000001, count: 8}
+          - {map: 211000001, count: 4}
       - name: Mu Lung Temple
         level_lo: 30
         level_hi: 95
@@ -408,7 +408,7 @@ waves:
         level_hi: 120
         wanderers: 3
         maps:
-          - {map: 240010501, count: 9}
+          - {map: 240010501, count: 8}
       - name: Ariant Residence
         level_lo: 30
         level_hi: 90
@@ -427,7 +427,7 @@ waves:
         level_hi: 80
         wanderers: 3
         maps:
-          - {map: 221000200, count: 16}
+          - {map: 221000200, count: 8}
       - name: NLC Shopping Centre
         level_lo: 30
         level_hi: 95
@@ -451,13 +451,13 @@ waves:
         level_hi: 70
         wanderers: 4
         maps:
-          - {map: 103000007, count: 10}
+          - {map: 103000007, count: 5}
       - name: Excavation Camp
         level_lo: 20
         level_hi: 60
         wanderers: 3
         maps:
-          - {map: 101030104, count: 8}
+          - {map: 101030104, count: 4}
       - name: Henesys East Brushwood
         level_lo: 10
         level_hi: 40
@@ -469,4 +469,4 @@ waves:
         level_hi: 85
         wanderers: 7
         maps:
-          - {map: 211000000, count: 20}
+          - {map: 211000000, count: 10}
