@@ -28,7 +28,7 @@ class EnvironmentPopulationConfigTest {
     void loadsBundledYamlFromClasspathOrFs() {
         var plan = EnvironmentPopulationConfig.reload();
         assertTrue(plan.training().enabled());
-        assertEquals(54, plan.training().cohorts().size());
+        assertEquals(125, plan.training().cohorts().size());
         assertEquals(1550, plan.trainingCohortTotal());
         assertTrue(plan.essentials().enabled());
         assertEquals("henesys", plan.essentials().fmRegion());
@@ -36,11 +36,27 @@ class EnvironmentPopulationConfigTest {
         assertTrue(plan.loadedFrom() != null && !plan.loadedFrom().isBlank());
 
         var towns = TownPresenceConfig.towns();
-        assertEquals(46, towns.size());
+        assertEquals(40, towns.size());
         int social = towns.stream().flatMap(t -> t.maps().stream()).mapToInt(m -> m.count()).sum();
         int wanderers = towns.stream().mapToInt(t -> t.wanderers()).sum();
         assertEquals(2001, social);
         assertEquals(272, wanderers);
+    }
+
+    // Every town should have 1-3 GachaBots - the ones that spray junk on the floor and pick it back
+    // up. Guards both the per-town range and that the field is wired through TownEntry at all (a
+    // parse regression would silently read 0 everywhere and empty the streets of them).
+    @Test
+    void everyTownHasOneToThreeGachaBots() {
+        var towns = TownPresenceConfig.towns();
+        assertFalse(towns.isEmpty());
+        int total = 0;
+        for (var t : towns) {
+            assertTrue(t.gacha() >= 1 && t.gacha() <= 3,
+                    () -> t.name() + " has " + t.gacha() + " gacha bots, expected 1-3");
+            total += t.gacha();
+        }
+        assertEquals(64, total);
     }
 
     @Test

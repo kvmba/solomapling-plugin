@@ -439,6 +439,23 @@ public class EnvironmentManager {
             int w = spawnTownWanderers(town.mainMapId(), town.wanderers(), town.levelLo(), town.levelHi());
             debugprint(fmt("TownPresence: {} wanderers on map {} ({})", w, town.mainMapId(), town.name()));
         }
+        if (town.gacha() > 0) {
+            int g = spawnGachaBotsInTown(town);
+            debugprint(fmt("TownPresence: {} gacha bots on map {} ({})", g, town.mainMapId(), town.name()));
+        }
+    }
+
+    // GachaBots for one town: they spray a pile of junk on the ground, stand over it, then pick it back
+    // up (see GachaBot). Seeded on the town's main map at anchor-weighted spots so they land where the
+    // crowd already is rather than off in a corner. Returns how many created.
+    public static int spawnGachaBotsInTown(TownPresenceConfig.TownEntry town) {
+        int mapId = town.mainMapId();
+        if (mapId < 0 || town.gacha() <= 0) {
+            return 0;
+        }
+        List<Integer> ids = spawnBotsOnMapOnPlatform(scaledAmbient(town.gacha()), mapId, "m1");
+        setAndStartBots(ids, BotTypeManager.BotType.GACHA_BOT);
+        return ids.size();
     }
 
     // Spawn n stationed ambient SocialBots on a map at anchor-weighted ground spots (near NPCs/shops, on

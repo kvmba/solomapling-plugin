@@ -33,8 +33,12 @@ public final class TownPresenceConfig {
 
     // One town's ambient plan. `wanderers` is the town-level count of roaming TownWandererBots (they drift
     // the town's map family), separate from the per-map stationed-SocialBot counts in `maps`.
+    // `gacha` is how many GachaBots work the town: they spray a pile of junk on the floor, stand over
+    // it, then pick it back up. One or two per town sells the "someone is sorting their inventory"
+    // street noise; they are functional performers, not ambient crowd, so the count is uncapped by
+    // the town's fill percentage.
     public record TownEntry(String name, int levelLo, int levelHi, int wanderers, List<MapShare> maps,
-                            String dialogueOverride) {
+                            String dialogueOverride, int gacha) {
         // The town's main map (first listed) - where roaming wanderers are seeded before they fan out.
         public int mainMapId() {
             return maps.isEmpty() ? -1 : maps.get(0).mapId();
@@ -169,8 +173,9 @@ public final class TownPresenceConfig {
                         }
                     }
                 }
+                int gacha = toInt(town.get("gacha"), 0);
                 if (!shares.isEmpty()) {
-                    out.add(new TownEntry(name, lo, hi, wanderers, shares, dialogue));
+                    out.add(new TownEntry(name, lo, hi, wanderers, shares, dialogue, gacha));
                 }
             }
         } catch (Exception e) {

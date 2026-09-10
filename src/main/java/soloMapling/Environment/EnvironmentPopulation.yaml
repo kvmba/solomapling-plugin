@@ -250,6 +250,7 @@ waves:
         level_lo: 15
         level_hi: 70
         wanderers: 18
+        gacha: 3
         maps:
           - {map: 103000000, count: 56}
           - {map: 103000007, count: 26}
@@ -258,24 +259,28 @@ waves:
         level_lo: 10
         level_hi: 60
         wanderers: 9
+        gacha: 2
         maps:
           - {map: 101000000, count: 36}
       - name: Perion
         level_lo: 10
         level_hi: 65
         wanderers: 9
+        gacha: 2
         maps:
           - {map: 102000000, count: 52}
       - name: Sleepywood
         level_lo: 25
         level_hi: 80
         wanderers: 6
+        gacha: 1
         maps:
           - {map: 105040300, count: 20}
       - name: Orbis
         level_lo: 30
         level_hi: 86
         wanderers: 13
+        gacha: 3
         maps:
           - {map: 200000000, count: 49}
           - {map: 200000200, count: 37}
@@ -285,6 +290,7 @@ waves:
         level_lo: 30
         level_hi: 90
         wanderers: 14
+        gacha: 3
         maps:
           - {map: 220000000, count: 70}
           - {map: 220000300, count: 35}
@@ -292,6 +298,7 @@ waves:
         level_lo: 30
         level_hi: 70
         wanderers: 8
+        gacha: 2
         maps:
           - {map: 222000000, count: 51}
       # 水下世界 34 练级 / 14 常驻（0.41）。三个甲板按容量分配（142/55/139）。
@@ -299,6 +306,7 @@ waves:
         level_lo: 30
         level_hi: 80
         wanderers: 6
+        gacha: 2
         maps:
           - {map: 230000000, count: 24}
           - {map: 230000001, count: 15}
@@ -309,12 +317,14 @@ waves:
         level_lo: 70
         level_hi: 120
         wanderers: 14
+        gacha: 3
         maps:
           - {map: 240000000, count: 70}
       - name: Mu Lung
         level_lo: 30
         level_hi: 95
         wanderers: 11
+        gacha: 2
         maps:
           - {map: 250000000, count: 54}
           - {map: 250000100, count: 29}
@@ -322,12 +332,14 @@ waves:
         level_lo: 40
         level_hi: 90
         wanderers: 5
+        gacha: 1
         maps:
           - {map: 251000000, count: 44}
       - name: Ariant
         level_lo: 30
         level_hi: 90
         wanderers: 11
+        gacha: 2
         maps:
           - {map: 260000000, count: 22}
           - {map: 260000200, count: 41}
@@ -336,6 +348,7 @@ waves:
         level_lo: 30
         level_hi: 90
         wanderers: 9
+        gacha: 2
         maps:
           - {map: 261000000, count: 84}
           - {map: 261000001, count: 16}
@@ -344,6 +357,7 @@ waves:
         level_lo: 30
         level_hi: 70
         wanderers: 4
+        gacha: 1
         maps:
           - {map: 300000000, count: 46}
       # 时间神殿 lv90-150，只有 4 个驻点。容量 73，9 占 12%。
@@ -351,12 +365,14 @@ waves:
         level_lo: 90
         level_hi: 150
         wanderers: 5
+        gacha: 1
         maps:
           - {map: 270000000, count: 18}
       - name: New Leaf City
         level_lo: 30
         level_hi: 95
         wanderers: 13
+        gacha: 2
         maps:
           - {map: 600000000, count: 84}
           - {map: 600000001, count: 24}
@@ -364,18 +380,21 @@ waves:
         level_lo: 30
         level_hi: 80
         wanderers: 8
+        gacha: 2
         maps:
           - {map: 540000000, count: 77}
       - name: Shanghai Bund
         level_lo: 30
         level_hi: 80
         wanderers: 7
+        gacha: 2
         maps:
           - {map: 701000000, count: 69}
       - name: Nautilus
         level_lo: 10
         level_hi: 70
         wanderers: 5
+        gacha: 2
         maps:
           - {map: 120000000, count: 42}
           - {map: 120000100, count: 24}
@@ -389,125 +408,146 @@ waves:
         level_lo: 30
         level_hi: 60
         wanderers: 8
+        gacha: 1
         maps:
           - {map: 110000000, count: 20}
       - name: Mushroom Forest Path
         level_lo: 10
         level_hi: 40
         wanderers: 4
+        gacha: 1
         maps:
           - {map: 106020000, count: 10}
       - name: Earth Defense HQ
         level_lo: 30
         level_hi: 80
         wanderers: 6
+        gacha: 2
         maps:
           - {map: 221000000, count: 36}
       - name: Boat Quay Town
         level_lo: 30
         level_hi: 80
         wanderers: 5
+        gacha: 1
         maps:
           - {map: 541000000, count: 72}
       - name: Shanghai Yu Garden
         level_lo: 30
         level_hi: 80
         wanderers: 5
+        gacha: 1
         maps:
           - {map: 701000200, count: 18}
       - name: Songshan Town
         level_lo: 30
         level_hi: 90
         wanderers: 7
+        gacha: 2
         maps:
           - {map: 702000000, count: 73}
       - name: Mushroom Shrine
         level_lo: 30
         level_hi: 90
         wanderers: 6
+        gacha: 2
         maps:
           - {map: 800000000, count: 41}
       - name: Showa Village
         level_lo: 30
         level_hi: 90
         wanderers: 5
+        gacha: 2
         maps:
           - {map: 801000000, count: 14}
       - name: Trend Zone
         level_lo: 30
         level_hi: 90
         wanderers: 5
+        gacha: 1
         maps:
           - {map: 550000000, count: 56}
       - name: Kampung Village
         level_lo: 30
         level_hi: 90
         wanderers: 4
+        gacha: 1
         maps:
           - {map: 551000000, count: 47}
       - name: Shanghai City Plaza
         level_lo: 30
         level_hi: 80
         wanderers: 4
+        gacha: 1
         maps:
           - {map: 701000100, count: 11}
       - name: Mahavira Hall
         level_lo: 30
         level_hi: 80
         wanderers: 3
+        gacha: 1
         maps:
           - {map: 702100000, count: 84}
       - name: Showa Shopping Street
         level_lo: 30
         level_hi: 90
         wanderers: 4
+        gacha: 1
         maps:
           - {map: 801000300, count: 24}
       - name: El Nath Chief Hall
         level_lo: 50
         level_hi: 85
         wanderers: 3
+        gacha: 1
         maps:
           - {map: 211000001, count: 21}
       - name: Priest Forest
         level_lo: 70
         level_hi: 120
         wanderers: 3
+        gacha: 1
         maps:
           - {map: 240010501, count: 8}
       - name: Defense HQ Hangar
         level_lo: 30
         level_hi: 80
         wanderers: 3
+        gacha: 1
         maps:
           - {map: 221000200, count: 25}
       - name: Henesys Park
         level_lo: 10
         level_hi: 60
         wanderers: 5
+        gacha: 1
         maps:
           - {map: 100000200, count: 9}
       - name: Henesys Pet Park
         level_lo: 10
         level_hi: 60
         wanderers: 4
+        gacha: 1
         maps:
           - {map: 100000202, count: 6}
       - name: Excavation Camp
         level_lo: 20
         level_hi: 60
         wanderers: 3
+        gacha: 1
         maps:
           - {map: 101030104, count: 35}
       - name: Henesys East Brushwood
         level_lo: 10
         level_hi: 40
         wanderers: 3
+        gacha: 1
         maps:
           - {map: 100020000, count: 3}
       - name: El Nath
         level_lo: 50
         level_hi: 85
         wanderers: 7
+        gacha: 2
         maps:
           - {map: 211000000, count: 40}
