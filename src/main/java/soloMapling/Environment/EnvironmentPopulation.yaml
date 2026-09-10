@@ -136,7 +136,7 @@ waves:
       # 通天塔<10层>：22 只 lv30 的怪，在白名单内。塔内楼层此前只有门口一个队列。
       - {map: 200081200, count: 6, level_lo: 30, level_hi: 40}
       # 通天塔低层：同样有怪且在白名单内，各放一小队把塔填上。
-      - {map: 200081500, count: 3, level_lo: 30, level_hi: 40}   # 5层 19怪 lv32
+      - {map: 200081500, count: 3, level_lo: 30, level_hi: 40}   # 7层 19怪 lv32
       - {map: 200081800, count: 3, level_lo: 30, level_hi: 40}   # 4层 17怪 lv33
       - {map: 200082000, count: 3, level_lo: 30, level_hi: 40}   # 2层 24怪 lv33-35
       - {map: 200081400, count: 2, level_lo: 25, level_hi: 35}   # 8层 18怪 lv23-30
