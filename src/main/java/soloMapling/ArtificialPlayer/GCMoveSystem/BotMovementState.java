@@ -30,6 +30,10 @@ class BotMovementState {
     volatile Character owner;             // follow anchor (the followed character), nullable
     volatile boolean following = false;
     volatile int followTargetId = 0;      // 0 = owner
+    // Personal lateral stand-off from the follow anchor (px, signed), rolled once per bot and kept:
+    // a squad tails its leader from spread-out spots instead of piling onto the leader's exact pixel.
+    // 0 = not rolled yet.
+    volatile int followOffsetPx = 0;
     ScheduledFuture<?> task;              // this bot's 50ms tick handle (set by GCMovementDriver)
     BotMovementProfile movementProfile = BotMovementProfile.base();
     long lastProfileRefreshMs = 0L;       // throttles the driver's periodic profile recompute (party Haste)

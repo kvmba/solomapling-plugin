@@ -1,6 +1,7 @@
 package soloMapling.ArtificialPlayer.GCMoveSystem;
 
 import org.gms.client.Character;
+import org.gms.constants.game.CharacterStance;
 import org.gms.server.maps.MapleMap;
 
 import java.awt.Point;
@@ -436,12 +437,47 @@ final class GCMovementDriver {
             return entry.moveTarget;
         }
         if (entry.following && entry.owner != null && entry.owner.getMap() == bot.getMap()) {
-            return entry.owner.getPosition();
+            return followStandoffTarget(entry, bot);
         }
         if (entry.farmAnchor != null) {
             return entry.farmAnchor;
         }
         return null;
+    }
+
+    // Lateral stand-off band for a following bot, in px either side of the anchor. Kept under
+    // cfg.FOLLOW_DIST (80): past that the step hysteresis reads the bot as "close enough" and it
+    // stops walking in, so a wider band would just strand followers further and further out.
+    private static final int FOLLOW_OFFSET_MIN_PX = 25;
+    private static final int FOLLOW_OFFSET_MAX_PX = 70;
+
+    /*
+     * Where a following bot actually walks to: the anchor's spot pushed sideways by THIS bot's own
+     * stand-off, so several followers of one leader spread along the platform instead of fighting
+     * over the leader's exact pixel (which reads as bots overlapping / humping the player).
+     *
+     * Rolled once per bot and then kept — re-rolling each tick would jitter the target and make the
+     * bot vibrate in place. Only honoured where the shifted point is real ground, so a bot never
+     * walks off a ledge or parks in mid-air to chase an offset it can't stand on.
+     */
+    private static Point followStandoffTarget(BotMovementState entry, Character bot) {
+        Point anchor = entry.owner.getPosition();
+        if (anchor == null) {
+            return null;
+        }
+        // On a rope the anchor's X IS the rope's X — the bot has to match it exactly to climb along,
+        // so a sideways stand-off there would leave it stranded on the platform beside the rope.
+        if (CharacterStance.isClimbing(entry.owner.getStance())) {
+            return anchor;
+        }
+        if (entry.followOffsetPx == 0) {
+            int magnitude = FOLLOW_OFFSET_MIN_PX
+                    + ThreadLocalRandom.current().nextInt(FOLLOW_OFFSET_MAX_PX - FOLLOW_OFFSET_MIN_PX + 1);
+            entry.followOffsetPx = ThreadLocalRandom.current().nextBoolean() ? magnitude : -magnitude;
+        }
+        int targetX = anchor.x + entry.followOffsetPx;
+        Point ground = BotPhysicsEngine.findGroundPoint(bot.getMap(), new Point(targetX, anchor.y - 1));
+        return ground == null ? anchor : new Point(targetX, ground.y);
     }
 
     /* Faithful port of BotManager.stepMovementCore (minus fidget). */
