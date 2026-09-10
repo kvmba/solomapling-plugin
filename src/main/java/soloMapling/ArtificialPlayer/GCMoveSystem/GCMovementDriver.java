@@ -2,6 +2,7 @@ package soloMapling.ArtificialPlayer.GCMoveSystem;
 
 import org.gms.client.Character;
 import org.gms.constants.game.CharacterStance;
+import org.gms.server.maps.Foothold;
 import org.gms.server.maps.MapleMap;
 
 import java.awt.Point;
@@ -445,11 +446,22 @@ final class GCMovementDriver {
         return null;
     }
 
-    // Lateral stand-off band for a following bot, in px either side of the anchor. Kept under
-    // cfg.FOLLOW_DIST (80): past that the step hysteresis reads the bot as "close enough" and it
-    // stops walking in, so a wider band would just strand followers further and further out.
-    private static final int FOLLOW_OFFSET_MIN_PX = 25;
+    // Lateral stand-off band for a following bot, in px either side of the anchor.
+    //
+    // LOWER bound must exceed cfg.STOP_DIST (30): a follower without a committed nav edge stops
+    // within 30px of its target (planGroundAction -> calcStepX), so a stand-off of 25 would let the
+    // bot settle anywhere in that tolerance — including right back on the leader's pixel, which is
+    // the exact overlap this is meant to fix. MIN_USABLE_STANDOFF_PX enforces the margin at runtime.
+    //
+    // UPPER bound stays under cfg.FOLLOW_DIST (80): past it the step hysteresis reads the bot as
+    // "close enough" while it is still walking in, so a wider band strands followers further out.
+    private static final int FOLLOW_OFFSET_MIN_PX = 40;
     private static final int FOLLOW_OFFSET_MAX_PX = 70;
+    // Smallest stand-off worth walking to: > cfg.STOP_DIST so the bot can't settle back on the anchor.
+    private static final int MIN_USABLE_STANDOFF_PX = BotMovementManager.cfg.STOP_DIST + 10;
+    // Max Y gap between the anchor and the stand-off point: more than this and the clamped X sits over
+    // a hole or on a lower level, so the bot must not be sent there.
+    private static final int FOLLOW_STANDOFF_MAX_DROP_PX = 40;
 
     /*
      * Where a following bot actually walks to: the anchor's spot pushed sideways by THIS bot's own
@@ -475,9 +487,28 @@ final class GCMovementDriver {
                     + ThreadLocalRandom.current().nextInt(FOLLOW_OFFSET_MAX_PX - FOLLOW_OFFSET_MIN_PX + 1);
             entry.followOffsetPx = ThreadLocalRandom.current().nextBoolean() ? magnitude : -magnitude;
         }
-        int targetX = anchor.x + entry.followOffsetPx;
+        // Clamp into the foothold the anchor stands on: findGroundPoint searches straight down, so an
+        // offset X past the ledge edge would otherwise resolve onto whatever platform is below and the
+        // bot would walk off (or jump down) to reach it. Short footholds just get a smaller stand-off.
+        Foothold anchorFh = BotPhysicsEngine.findGroundFoothold(bot.getMap(), anchor);
+        if (anchorFh == null) {
+            return anchor;
+        }
+        int loX = Math.min(anchorFh.getX1(), anchorFh.getX2());
+        int hiX = Math.max(anchorFh.getX1(), anchorFh.getX2());
+        int offset = anchor.x + entry.followOffsetPx < loX || anchor.x + entry.followOffsetPx > hiX
+                ? -entry.followOffsetPx  // no room on the rolled side — try the other side instead
+                : entry.followOffsetPx;
+        int targetX = Math.max(loX, Math.min(hiX, anchor.x + offset));
+        if (Math.abs(targetX - anchor.x) < MIN_USABLE_STANDOFF_PX) {
+            return anchor; // foothold too narrow to spread on — tail the anchor
+        }
         Point ground = BotPhysicsEngine.findGroundPoint(bot.getMap(), new Point(targetX, anchor.y - 1));
-        return ground == null ? anchor : new Point(targetX, ground.y);
+        // A big Y drop means the clamped X still landed over a hole or a lower level — don't send the
+        // bot there.
+        return ground == null || Math.abs(ground.y - anchor.y) > FOLLOW_STANDOFF_MAX_DROP_PX
+                ? anchor
+                : new Point(targetX, ground.y);
     }
 
     /* Faithful port of BotManager.stepMovementCore (minus fidget). */
