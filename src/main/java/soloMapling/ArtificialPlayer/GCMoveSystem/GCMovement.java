@@ -86,8 +86,16 @@ public final class GCMovement {
             // has moveDir == 0 but is still airborne - and airborne is what makes the stance
             // render as JUMP. Testing only moveDir left those bots frozen in the jump pose.
             if (st.moveDir != 0 || st.groundBrakeDir != 0 || st.inAir || st.climbing) {
-                BotPhysicsEngine.idleOnGround(st, bot);
-                BotMovementManager.broadcastMovement(st);
+                // Mid-air / on a rope: leave the pose ALONE. Forcing the idle (standing) stance here
+                // would render a bot standing on nothing at its rope/air coordinates — the
+                // "standing in mid-air" bot a follower converted mid-climb turns into. Its last
+                // broadcast already carries ROPE/JUMP, i.e. what it is really doing; whoever takes
+                // over re-enables GC control, and enable() drops the bot onto the foothold below
+                // before the first tick, so the pose resolves on its own.
+                if (!st.inAir && !st.climbing) {
+                    BotPhysicsEngine.idleOnGround(st, bot);
+                    BotMovementManager.broadcastMovement(st);
+                }
             }
             GCMovementDriver.stop(st);
             MovementCommands.releaseMovementLock(bot);

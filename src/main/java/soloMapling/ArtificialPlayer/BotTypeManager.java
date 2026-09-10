@@ -193,17 +193,27 @@ public class BotTypeManager {
     }
 
     public static void manuallyStartBot(Character fakechar) {
+        // Freshly spawned: delay the first FSM tick past the spawn choreography window so a
+        // new bot never starts acting mid-drop-down/turn-around. The random spread also
+        // staggers first actions across a batch.
+        manuallyStartBot(fakechar, BotGeneration.SPAWN_CHOREOGRAPHY_MAX_MS
+                + java.util.concurrent.ThreadLocalRandom.current().nextLong(0, 3000));
+    }
+
+    // First-tick delay for a bot that was CONVERTED in place (convertBotType). Unlike a fresh spawn
+    // it is already live in-world — often mid-action (hanging on a rope, walking) — so the spawn
+    // choreography stagger doesn't apply and only makes it stand around before reacting. Short and
+    // slightly jittered so a converted cohort doesn't all act on the same frame.
+    private static final long CONVERT_FIRST_TICK_MS = 1200;
+    private static final long CONVERT_FIRST_TICK_JITTER_MS = 800;
+
+    public static void manuallyStartBot(Character fakechar, long initialDelayMs) {
         BotSM bot = getBotById(fakechar.getId());
-        if (bot.getRunning()) {
+        if (bot == null || bot.getRunning()) {
             return;
         }
         bot.setRunning(true);
-        // Delay the first FSM tick past the spawn choreography window so a
-        // freshly spawned bot never starts acting mid-drop-down/turn-around.
-        // The random spread also staggers first actions across a batch.
-        long initialDelay = BotGeneration.SPAWN_CHOREOGRAPHY_MAX_MS
-                + java.util.concurrent.ThreadLocalRandom.current().nextLong(0, 3000);
-        bot.startScheduledTask(initialDelay);
+        bot.startScheduledTask(initialDelayMs);
     }
 
     public static void manuallyStopBot(Character fakechar) {
@@ -238,7 +248,11 @@ public class BotTypeManager {
             manuallyStopBot(fakechar);
         }
         botType.createAndSetBot(fakechar);
-        manuallyStartBot(fakechar);
+        // Already live in-world (a conversion, not a spawn): skip the spawn-choreography stagger.
+        // At 7-10s the bot visibly stands around before reacting — worst when it was mid-action,
+        // e.g. a FollowerBot told to "train here" while hanging on a rope.
+        manuallyStartBot(fakechar, CONVERT_FIRST_TICK_MS
+                + java.util.concurrent.ThreadLocalRandom.current().nextLong(0, CONVERT_FIRST_TICK_JITTER_MS));
         return true;
     }
 
