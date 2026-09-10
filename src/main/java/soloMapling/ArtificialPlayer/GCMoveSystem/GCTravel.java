@@ -8,6 +8,7 @@ import org.gms.server.maps.Portal;
 import soloMapling.ArtificialPlayer.BotGrindSystem.BotPlaceNames;
 import soloMapling.ArtificialPlayer.BotTravelSystem.BotScriptedWarp;
 import soloMapling.ArtificialPlayer.BotWanderSystem.BotWanderSystem;
+import soloMapling.ArtificialPlayer.BotHealthSystem.BotDeath;
 import soloMapling.ArtificialPlayer.BotCommandsPack.SocialCommands;
 import soloMapling.BotLogger;
 import soloMapling.Environment.BotMessages;
@@ -626,6 +627,9 @@ final class GCTravel {
     }
 
     private static void warp(Character bot, int mapId, String reason) {
+        if (isDead(bot)) {
+            return; // a corpse does not travel — BotDeath carries it home itself
+        }
         BotLogger.log("[GCTravel] " + bot.getName() + " warped to map " + mapId + " — " + reason);
         try {
             bot.changeMap(mapId);
@@ -635,12 +639,23 @@ final class GCTravel {
     }
 
     private static void warpToPortal(Character bot, int mapId, int portalId, String reason) {
+        if (isDead(bot)) {
+            return;
+        }
         BotLogger.log("[GCTravel] " + bot.getName() + " warped to map " + mapId + " portal " + portalId + " — " + reason);
         try {
             bot.changeMap(mapId, portalId);
         } catch (Throwable ignored) {
             // a bad map id / lifecycle race shouldn't kill the trip; the next poll re-evaluates
         }
+    }
+
+    // A corpse does not travel: the poller runs on its own thread, so a bot killed mid-trip can
+    // still have a poll in flight (cancel(false) does not interrupt one), and BotDeath reads the
+    // bot's sanctuary off whatever map it wakes up on.
+    static boolean isDead(Character bot) {
+        BotDeath death = BotDeath.of(bot);
+        return death != null && death.isDead();
     }
 
     private static void finish(Trip trip, boolean ok) {

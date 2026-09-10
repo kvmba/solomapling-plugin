@@ -25,6 +25,9 @@ final class GCPortals {
         if (bot == null || portal == null || bot.getMap() == null) {
             return false;
         }
+        if (GCTravel.isDead(bot)) {
+            return false; // a corpse does not step through portals — see GCTravel.isDead
+        }
         int targetMapId = portal.getTargetMapId();
         try {
             MapleMap to = bot.getEventInstance() == null
