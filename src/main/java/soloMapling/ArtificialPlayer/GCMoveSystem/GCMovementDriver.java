@@ -448,17 +448,17 @@ final class GCMovementDriver {
 
     // Lateral stand-off band for a following bot, in px either side of the anchor.
     //
-    // LOWER bound must exceed cfg.STOP_DIST (30): a follower without a committed nav edge stops
-    // within 30px of its target (planGroundAction -> calcStepX), so a stand-off of 25 would let the
-    // bot settle anywhere in that tolerance — including right back on the leader's pixel, which is
-    // the exact overlap this is meant to fix. MIN_USABLE_STANDOFF_PX enforces the margin at runtime.
-    //
-    // UPPER bound stays under cfg.FOLLOW_DIST (80): past it the step hysteresis reads the bot as
-    // "close enough" while it is still walking in, so a wider band strands followers further out.
-    private static final int FOLLOW_OFFSET_MIN_PX = 40;
-    private static final int FOLLOW_OFFSET_MAX_PX = 70;
-    // Smallest stand-off worth walking to: > cfg.STOP_DIST so the bot can't settle back on the anchor.
-    private static final int MIN_USABLE_STANDOFF_PX = BotMovementManager.cfg.STOP_DIST + 10;
+    // LOWER bound must EXCEED cfg.FOLLOW_DIST (80), not merely cfg.STOP_DIST. calcStepX suppresses
+    // the first step while the bot is standing still and the target is within followDist:
+    //     if (absDx <= stopDist) return 0;
+    //     if (!wasMovingX && absDx <= followDist) return 0;
+    // A follower with no committed nav edge runs at stopDist=STOP_DIST(30) / followDist=FOLLOW_DIST(80),
+    // so a stand-off of 40-70 px leaves a bot already parked on the leader permanently inside that
+    // dead-band: it never takes the first step and stays stacked on the leader — the exact bug. Once
+    // moving, wasMovingX latches true and the bot closes to STOP_DIST of its own stand-off point,
+    // which is why the lower bound only has to clear the dead-band, not the stop tolerance.
+    private static final int FOLLOW_OFFSET_MIN_PX = 90;
+    private static final int FOLLOW_OFFSET_MAX_PX = 140;
     // Max Y gap between the anchor and the stand-off point: more than this and the clamped X sits over
     // a hole or on a lower level, so the bot must not be sent there.
     private static final int FOLLOW_STANDOFF_MAX_DROP_PX = 40;
@@ -500,8 +500,11 @@ final class GCMovementDriver {
                 ? -entry.followOffsetPx  // no room on the rolled side — try the other side instead
                 : entry.followOffsetPx;
         int targetX = Math.max(loX, Math.min(hiX, anchor.x + offset));
-        if (Math.abs(targetX - anchor.x) < MIN_USABLE_STANDOFF_PX) {
-            return anchor; // foothold too narrow to spread on — tail the anchor
+        // A foothold too narrow to hold the rolled stand-off still gives the best separation it can
+        // (clamped to the ledge edge). Below the band minimum that separation is too small to matter —
+        // the bot would sit back inside the start-up dead-band / on the anchor — so just tail the anchor.
+        if (Math.abs(targetX - anchor.x) < FOLLOW_OFFSET_MIN_PX) {
+            return anchor;
         }
         Point ground = BotPhysicsEngine.findGroundPoint(bot.getMap(), new Point(targetX, anchor.y - 1));
         // A big Y drop means the clamped X still landed over a hole or a lower level — don't send the
