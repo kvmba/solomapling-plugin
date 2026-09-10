@@ -130,6 +130,28 @@ waves:
       - {map: 220020000, count: 16, level_lo: 36, level_hi: 60}
       - {map: 221000000, count: 40, level_lo: 40, level_hi: 54}
       - {map: 221020000, count: 68, level_lo: 30, level_hi: 47}
+      # 玩具塔 1-100 层：此前只有 1 楼(68)和顶楼，中间全空。按间隔选层投放，
+      # 让爬塔沿途有人，而不是全挤在两头。
+      - {map: 221020100, count: 8, level_lo: 30, level_hi: 45}   # 玩具塔2层
+      - {map: 221020400, count: 9, level_lo: 30, level_hi: 45}   # 玩具塔5层
+      - {map: 221020600, count: 10, level_lo: 30, level_hi: 45}   # 玩具塔7层
+      - {map: 221020800, count: 7, level_lo: 30, level_hi: 45}   # 玩具塔9层
+      - {map: 221021200, count: 7, level_lo: 30, level_hi: 45}   # 玩具塔22层
+      - {map: 221021400, count: 10, level_lo: 30, level_hi: 45}   # 玩具塔24层
+      - {map: 221021800, count: 8, level_lo: 30, level_hi: 45}   # 玩具塔42层
+      - {map: 221022000, count: 10, level_lo: 30, level_hi: 45}   # 玩具塔44层
+      - {map: 221022300, count: 10, level_lo: 30, level_hi: 45}   # 玩具塔56层
+      - {map: 221022500, count: 10, level_lo: 30, level_hi: 45}   # 玩具塔58层
+      - {map: 221022700, count: 10, level_lo: 30, level_hi: 45}   # 玩具塔60层
+      - {map: 221022900, count: 10, level_lo: 30, level_hi: 45}   # 玩具塔71层
+      - {map: 221023100, count: 10, level_lo: 30, level_hi: 45}   # 玩具塔73层
+      - {map: 221023300, count: 10, level_lo: 30, level_hi: 45}   # 玩具塔75层
+      - {map: 221023500, count: 10, level_lo: 30, level_hi: 45}   # 玩具塔91层
+      - {map: 221023700, count: 9, level_lo: 30, level_hi: 45}   # 玩具塔93层
+      - {map: 221023900, count: 9, level_lo: 30, level_hi: 45}   # 玩具塔95层
+      - {map: 221024100, count: 8, level_lo: 30, level_hi: 45}   # 玩具塔97层
+      - {map: 221024300, count: 8, level_lo: 30, level_hi: 45}   # 玩具塔99层
+      - {map: 221024400, count: 9, level_lo: 30, level_hi: 45}   # 玩具塔100层
       - {map: 222000000, count: 21, level_lo: 30, level_hi: 70}
       - {map: 200000000, count: 32, level_lo: 30, level_hi: 86}
       - {map: 200080100, count: 29, level_lo: 30, level_hi: 60}
@@ -166,6 +188,54 @@ waves:
       - {map: 110000000, count: 9, level_lo: 30, level_hi: 60}
       - {map: 106020100, count: 15, level_lo: 30, level_hi: 33}
       - {map: 300000000, count: 13, level_lo: 30, level_hi: 70}
+      # 各城镇周边的热点打怪图：此前练级 bot 只落在城镇本体和其正门，
+      # 玩家真正刷怪的周边地图（地铁、蚂蚁洞、云彩公园、修炼场…）全空。
+      # 下面按区域补上，数量按图容量和怪物密度给，保持不挤。
+      - {map: 103000104, count: 10, level_lo: 15, level_hi: 50}   # 地铁一号线<第3地区> 105怪 20-48
+      - {map: 103000201, count: 10, level_lo: 20, level_hi: 50}   # 地铁二号线<第2地区> 120怪 21-48
+      - {map: 105050200, count: 9,  level_lo: 20, level_hi: 30}   # 蚂蚁洞Ⅲ 100怪 22-24
+      - {map: 100030000, count: 8,  level_lo: 5,  level_hi: 15}   # 射手村东部树林 62怪 7-10
+      - {map: 101010101, count: 6,  level_lo: 5,  level_hi: 15}   # 大木林Ⅱ 64怪 6-10
+      - {map: 200010000, count: 8,  level_lo: 30, level_hi: 45}   # 云彩公园Ⅰ 36怪 35
+      - {map: 200040000, count: 8,  level_lo: 30, level_hi: 50}   # 云彩公园Ⅲ 33怪 30-45
+      - {map: 211030000, count: 7,  level_lo: 50, level_hi: 65}   # 结冰的平原Ⅰ 35怪 55-58
+      - {map: 211050000, count: 7,  level_lo: 50, level_hi: 70}   # 寒冰平原 27怪 55-64
+      - {map: 211041600, count: 7,  level_lo: 40, level_hi: 60}   # 废矿区Ⅱ 35怪 41-57
+      - {map: 220040200, count: 8,  level_lo: 30, level_hi: 45}   # 时间隧道 57怪 34-40
+      - {map: 221030000, count: 8,  level_lo: 35, level_hi: 50}   # 控制地区 51怪 41
+      - {map: 230030001, count: 7,  level_lo: 20, level_hi: 35}   # 鱼之平原 53怪 23-25
+      - {map: 230030200, count: 7,  level_lo: 20, level_hi: 35}   # 矩形地带 55怪 22-23
+      - {map: 230010000, count: 7,  level_lo: 30, level_hi: 50}   # 海底叉路 49怪 36-40
+      - {map: 240010101, count: 8,  level_lo: 65, level_hi: 80}   # 毛毛森林 36怪 70-74
+      - {map: 240010100, count: 8,  level_lo: 65, level_hi: 85}   # 米纳尔森林西边境界 27怪 70-76
+      - {map: 240030100, count: 7,  level_lo: 85, level_hi: 110}  # 龙林1 25怪 90-105
+      - {map: 250010503, count: 7,  level_lo: 50, level_hi: 70}   # 妖怪森林 34怪 55-66
+      - {map: 250020200, count: 7,  level_lo: 45, level_hi: 60}   # 中级修炼场 34怪 50-51
+      - {map: 250010500, count: 7,  level_lo: 55, level_hi: 70}   # 蟠桃果林1 31怪 58-62
+      - {map: 261010002, count: 6,  level_lo: 30, level_hi: 45}   # 研究所102号 29怪 32-38
+      - {map: 261020400, count: 6,  level_lo: 45, level_hi: 70}   # 研究所C-2地区 28怪 54-63
+      - {map: 270010200, count: 6,  level_lo: 75, level_hi: 100}  # 追忆之路2 23怪 80-94
+      - {map: 270030100, count: 6,  level_lo: 75, level_hi: 125}  # 忘却之路1 24怪 80-121
+      - {map: 300010100, count: 5,  level_lo: 40, level_hi: 50}   # 苔藓树丛西部森林1 9怪 42-46
+      - {map: 300010400, count: 5,  level_lo: 50, level_hi: 60}   # 石头山入口 9怪 57
+      - {map: 540000200, count: 7,  level_lo: 15, level_hi: 40}   # 主要通道2 42怪 18-33
+      - {map: 540020000, count: 7,  level_lo: 30, level_hi: 45}   # 郊区1 38怪 38
+      - {map: 541000100, count: 7,  level_lo: 45, level_hi: 60}   # 神秘通道1 36怪 50-53
+      - {map: 550000100, count: 6,  level_lo: 40, level_hi: 55}   # 泥泞的河岸外围 29怪 45-47
+      - {map: 551030001, count: 6,  level_lo: 65, level_hi: 80}   # 掰掰站最久的一环 48怪 68-72
+      - {map: 551000200, count: 6,  level_lo: 55, level_hi: 65}   # 大红花路2 37怪 59
+      - {map: 600010300, count: 8,  level_lo: 20, level_hi: 35}   # 丛林山谷 74怪 21-30
+      - {map: 600010200, count: 7,  level_lo: 15, level_hi: 45}   # 克兰卡丛林盆地 51怪 19-41
+      - {map: 600010000, count: 6,  level_lo: 15, level_hi: 30}   # 城市地下 35怪 19-21
+      - {map: 701010300, count: 7,  level_lo: 25, level_hi: 40}   # 徐州岔道 33怪 30-35
+      - {map: 701010000, count: 6,  level_lo: 10, level_hi: 30}   # 上海郊外 27怪 15-22
+      - {map: 701010200, count: 6,  level_lo: 20, level_hi: 35}   # 上海北部小山 25怪 25-30
+      - {map: 800030000, count: 7,  level_lo: 25, level_hi: 40}   # 妖兽之林 41怪 30
+      - {map: 800010001, count: 7,  level_lo: 25, level_hi: 40}   # 云狐山坡 38怪 30
+      - {map: 801010000, count: 6,  level_lo: 40, level_hi: 55}   # 昭和内部街道1 37怪 43-47
+      - {map: 110010000, count: 7,  level_lo: 30, level_hi: 45}   # 海边瓜棚 63怪 37
+      - {map: 110030000, count: 6,  level_lo: 30, level_hi: 55}   # 青螃蟹海滩Ⅰ 47怪 37-48
+      - {map: 110020000, count: 6,  level_lo: 30, level_hi: 45}   # 红螃蟹海滩Ⅰ 40怪 37
   town_presence:
     enabled: true
     # count = stationed SocialBots; wanderers = roaming TownWandererBots.
@@ -181,7 +251,7 @@ waves:
         level_hi: 70
         wanderers: 14
         maps:
-          - {map: 103000000, count: 44}
+          - {map: 103000000, count: 56}
           - {map: 103000007, count: 16}
           - {map: 103040000, count: 18}
       - name: Ellinia
@@ -195,7 +265,7 @@ waves:
         level_hi: 65
         wanderers: 9
         maps:
-          - {map: 102000000, count: 36}
+          - {map: 102000000, count: 52}
       - name: Sleepywood
         level_lo: 25
         level_hi: 80
@@ -207,8 +277,8 @@ waves:
         level_hi: 86
         wanderers: 9
         maps:
-          - {map: 200000000, count: 28}
-          - {map: 200000200, count: 12}
+          - {map: 200000000, count: 49}
+          - {map: 200000200, count: 27}
       # 玩具城系 170 个练级 bot 却只有 72 个常驻（比值 0.42，基准 0.65）：
       # 深层练级点（玩具塔、时间通道）把人吸走了，城里反而空。容量均充裕。
       - name: Ludibrium
@@ -217,13 +287,13 @@ waves:
         wanderers: 14
         maps:
           - {map: 220000000, count: 70}
-          - {map: 220000300, count: 24}
+          - {map: 220000300, count: 35}
       - name: Korean Folk Town
         level_lo: 30
         level_hi: 70
         wanderers: 8
         maps:
-          - {map: 222000000, count: 50}
+          - {map: 222000000, count: 51}
       # 水下世界 34 练级 / 14 常驻（0.41）。三个甲板按容量分配（142/55/139）。
       - name: Aquarium
         level_lo: 30
@@ -231,8 +301,8 @@ waves:
         wanderers: 6
         maps:
           - {map: 230000000, count: 24}
-          - {map: 230000001, count: 8}
-          - {map: 230000002, count: 12}
+          - {map: 230000001, count: 15}
+          - {map: 230000002, count: 38}
       # 神木村是 lv70-130 的顶级大陆，练级队列 119 个却只有 15 个驻点——玩家满级
       # 后回到城里会看到一座空城。容量 242，35 只占 14%，远未站满。
       - name: Leafre
@@ -246,36 +316,36 @@ waves:
         level_hi: 95
         wanderers: 8
         maps:
-          - {map: 250000000, count: 22}
-          - {map: 250000100, count: 8}
+          - {map: 250000000, count: 54}
+          - {map: 250000100, count: 21}
       - name: Herb Town
         level_lo: 40
         level_hi: 90
         wanderers: 5
         maps:
-          - {map: 251000000, count: 16}
+          - {map: 251000000, count: 44}
       - name: Ariant
         level_lo: 30
         level_hi: 90
         wanderers: 8
         maps:
           - {map: 260000000, count: 22}
-          - {map: 260000200, count: 8}
-          - {map: 260000303, count: 6}
+          - {map: 260000200, count: 33}
+          - {map: 260000303, count: 9}
       - name: Magatia
         level_lo: 30
         level_hi: 90
         wanderers: 6
         maps:
-          - {map: 261000000, count: 18}
+          - {map: 261000000, count: 84}
           - {map: 261000001, count: 8}
-          - {map: 261000002, count: 6}
+          - {map: 261000002, count: 9}
       - name: Arta Camp
         level_lo: 30
         level_hi: 70
         wanderers: 4
         maps:
-          - {map: 300000000, count: 8}
+          - {map: 300000000, count: 46}
       # 时间神殿 lv90-150，只有 4 个驻点。容量 73，9 占 12%。
       - name: Time Temple
         level_lo: 90
@@ -288,29 +358,29 @@ waves:
         level_hi: 95
         wanderers: 9
         maps:
-          - {map: 600000000, count: 28}
+          - {map: 600000000, count: 84}
           - {map: 600000001, count: 12}
       - name: Singapore CBD
         level_lo: 30
         level_hi: 80
         wanderers: 8
         maps:
-          - {map: 540000000, count: 24}
+          - {map: 540000000, count: 77}
       - name: Shanghai Bund
         level_lo: 30
         level_hi: 80
         wanderers: 7
         maps:
-          - {map: 701000000, count: 20}
+          - {map: 701000000, count: 69}
       - name: Nautilus
         level_lo: 10
         level_hi: 70
         wanderers: 5
         maps:
-          - {map: 120000000, count: 8}
-          - {map: 120000100, count: 4}
-          - {map: 120000200, count: 4}
-          - {map: 120000300, count: 4}
+          - {map: 120000000, count: 84}
+          - {map: 120000100, count: 24}
+          - {map: 120000200, count: 31}
+          - {map: 120000300, count: 28}
       # 黄金海滩：原样复制了诺特勒斯的四张船图（120000000/100/200/300），
       # 于是这个条目的人全落在了船舱里，真正的黄金海滩一个驻站 bot 都没有。
       # 指向海滩自己的地图 110000000：town=1，5 个 NPC（杂货商人拜伦、导游派申），
@@ -338,25 +408,25 @@ waves:
         level_hi: 80
         wanderers: 5
         maps:
-          - {map: 541000000, count: 12}
+          - {map: 541000000, count: 72}
       - name: Shanghai Yu Garden
         level_lo: 30
         level_hi: 80
         wanderers: 5
         maps:
-          - {map: 701000200, count: 16}
+          - {map: 701000200, count: 18}
       - name: Songshan Town
         level_lo: 30
         level_hi: 90
         wanderers: 7
         maps:
-          - {map: 702000000, count: 20}
+          - {map: 702000000, count: 73}
       - name: Mushroom Shrine
         level_lo: 30
         level_hi: 90
         wanderers: 6
         maps:
-          - {map: 800000000, count: 16}
+          - {map: 800000000, count: 41}
       - name: Showa Village
         level_lo: 30
         level_hi: 90
@@ -368,13 +438,13 @@ waves:
         level_hi: 90
         wanderers: 5
         maps:
-          - {map: 550000000, count: 14}
+          - {map: 550000000, count: 56}
       - name: Kampung Village
         level_lo: 30
         level_hi: 90
         wanderers: 4
         maps:
-          - {map: 551000000, count: 10}
+          - {map: 551000000, count: 47}
       - name: Shanghai City Plaza
         level_lo: 30
         level_hi: 80
@@ -386,13 +456,13 @@ waves:
         level_hi: 80
         wanderers: 3
         maps:
-          - {map: 702100000, count: 10}
+          - {map: 702100000, count: 84}
       - name: Showa Shopping Street
         level_lo: 30
         level_hi: 90
         wanderers: 4
         maps:
-          - {map: 801000300, count: 12}
+          - {map: 801000300, count: 24}
       - name: Orbis Park
         level_lo: 30
         level_hi: 86
@@ -404,7 +474,7 @@ waves:
         level_hi: 85
         wanderers: 3
         maps:
-          - {map: 211000001, count: 8}
+          - {map: 211000001, count: 21}
       - name: Mu Lung Temple
         level_lo: 30
         level_hi: 95
@@ -435,7 +505,7 @@ waves:
         level_hi: 80
         wanderers: 3
         maps:
-          - {map: 221000200, count: 16}
+          - {map: 221000200, count: 84}
       - name: NLC Shopping Centre
         level_lo: 30
         level_hi: 95
@@ -465,7 +535,7 @@ waves:
         level_hi: 60
         wanderers: 3
         maps:
-          - {map: 101030104, count: 8}
+          - {map: 101030104, count: 35}
       - name: Henesys East Brushwood
         level_lo: 10
         level_hi: 40
@@ -477,4 +547,4 @@ waves:
         level_hi: 85
         wanderers: 7
         maps:
-          - {map: 211000000, count: 20}
+          - {map: 211000000, count: 40}

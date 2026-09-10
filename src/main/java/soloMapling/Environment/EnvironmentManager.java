@@ -908,9 +908,9 @@ public class EnvironmentManager {
 
     public static void spawnJQBotsPetPark() {
         debugprint("Spawning JQ Bots in Henesys Pet Park...");
-        // Six runners, not fifteen: they all work the same short obstacle course from the same
+        // Three runners, not six: they all work the same short obstacle course from the same
         // start point, so a larger batch read as a queue rather than as people having a go.
-        List<Integer> botIds = spawnBotsOnMapOnPlatform(scaledAmbient(6), HENESYS_PET_PARK, "m1");
+        List<Integer> botIds = spawnBotsOnMapOnPlatform(scaledAmbient(3), HENESYS_PET_PARK, "m1");
         setAndStartBots(botIds, BotTypeManager.BotType.HENESYS_JQ_BOT);
         debugprint(fmt("Pet Park JQ bots spawned: {}", botIds.size()));
     }
