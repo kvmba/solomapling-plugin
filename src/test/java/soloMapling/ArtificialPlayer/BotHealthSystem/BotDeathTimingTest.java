@@ -16,10 +16,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class BotDeathTimingTest {
 
     @Test
-    void downTimeIsHalfAMinuteToTwoMinutes() {
+    void downTimeIsHalfAMinuteToAMinute() {
         // The brief: long enough to read as a corpse, short enough that the bot comes back.
         assertTrue(BotDeath.DOWN_MIN_MS >= 30_000L, "must lie at least 30s");
-        assertTrue(BotDeath.DOWN_MAX_MS <= 120_000L, "must not lie past 2 min");
+        assertTrue(BotDeath.DOWN_MAX_MS <= 60_000L, "must not lie past 1 min");
         assertTrue(BotDeath.DOWN_MIN_MS < BotDeath.DOWN_MAX_MS, "the window must vary");
     }
 
@@ -43,7 +43,7 @@ class BotDeathTimingTest {
     @Test
     void deadBotsTickFarFasterThanAnUnobservedGrinder() {
         // The bug this guards: an unobserved grinder's macro cadence is 240-480s. Left at that,
-        // a death would take a quarter of an hour instead of the intended 30-120s. The corpse
+        // a death would take a quarter of an hour instead of the intended 30-60s. The corpse
         // has to be paced by its own clock.
         BotDeath death = new BotDeath(null);
         long delay = death.tickDelayMs();

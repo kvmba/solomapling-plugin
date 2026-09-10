@@ -47,7 +47,7 @@ public final class BotDeath {
     // Lie here before being carried home: long enough to read as a corpse rather than a
     // stumble, varied so a field of bodies does not all stand up on the same tick.
     static final long DOWN_MIN_MS = 30_000L;
-    static final long DOWN_MAX_MS = 120_000L;
+    static final long DOWN_MAX_MS = 60_000L;
 
     // Grumble cadence while down.
     static final long GRUMBLE_MIN_MS = 8_000L;
@@ -215,8 +215,8 @@ public final class BotDeath {
      * <p>Why this is not simply left alone: a grinder's unobserved cadence is 4-8 minutes, and
      * the whole point of that stretch is that nothing time-critical happens while nobody is
      * watching. A death is nothing but a timer, so at the stretched cadence a bot in an empty
-     * field would lie there for a quarter of an hour instead of the intended half-minute to two
-     * minutes. Living bots keep their cadence; only the corpse is paced by its own clock.
+     * field would lie there for a quarter of an hour instead of the intended half-minute to a
+     * minute. Living bots keep their cadence; only the corpse is paced by its own clock.
      */
     public long tickDelayMs() {
         return delayForRemaining(standUpAtMs - System.currentTimeMillis());
