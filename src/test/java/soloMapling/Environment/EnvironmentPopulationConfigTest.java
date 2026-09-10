@@ -29,7 +29,7 @@ class EnvironmentPopulationConfigTest {
         var plan = EnvironmentPopulationConfig.reload();
         assertTrue(plan.training().enabled());
         assertEquals(54, plan.training().cohorts().size());
-        assertEquals(1584, plan.trainingCohortTotal());
+        assertEquals(1550, plan.trainingCohortTotal());
         assertTrue(plan.essentials().enabled());
         assertEquals("henesys", plan.essentials().fmRegion());
         assertEquals(5, plan.essentials().fmEntrance().m1());
@@ -39,7 +39,7 @@ class EnvironmentPopulationConfigTest {
         assertEquals(46, towns.size());
         int social = towns.stream().flatMap(t -> t.maps().stream()).mapToInt(m -> m.count()).sum();
         int wanderers = towns.stream().mapToInt(t -> t.wanderers()).sum();
-        assertEquals(2102, social);
+        assertEquals(2001, social);
         assertEquals(272, wanderers);
     }
 

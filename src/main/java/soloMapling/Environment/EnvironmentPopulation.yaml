@@ -129,7 +129,7 @@ waves:
       - {map: 220050300, count: 16, level_lo: 70, level_hi: 95}
       - {map: 220020000, count: 16, level_lo: 36, level_hi: 60}
       - {map: 221000000, count: 40, level_lo: 40, level_hi: 54}
-      - {map: 221020000, count: 68, level_lo: 30, level_hi: 47}
+      - {map: 221020000, count: 34, level_lo: 30, level_hi: 47}
       # 玩具塔 1-100 层：此前只有 1 楼(68)和顶楼，中间全空。按间隔选层投放，
       # 让爬塔沿途有人，而不是全挤在两头。
       - {map: 221020100, count: 8, level_lo: 30, level_hi: 45}   # 玩具塔2层
@@ -249,10 +249,10 @@ waves:
       - name: Kerning City
         level_lo: 15
         level_hi: 70
-        wanderers: 14
+        wanderers: 18
         maps:
           - {map: 103000000, count: 56}
-          - {map: 103000007, count: 16}
+          - {map: 103000007, count: 26}
           - {map: 103040000, count: 18}
       - name: Ellinia
         level_lo: 10
@@ -275,10 +275,10 @@ waves:
       - name: Orbis
         level_lo: 30
         level_hi: 86
-        wanderers: 9
+        wanderers: 13
         maps:
           - {map: 200000000, count: 49}
-          - {map: 200000200, count: 27}
+          - {map: 200000200, count: 37}
       # 玩具城系 170 个练级 bot 却只有 72 个常驻（比值 0.42，基准 0.65）：
       # 深层练级点（玩具塔、时间通道）把人吸走了，城里反而空。容量均充裕。
       - name: Ludibrium
@@ -314,10 +314,10 @@ waves:
       - name: Mu Lung
         level_lo: 30
         level_hi: 95
-        wanderers: 8
+        wanderers: 11
         maps:
           - {map: 250000000, count: 54}
-          - {map: 250000100, count: 21}
+          - {map: 250000100, count: 29}
       - name: Herb Town
         level_lo: 40
         level_hi: 90
@@ -327,18 +327,18 @@ waves:
       - name: Ariant
         level_lo: 30
         level_hi: 90
-        wanderers: 8
+        wanderers: 11
         maps:
           - {map: 260000000, count: 22}
-          - {map: 260000200, count: 33}
+          - {map: 260000200, count: 41}
           - {map: 260000303, count: 9}
       - name: Magatia
         level_lo: 30
         level_hi: 90
-        wanderers: 6
+        wanderers: 9
         maps:
           - {map: 261000000, count: 84}
-          - {map: 261000001, count: 8}
+          - {map: 261000001, count: 16}
           - {map: 261000002, count: 9}
       - name: Arta Camp
         level_lo: 30
@@ -356,10 +356,10 @@ waves:
       - name: New Leaf City
         level_lo: 30
         level_hi: 95
-        wanderers: 9
+        wanderers: 13
         maps:
           - {map: 600000000, count: 84}
-          - {map: 600000001, count: 12}
+          - {map: 600000001, count: 24}
       - name: Singapore CBD
         level_lo: 30
         level_hi: 80
@@ -377,7 +377,7 @@ waves:
         level_hi: 70
         wanderers: 5
         maps:
-          - {map: 120000000, count: 84}
+          - {map: 120000000, count: 42}
           - {map: 120000100, count: 24}
           - {map: 120000200, count: 31}
           - {map: 120000300, count: 28}
@@ -463,55 +463,24 @@ waves:
         wanderers: 4
         maps:
           - {map: 801000300, count: 24}
-      - name: Orbis Park
-        level_lo: 30
-        level_hi: 86
-        wanderers: 4
-        maps:
-          - {map: 200000200, count: 10}
       - name: El Nath Chief Hall
         level_lo: 50
         level_hi: 85
         wanderers: 3
         maps:
           - {map: 211000001, count: 21}
-      - name: Mu Lung Temple
-        level_lo: 30
-        level_hi: 95
-        wanderers: 3
-        maps:
-          - {map: 250000100, count: 8}
       - name: Priest Forest
         level_lo: 70
         level_hi: 120
         wanderers: 3
         maps:
           - {map: 240010501, count: 8}
-      - name: Ariant Residence
-        level_lo: 30
-        level_hi: 90
-        wanderers: 3
-        maps:
-          - {map: 260000200, count: 8}
-      - name: Alchemist House
-        level_lo: 30
-        level_hi: 90
-        wanderers: 3
-        maps:
-          - {map: 261000001, count: 8}
-      # 容量 311 但 spanX 仅 945——窄而多层，地面分散，所以只小幅加。
       - name: Defense HQ Hangar
         level_lo: 30
         level_hi: 80
         wanderers: 3
         maps:
-          - {map: 221000200, count: 84}
-      - name: NLC Shopping Centre
-        level_lo: 30
-        level_hi: 95
-        wanderers: 4
-        maps:
-          - {map: 600000001, count: 12}
+          - {map: 221000200, count: 25}
       - name: Henesys Park
         level_lo: 10
         level_hi: 60
@@ -524,12 +493,6 @@ waves:
         wanderers: 4
         maps:
           - {map: 100000202, count: 6}
-      - name: Kerning Night Market
-        level_lo: 15
-        level_hi: 70
-        wanderers: 4
-        maps:
-          - {map: 103000007, count: 10}
       - name: Excavation Camp
         level_lo: 20
         level_hi: 60
