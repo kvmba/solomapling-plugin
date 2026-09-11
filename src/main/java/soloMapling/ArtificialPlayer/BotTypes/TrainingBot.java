@@ -491,46 +491,51 @@ public class TrainingBot extends BotSM implements GrindTickRegistry.Participant 
      * at the terminal and aboard like anyone else. Returns true if a migration was started.
      */
     /*
-     * Chance a settled bot picks up and moves to another continent for a while even though nothing
-     * here has run out, and how long it stays once it has. Without the dice the low continents keep
-     * nobody but beginners; without the stay a bot would cross and immediately cross back. Getting
-     * there is a boat or a flight, so a move is an afternoon at least — a bot that crossed the world
-     * for ten minutes would look silly. A CLIMB (outgrown the continent) is not optional and rolls
-     * neither: it fires as soon as the bot is able, and a stay would only strand it where it has
-     * nothing left to fight.
+     * How long a bot must live somewhere before it may cross again, and the dice on an optional
+     * move. The cooldown applies to EVERY move including a climb: crossing is a ticket, a wait
+     * and a sailing, so a bot that just arrived somewhere has not "done" anything yet, and the
+     * low continents would keep nobody if the same bots left again on their next town visit.
+     * The dice exist because a bot that could always move should not always: without them the
+     * continents below FREE_MOVE_LEVEL would only ever be climbed out of.
      */
-    private static final long MOVE_STAY_MIN_MS = 90 * 60 * 1000L;   // 1.5 h
-    private static final long MOVE_STAY_MAX_MS = 240 * 60 * 1000L;  // 4 h
+    private static final long MOVE_COOLDOWN_MIN_MS = 180 * 60 * 1000L;  // 3 h
+    private static final long MOVE_COOLDOWN_MAX_MS = 480 * 60 * 1000L;  // 8 h
     private long movedUntilMs;
 
     private boolean startMigration() {
         Character chr = getChr();
-        if (homeMapId < 0 || currentTrainMapId < 0) {
+        // Only the home check: a bot reaching here has just walked home from a grind, which is
+        // itself the proof that it settled and trained. The old second condition
+        // (currentTrainMapId >= 0) could never pass — leaveGrind() clears the train target
+        // BEFORE entering GO_TOWN, so by the time this runs it is always -1 — and it held the
+        // gate shut on every bot since the migration was written. Its intent ("hasn't settled
+        // anywhere yet") is already covered by homeMapId.
+        if (homeMapId < 0) {
             return false; // not settled anywhere yet
         }
-        boolean settled = now() > movedUntilMs; // last move's stay window has run out
-        // A climb — below FREE_MOVE_LEVEL, outgrown this continent — is not a choice: the bot
-        // leaves as soon as it can, and a stay window would only strand it somewhere it has
-        // outlevelled. Every OTHER move is optional, so it rolls the dice and observes the
-        // window, or a bot with anywhere to go would simply live aboard.
+        // Cooldown first, and it covers every move below. A bot that has just crossed is not
+        // eligible to cross again until it has actually lived somewhere a while — otherwise it
+        // treats its new continent as a lobby and leaves on the next town visit, and the low
+        // continents never keep anyone.
+        if (now() <= movedUntilMs) {
+            return false;
+        }
         boolean optional = chr.getLevel() >= TrainingRegions.FREE_MOVE_LEVEL;
         int dest = TrainingRegions.migrationTarget(homeMapId, chr.getLevel());
         if (dest <= 0) {
             // Nothing to outgrow into, so the only move left is going somewhere else anyway.
             optional = true;
-            if (settled && rng.nextDouble() < TrainingRegions.OPTIONAL_MOVE_CHANCE) {
+            if (rng.nextDouble() < TrainingRegions.OPTIONAL_MOVE_CHANCE) {
                 dest = TrainingRegions.returnTarget(homeMapId, chr.getLevel());
             }
-        } else if (optional && (!settled || rng.nextDouble() >= TrainingRegions.OPTIONAL_MOVE_CHANCE)) {
+        } else if (optional && rng.nextDouble() >= TrainingRegions.OPTIONAL_MOVE_CHANCE) {
             dest = 0; // this continent still has mobs worth the bot's time — staying put
         }
         if (dest <= 0 || dest == homeMapId) {
             return false;
         }
-        if (optional) {
-            movedUntilMs = now() + MOVE_STAY_MIN_MS
-                    + (long) (rng.nextDouble() * (MOVE_STAY_MAX_MS - MOVE_STAY_MIN_MS));
-        }
+        movedUntilMs = now() + MOVE_COOLDOWN_MIN_MS
+                + (long) (rng.nextDouble() * (MOVE_COOLDOWN_MAX_MS - MOVE_COOLDOWN_MIN_MS));
         // stdout, not the in-world chat: this is the one line that says whether a bot ever
         // decides to leave at all, and it has to be readable without a GM client watching the
         // map.

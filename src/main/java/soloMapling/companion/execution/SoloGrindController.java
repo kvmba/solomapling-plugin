@@ -95,18 +95,18 @@ public final class SoloGrindController {
      */
     private volatile boolean relocating = false;
     /**
-     * Until when a companion that can go anywhere should stay where it landed.
+     * Until when a companion must stay where it landed: the crossing cooldown.
      *
-     * <p>Only free moves set it. Without it a high-level companion has a target on every single
-     * decision, so it would spend its whole life aboard instead of ever reaching a hunting
-     * ground. A companion accompanies players, so it needs to be somewhere long enough to be
-     * found — the same reason a training bot's visit lasts an afternoon rather than a minute.</p>
+     * <p>It covers every crossing, climbs included. Without it a companion that can go anywhere
+     * is offered a new continent on its very next decision, so it spends its life aboard instead
+     * of ever reaching a hunting ground — and one that keeps leaving is never findable, which
+     * matters because a companion's job is to be met.</p>
      */
     private volatile long relocatedUntilMs = 0L;
 
-    /** How long a free move keeps a companion on the continent it crossed to. */
-    private static final long STAY_MIN_MS = 90 * 60_000L;   // 1.5 h
-    private static final long STAY_MAX_MS = 240 * 60_000L;  // 4 h
+    /** How long a crossing keeps a companion on the continent it moved to. */
+    private static final long STAY_MIN_MS = 180 * 60_000L;  // 3 h
+    private static final long STAY_MAX_MS = 480 * 60_000L;  // 8 h
 
     public SoloGrindController(GrindBrain grind) {
         this.grind = java.util.Objects.requireNonNull(grind, "grind");
@@ -268,22 +268,19 @@ public final class SoloGrindController {
             int continent = TrainingRegions.migrationTarget(
                     companion.getMapId(), companion.getLevel());
             if (continent > 0 && continent != companion.getMapId()) {
-                // A climb (outgrown the continent) is not a choice — it fires as soon as the
-                // companion is able. A free move is, so it rolls the dice like a training bot's
-                // visit: without the roll a companion with anywhere to go would leave on its
-                // very next decision, every time, and never settle long enough to be found.
+                // The dice apply to a free move only — a companion that can go anywhere should
+                // not leave every single time it could. The cooldown below covers both kinds:
+                // a crossing is a trip like any other, and a companion that keeps leaving
+                // never settles anywhere long enough to be found.
                 boolean freeMove = companion.getLevel() >= TrainingRegions.FREE_MOVE_LEVEL;
-                if (freeMove) {
-                    if (ThreadLocalRandom.current().nextDouble() >= TrainingRegions.OPTIONAL_MOVE_CHANCE) {
-                        relocatedUntilMs = now + RETRY_MS; // not this time — ask again later
-                        continent = 0;
-                    } else {
-                        relocatedUntilMs = now + STAY_MIN_MS
-                                + (long) (ThreadLocalRandom.current().nextDouble()
-                                        * (STAY_MAX_MS - STAY_MIN_MS));
-                    }
-                }
-                if (continent > 0) {
+                if (freeMove
+                        && ThreadLocalRandom.current().nextDouble()
+                                >= TrainingRegions.OPTIONAL_MOVE_CHANCE) {
+                    relocatedUntilMs = now + RETRY_MS; // not this time — ask again later
+                } else {
+                    relocatedUntilMs = now + STAY_MIN_MS
+                            + (long) (ThreadLocalRandom.current().nextDouble()
+                                    * (STAY_MAX_MS - STAY_MIN_MS));
                     relocating = true;
                     targetMapId = continent;
                     targetMobLevel = 0;
