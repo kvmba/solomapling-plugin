@@ -446,16 +446,10 @@ public class EnvironmentManager {
     }
 
     // GachaBots for one town: they spray a pile of junk on the ground, stand over it, then pick it back
-    // up (see GachaBot). Seeded on the town's main map with the same foothold sampling the stationed
-    // crowd uses, NOT spawnBotsOnMapOnPlatform - that one needs a recorded movement CSV under
-    // movementDataPackets/map<id>/, and only Henesys and the Free Market have those. Every other town
-    // would have resolved an empty platform and dropped its bots on (0,0).
+    // up (see GachaBot). Confined to the floor band - seeded on an upper platform, the spray lands on
+    // the floor below and the bot can never walk to it. Called only when the town asks for some.
     private static int spawnGachaBotsInTown(TownPresenceConfig.TownEntry town) {
-        int mapId = town.mainMapId();
-        if (mapId < 0 || town.gacha() <= 0) {
-            return 0;
-        }
-        return spawnTownCohort(mapId, scaledAmbient(town.gacha()), town.levelLo(), town.levelHi(),
+        return spawnTownCohort(town.mainMapId(), scaledAmbient(town.gacha()), town.levelLo(), town.levelHi(),
                 BotTypeManager.BotType.GACHA_BOT, true);
     }
 

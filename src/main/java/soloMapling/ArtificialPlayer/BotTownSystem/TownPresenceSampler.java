@@ -188,8 +188,7 @@ public final class TownPresenceSampler {
 
     // Just the ledges in the map's lowest band: anything whose centreY sits within FLOOR_BAND_TOLERANCE
     // of the lowest ledge on the map (Y grows downward, so the largest Y is the floor). Used to keep a
-    // crowd off the platforms above the floor. Falls back to the single lowest ledge when the band is
-    // empty - there is always at least the one ledge the floor was read from.
+    // crowd off the platforms above the floor.
     private static List<GCMovement.Ledge> floorBand(List<GCMovement.Ledge> ledges) {
         int floor = Integer.MIN_VALUE;
         for (GCMovement.Ledge l : ledges) {
@@ -201,7 +200,7 @@ public final class TownPresenceSampler {
                 out.add(l);
             }
         }
-        return out.isEmpty() ? List.of(ledges.get(0)) : out;
+        return out;
     }
 
     // Per-ledge weight = span * shape-profile * (floor + anchor pull), then curation overrides: a ledge
