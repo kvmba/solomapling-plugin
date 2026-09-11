@@ -281,24 +281,6 @@ final class GCMovementDriver {
             return;
         }
 
-        // A disable() that arrived mid-air: let the fall land first, then finish handing the bot
-        // over. Placed above the portal-drop hold so the pending drop still plays out in full -
-        // that hold is the visible "appears at the portal, then falls" beat a real client shows,
-        // and cutting it short is what used to leave the bot hovering in the jump pose.
-        if (entry.disableAfterLanding) {
-            // Only the FALL is waited out. A bot that ended up on a rope is not dragged off it -
-            // hanging there is legitimate, and the rope stance is what it is really doing - so the
-            // handover completes as soon as it is no longer falling, and the rope is left for
-            // enable() to resolve. Waiting on climbing too would hold the movement lock for as long
-            // as the bot hangs (rope rests run for minutes), starving the old engine.
-            if (entry.inAir || entry.portalDropAtMs > 0L) {
-                return; // still on the way down - keep the physics driving it
-            }
-            entry.disableAfterLanding = false;
-            GCMovement.finishDeferredDisable(entry.bot);
-            return;
-        }
-
         // Pending organic portal/teleport drop: hold standing at the spawn portal (the bot appears
         // up at the portal, above the floor), then release the natural fall once the load beat passes.
         if (entry.portalDropAtMs > 0L) {
@@ -311,6 +293,26 @@ final class GCMovementDriver {
             entry.portalDropAtMs = 0L;
             BotPhysicsEngine.beginPortalDrop(entry, bot, bot.getPosition()); // release the fall
             broadcastIfObserved(entry);
+            return;
+        }
+
+        // A disable() that arrived mid-air: let the fall land first, then finish handing the bot
+        // over. Sits AFTER the portal-drop hold on purpose - that hold owns the whole "appears at
+        // the portal, floats, then falls" beat and returns every tick while it runs, so a branch
+        // placed above it would never be reached during the float. Once it releases, the bot is
+        // airborne and falls through here every tick until it lands.
+        //
+        // Only inAir is waited on. A bot that ends up on a rope is not dragged off it - hanging
+        // there is legitimate and the rope stance is what it is really doing - so the handover
+        // completes as soon as it is no longer falling, leaving the rope for enable() to resolve.
+        // Waiting on climbing would hold the movement lock for as long as the bot hangs (rope
+        // rests run for minutes), starving the old engine.
+        if (entry.disableAfterLanding) {
+            if (entry.inAir) {
+                return; // still on the way down - keep the physics driving it
+            }
+            entry.disableAfterLanding = false;
+            GCMovement.finishDeferredDisable(entry.bot);
             return;
         }
 
