@@ -67,19 +67,24 @@ public final class BotPlaceNames {
             if (root == null) {
                 return out;
             }
+            // Map.img is two levels deep: an area ("victoria", "maple", ...) whose children are
+            // the maps themselves. Reading only the top level finds no ids at all and leaves the
+            // table empty, which would silently print every name as a number.
             for (Data area : root.getChildren()) {
-                int mapId;
-                try {
-                    mapId = Integer.parseInt(area.getName());
-                } catch (NumberFormatException ignored) {
-                    continue; // not a map entry (e.g. a nested category)
+                for (Data map : area.getChildren()) {
+                    int mapId;
+                    try {
+                        mapId = Integer.parseInt(map.getName());
+                    } catch (NumberFormatException ignored) {
+                        continue; // not a map entry
+                    }
+                    String name = DataTool.getString("mapName", map, null);
+                    if (name == null) {
+                        continue;
+                    }
+                    String street = DataTool.getString("streetName", map, null);
+                    out.put(mapId, street == null || street.isBlank() ? name : street + " - " + name);
                 }
-                String street = DataTool.getString("streetName", area, null);
-                String map = DataTool.getString("mapName", area, null);
-                if (map == null) {
-                    continue;
-                }
-                out.put(mapId, street == null || street.isBlank() ? map : street + " - " + map);
             }
         } catch (Exception e) {
             System.err.println("[BotPlaceNames] Failed to load map names from String.wz: "

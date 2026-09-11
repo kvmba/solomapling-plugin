@@ -241,10 +241,11 @@ public final class SoloGrindController {
             GCMovement.setGrinding(companion, false);
         }
         grindRegistered = false;
-        // Clear the relocation flag BEFORE releasing: releaseReservation() reads it to decide
-        // whether a reservation was ever taken out on the current target.
-        relocating = false;
+        // Release BEFORE clearing the flag: releaseReservation() reads `relocating` to tell a
+        // hunting-ground slot (which was reserved) from a continent town (which never was), so
+        // the flag has to still describe the trip being dropped.
         releaseReservation();
+        relocating = false;
         targetMapId = -1;
         targetMobLevel = 0;
         // IDLE, not RESTING: a stop means someone else is taking over, and a
@@ -349,10 +350,11 @@ public final class SoloGrindController {
             GCMovement.setGrinding(companion, false);
         }
         grindRegistered = false;
-        // Clear the relocation flag BEFORE releasing: releaseReservation() reads it to decide
-        // whether a reservation was ever taken out on the current target.
-        relocating = false;
+        // Release BEFORE clearing the flag: releaseReservation() reads `relocating` to tell a
+        // hunting-ground slot (which was reserved) from a continent town (which never was), so
+        // the flag has to still describe the trip being dropped.
         releaseReservation();
+        relocating = false;
         targetMapId = -1;
         targetMobLevel = 0;
         phase = Phase.RESTING;
