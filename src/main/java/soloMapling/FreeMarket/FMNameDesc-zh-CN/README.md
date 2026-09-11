@@ -22,10 +22,23 @@ path already accepts CJK:
   out correctly.
 - `PluginResources.openReader()` decodes as UTF-8.
 
-Entries are Chinese MapleStory-style names: 怀旧 two-word names, in-game terms, food and drink,
-self-deprecating player humour, and CN/EN mixes. Roughly 10% carry a symbol or kaomoji
-(`♪ ★ ♡`, `(￣▽￣)`, `^_^`) because that is how real players decorate names — the symbols are
-limited to ones the v83 client font actually covers, so nothing renders as a tofu box.
+Entries are Chinese MapleStory-style names only — no symbols or kaomoji (an earlier pass carried
+`♪ ★ ♡`, `(￣▽￣)`, `^_^`; those are gone, see **Characters** below). The list is ~7,900 names:
+the pool's own two shapes crossed, plus curated standalone names.
+
+- **`状态/动作` × `职业/怪物`** — `摸鱼企鹅王`, `熬夜战神`, and the reverse `企鹅王摸鱼`, `战神熬夜`.
+  States come from the vocabulary players actually use (摸鱼 摆烂 躺平 养老 挂机 搬砖 打宝 熬夜 失眠
+  回坑 带队 捡漏 …); roles are the MS classes and monsters the pool already used (企鹅王 冰龙王 大主教
+  圣骑士 恶魔猎 魔法师 弓箭手 机械师 绿水灵 木妖精 橡皮怪 战神 龙神 …) plus the meme identities
+  (摸鱼王 摆烂王 肝帝 卷王 打工人 老司机 …).
+- **`形容词` × `职业/怪物`** — `冷酷法师`, `迷糊小雪人`, `倔强狂徒` style personality front-ends.
+- **独立名** — 怀旧 (`点卡时代`, `网吧通宵`, `十年老兵`), 热梗 (`芜湖起飞`, `绝绝子`, `格局打开`),
+  食物 (`螺蛳粉`, `珍珠奶茶`, `杨枝甘露`), 萌宠 (`橘猫`, `柯基`, `柴犬`) and 文艺 (`深夜食堂`,
+  `岁月静好`, `云淡风轻`).
+
+The `AFK`-prefixed family (`AFK一路向北` …) was removed: the prefix reads as a status, not as part
+of a name, and it made ~1% of the pool look like a bot farm. Width distribution lands on 8 and 10
+(CJK counts as two cells), with a thinner tail at 9/11/12; nothing exceeds 12.
 
 **Constraints** — `FMShopDescGen.loadAndShuffleNames()` silently drops any line longer than 12
 characters, and shop titles are laid out by display width:
@@ -44,8 +57,9 @@ characters, and shop titles are laid out by display width:
 Nothing else. Every other character is rejected, because a name is drawn with the game's own
 font and anything that font lacks renders as `?` or a tofu box. The rule is a whitelist, so it
 rejects by default rather than by enumeration — kana (`の パ`), full-width forms (`２`), CJK
-punctuation, symbols (`♪ ★ ♡ 〜 ° 丶 灬 丨`) and every invisible or control character (zero-width
-space, BOM, `0x00`-`0x1F`, `0x7F`, spaces) all fail on the same rule.
+punctuation, symbols (`♪ ★ ♡ 〜 °`) and every invisible or control character (zero-width
+space, BOM, `0x00`-`0x1F`, `0x7F`, spaces) all fail on the same rule. **No decoration symbols
+and no kaomoji are allowed at all** — only `A-Z a-z 0-9` and simplified Chinese.
 
 Two things are easy to get wrong and are worth naming:
 

@@ -69,7 +69,7 @@ class BotNamePoolConcurrencyTest {
         }
         int expected = threads * perThread;
         assertEquals(expected, sum, "a thread lost names under contention");
-        // The pool is 3200 names and we draw 960, so any duplicate means the index was
+        // The pool is ~7,900 names and we draw 960, so any duplicate means the index was
         // incremented non-atomically.
         assertEquals(expected, all.size(), "the same name was handed to two threads");
     }
