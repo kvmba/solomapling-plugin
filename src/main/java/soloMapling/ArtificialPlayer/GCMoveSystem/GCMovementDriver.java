@@ -81,11 +81,6 @@ final class GCMovementDriver {
         synchronized (entry) {
             cancelScheduledTick(entry);
             entry.tickStopped = false;
-            // A new session must not inherit a handover the previous one was waiting to finish:
-            // disable() defers while the bot is airborne, and if the bot is re-enabled before it
-            // lands, computeIfAbsent hands back that same entry - the stale flag would then stop
-            // the fresh session the moment the bot next touches the ground.
-            entry.disableAfterLanding = false;
             long generation = ++entry.tickGeneration;
             scheduleNext(entry, generation, System.nanoTime());
         }

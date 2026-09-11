@@ -42,6 +42,16 @@ public final class GCMovement {
             return;
         }
         ObserverTracker.ensureStarted(); // LOD observability poll (idempotent)
+        // A handover the PREVIOUS session deferred must not survive into this one. disable() sets
+        // disableAfterLanding when the bot is airborne and leaves the entry alive to finish the
+        // fall; if the bot is re-enabled before it lands, computeIfAbsent hands back that same
+        // entry WITHOUT running the creation lambda - so the flag has to be cleared here, outside
+        // it. Otherwise the stale flag would stop this fresh session the moment the bot next
+        // touches the ground.
+        BotMovementState resumed = STATES.get(bot.getId());
+        if (resumed != null) {
+            resumed.disableAfterLanding = false;
+        }
         STATES.computeIfAbsent(bot.getId(), id -> {
             // owner == null by default (no follow anchor, and avoids the nav warmup notice trying to
             // dropMessage through the shared BotClient). GCFollow sets owner to the followed character.
@@ -106,6 +116,9 @@ public final class GCMovement {
                         // isEnabled() false while the old entry is still driving, so a later
                         // enable() would build a SECOND state and start a second driver on the
                         // same bot - and the deferred finish would then find no state to hand over.
+                        // Idempotent: disable() called twice while the fall is still in flight
+                        // (a teardown racing the stroll-return callback) just re-states the same
+                        // intent - the driver still owns landing it and finishing the handover.
                         STATES.put(bot.getId(), st);
                         return; // the driver calls finishDeferredDisable once it has landed
                     }
