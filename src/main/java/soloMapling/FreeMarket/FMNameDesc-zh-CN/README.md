@@ -23,7 +23,7 @@ path already accepts CJK:
 - `PluginResources.openReader()` decodes as UTF-8.
 
 Entries are Chinese MapleStory-style names only — no symbols or kaomoji (an earlier pass carried
-`♪ ★ ♡`, `(￣▽￣)`, `^_^`; those are gone, see **Characters** below). The list is ~7,900 names:
+`♪ ★ ♡`, `(￣▽￣)`, `^_^`; those are gone, see **Characters** below). The list is 10,000 names:
 the pool's own two shapes crossed, plus curated standalone names.
 
 - **`状态/动作` × `职业/怪物`** — `摸鱼企鹅王`, `熬夜战神`, and the reverse `企鹅王摸鱼`, `战神熬夜`.
