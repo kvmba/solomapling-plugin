@@ -81,6 +81,11 @@ final class GCMovementDriver {
         synchronized (entry) {
             cancelScheduledTick(entry);
             entry.tickStopped = false;
+            // A new session must not inherit a handover the previous one was waiting to finish:
+            // disable() defers while the bot is airborne, and if the bot is re-enabled before it
+            // lands, computeIfAbsent hands back that same entry - the stale flag would then stop
+            // the fresh session the moment the bot next touches the ground.
+            entry.disableAfterLanding = false;
             long generation = ++entry.tickGeneration;
             scheduleNext(entry, generation, System.nanoTime());
         }
@@ -278,6 +283,24 @@ final class GCMovementDriver {
             entry.moveProgressAtMs = System.currentTimeMillis();
             BotPhysicsEngine.idleOnGround(entry, bot);
             broadcastIfObserved(entry);
+            return;
+        }
+
+        // A disable() that arrived mid-air: let the fall land first, then finish handing the bot
+        // over. Placed above the portal-drop hold so the pending drop still plays out in full -
+        // that hold is the visible "appears at the portal, then falls" beat a real client shows,
+        // and cutting it short is what used to leave the bot hovering in the jump pose.
+        if (entry.disableAfterLanding) {
+            // Only the FALL is waited out. A bot that ended up on a rope is not dragged off it -
+            // hanging there is legitimate, and the rope stance is what it is really doing - so the
+            // handover completes as soon as it is no longer falling, and the rope is left for
+            // enable() to resolve. Waiting on climbing too would hold the movement lock for as long
+            // as the bot hangs (rope rests run for minutes), starving the old engine.
+            if (entry.inAir || entry.portalDropAtMs > 0L) {
+                return; // still on the way down - keep the physics driving it
+            }
+            entry.disableAfterLanding = false;
+            GCMovement.finishDeferredDisable(entry.bot);
             return;
         }
 

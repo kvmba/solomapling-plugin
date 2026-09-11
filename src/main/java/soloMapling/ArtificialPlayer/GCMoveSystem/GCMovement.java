@@ -86,21 +86,65 @@ public final class GCMovement {
             // has moveDir == 0 but is still airborne - and airborne is what makes the stance
             // render as JUMP. Testing only moveDir left those bots frozen in the jump pose.
             if (st.moveDir != 0 || st.groundBrakeDir != 0 || st.inAir || st.climbing) {
-                // Mid-air / on a rope: leave the pose ALONE. Forcing the idle (standing) stance here
-                // would render a bot standing on nothing at its rope/air coordinates — the
-                // "standing in mid-air" bot a follower converted mid-climb turns into. Its last
-                // broadcast already carries ROPE/JUMP, i.e. what it is really doing; whoever takes
-                // over re-enables GC control, and enable() drops the bot onto the foothold below
-                // before the first tick, so the pose resolves on its own.
-                if (!st.inAir && !st.climbing) {
-                    BotPhysicsEngine.idleOnGround(st, bot);
-                    BotMovementManager.broadcastMovement(st);
+                // Mid-air: hand the bot over LATE instead of settling it here. A real player keeps
+                // falling to the floor frame by frame; forcing the landing was a visible teleport,
+                // and cutting the session mid-air was what froze bots in the jump pose. So keep the
+                // driver running and let the physics land it, then finish the handover (see
+                // GCMovementDriver.tick). Covers every caller at once - notably the stroll return,
+                // whose travel-finish callback fires within ~300ms of the map change while the
+                // map-entry float (inAir, ~60px up, 1.5-2.1s hold) is still in flight.
+                //
+                // On a rope: leave the pose ALONE. Hanging on a rope is a legitimate place to
+                // stand, so snapping a climber down to the floor would read as it falling off -
+                // the rope coords plus the ROPE stance are what it is really doing. Whoever takes
+                // over re-enables GC control, and enable() resolves the position from there.
+                if (!st.climbing) {
+                    if (st.inAir || st.portalDropAtMs > 0L) {
+                        st.disableAfterLanding = true;
+                        // Put the state BACK: the driver keeps ticking it until it lands, and it
+                        // must stay the live entry for that. Leaving it removed would make
+                        // isEnabled() false while the old entry is still driving, so a later
+                        // enable() would build a SECOND state and start a second driver on the
+                        // same bot - and the deferred finish would then find no state to hand over.
+                        STATES.put(bot.getId(), st);
+                        return; // the driver calls finishDeferredDisable once it has landed
+                    }
+                    settleGroundedOnDisable(st, bot);
                 }
             }
-            GCMovementDriver.stop(st);
-            MovementCommands.releaseMovementLock(bot);
+            finishDisable(st, bot);
         }
         ARRIVAL_CALLBACKS.remove(bot.getId());
+    }
+
+    /* Shared tail of .disable(): stop the driver and release the lock the old engine needs. */
+    private static void finishDisable(BotMovementState st, Character bot) {
+        GCMovementDriver.stop(st);
+        MovementCommands.releaseMovementLock(bot);
+    }
+
+    /*
+     * Driver hook: a disable() deferred by an airborne bot has now landed. Settle the stance and
+     * finish the handover, so the bot is left standing on the floor exactly as a real player would
+     * be after the drop - no forced snap, no mid-air freeze.
+     */
+    static void finishDeferredDisable(Character bot) {
+        if (bot == null) {
+            return;
+        }
+        BotMovementState st = STATES.remove(bot.getId());
+        if (st == null) {
+            return; // already taken over (re-enabled, or disabled again) - nothing to finish
+        }
+        settleGroundedOnDisable(st, bot);
+        finishDisable(st, bot);
+        ARRIVAL_CALLBACKS.remove(bot.getId());
+    }
+
+    /* Idle stance + one last frame for a bot that is standing when its session ends. */
+    private static void settleGroundedOnDisable(BotMovementState st, Character bot) {
+        BotPhysicsEngine.idleOnGround(st, bot);
+        BotMovementManager.broadcastMovement(st);
     }
 
     public static boolean isEnabled(Character bot) {

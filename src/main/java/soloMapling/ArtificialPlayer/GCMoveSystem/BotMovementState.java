@@ -144,6 +144,12 @@ class BotMovementState {
     // releases its natural fall to the floor. 0 = no pending drop. (Mirrors the recorded engine's
     // teleport-above -> load delay -> drop-down.) Set on map change, consumed by the driver.
     long portalDropAtMs = 0L;
+    // Set by GCMovement.disable() when the bot is still airborne: hand control over LATE, once the
+    // physics has finished the fall and the bot is standing. A real player keeps falling to the
+    // floor frame by frame; cutting the session mid-air is what left bots suspended in the jump
+    // pose, and forcing the landing is a teleport. The driver keeps ticking (see
+    // GCMovementDriver.tick) so the drop plays out, then settles and drops the state itself.
+    boolean disableAfterLanding = false;
     // Idle fidget: while > now, the driver renders a crouch/duck pose instead of plain standing.
     long duckUntilMs = 0L;
 
