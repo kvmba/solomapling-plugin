@@ -182,6 +182,11 @@ public class GachaBot extends BotSM {
                 break;
             case PROCESS_REWARD:
                 processReward();
+                // Linger between rounds. The FSM advances one state per macro tick (2-6s), so a round
+                // is ~7 ticks and the spray alone repeats every ~30s - a pile appearing on that beat
+                // reads as a machine, not as someone sorting their bag. One extra beat here doubles
+                // the cycle to ~60s.
+                waitForRandom(24000, 36000);
                 setGachaBotState(GachaBotState.RUN_ROULETTE); // Loop back to state 1
                 break;
             default:
