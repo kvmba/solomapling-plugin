@@ -26,19 +26,26 @@ Entries are Chinese MapleStory-style names only — no symbols or kaomoji (an ea
 `♪ ★ ♡`, `(￣▽￣)`, `^_^`; those are gone, see **Characters** below). The list is 10,000 names:
 the pool's own two shapes crossed, plus curated standalone names.
 
-- **`状态/动作` × `职业/怪物`** — `摸鱼企鹅王`, `熬夜战神`, and the reverse `企鹅王摸鱼`, `战神熬夜`.
-  States come from the vocabulary players actually use (摸鱼 摆烂 躺平 养老 挂机 搬砖 打宝 熬夜 失眠
-  回坑 带队 捡漏 …); roles are the MS classes and monsters the pool already used (企鹅王 冰龙王 大主教
-  圣骑士 恶魔猎 魔法师 弓箭手 机械师 绿水灵 木妖精 橡皮怪 战神 龙神 …) plus the meme identities
-  (摸鱼王 摆烂王 肝帝 卷王 打工人 老司机 …).
-- **`形容词` × `职业/怪物`** — `冷酷法师`, `迷糊小雪人`, `倔强狂徒` style personality front-ends.
+- **`状态/动作 的 职业/怪物`** — the habit form, five characters, which is what a domestic
+  player's IGN usually reads as: `熬夜的战神` (not `熬夜战神`), `摸鱼企鹅王` style kept where the
+  bare form is already idiomatic. `状态/动作` come from the vocabulary players actually use (摸鱼
+  摆烂 躺平 养老 挂机 搬砖 打宝 熬夜 失眠 回坑 带队 …); roles are the MS classes and monsters the
+  pool already used (企鹅王 冰龙王 大主教 圣骑士 恶魔猎 魔法师 弓箭手 机械师 绿水灵 木妖精 橡皮怪
+  战神 龙神 …) plus the meme identities (摸鱼王 摆烂王 肝帝 卷王 打工人 老司机 …).
+- **`形容词 的 职业/怪物`** — `高冷的橘猫`, `迷糊的小雪人` style personality front-ends.
+- **`职业/怪物 × 状态`** — the reverse order survives unchanged (`战神熬夜`, `企鹅王摸鱼`), since
+  the state reads as the verb there and inserting 的 would break it.
 - **独立名** — 怀旧 (`点卡时代`, `网吧通宵`, `十年老兵`), 热梗 (`芜湖起飞`, `绝绝子`, `格局打开`),
   食物 (`螺蛳粉`, `珍珠奶茶`, `杨枝甘露`), 萌宠 (`橘猫`, `柯基`, `柴犬`) and 文艺 (`深夜食堂`,
   `岁月静好`, `云淡风轻`).
 
+Object-taking verbs (求带 捡漏 代练 上分 组队 刷图 …) are deliberately **not** put in front of 的:
+`求带的主教` / `刷图的仓鼠` read wrong, so those pairings stay in their bare form or drop out.
+
 The `AFK`-prefixed family (`AFK一路向北` …) was removed: the prefix reads as a status, not as part
-of a name, and it made ~1% of the pool look like a bot farm. Width distribution lands on 8 and 10
-(CJK counts as two cells), with a thinner tail at 9/11/12; nothing exceeds 12.
+of a name, and it made ~1% of the pool look like a bot farm. 5-character names are now the bulk
+of the pool (≈6,700) with 4-character at ≈1,900; width distribution lands on 10 and 8 (CJK counts
+as two cells), with a thinner tail at 9/11/12; nothing exceeds 12.
 
 **Constraints** — `FMShopDescGen.loadAndShuffleNames()` silently drops any line longer than 12
 characters, and shop titles are laid out by display width:
