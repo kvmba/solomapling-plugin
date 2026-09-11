@@ -56,9 +56,11 @@ public final class TownPresenceSampler {
     private static final int MIN_SPACING = 30;
     private static final int X_CANDIDATES = 7; // X samples scored per ledge pick (bias toward anchors)
 
-    // How close (in Y) a ledge must sit to the lowest ledge to count as the map's floor band. Wide enough
-    // to take in the floor-level platforms a street is made of, tight enough to exclude a first floor.
-    private static final int FLOOR_BAND_TOLERANCE = 20;
+    // How close (in Y) a ledge must sit to the lowest ledge to count as the map's floor band. The
+    // floor of a town is rarely one platform: it is the sheet of street and terrace at the bottom, and
+    // its pieces sit up to a step apart (Kerning's widest floor piece is 116px and its neighbours are
+    // ~30px higher). 40 takes those in while still excluding a genuinely separate first floor.
+    private static final int FLOOR_BAND_TOLERANCE = 40;
 
     // Pick up to `count` anchor-weighted ground spots on `map`, reachable from `anchor` (the town spawn
     // portal). Returns fewer than count only if the nav graph isn't baked / there are no ledges; the
