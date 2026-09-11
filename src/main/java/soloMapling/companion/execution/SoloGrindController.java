@@ -6,7 +6,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import soloMapling.ArtificialPlayer.BotGrindSystem.GrindBrain;
 import soloMapling.ArtificialPlayer.BotGrindSystem.TrainingMap;
-import soloMapling.ArtificialPlayer.BotGrindSystem.BotPlaceNames;
 import soloMapling.ArtificialPlayer.BotGrindSystem.TrainingMapChooser;
 import soloMapling.ArtificialPlayer.BotGrindSystem.TrainingRegions;
 import soloMapling.ArtificialPlayer.GCMoveSystem.GCMovement;
@@ -291,16 +290,6 @@ public final class SoloGrindController {
                     log.info("Companion relocating cid={} from={} to={} level={}",
                             companion.getId(), companion.getMapId(), continent,
                             companion.getLevel());
-                    // stdout so it sits next to the training bots' [MIGRATE] lines — a
-                    // companion's moves are the ones hardest to attribute, since it has no
-                    // home town to compare against.
-                    System.out.println("[MIGRATE] bot=" + companion.getName()
-                            + " lv=" + companion.getLevel()
-                            + " from=" + companion.getMapId()
-                            + "(" + BotPlaceNames.name(companion.getMapId()) + ")"
-                            + " dest=" + continent
-                            + "(" + BotPlaceNames.name(continent) + ")"
-                            + " (companion)");
                     return;
                 }
             }

@@ -99,7 +99,7 @@ public final class TrainingRegions {
      * roll it, and a bot that moves twice as readily as its neighbour is not a tunable anyone
      * asked for.</p>
      */
-    public static final double OPTIONAL_MOVE_CHANCE = 0.40;
+    public static final double OPTIONAL_MOVE_CHANCE = 0.25;
 
     /**
      * A continent to move to: any other continent this bot qualifies for, picked at random.

@@ -100,10 +100,10 @@ class TrainingRegionsMigrationTest {
     }
 
     @Test
-    void theOptionalMoveChanceIsFortyPercentAndShared() {
+    void theOptionalMoveChanceIsTwentyFivePercentAndShared() {
         // Both bot kinds roll the same dice, so the figure lives in one place and neither can
         // drift into moving twice as readily as the other.
-        assertEquals(0.40, TrainingRegions.OPTIONAL_MOVE_CHANCE, 0.0);
+        assertEquals(0.25, TrainingRegions.OPTIONAL_MOVE_CHANCE, 0.0);
         assertTrue(TrainingRegions.OPTIONAL_MOVE_CHANCE > 0.0
                 && TrainingRegions.OPTIONAL_MOVE_CHANCE < 1.0,
                 "must be a real chance, not always or never");
