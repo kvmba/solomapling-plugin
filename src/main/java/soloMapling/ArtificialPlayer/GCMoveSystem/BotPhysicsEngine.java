@@ -274,6 +274,14 @@ final class BotPhysicsEngine {
         return area != null && area.height > 0 ? area.y + area.height + 600 : Integer.MAX_VALUE;
     }
 
+    /* Lowest Y a swimming bot may sink to: the map's VR bottom, i.e. the client's own map boundary.
+     * Integer.MAX_VALUE when the map has no usable VR bounds, so nothing changes for those maps
+     * (the driver's fall-off-map recovery still backstops them). See applySwimMotion. */
+    private static int swimFloorY(MapleMap map) {
+        java.awt.Rectangle area = map == null ? null : map.getMapArea();
+        return area != null && area.height > 0 ? area.y + area.height : Integer.MAX_VALUE;
+    }
+
     static float jumpForcePerTick() {
         return cfg.JUMP_SPEED_PXS * tickS();
     }
@@ -1337,6 +1345,28 @@ final class BotPhysicsEngine {
 
         double nextX = entry.physX + vx * t;
         double nextY = entry.physY + vy * t;
+
+        // Water floor, the v83 client's own map boundary: a swimming character is clamped at the
+        // VR bottom instead of sinking through it, which is why real players never leave the map
+        // even where the water column has no foothold beneath it (the seabed is layered — a
+        // mid-map column's deepest platform often sits hundreds of px above the VR bottom). Our
+        // swim integrator has no such clamp, so a bot that ends up under a platform (e.g. the
+        // swim-map down-jump that drops "into open water") sinks at its terminal rate until
+        // GCMovementDriver's fall-off-map recovery catches it — far below the visible map, still
+        // broadcasting the SWIM stance the whole way down.
+        //
+        // Mirrors the client: clamp the descent at the VR bottom and hold there (vy zeroed), so the
+        // bot treads water at the boundary like a player does. Only the downward component is
+        // clamped — jump bursts still arc up freely. mapFloorY's 600px slack is deliberately NOT
+        // reused here: it is sized for the fall *simulations*, which must keep going past the
+        // boundary to find the map's real floor.
+        double waterFloorY = swimFloorY(map);
+        if (nextY > waterFloorY) {
+            nextY = waterFloorY;
+            if (vy > 0.0) {
+                vy = 0.0;
+            }
+        }
 
         // Use the same sweep-based collision resolution as airborne physics:
         // resolveAirCollision handles wall segments and scans every pixel along
