@@ -146,7 +146,28 @@ public class PathFinder {
         MapGraph gr = new MapGraph(mapId);
         List<String> mainAreas = gr.getMainAreaOfPoint(startPoint);
         List<String> endAreas = gr.getMainAreaOfPoint(endPoint);
-//        List<String> connectors = gr.getConnectorOfPoint(endPoint); //  gr.getMainAreaOfPoint(endPoint)
+
+        // An endpoint that is not on the recorded mesh used to reach the graph as
+        // null and Dijkstra threw "Graph must contain the source vertex!", which
+        // killed the caller's tick on every retry (the OPQ portal-placement freeze).
+        // Fall back to the nearest recorded ground point; if even that misses, return
+        // no route instead of throwing so the caller can handle the miss.
+        if (mainAreas.isEmpty()) {
+            Point snapped = snapToGround(mapId, startPoint);
+            if (snapped != null) {
+                mainAreas = gr.getMainAreaOfPoint(snapped);
+            }
+        }
+        if (endAreas.isEmpty()) {
+            Point snapped = snapToGround(mapId, endPoint);
+            if (snapped != null) {
+                endAreas = gr.getMainAreaOfPoint(snapped);
+            }
+        }
+        if (mainAreas.isEmpty() || endAreas.isEmpty()) {
+            debugprint("createPath: no recorded area for start=" + startPoint + " end=" + endPoint);
+            return java.util.Collections.emptyList();
+        }
 
         String mainArear = SoloMaplingUtilities.getRandomElement(mainAreas);
         String endArea = SoloMaplingUtilities.getRandomElement(endAreas);

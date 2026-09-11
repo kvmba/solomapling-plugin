@@ -8,6 +8,7 @@ import soloMapling.ArtificialPlayer.BotHelpers;
 import soloMapling.ArtificialPlayer.BotMovementSystem.MovementStructures.MovementPacket;
 import soloMapling.ArtificialPlayer.BotMovementSystem.MovementStructures.SingleMoveCommand;
 import soloMapling.ArtificialPlayer.BotMovementSystem.MovementStructures.MovementRecording;
+import soloMapling.ArtificialPlayer.BotMovementSystem.NavigationSystem.MapGraph;
 import soloMapling.ArtificialPlayer.BotMovementSystem.NavigationSystem.NavigationElement;
 import soloMapling.ArtificialPlayer.BotMovementSystem.NavigationSystem.PathFinder;
 import soloMapling.ArtificialPlayer.GCMoveSystem.LodCounts;
@@ -342,8 +343,45 @@ public class MovementCommands {
         }
     }
 
+    // ── Recorded-navigation ground alignment ───────────────────────────────
+    // The recorded pathfinder can only route between points that appear in a map's
+    // MovementDataPackets. A bot can still start outside every recorded area: a
+    // clientless portal placement keeps the portal's (airborne) coordinates because
+    // nothing applies client gravity, and a host/GM map change does the same.
+    // createPath then gets a null start area — the SHORTEST branch throws
+    // "Graph must contain the source vertex!" on every tick and the RANDOM branch
+    // returns an empty chain — so the FSM retries forever and the bot never moves.
+    // Land it on the nearest recorded ground point before planning.
+    private static final int GROUND_ALIGN_Y_TOLERANCE = 1000;
+
+    private static void alignToRecordedGround(Character fakechar, int mapId) {
+        try {
+            Point pos = fakechar.getPosition();
+            if (pos == null) {
+                return;
+            }
+            if (!new MapGraph(mapId).getMainAreaOfPoint(pos).isEmpty()) {
+                return; // already on the recorded mesh
+            }
+            Point ground = PathFinder.snapToGround(mapId, pos); // tight: same floor first
+            if (ground == null) {
+                ground = PathFinder.snapToGround(mapId, pos, GROUND_ALIGN_Y_TOLERANCE);
+            }
+            if (ground == null || ground.equals(pos)) {
+                return;
+            }
+            fakechar.setPosition(new Point(ground));
+            // Broadcast the correction at the idle stance so the bot settles on the
+            // floor instead of standing on nothing at the old coordinates.
+            BotIdleStandingUpdateForced(fakechar);
+        } catch (Exception ignored) {
+            // best effort: alignment must never break the movement call
+        }
+    }
+
     private static void pathFinderBetaUnlocked(Character fakechar, Point endPt) {
         int mapId = fakechar.getMapId();
+        alignToRecordedGround(fakechar, mapId);
         Point start = fakechar.getPosition();
         PathFinder pf = new PathFinder(fakechar, endPt);
         List<String> path = createPath(mapId, start, endPt, PathFinder.PathType.RANDOM);
@@ -374,6 +412,7 @@ public class MovementCommands {
         if (!tryAcquireMovementLock(fakechar)) return;
         try {
             int mapId = fakechar.getMapId();
+            alignToRecordedGround(fakechar, mapId);
             Point start = fakechar.getPosition();
             PathFinder pf = new PathFinder(fakechar, endPt);
             List<String> path = createPath(mapId, start, endPt, PathFinder.PathType.RANDOM);
@@ -393,6 +432,7 @@ public class MovementCommands {
         if (!tryAcquireMovementLock(fakechar)) return null;
         try {
             int mapId = fakechar.getMapId();
+            alignToRecordedGround(fakechar, mapId);
             Point start = fakechar.getPosition();
 
             PathFinder.AerialPathResult result = PathFinder.coordPathBuilderAerial(fakechar, aerialPt);
