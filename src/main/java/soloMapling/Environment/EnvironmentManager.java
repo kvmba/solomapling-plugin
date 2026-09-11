@@ -456,7 +456,7 @@ public class EnvironmentManager {
             return 0;
         }
         return spawnTownCohort(mapId, scaledAmbient(town.gacha()), town.levelLo(), town.levelHi(),
-                BotTypeManager.BotType.GACHA_BOT);
+                BotTypeManager.BotType.GACHA_BOT, true);
     }
 
     // Spawn n stationed ambient SocialBots on a map at anchor-weighted ground spots (near NPCs/shops, on
@@ -474,13 +474,20 @@ public class EnvironmentManager {
     // Shared town-cohort spawn: place n bots at anchor-weighted ground spots on the map (mirrors
     // spawnScatteredTrainingBots but with the weighted sampler), typed as `type`.
     private static int spawnTownCohort(int mapId, int n, int loLevel, int hiLevel, BotTypeManager.BotType type) {
+        return spawnTownCohort(mapId, n, loLevel, hiLevel, type, false);
+    }
+
+    // As above; `floorOnly` confines the cohort to the map's lowest ground band.
+    private static int spawnTownCohort(int mapId, int n, int loLevel, int hiLevel, BotTypeManager.BotType type,
+                                       boolean floorOnly) {
         MapleMap map = getMapleMapById(mapId);
         if (map == null || map.getPortal(0) == null) {
             debugprint(fmt("TownPresence: no map / spawn portal for {}", mapId));
             return 0;
         }
         Point anchor = map.getPortal(0).getPosition();
-        List<Point> spots = TownPresenceSampler.sample(map, anchor, n, TownPresenceConfig.overridesFor(mapId));
+        List<Point> spots = TownPresenceSampler.sample(map, anchor, n,
+                TownPresenceConfig.overridesFor(mapId), floorOnly);
         List<Integer> ids = new ArrayList<>();
         for (int i = 0; i < n; i++) {
             Point spawnAt = i < spots.size() ? spots.get(i) : anchor;

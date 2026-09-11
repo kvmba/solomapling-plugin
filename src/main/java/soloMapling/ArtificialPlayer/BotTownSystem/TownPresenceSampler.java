@@ -56,6 +56,10 @@ public final class TownPresenceSampler {
     private static final int MIN_SPACING = 30;
     private static final int X_CANDIDATES = 7; // X samples scored per ledge pick (bias toward anchors)
 
+    // How close (in Y) a ledge must sit to the lowest ledge to count as the map's floor band. Wide enough
+    // to take in the floor-level platforms a street is made of, tight enough to exclude a first floor.
+    private static final int FLOOR_BAND_TOLERANCE = 20;
+
     // Pick up to `count` anchor-weighted ground spots on `map`, reachable from `anchor` (the town spawn
     // portal). Returns fewer than count only if the nav graph isn't baked / there are no ledges; the
     // caller falls back to the anchor for any shortfall (same contract as BotSpotPicker).
@@ -67,6 +71,15 @@ public final class TownPresenceSampler {
     // never placed in, and boost zones pull more of the crowd. Overrides compose with the algorithm - the
     // weighted distribution is still the floor everywhere the owner hasn't hand-touched.
     public static List<Point> sample(MapleMap map, Point anchor, int count, TownOverrides overrides) {
+        return sample(map, anchor, count, overrides, false);
+    }
+
+    // As sample(), but with `floorOnly` the crowd is confined to the map's lowest ground band. Used by
+    // GachaBot: it sprays a pile of items at its feet, and an item dropped on an upper platform lands on
+    // the floor below (calcDropPos drops from y-85 to the first foothold under it), where the bot can't
+    // reach it - so it would pile up unclaimed. Standing on the floor keeps the whole spray retrievable.
+    public static List<Point> sample(MapleMap map, Point anchor, int count, TownOverrides overrides,
+                                     boolean floorOnly) {
         List<Point> out = new ArrayList<>();
         if (map == null || anchor == null || count <= 0) {
             return out;
@@ -89,6 +102,9 @@ public final class TownPresenceSampler {
         List<GCMovement.Ledge> ledges = reachableLedges(map, anchor);
         if (ledges.isEmpty()) {
             return out;
+        }
+        if (floorOnly) {
+            ledges = floorBand(ledges);
         }
         List<Anchor> anchors = collectAnchors(map);
         double groundBandY = groundBandY(ledges);
@@ -166,6 +182,24 @@ public final class TownPresenceSampler {
             }
         }
         return band == Integer.MIN_VALUE ? ledges.get(0).centerY() : band;
+    }
+
+    // Just the ledges in the map's lowest band: anything whose centreY sits within FLOOR_BAND_TOLERANCE
+    // of the lowest ledge on the map (Y grows downward, so the largest Y is the floor). Used to keep a
+    // crowd off the platforms above the floor. Falls back to the single lowest ledge when the band is
+    // empty - there is always at least the one ledge the floor was read from.
+    private static List<GCMovement.Ledge> floorBand(List<GCMovement.Ledge> ledges) {
+        int floor = Integer.MIN_VALUE;
+        for (GCMovement.Ledge l : ledges) {
+            floor = Math.max(floor, l.centerY());
+        }
+        List<GCMovement.Ledge> out = new ArrayList<>();
+        for (GCMovement.Ledge l : ledges) {
+            if (floor - l.centerY() <= FLOOR_BAND_TOLERANCE) {
+                out.add(l);
+            }
+        }
+        return out.isEmpty() ? List.of(ledges.get(0)) : out;
     }
 
     // Per-ledge weight = span * shape-profile * (floor + anchor pull), then curation overrides: a ledge
