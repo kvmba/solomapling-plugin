@@ -5,7 +5,6 @@ import org.gms.net.server.Server;
 import org.gms.scripting.event.EventManager;
 import org.gms.server.maps.MapleMap;
 import org.gms.server.maps.Portal;
-import soloMapling.ArtificialPlayer.BotGrindSystem.BotPlaceNames;
 import soloMapling.ArtificialPlayer.BotTravelSystem.BotScriptedWarp;
 import soloMapling.ArtificialPlayer.BotWanderSystem.BotWanderSystem;
 import soloMapling.ArtificialPlayer.BotHealthSystem.BotDeath;
@@ -122,7 +121,6 @@ final class GCTravel {
         boolean waitingForTransit;
         boolean shoutedAtAttack;  // one shout per crossing, not one per poll
         boolean sheltering;      // took cover below during an attack — stay there until it clears
-        boolean loggedBoardingWait; // one [BOARD] line per wait, not one per 300ms poll
         Boolean sightseer;       // null undecided; true = watches from the rail, false = strolls
         Boolean railSide;        // null undecided; true = the left rail, false = the right
 
@@ -365,23 +363,6 @@ final class GCTravel {
         // bot in an empty lounge until the next sailing. Wait at the counter for the door.
         GCTaxi.VehicleEdge onward = GCTaxi.vehicleFrom(taxi.toMapId());
         if (onward != null && !boardingOpen(bot, onward.eventName())) {
-            // Diagnostic: a bot held at a counter looks identical whether it is waiting for
-            // the next sailing or has read a gate that will never open, and the whole cycle
-            // is a quarter of an hour, so "is it stuck?" is not answerable by watching. The
-            // property is printed raw — null means the event never set it, which is the case
-            // that would hold the bot here for good.
-            if (!trip.loggedBoardingWait) {
-                trip.loggedBoardingWait = true;
-                System.out.println("[BOARD] bot=" + bot.getName()
-                        + " waiting at " + bot.getMapId()
-                        + "(" + BotPlaceNames.name(bot.getMapId()) + ")"
-                        + " for " + onward.eventName()
-                        + " -> lounge " + taxi.toMapId()
-                        + "(" + BotPlaceNames.name(taxi.toMapId()) + ")"
-                        + " -> " + onward.toMapId()
-                        + "(" + BotPlaceNames.name(onward.toMapId()) + ")"
-                        + " entry=" + boardingEntry(bot, onward.eventName()));
-            }
             trip.waitingForTransit = true; // stillness by design — see the transit ceiling
             return;
         }
