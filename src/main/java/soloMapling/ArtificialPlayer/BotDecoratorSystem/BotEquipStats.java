@@ -15,9 +15,10 @@ import java.util.Map;
  * {@code PacketCreator.addCharEquips -> ItemInformationProvider.canWearEquipment(chr, equips)},
  * which drops any equip whose {@code reqLevel / reqSTR / reqDEX / reqINT / reqLUK / reqPOP}
  * exceeds the character's own stats. Bots are dressed with level- and job-coherent gear
- * (a level-60 thief's coat can demand 90 DEX + 140 LUK), but {@code BotDecorate.setBotVariables}
+ * (a Lv50 thief's coat demands 90 DEX + 140 LUK), but {@code BotDecorate.setBotVariables}
  * only ever set the bot's level/job/gender - never its STR/DEX/INT/LUK or fame. So the bot's
- * raw stats stay at the template character's beginner values (4/4/4/4) and the host silently
+ * raw stats stay at the template character's beginner values (12/5/4/4 on the host's default
+ * starter-AP config) and the host silently
  * omits the gear from the look packet: the items sit in slots -5/-6 (so
  * {@code BotEquipChecker} reads them as "dressed") while the client renders the bot bare.
  *
