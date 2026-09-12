@@ -197,7 +197,10 @@ public class TrainingBot extends BotSM implements GrindTickRegistry.Participant 
         // would keep swinging from the floor. Hand the grind back once (dropping the spot claim
         // and the map's occupancy slot) and step out of GRIND: the macro tick is suspended by
         // the death anyway, and resuming a released brain would fight over its spot claim.
-        if (death().isDead()) {
+        // adoptIfZeroHp() also catches a bot the host drained to zero directly (a map's decHP
+        // field), whose episode has not started yet — this sweep sees it every 250ms, well
+        // before the macro tick that would otherwise be the first to notice.
+        if (death().adoptIfZeroHp() || death().isDead()) {
             if (phase == Phase.GRIND) {
                 leaveGrind();
                 enterPhase(Phase.DECIDE); // re-picks a map when the bot is on its feet again

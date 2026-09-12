@@ -121,13 +121,17 @@ public final class BotMapEntryResponder implements EventSubscriber {
         }
     }
 
-    // Direction B. A bot just entered a map a real player is already on; wake its macro brain. Safe to
-    // call from the movement tick thread (nudgeSoon only reschedules, never runs the FSM).
+    // Direction B. A bot just entered a map a real player is already on; wake its macro brain. Called
+    // from the movement driver while it holds the bot's movement monitor, so the nudge is dispatched
+    // instead of inlined: nudgeSoon takes the macro monitor, and taking it from under the movement
+    // monitor would close an AB-BA cycle with the stop path (stopScheduledTask holds the macro monitor
+    // and waits for the movement monitor via GCMovement.disable). Off the driver, no order to invert.
     public static void onBotArrivedObserved(Character bot) {
+        if (bot == null) {
+            return;
+        }
         try {
-            if (bot != null) {
-                INSTANCE.nudge(bot);
-            }
+            ExecutorServiceManager.runAsync(() -> INSTANCE.nudge(bot));
         } catch (Throwable ignored) {
         }
     }

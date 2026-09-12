@@ -10,6 +10,7 @@ import soloMapling.ArtificialPlayer.BotGrindSystem.MapMobIndex;
 import soloMapling.ArtificialPlayer.BotSM;
 import soloMapling.ArtificialPlayer.GCMoveSystem.GCMovement;
 import soloMapling.companion.CompanionRoster;
+import soloMapling.server.ExecutorServiceManager;
 
 import java.util.concurrent.ThreadLocalRandom;
 
@@ -82,8 +83,13 @@ public final class BotDeath {
      * <p>Stopping the movement is done here rather than left to {@code GCMovementDriver}
      * because a driver only exists for a bot that has movement enabled, and the driver's job is
      * to move — not to notice it should not.
+     *
+     * <p>Synchronized together with {@link #adoptIfZeroHp()}: both arm the episode, and the
+     * driver thread (contact kill) can now meet a macro/grind thread (zero-HP adoption) in the
+     * same window. The monitor keeps "only one markDown per episode" a property instead of a
+     * hope; the overlap only ever meant a restarted lie-down.
      */
-    public void kill() {
+    public synchronized void kill() {
         Character chr = this.chr;
         if (chr == null || !BotHelpers.isBot(chr)) {
             return; // only artificial characters have this lifecycle
@@ -120,12 +126,13 @@ public final class BotDeath {
      * restore it.
      *
      * <p>Callers poll this from paths that already run for every bot (the movement driver's
-     * zero-HP hold, the macro tick's gate); it arms the ordinary episode once, on the
-     * transition into zero HP, and the existing lie-down / carry-home logic does the rest.
+     * zero-HP hold, the macro tick's gate, the grinder's 250ms combat sweep); it arms the
+     * ordinary episode once, on the transition into zero HP, and the existing lie-down /
+     * carry-home logic does the rest.
      *
      * @return true when this call adopted the bot — it is down from here on
      */
-    public boolean adoptIfZeroHp() {
+    public synchronized boolean adoptIfZeroHp() {
         if (down || !zeroedTemplateBot()) {
             return false;
         }
@@ -135,11 +142,18 @@ public final class BotDeath {
         // The episode is driven by the macro tick, and an unobserved grinder's next one may be
         // 4-8 minutes away — that whole stretch would be added to every death. Pull it forward
         // instead; the wheel re-paces to the corpse's own clock on that tick.
-        BotSM owner = soloMapling.ArtificialPlayer.BotMessagingSystem.CharacterStorage
-                .getBotById(chr.getId());
-        if (owner != null) {
-            owner.nudgeSoon(250L);
-        }
+        //
+        // Dispatched, never inlined: the movement-driver caller reaches this while holding the
+        // bot's movement monitor, and taking the macro monitor from there would close an AB-BA
+        // cycle with the stop path (stopScheduledTask holds the macro monitor and waits for the
+        // movement monitor via GCMovement.disable). Off the driver there is no order to invert.
+        ExecutorServiceManager.runAsync(() -> {
+            BotSM owner = soloMapling.ArtificialPlayer.BotMessagingSystem.CharacterStorage
+                    .getBotById(chr.getId());
+            if (owner != null) {
+                owner.nudgeSoon(250L);
+            }
+        });
         return true;
     }
 

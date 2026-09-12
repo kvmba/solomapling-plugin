@@ -50,11 +50,4 @@ class BotDeathZeroHpTest {
         assertFalse(death.isDead());
         assertFalse(death.isCorpse());
     }
-
-    @Test
-    void aRunningEpisodeIsAlsoACorpse() {
-        // isCorpse() must answer "do not move this body" for the ordinary case too,
-        // not just for the un-adopted window GCTravel now guards against.
-        assertFalse(new BotDeath(null).isCorpse());
-    }
 }

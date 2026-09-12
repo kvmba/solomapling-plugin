@@ -232,11 +232,19 @@ El Nath 寒冰区 10、Orbis 塔 B2）由宿主 `Character.doHurtHp()` → `addH
 
 | 位置 | 作用 |
 |---|---|
-| `BotDeath.adoptIfZeroHp()` | `hp<=0 && !down && 模板bot && 非伴生 && 有地图` → 直接 `markDown()` 进入既有死亡流程，并 `nudgeSoon` 唤醒宏 tick（未观察 grinder 否则等 4–8 分钟） |
+| `BotDeath.adoptIfZeroHp()` | `hp<=0 && !down && 模板bot && 非伴生 && 有地图` → 直接 `markDown()` 进入既有死亡流程；`synchronized` 保证恰好认领一次；`nudgeSoon` **异步派发**（见下）唤醒宏 tick |
 | `GCMovementDriver` 0 血分支 | 每 50ms/1s 跑一次的最快认领点（覆盖所有启用移动的 bot） |
 | `BotSM.tickRunnable` 门之前 | 兜底（覆盖无 movement 的 bot），保证本 tick 就按死亡处理 |
+| `TrainingBot.grindTick` | 共享 250ms 战斗 ticker 不经 BotSM 门；不认领的话 grinder 最长 8 分钟后才被发现 |
 | `BotDeath.abandon()` | 由 `isDead()` 改为 `isCorpse()`，转换类型时也不会把 0 血未认领的 bot 交出去 |
 | `GCTravel.isDead()` | 由 `isDead()` 改为 `isCorpse()`，未认领窗口内也不会把尸体传送走 |
+
+**锁序**：movement driver tick 持有 movement 监视器（`synchronized(entry)`），而停止路径持
+macro 监视器（`stopScheduledTask`）再取 movement 监视器（`GCMovement.disable` →
+`GCMovementDriver.stop`）。因此 driver 侧对 macro 侧的调用（`adoptIfZeroHp` 的 nudge、
+`onMapChange` 的 `onBotArrivedObserved`）必须异步派发，否则构成 AB-BA 死锁。
+`kill()` 与 `adoptIfZeroHp()` 共用 BotDeath 监视器：两条 arm 路径现在可能来自不同线程
+（driver 的接触伤害 vs 宏/战斗线程的认领），加锁保证每轮死亡只 arm 一次。
 
 伴生（companion）不认领：它们是真实角色、有自己的生存循环与宿主复活路径（与 `kill()` 一致）。
 
