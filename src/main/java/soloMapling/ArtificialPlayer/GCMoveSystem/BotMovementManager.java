@@ -476,8 +476,46 @@ class BotMovementManager {
             return;
         }
 
+        // Stranded: nothing to land on at this column, at the bot's depth or below. A bot gets here
+        // by drifting off a platform's edge — or under one; the seabed is layered and landings only
+        // ever look downward (findBelowIndexed requires foothold.y >= the probe). With no ground
+        // below, the swim integrator just sinks: UP-hold still descends at SWIM_UP_MAX_SINK_PXS and
+        // the only lift, the jump burst, is aimed at a target above. Players swim back to a platform
+        // here; mirror that. Two cases:
+        //   - some column in reach still has ground at/below us: steer back into it and hold UP —
+        //     the ordinary descent lands us once inside (never burst here: the hop would carry the
+        //     bot up past its target and, worse, out the top of the map once it is under no column
+        //     with ground at all).
+        //   - no such column (we are below every foothold in reach): burst upward on the jump
+        //     cadence until one exists again. The ascent is self-terminating — the higher the bot,
+        //     the more columns qualify.
+        // The test is deliberately the EXACT column probe, not findGroundPoint: that one also looks
+        // MAX_SLOPE_UP above the bot and would call this "supported" while the bot is still a few px
+        // UNDER a platform it cannot land on, so the rescue would end short and the bot drift away.
+        Point strandedPos = entry.bot.getPosition();
+        if (!hasLandingGround(entry, strandedPos)) {
+            entry.swimVerticalHold = -1;
+            int rescueX = rescueColumnX(entry);
+            if (rescueX != Integer.MIN_VALUE) {
+                int rescueDx = rescueX - strandedPos.x;
+                if (rescueDx > BotPhysicsEngine.cfg.SWIM_ARRIVAL_RADIUS_PX) {
+                    entry.swimMoveDir = 1;
+                } else if (rescueDx < -BotPhysicsEngine.cfg.SWIM_ARRIVAL_RADIUS_PX) {
+                    entry.swimMoveDir = -1;
+                }
+            } else {
+                long nowStranded = System.currentTimeMillis();
+                if (nowStranded >= entry.swimNextJumpAtMs) {
+                    entry.swimJumpRequested = true;
+                    entry.swimNextJumpAtMs = nowStranded + BotPhysicsEngine.cfg.SWIM_JUMP_COOLDOWN_MS;
+                }
+            }
+            return;
+        }
+
         if (targetPos == null) {
-            // Idle in water — hold UP so the bot doesn't sink endlessly.
+            // Idle in water — hold UP so the bot doesn't sink endlessly (UP terminal is still a slow
+            // sink; the stranded rescue above is what actually keeps it off the map floor).
             entry.swimVerticalHold = -1;
             return;
         }
@@ -527,6 +565,40 @@ class BotMovementManager {
             entry.swimVerticalHold = prevVerticalHold > 0 ? 1 : 0;
         }
     }
+
+    /*
+     * True when the bot has ground it could actually land on at (x,y): a foothold at that exact
+     * point or below it. The landing sweep probes from previousPos.y+1 downward, so ground strictly
+     * above the bot is not landable — see the stranded-swim rescue in computeSwimIntents.
+     */
+    private static boolean hasLandingGround(BotMovementState entry, Point pos) {
+        return BotPhysicsEngine.pointBelowIndexed(entry.bot.getMap(), pos) != null;
+    }
+
+    /*
+     * Nearest x that still has ground at or below the bot's current depth, for the stranded-swim
+     * rescue above. Probes outward in coarse steps, checking both sides and keeping the smaller
+     * offset: the goal is to re-enter a column the bot can actually land in, not to path precisely.
+     * Integer.MIN_VALUE when nothing within range — the caller then just treads water and bursts.
+     */
+    private static int rescueColumnX(BotMovementState entry) {
+        Point pos = entry.bot.getPosition();
+        for (int offset = RESCUE_PROBE_STEP_PX; offset <= RESCUE_PROBE_MAX_PX; offset += RESCUE_PROBE_STEP_PX) {
+            if (hasLandingGround(entry, new Point(pos.x - offset, pos.y))) {
+                return pos.x - offset;
+            }
+            if (hasLandingGround(entry, new Point(pos.x + offset, pos.y))) {
+                return pos.x + offset;
+            }
+        }
+        return Integer.MIN_VALUE;
+    }
+
+    // Stranded-swim rescue probe: how far to look (and in what steps) for a column with ground
+    // under the bot. One screen of reach covers every Aqua Road ledge edge; the step is a
+    // compromise between resolution and cost (this only runs while a bot is actually stranded).
+    private static final int RESCUE_PROBE_STEP_PX = 32;
+    private static final int RESCUE_PROBE_MAX_PX = 256;
 
     static void tickGrounded(BotMovementState entry, Point targetPos) {
         long startedAt = System.nanoTime();

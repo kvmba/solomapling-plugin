@@ -241,9 +241,9 @@ final class GCMovementDriver {
         // above stepMovementCore, so returning here would skip the very physics (tickAirborne) that
         // lands the bot - and the stuck-fall watchdog lives down there too, so it would never run
         // either. The bot would hang in the jump pose forever, which is exactly the freeze this
-        // hand-over exists to prevent. Only the LANDED case acts.
+        // hand-over exists to prevent. Only the LANDED case acts here; the flag is cleared inside
+        // the hand-over itself, so a racing disable() cannot lose it between the two.
         if (entry.disableAfterLanding && !entry.inAir && !entry.climbing) {
-            entry.disableAfterLanding = false;
             GCMovement.finishDeferredDisable(entry.bot);
             return;
         }
