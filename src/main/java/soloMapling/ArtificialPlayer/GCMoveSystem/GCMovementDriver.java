@@ -626,7 +626,14 @@ final class GCMovementDriver {
     private static final int PORTAL_FLOAT_HEIGHT_PX = 60;
 
     static void onMapChange(BotMovementState entry, Character bot) {
-        entry.lastMapId = bot.getMapId();
+        // Read the target map id ONCE here and publish it to entry.lastMapId only at the very end
+        // (below). Keeping lastMapId trailing the live map for the whole handler lets
+        // GCMovement.disable() - which may run concurrently off the travel/FSM threads - tell that a
+        // map change is still being processed and defer its hand-over instead of stopping the driver
+        // mid-arrival. Reading once up front (rather than at the end) preserves the old entry-time
+        // semantics: should the bot warp AGAIN mid-handler, the end assignment cannot bless the new
+        // map as already-processed.
+        final int mapId = bot.getMapId();
         // New map: drop any in-progress reaction pause. The per-player react cooldown is intentionally
         // NOT reset here - it's tied to the player so map-hopping can't re-trigger greetings at them.
         entry.reactingUntilMs = 0L;
@@ -656,10 +663,15 @@ final class GCMovementDriver {
             // Lift to at least PORTAL_FLOAT_HEIGHT_PX above the floor (keep a higher natural portal),
             // so the bot floats at/above the portal a beat, then drops — every time, not just for
             // portals that happen to sit high.
-            int floatY = Math.min(spawn.y, ground.y - PORTAL_FLOAT_HEIGHT_PX);
-            BotPhysicsEngine.teleportTo(entry, bot, new Point(spawn.x, floatY));
+            // Arm the pending drop BEFORE teleportTo: teleportTo -> clearMovementState leaves inAir
+            // FALSE, so between the two writes there is otherwise a window with neither flag set.
+            // GCMovement.disable() landing in that window used to settle+stop the driver with the
+            // drop never armed - the jump-pose freeze. Arming first makes the window always visible
+            // as "pending drop" instead.
             entry.portalDropAtMs = System.currentTimeMillis() + PORTAL_DROP_DELAY_MS
                     + ThreadLocalRandom.current().nextInt(PORTAL_DROP_DELAY_JITTER_MS + 1);
+            int floatY = Math.min(spawn.y, ground.y - PORTAL_FLOAT_HEIGHT_PX);
+            BotPhysicsEngine.teleportTo(entry, bot, new Point(spawn.x, floatY));
         } else {
             // Unobserved (or no floor below): just stand where we landed — no float.
             BotPhysicsEngine.teleportTo(entry, bot, ground != null ? ground : spawn);
@@ -667,6 +679,10 @@ final class GCMovementDriver {
         }
         BotNavigationGraphProvider.warmGraphAsync(map, entry.movementProfile);
         broadcastIfObserved(entry);
+        // Now the arrival is fully armed: publish the captured map id. Any disable() blocked on the
+        // trailing lastMapId has already deferred (or saw a live drop/airborne flag), so this cannot
+        // re-open the window. Uses the id read on entry, not a fresh read, to match the old behaviour.
+        entry.lastMapId = mapId;
     }
 
     /*

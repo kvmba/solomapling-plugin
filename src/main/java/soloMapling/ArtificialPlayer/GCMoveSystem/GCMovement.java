@@ -101,8 +101,12 @@ public final class GCMovement {
             // suspended but not "airborne" yet. Without it here the whole branch is skipped and
             // finishDisable stops the driver on a bot hanging at the float point with the drop
             // never released - the jump-pose freeze, with nothing left to tick it down.
+            // lastMapId counts too: it trails the bot's live map until onMapChange returns (see the
+            // assignment at the end of that handler), so it flags a map change the driver has not
+            // finished processing - the window in which the arrival is neither airborne nor yet
+            // armed with a drop.
             if (st.moveDir != 0 || st.groundBrakeDir != 0 || st.inAir || st.climbing
-                    || st.portalDropAtMs > 0L) {
+                    || st.portalDropAtMs > 0L || st.lastMapId != st.bot.getMapId()) {
                 // Mid-air: hand the bot over LATE instead of settling it here. A real player keeps
                 // falling to the floor frame by frame; forcing the landing was a visible teleport,
                 // and cutting the session mid-air was what froze bots in the jump pose. So keep the
@@ -116,7 +120,7 @@ public final class GCMovement {
                 // the rope coords plus the ROPE stance are what it is really doing. Whoever takes
                 // over re-enables GC control, and enable() resolves the position from there.
                 if (!st.climbing) {
-                    if (st.inAir || st.portalDropAtMs > 0L) {
+                    if (st.inAir || st.portalDropAtMs > 0L || st.lastMapId != st.bot.getMapId()) {
                         st.disableAfterLanding = true;
                         // Put the state BACK: the driver keeps ticking it until it lands, and it
                         // must stay the live entry for that. Leaving it removed would make
@@ -126,6 +130,13 @@ public final class GCMovement {
                         // Idempotent: disable() called twice while the fall is still in flight
                         // (a teardown racing the stroll-return callback) just re-states the same
                         // intent - the driver still owns landing it and finishing the handover.
+                        //
+                        // lastMapId != bot.getMapId() is the race this branch used to lose: a
+                        // disable() landing between the warp and the driver's onMapChange saw
+                        // neither inAir nor a pending drop, took the settle+stop path, and stopped
+                        // the driver before it could run the arrival at all - leaving the bot
+                        // parked at the portal with nothing left to drop it. Deferring instead
+                        // lets onMapChange play the entry (float -> drop) and hand over on landing.
                         STATES.put(bot.getId(), st);
                         return; // the driver calls finishDeferredDisable once it has landed
                     }
