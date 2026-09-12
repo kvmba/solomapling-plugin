@@ -105,6 +105,9 @@ public class BotDecorationQueue {
 
             // Run the full expensive decoration (WZ lookups, job-specific gear, etc.)
             BotDecorateEquips.decorateBotEquips(bot);
+            // Deferred decoration swaps gear on an already-spawned bot; realign the raw stats
+            // so the replacement pieces still pass the host's canWearEquipment look filter.
+            BotEquipStats.alignToEquipped(bot);
         } catch (Exception e) {
             System.err.println("[BotDecorationQueue] Error decorating bot " + botId + ": " + e.getMessage());
         }

@@ -337,6 +337,9 @@ public class BotDecorate {
         // any NX pieces.
         BotDecorateNX.apply(bot);
         BotFame.apply(bot);
+        // Last: make the bot's raw stats cover everything it now wears, or the host's
+        // canWearEquipment filter omits gear from the look packet and the bot renders bare.
+        BotEquipStats.alignToEquipped(bot);
     }
 
     public static void setBotVariables(Character bot, int baseClass, int minLevel, int maxLevel) {
@@ -364,6 +367,7 @@ public class BotDecorate {
         if (BeginnerEquip.isBeginner(bot)) {
             BeginnerEquip.apply(bot);
             BotFame.apply(bot);
+            BotEquipStats.alignToEquipped(bot);
             return;
         }
 
@@ -378,6 +382,9 @@ public class BotDecorate {
 
         BotDecorateNX.apply(bot);
         BotFame.apply(bot);
+        // See the random path above: align raw stats to the worn gear so the host's
+        // canWearEquipment filter keeps every piece in the look packet.
+        BotEquipStats.alignToEquipped(bot);
     }
 
     private static boolean hasClothing(Character bot) {

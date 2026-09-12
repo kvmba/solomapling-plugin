@@ -60,6 +60,10 @@ public class BotEquipChecker {
                     runAsync(() -> {
                         try {
                             BotDecorateEquips.equipTopBottom(chr);
+                            // The repair equips a top/bottom that may out-demand this bot's raw
+                            // stats; align them or the host's canWearEquipment filter hides the
+                            // piece and the bot stays visually bare despite the filled slot.
+                            BotEquipStats.alignToEquipped(chr);
                             fixedCount[0]++;
 //                            System.out.println("[BotEquipChecker] Equipped " + chr.getName()
 //                                    + " (job=" + chr.getJob().name() + " lv=" + chr.getLevel()
