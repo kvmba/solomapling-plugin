@@ -156,7 +156,12 @@ public final class GCMovement {
         if (st == null) {
             return; // already taken over (re-enabled, or disabled again) - nothing to finish
         }
-        settleGroundedOnDisable(st, bot);
+        // A fall can end by grabbing a rope instead of touching down. The rope pose and coords are
+        // what the bot is really doing, so leave them alone (same rule as disable()'s climbing
+        // path): settling here would render it standing on nothing at the rope's mid-air Y.
+        if (!st.climbing) {
+            settleGroundedOnDisable(st, bot);
+        }
         finishDisable(st, bot);
         ARRIVAL_CALLBACKS.remove(bot.getId());
     }
