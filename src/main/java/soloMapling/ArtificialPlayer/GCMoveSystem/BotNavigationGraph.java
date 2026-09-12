@@ -398,4 +398,31 @@ final class BotNavigationGraph implements Serializable {
         }
         return -1;
     }
+
+    /*
+     * Nearest rope region whose Y-span contains position and whose X is within xTol of it (the
+     * closest rope wins when several qualify). findRopeRegionId is the tight grip column
+     * (ROPE_GRAB_X) used for grip/current-region lookups; this wider form is for a mid-air TARGET
+     * such as a portal that hangs a little off the rope's axis — see
+     * BotNavigationManager.resolvePointTargetRegionId. The rope must still span position.y, so a
+     * climbing bot physically passes the target's height.
+     */
+    int findNearestRopeRegionId(Point position, int xTol) {
+        int best = -1;
+        int bestDx = Integer.MAX_VALUE;
+        for (Region region : regions) {
+            if (!region.isRopeRegion) {
+                continue;
+            }
+            int dx = Math.abs(position.x - region.minX);
+            if (dx <= xTol
+                    && position.y >= region.minY
+                    && position.y <= region.maxY
+                    && dx < bestDx) {
+                best = region.id;
+                bestDx = dx;
+            }
+        }
+        return best;
+    }
 }

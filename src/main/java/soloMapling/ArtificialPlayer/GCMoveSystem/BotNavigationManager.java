@@ -35,6 +35,16 @@ final class BotNavigationManager {
     // The executable region is the WHOLE window; steering at the boundary pixel parks bots
     // 1-2px outside it whenever arrival tolerances round against them.
     private static final int LAUNCH_WINDOW_STEER_INSET_PX = 4;
+    // Horizontal reach for attributing a MID-AIR target (a floating portal, an elevated point) to a
+    // rope it hangs beside. The tight grip column is ROPE_GRAB_X (8px); authoring routinely floats an
+    // exit portal a little off the rope's axis, and snapping such a point to the floor below collapses
+    // the goal onto the bot's own region (the 童话村[井口] bug — see resolvePointTargetRegionId).
+    private static final int TARGET_ROPE_ATTACH_X_PX = 24;
+    // How far the ground must sit BELOW such a target before the rope is the only way up. A bot can
+    // jump ~77px, and GCTravel treats a point within 100px on Y as "at the portal" (ENTER_Y); past
+    // that the bot genuinely has to climb to reach it. Below this the point is walk/jump-reachable
+    // from the ground and attributing it to the rope would be wrong.
+    private static final int TARGET_ROPE_ATTACH_MIN_DROP_PX = 100;
     // After a bot takes a portal, suppress further portal usage for this long. Prevents a bot from
     // immediately re-entering a portal (e.g. bouncing back through the return portal). Gates ONLY
     // portal execution — movement, attacks and every other action continue unaffected.
@@ -1803,11 +1813,29 @@ final class BotNavigationManager {
         if (ropeRegionId >= 0 && shouldPreferRopeRegion(map, position)) {
             return ropeRegionId;
         }
+        // A target authored a little off the rope's axis — the well-head exit portal of 童话村
+        // [井口] (222000001) floats 20px off a rope whose top reaches it — misses the tight grip
+        // column above, and the ground lookup below would snap the goal onto the floor UNDER the
+        // rope: the bot's own region. Same-region then plans no climb and the bot paces the floor
+        // forever. When a rope spans the point beside it AND the ground is far too low to walk/jump
+        // to, the rope is the only way up, so attribute the point to that rope. The cheap indexed
+        // ground probe gates the (O(regions)) rope scan, so ordinary targets pay neither.
+        if (groundTooLowForWalk(map, position)) {
+            int widerRopeRegionId = graph.findNearestRopeRegionId(position, TARGET_ROPE_ATTACH_X_PX);
+            if (widerRopeRegionId >= 0) {
+                return widerRopeRegionId;
+            }
+        }
         return graph.findRegionId(map, position);
     }
 
     private static boolean shouldPreferRopeRegion(MapleMap map, Point position) {
         return BotPhysicsEngine.isGroundFarBelow(map, position);
+    }
+
+    private static boolean groundTooLowForWalk(MapleMap map, Point position) {
+        Point ground = BotPhysicsEngine.findGroundPoint(map, position);
+        return ground == null || ground.y - position.y > TARGET_ROPE_ATTACH_MIN_DROP_PX;
     }
 
     private static boolean isRopeEntryEdge(BotNavigationGraph graph, BotNavigationGraph.Edge edge) {
