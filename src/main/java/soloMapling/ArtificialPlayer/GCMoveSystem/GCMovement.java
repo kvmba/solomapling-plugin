@@ -95,7 +95,14 @@ public final class GCMovement {
             // takeoff (see BotPhysicsEngine), so a bot that hopped in place and is then disabled
             // has moveDir == 0 but is still airborne - and airborne is what makes the stance
             // render as JUMP. Testing only moveDir left those bots frozen in the jump pose.
-            if (st.moveDir != 0 || st.groundBrakeDir != 0 || st.inAir || st.climbing) {
+            //
+            // portalDropAtMs counts too: onMapChange lifts the bot and arms the drop with inAir
+            // still FALSE (teleportTo -> clearMovementState), so for that window the bot is
+            // suspended but not "airborne" yet. Without it here the whole branch is skipped and
+            // finishDisable stops the driver on a bot hanging at the float point with the drop
+            // never released - the jump-pose freeze, with nothing left to tick it down.
+            if (st.moveDir != 0 || st.groundBrakeDir != 0 || st.inAir || st.climbing
+                    || st.portalDropAtMs > 0L) {
                 // Mid-air: hand the bot over LATE instead of settling it here. A real player keeps
                 // falling to the floor frame by frame; forcing the landing was a visible teleport,
                 // and cutting the session mid-air was what froze bots in the jump pose. So keep the
