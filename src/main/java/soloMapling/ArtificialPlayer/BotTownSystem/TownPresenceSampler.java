@@ -56,6 +56,12 @@ public final class TownPresenceSampler {
     private static final int MIN_SPACING = 30;
     private static final int X_CANDIDATES = 7; // X samples scored per ledge pick (bias toward anchors)
 
+    // Min walkable width one hosted bot needs (room to stand apart and drift a little). Caps how many
+    // picks a single ledge may absorb: anchor weighting has no ceiling of its own, so without this a hot
+    // floor near an NPC/portal draws the WHOLE cohort and stacks it on one platform. Mirrors the
+    // section-per-band capacity BotSpotClaims enforces on the same ledges once the bots are live.
+    private static final int MIN_BAND_PX = 200;
+
     // How close (in Y) a ledge must sit to the lowest ledge to count as the map's floor band. The
     // floor of a town is rarely one platform: it is the sheet of street and terrace at the bottom, and
     // its pieces sit up to a step apart (Kerning's widest floor piece is 116px and its neighbours are
@@ -118,9 +124,7 @@ public final class TownPresenceSampler {
 
         Map<Integer, List<Integer>> occupiedByLedge = new HashMap<>();
         for (int i = 0; i < remaining; i++) {
-            GCMovement.Ledge l = RANDOM.nextDouble() < TAIL_FRACTION
-                    ? ledges.get(RANDOM.nextInt(ledges.size())) // uniform straggler
-                    : weightedPick(ledges, weights);
+            GCMovement.Ledge l = pickLedge(ledges, weights, occupiedByLedge);
             List<Integer> taken = occupiedByLedge.computeIfAbsent(l.regionId(), k -> new ArrayList<>());
             int x = pickX(l, anchors, taken, ov);
             taken.add(x);
@@ -271,23 +275,81 @@ public final class TownPresenceSampler {
         return penalty;
     }
 
-    private static GCMovement.Ledge weightedPick(List<GCMovement.Ledge> ledges, double[] weights) {
+    // Pick which ledge the next spot lands on. The uniform straggler tail escapes the anchor weighting
+    // (so a few bots reach rarely-visited ledges); the weighted pick follows it. Both skip ledges already
+    // at their width-derived capacity, so the cohort spills sideways onto other platforms instead of
+    // stacking on the hot floor - the tail is about WHERE ON THE MAP, not about exceeding capacity.
+    // If every ledge is full the cohort has genuinely outgrown the map; the overflow then spreads by
+    // platform width (not anchor pull, which would just re-fill the hot floor).
+    static GCMovement.Ledge pickLedge(List<GCMovement.Ledge> ledges, double[] weights,
+                                      Map<Integer, List<Integer>> occupiedByLedge) {
+        if (RANDOM.nextDouble() < TAIL_FRACTION) {
+            return pickUniformWithRoom(ledges, occupiedByLedge);
+        }
         double total = 0.0;
-        for (double w : weights) {
-            total += w;
+        for (int i = 0; i < ledges.size(); i++) {
+            if (hasRoom(ledges.get(i), occupiedByLedge)) {
+                total += weights[i];
+            }
         }
         if (total <= 0.0) {
-            return ledges.get(RANDOM.nextInt(ledges.size()));
+            return pickByWidth(ledges); // every ledge full -> spread the overflow by platform size
         }
         double r = RANDOM.nextDouble() * total;
         double cumulative = 0.0;
         for (int i = 0; i < ledges.size(); i++) {
-            cumulative += weights[i];
-            if (r < cumulative) {
-                return ledges.get(i);
+            if (hasRoom(ledges.get(i), occupiedByLedge)) {
+                cumulative += weights[i];
+                if (r < cumulative) {
+                    return ledges.get(i);
+                }
             }
         }
         return ledges.get(ledges.size() - 1);
+    }
+
+    // A uniform draw among the ledges that still have room (the straggler tail); falls back to the full
+    // set only when every ledge is full, where the caller's fallback then spreads by width.
+    private static GCMovement.Ledge pickUniformWithRoom(List<GCMovement.Ledge> ledges,
+                                                       Map<Integer, List<Integer>> occupiedByLedge) {
+        List<GCMovement.Ledge> open = new ArrayList<>();
+        for (GCMovement.Ledge l : ledges) {
+            if (hasRoom(l, occupiedByLedge)) {
+                open.add(l);
+            }
+        }
+        if (open.isEmpty()) {
+            return pickByWidth(ledges);
+        }
+        return open.get(RANDOM.nextInt(open.size()));
+    }
+
+    private static boolean hasRoom(GCMovement.Ledge l, Map<Integer, List<Integer>> occupiedByLedge) {
+        return occupiedByLedge.getOrDefault(l.regionId(), List.of()).size() < ledgeCapacity(l);
+    }
+
+    // Overflow sharing: weight each ledge by its walkable width so the surplus spreads in proportion to
+    // available ground, never re-concentrating on the anchor-heavy platform.
+    private static GCMovement.Ledge pickByWidth(List<GCMovement.Ledge> ledges) {
+        long total = 0;
+        for (GCMovement.Ledge l : ledges) {
+            total += Math.max(1, l.maxX() - l.minX());
+        }
+        long r = (long) (RANDOM.nextDouble() * total);
+        long cumulative = 0;
+        for (GCMovement.Ledge l : ledges) {
+            cumulative += Math.max(1, l.maxX() - l.minX());
+            if (r < cumulative) {
+                return l;
+            }
+        }
+        return ledges.get(ledges.size() - 1);
+    }
+
+    // How many hosted bots one ledge may absorb: one per MIN_BAND_PX of walkable width, at least one so a
+    // narrow ledge still hosts a bot. A long street holds a few; a short platform stays single-occupancy.
+    static int ledgeCapacity(GCMovement.Ledge l) {
+        return Math.max(1, (l.maxX() - l.minX()) / MIN_BAND_PX);
     }
 
     // Human-readable dump of where weight concentrates on a map: anchor count + the top-N ledges by
