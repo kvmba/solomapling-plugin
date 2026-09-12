@@ -652,10 +652,12 @@ final class GCTravel {
 
     // A corpse does not travel: the poller runs on its own thread, so a bot killed mid-trip can
     // still have a poll in flight (cancel(false) does not interrupt one), and BotDeath reads the
-    // bot's sanctuary off whatever map it wakes up on.
+    // bot's sanctuary off whatever map it wakes up on. isCorpse() also covers the window before
+    // the episode starts — a bot the host zeroed via a map's decHP field (Aqua Road's breathing
+    // damage) between movement ticks would otherwise be warped onward as a body.
     static boolean isDead(Character bot) {
         BotDeath death = BotDeath.of(bot);
-        return death != null && death.isDead();
+        return death != null && death.isCorpse();
     }
 
     private static void finish(Trip trip, boolean ok) {

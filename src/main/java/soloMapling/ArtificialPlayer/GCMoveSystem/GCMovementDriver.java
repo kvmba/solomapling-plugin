@@ -4,6 +4,7 @@ import org.gms.client.Character;
 import org.gms.constants.game.CharacterStance;
 import org.gms.server.maps.Foothold;
 import org.gms.server.maps.MapleMap;
+import soloMapling.ArtificialPlayer.BotHealthSystem.BotDeath;
 
 import java.awt.Point;
 import java.awt.Rectangle;
@@ -218,6 +219,14 @@ final class GCMovementDriver {
         // killed mid-rest must stop resting. This branch does their job better — it is the
         // stricter one — so let it win.
         if (bot.getHp() <= 0) {
+            // The host can zero a bot outside the damage layer: a map's WZ decHP field (Aqua
+            // Road's underwater breathing damage, El Nath's cold) calls Character.addHP
+            // directly. Adopt it here — the fastest path that runs for every moving bot — so
+            // it gets an episode and is carried home at full HP instead of standing at zero.
+            BotDeath death = BotDeath.of(bot);
+            if (death != null) {
+                death.adoptIfZeroHp();
+            }
             // Settle it once, not every tick: re-settling re-broadcasts the same frame (cheap
             // and deduped, but pointless) and would pin a bot that is still legitimately
             // falling to its death spot mid-air.

@@ -217,3 +217,26 @@ BotClientBinding.runWithBoundPlayer(bot, () -> bot.changeMap(safeMapId));
 - **b. 死亡计数无上限**：一张图连死要打 debug 日志，便于观察是否有 bot 卡在死亡循环。
 - **c. `changeMap` 到未加载地图**：宿主 `getMap(id, true)` 找不到会静默 return，
   死亡态会一直挂着。兜底：传送后校验 `getMapId() != safeMapId` → 退回原地等怪消失分支。
+
+## 9. 补丁：宿主地图扣血（decHP）绕过了死亡入口
+
+伤害层不是唯一的掉血来源：地图 WZ 带 `decHP` 的图（水下世界 2300xxxxx 呼吸伤害 6/跳、
+El Nath 寒冰区 10、Orbis 塔 B2）由宿主 `Character.doHurtHp()` → `addHP(-decHP)` 直接扣，
+既没有 5% 下限也不经过 `BotContactDamage`。被它扣到 0 的 bot 没有死亡态：
+
+- `BotSM` 死亡总闸读 `isDead()`（false）→ FSM 照常跑，看门狗/换图会把尸体传到别的图；
+- `GCMovementDriver` 只把 0 血 bot 摆成 DEAD 姿态冻住并广播（看起来就是"死了但还在被移动"）；
+- `BotPotionSim` 的 `isAlive()` 门 → 0 血后永不回血。
+
+**修复**（`BotDeath.adoptIfZeroHp` + 两处轮询点）：
+
+| 位置 | 作用 |
+|---|---|
+| `BotDeath.adoptIfZeroHp()` | `hp<=0 && !down && 模板bot && 非伴生 && 有地图` → 直接 `markDown()` 进入既有死亡流程，并 `nudgeSoon` 唤醒宏 tick（未观察 grinder 否则等 4–8 分钟） |
+| `GCMovementDriver` 0 血分支 | 每 50ms/1s 跑一次的最快认领点（覆盖所有启用移动的 bot） |
+| `BotSM.tickRunnable` 门之前 | 兜底（覆盖无 movement 的 bot），保证本 tick 就按死亡处理 |
+| `BotDeath.abandon()` | 由 `isDead()` 改为 `isCorpse()`，转换类型时也不会把 0 血未认领的 bot 交出去 |
+| `GCTravel.isDead()` | 由 `isDead()` 改为 `isCorpse()`，未认领窗口内也不会把尸体传送走 |
+
+伴生（companion）不认领：它们是真实角色、有自己的生存循环与宿主复活路径（与 `kill()` 一致）。
+

@@ -87,6 +87,11 @@ public abstract class BotSM implements EventSubscriber {
             // The tick is also re-paced while down: an unobserved grinder otherwise ticks on a
             // 4-8 minute cadence, which is right for its abstract grinding but would stretch a
             // half-minute death into a quarter of an hour.
+            // A bot the host zeroed behind our back — a map's decHP field drains HP directly
+            // (Aqua Road's breathing damage, El Nath's cold) without going through the damage
+            // layer — has no episode of its own yet. Adopt it before the gate so this tick
+            // already treats it as down instead of letting the FSM steer a corpse.
+            death().adoptIfZeroHp();
             if (death().isDead() && state != BotState.TRADING) {
                 if (death().tick()) {
                     updateScheduleDelay(death().tickDelayMs());

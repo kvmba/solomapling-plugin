@@ -25,8 +25,9 @@ import static soloMapling.ArtificialPlayer.BotMovementSystem.MovementCommands.bo
  * <p>Design boundaries, deliberately narrow:
  * <ul>
  *   <li><b>Injury is not our business.</b> {@code BotContactDamage} decides when a hit is
- *       lethal and calls {@link #kill}. We never look at HP ourselves to discover death, so
- *       there is exactly one way to die: taking a hit you cannot survive.</li>
+ *       lethal and calls {@link #kill}. The one exception is {@link #adoptIfZeroHp}: the host
+ *       drains HP around us too (a map's {@code decHP} field, e.g. Aqua Road's breathing
+ *       damage), and a bot it zeroes out has no episode to stand it back up.</li>
  *   <li><b>"Alright again" has exactly one meaning.</b> A bot that reached a different map is
  *       alive and well — the transport put it somewhere and topped it up. We do not inspect
  *       the destination's monster list and re-kill it: it is standing there with full HP, and
@@ -103,6 +104,75 @@ public final class BotDeath {
         BotClientBinding.runWithBoundPlayer(chr, () -> chr.updateHp(0));
         chr.updatePartyMemberHP(); // headless bots never receive their own stat packet
         markDown();
+    }
+
+    /**
+     * Adopts a bot found at zero HP with no episode of its own.
+     *
+     * <p>The damage layer is not the only thing that drains an artificial player: the host's
+     * map machinery does too, on any map whose WZ data carries a {@code decHP} value — Aqua
+     * Road's underwater breathing damage (6 a tick on the 2300xxxxx maps), El Nath's cold
+     * fields (10), Orbis Tower B2. That path calls {@code Character.addHP} directly, knows
+     * nothing about bots, and clamps only at zero: no floor, and nothing calls {@link #kill}.
+     * A bot it zeroes out would otherwise lie at 0 HP with no episode to stand it back up —
+     * the FSM gate reads {@code isDead()}, which is false, so the bot keeps running its
+     * brain and travels to another map as a corpse, arriving dead with nothing left to
+     * restore it.
+     *
+     * <p>Callers poll this from paths that already run for every bot (the movement driver's
+     * zero-HP hold, the macro tick's gate); it arms the ordinary episode once, on the
+     * transition into zero HP, and the existing lie-down / carry-home logic does the rest.
+     *
+     * @return true when this call adopted the bot — it is down from here on
+     */
+    public boolean adoptIfZeroHp() {
+        if (down || !zeroedTemplateBot()) {
+            return false;
+        }
+        // markDown, not kill(): the HP is already at zero (the host put it there), and kill()
+        // would re-run that mutation plus its party publish for no gain.
+        markDown();
+        // The episode is driven by the macro tick, and an unobserved grinder's next one may be
+        // 4-8 minutes away — that whole stretch would be added to every death. Pull it forward
+        // instead; the wheel re-paces to the corpse's own clock on that tick.
+        BotSM owner = soloMapling.ArtificialPlayer.BotMessagingSystem.CharacterStorage
+                .getBotById(chr.getId());
+        if (owner != null) {
+            owner.nudgeSoon(250L);
+        }
+        return true;
+    }
+
+    /**
+     * Whether this bot must be treated as a corpse right now — adopted or not.
+     *
+     * <p>{@link #isDead()} answers "is the episode running". This also covers a bot drained
+     * to zero by something outside the damage layer but not yet picked up (see
+     * {@link #adoptIfZeroHp}). Movers ask this instead, so a body is never warped onward in
+     * that window either.
+     */
+    public boolean isCorpse() {
+        return down || zeroedTemplateBot();
+    }
+
+    /** The zero-HP half of {@link #isCorpse()}: zeroed, artificial, and nobody's companion. */
+    private boolean zeroedTemplateBot() {
+        Character chr = this.chr;
+        return chr != null && needsZeroHpAdoption(
+                BotHelpers.isBot(chr), CompanionRoster.isCompanion(chr.getId()),
+                chr.getMap() != null, chr.getHp());
+    }
+
+    /**
+     * Pure form of the adoption predicate, so the rule is testable without a character:
+     * an artificial player at zero HP that is not a companion and still has a map.
+     *
+     * <p>Companions are excluded for the same reason as in {@link #kill()}: they are real
+     * characters with a real survival loop and a host revive of their own, and this episode
+     * must not knock one over.
+     */
+    static boolean needsZeroHpAdoption(boolean artificial, boolean companion, boolean onMap, int hp) {
+        return artificial && !companion && onMap && hp <= 0;
     }
 
     private void markDown() {
@@ -277,10 +347,11 @@ public final class BotDeath {
      * <p>Used when the bot is being handed to a different behaviour (a retype). The outgoing
      * {@code BotDeath} is discarded with its bot — a fresh {@code BotSM} builds a fresh one — so
      * the character must not be left at zero HP with nobody left to stand it up. Always call
-     * this before the old behaviour is thrown away.
+     * this before the old behaviour is thrown away. Also covers a bot the host already zeroed
+     * but whose episode had not started yet (see {@link #adoptIfZeroHp}).
      */
     public void abandon() {
-        if (!down) {
+        if (!isCorpse()) {
             return;
         }
         Character chr = this.chr;
