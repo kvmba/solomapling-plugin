@@ -290,4 +290,10 @@ public class SellingMerchantBot extends BotSM {
             e.printStackTrace();
         }
     }
+
+    @Override
+    public boolean allowsMount() {
+        // FM 卖货商人：站在自由市场入口喊话，可以骑宠。
+        return true;
+    }
 }

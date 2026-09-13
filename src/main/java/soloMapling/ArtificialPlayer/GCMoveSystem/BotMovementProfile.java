@@ -1,5 +1,6 @@
 package soloMapling.ArtificialPlayer.GCMoveSystem;
 
+import org.gms.client.BuffStat;
 import org.gms.client.Character;
 import org.gms.client.Job;
 import org.gms.client.inventory.InventoryType;
@@ -48,6 +49,13 @@ record BotMovementProfile(int totalSpeedStat, int totalJumpStat, boolean snowSho
     static final int HASTE_SELF_MAX_LEVEL = 55;                // haste-thief at/above this = max speed+jump
     static final int PARTY_HASTE_THIEF_LEVEL = 60;             // a haste-thief party member at/above this grants party Haste
     static final int YOUNG_THIEF_JUMP = 115;
+
+    // Riding bonus (movement profile only; see mounted()). v83's own riding grants speed/jump but
+    // this server carries none in WZ/StatEffect, so the bot's effective movement adds it here so
+    // the mounted bot visibly moves like a rider. Kept modest so the existing speed/jump ceilings
+    // still clamp it (a Haste thief on a mount does not exceed the physics cap).
+    static final int MOUNT_SPEED_BONUS = 20;
+    static final int MOUNT_JUMP_BONUS = 10;
 
     BotMovementProfile {
         totalSpeedStat = bucketStat(totalSpeedStat);
@@ -100,7 +108,20 @@ record BotMovementProfile(int totalSpeedStat, int totalJumpStat, boolean snowSho
 
         int totalSpeed = speedBaseline + (character.getTotalMoveSpeedStat() - BASE_TOTAL_STAT);
         int totalJump = jumpBaseline + (character.getTotalJumpStat() - BASE_TOTAL_STAT);
+        // A rider walks faster & leaps higher — the visible mount should move like one. This server
+        // ships no mount speed data (skill 1004 has no `speed`, every TamingMob item's incSpeed/
+        // incJump is 0), so the bonus is added here, on the movement profile only: the graph/physics
+        // use it, and it does NOT touch the character's real stat (no economy/combat side effect).
+        if (mounted(character)) {
+            totalSpeed += MOUNT_SPEED_BONUS;
+            totalJump += MOUNT_JUMP_BONUS;
+        }
         return new BotMovementProfile(totalSpeed, totalJump, wearsSnowShoes(character));
+    }
+
+    /** True while the bot is actually riding (the MONSTER_RIDING buff is registered). */
+    private static boolean mounted(Character character) {
+        return character.getBuffedValue(BuffStat.MONSTER_RIDING) != null;
     }
 
     // Thief lineage: THIEF(400) -> ASSASSIN(410)/BANDIT(420) -> ... -> NIGHTLORD(412)/SHADOWER(422).

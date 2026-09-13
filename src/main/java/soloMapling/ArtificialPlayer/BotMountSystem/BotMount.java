@@ -57,13 +57,15 @@ import java.util.concurrent.ConcurrentHashMap;
  *       speed and nothing drains fatigue.</li>
  * </ul>
  *
- * <p>Applies only to the four mobile families — 站街 (SocialBot), 打怪 (TrainingBot),
- * 游走 (TownWandererBot) and 持久化 (CompanionBot) — each of which opts in via
- * {@code BotSM.allowsMount()}. Merchants, gacha/blackjack/game-zone hosts, dice,
- * drop-game, OPQ and the tutorial/staging bots never mount. The one
- * {@link BotSM} tick drives all of them: {@link #tick(Character)} reconciles the mount
- * every tick (cheap no-op for a non-owner) and {@link #cancelForAction(Character)} is the
- * eager fail-safe the skill / attack / chair paths call before they take the pose.
+ * <p>Applies to the four mobile families — 站街 (SocialBot), 打怪 (TrainingBot), 游走
+ * (TownWandererBot) and 持久化 (CompanionBot) — plus the Free-Market standing/shouting
+ * merchants (Selling/Buying/NX merchant bots, who stand and advertise in 自由市场). Each
+ * opts in via {@code BotSM.allowsMount()}. The moving FM browser (FMBot, which walks
+ * shops), gacha/blackjack/game-zone hosts, dice, drop-game, OPQ and the tutorial/staging
+ * bots never mount. The one {@link BotSM} tick drives all of them: {@link #tick(Character)}
+ * reconciles the mount every tick (cheap no-op for a non-owner) and
+ * {@link #cancelForAction(Character)} is the eager fail-safe the skill / attack / chair
+ * paths call before they take the pose.
  */
 public final class BotMount {
 
