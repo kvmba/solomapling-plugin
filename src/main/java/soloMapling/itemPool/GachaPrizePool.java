@@ -50,7 +50,6 @@ public class GachaPrizePool {
     /** Lazily-built shared pool; see {@link #shared()}. */
     private static volatile GachaPrizePool SHARED;
 
-
     private final List<Entry> equips = new ArrayList<>();
     private final List<Entry> items = new ArrayList<>();
     private int equipTotalWeight = 0;
