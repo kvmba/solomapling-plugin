@@ -71,4 +71,20 @@ class SwimWallCrossingTest {
         int top = BotPhysicsEngine.swimWallTopAhead(twoWalls, new Point(20, 570), new Point(120, 570));
         assertEquals(300, top, "clearing every blocking wall needs the highest top (smallest y)");
     }
+
+    @Test
+    void aSwimmerRisesSegmentBySegmentUpAStackedColumn() {
+        // Real underwater walls are stacked 40-60px segments (Crystal Canyon's 240px wall = 5 of them,
+        // Fish Plain's ~580px = 13). The probe returns the top of the segment AT the swimmer's depth,
+        // so clearing it lands the swimmer in the next segment up and the probe advances — a natural
+        // ladder up the column, rather than one unreachable leap to the top.
+        List<Foothold> column = List.of(
+                wall(51, 340, 380), wall(51, 380, 420), wall(51, 420, 460),
+                wall(51, 460, 500), wall(51, 500, 540), wall(51, 540, 580));
+        // From the floor, the swimmer is in the bottom segment (540..580): target is its top 540.
+        assertEquals(540, BotPhysicsEngine.swimWallTopAhead(column, new Point(20, 570), new Point(120, 570)));
+        // Once risen into the 460..500 segment, the probe advances to that segment's top (460) — the
+        // next rung up the column, not the whole 240px in one leap.
+        assertEquals(460, BotPhysicsEngine.swimWallTopAhead(column, new Point(20, 470), new Point(120, 470)));
+    }
 }
