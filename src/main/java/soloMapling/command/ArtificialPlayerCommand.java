@@ -402,8 +402,9 @@ public class ArtificialPlayerCommand extends Command {
             case "mount": {
                 boolean ok = soloMapling.ArtificialPlayer.BotMountSystem.BotMount.forceMount(fakechar);
                 player.yellowMessage("Mount " + fakechar.getName() + " (lv" + fakechar.getLevel()
-                        + "): " + (ok ? "mounted" : "FAILED (null map or this map forbids mounts)"));
-                if (fakechar.getMapId() != player.getMapId()) {
+                        + "): " + (ok ? "mounted"
+                        : "FAILED (needs level 70+, a map, and a map that allows mounts)"));
+                if (ok && fakechar.getMapId() != player.getMapId()) {
                     player.yellowMessage("Note: bot is on map " + fakechar.getMapId()
                             + " - the mount only shows to players on the bot's map.");
                 }

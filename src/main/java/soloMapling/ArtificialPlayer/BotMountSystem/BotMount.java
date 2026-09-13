@@ -118,11 +118,13 @@ public final class BotMount {
     }
 
     /**
-     * Reconcile the mount against the bot's present state. Safe to call every tick:
+     * Reconcile the mount against the bot's present state. Safe to call every tick,
+     * and idempotent: it only broadcasts on an actual state change (mount ⇄ dismount),
+     * never while the bot is already in the intended state.
      * <ul>
      *   <li>owns no mount / below level / map forbids mounts → ensure dismounted;</li>
-     *   <li>else, unless {@link #forbidsMount} (chair or death), → ensure mounted;</li>
-     *   <li>chair or death → dismount.</li>
+     *   <li>astride and a forbidden state (chair or death) → dismount;</li>
+     *   <li>not astride, state allows it, and past the action cooldown → mount.</li>
      * </ul>
      * Normal movement (walk, jump, climb, swim, teleport, map change) never dismounts.
      * The skill / attack / chair paths also call {@link #cancelForAction} eagerly; this
@@ -138,12 +140,12 @@ public final class BotMount {
             }
             return;
         }
-        if (!forbidsMount(bot)) {
-            if (!isRiding(bot) && System.currentTimeMillis() >= remountAllowedAt(bot)) {
-                mount(bot, ownedMountId(bot));
+        if (isRiding(bot)) {
+            if (forbidsMount(bot)) {
+                dismount(bot);
             }
-        } else if (isRiding(bot)) {
-            dismount(bot);
+        } else if (!forbidsMount(bot) && System.currentTimeMillis() >= remountAllowedAt(bot)) {
+            mount(bot, ownedMountId(bot));
         }
     }
 
@@ -164,13 +166,17 @@ public final class BotMount {
         }
     }
 
-    /** Force-mount for the GM test command, ignoring the ownership/pose/cooldown gates. */
+    /**
+     * Force-mount for the GM test command, ignoring the ownership / pose / cooldown
+     * gates. Still refuses the hard world rules — below {@link #MIN_LEVEL}, no map, or a
+     * map that forbids mounts — because the tick sweep would undo it a moment later, so
+     * reporting failure here is the honest answer.
+     */
     public static boolean forceMount(Character bot) {
-        if (bot == null || bot.getMap() == null || mapForbidsMounts(bot)) {
+        if (bot == null || bot.getMap() == null || bot.getLevel() < MIN_LEVEL || mapForbidsMounts(bot)) {
             return false;
         }
-        mount(bot, ownsMount(bot) ? ownedMountId(bot) : MOUNT_IDS[0]);
-        return true;
+        return mount(bot, ownsMount(bot) ? ownedMountId(bot) : MOUNT_IDS[0]);
     }
 
     /** Force-dismount for the GM test command; holds it off like any action does. */
@@ -234,24 +240,28 @@ public final class BotMount {
      * {@code getBuffedValue(MONSTER_RIDING)} is non-null), and broadcasts
      * {@code showMonsterRiding} so everyone already on the map sees it — the same
      * three steps the host's StatEffect rider path performs for a real player.
+     *
+     * @return false if the rider skill/effect is missing (nothing to ride with);
+     *         true once the mount model and buff are in place.
      */
-    private static void mount(Character bot, int mountItemId) {
+    private static boolean mount(Character bot, int mountItemId) {
         Skill skill = SkillFactory.getSkill(RIDE_SKILL);
         if (skill == null || skill.getMaxLevel() < 1) {
-            return; // rider skill missing from WZ — nothing to ride with
+            return false; // rider skill missing from WZ — nothing to ride with
         }
         StatEffect effect = skill.getEffect(skill.getMaxLevel());
         if (effect == null) {
-            return;
+            return false;
         }
 
         // Create the Mount object the look packet reads, if this bot has none yet, and set
-        // its item id (the id the client's TamingMob data resolves to a model).
+        // its item id (the id the client's TamingMob data resolves to a model). The skill id
+        // is the same convention the host uses when it builds a Mount on character load.
         if (bot.getMapleMount() == null) {
-            bot.setMapleMount(new Mount(bot, mountItemId, RIDE_SKILL));
+            bot.setMapleMount(new Mount(bot, mountItemId, bot.getJobType() * 10000000 + RIDE_SKILL));
+        } else {
+            bot.getMapleMount().setItemId(mountItemId);
         }
-        bot.getMapleMount().setItemId(mountItemId);
-        bot.getMapleMount().setSkillId(bot.getJobType() * 10000000 + RIDE_SKILL);
 
         long now = Server.getInstance().getCurrentTime();
         long duration = effect.getDuration() > 0 ? effect.getDuration() : RIDE_SKILL; // 1004: time=2100000ms
@@ -259,6 +269,7 @@ public final class BotMount {
         // what makes every later spawn/warp packet carry the mount instead of a bare character.
         bot.registerEffect(effect, now, now + duration, false);
         broadcastMountedLine(bot);
+        return true;
     }
 
     /** Broadcast the mount line so everyone already on the map sees the bot astride. */
