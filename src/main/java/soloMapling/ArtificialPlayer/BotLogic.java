@@ -35,6 +35,9 @@ public class BotLogic {
 
     // BotLogic - things that are game thinking related, invisible to players
 
+    // Reused read-only type filter for the player scan (getMapObjectsInRect only reads it).
+    private static final List<MapObjectType> PLAYER_TYPES = List.of(MapObjectType.PLAYER);
+
     public static Character waitForPlayerInRange(Character fakechar, int width, int height) {
         Rectangle rect = BotHelpers.createRectangle(fakechar.getPosition(), width, height);
         List<MapObject> playersInRange = getPlayersInRange(fakechar, rect);
@@ -43,7 +46,7 @@ public class BotLogic {
 
     // Helper method to get all players in the rectangle
     private static List<MapObject> getPlayersInRange(Character fakeChar, Rectangle rect) {
-        return fakeChar.getMap().getMapObjectsInRect(rect, List.of(MapObjectType.PLAYER));
+        return fakeChar.getMap().getMapObjectsInRect(rect, PLAYER_TYPES);
     }
 
     // Helper method to find the first valid player in the range

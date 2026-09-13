@@ -57,6 +57,10 @@ final class BotContactDamage {
     // each candidate with the real lower-half hitbox overlap.
     private static final int   MOB_QUERY_MARGIN       = 150;
 
+    // Reused read-only type filter for the touch scan (getMapObjectsInRect only reads it), so the
+    // per-tick contact check on an observed map does not allocate a fresh List each time.
+    private static final List<MapObjectType> MONSTER_TYPES = List.of(MapObjectType.MONSTER);
+
     // Damage number is scaled off physical attack. All artificial-player types apply the same roll to
     // real HP through resolveMobHitDamage, so TrainingBot and persistent companion semantics agree.
     private static final double DMG_FACTOR  = 0.5;   // multiplier on mob.getPADamage()
@@ -111,7 +115,7 @@ final class BotContactDamage {
             Rectangle query = new Rectangle(getBotTouchBounds(entry, bot));
             query.grow(MOB_QUERY_MARGIN, MOB_QUERY_MARGIN);
             Monster nearby = null;
-            for (MapObject obj : bot.getMap().getMapObjectsInRect(query, List.of(MapObjectType.MONSTER))) {
+            for (MapObject obj : bot.getMap().getMapObjectsInRect(query, MONSTER_TYPES)) {
                 Monster mob = (Monster) obj;
                 if (!isHostileLivingMonster(mob)) {
                     continue;

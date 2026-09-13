@@ -17,6 +17,11 @@ import java.util.List;
 // bring their own bounds. Extracted verbatim from the pre-split GrindBrain. Ours (SoloMapling).
 final class GrindLoot {
 
+    // The type filter for the loot scan, reused across every call. getMapObjectsInRange only
+    // reads it (List.contains), so one immutable instance is safe to share and saves a fresh
+    // List per scan on the hot loot path.
+    private static final List<MapObjectType> ITEM_TYPES = List.of(MapObjectType.ITEM);
+
     private static final int LOOT_PICKUP_PX = 60;            // close enough to grab
     private static final long LOOT_GAP_MIN_MS = 100;         // stagger between at-feet pickups
     private static final long LOOT_GAP_MAX_MS = 350;
@@ -235,7 +240,7 @@ final class GrindLoot {
         double searchSq = (double) rangePx * rangePx;
         MapItem best = null;
         double bestSq = Double.MAX_VALUE;
-        for (MapObject mo : chr.getMap().getMapObjectsInRange(pos, searchSq, List.of(MapObjectType.ITEM))) {
+        for (MapObject mo : chr.getMap().getMapObjectsInRange(pos, searchSq, ITEM_TYPES)) {
             MapItem mi = (MapItem) mo;
             if (!DropCommands.botCanLoot(chr, mi)) {
                 continue;
@@ -269,7 +274,7 @@ final class GrindLoot {
         }
         double searchSq = (double) rangePx * rangePx;
         List<MapItem> out = new ArrayList<>();
-        for (MapObject mo : chr.getMap().getMapObjectsInRange(pos, searchSq, List.of(MapObjectType.ITEM))) {
+        for (MapObject mo : chr.getMap().getMapObjectsInRange(pos, searchSq, ITEM_TYPES)) {
             MapItem mi = (MapItem) mo;
             if (!DropCommands.botCanLoot(chr, mi)) {
                 continue;

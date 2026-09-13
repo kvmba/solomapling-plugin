@@ -52,6 +52,10 @@ public final class BotAttackDriver {
     private static final int SEEK_RANGE = 700;
     private static final double SEEK_RANGE_SQ = (double) SEEK_RANGE * SEEK_RANGE;
 
+    // Reused type filter for the mob scans (read-only in getMapObjectsInRange), so the target
+    // search does not allocate a fresh List on every attack tick.
+    private static final List<MapObjectType> MONSTER_TYPES = List.of(MapObjectType.MONSTER);
+
     // A forward (non-surround) attack still reaches a hair behind the bot so a mob right on top
     // of it counts; mobs clearly behind are excluded (e.g. a crossbow won't fire backwards).
     private static final int BACK_MARGIN = 25;
@@ -311,7 +315,7 @@ public final class BotAttackDriver {
         Rectangle box = reachBox(bot, profile, weapon, facingLeft);
 
         List<Monster> found = new ArrayList<>();
-        for (MapObject mo : bot.getMap().getMapObjectsInRange(botPos, SEEK_RANGE_SQ, List.of(MapObjectType.MONSTER))) {
+        for (MapObject mo : bot.getMap().getMapObjectsInRange(botPos, SEEK_RANGE_SQ, MONSTER_TYPES)) {
             Monster m = (Monster) mo;
             if (!m.isAlive()) {
                 continue;
@@ -435,7 +439,7 @@ public final class BotAttackDriver {
         }
         Monster nearest = null;
         double bestSq = Double.MAX_VALUE;
-        for (MapObject mo : bot.getMap().getMapObjectsInRange(botPos, SEEK_RANGE_SQ, List.of(MapObjectType.MONSTER))) {
+        for (MapObject mo : bot.getMap().getMapObjectsInRange(botPos, SEEK_RANGE_SQ, MONSTER_TYPES)) {
             Monster m = (Monster) mo;
             if (!m.isAlive() || m.getPosition() == null) {
                 continue;
