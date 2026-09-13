@@ -43,8 +43,8 @@ import java.util.concurrent.ConcurrentHashMap;
  *
  * <p>Rules (product):
  * <ul>
- *   <li>Only bots at {@link #MIN_LEVEL} (70) or above ever ride — the real v83 mount
- *       requirement (Hog/Frog etc. carry {@code reqLevel=70}).</li>
+ *   <li>Only bots at {@link #MIN_LEVEL} (70) or above ever ride — 70 is the explorer mount
+ *       floor (Hog; Silver Mane/Red Draco sit higher, at 120/200).</li>
  *   <li>Only an {@value #OWN_CHANCE} fraction of the eligible population owns a mount,
  *       decided DETERMINISTICALLY from the bot's character id — a persistent companion
  *       keeps the same mount across restarts, and the crowd has a mount minority.</li>
@@ -67,7 +67,7 @@ import java.util.concurrent.ConcurrentHashMap;
  */
 public final class BotMount {
 
-    /** v83's own mount requirement — the Hog & friends sit at reqLevel 70+. */
+    /** The lowest explorer-mount level (Hog); the other kits sit at its 120/200 entries. */
     public static final int MIN_LEVEL = 70;
 
     /** Share of eligible (level >= 70) bots that own a mount. */
