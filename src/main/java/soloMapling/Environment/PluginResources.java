@@ -129,7 +129,10 @@ public final class PluginResources {
     }
 
     public static List<String> listFileNames(String relativeDir, String endsWith, boolean stripExtension) {
-        String cacheKey = relativeDir + "|" + endsWith + "|" + stripExtension;
+        // Key on the normalized path: callers pass either the legacy (src/main/java/soloMapling/...)
+        // or the classpath (soloMapling/...) form, and both resolve to the same directory - keying on
+        // the raw string cached (and re-scanned) the same listing twice under two keys.
+        String cacheKey = normalize(relativeDir) + "|" + endsWith + "|" + stripExtension;
         List<String> cached = LIST_CACHE.get(cacheKey);
         if (cached != null) {
             return cached;
