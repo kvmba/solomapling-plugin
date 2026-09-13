@@ -18,7 +18,6 @@ import java.util.ArrayList;
 import java.util.List;
 
 import static soloMapling.ArtificialPlayer.BotHelpers.isUnusableItem;
-import static soloMapling.ArtificialPlayer.BotLogic.isPointNear;
 import static soloMapling.DebugUtilities.debugprint;
 import static soloMapling.itemPool.GachaFillerSystem.getRandomMesoGachaFiller;
 
@@ -42,19 +41,6 @@ public class CustomReactor {
         }
     }
 
-    public static int getNearestReactor(Character fakechar) {
-        List<Reactor> reactors = fakechar.getMap().getAllReactors();
-        for (Reactor reactor : reactors) {
-            if (reactor.getState() < 4 && reactor.isAlive()) {
-                if (isPointNear(reactor.getPosition(), fakechar.getPosition(), 25)) {
-//                    debugprint("Reactor near: ", reactor.getObjectId(), reactor.getId(), reactor.getPosition(), fakechar.getPosition());
-                    return reactor.getObjectId();
-                }
-            }
-        }
-        return 0;
-    }
-
     public static int spawnReactor(Character fakechar) {
         return spawnReactor(fakechar.getPosition(), fakechar.getMap());
     }
@@ -69,7 +55,12 @@ public class CustomReactor {
     }
 
     public static void deleteReactor(MapleMap map, int oid) {
+        // destroyReactor broadcasts the destroy packet (clients drop the sprite) and marks the
+        // reactor dead, but the host only unregisters the map object when Reactor.destroy() reports
+        // it was ALREADY dead - a second pass. A one-shot synthetic box (delay 0) never respawns, so
+        // without the explicit removeMapObject it would linger in the map's object table forever.
         map.destroyReactor(oid);
+        map.removeMapObject(oid);
     }
 
     /*
