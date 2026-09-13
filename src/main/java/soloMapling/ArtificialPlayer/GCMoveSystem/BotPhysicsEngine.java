@@ -860,6 +860,36 @@ final class BotPhysicsEngine {
             return;
         }
         entry.blockedRopeGrab = null;
+        // In swim maps a down-jump is a committed drop into water, not a land-map hop: swim physics
+        // owns motion, so set up swim mode directly instead of routing through launchAirborne — whose
+        // px/tick velocity the swim integrator (which reads px/s) would swallow whole, leaving the bot
+        // on its takeoff platform. The bot just sinks under swim gravity; the grace window keeps the
+        // platform it is standing on from re-catching it.
+        if (bot.getMap() != null && bot.getMap().isSwim()) {
+            Point position = bot.getPosition();
+            entry.climbing = false;
+            entry.climbRope = null;
+            entry.inAir = true;
+            entry.swimming = true;
+            entry.crouching = false;
+            entry.physX = position.x;
+            entry.physY = position.y;
+            entry.velY = 0f;
+            stopGroundMotion(entry);
+            entry.climbUpIntent = false;
+            entry.airVelX = 0;
+            entry.airSteerVelX = 0.0;
+            entry.fixedAirArc = false;
+            entry.downJumpPending = false;
+            entry.swimJumpRequested = false;
+            // A mid-water swim burst may follow later, but not on the next swim tick just because
+            // the steering target is still below the bot.
+            entry.swimNextJumpAtMs = System.currentTimeMillis() + cfg.SWIM_JUMP_COOLDOWN_MS;
+            setMovementVelocity(entry, 0, 0);
+            syncCharacterState(entry);
+            entry.downJumpGracePeriodMS = cfg.DOWN_JUMP_GRACE_MS;
+            return;
+        }
         launchAirborne(entry, bot, bot.getPosition(), -downJumpForcePerTick(), 0, false);
         entry.downJumpGracePeriodMS = cfg.DOWN_JUMP_GRACE_MS;
     }
@@ -1385,7 +1415,7 @@ final class BotPhysicsEngine {
         {
             Point nextPt = new Point((int) Math.round(nextX), (int) Math.round(nextY));
             AirCollision collision = resolveAirCollision(map, prevPt, nextPt);
-            if (collision.type() == AirCollisionType.LAND) {
+            if (collision.type() == AirCollisionType.LAND && (canLand(entry) || forbidFallDownLanding(collision))) {
                 nextX = collision.point().x;
                 nextY = collision.point().y;
                 vy = 0.0;
