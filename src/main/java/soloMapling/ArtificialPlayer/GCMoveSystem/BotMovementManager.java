@@ -532,15 +532,12 @@ class BotMovementManager {
         // Same-level wall ahead: the vertical intent below is derived only from the target's
         // relative height, so an underwater floor wall between the bot and a target at its own depth
         // gets no vertical input at all — the bot just pins against the wall (applySwimMotion zeroes
-        // vx on WALL) and never crosses it (Aqua Road / Crystal Canyon floor walls). Rise above the
-        // wall top first; once the bot is clear of the top the normal steering below resumes and the
-        // horizontal push carries it across.
+        // vx on WALL) and never crosses it (Aqua Road / Crystal Canyon floor walls). swimWallTopAhead
+        // already accounts for the clearance margin, so a non-MIN result means the bot is not yet high
+        // enough: hold UP and burst on cadence to gain height (the UP-hold terminal is still a slow
+        // sink). Once clear, the normal steering below resumes and the horizontal push crosses.
         int wallTopY = BotPhysicsEngine.swimWallTopAhead(entry.bot.getMap(), pos, targetPos);
-        if (wallTopY != Integer.MIN_VALUE && pos.y > wallTopY - BotPhysicsEngine.cfg.SWIM_WALL_CLEAR_PX) {
-            // Still below the clearance: hold UP AND burst on cadence. Burst (not the UP hold alone)
-            // is what gains height — the UP-hold terminal is still a slow sink, and a ground-jump
-            // launch only lifts ~160px in water, well short of an underwater wall. Keep bursting until
-            // the bot is clear, then fall through to the normal steering below to cross.
+        if (wallTopY != Integer.MIN_VALUE) {
             entry.swimVerticalHold = -1;
             long nowWallMs = System.currentTimeMillis();
             if (nowWallMs >= entry.swimNextJumpAtMs) {

@@ -45,10 +45,18 @@ class SwimWallCrossingTest {
     }
 
     @Test
-    void ignoresAWallTheSwimmerIsAlreadyAbove() {
-        // y=300 is above the wall top (340), so the wall does not block a level path from here.
-        int top = BotPhysicsEngine.swimWallTopAhead(FLOOR_WALL, new Point(20, 300), new Point(120, 300));
-        assertEquals(Integer.MIN_VALUE, top, "wall top y=340 is below a swimmer at y=300");
+    void ignoresAWallTheSwimmerHasAlreadyCleared() {
+        // Wall top is 340; the swimmer must clear it by SWIM_WALL_CLEAR_PX (40), so y <= 299 is past.
+        int top = BotPhysicsEngine.swimWallTopAhead(FLOOR_WALL, new Point(20, 299), new Point(120, 299));
+        assertEquals(Integer.MIN_VALUE, top, "wall top y=340 cleared by a swimmer at y=299");
+    }
+
+    @Test
+    void stillBlocksInsideTheClearBandAboveTheTop() {
+        // y=320 is above the top (340) but within the 40px clearance, so the wall still blocks: the
+        // swimmer must end up unambiguously above the lip, not exactly level with it.
+        int top = BotPhysicsEngine.swimWallTopAhead(FLOOR_WALL, new Point(20, 320), new Point(120, 320));
+        assertEquals(340, top, "wall top y=340 still blocks a swimmer at y=320 (inside clearance)");
     }
 
     @Test
