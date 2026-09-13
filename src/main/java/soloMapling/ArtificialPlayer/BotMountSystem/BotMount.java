@@ -53,19 +53,21 @@ import java.util.concurrent.ConcurrentHashMap;
  *       for the three things a rider can't do: cast a skill (including any attack), sit in
  *       a chair, and die. A map whose WZ {@code fieldLimit} carries CANNOTUSEMOUNTS also
  *       dismounts it (the host does this on enter too).</li>
- *   <li>Mounts are cosmetic on bots: the riding buff does not change their movement
- *       speed and nothing drains fatigue.</li>
+ *   <li>The mount also gives the bot a real movement boost while riding (+{@code MOUNT_SPEED_BONUS}
+ *       speed / +{@code MOUNT_JUMP_BONUS} jump, applied to the bot's own movement profile so the
+ *       visible mount moves like one) — see {@code BotMovementProfile}. Nothing drains fatigue.</li>
  * </ul>
  *
  * <p>Applies to the four mobile families — 站街 (SocialBot), 打怪 (TrainingBot), 游走
- * (TownWandererBot) and 持久化 (CompanionBot) — plus the Free-Market standing/shouting
- * merchants (Selling/Buying/NX merchant bots, who stand and advertise in 自由市场). Each
- * opts in via {@code BotSM.allowsMount()}. The moving FM browser (FMBot, which walks
- * shops), gacha/blackjack/game-zone hosts, dice, drop-game, OPQ and the tutorial/staging
- * bots never mount. The one {@link BotSM} tick drives all of them: {@link #tick(Character)}
- * reconciles the mount every tick (cheap no-op for a non-owner) and
- * {@link #cancelForAction(Character)} is the eager fail-safe the skill / attack / chair
- * paths call before they take the pose.
+ * (TownWandererBot) and 持久化 (CompanionBot) — plus the Free-Market buying merchant
+ * (BuyingMerchantBot, which stands at the FM entrance and advertises what it wants to buy).
+ * Each opts in via {@code BotSM.allowsMount()}. Entities that run a shop/stall do not
+ * mount: the selling & NX merchants, the walking FM browser (FMBot), and the in-room
+ * hired-merchant owners (bare Characters with no BotSM) are all excluded, along with
+ * gacha/blackjack/game-zone hosts, dice, drop-game, OPQ and the tutorial/staging bots.
+ * The one {@link BotSM} tick drives all of them: {@link #tick(Character)} reconciles the
+ * mount every tick (cheap no-op for a non-owner) and {@link #cancelForAction(Character)} is
+ * the eager fail-safe the skill / attack / chair paths call before they take the pose.
  */
 public final class BotMount {
 
