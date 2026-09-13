@@ -34,7 +34,10 @@ final class EngageBeat {
 
     // ── Attack tempo (real classes can't walk mid-attack; only jumps/teleports move while attacking) ──
     static final long ATTACK_WALK_LOCK_MS = 500;            // after a swing, hold position this long before walking
-    private static final int TURN_DEADZONE_PX = 15;         // mob within this |dx| = no meaningful facing to change
+    // Must be >= TURN_STEP_MAX_PX: doTurnBeat steps up to TURN_STEP_MAX_PX toward the mob, and if
+    // that step can overshoot the mob's x the mob lands on the other side, flipping needsTurnBeat and
+    // pacing the bot back and forth across it (the flat-ground left-right sway).
+    private static final int TURN_DEADZONE_PX = 20;         // mob within this |dx| = no meaningful facing to change
     private static final int TURN_STEP_MIN_PX = 5;          // a turn carries the bot a tap's worth into the new facing...
     private static final int TURN_STEP_MAX_PX = 20;         // ...up to a longer press
     private static final long TURN_BEAT_THROTTLE_MS = 500;  // anti-thrash: don't spend a turn-beat more often than this
