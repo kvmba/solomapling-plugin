@@ -138,25 +138,27 @@ class BotDialogueConstructorTest {
     }
 
     /**
-     * The GachaBot's bait act speaks from the Taunt node on a fraction of its sprays. A pack that
-     * dropped the node (or a language that forgot it) would silently mute the bot, so both languages
-     * must ship a healthy pool.
+     * The GachaBot's bait act speaks from the Taunt node on a fraction of its sprays and the Nudge
+     * node when it shuffles to a new spot. A pack that dropped either node (or a language that forgot
+     * it) would silently mute those beats, so both languages must ship a healthy pool.
      */
     @Test
-    void gachaTauntNodeIsPresentInBothLanguages() {
+    void gachaDialogueNodesArePresentInBothLanguages() {
         for (String languageTag : Arrays.asList("en-US", "zh-CN")) {
             SoloMaplingLanguageConfig.setLanguageTag(languageTag);
-            BotDialogueHandler.DialogueConstructor con =
-                    BotDialogueHandler.getDialogueCon("GachaBotDialogue.yaml", "GachaBot", "Taunt");
-            assertNotNull(con, languageTag + " GachaBot Taunt node missing");
-            List<String> lines = con.getDialogue();
-            assertFalse(lines.isEmpty(), languageTag + " GachaBot Taunt node has no lines");
-            assertTrue(lines.size() >= 100,
-                    languageTag + " GachaBot Taunt node should carry >= 100 lines, got " + lines.size());
-            for (int i = 0; i < lines.size(); i++) {
-                assertNotNull(lines.get(i), languageTag + " Taunt line " + i + " is null");
-                assertFalse(lines.get(i).isBlank(), languageTag + " Taunt line " + i + " is blank");
-                assertNotNull(con.getEmoteForIndex(i), languageTag + " Taunt line " + i + " has no emote");
+            for (String node : Arrays.asList("Taunt", "Nudge")) {
+                BotDialogueHandler.DialogueConstructor con =
+                        BotDialogueHandler.getDialogueCon("GachaBotDialogue.yaml", "GachaBot", node);
+                assertNotNull(con, languageTag + " GachaBot " + node + " node missing");
+                List<String> lines = con.getDialogue();
+                assertFalse(lines.isEmpty(), languageTag + " GachaBot " + node + " node has no lines");
+                assertTrue(lines.size() >= 100,
+                        languageTag + " GachaBot " + node + " node should carry >= 100 lines, got " + lines.size());
+                for (int i = 0; i < lines.size(); i++) {
+                    assertNotNull(lines.get(i), languageTag + " " + node + " line " + i + " is null");
+                    assertFalse(lines.get(i).isBlank(), languageTag + " " + node + " line " + i + " is blank");
+                    assertNotNull(con.getEmoteForIndex(i), languageTag + " " + node + " line " + i + " has no emote");
+                }
             }
         }
     }

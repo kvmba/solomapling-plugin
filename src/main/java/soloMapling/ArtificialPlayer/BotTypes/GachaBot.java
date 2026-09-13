@@ -135,6 +135,9 @@ public class GachaBot extends BotSM {
     // A candidate a little below the current spot is still the same ledge band; this tolerates the
     // small slope of a hill without letting the bot hop down to the floor beneath a platform.
     private static final int NUDGE_MAX_DROP_PX = 30;
+    // Chance a nudge comes with a line from the Nudge node. Independent of NUDGE_CHANCE so a quiet
+    // shuffle stays possible - narrating every move would read as a script.
+    private static final double NUDGE_TAUNT_CHANCE = 0.4;
 
     // True while a nudge walk is in flight, so the tick can reclaim the bot if the walk ends without
     // firing the arrival callback (the driver drops it when it gives up on an unreachable target).
@@ -169,6 +172,11 @@ public class GachaBot extends BotSM {
         // so hand the bot back the moment it arrives (the SocialBot relocation pattern) - otherwise
         // it would sit under GC control forever and block its own recorded-movement routines.
         nudgePending = true;
+        // A line to go with the shuffle, on its own roll - not every nudge, or the bot narrates its
+        // own routine. Says it as it starts moving, so it reads as muttering while it repositions.
+        if (ThreadLocalRandom.current().nextDouble() < NUDGE_TAUNT_CHANCE) {
+            getDialogueHandler().executeBotFlavorDialogue("Nudge", this);
+        }
         GCMovement.move(chr, dest.x, dest.y, () -> {
             nudgePending = false;
             GCMovement.disable(chr);
