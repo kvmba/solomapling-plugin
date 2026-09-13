@@ -547,9 +547,8 @@ final class GCMovementDriver {
         // overlap this method exists to prevent. Underwater there are no ledges to walk off and every
         // depth is swimmable, so keep the lateral stand-off at the anchor's own depth and skip the
         // clamp. A leader still standing on a platform keeps nearby ground and takes the clamp as before.
-        MapleMap map = bot.getMap();
-        if (map != null && map.isSwim()) {
-            Point anchorGround = BotPhysicsEngine.findGroundPoint(map, anchor);
+        if (bot.getMap().isSwim()) {
+            Point anchorGround = BotPhysicsEngine.findGroundPoint(bot.getMap(), anchor);
             if (anchorGround == null
                     || Math.abs(anchorGround.y - anchor.y) > FOLLOW_STANDOFF_MAX_DROP_PX) {
                 return new Point(anchor.x + entry.followOffsetPx, anchor.y);
