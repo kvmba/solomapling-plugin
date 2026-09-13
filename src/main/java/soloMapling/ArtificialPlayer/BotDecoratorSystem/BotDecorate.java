@@ -4,6 +4,7 @@ import org.gms.client.Character;
 import org.gms.client.Job;
 import org.gms.client.inventory.InventoryType;
 import org.gms.client.BotTier;
+import soloMapling.ArtificialPlayer.BotMedalSystem.BotMedal;
 import soloMapling.itemPool.EquipMetadataCache;
 
 import java.util.Random;
@@ -337,6 +338,9 @@ public class BotDecorate {
         // any NX pieces.
         BotDecorateNX.apply(bot);
         BotFame.apply(bot);
+        // Title (称号/medal) after fame: the roll is level-based and the wearable check reads
+        // the bot's fame for reqPOP. Applied to every decorated bot type.
+        BotMedal.apply(bot);
         // Last: make the bot's raw stats cover everything it now wears, or the host's
         // canWearEquipment filter omits gear from the look packet and the bot renders bare.
         BotEquipStats.alignToEquipped(bot);
@@ -367,6 +371,8 @@ public class BotDecorate {
         if (BeginnerEquip.isBeginner(bot)) {
             BeginnerEquip.apply(bot);
             BotFame.apply(bot);
+            // Beginners (lv<10) never wear a title; this also clears any stale one.
+            BotMedal.apply(bot);
             BotEquipStats.alignToEquipped(bot);
             return;
         }
@@ -382,6 +388,8 @@ public class BotDecorate {
 
         BotDecorateNX.apply(bot);
         BotFame.apply(bot);
+        // Title (称号/medal); see the random-decoration path above.
+        BotMedal.apply(bot);
         // See the random path above: align raw stats to the worn gear so the host's
         // canWearEquipment filter keeps every piece in the look packet.
         BotEquipStats.alignToEquipped(bot);

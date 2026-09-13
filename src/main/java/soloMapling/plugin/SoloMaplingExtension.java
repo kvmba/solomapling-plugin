@@ -53,6 +53,7 @@ import soloMapling.companion.provisioning.SecureCompanionIdentityGenerator;
 import soloMapling.FreeMarket.FMShopDescGen;
 import soloMapling.itemPool.DesirableEquipList;
 import soloMapling.itemPool.EquipMetadataCache;
+import soloMapling.ArtificialPlayer.BotMedalSystem.BotMedalPool;
 import soloMapling.server.MethodScheduler;
 
 import java.time.Clock;
@@ -154,6 +155,7 @@ public final class SoloMaplingExtension implements ServerExtension {
         try {
             EquipMetadataCache.initialize();
             DesirableEquipList.load();
+            BotMedalPool.load();
             log.info("SoloMapling EquipMetadataCache + DesirableEquipList loaded");
         } catch (Throwable t) {
             log.warn("SoloMapling equip metadata prefetch failed (bots may still start lazily): {}", t.toString());

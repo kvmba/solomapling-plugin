@@ -33,6 +33,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import static soloMapling.ArtificialPlayer.BotClientHandler.getBotClient;
 import static soloMapling.ArtificialPlayer.BotCommandsPack.WarpCommands.botEnterPortalDropDown;
 import soloMapling.ArtificialPlayer.BotDecoratorSystem.BotFame;
+import soloMapling.ArtificialPlayer.BotMedalSystem.BotMedal;
 import static soloMapling.ArtificialPlayer.BotDecoratorSystem.BotDecorate.setBotVariables;
 import static soloMapling.ArtificialPlayer.BotMovementSystem.MovementCommands.microTurnAroundToLeft;
 import static soloMapling.DebugUtilities.debugprint;
@@ -330,6 +331,11 @@ public class BotGeneration {
         // Real clients apply gravity; headless companions need the same recorded
         // drop-down used by generated bots or they remain visually suspended.
         runAsync(() -> playSpawnChoreography(companion));
+        // Companions bypass BotDecorate (they load persisted state, not a rolled template),
+        // so give them a title here too. Level/job are final by now. Companions persist
+        // their character, so a granted medal sticks across restarts — reroll() clears any
+        // previous one first, keeping it to at most one at a time.
+        BotMedal.reroll(companion);
         debugprint("[BotGeneration] loaded persistent companion "
                 + companion.getName() + " (" + companion.getId() + ")");
         return companion;

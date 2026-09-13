@@ -94,6 +94,22 @@ public class BotCustomization {
         fakechar.equipChanged(); // Update fakechar avatar, doesn't work if they're not on screen
     }
 
+    /**
+     * Clears an equipped slot (e.g. the medal slot {@code -49}) and refreshes the bot's
+     * avatar so observers drop the piece too. No-op when the slot is empty or the bot is
+     * not in a map ({@code equipChanged} broadcasts to the bot's map).
+     */
+    public static void UnequipBot(Character fakechar, short dst) {
+        if (fakechar == null || fakechar.getMap() == null) {
+            return;
+        }
+        if (fakechar.getInventory(InventoryType.EQUIPPED).getItem(dst) == null) {
+            return;
+        }
+        fakechar.getInventory(InventoryType.EQUIPPED).removeSlot(dst);
+        fakechar.equipChanged();
+    }
+
     public static int getRandomChairId() {
         return getRandomNumber(v83_chair_ids);
     }

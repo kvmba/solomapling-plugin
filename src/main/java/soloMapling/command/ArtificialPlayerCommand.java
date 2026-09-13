@@ -16,6 +16,9 @@ import soloMapling.ArtificialPlayer.BotDecoratorSystem.BotDecorateBody;
 import soloMapling.ArtificialPlayer.BotDecoratorSystem.BotDecorateEquips;
 import soloMapling.ArtificialPlayer.BotDecoratorSystem.BotDecorateNX;
 import soloMapling.ArtificialPlayer.BotDecoratorSystem.BotFame;
+import soloMapling.ArtificialPlayer.BotMedalSystem.BotMedal;
+import soloMapling.ArtificialPlayer.BotMedalSystem.BotMedalAssigner;
+import soloMapling.ArtificialPlayer.BotMedalSystem.BotMedalPool;
 import soloMapling.ArtificialPlayer.BotMovementSystem.MovementCommands;
 import soloMapling.ArtificialPlayer.BotMovementSystem.MovementStructures.MovementRecording;
 import soloMapling.ArtificialPlayer.BotMessagingSystem.CharacterStorage;
@@ -399,6 +402,42 @@ public class ArtificialPlayerCommand extends Command {
                 player.yellowMessage("Re-rolled " + fakechar.getName() + " (lv" + fakechar.getLevel()
                         + ", " + fakechar.getTier() + ") fame -> " + fakechar.getFame());
                 break;
+            case "medal":
+                int medalId = BotMedal.currentMedalId(fakechar);
+                if (medalId == 0) {
+                    player.yellowMessage(fakechar.getName() + " (lv" + fakechar.getLevel()
+                            + ") wears no title. Legal pool: " + BotMedalPool.all().size() + " medals.");
+                } else {
+                    player.yellowMessage(fakechar.getName() + " (lv" + fakechar.getLevel() + ") title: "
+                            + medalId + " " + convertItemIdToName(medalId)
+                            + " (wear chance at this level: "
+                            + Math.round(BotMedalAssigner.wearChance(fakechar.getLevel()) * 100) + "%)");
+                }
+                break;
+            case "removemedal":
+                BotMedal.remove(fakechar);
+                player.yellowMessage("Removed title from " + fakechar.getName() + ".");
+                break;
+            case "givemedal": {
+                // Random legal, wearable medal (use the 3-number form !bot givemedal <cid> <itemId> to force one).
+                Integer grantId = BotMedalAssigner.pick(fakechar);
+                if (grantId == null) {
+                    player.yellowMessage("givemedal: no wearable medal for " + fakechar.getName()
+                            + " (lv" + fakechar.getLevel() + ", job " + fakechar.getJob() + ").");
+                    break;
+                }
+                BotMedal.equip(fakechar, grantId);
+                player.yellowMessage("Gave " + fakechar.getName() + " random title " + grantId + " "
+                        + convertItemIdToName(grantId) + ".");
+                break;
+            }
+            case "rerollmedal":
+                BotMedal.reroll(fakechar);
+                int rerolled = BotMedal.currentMedalId(fakechar);
+                player.yellowMessage("Re-rolled " + fakechar.getName() + " (lv" + fakechar.getLevel()
+                        + ") title -> " + (rerolled == 0 ? "none"
+                        : rerolled + " " + convertItemIdToName(rerolled)));
+                break;
             case "mount": {
                 boolean ok = soloMapling.ArtificialPlayer.BotMountSystem.BotMount.forceMount(fakechar);
                 soloMapling.ArtificialPlayer.BotSM bot =
@@ -541,6 +580,19 @@ public class ArtificialPlayerCommand extends Command {
                  */
                 EquipBot(fakechar, input3);
                 break;
+            case "givemedal": {
+                // Force a specific medal (must be a legal, Chinese-named, wearable medal).
+                if (!BotMedalPool.isLegal(input3)) {
+                    player.yellowMessage("givemedal: " + input3 + " is not a legal bot medal "
+                            + "(must be a real Chinese-named 114xxxx title, not 人气/宠物类). "
+                            + "Pool size: " + BotMedalPool.all().size() + ".");
+                    break;
+                }
+                BotMedal.equip(fakechar, input3);
+                player.yellowMessage("Gave " + fakechar.getName() + " title " + input3 + " "
+                        + convertItemIdToName(input3) + ".");
+                break;
+            }
 //            case "getslotinfo":
 //                testEquipDestinationSlot(c.getPlayer(), input3);
 //                break;
@@ -985,6 +1037,10 @@ public class ArtificialPlayerCommand extends Command {
         player.yellowMessage("!bot randombody <cid>            - random body decoration");
         player.yellowMessage("!bot randomequips <cid>          - random equip decoration");
         player.yellowMessage("!bot decoratenx <cid>            - apply NX decoration");
+        player.yellowMessage("!bot medal <cid>                 - show bot's title (medal) + wear chance");
+        player.yellowMessage("!bot givemedal <cid> [itemid]    - give a title (random legal, or force an id)");
+        player.yellowMessage("!bot removemedal <cid>           - remove bot's title");
+        player.yellowMessage("!bot rerollmedal <cid>           - re-roll bot's title");
         player.yellowMessage("!bot mount <cid>                 - force-mount bot (lv70+ mobile families / buying merchant)");
         player.yellowMessage("!bot dismount <cid>              - force-dismount bot");
         player.yellowMessage("!bot equip <cid> <itemid>        - equip item on bot");
