@@ -90,7 +90,7 @@ public final class SoloMaplingExtension implements ServerExtension {
      * engine is still finishing up behind it. Spawning bots into that contends for CPU
      * the server still needs to boot; waiting costs nothing since the waves are async.
      */
-    private static final long ENVIRONMENT_STARTUP_DELAY_MS = 5_000L;
+    private static final long ENVIRONMENT_STARTUP_DELAY_MS = 10_000L;
 
     private final CompanionLifecycleAccess companionLifecycleAccess =
             new CompanionLifecycleAccess();
