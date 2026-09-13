@@ -257,6 +257,9 @@ public class BotGeneration {
         } else {
             setBotVariables(bot, baseClass, minLevel, maxLevel, forcedJobId);
         }
+        // Pets, if the policy grants them. Level/job/gear are settled above, and
+        // the bot is already on its map, so the pets can be shown right away.
+        soloMapling.ArtificialPlayer.BotPetSystem.BotPetSystem.grant(bot);
         // Choreography sleeps ~2.5-6s in total; play it on a virtual thread so
         // mass spawning isn't gated on each bot's arrival animation. Drop-down ->
         // turn-around ordering is preserved because it's one sequential task.
@@ -435,6 +438,11 @@ public class BotGeneration {
     }
 
     public static void removeBotFromServer(Character fakechar) {
+        // Detach pets first: they must be shown leaving while the bot is still on
+        // its map. Ambient bots keep pets in memory only, so nothing is left
+        // behind; companions are skipped here (their saved pets persist).
+        soloMapling.ArtificialPlayer.BotPetSystem.BotPetSystem.remove(fakechar);
+        soloMapling.ArtificialPlayer.BotPetSystem.BotPetSystem.onBotRemoved(fakechar.getId());
         fakechar.getMap().removePlayer(fakechar);
         // Remove from the channel this bot actually lives on. Removing from a fixed channel
         // would leave a ghost entry behind on every other channel once bots are spread out.

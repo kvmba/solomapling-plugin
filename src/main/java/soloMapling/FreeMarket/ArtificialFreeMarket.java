@@ -387,6 +387,9 @@ public class ArtificialFreeMarket {
     // Bot Store Permits
 
     public static void BotPlayerStorePermit(Character fakechar) {
+        // A shop keeper does not walk around with a pet. The bot became a shop
+        // keeper here (not at spawn), so this is where its pet is taken back.
+        soloMapling.ArtificialPlayer.BotPetSystem.BotPetSystem.remove(fakechar);
         String desc = "Test";
         Integer shopItemId = getRandomStorePermitId();
         PlayerShop ps = new PlayerShop(fakechar, desc, shopItemId);

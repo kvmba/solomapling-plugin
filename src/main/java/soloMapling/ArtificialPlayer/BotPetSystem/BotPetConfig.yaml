@@ -1,0 +1,63 @@
+# =============================================================================
+# Bot Pet tuning. Read once at startup (no hot reload) from this file; a copy
+# under data/solomapling/override/... wins over the packaged one.
+# =============================================================================
+
+enabled: true
+
+# Carry chance = min(p_max, p_max * strength^exponent), where
+#   strength = (1 - tier_weight) * level/level_cap + tier_weight * tierScore
+#   tierScore: D=0.0  C=0.25  B=0.5  A=0.75  S=1.0
+# So the ceiling is p_max (30%) and only high-level, high-tier bots approach it.
+curve:
+  p_max: 0.30
+  level_cap: 120
+  exponent: 1.4
+  tier_weight: 0.25
+  min_level: 10          # below this a bot carries no pet (newbie island)
+
+# Count distribution, keyed on strength. The first band whose sMax exceeds the
+# strength wins; w = per-mille weights for carrying 1, 2 or 3 pets.
+counts:
+  - { sMax: 0.25, w: [100, 0, 0] }
+  - { sMax: 0.50, w: [80, 20, 0] }
+  - { sMax: 0.75, w: [60, 32, 8] }
+  - { sMax: 2.00, w: [45, 37, 18] }
+
+# Pet level stays low on purpose: level 1 + floor(strength * per_strength), capped.
+pet_level: { base: 1, per_strength: 4, max: 5 }
+
+# Chance a newly granted pet is given a random name (and a name-tag).
+naming: { chance: 0.70 }
+
+# Pet looting gear (equip slot per pet index). A pet can loot only if the
+# matching gear is equipped — exactly like a real client (host PetLootHandler).
+gear:
+  item_pouch:  { id: 1812001, chance: 0.60 }   # loots items
+  meso_magnet: { id: 1812000, chance: 0.30 }   # loots mesos
+  name_tag_chance: 0.70
+
+# Follow drive. Offsets are applied behind the bot on land; swim_offset is above
+# it in water. swim_follow_speed is px/s the pet glides in water.
+follow:
+  tick_ms: 300
+  eps_px: 25
+  base_offset: -40
+  step_offset: 40
+  swim_offset: 14
+  swim_follow_speed: 130.0
+  swim_dead_zone_px: 10
+
+# Pet looting (only for pets with the matching gear).
+pickup:
+  max_per_tick: 2
+  range: 120
+  player_nearby_range: 600
+
+# Persistent companions keep their pets across restarts (they are saved); ambient
+# template bots keep theirs in memory only and never touch the DB.
+persist:
+  companions: true
+
+# Free-market shop-running bots are excluded (their pet is removed when the shop opens).
+exclude_fm_shop: true

@@ -266,6 +266,9 @@ public final class HostCompanionRuntimeAdapter implements CompanionRuntimeAdapte
     public void attachAndStart(LoadedCompanion companion) {
         Character character = unwrap(companion);
         CompanionBot.attachAndStart(character, ProductionCompanionBrain.createDefault());
+        // Persistent pets: granted once the companion is live. Idempotent — a
+        // companion that already has pets (loaded from its saved state) keeps them.
+        soloMapling.ArtificialPlayer.BotPetSystem.BotPetSystem.grant(character);
     }
 
     @Override

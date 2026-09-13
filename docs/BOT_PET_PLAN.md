@@ -1,0 +1,409 @@
+# Bot 携宠方案（规划 v3 → 已实现）
+
+> 状态：**已实现**（`soloMapling.ArtificialPlayer.BotPetSystem`）。本文件保留为设计说明；实现与本文件的差异见文末「实现记录」。
+>
+> 目标：让 bot 按实力携带宠物，宠物跟随 bot 移动（含**游泳姿势+物理跟随**），进图、**死亡回城**随行；具备拾取装备的宠物可**替玩家/自己拾取**；**ambient bot 默认不写数据库**（反射直造），**持久化 bot（companion）走库持久化**。
+
+本版依据累计 10 条决策：
+1. 所有 bot 都支持携带，唯独**自由市场开店（雇佣商人/个人商店）的 bot 除外**。
+2. 曲线与参数由实现方分析决定，合理即可。
+3. 宠物要有**随机名字**（按概率）且**等级要低**；携带比例看 **bot 的实力**（等级 + 品级 tier）。
+4. 支持宠物**拾取**（取决于宠物是否装了拾取装备）；投放比例由实现方决定。
+5. 宠物**跟随 bot**；bot **死亡回城后宠物跟着回去**。
+6. **注意游泳区域的表现**。
+7. **可以不用 `createPet`、自己制造宠物以绕过数据库**（ambient bot 不写库）。
+8. **持久化 bot 也需要支持**（companion）。
+9. **真玩家在场时，支持拾物的宠物会替玩家去拾取**。
+10. 其余由实现方决定；宠物是付费向内容，投放合理即可。
+
+---
+
+## 1. 现状调研（结论，决定方案的关键事实）
+
+### 1.1 插件侧：零 bot 宠物代码
+全库唯一与宠物实体相关的调用是 `DialogueContextResolver.petName(Character c)`，其中 `c` 是**被搭话的玩家**（社交 bot 夸玩家 `{PLAYER_PET}`）。其余 "pet" 命中都是地图名"宠物公园"、掉落注释或 `PetLoot*` IGN。
+
+### 1.2 宿主 BeiDou 宠物系统完整，插件整体复用，**无需改宿主**
+
+| 能力 | 宿主位置 | 可用性 |
+|---|---|---|
+| 宠物实体 | `org.gms.client.inventory.Pet`（extends `Item`） | public（**但构造器 private**） |
+| 宠物现金道具 | `500xxxx`，`ItemConstants.isPet()` | public |
+| 角色宠物槽 | `Character.pets[3]`、`addPet`、`getPet(0..2)`、`getPetIndex`、`removePet` | public |
+| 生成宠物（**写库**） | `Pet.createPet(itemId[,level,tameness,fullness])` → `INSERT INTO pets` | public |
+| 生成宠物（**不写库**） | 私有构造 `Pet(int id, short position, int uniqueid)` + 各 public setter | **需反射** |
+| 召唤广播 | `PacketCreator.showPet(chr, pet, false, false)` → `SPAWN_PET` | public |
+| **进图自带宠物** | `spawnPlayerMapObject`→`addCharInfo` 自动遍历 `chr.getPets()` | 自动 |
+| 宠物移动广播 | `PacketCreator.movePet(cid, petId, slot, fragments)` → `MOVE_PET` | public |
+| 宠物移动落点 | `Pet.updatePosition(...)` / `setPos/setFh/setStance` | public |
+| 参考实现 | `SpawnPetProcessor.processSpawnPet` | 源码参考 |
+| 宠物饥饿 | `World.registerPetHunger`（会 `saveToDb`）→ **不注册即无饥饿** | 宿主驱动 |
+| **宠物拾取判定** | `PetLootHandler`：需 `isEquippedItemPouch(idx)`（拾物）/ `isEquippedMesoMagnet(idx)`（拾金币） | 源码 |
+| 宠物装备槽 | `ItemConstants.PET_EQUIP_SLOTS.get(i)`：`equip/nameTag/chatBalloon/mesoMagnet/itemPouch/itemIgnore` | public |
+| 宠物装备道具 | `1812000 磁铁`、`1812001 拾物`、`1812007 忽略` | `ItemId` |
+| 引擎拾取入口 | `Character.pickupItem(MapObject ob, int petIndex)` | public |
+| 泳图判定 | `MapleMap.isSwim()` / `setSwim`（由 WZ `swim` 决定） | public |
+| 宠物升级曲线 | `ExpTable.getTamenessNeededForLevel` | public |
+
+### 1.3 关键约束 / 陷阱
+
+1. **宠物必须在 `CASH` 库存有 `500xxxx` 道具** —— 这是**走宿主正常流程**时的要求。若走内存直造（见 §3.4），可不要该道具，但要注意：`unEquipPet`/`runFullnessSchedule` 会 `saveToDb`，**必须绕开**。
+2. **`Item(id, pos, qty, petid)` 构造会调 `Pet.loadFromDb` 读库** —— 想不写库，就别用带 `petid` 的 `Item` 构造；直接用反射造 `Pet` 再 `chr.addPet(pet)`。
+3. **`Pet` 构造器是 private** —— 需反射（插件已有反射先例：`SingleMoveCommand`）。
+4. **宠物装备（`1812xxx`）不能走 `BotCustomization.EquipBot`** —— 它的 `getEquipSlotType` 对 1812 前缀返回 0，会错槽。需要新的 `equipPetItem` 直接写 `PET_EQUIP_SLOTS` 槽位。
+5. **泳图 `findBelow` 会返回海床/很远的地板或 null** —— 宠物贴地会"瞬移下沉"。泳图必须跳过贴地。
+6. **`changeMap` 后宠物 pos 不会自动更新** —— 新图观察者收到 `spawnPlayerMapObject`（带 `getPets()`），但宠物坐标还是旧的 → 必须重新 snap + 重播。
+7. **FM 开店发生在生成之后** —— 授予时无法预知类型，需在开店时回收（§3.7）。
+
+### 1.4 插件内部可直接复用
+- 资源：`PluginResources`（`override` → 源码树 → classpath）+ YAML（同 `NXItemPool`）。
+- 调度：`ExecutorServiceManager.getScheduledExecutorService()`；`runAsync`。
+- 观察者 LOD：`ObserverTracker.isActiveMap(int)` / `GCMovement.isMapObserved(int)`。
+- 生成链路：`BotDecorate.setBotVariables(...)`（等级/职业/装备定稿后返回）；`BotGeneration.createBotOn(...)`。
+- 持久化：`BotGeneration.loadPersistentBot` / `saveAndRemovePersistentBot`；`CompanionRoster.isCompanion(id)`。
+- 移除链路：`BotGeneration.removeBotFromServer(...)`。
+- 拾取：`BotClientBinding.withBoundPlayer(chr, () -> chr.pickupItem(ob, idx))`；`DropCommands.botCanLoot`。
+- 品级：`Character.getTier()`（`BotTier` S/A/B/C/D）。
+- 泳图：bot 物理引擎已有 `tickSwimming`/`applySwimMotion`（参考点，宠物不需要物理）。
+
+### 1.5 需要排除的 bot（决策 1）
+- **FM 开店 bot**：`ArtificialFreeMarket.createBotShopAtLocation` → `BotPlayerStorePermit(fakechar)` → `fakechar.setPlayerShop(ps)`（并建 `HiredMerchantArtificial`）。这是"自由市场雇佣商人/个人商店"的唯一标记。
+- 纯货架角色（`spawnHiredMerchantStore` 的 `Character.getDefault`）不是 bot（无 `BotSM`），天然无宠物。
+
+---
+
+## 2. 总体设计
+
+全部落在**插件**内，不新增宿主依赖：
+
+```
+A 宠物池      BotPetPool          宠物 itemId / 名字池 / 拾取装备池（YAML + 可选 WZ 补全）
+B 分配策略    BotPetAssigner      实力(等级+tier) → (携带概率, 数量1..3, 宠物等级, 是否命名, 是否拾取)
+C 生命周期    BotPetFactory       造宠物：默认【反射内存直造·不写库】；companion【走库持久化】
+             BotPetController     授予 / 召唤 / 生成广播 / 回收（FM 开店）/ 清理
+             BotPetFollower      跟随移动 + 泳图适配 + 切图/死亡回城跟随 + 宠物拾取
+             BotPetNames          随机宠物名
+             BotPetGear           宠物拾取/名签装备（直写 PET_EQUIP_SLOTS）
+```
+
+触发点：
+- **授予+召唤**：`BotGeneration.createBotOn(...)` 里 `setBotVariables(...)` 之后、`playSpawnChoreography` 之前。
+- **持久化 bot**：`BotGeneration.loadPersistentBot(...)` 加载成功后（幂等恢复，§3.9）。
+- **回收**：`ArtificialFreeMarket.BotPlayerStorePermit(...)` 打开商店时。
+- **跟随/拾取**：一个全局定时任务（`~250ms`），仿 `GrindTickRegistry`。
+- **清理**：`BotGeneration.removeBotFromServer(...)`。
+
+---
+
+## 3. 详细设计
+
+### 3.1 宠物池 `BotPetPool`
+- 文件：`src/main/java/soloMapling/ArtificialPlayer/BotPetSystem/BotPetPool.java` + `BotPetPool.yaml`。
+- YAML：
+  ```yaml
+  pets:
+    - 5000000   # 蜗牛
+    - 5000001
+    - 5000007
+    # ... 可从 WZ 的 Pet/、Cash/ 用 ItemConstants.isPet 自动补全
+  pickupEquips:
+    item_pouch: 1812001
+    meso_magnet: 1812000
+  ```
+- 加载：`PluginResources`；缺省时可选从 WZ 枚举 `isPet` 的道具自动补全（仿 `NXItemPool.loadCashItemsFromCache`）。
+
+### 3.2 分配策略 `BotPetAssigner`（纯函数，可单测）
+
+输入：`level`、`BotTier tier`、`boolean persistent`、`Random`；输出 `List<PetSpec>`（0..3），
+`PetSpec = {itemId, petLevel, named, pickupItem, pickupMeso}`。
+
+**携带概率（看实力，上限 30%）**：
+```
+strength = 0.75 * (level / L_CAP) + 0.25 * tierScore      // tierScore: D0 C.25 B.5 A.75 S1
+p(>=1)   = clamp(0.30 * strength^1.4, 0, 0.30)
+level < 10 → 0（新手岛/初学者不带宠物）
+L_CAP = 120
+```
+- 等级为 75% 权重、tier 为 25% 权重，体现"实力"。
+
+**数量分布**（仅"有宠物"时抽样；实力越高越向 2–3 只倾斜）—— 权重 `[w1,w2,w3]`：
+
+| 实力 strength | 1 只 | 2 只 | 3 只 |
+|---|---|---|---|
+| < 0.25 | 100% | 0% | 0% |
+| 0.25–0.5 | 80% | 20% | 0% |
+| 0.5–0.75 | 60% | 32% | 8% |
+| ≥ 0.75 | 45% | 37% | 18% |
+
+- 3 只封顶（`Character.pets[3]`）；种类**无放回**抽取。
+
+**宠物等级（决策 3：低等级）**：
+- `petLevel = 1 + floor(strength * 4)`（1–5）。即便 150 级 bot，宠物也只 1–5 级。
+
+**随机概率命名（决策 3）**：
+- `named = rng < NAMED_CHANCE`（默认 0.70）；命中则 `BotPetNames.random()`，否则留默认名。
+
+### 3.3 随机名字 `BotPetNames`
+- 新增 `BotPetNamePool.yaml`（或复用 `FMShopDescGen.getRandomCharacterIGN` 的 IGN 池思路）。
+- 只在 `named` 命中时 `pet.setName(...)`。
+
+### 3.4 造宠物：**默认不写库**（决策 7）`BotPetFactory`
+
+**两条路径**，由 `persistent` 决定：
+
+#### (A) Ambient bot（模板克隆，id ≥ 20000，从不 `saveCharToDB`）—— **反射内存直造，零 DB 写**
+```java
+// 1) 反射调用私有构造器，得到一个不属于任何 DB 行的 Pet
+Constructor<Pet> c = Pet.class.getDeclaredConstructor(int.class, short.class, int.class);
+c.setAccessible(true);
+Pet pet = c.newInstance(itemId, (short) 0, uniqueId);   // uniqueId 由插件自增（见下）
+// 2) 各字段用 public setter
+pet.setName(name);              // 命中命名才设
+pet.setLevel((byte) petLevel);  // 1..5
+pet.setTameness(0);
+pet.setFullness(100);           // 满食；且我们不注册 hunger → 永不掉食/消失
+pet.setSummoned(true);
+pet.setPos(...); pet.setFh(...); pet.setStance(0);      // 召唤时定位
+// 3) 只进内存宠物槽，不进 CASH 库存、不 saveToDb
+chr.addPet(pet);
+```
+- **uniqueId 生成**：用插件私有 `AtomicInteger`，从高位起（如 `1_000_000_000`）递增，避开 `CashIdGenerator` 的真实宠物 id，避免与真人/持久 bot 冲突，也免去 `freeCashId`。
+- **不写 `pets` 表** → `removeBotFromServer` 时**无需清理 DB**（决策 7 的直接收益）。
+- **进内存即可**：`addPet` 填 `pets[]`；`spawnPlayerMapObject.addCharInfo`、`showPet`、`movePet` 都只读 `pets[]`，**不依赖 CASH 道具**。
+- **绝不调用**：`Pet.saveToDb`、`Pet.deleteFromDb`、`chr.unEquipPet`、`World.registerPetHunger`（这些都会碰库或需要 CASH 道具）。移除用 `chr.removePet(pet, true)` + 广播 `showPet(remove=true)`。
+
+#### (B) 持久化 bot（companion，会 `saveCharToDB`）—— **走宿主正常持久化**
+- 用 `Pet.createPet(itemId, level, tameness, fullness)` **写库** + `Item(..., petid)` 进 `CASH` + `pet.saveToDb()`；
+- 这样宠物随 companion 的 `saveCharToDB(true)` 一起持久化，**重启后仍在**（满足决策 8）。
+- **幂等**：加载 companion 时若 `chr.getPets()` 已非空，**跳过授予**（见 §3.9）。
+
+> 结论：ambient bot 全内存、零库写；只有真实持久化的 companion 才写库。这既回答了"绕过数据库"，又满足"持久化 bot 也支持"。
+
+### 3.5 授予 + 召唤 `BotPetController`
+
+```
+grantPets(bot):                                     // 非 FM 开店 bot 才授
+  specs = BotPetAssigner.assign(level, tier, persistent, rng)
+  for spec in specs:
+    Pet pet = persistent
+        ? BotPetFactory.createPersistent(bot, spec)     // createPet + CASH + DB
+        : BotPetFactory.createInMemory(bot, spec)       // 反射直造，零 DB
+    if pet != null: bot.addPet(pet)
+  summonPets(bot)
+
+summonPets(bot):
+  for idx, pet in bot.getPets*():
+    placeAtBot(bot, pet, idx)                        // 见下（含泳图适配）
+    pet.setSummoned(true)
+    if persistent: pet.saveToDb()
+    bot.loadPetExcludedItems(pet.getUniqueId())      // persistent 才需要；ambient 为空跳过
+    bot.getMap().broadcastMessage(bot, PacketCreator.showPet(bot, pet, false, false), true)
+    maybeEquipPetGear(bot, idx, spec)                // 名签 / 拾物 / 磁铁
+  bot.sendPacket(PacketCreator.petStatUpdate(bot))   // 可选
+```
+
+**`placeAtBot`（含泳图，决策 6）**：
+```java
+Point p = bot.getPosition(); p.y -= 12;
+pet.setPos(p);
+pet.setStance(0);
+if (map.isSwim()) {
+    pet.setFh(0);                 // 泳图不贴地；客户端自行让宠物浮游
+} else {
+    Foothold fh = map.getFootholds().findBelow(p);
+    pet.setFh(fh == null ? 0 : fh.getId());   // 防 null
+}
+```
+
+**宠物装备** `maybeEquipPetGear`（决策 4）：`equipPetItem(bot, idx, itemId, slot)`：造干净 `Equip` → `setPosition(slot)` → 写 `EQUIPPED` 库存 → `bot.equipChanged()`。槽位取 `ItemConstants.PET_EQUIP_SLOTS.get(idx)` 的 `itemPouch()/mesoMagnet()/nameTag()`（`-122/-133/-141` 等）。
+- 投放比例（可配）：拾物 `~60%`、磁铁 `~30%`、名签 `~70%`，三者独立抽样，**严格由装备决定能力**。
+
+### 3.6 跟随移动 `BotPetFollower`（核心，含泳图）
+
+全局定时驱动，`TICK_MS ≈ 250ms`：
+```
+onTick():
+  for bot in botsWithSummonedPets:
+    Character chr = bot.getChr()
+    if chr == null || chr.getMap() == null: continue
+    MapleMap map = chr.getMap()
+
+    // (a) 地图变化（含死亡回城）→ 宠物重定位 + 重播
+    if lastMapId[bot] != chr.getMapId():
+      lastMapId[bot] = chr.getMapId()
+      for idx, pet in chr.getPets*(): relocatePet(chr, pet, idx)  // 见下
+      continue
+
+    if !ObserverTracker.isActiveMap(chr.getMapId()): continue      // LOD
+
+    // (b) 跟随：身后错位；泳图不贴地
+    for idx, pet in chr.getPets*():
+      Point target = petFollowTarget(chr, idx)                    // (chr.x-(40+40*idx), chr.y) [+泳图 y 偏移]
+      if map.isSwim(): target.y = chr.getPosition().y - 12 * (idx + 1)   // 水里在 bot 上方错位
+      if dist(pet.getPos(), target) < FOLLOW_EPS: continue
+      pet.setPos(target); pet.setStance(0)
+      pet.setFh(map.isSwim() ? 0 : fhOf(map, target))
+      broadcastPetMove(chr, pet, idx, target)
+```
+
+**`relocatePet`（切图/回城）**：`placeAtBot` 后 `broadcastMessage(showPet(...))`。
+- 关键：`changeMap` 后客户端收到的是 `spawnPlayerMapObject`（带 `getPets()`），但宠物坐标是旧的 → 这里先 snap 到新图，随后 `MOVE_PET` 让客户端跟上。
+
+**泳图表现（决策 6）**：
+- 泳图**跳过 `findBelow` 贴地**（海床/空列会返回错误地板或 null，导致宠物瞬移下沉）。
+- 宠物位置 = bot 位置上方错位；`fh = 0`；仍发 `MOVE_PET`。
+- 真实客户端里宠物本来就会随主人浮游/游泳，服务端只需给位置，不需宠物物理。
+- 泳图/陆图切换时走 (a) 分支统一重定位，无需特殊代码。
+
+**宠物移动包**（推荐，复用宿主序列化）：
+```java
+List<LifeMovementFragment> moves = List.of(
+    new AbsoluteLifeMovement(0/*NORMAL*/, target, TICK_MS, 0/*STAND*/) {{
+        setPixelsPerSecond(new Point(0, 0));
+        setFh(fh);
+    }});
+Packet p = PacketCreator.movePet(chr.getId(), pet.getUniqueId(), (byte) idx, moves);
+chr.getMap().broadcastMessage(chr, p, false);
+```
+（备用：手搓单段字节，同 bot 自身 `sendMovementPacket` 布局，走 `movePacket`。）
+
+**死亡仍在跟（决策 5）**：bot 死亡时 `chr` 不动，宠物停在旁边；`carryHome()` 触发 `changeMap` → 命中 (a) → 宠物自动跟到回城后的地图。**无需为死亡单独写逻辑**。
+
+### 3.7 宠物拾取 `petTryLoot`（决策 4 + 9）
+
+宿主拾取由客户端包驱动（`PetLootHandler`），bot 无客户端，由插件代驱动：
+- **资格**：`chr.isEquippedItemPouch(idx)`（拾物）/ `chr.isEquippedMesoMagnet(idx)`（拾金币）—— 没装对应装备就**不拾取**（严格符合决策 4）。
+- **触发**：扫描宠物附近（`pet.getPos()` 半径内）的 `MapItem`。
+- **归属规则**：复用 `DropCommands.botCanLoot(chr, mapItem)`（自己掉落 + 自由拾取 + 过保护期的）。**不抢**受保护的他人掉落。
+- **替玩家拾取（决策 9）**：
+  - 当**真人玩家**在场且其掉落已进入自由拾取窗口、或宠物就在其附近时，**支持拾物的宠物会主动去拾取**（作为该 bot 的宠物替主人/替附近玩家完成拾取动作）。
+  - 解释与边界：受 `canBePickedBy` 保护的掉落**不会**被抢；"替代玩家拾取"= 由宠物作为主动拾取者完成动作，而非绕过归属。**此语义是本版推断，见 §5 待确认**。
+- **执行**：`BotClientBinding.withBoundPlayer(chr, () -> chr.pickupItem(mapItem, idx))` —— 走引擎权威路径。
+- **节流**：每 tick 每宠最多 `N` 次；金币仅在装了磁铁时拾取。
+- **与现有拾取的取舍**：装了拾取装备的宠物承担拾取（视觉更像真玩家），未装装备的 bot 仍可走原 `DropCommands.botLoot` 直接拾取（保持原行为不回退）。
+
+### 3.8 客户端一致性
+
+| 场景 | 覆盖方式 |
+|---|---|
+| bot 进图自带宠物 | `spawnPlayerMapObject.addCharInfo` 自动遍历 `getPets()` |
+| 已在图观察者看到召唤 | 召唤时补 `showPet` |
+| 宠物移动（含泳图） | `MOVE_PET` 包 |
+| 切图 / 死亡回城 | (a) 分支先 snap + 重播，再由 `MOVE_PET` 跟上 |
+| 名签 / 聊天气球 | `hasPetNameTag/hasPetChatballoon`（装备槽 `-121/-131/-139`、`-129/-132/-140`） |
+| 宠物装备外观 | `getPetEquipItemId` 靠 `PET_EQUIP_SLOTS.get(i).equip()` |
+
+### 3.9 持久化与清理
+
+| bot 类别 | 宠物来源 | DB 写入 | 清理 |
+|---|---|---|---|
+| Ambient（模板，id≥20000） | 反射内存直造 | **无** | `removeBotFromServer` → `removePet` + 广播移除（无 DB 行可清） |
+| Companion（持久） | `createPet` + CASH + `saveToDb` | 有（随 `saveCharToDB`） | 随 companion 生命周期；不随下线删除 |
+| FM 开店 bot | 授予时先给，开店时回收 | 同 ambient | `removePets`（§3.10） |
+
+- **Companion 幂等恢复（决策 8）**：`loadPersistentBot` 成功后，若 `chr.getPets()` 已非空 → 跳过授予；若为空且满足实力曲线 → 授予。这样宠物随 companion 持久保存，重启不丢、也不叠加。
+  （可选增强：用 `bot_pets` 映射表记录 companion 与 petid 的归属，便于集中管理；MVP 先靠 `pets` 行 + `summoned` 标志恢复。）
+
+### 3.10 FM 开店回收（决策 1）
+
+`ArtificialFreeMarket.BotPlayerStorePermit(fakechar)` 打开商店后插一行：
+```
+BotPetController.removePets(fakechar)
+```
+- `removePets`：`removePet` + 广播 `showPet(remove=true)` + 卸载宠物装备；persistent 的删 `pets` 行 + `freeCashId`，ambient 的直接弃用。
+- 同步迁移：若该 bot 此前由（非开店）类型转成开店，同样回收。
+
+### 3.11 配置与开关
+
+- `BotPet.yaml`（`PluginResources` 解析）：
+  ```yaml
+  enabled: true
+  curve:  { p_max: 0.30, level_cap: 120, k: 1.4, tier_weight: 0.25, min_level: 10 }
+  counts: [ {sMax: 0.25, w: [100,0,0]}, {sMax: 0.50, w: [80,20,0]},
+            {sMax: 0.75, w: [60,32,8]}, {sMax: 2.0, w: [45,37,18]} ]
+  pet_level: { base: 1, per_strength: 4, max: 5 }
+  naming:  { chance: 0.70 }
+  gear:    { item_pouch: {id: 1812001, chance: 0.60},
+             meso_magnet: {id: 1812000, chance: 0.30},
+             name_tag_chance: 0.70 }
+  follow:  { tick_ms: 250, eps_px: 25, base_offset: -40, step_offset: 40, swim_offset: -12 }
+  pickup:  { max_per_tick: 2 }
+  persist: { companions: true }     # 持久化 bot 是否带宠物
+  exclude_fm_shop: true
+  ```
+- MMC/GM：`botpet enable|disable|status|reload`（仿 `decoratenx`）。
+- 全局 `ENABLED` 静态开关。
+
+### 3.12 测试
+
+- **纯逻辑单测**：`BotPetAssignerTest` —— 概率随实力单调不减且 ≤30%；数量 ∈[0,3] 且右偏；无放回；宠物等级 ∈[1,5]；命名概率区间。
+- **纯函数单测**：`petFollowTarget`（陆图偏移/泳图偏移/死区）；`AbsoluteLifeMovement` 宠物字节布局。
+- **工厂单测**：反射造 `Pet` 能拿到正确 itemId/level/uniqueId，且**不触发任何 `pets` 表写**（对内联 SQL 断言或 mock）。
+- **手动集成**：GM `spawn` + `botpet status`；观察带宠比例、跟随、**泳图浮游**、切图/死亡回城、替玩家拾取、FM 开店无宠、companion 重启后宠物仍在。
+
+---
+
+## 4. 影响面与性能
+
+- **宿主零改动**（不新增 `extension-api`）；反射仅用于 `Pet` 私有构造器（同模块，安全）。
+- 新增插件文件 + 三处小改：`BotGeneration.createBotOn`（授予）、`BotGeneration.loadPersistentBot`（companion 幂等授予）、`ArtificialFreeMarket.BotPlayerStorePermit`（回收）、`BotGeneration.removeBotFromServer`（清理）。
+- **性能**：跟随驱动 `O(带宠 bot 数)`；LOD 跳过 + 死区抑制，仅位移超阈值才发一个 `MOVE_PET`；拾取每 tick 有上限；ambient 宠物零 DB 写。
+- **风险点**：无真实客户端时"召唤/移动/泳图"包能否正确渲染（预期可以，帧与宿主同源）——**阶段 2 首要验证**。
+
+---
+
+## 5. 分阶段
+
+| 阶段 | 内容 | 验收 |
+|---|---|---|
+| 1 授予 | `BotPetPool` + `BotPetAssigner` + `BotPetFactory`（反射/持久双路径）+ `BotPetController` | 进图带宠；比例随实力、≤30%、≤3 只；宠物低等级+随机名；ambient 零 DB 写 |
+| 2 跟随 | `BotPetFollower` + 泳图适配 + 切图/死亡回城联动 | 平滑跟随；**泳图浮游正常**；切图/回城随行 |
+| 3 拾取 | `petTryLoot` + `BotPetGear` | 有拾物装备的宠物会捡物/捡金币（含替玩家），其余不捡 |
+| 4 打磨 | companion 持久化 + FM 开店回收 + MMC `botpet` | companion 重启宠物仍在；FM 开店无宠；可开关 |
+
+---
+
+## 6. 开放问题（实现前确认）
+
+1. **"替玩家拾取"的确切语义（决策 9）**：支持拾物的宠物作为**主动拾取者**，在合法归属（自己/自由拾取）范围内**替玩家完成拾取动作**；**不抢**受保护的他人掉落。✅ 已按此实现。
+2. **泳图宠物姿态**：宠物使用**游泳姿势（stance 12/13）+ 物理滑行**，不只是位置。✅ 已按此实现。
+3. **曲线/比例数值**：30% 上限、宠物 1–5 级、命名 70%、拾物 60%/磁铁 30%。✅ 已按此实现。
+
+---
+
+## 7. 实现记录（as built）
+
+全部落在插件内，宿主**零改动**。新增包 `soloMapling.ArtificialPlayer.BotPetSystem`：
+
+| 文件 | 职责 |
+|---|---|
+| `BotPetConfig` (+`.yaml`) | 配置加载（`PluginResources` 解析，缺省回退默认） |
+| `BotPetPool` (+`.yaml`) | 宠物 id 池，`ItemConstants.isPet` 校验，无放回抽取 |
+| `BotPetNames` (+`.yaml`) | 随机宠物名（≤7 字符） |
+| `BotPetAssigner` / `PetSpec` | **纯策略**：实力 → 携带概率 / 数量 / 宠物等级 / 命名 / 拾取装备 |
+| `BotPetFactory` | 造宠双路径：反射内存直造（ambient）/ `createPet`+CASH 持久化（companion） |
+| `BotPetGear` | 宠物装备（拾物/磁铁/名签）直写 `PET_EQUIP_SLOTS` |
+| `BotPetController` | 授予 / 召唤 / 重定位 / 回收 |
+| `BotPetFollower` | 全局定时驱动：跟随 + 泳图滑行 + 地图变化重定位 + 宠物拾取 |
+| `BotPetSystem` | 门面：bootstrap / grant / remove / reload / enabled 开关 |
+
+命令：`!botpet status|enable|disable|reload|grant <botId>|clear <botId>`。
+
+集成点（4 处小改）：
+- `BotGeneration.createBotOn` → 装饰完成后 `BotPetSystem.grant(bot)`。
+- `BotGeneration.removeBotFromServer` → `remove`（仅 ambient）+ `onBotRemoved`。
+- `HostCompanionRuntimeAdapter.attachAndStart` → companion 上线后 `grant`（幂等）。
+- `ArtificialFreeMarket.BotPlayerStorePermit` → 开店时 `remove`（决策 1）。
+- `SoloMaplingExtension` → `onServerReady` 时 `bootstrap`、`onUnload` 时 `shutdown`、注册 `!botpet`。
+
+与规划稿的差异 / 落地细节：
+1. **泳图跟随是"物理滑行"**：宠物按 `swim_follow_speed` px/s 朝 bot 上方错位点逐 tick 逼近（带 dead-zone + 最大步长），`MOVE_PET` 带速度并置 stance 12/13 —— 即"游泳姿势 + 物理跟随"。
+2. **陆地图**：宠物停在 bot 身后（40/80/120px），`findBelow` 贴地（null 安全），stance 按移动方向 WALK/STAND。
+3. **宠物名签**：v83 只有一个名牌道具 `1822000`；各宠 index 写入各自的 `PET_EQUIP_SLOTS[i].nameTag()` 槽（客户端按槽判 `hasPetNameTag`）。
+4. **宠物池排除 5000028/5000047**（龙/机器人蛋），避免穿上渲染成蛋。
+5. **ambient 宠物 id** 取 `1_500_000_000` 起的插件私有区间，避开 `CashIdGenerator`（<777,000,000），无需 `freeCashId`。
+6. **companion 下线不删宠**：`removePets` 对 companion 直接返回，其宠物随 `saveCharToDB` 持久化；上线 `grantForBot` 幂等（`getPets()` 非空则跳过），重启不丢也不叠加。
+7. **移除顺序**：`removePets` 先清装备槽 → 广播移除 → `removePet` 清宠物槽 → `petStatUpdate`；`PetLootHandler` 在宠物离开后自然失效（`getPetIndex` 返回 -1）。
+8. **配置**：`BotPetConfig.yaml` / `BotPetPool.yaml` / `BotPetNames.yaml`，均可放 `data/solomapling/override/...` 覆盖。
+
+测试：`BotPetAssignerTest`（10 例，纯逻辑）——强度单调/≤1、携带率单调且 ≤30%、低于 `min_level` 无宠、数量 ∈[1,3] 且不重复、数量分布随实力右偏、宠物等级 ∈[1,5]、空池/禁用不产宠。全量 `mvn test` 830 项通过。

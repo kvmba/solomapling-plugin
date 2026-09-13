@@ -1,0 +1,59 @@
+# =============================================================================
+# Bot Pet Names - random names for named pets.
+# =============================================================================
+# Names must be <= 7 characters (the client truncates longer pet names).
+# Mixed-language on purpose: a bot sharing a map with players of any locale
+# reads fine. Drawn without replacement; duplicates are dropped on load.
+# =============================================================================
+
+names:
+  - Brownie
+  - Cocoa
+  - Mochi
+  - Biscuit
+  - Pepper
+  - Nugget
+  - Pudding
+  - Coco
+  - Momo
+  - Luna
+  - Mocha
+  - Bean
+  - Kiwi
+  - Mango
+  - Sesame
+  - Waffle
+  - Dumpling
+  - Noodle
+  - Tofu
+  - Bao
+  - Puff
+  - Snowy
+  - Shadow
+  - Sparky
+  - Bubbles
+  - Lucky
+  - Peanut
+  - Cookie
+  - Gizmo
+  - Taro
+  - Yuzu
+  - Miso
+  - Matcha
+  - Boba
+  - Chibi
+  - Kiki
+  - Lulu
+  - Nana
+  - Pip
+  - Roro
+  - Yoyo
+  - Zuzu
+  - Xiaohei
+  - Xiaobai
+  - Tuanzi
+  - Mantou
+  - Gougou
+  - Maomao
+  - Dudu
+  - Tangyuan

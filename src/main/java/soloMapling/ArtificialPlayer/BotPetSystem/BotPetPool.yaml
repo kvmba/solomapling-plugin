@@ -1,0 +1,56 @@
+# =============================================================================
+# Bot Pet Pool - pet item ids a SoloMapling bot may carry.
+# =============================================================================
+# Every entry must be a real pet item id (500xxxx); the loader validates with
+# the host's ItemConstants.isPet() and silently drops anything else.
+#
+# Curated from String.wz/Pet.img.xml (v83). The two evolution "egg" items are
+# intentionally excluded: 5000028 (Dragon) and 5000047 (Robo) — they are meant
+# to be hatched into their evolved pet, and would render as an egg when worn.
+#
+# Add or remove ids freely; order does not matter.
+# =============================================================================
+
+pets:
+  - 5000000   # Brown Kitty
+  - 5000001   # Brown Puppy
+  - 5000002   # Pink Bunny
+  - 5000003   # Mini Kargo
+  - 5000004   # Black Kitty
+  - 5000005   # White Bunny
+  - 5000006   # Husky
+  - 5000007   # Black Pig
+  - 5000008   # Panda
+  - 5000009   # Dino Boy
+  - 5000010   # Dino Girl
+  - 5000011   # Monkey
+  - 5000012   # White Tiger
+  - 5000013   # Elephant
+  - 5000014   # Rudolph
+  - 5000017   # Robot
+  - 5000018   # Husky
+  - 5000020   # Mini Yeti
+  - 5000022   # Turkey
+  - 5000023   # Penguin
+  - 5000024   # Jr. Balrog
+  - 5000025   # Golden Pig
+  - 5000026   # Sun Wu Kong
+  - 5000029   # Baby Dragon
+  - 5000030   # Green Dragon
+  - 5000031   # Red Dragon
+  - 5000032   # Blue Dragon
+  - 5000033   # Black Dragon
+  - 5000034   # Black Bunny
+  - 5000036   # Jr. Reaper
+  - 5000039   # Porcupine
+  - 5000041   # Snowman
+  - 5000042   # Kino
+  - 5000044   # Orange tiger
+  - 5000045   # Skunk
+  - 5000048   # Baby Robo
+  - 5000051   # Green Robo
+  - 5000054   # Snail
+  - 5000055   # Crys.Rudolph
+  - 5000058   # White Duck
+  - 5000060   # Pink Bean
+  - 5000066   # Baby Tiger
