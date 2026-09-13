@@ -128,16 +128,32 @@ public class GachaBot extends BotSM {
     // (the spray lands on that ledge's floor band, so leaving it would strand the loot), but a
     // perch it returns to every ~60s reads as a machine - a small shuffle keeps it looking alive.
     private static final double NUDGE_CHANCE = 0.35;
-    // Max shift from the current spot, snapped to whatever ground actually exists there.
-    private static final int NUDGE_RANGE_PX = 90;
+    // Shift distance is rolled per nudge (and the roll is symmetric), so the drift never repeats the
+    // same offset twice.
+    private static final int NUDGE_MIN_PX = 30;
+    private static final int NUDGE_MAX_PX = 140;
+    // A candidate a little below the current spot is still the same ledge band; this tolerates the
+    // small slope of a hill without letting the bot hop down to the floor beneath a platform.
+    private static final int NUDGE_MAX_DROP_PX = 30;
+
+    // True while a nudge walk is in flight, so the tick can reclaim the bot if the walk ends without
+    // firing the arrival callback (the driver drops it when it gives up on an unreachable target).
+    // Written by the driver's callback thread, read by the macro tick, hence volatile.
+    private volatile boolean nudgePending = false;
 
     private void maybeNudge() {
         if (ThreadLocalRandom.current().nextDouble() >= NUDGE_CHANCE) {
             return;
         }
-        Point pos = getChr().getPosition();
-        MapleMap map = getChr().getMap();
-        int dx = ThreadLocalRandom.current().nextInt(-NUDGE_RANGE_PX, NUDGE_RANGE_PX + 1);
+        Character chr = getChr();
+        Point pos = chr.getPosition();
+        MapleMap map = chr.getMap();
+        // Roll the distance per nudge (symmetric), so the shuffle never repeats the same offset.
+        int range = ThreadLocalRandom.current().nextInt(NUDGE_MIN_PX, NUDGE_MAX_PX + 1);
+        int dx = ThreadLocalRandom.current().nextInt(-range, range + 1);
+        if (dx == 0) {
+            return;
+        }
         // groundPointBelow is pure physics (no nav-graph build, no tick stall) and returns null on a
         // gap or drop-off, so a candidate that isn't on solid ground at the same height is discarded.
         Point dest = GCMovement.groundPointBelow(map, pos.x + dx, pos.y);
@@ -149,15 +165,28 @@ public class GachaBot extends BotSM {
         if (GCMovement.onDifferentLedge(map, pos.x, pos.y, dest.x, dest.y)) {
             return;
         }
-        GCMovement.move(getChr(), dest.x, dest.y);
+        // move() enables a dynamic session that HOLDS the shared movement lock until it is released,
+        // so hand the bot back the moment it arrives (the SocialBot relocation pattern) - otherwise
+        // it would sit under GC control forever and block its own recorded-movement routines.
+        nudgePending = true;
+        GCMovement.move(chr, dest.x, dest.y, () -> {
+            nudgePending = false;
+            GCMovement.disable(chr);
+        });
     }
-
-    // A candidate a little below the current spot is still the same ledge band; this tolerates the
-    // small slope of a hill without letting the bot hop down to the floor beneath a platform.
-    private static final int NUDGE_MAX_DROP_PX = 30;
 
     private void processReward() {
         return;
+    }
+
+    // Release any GC session a nudge still holds when this bot is torn down (stop / type conversion),
+    // so the shared movement lock is handed back before the next owner takes over. disable() is
+    // idempotent, so this is a no-op when no nudge is in flight.
+    @Override
+    public synchronized void stopScheduledTask() {
+        nudgePending = false;
+        GCMovement.disable(getChr());
+        super.stopScheduledTask();
     }
 
 
@@ -166,6 +195,13 @@ public class GachaBot extends BotSM {
         super.updateState();
         if (checkIfNotRunningOrPaused()) {
             return;
+        }
+        // If a nudge walk ended without firing its arrival callback (the driver drops the callback
+        // when it gives up on an unreachable target), reclaim the bot here so the GC session and the
+        // shared movement lock it holds are never stranded. disable() is idempotent.
+        if (nudgePending && !GCMovement.isMoving(getChr())) {
+            nudgePending = false;
+            GCMovement.disable(getChr());
         }
         getDebugger().debugLoggingFull(String.format("%s GachaBotState: %s", this.getChr().getName(), gachaBotState), String.format("%s", gachaBotState));
 
