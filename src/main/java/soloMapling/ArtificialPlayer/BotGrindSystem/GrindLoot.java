@@ -47,6 +47,9 @@ final class GrindLoot {
     private final GrindBrain b;
     private long lootNextMs = 0L;
     private long lastLootNarrateMs = 0L;
+    // The direction of the sweep in progress, held until that side runs out of drops (see tryWalkAndLoot).
+    private boolean sweepingRight = false;
+    private boolean sweeping = false;
 
     GrindLoot(GrindBrain brain) {
         this.b = brain;
@@ -55,6 +58,7 @@ final class GrindLoot {
     void reset() {
         lootNextMs = 0L;
         lastLootNarrateMs = 0L;
+        sweeping = false;
     }
 
     // Passive at-feet loot: scoop a single drop sitting directly at the bot's feet (staggered), wherever the
@@ -88,29 +92,29 @@ final class GrindLoot {
         if (pos == null) {
             return true; // loot exists but we can't route this tick — still "there's loot to deal with"
         }
-        // Route: near end = closest drop; far end = the farthest drop on the near end's side. Walking from the
-        // bot through the near end to the far end passes over the whole chain in one direction; drops on the far
-        // side of the bot are caught on a later sweep once the near ones are gone.
-        MapItem near = drops.get(0);
-        double nearSq = pos.distanceSq(near.getPosition());
-        for (MapItem mi : drops) {
-            double dsq = pos.distanceSq(mi.getPosition());
+        // The nearest drop is the blink entry (mages/hermits blink to it, then walk the chain out) — and
+        // it seeds the initial sweep direction. See sweepStep for why the direction is committed.
+        int nearIdx = 0;
+        double nearSq = pos.distanceSq(drops.get(0).getPosition());
+        for (int i = 1; i < drops.size(); i++) {
+            double dsq = pos.distanceSq(drops.get(i).getPosition());
             if (dsq < nearSq) {
                 nearSq = dsq;
-                near = mi;
+                nearIdx = i;
             }
         }
-        boolean sweepRight = near.getPosition().x >= pos.x;
-        MapItem far = near;
-        for (MapItem mi : drops) {
-            int mx = mi.getPosition().x;
-            if (sweepRight ? mx > far.getPosition().x : mx < far.getPosition().x) {
-                far = mi;
-            }
+        MapItem near = drops.get(nearIdx);
+        int[] xs = new int[drops.size()];
+        for (int i = 0; i < xs.length; i++) {
+            xs[i] = drops.get(i).getPosition().x;
         }
-        // Class-skill approach: mages blink / hermits flash-jump to the near end of the chain, then the sweep
-        // walk covers the rest. skillMoveToward carries every safety gate (style, cooldown, min distance,
-        // onDifferentLedge refusal); WALK-style bots and any refusal fall through to the plain walk below.
+        int[] step = sweepStep(xs, pos.x, nearIdx, sweeping, sweepingRight);
+        sweepingRight = step[0] != 0;
+        sweeping = true;
+        MapItem far = drops.get(step[1]);
+        // Class-skill approach: mages blink / hermits flash-jump to the near end of the chain, then the
+        // sweep walk covers the rest. skillMoveToward carries every safety gate (style, cooldown, min
+        // distance, onDifferentLedge refusal); WALK-style bots and any refusal fall through to the walk.
         Point nearGp = GCMovement.groundPointBelow(chr.getMap(), near.getPosition().x, near.getPosition().y);
         int nearY = (nearGp != null) ? nearGp.y : near.getPosition().y;
         if (b.engage.skillMoveToward(chr, near.getPosition().x, nearY)) {
@@ -121,9 +125,50 @@ final class GrindLoot {
         // Drive-by walk to the far end — no GCMovement.stop. Re-issue only when the far target shifts past the
         // epsilon (existing retarget pattern) so the walk runs uninterrupted across ticks.
         b.engaged = false;
-        walkToFarthestOnSide(chr, drops, near, far, x0, x1, "sweeping through a chain of drops");
+        walkToFarthestOnSide(chr, far, x0, x1, "sweeping through a chain of drops");
         vacuumWhileSweeping(chr);
         return true;
+    }
+
+    /**
+     * Pick the far end of the next sweep step for a COMMITTED direction.
+     *
+     * <p>The direction flips only when the current side has no drops left (one turn, then a clean pass
+     * over the other side) — never per tick. The old code re-derived it every tick from the current
+     * nearest drop, so as the bot walked a two-sided pile its nearest drop crossed under it and the
+     * walk reversed: the left-right shuffle. Holding the side still clears the whole pile, in two
+     * passes instead of a stutter.
+     *
+     * @param xs       the collectable drops' X coordinates
+     * @param botX     the bot's current X
+     * @param nearIdx  the closest drop's index (seeds the initial side)
+     * @param haveDir  whether a direction is already committed
+     * @param right    the committed direction when {@code haveDir}
+     * @return {@code {dirBit, farIndex}}; dirBit 1 = right, 0 = left
+     */
+    static int[] sweepStep(int[] xs, int botX, int nearIdx, boolean haveDir, boolean right) {
+        boolean dir = right;
+        if (!haveDir) {
+            dir = xs[nearIdx] >= botX;
+        } else {
+            boolean anyOnSide = false;
+            for (int x : xs) {
+                if (dir ? x >= botX : x <= botX) {
+                    anyOnSide = true;
+                    break;
+                }
+            }
+            if (!anyOnSide) {
+                dir = !dir; // this side is done -> turn once and sweep the other
+            }
+        }
+        int far = 0;
+        for (int i = 1; i < xs.length; i++) {
+            if (dir ? xs[i] > xs[far] : xs[i] < xs[far]) {
+                far = i;
+            }
+        }
+        return new int[] { dir ? 1 : 0, far };
     }
 
     /**
@@ -186,18 +231,8 @@ final class GrindLoot {
         return true;
     }
 
-    /** Walk to the chain's far end on the near end's side (see tryWalkAndLoot for the routing). */
-    private void walkToFarthestOnSide(Character chr, List<MapItem> drops, MapItem near, MapItem seed,
-                                      int x0, int x1, String narration) {
-        Point pos = chr.getPosition();
-        boolean sweepRight = near.getPosition().x >= pos.x;
-        MapItem far = seed;
-        for (MapItem mi : drops) {
-            int mx = mi.getPosition().x;
-            if (sweepRight ? mx > far.getPosition().x : mx < far.getPosition().x) {
-                far = mi;
-            }
-        }
+    /** Walk to the far end of the committed sweep direction (see tryWalkAndLoot for the routing). */
+    private void walkToFarthestOnSide(Character chr, MapItem far, int x0, int x1, String narration) {
         int tx = GrindBrain.clamp(far.getPosition().x, x0, x1);
         if (Math.abs(tx - b.lastMoveTargetX) >= GrindBrain.ROAM_RETARGET_EPS) {
             Point gp = GCMovement.groundPointBelow(chr.getMap(), far.getPosition().x, far.getPosition().y);
