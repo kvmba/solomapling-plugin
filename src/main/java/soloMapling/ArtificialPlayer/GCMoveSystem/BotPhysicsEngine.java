@@ -755,6 +755,11 @@ final class BotPhysicsEngine {
         entry.climbing = false;
         entry.climbRope = null;
         entry.crouching = false;
+        // Clearing swimming here too keeps the "stand still" helper honest on dry land: resolveStance
+        // ranks swimming above inAir/crouching, so a stale true would keep rendering the SWIM pose
+        // even as this method otherwise settles the bot into a grounded idle (the map-entry float,
+        // the deferred hand-over, and GCMovement.disable's settle all land here).
+        entry.swimming = false;
         entry.climbUpIntent = false;
         clearRopeEntryIntent(entry);
         entry.velY = 0f;
@@ -2003,6 +2008,11 @@ final class BotPhysicsEngine {
         entry.climbing = false;
         entry.climbRope = null;
         entry.crouching = false;
+        // swimming must be cleared with the other transient pose flags: it is a per-map fact (the bot
+        // is in water), and it outranks inAir/crouching in resolveStance. Left set across a map
+        // change it renders the SWIM pose on dry land with no way to recover - teleportTo /
+        // beginPortalDrop / markDead all route through here.
+        entry.swimming = false;
         entry.velY = 0f;
         entry.hspeed = 0.0;
         entry.physX = position.x;
