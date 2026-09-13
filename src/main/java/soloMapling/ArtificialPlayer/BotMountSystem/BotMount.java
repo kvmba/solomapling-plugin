@@ -78,17 +78,23 @@ public final class BotMount {
     private static final short SLOT_SADDLE = -19;
 
     /**
-     * The mount kits a bot can own: a 骑宠 (Tm, slot -18) paired with its 鞍子 (Sd, slot -19).
-     * Deliberately a fixed allow-list of a <b>complete, non-cash</b> pair present in this
-     * server's WZ — an item id the client's TamingMob data lacks (or a saddle with no mount)
-     * is a crash or a mountless rider for every viewer, so we never roll the whole 1902xxx /
-     * 1912xxx ranges.
+     * The mount kits a bot can own, as a 骑宠 (Tm, slot -18) + 鞍子 (Sd, slot -19) pair plus
+     * the mount's own level requirement. This is exactly the host's <b>Explorer mount
+     * family</b> ({@code ItemId.isExplorerMount}: Hog/Silver Mane/Red Draco + the explorer
+     * Saddle) — the set a normal (non-Cygnus, non-Aran) adventurer can ride, and the one the
+     * host's mount rules recognise.
      *
-     * <p>Hog 1902000 (reqLevel 70) + Saddle 1912000 (reqLevel 0) is the plain, non-cash farm
-     * mount. If more complete pairs are added to the WZ later, extend this array.
+     * <p>Both items must exist in the client's {@code Character.wz/TamingMob} with real frames
+     * AND the mount must pass the character's level check, or the host's {@code canWearEquipment}
+     * drops it from the look packet and the rider renders bare. Requiring the whole family
+     * present avoids that; a Cygnus-only mount (Mimiana/Mimio/Shinjou + 1912005) is deliberately
+     * excluded — explorers can't wear it.
      */
     private static final int[][] KITS = {
-            {1902000, 1912000}, // Hog + Saddle
+            // {mount (Tm), saddle (Sd), mount reqLevel}
+            {1902000, 1912000, 70},   // Hog          + Saddle
+            {1902001, 1912000, 120},  // Silver Mane  + Saddle
+            {1902002, 1912000, 200},  // Red Draco    + Saddle
     };
 
     /** Rider skill id: {@code sourceid % 10000000 == 1004} → {@code isMonsterRiding()}. */
@@ -110,7 +116,7 @@ public final class BotMount {
 
     /** Whether this bot owns a mount at all, decided stably from its character id. */
     public static boolean ownsMount(Character bot) {
-        return bot != null && kitIndexForId(bot.getId()) >= 0;
+        return bot != null && ownsMountForId(bot.getId());
     }
 
     /** Whether the bot is currently astride (has the riding buff registered). */
@@ -212,17 +218,43 @@ public final class BotMount {
         return h;
     }
 
-    /** Index into {@link #KITS} for a character id, or -1 when it owns no mount. */
-    static int kitIndexForId(int cid) {
-        if (Math.floorMod(mix(cid), 1000) >= (int) Math.round(OWN_CHANCE * 1000)) {
-            return -1;
-        }
-        return Math.floorMod(mix(cid), KITS.length);
-    }
-
     /** Pure ownership test (package-private for the determinism test). */
     static boolean ownsMountForId(int cid) {
-        return kitIndexForId(cid) >= 0;
+        return Math.floorMod(mix(cid), 1000) < (int) Math.round(OWN_CHANCE * 1000);
+    }
+
+    /**
+     * Deterministic kit index for a character id at a given level, or -1 if the bot owns no
+     * mount or qualifies for none. Each id has a fixed preferred kit rank; it rides the
+     * highest kit up to that rank which the level allows, so a bot can only ever UPGRADE its
+     * mount as it levels (never oscillate), and the choice is stable across restarts.
+     */
+    static int kitIndexForId(int cid, int level) {
+        if (!ownsMountForId(cid)) {
+            return -1;
+        }
+        int eligible = 0;
+        for (int[] kit : KITS) {
+            if (kit[2] <= level) {
+                eligible++;
+            }
+        }
+        if (eligible == 0) {
+            return -1; // owns a mount but is below every kit's reqLevel
+        }
+        int preferred = Math.floorMod(mix(cid), KITS.length);
+        return Math.min(preferred, eligible - 1);
+    }
+
+    /** The fanciest kit a level qualifies for (GM force-mount of a non-owner fallback). */
+    private static int[] eligibleKitRow(int level) {
+        int[] row = KITS[0];
+        for (int[] kit : KITS) {
+            if (kit[2] <= level) {
+                row = kit;
+            }
+        }
+        return row;
     }
 
     /**
@@ -287,9 +319,11 @@ public final class BotMount {
             return false;
         }
 
-        int kitIndex = kitIndexForId(bot.getId());
-        // A GM force-mount of a non-owner: fall back to the first kit so the pipe is testable.
-        int[] kit = kitIndex < 0 ? KITS[0] : KITS[kitIndex];
+        int kitIndex = kitIndexForId(bot.getId(), bot.getLevel());
+        // KITS is ordered by ascending reqLevel and kitIndexForId returns an index within the
+        // eligible prefix, so KITS[kitIndex] is already a kit this level may ride. A GM
+        // force-mount of a non-owner (kitIndex < 0) uses the fanciest kit the level allows.
+        int[] kit = kitIndex >= 0 ? KITS[kitIndex] : eligibleKitRow(bot.getLevel());
 
         learnRiderSkill(bot, skill);
         equipIfMissing(bot, kit[0], SLOT_MOUNT);   // 骑宠 Tm

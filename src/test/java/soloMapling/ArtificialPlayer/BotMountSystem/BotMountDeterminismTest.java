@@ -10,8 +10,8 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Locks the deterministic half of the mount system: which bots own a mount and which
- * kit (骑宠 + 鞍子 pair) they get, decided purely from the character id. This is the
+ * Locks the deterministic half of the mount system: which bots own a mount and which kit
+ * (骑宠 + 鞍子 pair) they get, decided purely from the character id and level. This is the
  * contract that lets a persistent companion keep the same mount across restarts with no
  * extra storage, and keeps the population's mount share near {@link BotMount#OWN_CHANCE}.
  */
@@ -22,8 +22,6 @@ class BotMountDeterminismTest {
         for (int cid = 100; cid < 5_000; cid++) {
             assertEquals(BotMount.ownsMountForId(cid), BotMount.ownsMountForId(cid),
                     "same cid must always answer the same way");
-            assertEquals(BotMount.kitIndexForId(cid), BotMount.kitIndexForId(cid),
-                    "same cid must always map to the same kit");
         }
     }
 
@@ -44,35 +42,51 @@ class BotMountDeterminismTest {
     }
 
     @Test
-    void kitIndexIsMinusOneExactlyForNonOwners() {
+    void nonOwnersMapToMinusOneAtEveryLevel() {
         for (int cid = 100; cid < 5_000; cid++) {
-            boolean owns = BotMount.ownsMountForId(cid);
-            int kit = BotMount.kitIndexForId(cid);
-            if (owns) {
-                assertTrue(kit >= 0, "owner cid " + cid + " must map to a real kit");
-            } else {
-                assertEquals(-1, kit, "non-owner cid " + cid + " must map to -1");
+            if (BotMount.ownsMountForId(cid)) {
+                continue;
             }
+            assertEquals(-1, BotMount.kitIndexForId(cid, 10), "non-owner cid " + cid);
+            assertEquals(-1, BotMount.kitIndexForId(cid, 200), "non-owner cid " + cid);
         }
     }
 
     @Test
-    void everyAllowListedMountIsReachable() {
+    void aLevel70OwnerAlwaysGetsAnEligibleKit() {
+        // At level 70 only the Hog kit (reqLevel 70) is eligible; a selected index must exist.
+        for (int cid = 100; cid < 20_000; cid++) {
+            if (!BotMount.ownsMountForId(cid)) {
+                continue;
+            }
+            int idx = BotMount.kitIndexForId(cid, 70);
+            assertTrue(idx >= 0 && idx < BotMount.mountIds().length,
+                    "level-70 owner cid " + cid + " must select a real kit, got " + idx);
+        }
+    }
+
+    @Test
+    void everyAllowListedMountIsReachableAtSomeLevel() {
         Set<Integer> seen = new HashSet<>();
-        for (int cid = 100; cid < 100_000; cid++) {
-            int kit = BotMount.kitIndexForId(cid);
-            if (kit >= 0) {
-                seen.add(kit);
+        for (int cid = 100; cid < 200_000; cid++) {
+            if (!BotMount.ownsMountForId(cid)) {
+                continue;
+            }
+            for (int level : new int[]{70, 120, 200}) {
+                int idx = BotMount.kitIndexForId(cid, level);
+                if (idx >= 0) {
+                    seen.add(idx);
+                }
             }
         }
         assertEquals(BotMount.mountIds().length, seen.size(),
-                "every allow-listed mount kit should be reachable by some cid");
+                "every allow-listed mount kit should be reachable by some (cid, level)");
     }
 
     @Test
-    void theAllowListOnlyCarriesRealMountItems() {
-        // Guard the sanity of the shipped allow-list without a live WZ: a v83 mount item is
-        // 1902xxx and its saddle is 1912xxx, both with a positive id.
+    void theAllowListOnlyCarriesExplorerMountItems() {
+        // v83 explorer mounts are 1902xxx (TamingMob); the Cygnus family (1912005 saddle /
+        // 1902005-1902007 mounts) is a different, explorer-incompatible set and must not appear.
         for (int mountId : BotMount.mountIds()) {
             assertTrue(mountId >= 1902000 && mountId < 1903000,
                     "mount id " + mountId + " is not a 1902xxx 骑宠 (TamingMob) item");
