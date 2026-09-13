@@ -516,8 +516,10 @@ final class GCMovementDriver {
      * over the leader's exact pixel (which reads as bots overlapping / humping the player).
      *
      * Rolled once per bot and then kept — re-rolling each tick would jitter the target and make the
-     * bot vibrate in place. Only honoured where the shifted point is real ground, so a bot never
-     * walks off a ledge or parks in mid-air to chase an offset it can't stand on.
+     * bot vibrate in place. On ground maps, only honoured where the shifted point is real ground, so
+     * a bot never walks off a ledge or parks in mid-air to chase an offset it can't stand on. In swim
+     * maps the offset is kept at the anchor's depth instead: there are no ledges to fall off and the
+     * ground clamp would otherwise collapse it back onto the leader (see the swim branch below).
      */
     private static Point followStandoffTarget(BotMovementState entry, Character bot) {
         Point anchor = entry.owner.getPosition();
@@ -538,6 +540,20 @@ final class GCMovementDriver {
             int magnitude = FOLLOW_OFFSET_MIN_PX
                     + ThreadLocalRandom.current().nextInt(FOLLOW_OFFSET_MAX_PX - FOLLOW_OFFSET_MIN_PX + 1);
             entry.followOffsetPx = ThreadLocalRandom.current().nextBoolean() ? magnitude : -magnitude;
+        }
+        // Swim maps (Aquarium etc.): the anchor is usually treading open water, not standing on a
+        // foothold, so the ground-clamp below resolves the shifted X onto the seafloor far beneath and
+        // gives up (`? anchor`) — collapsing the target back onto the leader's exact pixel, the very
+        // overlap this method exists to prevent. Underwater there are no ledges to walk off and every
+        // depth is swimmable, so keep the lateral stand-off at the anchor's own depth and skip the
+        // clamp. A leader still standing on a platform keeps nearby ground and takes the clamp as before.
+        MapleMap map = bot.getMap();
+        if (map != null && map.isSwim()) {
+            Point anchorGround = BotPhysicsEngine.findGroundPoint(map, anchor);
+            if (anchorGround == null
+                    || Math.abs(anchorGround.y - anchor.y) > FOLLOW_STANDOFF_MAX_DROP_PX) {
+                return new Point(anchor.x + entry.followOffsetPx, anchor.y);
+            }
         }
         // Clamp into the foothold the anchor stands on: findGroundPoint searches straight down, so an
         // offset X past the ledge edge would otherwise resolve onto whatever platform is below and the
