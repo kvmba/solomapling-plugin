@@ -47,11 +47,21 @@ public class DebugUtilities {
     // "Hello Julia, you have 42 items"
      */
     public static String fmt(String template, Object... args) {
-        String result = template;
+        // Plain indexOf substitution, not replaceFirst: the regex form compiles a Pattern on every
+        // call, and these fmt() calls sit on startup/wave paths (debugprint's own DEBUG guard cannot
+        // skip them - Java evaluates arguments before the call).
+        StringBuilder out = new StringBuilder(template.length() + args.length * 8);
+        int cursor = 0;
         for (Object arg : args) {
-            result = result.replaceFirst("\\{\\}", String.valueOf(arg));
+            int at = template.indexOf("{}", cursor);
+            if (at < 0) {
+                break;
+            }
+            out.append(template, cursor, at).append(arg);
+            cursor = at + 2;
         }
-        return result;
+        out.append(template, cursor, template.length());
+        return out.toString();
     }
 
     public static void main(String[] args) {
