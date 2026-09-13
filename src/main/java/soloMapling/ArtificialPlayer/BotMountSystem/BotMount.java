@@ -306,7 +306,10 @@ public final class BotMount {
         }
 
         long now = Server.getInstance().getCurrentTime();
-        long duration = effect.getDuration() > 0 ? effect.getDuration() : RIDE_SKILL; // 1004: time=2100000ms
+        // Skill `time` is stored in SECONDS (StatEffect.loadFromData multiplies by 1000), so
+        // 1004's time=2100000 lands as ~24 days — effectively the buff never lapses while the
+        // bot lives. The RIDE_SKILL fallback only matters if the duration were somehow absent.
+        long duration = effect.getDuration() > 0 ? effect.getDuration() : RIDE_SKILL;
         // Non-silent so the buff lands in the character's buff holders; that registration is
         // what makes every later spawn/warp packet carry the mount instead of a bare character.
         bot.registerEffect(effect, now, now + duration, false);
