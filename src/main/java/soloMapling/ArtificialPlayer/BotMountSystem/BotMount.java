@@ -58,12 +58,12 @@ import java.util.concurrent.ConcurrentHashMap;
  *       visible mount moves like one) — see {@code BotMovementProfile}. Nothing drains fatigue.</li>
  * </ul>
  *
- * <p>Applies to the four mobile families — 站街 (SocialBot), 打怪 (TrainingBot), 游走
- * (TownWandererBot) and 持久化 (CompanionBot) — plus the Free-Market buying merchant
- * (BuyingMerchantBot, which stands at the FM entrance and advertises what it wants to buy).
- * Each opts in via {@code BotSM.allowsMount()}. Entities that run a shop/stall do not
- * mount: the selling & NX merchants, the walking FM browser (FMBot), and the in-room
- * hired-merchant owners (bare Characters with no BotSM) are all excluded, along with
+ * <p>Applies to every bot that moves about its business and opts in via
+ * {@code BotSM.allowsMount()}: the four mobile families — 站街 (SocialBot), 打怪 (TrainingBot),
+ * 游走 (TownWandererBot) and 持久化 (CompanionBot) — plus all the mobile Free-Market bots
+ * (Buying/Selling/NX merchant bots, which stand at the FM entrance and advertise, and the
+ * walking FMBot browser). A shop/stall runner does NOT ride: the in-room hired-merchant and
+ * player-shop owners are bare Characters with no BotSM, so they are excluded, along with
  * gacha/blackjack/game-zone hosts, dice, drop-game, OPQ and the tutorial/staging bots.
  * The one {@link BotSM} tick drives all of them: {@link #tick(Character)} reconciles the
  * mount every tick (cheap no-op for a non-owner) and {@link #cancelForAction(Character)} is
@@ -303,12 +303,12 @@ public final class BotMount {
     }
 
     /**
-     * Whether this bot's type may ride at all. Opted in by the four mobile families
-     * (站街 / 打怪 / 游走 / 持久化) and the Free-Market buying merchant; every other bot —
-     * selling/NX merchants, the walking FM browser, gacha/blackjack/game-zone hosts, dice,
-     * drop-game, OPQ, tutorial — inherits the base {@code false}. A bot with no registered
-     * BotSM (shouldn't happen for a ticked bot) is treated as not allowed, so we never mount
-     * an unmanaged character.
+     * Whether this bot's type may ride at all. Opted in by every bot that moves about its
+     * business: the four mobile families (站街 / 打怪 / 游走 / 持久化) and the mobile Free-Market
+     * bots (buying/selling/NX merchants, and the walking FMBot browser). A shop/stall runner —
+     * the in-room hired-merchant and player-shop owners — is a bare Character with no registered
+     * BotSM, so it is never allowed here; gacha/blackjack/game-zone hosts, dice, drop-game, OPQ
+     * and the tutorial/staging bots also inherit {@code false}.
      */
     private static boolean allowsMount(Character bot) {
         BotSM owner = CharacterStorage.getBotById(bot.getId());

@@ -253,8 +253,7 @@ public class BuyingMerchantBot extends BotSM {
 
     @Override
     public boolean allowsMount() {
-        // 自由市场里唯一可骑宠的商人：买货商人站在入口喊话收东西，不摆摊。
-        // 卖货/NX 商人视为"开店"一类，店主要摆摊，故不可骑（见 BotMount 类注释）。
+        // FM 买货商人：站在入口喊话收东西（不摆摊），属于可动 bot，可骑宠。
         return true;
     }
 }

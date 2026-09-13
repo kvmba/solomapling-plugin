@@ -1046,7 +1046,7 @@ public class ArtificialPlayerCommand extends Command {
         player.yellowMessage("!bot givemedal <cid> [itemid]    - give a title (random legal, or force an id)");
         player.yellowMessage("!bot removemedal <cid>           - remove bot's title");
         player.yellowMessage("!bot rerollmedal <cid>           - re-roll bot's title");
-        player.yellowMessage("!bot mount <cid>                 - force-mount bot (lv70+ mobile families / buying merchant)");
+        player.yellowMessage("!bot mount <cid>                 - force-mount bot (lv70+ mobile bot; shop stall owners cannot mount)");
         player.yellowMessage("!bot dismount <cid>              - force-dismount bot");
         player.yellowMessage("!bot equip <cid> <itemid>        - equip item on bot");
         player.yellowMessage("!bot sethair <cid> <hairid>      - set bot hair style");

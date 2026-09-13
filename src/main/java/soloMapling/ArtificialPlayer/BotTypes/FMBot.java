@@ -502,4 +502,10 @@ public class FMBot extends BotSM {
         }
     }
 
+    @Override
+    public boolean allowsMount() {
+        // FM 逛店浏览者：走来走去逛商店，属于可动 bot，可骑宠。
+        return true;
+    }
+
 }

@@ -290,4 +290,10 @@ public class SellingMerchantBot extends BotSM {
             e.printStackTrace();
         }
     }
+
+    @Override
+    public boolean allowsMount() {
+        // FM 卖货商人：站在入口喊话卖东西（不摆摊），属于可动 bot，可骑宠。
+        return true;
+    }
 }
