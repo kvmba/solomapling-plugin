@@ -26,6 +26,7 @@ import soloMapling.ArtificialPlayer.BotPartySystem.BotPartyInviteBridge;
 import soloMapling.ArtificialPlayer.BotTradeSystem.BotTradeInviteBridge;
 import soloMapling.ArtificialPlayer.BotTradeSystem.SoloMaplingTradeParticipantHook;
 import soloMapling.ArtificialPlayer.LlmSystem.SocialLlmService;
+import soloMapling.ArtificialPlayer.BotMedalSystem.BotMedalPool;
 import soloMapling.Environment.EnvironmentManager;
 import soloMapling.Environment.EnvironmentPopulationConfig;
 import soloMapling.Environment.SoloMaplingLanguageConfig;
@@ -53,7 +54,6 @@ import soloMapling.companion.provisioning.SecureCompanionIdentityGenerator;
 import soloMapling.FreeMarket.FMShopDescGen;
 import soloMapling.itemPool.DesirableEquipList;
 import soloMapling.itemPool.EquipMetadataCache;
-import soloMapling.ArtificialPlayer.BotMedalSystem.BotMedalPool;
 import soloMapling.server.MethodScheduler;
 
 import java.time.Clock;

@@ -14,6 +14,10 @@
 
 ### Features
 
+- **Bot titles (称号/medals):** decorated bots roll, level-scaled, for a 称号 and wear it at spawn — no title below level 10, rising to a **50%** ceiling at level 130, with higher-level bots biased toward the fancier (reqLevel > 0) titles. A medal is the v83 `Me`-slot equip (`114xxxx`, slot `-49`), so wearing one is pure inventory state — the host's `addCharInfo` carries it in the look packet and the medal's own stat bonuses apply through the normal equip-stats recalculation. Bot play does not read those stats, so the effect is cosmetic.
+  - The legal pool is scanned once from the client `Character.wz` (the host `EquipType` has no MEDAL value, so `EquipMetadataCache` skips medals) and keeps only real, localized (han-character) titles, excluding 人气 / 宠物-intimacy titles.
+  - A bot only ever wears a medal it can legally wear (`reqLevel` / `reqJob` / `reqSTR…` / `reqPOP` all satisfied), and the title is re-rolled wherever the level or job is overridden (OPQ lobby, attack-test spawn, `!bot setlevel` / `setjob`).
+  - New GM commands: `!bot medal <cid>` (inspect), `!bot givemedal <cid> [itemid]`, `!bot removemedal <cid>`, `!bot rerollmedal <cid>`.
 - **SocialBot Hybrid LLM chat:** optional DeepSeek integration for free-form player dialogue during active SocialBot sessions (`solomapling.llm.*`). Menu options, party recruit, and goodbye remain YAML/rule-driven.
 - Uses [simple-openai](https://github.com/sashirestela/simple-openai) (`SimpleOpenAIDeepseek`); client + OkHttp/Jackson shaded into the plugin jar.
 - `DialogueContextResolver.buildSnapshot()` exports live game context into LLM system prompts.

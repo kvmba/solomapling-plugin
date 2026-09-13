@@ -554,6 +554,9 @@ public class ArtificialPlayerCommand extends Command {
                     break;
                 }
                 fakechar.setLevel(input3);
+                // Level is a medal wearability requirement, so re-roll the title to match
+                // (a level-down must not leave an unwearable medal on).
+                BotMedal.reroll(fakechar);
                 player.yellowMessage("Set " + fakechar.getName() + " to level " + input3);
                 break;
             case "setclass":
@@ -565,6 +568,8 @@ public class ArtificialPlayerCommand extends Command {
                     break;
                 }
                 fakechar.setJob(newJob);
+                // Job feeds the medal's reqJob gate, so re-roll the title to match the new class.
+                BotMedal.reroll(fakechar);
                 player.yellowMessage("Set " + fakechar.getName() + " to job " + newJob + " (" + input3
                         + ") - buffs: " + BotBuffConfig.buffsForJob(newJob));
                 break;
