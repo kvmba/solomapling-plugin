@@ -124,16 +124,15 @@ public class GachaBot extends BotSM {
         maybeNudge();
     }
 
-    // Chance the bot shifts position after a pickup. It never wanders off the ledge it works from
-    // (the spray lands on that ledge's floor band, so leaving it would strand the loot), but a
-    // perch it returns to every ~60s reads as a machine - a small shuffle keeps it looking alive.
+    // Chance the bot shifts position after a pickup. It walks to a fresh spot on the SAME walkable
+    // ledge (the walk-connected union of footholds under it), so it never strands the loot it sprays,
+    // but a perch it returns to every ~60s reads as a machine - roaming keeps it looking alive.
     private static final double NUDGE_CHANCE = 0.35;
-    // Shift distance is rolled per nudge (and the roll is symmetric), so the drift never repeats the
-    // same offset twice.
+    // A nudge must clear at least this, so it visibly moves instead of jittering in place.
     private static final int NUDGE_MIN_PX = 30;
-    private static final int NUDGE_MAX_PX = 140;
-    // A candidate a little below the current spot is still the same ledge band; this tolerates the
-    // small slope of a hill without letting the bot hop down to the floor beneath a platform.
+    // Ground-probe range used only when the map has no baked nav graph yet (no ledge to roam).
+    private static final int NUDGE_FALLBACK_PX = 120;
+    // On that fallback, tolerate a small height change (a hill) but not a hop down to another ledge.
     private static final int NUDGE_MAX_DROP_PX = 30;
     // Chance a nudge comes with a line from the Nudge node. Independent of NUDGE_CHANCE so a quiet
     // shuffle stays possible - narrating every move would read as a script.
@@ -150,22 +149,8 @@ public class GachaBot extends BotSM {
         }
         Character chr = getChr();
         Point pos = chr.getPosition();
-        MapleMap map = chr.getMap();
-        // Roll the distance per nudge (symmetric), so the shuffle never repeats the same offset.
-        int range = ThreadLocalRandom.current().nextInt(NUDGE_MIN_PX, NUDGE_MAX_PX + 1);
-        int dx = ThreadLocalRandom.current().nextInt(-range, range + 1);
-        if (dx == 0) {
-            return;
-        }
-        // groundPointBelow is pure physics (no nav-graph build, no tick stall) and returns null on a
-        // gap or drop-off, so a candidate that isn't on solid ground at the same height is discarded.
-        Point dest = GCMovement.groundPointBelow(map, pos.x + dx, pos.y);
-        if (dest == null || Math.abs(dest.y - pos.y) > NUDGE_MAX_DROP_PX) {
-            return;
-        }
-        // Same-ledge guard on a baked map: reject a target that sits on another walkable region, so
-        // "shift a spot" can never mean hopping to an adjacent platform. Peek-only - no graph build.
-        if (GCMovement.onDifferentLedge(map, pos.x, pos.y, dest.x, dest.y)) {
+        Point dest = pickLedgeSpot(chr.getMap(), pos);
+        if (dest == null || (dest.x == pos.x && dest.y == pos.y)) {
             return;
         }
         // move() enables a dynamic session that HOLDS the shared movement lock until it is released,
@@ -173,7 +158,7 @@ public class GachaBot extends BotSM {
         // it would sit under GC control forever and block its own recorded-movement routines.
         nudgePending = true;
         // A line to go with the shuffle, on its own roll - not every nudge, or the bot narrates its
-        // own routine. Says it as it starts moving, so it reads as muttering while it repositions.
+        // own routine. Said as it starts moving, so it reads as muttering while it repositions.
         if (ThreadLocalRandom.current().nextDouble() < NUDGE_TAUNT_CHANCE) {
             getDialogueHandler().executeBotFlavorDialogue("Nudge", this);
         }
@@ -181,6 +166,36 @@ public class GachaBot extends BotSM {
             nudgePending = false;
             GCMovement.disable(chr);
         });
+    }
+
+    // A random spot anywhere on the bot's current walkable ledge, or null to stay put. The ledge is
+    // the region under the bot - the WHOLE walk-connected floor band (many footholds), not one
+    // foothold - so it roams like a player instead of hovering near where it stood. peek* only: this
+    // never builds the graph, so it is safe on the macro tick. Falls back to a short same-height
+    // ground probe on a map that has no baked nav graph yet.
+    private Point pickLedgeSpot(MapleMap map, Point pos) {
+        GCMovement.Ledge ledge = GCMovement.peekLedgeAt(map, pos.x, pos.y);
+        if (ledge != null) {
+            int lo = ledge.minX();
+            int hi = ledge.maxX();
+            boolean leftOk = pos.x - lo >= NUDGE_MIN_PX;
+            boolean rightOk = hi - pos.x >= NUDGE_MIN_PX;
+            if (!leftOk && !rightOk) {
+                return null; // ledge too narrow to take a real step
+            }
+            boolean goLeft = leftOk && (!rightOk || ThreadLocalRandom.current().nextBoolean());
+            int x = goLeft
+                    ? ThreadLocalRandom.current().nextInt(lo, pos.x - NUDGE_MIN_PX + 1)
+                    : ThreadLocalRandom.current().nextInt(pos.x + NUDGE_MIN_PX, hi + 1);
+            return GCMovement.peekGroundPointInRegion(map, ledge.regionId(), x);
+        }
+        // No baked nav graph yet: no ledge to roam, so take a short same-height step instead.
+        int dx = ThreadLocalRandom.current().nextInt(-NUDGE_FALLBACK_PX, NUDGE_FALLBACK_PX + 1);
+        Point dest = dx == 0 ? null : GCMovement.groundPointBelow(map, pos.x + dx, pos.y);
+        if (dest == null || Math.abs(dest.y - pos.y) > NUDGE_MAX_DROP_PX) {
+            return null;
+        }
+        return dest;
     }
 
     private void processReward() {

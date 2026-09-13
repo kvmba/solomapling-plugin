@@ -791,6 +791,38 @@ public final class GCMovement {
         return r == null ? null : r.pointAt(x);
     }
 
+    /* Peek-only twin of groundPointInRegion: samples a region's ground line at x WITHOUT triggering a
+     * graph build (safe on a bot tick). Null when the map isn't baked or the region is unknown. */
+    public static Point peekGroundPointInRegion(MapleMap map, int regionId, int x) {
+        BotNavigationGraph g = BotNavigationGraphProvider.peekGraph(map);
+        if (g == null) {
+            return null;
+        }
+        BotNavigationGraph.Region r = g.getRegion(regionId);
+        return r == null ? null : r.pointAt(x);
+    }
+
+    /* Peek-only: the walkable ledge (region) under (x,y), or null when the map isn't baked, the point
+     * is on no ledge, or it sits on a rope. A region is the walk-connected union of all its
+     * footholds, so its [minX,maxX] is the WHOLE floor band the bot can walk - letting a caller sample
+     * the entire ledge instead of a fixed radius, without triggering a build. */
+    public static Ledge peekLedgeAt(MapleMap map, int x, int y) {
+        BotNavigationGraph g = BotNavigationGraphProvider.peekGraph(map);
+        if (g == null) {
+            return null;
+        }
+        int regionId = g.findRegionId(map, new Point(x, y));
+        if (regionId < 0) {
+            return null;
+        }
+        BotNavigationGraph.Region r = g.getRegion(regionId);
+        if (r == null || r.isRopeRegion) {
+            return null;
+        }
+        Point c = r.centerPoint();
+        return new Ledge(r.id, r.minX, r.maxX, c.x, c.y);
+    }
+
     /* Snap an arbitrary (possibly airborne) point down to the foothold it rests over, or null if there's
      * no floor below it. Lets a bot aim a move at a jumping/airborne mob's actual platform instead of its
      * raw y, so the pathfinder doesn't take a long detour to reach a mob that's really right in front. */
