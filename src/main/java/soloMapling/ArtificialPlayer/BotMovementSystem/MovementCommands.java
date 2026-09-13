@@ -501,6 +501,8 @@ public class MovementCommands {
         if (GCMovement.isEnabled(fakechar) && !GCMovement.isGrounded(fakechar)) {
             return;
         }
+        // A chair is a ground pose too - never sit while astride.
+        soloMapling.ArtificialPlayer.BotMountSystem.BotMount.cancelForAction(fakechar);
         fakechar.setChair(chairId);
         int stance = fakechar.getStance();
         InPacket sitPacket = createSitPacket(fakechar);

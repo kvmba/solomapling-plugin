@@ -79,6 +79,10 @@ public abstract class BotSM implements EventSubscriber {
     // One shared tick body for every (re)schedule path - start / priority change / nudge.
     private final Runnable tickRunnable = () -> {
         try {
+            // Mount reconciliation runs ahead of every gate so a bot is astride iff its pose
+            // allows it: walking/standing → mount, anything else (skill, air, rope, swim,
+            // chair, death) → dismount. Cheap no-op for the bots that own no mount.
+            soloMapling.ArtificialPlayer.BotMountSystem.BotMount.tick(getChr());
             // Death outranks everything the bot would otherwise do: a corpse does not grind,
             // wander or follow. Checked here rather than in each of the twenty-odd bot types
             // so the rule is stated once. Trading is let through on purpose - a dead bot in a

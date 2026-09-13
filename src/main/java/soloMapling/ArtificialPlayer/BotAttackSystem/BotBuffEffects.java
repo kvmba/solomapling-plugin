@@ -39,6 +39,10 @@ public final class BotBuffEffects {
     public static int showBuff(Character bot, int skillId) {
         if (bot == null || bot.getMap() == null) return 0;
 
+        // Casting a skill is never done from the saddle - drop the mount first so the
+        // riding model doesn't fight the cast pose. Cheap no-op for an unmounted bot.
+        soloMapling.ArtificialPlayer.BotMountSystem.BotMount.cancelForAction(bot);
+
         // Gate on the skill existing in Skill.wz BEFORE broadcasting: the client looks the id up
         // to play the cast animation, and an id that isn't there is a client crash for everyone
         // watching. Ids reach here straight from !bot castbuff/givebuff, so they are not trusted.

@@ -399,6 +399,20 @@ public class ArtificialPlayerCommand extends Command {
                 player.yellowMessage("Re-rolled " + fakechar.getName() + " (lv" + fakechar.getLevel()
                         + ", " + fakechar.getTier() + ") fame -> " + fakechar.getFame());
                 break;
+            case "mount": {
+                boolean ok = soloMapling.ArtificialPlayer.BotMountSystem.BotMount.forceMount(fakechar);
+                player.yellowMessage("Mount " + fakechar.getName() + " (lv" + fakechar.getLevel()
+                        + "): " + (ok ? "mounted" : "FAILED (null map or this map forbids mounts)"));
+                if (fakechar.getMapId() != player.getMapId()) {
+                    player.yellowMessage("Note: bot is on map " + fakechar.getMapId()
+                            + " - the mount only shows to players on the bot's map.");
+                }
+                break;
+            }
+            case "dismount":
+                soloMapling.ArtificialPlayer.BotMountSystem.BotMount.forceDismount(fakechar);
+                player.yellowMessage("Dismounted " + fakechar.getName() + ".");
+                break;
 
             // Party commands
             case "makeparty":
@@ -967,6 +981,8 @@ public class ArtificialPlayerCommand extends Command {
         player.yellowMessage("!bot randombody <cid>            - random body decoration");
         player.yellowMessage("!bot randomequips <cid>          - random equip decoration");
         player.yellowMessage("!bot decoratenx <cid>            - apply NX decoration");
+        player.yellowMessage("!bot mount <cid>                 - force-mount bot (lv70+ ride while walking/idle)");
+        player.yellowMessage("!bot dismount <cid>              - force-dismount bot");
         player.yellowMessage("!bot equip <cid> <itemid>        - equip item on bot");
         player.yellowMessage("!bot sethair <cid> <hairid>      - set bot hair style");
         player.yellowMessage("-- Movement --");

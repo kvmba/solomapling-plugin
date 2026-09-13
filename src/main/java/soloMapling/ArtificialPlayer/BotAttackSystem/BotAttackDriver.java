@@ -258,6 +258,11 @@ public final class BotAttackDriver {
             hits.put(mob, lines);
         }
 
+        // An attack is never made from the saddle: drop the mount right before the swing
+        // broadcasts (after the "would this actually hit?" gates, so a mount only comes
+        // off for a real strike, not every targeting tick).
+        soloMapling.ArtificialPlayer.BotMountSystem.BotMount.cancelForAction(bot);
+
         boolean killed = switch (profile.route) {
             case CLOSE  -> BotAttackEffects.meleeStrike(bot, hits, skillId, profile.skillLevel,
                     bodyActionId, facingMask, profile.speed, profile.hitDelayMs);
