@@ -211,6 +211,17 @@ public abstract class BotSM implements EventSubscriber {
         return this.botType;
     }
 
+    /**
+     * Whether this bot type may ride a mount. Only the four mobile families opt in
+     * (SocialBot 站街, TrainingBot 打怪, TownWandererBot 游走, CompanionBot 持久化);
+     * every other type — merchants, gacha/blackjack/game-zone hosts, dice, drop-game,
+     * OPQ and the tutorial/staging bots — inherits the default of false. Overridden by
+     * the four; checked by {@code BotMount} so a non-eligible bot never mounts.
+     */
+    public boolean allowsMount() {
+        return false;
+    }
+
     public void setRunning(boolean bool) {
         this.running = bool;
     }

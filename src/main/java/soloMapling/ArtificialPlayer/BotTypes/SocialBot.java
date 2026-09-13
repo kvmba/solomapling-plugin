@@ -1066,4 +1066,9 @@ public class SocialBot extends BotSM {
             lastInteractionTime = System.currentTimeMillis();
         }
     }
+
+    @Override
+    public boolean allowsMount() {
+        return true; // 站街
+    }
 }

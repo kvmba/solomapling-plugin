@@ -218,4 +218,9 @@ public class TownWandererBot extends BotSM {
         super.stopScheduledTask();
         log("[TownWandererBot] stopped: " + (chr != null ? chr.getName() : "?"));
     }
+
+    @Override
+    public boolean allowsMount() {
+        return true; // 游走
+    }
 }

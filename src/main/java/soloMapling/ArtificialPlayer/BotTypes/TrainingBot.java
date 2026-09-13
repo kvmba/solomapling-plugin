@@ -1492,4 +1492,9 @@ public class TrainingBot extends BotSM implements GrindTickRegistry.Participant 
         super.stopScheduledTask();
         log("[TrainingBot] stopped: " + (chr != null ? chr.getName() : "?"));
     }
+
+    @Override
+    public boolean allowsMount() {
+        return true; // 打怪
+    }
 }

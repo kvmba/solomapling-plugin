@@ -711,4 +711,9 @@ public final class CompanionBot extends BotSM implements
     private static String inviteKey(int inviterId, int partyId) {
         return inviterId + ":" + partyId;
     }
+
+    @Override
+    public boolean allowsMount() {
+        return true; // 持久化
+    }
 }
