@@ -24,7 +24,7 @@
 - **雇佣商人 ≈ 241**：FM 房间里的 `HiredMerchantArtificial` 是商店对象（`Character.getDefault` 造的壳），不是一个活的角色 bot。
 - **ScrollBot 10 个**：Wave 6 的 `convert_scroll_bots` 是把场上已有的 idle filler 改型，不新增人口。
 
-按 `spawn_rate_per_second: 50` 的限流，2355 个 bot 需要约 **47 秒（≈1 分钟）** 才能铺满；置 0 则不限流（一次性爆发）。
+按 `spawn_rate_per_second: 25` 的限流，2355 个 bot 需要约 **94 秒（≈1.5 分钟）** 才能铺满；置 0 则不限流（一次性爆发）。
 （FM 房间的雇佣商人不走 `createBot`，不受此限流约束——它们是同步建的，房间填充比这个快。）
 
 ---

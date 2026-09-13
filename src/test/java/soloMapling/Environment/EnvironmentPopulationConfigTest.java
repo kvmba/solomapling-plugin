@@ -101,9 +101,9 @@ class EnvironmentPopulationConfigTest {
     }
 
     @Test
-    void bundledYamlPacesSpawnsAtFiftyPerSecond() {
+    void bundledYamlPacesSpawnsAtTwentyFivePerSecond() {
         var plan = EnvironmentPopulationConfig.reload();
-        assertEquals(50, plan.spawnRatePerSecond());
+        assertEquals(25, plan.spawnRatePerSecond());
     }
 
     @Test
