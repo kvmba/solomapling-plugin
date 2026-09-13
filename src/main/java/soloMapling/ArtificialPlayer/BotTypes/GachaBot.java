@@ -16,6 +16,7 @@ import soloMapling.Environment.BotMessages;
 
 import java.util.Collections;
 import java.util.List;
+import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
 
 import static soloMapling.ArtificialPlayer.BotCommandsPack.DropCommands.botLootOwnerItems;
@@ -60,6 +61,10 @@ public class GachaBot extends BotSM {
         EventBus.getInstance().subscribe(EventType.SCROLLING, this);
     }
 
+    // Chance a spray comes with a taunt aimed at whoever is watching. Occasional, not every round -
+    // baiting on every single drop would read as a scripted loop instead of someone working the crowd.
+    private static final double TAUNT_CHANCE = 0.25;
+
     private void setPosition() {
         SocialCommands.BotChatbubble(getChr(), BotMessages.get("gacha.position_set"));
     }
@@ -77,6 +82,17 @@ public class GachaBot extends BotSM {
         // former and passes the latter through untouched.
         Item prize = prizeId > 0 ? GachaPrizePool.buildPrize(prizeId) : null;
         gachaPop(getChr(), createReactorDropList(filler), prize);
+        maybeTaunt();
+    }
+
+    // The bot's whole act is bait: it sprays a tempting pile of drops (occasionally a gutted
+    // "jackpot") and then picks them back up, daring whoever is watching to grab something first.
+    // A taunt lands on a fraction of sprays so it reads as someone working the crowd, not a script.
+    private void maybeTaunt() {
+        if (ThreadLocalRandom.current().nextDouble() >= TAUNT_CHANCE) {
+            return;
+        }
+        getDialogueHandler().executeBotFlavorDialogue("Taunt", this);
     }
 
     /**

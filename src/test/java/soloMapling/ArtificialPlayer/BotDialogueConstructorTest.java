@@ -137,6 +137,30 @@ class BotDialogueConstructorTest {
         }
     }
 
+    /**
+     * The GachaBot's bait act speaks from the Taunt node on a fraction of its sprays. A pack that
+     * dropped the node (or a language that forgot it) would silently mute the bot, so both languages
+     * must ship a healthy pool.
+     */
+    @Test
+    void gachaTauntNodeIsPresentInBothLanguages() {
+        for (String languageTag : Arrays.asList("en-US", "zh-CN")) {
+            SoloMaplingLanguageConfig.setLanguageTag(languageTag);
+            BotDialogueHandler.DialogueConstructor con =
+                    BotDialogueHandler.getDialogueCon("GachaBotDialogue.yaml", "GachaBot", "Taunt");
+            assertNotNull(con, languageTag + " GachaBot Taunt node missing");
+            List<String> lines = con.getDialogue();
+            assertFalse(lines.isEmpty(), languageTag + " GachaBot Taunt node has no lines");
+            assertTrue(lines.size() >= 100,
+                    languageTag + " GachaBot Taunt node should carry >= 100 lines, got " + lines.size());
+            for (int i = 0; i < lines.size(); i++) {
+                assertNotNull(lines.get(i), languageTag + " Taunt line " + i + " is null");
+                assertFalse(lines.get(i).isBlank(), languageTag + " Taunt line " + i + " is blank");
+                assertNotNull(con.getEmoteForIndex(i), languageTag + " Taunt line " + i + " has no emote");
+            }
+        }
+    }
+
     private static List<String> shippedPacks() {
         return Arrays.asList(
                 "BlackjackDealerBotDialogue.yaml",
@@ -144,6 +168,7 @@ class BotDialogueConstructorTest {
                 "DropGameSpectatorDialogue.yaml",
                 "FMBotDialogue.yaml",
                 "FollowerBotDialogue.yaml",
+                "GachaBotDialogue.yaml",
                 "GameZoneHostBotDialogue.yaml",
                 "HenesysBotDialogue.yaml",
                 "JQBotDialogue.yaml",
