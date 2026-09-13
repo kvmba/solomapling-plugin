@@ -11,7 +11,8 @@ import org.gms.server.StatEffect;
 import org.gms.server.maps.FieldLimit;
 import org.gms.server.maps.MapleMap;
 import org.gms.util.PacketCreator;
-import soloMapling.ArtificialPlayer.GCMoveSystem.GCMovement;
+import soloMapling.ArtificialPlayer.BotSM;
+import soloMapling.ArtificialPlayer.BotMessagingSystem.CharacterStorage;
 
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -36,19 +37,21 @@ import java.util.concurrent.ConcurrentHashMap;
  *       mount, decided DETERMINISTICALLY from the bot's character id — so a
  *       persistent companion keeps the same mount across restarts with no extra
  *       storage, and the crowd has a mount minority rather than everyone on a Hog.</li>
- *   <li>A bot is astride only while WALKING or STANDING STILL on solid ground.
- *       Casting a buff, swinging an attack, sitting a chair, climbing/swimming/
- *       falling all dismount it first — the client would otherwise render the
- *       wrong pose and the riding model would fight the skill animation.</li>
+ *   <li>A bot stays mounted through ALL normal movement — walking, standing,
+ *       jumping, climbing ropes/ladders, swimming and map changes — and only
+ *       dismounts for the three things a mount can't coexist with: casting a
+ *       skill (including any attack), sitting in a chair, and death. The skill /
+ *       attack / chair paths signal this eagerly via
+ *       {@link #cancelForAction(Character)}; the tick sweep is the backstop.</li>
  *   <li>Mounts are cosmetic on bots: no real speed change, no fatigue drain.
  *       They exist so the world reads like a populated server.</li>
  * </ul>
  *
  * <p>Applies to every bot family through the one {@link soloMapling.ArtificialPlayer.BotSM}
  * tick: 站街 (SocialBot), 打怪 (TrainingBot), 游走 (TownWandererBot) and 持久化
- * (CompanionBot). {@link #tick(Character)} reconciles the mount with the current pose
- * every tick (cheap no-op for a non-owner) and {@link #cancelForAction(Character)} is
- * the eager fail-safe the skill / attack / chair paths call before changing the pose.
+ * (CompanionBot). {@link #tick(Character)} reconciles the mount every tick (cheap
+ * no-op for a non-owner) and {@link #cancelForAction(Character)} is the eager
+ * fail-safe the skill / attack / chair paths call before they take the pose.
  */
 public final class BotMount {
 
@@ -115,12 +118,13 @@ public final class BotMount {
     }
 
     /**
-     * Reconcile the mount against the bot's present pose. Safe to call every tick:
+     * Reconcile the mount against the bot's present state. Safe to call every tick:
      * <ul>
      *   <li>owns no mount / below level / map forbids mounts → ensure dismounted;</li>
-     *   <li>walking or standing still (and on solid ground, off cooldown) → mount;</li>
-     *   <li>any other pose (skill pose, air, rope, swim, chair, death) → dismount.</li>
+     *   <li>else, unless {@link #forbidsMount} (chair or death), → ensure mounted;</li>
+     *   <li>chair or death → dismount.</li>
      * </ul>
+     * Normal movement (walk, jump, climb, swim, teleport, map change) never dismounts.
      * The skill / attack / chair paths also call {@link #cancelForAction} eagerly; this
      * tick sweep is the backstop.
      */
@@ -134,7 +138,7 @@ public final class BotMount {
             }
             return;
         }
-        if (isMountPose(bot)) {
+        if (!forbidsMount(bot)) {
             if (!isRiding(bot) && System.currentTimeMillis() >= remountAllowedAt(bot)) {
                 mount(bot, ownedMountId(bot));
             }
@@ -144,10 +148,11 @@ public final class BotMount {
     }
 
     /**
-     * Eager fail-safe for any action that changes the bot's pose to something a
-     * mount can't coexist with (a buff cast, an attack swing, a chair sit). Dismounts
-     * and arms the remount cooldown so a walk/swing cycle doesn't flicker the mount.
-     * Cheap no-op when the bot isn't riding.
+     * Eager fail-safe for the few actions a mount can't sit through: casting a skill
+     * (including any attack) and sitting a chair. Dismounts if astride and arms the
+     * remount cooldown so a walk/swing cycle doesn't flicker the mount. Death never
+     * routes here — the {@link #tick} sweep reads the corpse state directly. Cheap
+     * no-op when the bot isn't riding and owns no mount.
      */
     public static void cancelForAction(Character bot) {
         if (bot == null || (!ownsMount(bot) && !isRiding(bot))) {
@@ -199,20 +204,23 @@ public final class BotMount {
     }
 
     /**
-     * The only poses a mount may hold: idle standing or the walk cycle, on solid
-     * ground. Mirrors {@code MovementCommands.isStanding/isWalking}; anything else
-     * (jump/fall/swim/rope/chair/skill) is a dismount.
+     * The only poses a mount may NOT hold. A bot rides through every kind of normal
+     * movement — walking, standing, jumping, climbing ropes/ladders, swimming, map
+     * changes — so the ban is narrow: a chair (a distinct sit pose that owns the
+     * character's animation slots), or a corpse. Skill casting is not a persistent
+     * pose, so it is handled eagerly by {@link #cancelForAction} rather than here.
      */
-    private static boolean isMountPose(Character bot) {
+    private static boolean forbidsMount(Character bot) {
         if (bot.getChair() > 0) {
-            return false; // seated
+            return true; // seated — the chair owns the pose
         }
-        if (GCMovement.isEnabled(bot) && !GCMovement.isGrounded(bot)) {
-            return false; // mid-air / swimming / on a rope under GC control
+        // A body is never on horseback. Cover both the armed episode and a bot the host
+        // zeroed directly (decHP) that has not been adopted yet.
+        if (bot.getHp() <= 0) {
+            return true;
         }
-        int stance = bot.getStance();
-        // 2/3 = MOVING_RIGHT/LEFT, 4/5 = IDLE_RIGHT/LEFT (MovementEnums.StanceValues).
-        return stance == 2 || stance == 3 || stance == 4 || stance == 5;
+        BotSM owner = CharacterStorage.getBotById(bot.getId());
+        return owner != null && owner.death().isDead();
     }
 
     private static boolean mapForbidsMounts(Character bot) {
@@ -237,22 +245,28 @@ public final class BotMount {
             return;
         }
 
-        // v83 mountId convention (Character.loadCharFromDB): jobType*10000000 + 1004.
-        int mountId = bot.getJobType() * 10000000 + RIDE_SKILL;
-        Mount mount = bot.getMapleMount();
-        if (mount == null) {
-            mount = new Mount(bot, mountItemId, mountId);
-            bot.setMapleMount(mount);
-        } else {
-            mount.setItemId(mountItemId);
-            mount.setSkillId(mountId);
+        // Create the Mount object the look packet reads, if this bot has none yet, and set
+        // its item id (the id the client's TamingMob data resolves to a model).
+        if (bot.getMapleMount() == null) {
+            bot.setMapleMount(new Mount(bot, mountItemId, RIDE_SKILL));
         }
+        bot.getMapleMount().setItemId(mountItemId);
+        bot.getMapleMount().setSkillId(bot.getJobType() * 10000000 + RIDE_SKILL);
 
         long now = Server.getInstance().getCurrentTime();
         long duration = effect.getDuration() > 0 ? effect.getDuration() : RIDE_SKILL; // 1004: time=2100000ms
-        // Non-silent so the buff lands in the character's buff holders; that registration
-        // is precisely what every later spawn/warp packet reads to draw the mount.
+        // Non-silent so the buff lands in the character's buff holders; that registration is
+        // what makes every later spawn/warp packet carry the mount instead of a bare character.
         bot.registerEffect(effect, now, now + duration, false);
+        broadcastMountedLine(bot);
+    }
+
+    /** Broadcast the mount line so everyone already on the map sees the bot astride. */
+    private static void broadcastMountedLine(Character bot) {
+        Mount mount = bot.getMapleMount();
+        if (mount == null || bot.getMap() == null) {
+            return;
+        }
         bot.getMap().broadcastMessage(bot,
                 PacketCreator.showMonsterRiding(bot.getId(), mount), false);
     }
