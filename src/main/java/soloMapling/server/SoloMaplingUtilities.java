@@ -20,7 +20,10 @@ public class SoloMaplingUtilities {
     // A 1-in-N dice roll, NOT a percent chance: rollChanceInverse(20) is true one time in 20.
     // The bigger the number, the lower the chance. For percent semantics use chance(percent).
     public static boolean rollChanceInverse(int outOf) {
-        return new Random().nextInt(outOf) == 0;
+        // ThreadLocalRandom, not a fresh Random per call: callers hit this several times per bot
+        // tick (merchant/town flavour rolls), and constructing a Random each time reseeds from the
+        // entropy source. chance() already uses this; this just matches it.
+        return ThreadLocalRandom.current().nextInt(outOf) == 0;
     }
 
     // Use this for easy boolean % Chance calculating
@@ -43,8 +46,7 @@ public class SoloMaplingUtilities {
 
     public static <T> T getRandomElement(List<T> list) {
         try {
-            Random random = new Random();
-            return list.get(random.nextInt(list.size()));
+            return list.get(ThreadLocalRandom.current().nextInt(list.size()));
         } catch (IllegalArgumentException e) {
             return null; // or some default value
         }
