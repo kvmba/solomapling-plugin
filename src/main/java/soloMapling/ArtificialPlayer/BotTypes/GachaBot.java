@@ -105,7 +105,7 @@ public class GachaBot extends BotSM {
      * yaml is missing, so a broken file costs the gag rather than the bot.
      */
     private int rollPrizeId() {
-        GachaPrizePool pool = GachaPrizePool.load();
+        GachaPrizePool pool = GachaPrizePool.shared();
         if (pool.isEmpty()) {
             return 0;
         }

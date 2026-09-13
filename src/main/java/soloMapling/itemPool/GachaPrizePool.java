@@ -47,6 +47,10 @@ public class GachaPrizePool {
 
     private static final Random random = new Random();
 
+    /** Lazily-built shared pool; see {@link #shared()}. */
+    private static volatile GachaPrizePool SHARED;
+
+
     private final List<Entry> equips = new ArrayList<>();
     private final List<Entry> items = new ArrayList<>();
     private int equipTotalWeight = 0;
@@ -76,6 +80,25 @@ public class GachaPrizePool {
             log("GachaPrizePool: failed to load " + PRIZE_POOL_PATH + ": " + e.getMessage());
         }
         return pool;
+    }
+
+    /**
+     * The shared pool, parsed once. The yaml is a packaged resource, immutable at
+     * runtime, and every gacha bot rolls against the same entries - so re-reading and
+     * re-parsing the whole file on each round (each bot, every ~30s) is pure waste.
+     * {@link #load()} is kept for callers that want a fresh instance (tests).
+     */
+    public static GachaPrizePool shared() {
+        GachaPrizePool local = SHARED;
+        if (local == null) {
+            synchronized (GachaPrizePool.class) {
+                if (SHARED == null) {
+                    SHARED = load();
+                }
+                local = SHARED;
+            }
+        }
+        return local;
     }
 
     private static int loadSection(Map<String, Object> root, String key, List<Entry> into) {
