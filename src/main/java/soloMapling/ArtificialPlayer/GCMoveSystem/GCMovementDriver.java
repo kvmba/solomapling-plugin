@@ -5,6 +5,7 @@ import org.gms.constants.game.CharacterStance;
 import org.gms.server.maps.Foothold;
 import org.gms.server.maps.MapleMap;
 import soloMapling.ArtificialPlayer.BotHealthSystem.BotDeath;
+import soloMapling.ArtificialPlayer.BotMovementSystem.MovementCommands;
 
 import java.awt.Point;
 import java.awt.Rectangle;
@@ -287,7 +288,16 @@ final class GCMovementDriver {
         // nothing is lost by holding; botCancelChair clears the chair and the driver resumes normally.
         // Mirrors the old engine's getChair() > 0 guards in MovementCommands.
         if (bot.getChair() > 0) {
-            return;
+            // Only hold once the bot is actually on the ground. A seat pinned mid-air/mid-swim (a sit
+            // that raced the integrator, or one taken while a map change's portal float had the bot
+            // airborne) would otherwise freeze here in the SIT pose at whatever water/air column it sat
+            // in - the "bot sitting in the air" report - because this early return skips the very physics
+            // that grounds it. Clear the chair and fall through instead so the bot lands, then the chair
+            // hold (or nothing) re-engages on solid ground.
+            if (GCMovement.isGrounded(entry)) {
+                return;
+            }
+            MovementCommands.botCancelChair(bot);
         }
 
         // Rope rest hold (grind break): the bot is deliberately hanging idle on a rope. Freeze the hang and

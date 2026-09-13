@@ -506,6 +506,18 @@ public final class GCMovement {
         return st != null && st.climbing;
     }
 
+    /* True while the bot is standing on solid ground under GC control: not airborne, not swimming, not on
+     * a rope. The physics pose is authoritative for a GC-driven bot. False when the bot isn't under GC
+     * control (the old recorded engine owns it). Pose-pinning commands (a chair) gate on this so they never
+     * fire mid-swim/mid-fall — see MovementCommands.botSitChair. */
+    public static boolean isGrounded(Character bot) {
+        return isGrounded(bot == null ? null : STATES.get(bot.getId()));
+    }
+
+    static boolean isGrounded(BotMovementState st) {
+        return st != null && !st.inAir && !st.swimming && !st.climbing;
+    }
+
     /* Mark the bot as actively grinding so the movement layer's grind-specific guards engage — chiefly
      * it stops idle-hanging on a rope (shouldHoldClimbIdle) and instead dismounts to keep fighting.
      * Set on GRIND entry, cleared when the bot leaves the grind. */

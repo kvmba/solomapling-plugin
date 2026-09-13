@@ -11,6 +11,7 @@ import soloMapling.ArtificialPlayer.BotMovementSystem.MovementStructures.Movemen
 import soloMapling.ArtificialPlayer.BotMovementSystem.NavigationSystem.MapGraph;
 import soloMapling.ArtificialPlayer.BotMovementSystem.NavigationSystem.NavigationElement;
 import soloMapling.ArtificialPlayer.BotMovementSystem.NavigationSystem.PathFinder;
+import soloMapling.ArtificialPlayer.GCMoveSystem.GCMovement;
 import soloMapling.ArtificialPlayer.GCMoveSystem.LodCounts;
 import org.gms.util.PacketCreator;
 import org.gms.exception.EmptyMovementException;
@@ -490,6 +491,16 @@ public class MovementCommands {
     }
 
     public static void botSitChair(Character fakechar, Integer chairId) {
+        // A chair is a ground pose. Refuse to pin one on a GC-driven bot that is not actually standing
+        // on a foothold: mid-swim (the underwater-town resting pose - the bot treads water, no foothold
+        // under it) or mid-fall. The movement driver freezes every tick for a seated bot, so it would
+        // never run the swim/air physics that lands the bot - it would hang in the SIT pose at whatever
+        // water column it happened to be in (the reported "bot sitting in mid-air"). A chair is
+        // cosmetic, so skipping it here is lossless; a bot under the old recorded engine (not GC-enabled)
+        // is unaffected and sits as before.
+        if (GCMovement.isEnabled(fakechar) && !GCMovement.isGrounded(fakechar)) {
+            return;
+        }
         fakechar.setChair(chairId);
         int stance = fakechar.getStance();
         InPacket sitPacket = createSitPacket(fakechar);
