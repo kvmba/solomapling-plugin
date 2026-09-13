@@ -6,6 +6,7 @@ import org.gms.client.inventory.InventoryType;
 import org.gms.client.inventory.Item;
 import org.gms.constants.inventory.ItemConstants;
 import org.gms.server.ItemInformationProvider;
+import org.gms.server.TimerManager;
 import org.gms.server.maps.MapleMap;
 import org.gms.server.maps.Reactor;
 import org.gms.server.maps.ReactorDropEntry;
@@ -54,16 +55,17 @@ public class CustomReactor {
         return 0;
     }
 
-    public static void spawnReactor(Character fakechar) {
-        spawnReactor(fakechar.getPosition(), fakechar.getMap());
+    public static int spawnReactor(Character fakechar) {
+        return spawnReactor(fakechar.getPosition(), fakechar.getMap());
     }
 
-    public static void spawnReactor(Point position, MapleMap map) {
+    public static int spawnReactor(Point position, MapleMap map) {
         int reactorID = 2202004;
         Reactor reactor = new Reactor(ReactorFactory.getReactorS(reactorID), reactorID);
         reactor.setPosition(position);
         reactor.resetReactorActions(0);
         map.spawnReactor(reactor);
+        return reactor.getObjectId();
     }
 
     public static void deleteReactor(MapleMap map, int oid) {
@@ -112,6 +114,17 @@ public class CustomReactor {
         hitReactor(map, oid);
         hitReactor(map, oid);
         hitReactor(map, oid);
+    }
+
+    // Synth reactors (spawnReactor) never leave the map on their own: hitReactor bumps the
+    // state directly instead of going through Reactor.hitReactor, and destroyReactor's
+    // destroy() only removes an alive reactor with delay > 0. Left alone, one pile per gacha
+    // round accumulates forever, so schedule the box's removal once its spray + pickup window
+    // has passed.
+    private static final long REACTOR_CLEANUP_MS = 15000;
+
+    public static void scheduleReactorCleanup(MapleMap map, int oid) {
+        TimerManager.getInstance().schedule(() -> deleteReactor(map, oid), REACTOR_CLEANUP_MS);
     }
 
     public static List<ReactorDropEntry> createReactorDropList(List<Integer> itemIds) {
@@ -292,9 +305,11 @@ public class CustomReactor {
      * drift apart the moment one is filtered out.
      */
     public static void gachaPop(Character fakechar, List<ReactorDropEntry> drops, Item prize) {
-        spawnReactor(fakechar);
-        int nearestReactor = getNearestReactor(fakechar);
-        threeHitReactor(fakechar.getMap(), nearestReactor);
-        dropFromReactorCustom(fakechar.getMap(), nearestReactor, drops, fakechar, true, prize);
+        int reactorOid = spawnReactor(fakechar);
+        threeHitReactor(fakechar.getMap(), reactorOid);
+        dropFromReactorCustom(fakechar.getMap(), reactorOid, drops, fakechar, true, prize);
+        // The synthetic box never removes itself (see scheduleReactorCleanup) - each round
+        // otherwise leaks one more reactor onto the map.
+        scheduleReactorCleanup(fakechar.getMap(), reactorOid);
     }
 }

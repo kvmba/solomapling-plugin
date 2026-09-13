@@ -2,7 +2,6 @@ package soloMapling.ArtificialPlayer.BotTypes;
 
 import org.gms.client.Character;
 import org.gms.client.inventory.Item;
-import org.gms.server.maps.ReactorDropEntry;
 import soloMapling.ArtificialPlayer.BotCommandsPack.SocialCommands;
 import soloMapling.ArtificialPlayer.BotHelpers;
 import soloMapling.ArtificialPlayer.BotMessagingSystem.ChatMessage;
@@ -15,10 +14,8 @@ import soloMapling.server.EventMessageSystem.EventType;
 import soloMapling.server.EventMessageSystem.GameEvent;
 import soloMapling.Environment.BotMessages;
 
-import java.awt.*;
 import java.util.Collections;
 import java.util.List;
-import java.util.Queue;
 import java.util.concurrent.TimeUnit;
 
 import static soloMapling.ArtificialPlayer.BotCommandsPack.DropCommands.botLootOwnerItems;
@@ -27,19 +24,12 @@ import static soloMapling.ArtificialPlayer.BotMovementSystem.MovementCommands.Bo
 import static soloMapling.DebugUtilities.debugprint;
 import static soloMapling.MapVFX.CustomReactor.createReactorDropList;
 import static soloMapling.MapVFX.CustomReactor.gachaPop;
-import static soloMapling.ArtificialPlayer.BotDialogueHandler.getRandomDialogueLine;
 import static soloMapling.BotLogger.log;
 import static soloMapling.itemPool.GachaFillerSystem.createGachaListWithPrize;
 
 public class GachaBot extends BotSM {
     private GachaBotState gachaBotState = GachaBotState.RESET;
     private List<String> hint = Collections.singletonList(getChr().getName());
-
-    private long startTime;
-    private long endTime;
-
-    private Point basePosition;
-    private Queue<String> rewardQueue; // Queue for gacha rewards to react to
 
     public GachaBot(Character character) {
         super(character);
@@ -71,8 +61,6 @@ public class GachaBot extends BotSM {
     }
 
     private void setPosition() {
-        // Set the bot's main position where it will operate from
-        this.basePosition = getChr().getPosition();
         SocialCommands.BotChatbubble(getChr(), BotMessages.get("gacha.position_set"));
     }
 
@@ -117,24 +105,7 @@ public class GachaBot extends BotSM {
     }
 
     private void processReward() {
-//        SocialCommands.BotChatbubble(getChr(), "process reward!");
         return;
-
-//        // Read gachapon reward queue and do a reaction
-//        if (rewardQueue != null && !rewardQueue.isEmpty()) {
-//            String reward = rewardQueue.poll();
-//            reactToReward(reward);
-//        }
-    }
-
-    private void reactToReward(String reward) {
-        // React based on the reward received
-        String reaction = getRandomDialogueLine(GachaBot.this, "RewardReaction");
-        if (reaction != null && !reaction.isEmpty()) {
-            SocialCommands.BotSpeak(getChr(), reaction + " " + reward);
-        } else {
-            SocialCommands.BotSpeak(getChr(), BotMessages.get("gacha.wow", reward));
-        }
     }
 
 
@@ -218,11 +189,8 @@ public class GachaBot extends BotSM {
         // Process all queued events
         super.processQueuedEvents();
 
-        // Transition logic
-        if (super.hasQueuedEvents()) {
-            System.out.println("Events queued. staying in STAND BY 3");
-        } else {
-            // Move to next appropriate state
+        // Stay in STAND_BY_3 while events remain queued; otherwise advance.
+        if (!super.hasQueuedEvents()) {
             setGachaBotState(GachaBotState.STAND_BY_4);
         }
     }
