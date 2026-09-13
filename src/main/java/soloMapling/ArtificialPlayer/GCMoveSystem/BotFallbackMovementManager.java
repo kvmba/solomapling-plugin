@@ -69,6 +69,18 @@ final class BotFallbackMovementManager {
             return false;
         }
 
+        // Swim-map floor wall between the bot and a target on the far side: swim maps run on the
+        // heuristic fallback (no A* graph) and this kind of map has no rope, so the only way across
+        // an underwater wall is to leave the platform and swim over it. Without this the bot just
+        // idles against the wall forever (planGroundAction clears/idles a wall-blocked step). Hop
+        // into the water; the swim controller then rises above the wall top (computeSwimIntents'
+        // wall-ahead branch) and crosses it.
+        if (map != null && map.isSwim()
+                && BotPhysicsEngine.swimWallTopAhead(map, botPos, steeringTarget) != Integer.MIN_VALUE) {
+            BotMovementManager.initiateJump(entry, bot, Integer.signum(steeringTarget.x - botPos.x));
+            return true;
+        }
+
         if (shouldUseJump(entry, botPos, steeringTarget, stepX)) {
             BotMovementManager.initiateJump(entry, bot, steeringTarget.x - botPos.x);
             return true;

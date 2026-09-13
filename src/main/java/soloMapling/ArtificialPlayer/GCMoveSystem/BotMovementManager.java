@@ -726,18 +726,6 @@ class BotMovementManager {
         boolean canWalkStep = BotPhysicsEngine.canWalkGroundStep(entry.bot.getMap(), botPos, stepX);
         if (!canWalkStep) {
             boolean blockedByWall = BotPhysicsEngine.isGroundStepBlockedByWall(entry.bot.getMap(), botPos, stepX);
-            // Swim-map floor wall in the way of a target on the far side: swim maps run on the
-            // heuristic fallback (no A* graph) and have no rope here, so the only way across an
-            // underwater wall is to leave the platform and swim over it. On solid ground the code
-            // below would just idle (or clear the nav edge) and the bot would be stuck against the
-            // wall forever. Hop into the water instead; the swim controller then rises above the
-            // wall (computeSwimIntents' wall-ahead branch) and crosses it. Gated on a collidable
-            // wall ahead at the bot's own depth, so ordinary unwalkable steps are unaffected.
-            if (blockedByWall
-                    && entry.bot.getMap() != null && entry.bot.getMap().isSwim()
-                    && BotPhysicsEngine.swimWallTopAhead(entry.bot.getMap(), botPos, targetPos) != Integer.MIN_VALUE) {
-                return MoveAction.jump(Integer.signum(stepX));
-            }
             if (!blockedByWall
                     && ((directionalDrop && Integer.signum(stepX) == Integer.signum(entry.navEdge.launchStepX))
                     || BotFallbackMovementManager.shouldWalkOffLedge(entry, botPos, targetPos, stepX))) {
