@@ -2,18 +2,21 @@ package soloMapling.ArtificialPlayer.BotTypes;
 
 import org.gms.client.Character;
 import org.gms.client.inventory.Item;
+import org.gms.server.maps.MapleMap;
 import soloMapling.ArtificialPlayer.BotCommandsPack.SocialCommands;
 import soloMapling.ArtificialPlayer.BotHelpers;
 import soloMapling.ArtificialPlayer.BotMessagingSystem.ChatMessage;
 import soloMapling.ArtificialPlayer.BotMessagingSystem.MessageQueue;
 import soloMapling.ArtificialPlayer.BotMovementSystem.MovementStructures.MovementRecording;
 import soloMapling.ArtificialPlayer.BotSM;
+import soloMapling.ArtificialPlayer.GCMoveSystem.GCMovement;
 import soloMapling.itemPool.GachaPrizePool;
 import soloMapling.server.EventMessageSystem.EventBus;
 import soloMapling.server.EventMessageSystem.EventType;
 import soloMapling.server.EventMessageSystem.GameEvent;
 import soloMapling.Environment.BotMessages;
 
+import java.awt.Point;
 import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.ThreadLocalRandom;
@@ -118,7 +121,40 @@ public class GachaBot extends BotSM {
 //        SocialCommands.BotChatbubble(getChr(), "Running pickup!");
         SocialCommands.BotEmote(getChr(), 3);
         botLootOwnerItems(getChr(), getChr().getPosition(), 12000);
+        maybeNudge();
     }
+
+    // Chance the bot shifts position after a pickup. It never wanders off the ledge it works from
+    // (the spray lands on that ledge's floor band, so leaving it would strand the loot), but a
+    // perch it returns to every ~60s reads as a machine - a small shuffle keeps it looking alive.
+    private static final double NUDGE_CHANCE = 0.35;
+    // Max shift from the current spot, snapped to whatever ground actually exists there.
+    private static final int NUDGE_RANGE_PX = 90;
+
+    private void maybeNudge() {
+        if (ThreadLocalRandom.current().nextDouble() >= NUDGE_CHANCE) {
+            return;
+        }
+        Point pos = getChr().getPosition();
+        MapleMap map = getChr().getMap();
+        int dx = ThreadLocalRandom.current().nextInt(-NUDGE_RANGE_PX, NUDGE_RANGE_PX + 1);
+        // groundPointBelow is pure physics (no nav-graph build, no tick stall) and returns null on a
+        // gap or drop-off, so a candidate that isn't on solid ground at the same height is discarded.
+        Point dest = GCMovement.groundPointBelow(map, pos.x + dx, pos.y);
+        if (dest == null || Math.abs(dest.y - pos.y) > NUDGE_MAX_DROP_PX) {
+            return;
+        }
+        // Same-ledge guard on a baked map: reject a target that sits on another walkable region, so
+        // "shift a spot" can never mean hopping to an adjacent platform. Peek-only - no graph build.
+        if (GCMovement.onDifferentLedge(map, pos.x, pos.y, dest.x, dest.y)) {
+            return;
+        }
+        GCMovement.move(getChr(), dest.x, dest.y);
+    }
+
+    // A candidate a little below the current spot is still the same ledge band; this tolerates the
+    // small slope of a hill without letting the bot hop down to the floor beneath a platform.
+    private static final int NUDGE_MAX_DROP_PX = 30;
 
     private void processReward() {
         return;
