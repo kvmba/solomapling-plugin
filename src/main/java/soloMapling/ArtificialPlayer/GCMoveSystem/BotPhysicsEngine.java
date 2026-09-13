@@ -125,6 +125,11 @@ final class BotPhysicsEngine {
         // the swim-burst animation gates the next effective jump to ~500ms.
         public int SWIM_JUMP_COOLDOWN_MS = 500;
         public int SWIM_LEVEL_BAND_PX = 30;          // |dy| <= this = "same level" → UP hold
+        // Clearance above a blocking wall's top the swim controller aims for before resuming normal
+        // horizontal steering over it. Sized well past SWIM_JUMP_BURST_PXS's per-tick rise and the
+        // wall thickness so the bot is unambiguously above the wall, not level with its lip (which
+        // the swept collision can still clip). See computeSwimIntents' wall-ahead branch.
+        public int SWIM_WALL_CLEAR_PX = 40;
         public int SWIM_DOWN_BAND_PX = 120;          // dy in (level, this] = free sink; > this = DOWN hold
         public int SWIM_JUMP_TRIGGER_DY_PX = 100;    // dy <= -this px = trigger JUMP burst (with cooldown)
     }
@@ -509,6 +514,49 @@ final class BotPhysicsEngine {
 
     static boolean isGroundRunwayBlockedByWall(MapleMap map, Point from, Point to) {
         return findGroundWallCollision(map, from, to).type() == AirCollisionType.WALL;
+    }
+
+    /*
+     * Wall top a swimmer must rise above to pass horizontally from `from` toward `to`, or
+     * Integer.MIN_VALUE when no collidable vertical wall currently blocks that path. Considers only
+     * walls strictly between the two X's, in the travel direction, whose vertical span contains the
+     * swimmer's current depth (a wall already behind or fully above the bot does not block), and
+     * returns the HIGHEST such wall top (smallest Y) — clearing every blocking wall's top clears them
+     * all. Mirrors the swim integrator's own wall test in applySwimMotion, whose horizontal component
+     * is zeroed on WALL; without an explicit target the greedy swim controller never rises past a
+     * same-level wall and just pins against it (Aqua Road / Crystal Canyon floor walls).
+     */
+    static int swimWallTopAhead(MapleMap map, Point from, Point to) {
+        if (map == null) {
+            return Integer.MIN_VALUE;
+        }
+        return swimWallTopAhead(collisionIndex(map).collidableWalls(), from, to);
+    }
+
+    static int swimWallTopAhead(java.util.List<Foothold> collidableWalls, Point from, Point to) {
+        if (collidableWalls == null || from == null || to == null) {
+            return Integer.MIN_VALUE;
+        }
+        int dir = Integer.signum(to.x - from.x);
+        if (dir == 0) {
+            return Integer.MIN_VALUE;
+        }
+        int requiredTop = Integer.MIN_VALUE;
+        for (Foothold wall : collidableWalls) {
+            int wx = wall.getX1();
+            if (dir > 0 ? (wx <= from.x || wx >= to.x) : (wx >= from.x || wx <= to.x)) {
+                continue;
+            }
+            int minY = Math.min(wall.getY1(), wall.getY2());
+            int maxY = Math.max(wall.getY1(), wall.getY2());
+            if (from.y < minY || from.y > maxY) {
+                continue;
+            }
+            if (requiredTop == Integer.MIN_VALUE || minY < requiredTop) {
+                requiredTop = minY;
+            }
+        }
+        return requiredTop;
     }
 
     static boolean isGroundFarBelow(MapleMap map, Point position) {

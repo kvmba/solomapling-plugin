@@ -529,6 +529,27 @@ class BotMovementManager {
         if (dx >  hRadius) entry.swimMoveDir =  1;
         else if (dx < -hRadius) entry.swimMoveDir = -1;
 
+        // Same-level wall ahead: the vertical intent below is derived only from the target's
+        // relative height, so an underwater floor wall between the bot and a target at its own depth
+        // gets no vertical input at all — the bot just pins against the wall (applySwimMotion zeroes
+        // vx on WALL) and never crosses it (Aqua Road / Crystal Canyon floor walls). Rise above the
+        // wall top first; once the bot is clear of the top the normal steering below resumes and the
+        // horizontal push carries it across.
+        int wallTopY = BotPhysicsEngine.swimWallTopAhead(entry.bot.getMap(), pos, targetPos);
+        if (wallTopY != Integer.MIN_VALUE && pos.y > wallTopY - BotPhysicsEngine.cfg.SWIM_WALL_CLEAR_PX) {
+            // Still below the clearance: hold UP AND burst on cadence. Burst (not the UP hold alone)
+            // is what gains height — the UP-hold terminal is still a slow sink, and a ground-jump
+            // launch only lifts ~160px in water, well short of an underwater wall. Keep bursting until
+            // the bot is clear, then fall through to the normal steering below to cross.
+            entry.swimVerticalHold = -1;
+            long nowWallMs = System.currentTimeMillis();
+            if (nowWallMs >= entry.swimNextJumpAtMs) {
+                entry.swimJumpRequested = true;
+                entry.swimNextJumpAtMs = nowWallMs + BotPhysicsEngine.cfg.SWIM_JUMP_COOLDOWN_MS;
+            }
+            return;
+        }
+
         // Arrival band: bot is essentially on top of the target both axes.
         // Hold UP just to maintain altitude, no burst, no horizontal push —
         // prevents the jump/sink oscillation when bot overshoots target by a
@@ -705,6 +726,18 @@ class BotMovementManager {
         boolean canWalkStep = BotPhysicsEngine.canWalkGroundStep(entry.bot.getMap(), botPos, stepX);
         if (!canWalkStep) {
             boolean blockedByWall = BotPhysicsEngine.isGroundStepBlockedByWall(entry.bot.getMap(), botPos, stepX);
+            // Swim-map floor wall in the way of a target on the far side: swim maps run on the
+            // heuristic fallback (no A* graph) and have no rope here, so the only way across an
+            // underwater wall is to leave the platform and swim over it. On solid ground the code
+            // below would just idle (or clear the nav edge) and the bot would be stuck against the
+            // wall forever. Hop into the water instead; the swim controller then rises above the
+            // wall (computeSwimIntents' wall-ahead branch) and crosses it. Gated on a collidable
+            // wall ahead at the bot's own depth, so ordinary unwalkable steps are unaffected.
+            if (blockedByWall
+                    && entry.bot.getMap() != null && entry.bot.getMap().isSwim()
+                    && BotPhysicsEngine.swimWallTopAhead(entry.bot.getMap(), botPos, targetPos) != Integer.MIN_VALUE) {
+                return MoveAction.jump(Integer.signum(stepX));
+            }
             if (!blockedByWall
                     && ((directionalDrop && Integer.signum(stepX) == Integer.signum(entry.navEdge.launchStepX))
                     || BotFallbackMovementManager.shouldWalkOffLedge(entry, botPos, targetPos, stepX))) {
