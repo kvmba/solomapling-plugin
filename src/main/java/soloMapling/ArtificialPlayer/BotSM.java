@@ -212,11 +212,12 @@ public abstract class BotSM implements EventSubscriber {
     }
 
     /**
-     * Whether this bot type may ride a mount. Only the four mobile families opt in
-     * (SocialBot 站街, TrainingBot 打怪, TownWandererBot 游走, CompanionBot 持久化);
-     * every other type — merchants, gacha/blackjack/game-zone hosts, dice, drop-game,
-     * OPQ and the tutorial/staging bots — inherits the default of false. Overridden by
-     * the four; checked by {@code BotMount} so a non-eligible bot never mounts.
+     * Whether this bot type may ride a mount. Opted in by the four mobile families
+     * (SocialBot 站街, TrainingBot 打怪, TownWandererBot 游走, CompanionBot 持久化) and the
+     * Free-Market buying merchant (BuyingMerchantBot); every other type — selling/NX
+     * merchants, the walking FM browser, gacha/blackjack/game-zone hosts, dice, drop-game,
+     * OPQ and the tutorial/staging bots — inherits the default of false. Checked by
+     * {@code BotMount} so a non-eligible bot never mounts.
      */
     public boolean allowsMount() {
         return false;

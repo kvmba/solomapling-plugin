@@ -116,11 +116,15 @@ public final class BotMount {
     // botId -> epoch-ms before which this bot must not remount (set by cancelForAction).
     private static final Map<Integer, Long> remountBlockedUntil = new ConcurrentHashMap<>();
 
+    // Bots a GM force-mounted even though the deterministic roll gave them no mount. Kept so the
+    // tick sweep treats them as owners and does not immediately undo the forced mount.
+    private static final java.util.Set<Integer> forcedOwners = ConcurrentHashMap.newKeySet();
+
     private BotMount() {}
 
     /** Whether this bot owns a mount at all, decided stably from its character id. */
     public static boolean ownsMount(Character bot) {
-        return bot != null && ownsMountForId(bot.getId());
+        return bot != null && (ownsMountForId(bot.getId()) || forcedOwners.contains(bot.getId()));
     }
 
     /** Whether the bot is currently astride (has the riding buff registered). */
@@ -175,27 +179,39 @@ public final class BotMount {
     }
 
     /**
-     * Force-mount for the GM test command, ignoring the ownership / pose / cooldown gates.
-     * Still refuses the hard world rules — below {@link #MIN_LEVEL}, no map, or a map that
-     * forbids mounts — because the tick sweep would undo it a moment later, so reporting
-     * failure here is the honest answer. A GM-spawned non-owner still gets the full kit.
+     * Force-mount for the GM test command, ignoring the ownership / cooldown gates. Still
+     * refuses the hard world rules — below {@link #MIN_LEVEL}, a bot type that may not ride, no
+     * map, or a map that forbids mounts — because the tick sweep would undo it a moment later,
+     * so reporting failure here is the honest answer. A GM-spawned bot the roll gave no mount
+     * still gets the full kit, and is remembered as a forced owner so the tick keeps it mounted.
      */
     public static boolean forceMount(Character bot) {
         if (bot == null || bot.getMap() == null || bot.getLevel() < MIN_LEVEL
                 || !allowsMount(bot) || mapForbidsMounts(bot)) {
             return false;
         }
+        if (!ownsMountForId(bot.getId())) {
+            forcedOwners.add(bot.getId());
+        }
         return mount(bot);
     }
 
-    /** Force-dismount for the GM test command; holds it off like any action does. */
+    /**
+     * Force-dismount for the GM test command. Also clears any forced-owner override, so a bot a
+     * GM force-mounted stays off rather than remounting when the action cooldown lapses.
+     */
     public static void forceDismount(Character bot) {
+        if (bot == null) {
+            return;
+        }
+        forcedOwners.remove(bot.getId());
         cancelForAction(bot);
     }
 
-    /** Release a despawned bot's cooldown bookkeeping so the maps don't grow unbounded. */
+    /** Release a despawned bot's mount bookkeeping so the maps don't grow unbounded. */
     public static void forget(int botId) {
         remountBlockedUntil.remove(botId);
+        forcedOwners.remove(botId);
     }
 
     /** The 骑宠 (Tm) item ids a GM may hand out (for the command's help text). */
@@ -287,8 +303,9 @@ public final class BotMount {
     }
 
     /**
-     * Whether this bot's type may ride at all. Only the four mobile families do (站街 / 打怪 /
-     * 游走 / 持久化); every other bot — merchants, gacha/blackjack/game-zone hosts, dice,
+     * Whether this bot's type may ride at all. Opted in by the four mobile families
+     * (站街 / 打怪 / 游走 / 持久化) and the Free-Market buying merchant; every other bot —
+     * selling/NX merchants, the walking FM browser, gacha/blackjack/game-zone hosts, dice,
      * drop-game, OPQ, tutorial — inherits the base {@code false}. A bot with no registered
      * BotSM (shouldn't happen for a ticked bot) is treated as not allowed, so we never mount
      * an unmanaged character.
