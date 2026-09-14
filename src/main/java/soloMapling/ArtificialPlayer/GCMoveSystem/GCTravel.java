@@ -39,7 +39,17 @@ final class GCTravel {
 
     // Route-search depth cap. Kept >= TrainingBot's discovery radius so anything a bot can DISCOVER it
     // can also ROUTE to (route may use taxi/ferry shortcuts, so the actual hop count is usually lower).
-    private static final int MAX_HOPS = 20;
+    //
+    // Sized for the WHOLE connected world, not one continent. It was 20 — fine for Victoria Island,
+    // but the world is now fully joined (boats, trains, cabins, the travel agency, the Helios
+    // elevator), and route() returning null does not idle the bot: GCTravel bare-warps the whole
+    // remainder of the trip. So a cap that is too small does not just avoid a long walk, it teleports
+    // the bot across continents, skipping every boat and train on the way. Measured on the live graph
+    // (788 maps): the widest REAL crossing is 地球防御本部 → 玩具城 = 49 hops, because it climbs the
+    // whole 玩具塔 one floor at a time (221020000 → ... → 221024400); town↔town tops out at 33 and
+    // the farthest reachable map from Ludibrium is 57. 64 clears all of those with headroom. The
+    // BFS is O(788 nodes) with early exit, so the ceiling costs nothing at this size.
+    private static final int MAX_HOPS = 64;
     private static final int POLL_MS = 300;
     // "At the portal" box: portals often sit a little above the floor the bot stands on, so the
     // vertical tolerance is generous while X stays tight.
