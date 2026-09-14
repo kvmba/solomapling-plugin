@@ -1,6 +1,7 @@
 package soloMapling.ArtificialPlayer.BotTypes;
 
 import org.gms.client.Character;
+import org.gms.extension.event.ChatType;
 import soloMapling.ArtificialPlayer.BotChatterSystem.BotChatter;
 import soloMapling.ArtificialPlayer.ConversationManager;
 import soloMapling.ArtificialPlayer.BotDialogueHandler;
@@ -58,6 +59,7 @@ public class SocialBot extends BotSM {
 
     private static final long CONVERSATION_TIMEOUT_MS = 35_000;
     private volatile long lastRespondantMessageTime = 0;
+    // The reply channel (replyType/replyTarget) lives on BotSM so every conversational type shares it.
 
     private static final long TRACKER_CLEANUP_INTERVAL_MS = 120_000;
     private long lastCleanupTime = System.currentTimeMillis();
@@ -485,6 +487,33 @@ public class SocialBot extends BotSM {
         }
     }
 
+    // A directed line (whisper / party / guild / ...) addressed to this bot. Mirrors the Dispatcher's
+    // name-call handling: a bot mid-conversation continues it; an idle bot opens a new one. The
+    // arriving type is remembered so replies go back on the same channel (see BotReply).
+    @Override
+    protected void onDirectChat(ChatMessage message) {
+        Character player = message.getSender();
+        if (player == null || isBot(player)) {
+            return;
+        }
+        if (hasActiveRespondant()) {
+            // Only the current partner continues the conversation; a line from anyone else is
+            // ignored (same as a second player on the map). The reply channel is left untouched so
+            // a bystander cannot hijack the in-progress conversation's reply destination.
+            if (getInteractors().getRespondant().getId() != player.getId()) {
+                return;
+            }
+            lastRespondantMessageTime = System.currentTimeMillis();
+            enterReplyChannel(message.getChatType(), player);
+            handlePlayerMessage(message);
+            return;
+        }
+        // Idle: open a new conversation on the channel the line arrived on.
+        enterReplyChannel(message.getChatType(), player);
+        getInteractors().setRespondant(player);
+        onFirstInteraction(player);
+    }
+
     public void onFirstInteraction(Character player) {
         lastRespondantMessageTime = System.currentTimeMillis();
 
@@ -684,7 +713,7 @@ public class SocialBot extends BotSM {
                 .run(() -> botFaceTowardsPoint(getChr(), player.getPosition()));
         if (speakable) {
             chain.run(() -> {
-                BotSpeak(getChr(), reply);
+                sayReply(reply);
                 SocialChatSessionStore.addAssistant(botId, playerId, reply);
             });
         }
@@ -707,7 +736,7 @@ public class SocialBot extends BotSM {
             // node) an unconditional pause is the bot silently staring for seconds.
             chain.pause(BotTiming.typingPauseFor(line))
                     .run(() -> botFaceTowardsPoint(getChr(), player.getPosition()))
-                    .run(() -> BotSpeak(getChr(), line));
+                    .run(() -> sayReply(line));
             if (emote > 0) {
                 chain.pause(400).run(() -> BotEmote(getChr(), emote));
             }
@@ -770,7 +799,7 @@ public class SocialBot extends BotSM {
             // dialogue node doesn't read as the bot thinking for seconds.
             chain.pause(BotTiming.typingPauseFor(line))
                     .run(() -> botFaceTowardsPoint(getChr(), player.getPosition()))
-                    .run(() -> BotSpeak(getChr(), line));
+                    .run(() -> sayReply(line));
             if (emote > 0) {
                 chain.pause(400).run(() -> BotEmote(getChr(), emote));
             }
@@ -820,7 +849,7 @@ public class SocialBot extends BotSM {
         String line = getRandomLine(category, player);
         int emote = getRandomEmote(category);
         if (line != null) {
-            chain.run(() -> BotSpeak(getChr(), line))
+            chain.run(() -> sayReply(line))
                     .pauseRandom(500, 1000);
             if (emote > 0) {
                 chain.run(() -> BotEmote(getChr(), emote));
@@ -873,7 +902,7 @@ public class SocialBot extends BotSM {
         String line = getRandomLine("Greeting", player);
         int emote = getRandomEmote("Greeting");
         if (line != null) {
-            chain.run(() -> BotSpeak(getChr(), line));
+            chain.run(() -> sayReply(line));
             if (emote > 0) {
                 chain.pause(400).run(() -> BotEmote(getChr(), emote));
             }
@@ -890,13 +919,17 @@ public class SocialBot extends BotSM {
     private void doGoodbye(Character player) {
         String line = getRandomLine("Goodbye", player);
         int emote = getRandomEmote("Goodbye");
+        // Capture the channel NOW: the caller resets the conversation right after this call, clearing
+        // the bot-wide replyType before the delayed farewell would read it - so a directed goodbye
+        // must carry its channel forward, not re-read it at fire time.
+        ChatType channelType = replyChannel();
         BotTiming.Chain chain = BotTiming.chain().stopUnless(() -> {
             Character r = getInteractors().getRespondant();
             return r == null || r.getId() == player.getId();
         });
         if (line != null) {
             chain.pause(BotTiming.typingPauseFor(line))
-                    .run(() -> BotSpeak(getChr(), line));
+                    .run(() -> BotReply(getChr(), channelType, player, line));
             if (emote > 0) {
                 chain.pause(400).run(() -> BotEmote(getChr(), emote));
             }
@@ -928,9 +961,14 @@ public class SocialBot extends BotSM {
     // to stop engaging at this interaction level, so one beat later is still coherent.
     private void speakAfterBeat(Character player, String line) {
         Character chr = getChr();
+        // Capture the channel NOW: the bot's replyType is bot-wide and the conversation resets
+        // immediately after this call (clearing it), so reading it inside the delayed action would
+        // find null and downgrade a directed reply to a map bubble the far player never sees.
+        ChatType channelType = replyChannel();
+        Character channelTarget = player;
         BotTiming.after(BotTiming.typingPauseFor(line), () -> {
             if (chr != null && chr.getMap() != null && getRunning()) {
-                BotSpeak(chr, line);
+                BotReply(chr, channelType, channelTarget, line);
             }
         });
     }
@@ -973,9 +1011,10 @@ public class SocialBot extends BotSM {
 
         long elapsed = System.currentTimeMillis() - lastRespondantMessageTime;
         if (elapsed > CONVERSATION_TIMEOUT_MS) {
-            String line = getRandomLine("Timeout", getInteractors().getRespondant());
+            Character respondant = getInteractors().getRespondant();
+            String line = getRandomLine("Timeout", respondant);
             if (line != null) {
-                BotSpeak(getChr(), line);
+                sayReply(line);
             }
             resetConversation();
         }
@@ -990,6 +1029,7 @@ public class SocialBot extends BotSM {
         getInteractors().resetRespondant();
         socialState = SocialBotState.IDLE_AMBIENT;
         lastRespondantMessageTime = 0;
+        leaveReplyChannel();
     }
 
     // --- Anti-spam tracker ---

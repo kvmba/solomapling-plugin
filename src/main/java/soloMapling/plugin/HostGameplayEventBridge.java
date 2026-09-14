@@ -1,7 +1,9 @@
 package soloMapling.plugin;
 
 import org.gms.extension.event.CharacterChatEvent;
+import org.gms.extension.event.CharacterDirectChatEvent;
 import org.gms.extension.event.CharacterMapEnteredEvent;
+import org.gms.extension.event.ChatType;
 import org.gms.extension.api.HostRuntime;
 import soloMapling.server.EventMessageSystem.EventBus;
 import soloMapling.server.EventMessageSystem.EventType;
@@ -26,6 +28,34 @@ public final class HostGameplayEventBridge {
         }
         runtime.events().subscribe(CharacterMapEnteredEvent.class, HostGameplayEventBridge::onMapEntered);
         runtime.events().subscribe(CharacterChatEvent.class, HostGameplayEventBridge::onChat);
+        runtime.events().subscribe(CharacterDirectChatEvent.class, HostGameplayEventBridge::onDirectChat);
+    }
+
+    // A directed line (whisper / buddy / party / guild / alliance) addressed to a bot. The recipient
+    // travels with the event so the consumer can hand it to that bot's own inbox - the map-wide
+    // Dispatcher cannot reach a bot on another map or channel.
+    private static void onDirectChat(CharacterDirectChatEvent event) {
+        try {
+            EventBus.getInstance().publish(new GameEvent(
+                    event.sender(),
+                    typeFor(event.type()),
+                    event.message(),
+                    null,
+                    null,
+                    event.recipient(),
+                    event.type()));
+        } catch (Throwable ignored) {
+        }
+    }
+
+    private static EventType typeFor(ChatType type) {
+        return switch (type) {
+            case WHISPER -> EventType.CHAT_WHISPER;
+            case BUDDY -> EventType.CHAT_BUDDY;
+            case PARTY -> EventType.CHAT_PARTY;
+            case GUILD -> EventType.CHAT_GUILD;
+            case ALLIANCE -> EventType.CHAT_ALLIANCE;
+        };
     }
 
     private static void onMapEntered(CharacterMapEnteredEvent event) {

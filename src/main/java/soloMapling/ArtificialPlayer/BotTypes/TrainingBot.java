@@ -10,6 +10,7 @@ import org.gms.net.server.world.World;
 import soloMapling.ArtificialPlayer.BotAttackSystem.BotAttackDriver;
 import soloMapling.ArtificialPlayer.BotAttackSystem.BotBuffDriver;
 import soloMapling.ArtificialPlayer.BotHealthSystem.BotPotionSim;
+import soloMapling.ArtificialPlayer.BotMessagingSystem.ChatMessage;
 import soloMapling.ArtificialPlayer.BotOptionMenu;
 import soloMapling.ArtificialPlayer.BotPartySystem.BotPartyQueue;
 import soloMapling.ArtificialPlayer.BotPartySystem.BotRecruitManager;
@@ -330,6 +331,20 @@ public class TrainingBot extends BotSM implements GrindTickRegistry.Participant 
     @Override
     public boolean offerKeyword(Character player, String content) {
         return (getChr().getParty() != null ? partyMenu : soloMenu).offerDirect(player, content);
+    }
+
+    // A party-channel (or whisper/guild) line addressed to this bot. Party chat is a different packet
+    // from map chat, so a partied grinder never saw it before; a keyword is claimed exactly like the
+    // same-map party broadcast. No reply channel is armed: this bot answers with the same-map bubble
+    // its menu replies already use, so only a speaker ON its map can see the reply - and a TrainingBot
+    // recruited into a party grinds alongside that player by construction.
+    @Override
+    protected void onDirectChat(ChatMessage message) {
+        Character player = message.getSender();
+        if (player == null || isBot(player) || !isSameMap(player)) {
+            return;
+        }
+        offerKeyword(player, message.getContent());
     }
 
     // Shouted offer from a stranger in range: no menu, no conversation - the shout IS the

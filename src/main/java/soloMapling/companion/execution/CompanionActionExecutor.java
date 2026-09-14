@@ -2,6 +2,7 @@ package soloMapling.companion.execution;
 
 import org.gms.client.Character;
 import soloMapling.ArtificialPlayer.BotCommandsPack.SocialCommands;
+import soloMapling.ArtificialPlayer.BotMessagingSystem.CharacterStorage;
 import soloMapling.ArtificialPlayer.BotPartySystem.BotPartyCommands;
 import soloMapling.ArtificialPlayer.BotPartySystem.BotPartyQueue;
 import soloMapling.ArtificialPlayer.BotSM;
@@ -187,7 +188,15 @@ public final class CompanionActionExecutor {
 
         @Override
         public void say(Character companion, String text) {
-            SocialCommands.BotSpeak(companion, text);
+            // Speak on the channel the turn arrived on: a whisper/party line reaches the companion on
+            // any map, so replying must too. The companion's own BotSM holds that channel; without it
+            // (ephemeral companion with no registered BotSM) fall back to the map bubble.
+            BotSM bot = CharacterStorage.getBotById(companion.getId());
+            if (bot != null) {
+                bot.sayReply(text);
+            } else {
+                SocialCommands.BotSpeak(companion, text);
+            }
         }
 
         @Override

@@ -1,6 +1,8 @@
 package soloMapling.ArtificialPlayer.BotCommandsPack;
 
 import org.gms.client.Character;
+import org.gms.extension.event.ChatType;
+import org.gms.net.server.Server;
 import soloMapling.ArtificialPlayer.BotHelpers;
 import org.gms.util.PacketCreator;
 
@@ -26,6 +28,73 @@ public class SocialCommands {
             BotChatbubbleTyping(fakechar, message, 150);
         } else {
             BotFullChat(fakechar, message);
+        }
+    }
+
+    // --- Directed-channel replies ---------------------------------------------------------------
+    // A bot answering a whisper / party / guild / buddy / alliance line must send on THAT channel,
+    // not broadcast to its own map: the player may be on another map, where a map bubble is
+    // invisible, and same-map bystanders would otherwise see a private line as public map chat.
+    // These calls are programmatic (they do not go through the chat packet handlers), so they never
+    // re-enter the inbound event path - no echo.
+
+    /**
+     * Speaks one line back on the channel the conversation arrived on. {@code type == null} means a
+     * map (general) conversation, which keeps the existing map-bubble behaviour.
+     */
+    public static void BotReply(Character fakechar, ChatType type, Character player, String message) {
+        if (fakechar == null || message == null) {
+            return;
+        }
+        if (type == null) {
+            BotSpeak(fakechar, message);
+            return;
+        }
+        switch (type) {
+            case WHISPER -> BotReplyWhisper(fakechar, player, message);
+            case PARTY -> BotReplyParty(fakechar, message);
+            case GUILD -> BotReplyGuild(fakechar, message);
+            case BUDDY -> BotReplyBuddy(fakechar, player, message);
+            case ALLIANCE -> BotReplyAlliance(fakechar, message);
+        }
+    }
+
+    public static void BotReplyWhisper(Character fakechar, Character target, String message) {
+        if (target == null || target.getClient() == null) {
+            return;
+        }
+        target.sendPacket(PacketCreator.getWhisperReceive(
+                fakechar.getName(), fakechar.getClient().getChannel() - 1, fakechar.isGM(), message));
+    }
+
+    public static void BotReplyParty(Character fakechar, String message) {
+        if (fakechar.getParty() != null) {
+            fakechar.getWorldServer().partyChat(fakechar.getParty(), message, fakechar.getName());
+        }
+    }
+
+    public static void BotReplyGuild(Character fakechar, String message) {
+        if (fakechar.getGuildId() > 0) {
+            Server.getInstance().guildChat(fakechar.getGuildId(), fakechar.getName(), fakechar.getId(), message);
+        }
+    }
+
+    public static void BotReplyBuddy(Character fakechar, Character target, String message) {
+        if (target != null) {
+            fakechar.getWorldServer().buddyChat(
+                    new int[]{target.getId()}, fakechar.getId(), fakechar.getName(), message);
+        }
+    }
+
+    public static void BotReplyAlliance(Character fakechar, String message) {
+        var guild = fakechar.getGuild();
+        if (guild == null) {
+            return;
+        }
+        int allianceId = guild.getAllianceId();
+        if (allianceId > 0) {
+            Server.getInstance().allianceMessage(allianceId,
+                    PacketCreator.multiChat(fakechar.getName(), message, 3), fakechar.getId(), -1);
         }
     }
 

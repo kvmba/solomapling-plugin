@@ -9,7 +9,7 @@ BeiDou engine code must not `import soloMapling.*`. SoloMapling remains a provid
 - `ArtificialCharacters` + `CharacterClassifier` (`extension-api`)
 - `TradeParticipantHook` + `TradeParticipants` (`extension-api`)
 - `HostHooks.isArtificial` / `HostHooks.trade*` / `HostHooks.publish`
-- Gameplay events: `CharacterMapEnteredEvent`, `CharacterChatEvent`, `PartyInviteEvent`, `TradeInviteEvent`
+- Gameplay events: `CharacterMapEnteredEvent`, `CharacterChatEvent`, `CharacterDirectChatEvent` (whisper / buddy / party / guild / alliance, with `ChatType`), `PartyInviteEvent`, `TradeInviteEvent`
 - Simulation APIs: `BotClient`, `BotTier`, movement/combat helpers
 - Generic atomic native account/character provisioning, including post-commit
   cache publication and a callback inside the host transaction
@@ -33,8 +33,17 @@ knowledge, activity records, or their schema.
    `id > 20000 || id == 999`
 3. `TradeParticipants.register(SoloMaplingTradeParticipantHook)`
 4. `HostGameplayEventBridge` — host map/chat events → internal `EventBus`
-5. `PlayerChatBridge` / `BotPartyInviteBridge` / `BotTradeInviteBridge`
+5. `PlayerChatBridge` / `DirectChatBridge` / `BotPartyInviteBridge` / `BotTradeInviteBridge`
 6. Register GM commands via `HostCommandRegistry`
+
+### Directed chat (whisper / buddy / party / guild / alliance)
+
+Host publishes `CharacterDirectChatEvent` once per **artificial recipient** (the mirror of
+`CharacterChatEvent` being published only for real *senders*) from `WhisperHandler` and
+`MultiChatHandler`. `HostGameplayEventBridge` maps it onto the matching `EventType`, and
+`DirectChatBridge` hands each line to that bot's own inbox (`BotSM.postDirectChat`) - not the
+map-wide `Dispatcher`, which cannot find a bot on another map and shares a single-consumer queue.
+See [BOT_CHAT_CHANNELS_PLAN.md](BOT_CHAT_CHANNELS_PLAN.md).
 
 ## Trade (phase 3)
 

@@ -21,6 +21,7 @@ import org.slf4j.LoggerFactory;
 import soloMapling.ArtificialPlayer.BotClientHandler;
 import soloMapling.ArtificialPlayer.BotGeneration;
 import soloMapling.ArtificialPlayer.BotMessagingSystem.CharacterStorage;
+import soloMapling.ArtificialPlayer.BotMessagingSystem.DirectChatBridge;
 import soloMapling.ArtificialPlayer.BotMessagingSystem.PlayerChatBridge;
 import soloMapling.ArtificialPlayer.BotPartySystem.BotPartyInviteBridge;
 import soloMapling.ArtificialPlayer.BotTradeSystem.BotTradeInviteBridge;
@@ -147,6 +148,7 @@ public final class SoloMaplingExtension implements ServerExtension {
         // Host->bot input bridges. Must be live before any player can chat or invite.
         HostGameplayEventBridge.register(runtime);
         PlayerChatBridge.register();
+        DirectChatBridge.register();
         BotPartyInviteBridge.register(runtime);
         BotTradeInviteBridge.register(runtime);
 

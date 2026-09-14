@@ -70,6 +70,14 @@ public abstract class BotSM implements EventSubscriber {
 
     private static MessageQueue messageQueue = MessageQueue.getInstance();
 
+    // Per-bot inbox for directed channels (whisper/buddy/party/guild/alliance). Unlike the shared
+    // primary/secondary queues this is addressed to exactly this bot, and unlike the Dispatcher it
+    // needs no map proximity - a whisper or party line reaches a bot on any map or channel.
+    private final java.util.concurrent.ConcurrentLinkedQueue<ChatMessage> directInbox =
+            new java.util.concurrent.ConcurrentLinkedQueue<>();
+    // Drain cap per tick: a burst of whispers must not starve the bot's own FSM.
+    private static final int MAX_DIRECT_CHAT_PER_TICK = 8;
+
     /**
      * This bot's death episode — the one piece of state that suspends all the others.
      * Declared before the tick body below references it.
@@ -110,6 +118,7 @@ public abstract class BotSM implements EventSubscriber {
                 return; // FSM-requested pause (waitFor) - skip the tick entirely
             }
             soloMapling.server.BotPerfStats.MACRO_TICKS.increment();
+            drainDirectChat();
             updateState();
         } catch (Exception e) {
             e.printStackTrace(); // Handle exceptions to ensure the scheduler doesn't stop unexpectedly
@@ -246,6 +255,81 @@ public abstract class BotSM implements EventSubscriber {
 
     public BotInteractorsHandler getInteractors() {
         return interactors;
+    }
+
+    /**
+     * Accepts one directed line (whisper/buddy/party/guild/alliance) for this bot. Called by the
+     * bridge on the sending player's packet thread, so it only enqueues - the bot's own tick drains
+     * and acts on it. Safe on any thread.
+     */
+    public void postDirectChat(ChatMessage message) {
+        if (message != null) {
+            directInbox.add(message);
+        }
+    }
+
+    // Bounded drain, run from the tick ahead of the FSM so a whisper reaches the bot promptly.
+    private void drainDirectChat() {
+        for (int i = 0; i < MAX_DIRECT_CHAT_PER_TICK && !directInbox.isEmpty(); i++) {
+            ChatMessage message = directInbox.poll();
+            if (message == null) {
+                return;
+            }
+            try {
+                onDirectChat(message);
+            } catch (Exception e) {
+                e.printStackTrace();
+            }
+        }
+    }
+
+    /**
+     * Handles one directed line. Default no-op: most bot types (shop runners, game-zone hosts, the
+     * frozen set pieces) are not conversational off their own map, so an undirected whisper to them
+     * is silently ignored - opting in is each type's choice. Overridden by the conversational types
+     * (SocialBot, CompanionBot, FollowerBot).
+     */
+    protected void onDirectChat(ChatMessage message) {
+    }
+
+    // --- Reply channel (set when a conversation is opened by a directed line) --------------------
+    // null type means the conversation came from map-wide chat, so replies keep the map bubble.
+    // A directed type makes replies go back on that channel, which is the only way a line reaches a
+    // player on another map or channel. Written off the tick (the packet thread) and read on it.
+    protected volatile org.gms.extension.event.ChatType replyType = null;
+    protected volatile Character replyTarget = null;
+
+    protected void enterReplyChannel(org.gms.extension.event.ChatType type, Character target) {
+        replyType = type;
+        replyTarget = target;
+    }
+
+    protected void leaveReplyChannel() {
+        replyType = null;
+        replyTarget = null;
+    }
+
+    // Same map (and both maps present). Directed-channel handlers use this to tell a same-map
+    // speaker (a bubble reply reaches them) from a distant one (only a channel-scoped reply does).
+    protected boolean isSameMap(Character other) {
+        Character self = getChr();
+        return other != null && self != null && self.getMap() != null && other.getMap() != null
+                && other.getMapId() == self.getMapId();
+    }
+
+    /** Speaks one line on the current reply channel (map bubble when none is set). */
+    public void sayReply(String line) {
+        SocialCommands.BotReply(getChr(), replyChannel(), replyChannelTarget(), line);
+    }
+
+    // The channel the next sayReply uses. Read through these rather than the fields so a bot whose
+    // replies are produced on concurrent per-turn threads (CompanionBot) can scope them per turn.
+    protected org.gms.extension.event.ChatType replyChannel() {
+        return replyType;
+    }
+
+    protected Character replyChannelTarget() {
+        return replyTarget;
     }
 
     public BotTradeHandler getTradeHandler() {

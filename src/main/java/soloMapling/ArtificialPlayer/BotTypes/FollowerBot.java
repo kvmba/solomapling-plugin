@@ -5,6 +5,7 @@ import org.gms.net.server.world.Party;
 import org.gms.net.server.world.PartyCharacter;
 import soloMapling.ArtificialPlayer.BotDialogueHandler;
 import soloMapling.ArtificialPlayer.BotHealthSystem.BotPotionSim;
+import soloMapling.ArtificialPlayer.BotMessagingSystem.ChatMessage;
 import soloMapling.ArtificialPlayer.BotOptionMenu;
 import soloMapling.ArtificialPlayer.BotSM;
 import soloMapling.ArtificialPlayer.BotTypeManager;
@@ -246,6 +247,21 @@ public class FollowerBot extends BotSM {
             sayNode("PartyFarewell", null);
             fallbackConvert();
         }
+    }
+
+    // A party-channel (or whisper/guild) line addressed to this follower. Party channel chat is a
+    // different packet from map chat, so even a same-map leader's party line never reached the bot
+    // before. A keyword is claimed exactly like the map party-broadcast path, but only from a speaker
+    // ON this bot's map: the reply is a same-map bubble (no channel is armed - its leader shares its
+    // map, and ambient follow lines stay map chat), so arming a menu for a distant speaker would just
+    // leave a hint nobody can see.
+    @Override
+    protected void onDirectChat(ChatMessage message) {
+        Character player = message.getSender();
+        if (player == null || isBot(player) || !isSameMap(player)) {
+            return;
+        }
+        offerKeyword(player, message.getContent());
     }
 
     // ── Menu (Dispatcher routes a "botname" chat here via displayCommands) ───

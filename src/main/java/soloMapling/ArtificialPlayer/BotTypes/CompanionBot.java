@@ -7,6 +7,7 @@ import soloMapling.ArtificialPlayer.BotGrindSystem.GrindBrain;
 import soloMapling.ArtificialPlayer.BotGrindSystem.GrindStyle;
 import soloMapling.ArtificialPlayer.BotGrindSystem.GrindTickRegistry;
 import soloMapling.ArtificialPlayer.BotMessagingSystem.CharacterStorage;
+import soloMapling.ArtificialPlayer.BotMessagingSystem.ChatMessage;
 import soloMapling.ArtificialPlayer.BotPartySystem.BotPartyQueue;
 import soloMapling.ArtificialPlayer.BotSM;
 import soloMapling.ArtificialPlayer.BotTypeManager;
@@ -74,6 +75,18 @@ public final class CompanionBot extends BotSM implements
     private final TurnCoordinator turns;
     private TurnContext activeContext;
     private long lastPlayedTurnId;
+
+    // Reply channel for a directed line. Armed per SPEAKER by onDirectChat, consumed by the turn
+    // that plays that speaker's line. The turn body runs on its own chain virtual thread, so a
+    // ThreadLocal carries it precisely: two overlapping turns (two chats, or a chat plus a
+    // party-invite turn that bypasses session ownership) never inherit each other's channel.
+    private final java.util.concurrent.ConcurrentHashMap<Integer, TurnReply> directedReplyByPlayer =
+            new java.util.concurrent.ConcurrentHashMap<>();
+    private final ThreadLocal<TurnReply> activeTurnReply = new ThreadLocal<>();
+
+    private record TurnReply(org.gms.extension.event.ChatType type, Character target) {
+    }
+
     private final GrindBrain grind = new GrindBrain(message -> { });
     private final SoloGrindController soloGrind = new SoloGrindController(grind);
     /** Whether this companion is currently on the shared combat sweep for solo grinding.
@@ -163,6 +176,46 @@ public final class CompanionBot extends BotSM implements
                         player.getMap() != null,
                         companion.getMapId(),
                         player.getMapId());
+    }
+
+    // A whisper / party / guild line addressed straight to the companion. Feeds the same turn
+    // pipeline as a map line - the brain already perceives cross-map players, so a directed line
+    // is one more input. The map-proximity gate that governs ambient continuation is deliberately
+    // NOT applied here: the player chose to address the companion directly.
+    //
+    // The reply channel is armed only when the sender is elsewhere: a same-map conversation already
+    // reaches the player through the map bubble, and arming a channel for it would leak into the
+    // companion's later ambient lines. A cross-map line, by contrast, is only visible to the player
+    // if the reply comes back on the channel it arrived on.
+    //
+    // Keyed by the SPEAKER, not held on the bot: turns for different players run concurrently (two
+    // chats, or a chat plus a party-invite turn that bypasses session ownership), so a single bot-wide
+    // channel would let one player's Say fire on another player's channel. Keyed and cleared below,
+    // every Say reaches exactly the player whose turn armed it.
+    @Override
+    protected void onDirectChat(ChatMessage message) {
+        if (message == null || !getRunning()) {
+            return;
+        }
+        if (!isSameMap(message.getSender())) {
+            directedReplyByPlayer.put(message.getSender().getId(),
+                    new TurnReply(message.getChatType(), message.getSender()));
+        }
+        enqueuePlayerMessage(message.getSender(), message.getContent());
+    }
+
+    // The channel this turn should answer on, or null for a map bubble; read from the ThreadLocal the
+    // turn armed in playDecision, never from bot-wide state, so concurrent turns can't cross wires.
+    @Override
+    protected org.gms.extension.event.ChatType replyChannel() {
+        TurnReply reply = activeTurnReply.get();
+        return reply == null ? null : reply.type();
+    }
+
+    @Override
+    protected Character replyChannelTarget() {
+        TurnReply reply = activeTurnReply.get();
+        return reply == null ? null : reply.target();
     }
 
     public TurnCoordinator.State companionState() {
@@ -354,45 +407,55 @@ public final class CompanionBot extends BotSM implements
         if (!claimTurn(planned)) {
             return;
         }
-        List<ActionExecutionResult> executions = new ArrayList<>();
-        CompanionPlannerResult result = planned.result();
-        if (result instanceof CompanionPlannerResult.Success success) {
-            AgentDecision decision = success.decision();
-            log.info("Companion planning succeeded cid={} playerCid={} latencyMs={} actions={}",
-                    context.request().companionCharacterId(),
-                    context.request().playerCharacterId(), elapsedMs, decision.actions().size());
-            log.debug("Companion decision cid={} reason={} reply={} actions={}",
-                    context.request().companionCharacterId(),
-                    decision.reason(), decision.reply(), decision.actions());
-            for (CompanionAction action : CompanionDecisionActions.forExecution(
-                    decision, context.request().playerMessage(), context.request().playerCharacterId())) {
-                ActionExecutionResult execution =
-                        actionExecutor.execute(action, getChr(), this, context.resolver());
-                executions.add(execution);
-                if (execution.status() == ActionExecutionResult.Status.SUCCESS
-                        || execution.status() == ActionExecutionResult.Status.DEFERRED) {
-                    log.info("Companion action cid={} type={} status={} code={}",
-                            context.request().companionCharacterId(), action.type(),
-                            execution.status(), execution.reasonCode());
-                } else {
-                    log.warn("Companion action cid={} type={} status={} code={} reason={}",
-                            context.request().companionCharacterId(), action.type(),
-                            execution.status(), execution.reasonCode(), execution.reason());
-                }
-            }
-        } else if (result instanceof CompanionPlannerResult.Failure failure) {
-            log.warn("Companion planning fallback cid={} playerCid={} latencyMs={} type={} message={} violations={}",
-                    context.request().companionCharacterId(),
-                    context.request().playerCharacterId(), elapsedMs,
-                    failure.type(), failure.message(), failure.violations().size());
-            ActionExecutionResult execution = actionExecutor.execute(
-                    new CompanionAction.Say(fallbackReply()),
-                    getChr(),
-                    this,
-                    context.resolver());
-            executions.add(execution);
+        // Arm this turn's reply channel from the speaker's directed line (null = map bubble). The key
+        // is consumed one-per-turn; the ThreadLocal keeps it visible only to this turn's own Say.
+        TurnReply directed = directedReplyByPlayer.remove(planned.message().playerCharacterId());
+        if (directed != null) {
+            activeTurnReply.set(directed);
         }
-        brain.record(new CompanionBrain.CompletedTurn(context.request(), result, executions));
+        try {
+            List<ActionExecutionResult> executions = new ArrayList<>();
+            CompanionPlannerResult result = planned.result();
+            if (result instanceof CompanionPlannerResult.Success success) {
+                AgentDecision decision = success.decision();
+                log.info("Companion planning succeeded cid={} playerCid={} latencyMs={} actions={}",
+                        context.request().companionCharacterId(),
+                        context.request().playerCharacterId(), elapsedMs, decision.actions().size());
+                log.debug("Companion decision cid={} reason={} reply={} actions={}",
+                        context.request().companionCharacterId(),
+                        decision.reason(), decision.reply(), decision.actions());
+                for (CompanionAction action : CompanionDecisionActions.forExecution(
+                        decision, context.request().playerMessage(), context.request().playerCharacterId())) {
+                    ActionExecutionResult execution =
+                            actionExecutor.execute(action, getChr(), this, context.resolver());
+                    executions.add(execution);
+                    if (execution.status() == ActionExecutionResult.Status.SUCCESS
+                            || execution.status() == ActionExecutionResult.Status.DEFERRED) {
+                        log.info("Companion action cid={} type={} status={} code={}",
+                                context.request().companionCharacterId(), action.type(),
+                                execution.status(), execution.reasonCode());
+                    } else {
+                        log.warn("Companion action cid={} type={} status={} code={} reason={}",
+                                context.request().companionCharacterId(), action.type(),
+                                execution.status(), execution.reasonCode(), execution.reason());
+                    }
+                }
+            } else if (result instanceof CompanionPlannerResult.Failure failure) {
+                log.warn("Companion planning fallback cid={} playerCid={} latencyMs={} type={} message={} violations={}",
+                        context.request().companionCharacterId(),
+                        context.request().playerCharacterId(), elapsedMs,
+                        failure.type(), failure.message(), failure.violations().size());
+                ActionExecutionResult execution = actionExecutor.execute(
+                        new CompanionAction.Say(fallbackReply()),
+                        getChr(),
+                        this,
+                        context.resolver());
+                executions.add(execution);
+            }
+            brain.record(new CompanionBrain.CompletedTurn(context.request(), result, executions));
+        } finally {
+            activeTurnReply.remove();
+        }
     }
 
     // Atomically claims this turn as the newest one played. False when a newer turn has already
