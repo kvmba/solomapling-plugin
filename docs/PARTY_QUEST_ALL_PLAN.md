@@ -199,6 +199,10 @@ feat(pq): <PQ 名> — bot 可陪玩全流程
 | 9 | **Amoria PQ** 6 关 | `948a6a4` | ✅ 实现完成 |
 | 10 | **Ellin PQ** 8 关 | `d9f9208` | ✅ 实现完成 |
 | 11 | **Zakum PQ**（矿区） | `766bfa0` | ✅ 实现完成 |
+| 12 | **Horntail PQ** 5 关 | `7fb0ccb` | ✅ 实现完成 |
+| 13 | **Magatia PQ**（A/Z 双版本） | `6756b49` | ✅ 实现完成 |
+| 14 | **Monster Carnival (CPQ)**（陪练型） | `3f01f63` | ✅ 实现完成 |
+| 15 | **Nett's Pyramid**（独立入口） | `dd02def` | ✅ 实现完成 |
 
 对应的 bot 类型与命令：
 
@@ -213,26 +217,30 @@ feat(pq): <PQ 名> — bot 可陪玩全流程
 | Amoria | `AMORIA_PQ_BOT` | `!bot apqbot` |
 | Ellin | `ELLIN_PQ_BOT` | `!bot epqbot` |
 | Zakum | `ZAKUM_PQ_BOT` | `!bot zpqbot` |
+| Horntail | `HORNTAIL_PQ_BOT` | `!bot htpqbot` |
+| Magatia | `MAGATIA_PQ_BOT` | `!bot mpqbot` |
+| Monster Carnival | `CARNIVAL_PQ_BOT` | `!bot cpqbot` |
+| Pyramid | `PYRAMID_PQ_BOT` | `!bot pyramidbot` |
 
 ### 尚未实现
 
-| 类别 | 内容 | 阻塞点 |
+| 类别 | 内容 | 状态 |
 |---|---|---|
-| A 类 | Magatia（护送 + 双版本 A/Z）、Treasure（140 级）、Horntail | 各有独立机制（护送、变身、小游戏），需逐个调研 |
-| B 类 | MK_PrimeMinister(3)、DelliBattle(2)、ElementalBattle(2) 等 | 结构同 A |
-| C 类 | Monster Carnival（对抗型，bot 当对手） | 语义全新，需"陪练"设计 |
-| D 类 | Ariant Coliseum | Expedition 架构 |
-| E 类 | Nett's Pyramid | 独立 API + Act Gauge |
-| F 类 | Expedition Boss（13 种） | 30 人 Boss，风险最高 |
-| G 类 | Mu Lung Dojo（组队） | 等级差 ≤30 + warpParty |
-| H 类 | Guild Quest | 需同公会 |
+| A 类 | 经典 9 个已实现；剩余：Treasure（服务端死局，见第九部分）、Awakening/Cafe/Holiday 等节日向 | 大部分完成 |
+| B 类 | MK_PrimeMinister(3)、DelliBattle(2)、ElementalBattle(2) | 结构同 A，未逐个实现 |
+| C 类 | Monster Carnival | ✅ 已实现（陪练型） |
+| D 类 | Ariant Coliseum（Expedition 架构 + 抢分） | 未实现 |
+| E 类 | Nett's Pyramid | ✅ 已实现 |
+| F 类 | Expedition Boss（13 种） | 未实现（30 人 Boss，风险最高） |
+| G 类 | Mu Lung Dojo（组队） | 未实现（等级差 ≤30 + warpParty） |
+| H 类 | Guild Quest | 未实现（需同公会） |
 
 ### 已验证 / 未验证
 
 | 项 | 状态 |
 |---|---|
 | 编译 | ✅ 每次提交前通过 |
-| 单元测试 | ✅ 906 个通过（含 25 个本次新增：Orbis 9 + Henesys 6 + Kerning 12 + Ludi 9） |
+| 单元测试 | ✅ 910 个通过（含 29 个本次新增：Orbis 9 + Henesys 6 + Kerning 12 + Ludi 9 + Carnival 4） |
 | 数据正确性 | ✅ 全部从脚本/WZ/db 读出，并有测试锁定 |
 | **实机跑通** | ❌ **未验证** —— 需要真实客户端进本测试 |
 
@@ -245,6 +253,24 @@ feat(pq): <PQ 名> — bot 可陪玩全流程
 5. **Boss Rush**：单人 + 1 bot，验证 bot 攻击真能造成伤害
 
 **共同风险**：`PqActions` 的 NPC 交互（`talkTo`）与 `holdArea` 的站位精度尚未在真机验证。
+
+### 各 PQ 的实机验证要点
+
+| PQ | 首个要看的东西 |
+|---|---|
+| Orbis | `!env reactorboxes` 核对落点是否为 `(377,99)` |
+| Henesys | 6 朵花是否全开（`stage` 属性递增到 6） |
+| Kerning | bot 是否播报点位、是否站对平台 |
+| Ludi | Stage 8 是否只占 1 个 crate（给玩家留位） |
+| Boss Rush | bot 攻击是否真造成伤害 |
+| Pirate | 箱子是否被打破、怪是否被清 |
+| Amoria | Stage 2 是否读到 combo；Stage 3 是否正确切换行为 |
+| Ellin | spine 反应堆是否被打破 |
+| Zakum | 箱子是否掉火矿石 |
+| Horntail | 是否按房间读到正确的钥匙 |
+| Magatia | Stage 6 是否播报 combo |
+| CPQ | 是否成功召唤（CP 扣减 + 怪出现） |
+| Pyramid | 是否在禁用怪出现时停手 |
 
 ---
 
