@@ -21,6 +21,7 @@ import soloMapling.ArtificialPlayer.BotTypes.Kerning.KerningPQBot;
 import soloMapling.ArtificialPlayer.BotTypes.Ludi.LudiPQBot;
 import soloMapling.ArtificialPlayer.BotTypes.OPQ.OPQBot;
 import soloMapling.ArtificialPlayer.BotTypes.Pirate.PiratePQBot;
+import soloMapling.ArtificialPlayer.BotTypes.Zakum.ZakumPQBot;
 import soloMapling.ArtificialPlayer.BotTypes.ScrollingBot;
 import soloMapling.ArtificialPlayer.BotTypes.SellingMerchantBot;
 import soloMapling.ArtificialPlayer.BotTypes.BuyingMerchantBot;
@@ -199,6 +200,13 @@ public class BotTypeManager {
             public void createAndSetBot(Character character) {
                 EllinPQBot epqBot = new EllinPQBot(character);
                 CharacterStorage.addActiveBot(character.getId(), epqBot);
+            }
+        },
+        ZAKUM_PQ_BOT {
+            @Override
+            public void createAndSetBot(Character character) {
+                ZakumPQBot zpqBot = new ZakumPQBot(character);
+                CharacterStorage.addActiveBot(character.getId(), zpqBot);
             }
         },
         SOCIAL_BOT {
