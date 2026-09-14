@@ -27,8 +27,10 @@ public final class BotPetController {
     private BotPetController() {
     }
 
-    /** Y offset above the character at which a pet is placed when it appears. */
-    private static final int SPAWN_Y_OFFSET = 12;
+    /** Horizontal spread between a bot's pets so they do not stack on one pixel. */
+    private static final int SPAWN_X_SPREAD = 22;
+    /** Pet STAND-right stance (see BotPetFollower); 0 is the pet's MOVE pose, not stand. */
+    private static final int PET_STAND_RIGHT = 4;
 
     /**
      * Give {@code bot} its pets, if the policy says so. Idempotent: a bot that
@@ -170,21 +172,19 @@ public final class BotPetController {
     }
 
     /**
-     * Place a pet just above the bot. On land it snaps to the foothold below; in
+     * Place a pet near the bot. On land it stands on the floor under its own x; in
      * a swim map footholds are the seabed / can be missing, so it floats (fh=0)
-     * and the follower glides it instead.
+     * and the follower glides it instead. Pets are nudged apart by index so a
+     * multi-pet bot's pets do not stack on one pixel.
      */
     static void placeAtBot(Character bot, Pet pet, int index) {
         MapleMap map = bot.getMap();
         Point pos = bot.getPosition();
-        Point p = new Point(pos.x, pos.y - SPAWN_Y_OFFSET * (index + 1));
+        int x = pos.x + (index + 1) * SPAWN_X_SPREAD;
+        Point p = new Point(x, map != null && map.isSwim() ? pos.y : groundY(map, x, pos.y));
         pet.setPos(p);
-        pet.setStance(0);
-        if (map != null && map.isSwim()) {
-            pet.setFh(0);
-        } else {
-            pet.setFh(footholdId(map, p));
-        }
+        pet.setStance(PET_STAND_RIGHT); // 4; 0 is the pet's MOVE pose, not stand
+        pet.setFh(map != null && map.isSwim() ? 0 : footholdId(map, p));
     }
 
     static int footholdId(MapleMap map, Point p) {
@@ -193,6 +193,15 @@ public final class BotPetController {
         }
         Foothold fh = map.getFootholds().findBelow(p);
         return fh == null ? 0 : fh.getId();
+    }
+
+    /** The y of the floor under x, falling back to {@code fallbackY} when there is none. */
+    private static int groundY(MapleMap map, int x, int fallbackY) {
+        if (map == null) {
+            return fallbackY;
+        }
+        Foothold fh = map.getFootholds().findBelow(new Point(x, fallbackY));
+        return fh == null ? fallbackY : fh.calculateFooting(x);
     }
 
     /** @return true when any gear was actually written (caller must then refresh the look) */

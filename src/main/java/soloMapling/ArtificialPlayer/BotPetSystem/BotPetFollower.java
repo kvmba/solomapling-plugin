@@ -4,6 +4,7 @@ import org.gms.client.Character;
 import org.gms.client.inventory.Pet;
 import org.gms.constants.game.CharacterStance;
 import org.gms.net.packet.Packet;
+import org.gms.server.maps.Foothold;
 import org.gms.server.maps.MapItem;
 import org.gms.server.maps.MapObject;
 import org.gms.server.maps.MapObjectType;
@@ -46,27 +47,37 @@ import java.util.concurrent.TimeUnit;
  */
 public final class BotPetFollower {
 
-    // Pet stances are NOT the character stances. The wire stance byte is
-    // (actionIndex << 1) | facing (even = right, odd = left), with the OFFICIAL
-    // action order STAND, MOVE, JUMP, ALERT, PRONE, FLY, HANG:
-    //     STAND = 0/1     MOVE = 2/3      JUMP = 4/5    ALERT = 6/7
-    //     PRONE = 8/9     FLY  = 10/11    HANG = 12/13
-    // Two independent facts pin this down: the host summons a pet with
-    // setStance(0) and the pet stands still, so 0 = STAND; and moving the pet
-    // with 2/3 renders the walk, so 2/3 = MOVE. (The Journey/maplestory-wasm
-    // client swaps the first two — MOVE=0/1, STAND=2/3 — so its table is NOT
-    // used here; it disagrees with the official client.)
-    private static final int PET_STAND_RIGHT = 0;
-    private static final int PET_STAND_LEFT = 1;
+    // Pet stance bytes, taken from the named GMS095 client (CPet::OnResolveMoveAction
+    // — the client's own physics-to-moveaction mapping; CPet::MoveAction2RawAction
+    // then maps moveaction>>1 to an action index, moveaction&1 being the facing):
+    //     MOVE  = 2/3    STAND = 4/5    JUMP = 6/7    SWIM = 12/13
+    // (even = right, odd = left). A pet has no separate "fly" action — in water it
+    // uses SWIM. NOTE: 0 is NOT a stand for a pet — moveaction>>1 == 0 lands on the
+    // MOVE animation, so a resting pet sent 0 would keep walking on the spot. (The
+    // Journey/maplestory-wasm client's MOVE=0/1 table disagrees with the official
+    // client and is deliberately not used.)
     private static final int PET_MOVE_RIGHT = 2;
     private static final int PET_MOVE_LEFT = 3;
-    private static final int PET_FLY_RIGHT = 10;
-    private static final int PET_FLY_LEFT = 11;
+    private static final int PET_STAND_RIGHT = 4;
+    private static final int PET_STAND_LEFT = 5;
+    private static final int PET_JUMP_RIGHT = 6;
+    private static final int PET_JUMP_LEFT = 7;
+    private static final int PET_SWIM_RIGHT = 12;
+    private static final int PET_SWIM_LEFT = 13;
+    private static final int PET_HANG_RIGHT = 30;
+    private static final int PET_HANG_LEFT = 31;
+
+    /** Per-pet horizontal spread so a multi-pet bot's pets do not overlap. */
+    private static final int PET_SPREAD_PX = 22;
+    /** Probe this far above a point when searching for the ground below it. */
+    private static final int GROUND_PROBE_UP = 8;
 
     /** Bots that currently have pets — the only ones a tick visits. */
     private static final Set<Integer> TRACKED = ConcurrentHashMap.newKeySet();
     /** Per-pet next allowed speak time (epoch ms), keyed by pet unique id. */
     private static final Map<Integer, Long> nextSpeakAtMs = new ConcurrentHashMap<>();
+    /** Per-pet next allowed pickup time (epoch ms), keyed by pet unique id. */
+    private static final Map<Integer, Long> nextPickupAtMs = new ConcurrentHashMap<>();
     private static ScheduledFuture<?> task;
 
     private BotPetFollower() {
@@ -90,6 +101,7 @@ public final class BotPetFollower {
         }
         TRACKED.clear();
         nextSpeakAtMs.clear();
+        nextPickupAtMs.clear();
     }
 
     /**
@@ -175,82 +187,116 @@ public final class BotPetFollower {
         }
     }
 
-    /** Land follow: park the pet behind the bot, snapped to the ground. */
+    /**
+     * Land follow, modelled on the real client's CPet: the pet keeps its deadband
+     * around the owner, gliding toward the owner's x at a fixed speed (never
+     * snapping). It holds to the side it is already on, so an owner turning around
+     * does NOT fling the pet to the other side — the pet just keeps following. It
+     * snaps to the floor beneath its own x, so it never floats over a ledge, and at
+     * rest it settles to STAND so it never keeps walking on the spot.
+     */
     private static void followLand(Character chr, Pet pet, int index, BotPetConfig config, boolean observed) {
         Point botPos = chr.getPosition();
-        // The park position is behind the BOT, so it uses the bot's facing — a
-        // Character, so the character stance encoding applies (only the pet's own
-        // animation uses the pet stance values defined above).
-        int facing = CharacterStance.isFacingLeft(chr.getStance()) ? -1 : 1;
-        int behind = Math.abs(config.baseOffset()) + config.stepOffset() * index; // 40, 80, 120 px behind
-        Point target = new Point(botPos.x - facing * behind, botPos.y);
 
-        Point cur = pet.getPos();
-        boolean withinDeadZone = Math.abs(cur.x - target.x) <= config.epsPx()
-                && Math.abs(cur.y - target.y) <= config.epsPx();
-        if (withinDeadZone) {
-            // Arrived. If the pet is still rendered mid-walk, settle it to a stand
-            // pose, or the client keeps looping the last move animation while the pet
-            // sits in place ("marching in place"). Pet stances are NOT the character
-            // stances: 0 = stand (the host summons pets with setStance(0)), and the
-            // low bit is the facing. Sent once (the stance check guards a repeat).
-            int stand = isPetFacingLeft(pet) ? PET_STAND_LEFT : PET_STAND_RIGHT;
-            if (pet.getStance() != stand) {
-                pet.setStance(stand);
-                if (observed) {
-                    broadcastMove(chr, pet, index, cur, 0, 0, pet.getFh(), stand, config);
-                }
-            }
+        // On a rope/ladder the real pet hangs on the owner's back (HANG pose).
+        if (CharacterStance.isClimbing(chr.getStance())) {
+            moveTowards(chr, pet, index, pet.getPos(), botPos,
+                    PET_HANG_RIGHT, PET_HANG_LEFT, config, observed, false, true);
             return;
         }
-        int deltaX = target.x - cur.x;
-        int deltaY = target.y - cur.y;
-        double dt = Math.max(0.05, config.followTickMs() / 1000.0);
-        int vx = deltaX == 0 ? 0 : (int) Math.round(deltaX / dt);
-        int stance = deltaX == 0
-                ? (isPetFacingLeft(pet) ? PET_STAND_LEFT : PET_STAND_RIGHT)
-                : (deltaX > 0 ? PET_MOVE_RIGHT : PET_MOVE_LEFT);
-        pet.setPos(target);
-        pet.setStance(stance);
-        int fh = BotPetController.footholdId(chr.getMap(), target);
-        pet.setFh(fh);
-        if (observed) {
-            broadcastMove(chr, pet, index, target, vx, (int) Math.round(deltaY / dt), fh, stance, config);
-        }
+
+        // Move toward the owner's x (a small per-index offset so a multi-pet bot's
+        // pets do not perfectly overlap), ground-snapped under its own x. Following
+        // the owner's position rather than its facing is what keeps a turn from
+        // flinging the pet to the other side.
+        Point target = groundSnap(chr.getMap(),
+                new Point(botPos.x + index * PET_SPREAD_PX, botPos.y));
+
+        // Airborne owner: the pet leaps after it, rendered in the JUMP pose.
+        boolean air = CharacterStance.isJumping(chr.getStance());
+        moveTowards(chr, pet, index, pet.getPos(), target,
+                air ? PET_JUMP_RIGHT : PET_STAND_RIGHT,
+                air ? PET_JUMP_LEFT : PET_STAND_LEFT, config, observed, air, false);
     }
 
     /**
-     * Swim follow: glide the pet toward a point above the bot at a fixed speed,
-     * rendered in the pet's FLY animation. Footholds are the seabed (or absent) in
-     * water, so fh stays 0 and the client floats the pet.
+     * Swim follow: glide the pet toward a point above the bot. Footholds are the
+     * seabed (or absent) in water, so fh stays 0 and the pet floats, in the SWIM pose.
      */
     private static void followSwim(Character chr, Pet pet, int index, BotPetConfig config, boolean observed) {
         Point botPos = chr.getPosition();
         Point target = new Point(botPos.x, botPos.y - config.swimOffset() * (index + 1));
+        moveTowards(chr, pet, index, pet.getPos(), target,
+                PET_SWIM_RIGHT, PET_SWIM_LEFT, config, observed, false, true);
+    }
 
-        Point cur = pet.getPos();
-        double offsetX = target.x - cur.x;
-        double offsetY = target.y - cur.y;
-        double dist = Math.hypot(offsetX, offsetY);
-        if (dist <= config.swimDeadZonePx()) {
-            return; // floating in place is the natural water idle — nothing to settle
+    /**
+     * Shared movement core: walk the pet toward {@code target} at a fixed speed, or
+     * teleport when hopelessly far (a warp). Within the deadband it settles to the
+     * given idle stance, sent once. {@code noGravity} keeps the pet at the target's
+     * own y (water / hanging on the owner's back).
+     */
+    private static void moveTowards(Character chr, Pet pet, int index, Point cur, Point target,
+                                    int idleRight, int idleLeft, BotPetConfig config,
+                                    boolean observed, boolean air, boolean noGravity) {
+        double dx = target.x - cur.x;
+        double dy = target.y - cur.y;
+        double dist = Math.hypot(dx, dy);
+
+        if (dist > config.teleportDistPx()) {
+            applyAndSend(chr, pet, index, target, 0, 0, noGravity ? 0 : pet.getFh(),
+                    isPetFacingLeft(pet) ? idleLeft : idleRight, config, observed);
+            return;
+        }
+        if (dist <= config.epsPx()) {
+            int idle = isPetFacingLeft(pet) ? idleLeft : idleRight;
+            if (pet.getStance() != idle) {
+                applyAndSend(chr, pet, index, cur, 0, 0, pet.getFh(), idle, config, observed);
+            }
+            return;
         }
         double dt = Math.max(0.05, config.followTickMs() / 1000.0);
-        double maxStep = Math.max(1.0, config.swimFollowSpeed() * dt);
+        double maxStep = Math.max(1.0, config.followSpeed() * dt);
         double scale = Math.min(1.0, maxStep / dist);
-        double stepX = offsetX * scale;
-        double stepY = offsetY * scale;
-
-        int newX = (int) Math.round(cur.x + stepX);
-        int newY = (int) Math.round(cur.y + stepY);
-        int stance = stepX >= 0 ? PET_FLY_RIGHT : PET_FLY_LEFT;
-        pet.setPos(new Point(newX, newY));
-        pet.setStance(stance);
-        pet.setFh(0);
-        if (observed) {
-            broadcastMove(chr, pet, index, new Point(newX, newY),
-                    (int) Math.round(stepX / dt), (int) Math.round(stepY / dt), 0, stance, config);
+        int nx = (int) Math.round(cur.x + dx * scale);
+        int ny = (int) Math.round(cur.y + dy * scale);
+        if (!noGravity) {
+            // Stay on the floor under the new x, so the pet walks along the ground
+            // instead of gliding through the air toward a foothold below.
+            ny = groundSnap(chr.getMap(), new Point(nx, ny)).y;
         }
+        int stepX = nx - cur.x;
+        int moveRight = air ? PET_JUMP_RIGHT : PET_MOVE_RIGHT;
+        int moveLeft = air ? PET_JUMP_LEFT : PET_MOVE_LEFT;
+        int stance = stepX == 0
+                ? (isPetFacingLeft(pet) ? idleLeft : idleRight)
+                : (stepX > 0 ? moveRight : moveLeft);
+        int fh = noGravity ? 0 : BotPetController.footholdId(chr.getMap(), new Point(nx, ny));
+        applyAndSend(chr, pet, index, new Point(nx, ny),
+                (int) Math.round(stepX / dt), (int) Math.round((ny - cur.y) / dt), fh, stance, config, observed);
+    }
+
+    private static void applyAndSend(Character chr, Pet pet, int index, Point pos,
+                                     int vx, int vy, int fh, int stance, BotPetConfig config, boolean observed) {
+        pet.setPos(pos);
+        pet.setStance(stance);
+        pet.setFh(fh);
+        if (observed) {
+            broadcastMove(chr, pet, index, pos, vx, vy, fh, stance, config);
+        }
+    }
+
+    /**
+     * The ground point under {@code p} (its own x), or {@code p} itself when there is
+     * none. Probes a little above {@code p} so an upward slope is found too (mirrors
+     * the host's own pet placement, which probes a few px up before findBelow).
+     */
+    private static Point groundSnap(MapleMap map, Point p) {
+        if (map == null) {
+            return p;
+        }
+        Foothold fh = map.getFootholds().findBelow(new Point(p.x, p.y - GROUND_PROBE_UP));
+        return fh == null ? p : new Point(p.x, fh.calculateFooting(p.x));
     }
 
     /**
@@ -321,11 +367,21 @@ public final class BotPetFollower {
      * for" whoever dropped them without ever stealing a protected drop.
      */
     private static void loot(Character chr, MapleMap map, BotPetConfig config) {
+        long now = System.currentTimeMillis();
         Pet[] pets = chr.getPets();
         for (int idx = 0; idx < pets.length; idx++) {
             Pet pet = pets[idx];
             if (pet == null) {
                 continue;
+            }
+            // Per-pet pickup cooldown: a pet trots over loot, it does not vacuum it
+            // up. Without this the pet (one item per follow tick) emptied a drop
+            // pile almost instantly.
+            if (now < nextPickupAtMs.getOrDefault(pet.getUniqueId(), 0L)) {
+                continue;
+            }
+            if (nextPickupAtMs.size() > 20_000) {
+                nextPickupAtMs.clear();
             }
             boolean items = chr.isEquippedItemPouch((byte) idx);
             boolean meso = chr.isEquippedMesoMagnet((byte) idx);
@@ -356,6 +412,9 @@ public final class BotPetFollower {
                 }
                 BotClientBinding.runWithBoundPlayer(chr, () -> chr.pickupItem(mapItem, petIndex));
                 picked++;
+            }
+            if (picked > 0) {
+                nextPickupAtMs.put(pet.getUniqueId(), now + config.pickupCooldownMs());
             }
         }
     }

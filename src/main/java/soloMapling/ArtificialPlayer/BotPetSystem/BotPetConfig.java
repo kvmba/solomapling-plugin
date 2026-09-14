@@ -45,14 +45,13 @@ public final class BotPetConfig {
 
     private static final long DEF_FOLLOW_TICK_MS = 300L;
     private static final int DEF_EPS_PX = 25;
-    private static final int DEF_BASE_OFFSET = -40;
-    private static final int DEF_STEP_OFFSET = 40;
+    private static final double DEF_FOLLOW_SPEED = 200.0;
+    private static final int DEF_TELEPORT_DIST_PX = 160;
     private static final int DEF_SWIM_OFFSET = 14;
-    private static final double DEF_SWIM_FOLLOW_SPEED = 130.0;
-    private static final int DEF_SWIM_DEAD_ZONE_PX = 10;
 
-    private static final int DEF_PICKUP_MAX_PER_TICK = 2;
+    private static final int DEF_PICKUP_MAX_PER_TICK = 1;
     private static final int DEF_PICKUP_RANGE = 120;
+    private static final long DEF_PICKUP_COOLDOWN_MS = 450L;
 
     private static final double DEF_SPEAK_CHANCE = 0.10;
     private static final long DEF_SPEAK_MIN_INTERVAL_MS = 8_000L;
@@ -105,14 +104,13 @@ public final class BotPetConfig {
 
     private final long followTickMs;
     private final int epsPx;
-    private final int baseOffset;
-    private final int stepOffset;
+    private final double followSpeed;
+    private final int teleportDistPx;
     private final int swimOffset;
-    private final double swimFollowSpeed;
-    private final int swimDeadZonePx;
 
     private final int pickupMaxPerTick;
     private final int pickupRange;
+    private final long pickupCooldownMs;
 
     private final double speakChance;
     private final long speakMinIntervalMs;
@@ -141,13 +139,12 @@ public final class BotPetConfig {
         this.nameTagChance = b.nameTagChance;
         this.followTickMs = b.followTickMs;
         this.epsPx = b.epsPx;
-        this.baseOffset = b.baseOffset;
-        this.stepOffset = b.stepOffset;
+        this.followSpeed = b.followSpeed;
+        this.teleportDistPx = b.teleportDistPx;
         this.swimOffset = b.swimOffset;
-        this.swimFollowSpeed = b.swimFollowSpeed;
-        this.swimDeadZonePx = b.swimDeadZonePx;
         this.pickupMaxPerTick = b.pickupMaxPerTick;
         this.pickupRange = b.pickupRange;
+        this.pickupCooldownMs = b.pickupCooldownMs;
         this.speakChance = b.speakChance;
         this.speakMinIntervalMs = b.speakMinIntervalMs;
         this.speakMaxIntervalMs = b.speakMaxIntervalMs;
@@ -176,14 +173,13 @@ public final class BotPetConfig {
 
     public long followTickMs() { return followTickMs; }
     public int epsPx() { return epsPx; }
-    public int baseOffset() { return baseOffset; }
-    public int stepOffset() { return stepOffset; }
+    public double followSpeed() { return followSpeed; }
+    public int teleportDistPx() { return teleportDistPx; }
     public int swimOffset() { return swimOffset; }
-    public double swimFollowSpeed() { return swimFollowSpeed; }
-    public int swimDeadZonePx() { return swimDeadZonePx; }
 
     public int pickupMaxPerTick() { return pickupMaxPerTick; }
     public int pickupRange() { return pickupRange; }
+    public long pickupCooldownMs() { return pickupCooldownMs; }
 
     public double speakChance() { return speakChance; }
     public long speakMinIntervalMs() { return speakMinIntervalMs; }
@@ -261,15 +257,14 @@ public final class BotPetConfig {
         Map<String, Object> follow = map(root.get("follow"));
         b.followTickMs = lng(follow.get("tick_ms"), DEF_FOLLOW_TICK_MS);
         b.epsPx = intOf(follow.get("eps_px"), DEF_EPS_PX);
-        b.baseOffset = intOf(follow.get("base_offset"), DEF_BASE_OFFSET);
-        b.stepOffset = intOf(follow.get("step_offset"), DEF_STEP_OFFSET);
+        b.followSpeed = dbl(follow.get("speed"), DEF_FOLLOW_SPEED);
+        b.teleportDistPx = intOf(follow.get("teleport_dist_px"), DEF_TELEPORT_DIST_PX);
         b.swimOffset = intOf(follow.get("swim_offset"), DEF_SWIM_OFFSET);
-        b.swimFollowSpeed = dbl(follow.get("swim_follow_speed"), DEF_SWIM_FOLLOW_SPEED);
-        b.swimDeadZonePx = intOf(follow.get("swim_dead_zone_px"), DEF_SWIM_DEAD_ZONE_PX);
 
         Map<String, Object> pickup = map(root.get("pickup"));
         b.pickupMaxPerTick = intOf(pickup.get("max_per_tick"), DEF_PICKUP_MAX_PER_TICK);
         b.pickupRange = intOf(pickup.get("range"), DEF_PICKUP_RANGE);
+        b.pickupCooldownMs = lng(pickup.get("cooldown_ms"), DEF_PICKUP_COOLDOWN_MS);
 
         Map<String, Object> speak = map(root.get("speak"));
         b.speakChance = dbl(speak.get("chance"), DEF_SPEAK_CHANCE);
@@ -383,13 +378,12 @@ public final class BotPetConfig {
         double nameTagChance = DEF_NAME_TAG_CHANCE;
         long followTickMs = DEF_FOLLOW_TICK_MS;
         int epsPx = DEF_EPS_PX;
-        int baseOffset = DEF_BASE_OFFSET;
-        int stepOffset = DEF_STEP_OFFSET;
+        double followSpeed = DEF_FOLLOW_SPEED;
+        int teleportDistPx = DEF_TELEPORT_DIST_PX;
         int swimOffset = DEF_SWIM_OFFSET;
-        double swimFollowSpeed = DEF_SWIM_FOLLOW_SPEED;
-        int swimDeadZonePx = DEF_SWIM_DEAD_ZONE_PX;
         int pickupMaxPerTick = DEF_PICKUP_MAX_PER_TICK;
         int pickupRange = DEF_PICKUP_RANGE;
+        long pickupCooldownMs = DEF_PICKUP_COOLDOWN_MS;
         double speakChance = DEF_SPEAK_CHANCE;
         long speakMinIntervalMs = DEF_SPEAK_MIN_INTERVAL_MS;
         long speakMaxIntervalMs = DEF_SPEAK_MAX_INTERVAL_MS;

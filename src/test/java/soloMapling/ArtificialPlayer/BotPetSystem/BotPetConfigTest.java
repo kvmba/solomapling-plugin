@@ -45,16 +45,16 @@ class BotPetConfigTest {
         assertEquals(0.70, c.nameTagChance(), 1e-9);
 
         // follow
-        assertEquals(300L, c.followTickMs());
+        assertEquals(200L, c.followTickMs());
         assertEquals(25, c.epsPx());
-        assertEquals(-40, c.baseOffset());
-        assertEquals(40, c.stepOffset());
+        assertEquals(200.0, c.followSpeed(), 1e-9);
+        assertEquals(160, c.teleportDistPx());
         assertEquals(14, c.swimOffset());
-        assertEquals(130.0, c.swimFollowSpeed(), 1e-9);
 
         // pickup
-        assertEquals(2, c.pickupMaxPerTick());
+        assertEquals(1, c.pickupMaxPerTick());
         assertEquals(120, c.pickupRange());
+        assertEquals(450L, c.pickupCooldownMs());
 
         // speak
         assertEquals(0.10, c.speakChance(), 1e-9);

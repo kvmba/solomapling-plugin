@@ -37,21 +37,24 @@ gear:
   meso_magnet: { id: 1812000, chance: 0.30 }   # loots mesos
   name_tag_chance: 0.70
 
-# Follow drive. Offsets are applied behind the bot on land; swim_offset is above
-# it in water. swim_follow_speed is px/s the pet glides in water.
+# Follow drive. The pet walks toward a point roughly behind the bot (offset on
+# land, above it in water), moving at `speed` px/s and only teleporting when it
+# is hopelessly far (teleport_dist_px, e.g. after a warp). It snaps to the ground
+# below its own x so it never floats over a ledge.
 follow:
-  tick_ms: 300
+  tick_ms: 200
   eps_px: 25
-  base_offset: -40
-  step_offset: 40
+  speed: 200.0
+  teleport_dist_px: 160
   swim_offset: 14
-  swim_follow_speed: 130.0
-  swim_dead_zone_px: 10
 
-# Pet looting (only for pets with the matching gear).
+# Pet looting (only for pets with the matching gear). A pet picks up at most
+# max_per_tick items per follow tick, and at most one every cooldown_ms — so it
+# reads like a pet trotting over loot, not a vacuum.
 pickup:
-  max_per_tick: 2
+  max_per_tick: 1
   range: 120
+  cooldown_ms: 450
 
 # Pet behaviours. Each pet performs a command from its own WZ interact menu
 # (Item.wz/Pet/<id>.img/interact) — the animation AND the spoken line come from
