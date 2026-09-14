@@ -55,6 +55,7 @@ public final class BotPetController {
         }
 
         boolean granted = false;
+        boolean lookChanged = false;
         for (PetSpec spec : specs) {
             String name = spec.named() ? BotPetNames.random() : null;
             Pet pet = persistent
@@ -75,7 +76,7 @@ public final class BotPetController {
             placeAtBot(bot, pet, slot);
             // Gear first, so the spawn broadcast already reflects the name tag
             // and looting pouches (hasPetNameTag / hasPetChatballoon read slots).
-            equipPetGear(bot, slot, spec, config);
+            lookChanged |= equipPetGear(bot, slot, spec, config);
             if (persistent) {
                 pet.saveToDb();
             }
@@ -84,6 +85,12 @@ public final class BotPetController {
         }
         if (granted) {
             BotPetFollower.track(bot.getId());
+        }
+        if (lookChanged) {
+            // Pet gear rides in the character LOOK (body parts 14/21/22/23), which
+            // observers only receive on an equipChanged broadcast — the host's own
+            // equip path ends the same way. Once per grant, not per pet.
+            bot.equipChanged();
         }
     }
 
@@ -105,8 +112,9 @@ public final class BotPetController {
             return; // nothing to detach (the common case)
         }
         Pet[] pets = bot.getPets();
+        boolean gearCleared = false;
         for (int i = 0; i < pets.length; i++) {
-            clearPetGear(bot, i);
+            gearCleared |= clearPetGear(bot, i);
         }
         if (bot.getMap() != null) {
             for (Pet pet : pets) {
@@ -128,6 +136,11 @@ public final class BotPetController {
         }
         if (had) {
             bot.sendPacket(PacketCreator.petStatUpdate(bot));
+        }
+        if (gearCleared) {
+            // Gear rides in the character look; refresh it so observers stop
+            // rendering the name tag / pouches (host's own unequip does the same).
+            bot.equipChanged();
         }
         BotPetFollower.forget(bot.getId());
     }
@@ -170,36 +183,48 @@ public final class BotPetController {
         return fh == null ? 0 : fh.getId();
     }
 
-    private static void equipPetGear(Character bot, int petIndex, PetSpec spec, BotPetConfig config) {
+    /** @return true when any gear was actually written (caller must then refresh the look) */
+    private static boolean equipPetGear(Character bot, int petIndex, PetSpec spec, BotPetConfig config) {
         if (petIndex < 0 || petIndex >= ItemConstants.PET_EQUIP_SLOTS.size()) {
-            return;
+            return false;
         }
+        boolean changed = false;
         if (spec.pickupItem()) {
-            BotPetGear.equipItemPouch(bot, petIndex, config.itemPouchId());
+            changed |= BotPetGear.equipItemPouch(bot, petIndex, config.itemPouchId());
         }
         if (spec.pickupMeso()) {
-            BotPetGear.equipMesoMagnet(bot, petIndex, config.mesoMagnetId());
+            changed |= BotPetGear.equipMesoMagnet(bot, petIndex, config.mesoMagnetId());
         }
         if (spec.named()) {
-            BotPetGear.equipNameTag(bot, petIndex);
+            changed |= BotPetGear.equipNameTag(bot, petIndex);
         }
+        return changed;
     }
 
-    private static void clearPetGear(Character bot, int petIndex) {
+    /** @return true when any gear slot actually held an item (caller must then refresh the look) */
+    private static boolean clearPetGear(Character bot, int petIndex) {
         if (bot == null || petIndex < 0 || petIndex >= ItemConstants.PET_EQUIP_SLOTS.size()) {
-            return;
+            return false;
         }
         var inv = bot.getInventory(InventoryType.EQUIPPED);
         if (inv == null) {
-            return;
+            return false;
         }
         PetEquipSlot slots = ItemConstants.PET_EQUIP_SLOTS.get(petIndex);
+        boolean cleared = false;
+        cleared |= inv.getItem(slots.itemPouch()) != null;
+        cleared |= inv.getItem(slots.mesoMagnet()) != null;
+        cleared |= inv.getItem(slots.nameTag()) != null;
+        cleared |= inv.getItem(slots.itemIgnore()) != null;
+        cleared |= inv.getItem(slots.chatBalloon()) != null;
+        cleared |= inv.getItem(slots.equip()) != null;
         inv.removeSlot(slots.itemPouch());
         inv.removeSlot(slots.mesoMagnet());
         inv.removeSlot(slots.nameTag());
         inv.removeSlot(slots.itemIgnore());
         inv.removeSlot(slots.chatBalloon());
         inv.removeSlot(slots.equip());
+        return cleared;
     }
 
     private static void broadcastShow(Character bot, Pet pet) {

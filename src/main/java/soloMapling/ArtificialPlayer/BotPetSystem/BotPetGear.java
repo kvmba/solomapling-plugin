@@ -26,26 +26,27 @@ public final class BotPetGear {
     /** The name label ring: equipping it gives the pet a name tag. (v83 has one.) */
     private static final int NAME_TAG_RING_ID = 1822000;
 
-    public static void equipItemPouch(Character bot, int petIndex, int itemId) {
-        equip(bot, petIndex, itemId, ItemConstants.PET_EQUIP_SLOTS.get(petIndex).itemPouch());
+    public static boolean equipItemPouch(Character bot, int petIndex, int itemId) {
+        return equip(bot, petIndex, itemId, ItemConstants.PET_EQUIP_SLOTS.get(petIndex).itemPouch());
     }
 
-    public static void equipMesoMagnet(Character bot, int petIndex, int itemId) {
-        equip(bot, petIndex, itemId, ItemConstants.PET_EQUIP_SLOTS.get(petIndex).mesoMagnet());
+    public static boolean equipMesoMagnet(Character bot, int petIndex, int itemId) {
+        return equip(bot, petIndex, itemId, ItemConstants.PET_EQUIP_SLOTS.get(petIndex).mesoMagnet());
     }
 
-    public static void equipNameTag(Character bot, int petIndex) {
+    public static boolean equipNameTag(Character bot, int petIndex) {
         // A name tag only shows if the pet has a real name; harmless otherwise.
-        equip(bot, petIndex, NAME_TAG_RING_ID, ItemConstants.PET_EQUIP_SLOTS.get(petIndex).nameTag());
+        return equip(bot, petIndex, NAME_TAG_RING_ID, ItemConstants.PET_EQUIP_SLOTS.get(petIndex).nameTag());
     }
 
-    private static void equip(Character bot, int petIndex, int itemId, short slot) {
+    /** @return true when an item was actually written to the slot */
+    private static boolean equip(Character bot, int petIndex, int itemId, short slot) {
         if (bot == null || bot.getInventory(InventoryType.EQUIPPED) == null) {
-            return;
+            return false;
         }
         Equip source = equipOf(itemId);
         if (source == null) {
-            return;
+            return false;
         }
         var inv = bot.getInventory(InventoryType.EQUIPPED);
         if (inv.getItem(slot) != null) {
@@ -53,6 +54,7 @@ public final class BotPetGear {
         }
         source.setPosition(slot);
         inv.addItemFromDB(source);
+        return true;
     }
 
     /** Pet gear are Equip items; {@code getEquipById} returns an {@link Equip}. */
