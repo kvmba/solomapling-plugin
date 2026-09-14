@@ -195,6 +195,9 @@ public final class BotAttackDriver {
         // reach, else the single-target attack.
         BotAttackProfile profile;
         boolean healUndead = false;
+        // Set when the AUTO branch below already scanned the pack profile's reach: escalating to that
+        // same profile reuses the scan, so the AoE path measures reach once instead of twice.
+        List<Monster> reachCache = null;
         if (choice == Choice.SINGLE) {
             profile = single;
         } else if (choice == Choice.AOE) {
@@ -211,15 +214,19 @@ public final class BotAttackDriver {
             // instead of dropping to single-target. Only escalate to an AoE when 2+ mobs are in reach.
             boolean ultReady = ultimate != null && now >= nextUltimateByBot.getOrDefault(bot.getId(), 0L);
             BotAttackProfile packAttack = ultReady ? ultimate : aoe;
-            boolean useAoe = packAttack != null && mobsInReach(bot, packAttack, weapon, facingLeft).size() >= 2;
-            if (useAoe) {
+            List<Monster> packInReach = packAttack == null
+                    ? List.of()
+                    : mobsInReach(bot, packAttack, weapon, facingLeft);
+            if (packInReach.size() >= 2) {
                 profile = packAttack;
+                reachCache = packInReach; // same inputs scanned once - reuse for the target list
             } else {
                 profile = single != null ? single : (aoe != null ? aoe : ultimate);
             }
         }
 
-        List<Monster> targets = cap(mobsInReach(bot, profile, weapon, facingLeft), profile.numAttacked);
+        List<Monster> targets = cap(reachCache != null ? reachCache : mobsInReach(bot, profile, weapon, facingLeft),
+                profile.numAttacked);
         if (healUndead) {
             targets = undeadOnly(targets); // Heal must not damage a living mob caught in the box
         }
