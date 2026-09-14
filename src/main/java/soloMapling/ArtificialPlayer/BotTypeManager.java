@@ -13,6 +13,7 @@ import soloMapling.ArtificialPlayer.BotTypes.GachaBot;
 import soloMapling.ArtificialPlayer.BotTypes.HenesysBot;
 import soloMapling.ArtificialPlayer.BotTypes.HenesysJQBot;
 import soloMapling.ArtificialPlayer.BotTypes.NXMerchantBot;
+import soloMapling.ArtificialPlayer.BotTypes.Henesys.HenesysPQBot;
 import soloMapling.ArtificialPlayer.BotTypes.OPQ.OPQBot;
 import soloMapling.ArtificialPlayer.BotTypes.ScrollingBot;
 import soloMapling.ArtificialPlayer.BotTypes.SellingMerchantBot;
@@ -143,6 +144,13 @@ public class BotTypeManager {
             public void createAndSetBot(Character character) {
                 OPQBot opqBot = new OPQBot(character);
                 CharacterStorage.addActiveBot(character.getId(), opqBot);
+            }
+        },
+        HENESYS_PQ_BOT {
+            @Override
+            public void createAndSetBot(Character character) {
+                HenesysPQBot hpqBot = new HenesysPQBot(character);
+                CharacterStorage.addActiveBot(character.getId(), hpqBot);
             }
         },
         SOCIAL_BOT {
