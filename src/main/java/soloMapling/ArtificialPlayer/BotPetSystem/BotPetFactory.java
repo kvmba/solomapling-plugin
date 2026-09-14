@@ -82,7 +82,13 @@ public final class BotPetFactory {
         Item item = new Item(spec.itemId(), (short) 0, (short) 1, petId);
         item.setExpiration(Long.MAX_VALUE);
         item.setFlag((short) 0);
-        bot.getInventory(InventoryType.CASH).addItem(item);
+        short slot = bot.getInventory(InventoryType.CASH).addItem(item);
+        if (slot == -1) {
+            // CASH full: drop the pet we just created rather than leave an orphan row
+            // with no backing inventory item.
+            Pet.deleteFromDb(bot, petId);
+            return null;
+        }
         pet.saveToDb();
         return pet;
     }

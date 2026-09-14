@@ -4,6 +4,7 @@ import org.gms.client.Character;
 import org.gms.client.inventory.InventoryType;
 import org.gms.client.inventory.Pet;
 import org.gms.constants.inventory.ItemConstants;
+import org.gms.constants.inventory.PetEquipSlot;
 import org.gms.server.maps.Foothold;
 import org.gms.server.maps.MapleMap;
 import org.gms.util.PacketCreator;
@@ -38,7 +39,11 @@ public final class BotPetController {
             return; // mapless bots (e.g. the console bot) can't show a pet either
         }
         if (hasAnyPet(bot)) {
-            return; // idempotent
+            // Idempotent: a companion that reloaded its saved pets keeps them.
+            // Still start following them — a reloaded companion is granted before
+            // any follow tracking existed.
+            BotPetFollower.track(bot.getId());
+            return;
         }
 
         boolean persistent = config.persistCompanions() && CompanionRoster.isCompanion(bot.getId());
@@ -70,21 +75,8 @@ public final class BotPetController {
             broadcastShow(bot, pet);
             index++;
         }
-    }
-
-    /** Re-place the pets on a freshly-changed map and re-broadcast them. */
-    public static void relocateForMap(Character bot) {
-        if (bot == null || bot.getMap() == null) {
-            return;
-        }
-        Pet[] pets = bot.getPets();
-        for (int i = 0; i < pets.length; i++) {
-            Pet pet = pets[i];
-            if (pet == null) {
-                continue;
-            }
-            placeAtBot(bot, pet, i);
-            broadcastShow(bot, pet);
+        if (index > 0) {
+            BotPetFollower.track(bot.getId());
         }
     }
 
@@ -126,6 +118,7 @@ public final class BotPetController {
         if (had) {
             bot.sendPacket(PacketCreator.petStatUpdate(bot));
         }
+        BotPetFollower.forget(bot.getId());
     }
 
     public static boolean hasAnyPet(Character bot) {
@@ -189,7 +182,7 @@ public final class BotPetController {
         if (inv == null) {
             return;
         }
-        org.gms.constants.inventory.PetEquipSlot slots = ItemConstants.PET_EQUIP_SLOTS.get(petIndex);
+        PetEquipSlot slots = ItemConstants.PET_EQUIP_SLOTS.get(petIndex);
         inv.removeSlot(slots.itemPouch());
         inv.removeSlot(slots.mesoMagnet());
         inv.removeSlot(slots.nameTag());

@@ -86,6 +86,14 @@ public final class BotPetPool {
         if (entry instanceof Number n) {
             return n.intValue();
         }
+        if (entry instanceof String s) {
+            // yamlbeans hands bare scalars back as String.
+            try {
+                return Integer.parseInt(s.trim());
+            } catch (NumberFormatException ignored) {
+                return null;
+            }
+        }
         if (entry instanceof Map<?, ?> m) {
             Object id = ((Map<String, Object>) m).get("id");
             if (id instanceof Number n) {

@@ -223,37 +223,24 @@ if (map.isSwim()) {
 全局定时驱动，`TICK_MS ≈ 250ms`：
 ```
 onTick():
-  for bot in botsWithSummonedPets:
-    Character chr = bot.getChr()
-    if chr == null || chr.getMap() == null: continue
-    MapleMap map = chr.getMap()
-
-    // (a) 地图变化（含死亡回城）→ 宠物重定位 + 重播
-    if lastMapId[bot] != chr.getMapId():
-      lastMapId[bot] = chr.getMapId()
-      for idx, pet in chr.getPets*(): relocatePet(chr, pet, idx)  // 见下
-      continue
+  for botId in TRACKED:                       // 仅有宠物的 bot
+    chr = SoloMaplingUtilities.getChr(botId)  // 用玩家存储解析（授予早于 BotSM 包装）
+    if chr == null || chr.getMap() == null || chr.getNoPets() == 0: forget(botId); continue
 
     if !ObserverTracker.isActiveMap(chr.getMapId()): continue      // LOD
 
-    // (b) 跟随：身后错位；泳图不贴地
+    // 跟随：身后错位；泳图在 bot 上方滑行
     for idx, pet in chr.getPets*():
-      Point target = petFollowTarget(chr, idx)                    // (chr.x-(40+40*idx), chr.y) [+泳图 y 偏移]
-      if map.isSwim(): target.y = chr.getPosition().y - 12 * (idx + 1)   // 水里在 bot 上方错位
-      if dist(pet.getPos(), target) < FOLLOW_EPS: continue
-      pet.setPos(target); pet.setStance(0)
-      pet.setFh(map.isSwim() ? 0 : fhOf(map, target))
-      broadcastPetMove(chr, pet, idx, target)
+      if map.isSwim(): followSwim(chr, pet, idx)   // 朝 (x, y-14*(idx+1)) 定速滑行，fh=0，stance 12/13
+      else:            followLand(chr, pet, idx)   // 身后 40/80/120px，findBelow 贴地，stance WALK/STAND
 ```
 
-**`relocatePet`（切图/回城）**：`placeAtBot` 后 `broadcastMessage(showPet(...))`。
-- 关键：`changeMap` 后客户端收到的是 `spawnPlayerMapObject`（带 `getPets()`），但宠物坐标是旧的 → 这里先 snap 到新图，随后 `MOVE_PET` 让客户端跟上。
+**切图 / 死亡回城**：**无插件代码**。宿主 `MapleMap.addPlayer` 每次进图都会对 `getPets()` 逐只 `setPos(getGroundBelow(...))` 并 `showPet`；其它观察者经 `spawnPlayerMapObject`（含 `getPets()`）收到宠物。所以宠物天然随 bot 过传送门 / 传送 / 死亡回城。**注意：不要再额外发 showPet，否则客户端重复生成宠物。**
 
 **泳图表现（决策 6）**：
 - 泳图**跳过 `findBelow` 贴地**（海床/空列会返回错误地板或 null，导致宠物瞬移下沉）。
-- 宠物位置 = bot 位置上方错位；`fh = 0`；仍发 `MOVE_PET`。
+- 宠物位置 = bot 位置上方错位；`fh = 0`；发 `MOVE_PET` 且带速度，**stance = 12/13（游泳姿势）** → "游泳姿势 + 物理跟随"。
 - 真实客户端里宠物本来就会随主人浮游/游泳，服务端只需给位置，不需宠物物理。
-- 泳图/陆图切换时走 (a) 分支统一重定位，无需特殊代码。
 
 **宠物移动包**（推荐，复用宿主序列化）：
 ```java
@@ -383,8 +370,8 @@ BotPetController.removePets(fakechar)
 | `BotPetAssigner` / `PetSpec` | **纯策略**：实力 → 携带概率 / 数量 / 宠物等级 / 命名 / 拾取装备 |
 | `BotPetFactory` | 造宠双路径：反射内存直造（ambient）/ `createPet`+CASH 持久化（companion） |
 | `BotPetGear` | 宠物装备（拾物/磁铁/名签）直写 `PET_EQUIP_SLOTS` |
-| `BotPetController` | 授予 / 召唤 / 重定位 / 回收 |
-| `BotPetFollower` | 全局定时驱动：跟随 + 泳图滑行 + 地图变化重定位 + 宠物拾取 |
+| `BotPetController` | 授予 / 召唤 / 回收（切图重定位由宿主完成，见下） |
+| `BotPetFollower` | 全局定时驱动：跟随 + 泳图滑行 + 宠物拾取 |
 | `BotPetSystem` | 门面：bootstrap / grant / remove / reload / enabled 开关 |
 
 命令：`!botpet status|enable|disable|reload|grant <botId>|clear <botId>`。
@@ -405,5 +392,9 @@ BotPetController.removePets(fakechar)
 6. **companion 下线不删宠**：`removePets` 对 companion 直接返回，其宠物随 `saveCharToDB` 持久化；上线 `grantForBot` 幂等（`getPets()` 非空则跳过），重启不丢也不叠加。
 7. **移除顺序**：`removePets` 先清装备槽 → 广播移除 → `removePet` 清宠物槽 → `petStatUpdate`；`PetLootHandler` 在宠物离开后自然失效（`getPetIndex` 返回 -1）。
 8. **配置**：`BotPetConfig.yaml` / `BotPetPool.yaml` / `BotPetNames.yaml`，均可放 `data/solomapling/override/...` 覆盖。
+9. **切图 / 死亡回城无需插件代码**：宿主的 `MapleMap.addPlayer` 在每次进图时已对 `getPets()` 逐只 `setPos(getGroundBelow(...))` 并 `showPet`（发给 bot 自己的 client，headless 侧为空操作），而其它观察者通过 `spawnPlayerMapObject`（`getPets()` 自动带上）收到宠物。因此宠物天然随 bot 过传送门 / 传送 / 死亡回城，follower 只需在"已在图"时维持跟随，**不做任何地图变化处理**（避免与宿主重复 showPet 导致客户端重复生成）。
+10. **宿主无"非落库"宠物工厂**：`Pet` 构造器私有，`createPet`/`loadFromDb` 都写/读库；`extension-api` 亦无宠物 API。故 ambient 的内存直造是**唯一**不落库路径，`BotPetFactoryTest` 证明其可在无 DB 环境构造出合法 `Pet`。
 
-测试：`BotPetAssignerTest`（10 例，纯逻辑）——强度单调/≤1、携带率单调且 ≤30%、低于 `min_level` 无宠、数量 ∈[1,3] 且不重复、数量分布随实力右偏、宠物等级 ∈[1,5]、空池/禁用不产宠。全量 `mvn test` 830 项通过。
+**审核修正（本轮）**：移除早期版本的多余地图变化重定位（宿主已处理，避免重复 showPet）；follower 改为只遍历"有宠物的 bot"（`TRACKED` 集合）并按 `SoloMaplingUtilities.getChr` 解析（授予发生在 BotSM 包装之前）；`grantForBot` 对"已有宠物"的幂等分支补 `track`（companion 重载后仍能跟随）；`createPersistent` 在 CASH 满时清理孤儿 `pets` 行；`BotPetPool` 兼容 yamlbeans 把裸数字读成字符串。
+
+测试：`BotPetAssignerTest`（10 例，纯策略）+ `BotPetConfigTest`（2 例，YAML 键位 + 池加载）+ `BotPetFactoryTest`（3 例，无 DB 反射造宠）。全量 `mvn test` 835 项通过。

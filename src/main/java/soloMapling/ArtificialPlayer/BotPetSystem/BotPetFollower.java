@@ -3,7 +3,6 @@ package soloMapling.ArtificialPlayer.BotPetSystem;
 import org.gms.client.Character;
 import org.gms.client.inventory.Pet;
 import org.gms.constants.game.CharacterStance;
-import org.gms.constants.inventory.ItemConstants;
 import org.gms.net.packet.Packet;
 import org.gms.server.maps.MapItem;
 import org.gms.server.maps.MapObject;
@@ -14,13 +13,11 @@ import org.gms.server.movement.LifeMovementFragment;
 import org.gms.util.PacketCreator;
 import soloMapling.ArtificialPlayer.BotClientBinding;
 import soloMapling.ArtificialPlayer.BotCommandsPack.DropCommands;
-import soloMapling.ArtificialPlayer.BotMessagingSystem.CharacterStorage;
-import soloMapling.ArtificialPlayer.BotSM;
 import soloMapling.ArtificialPlayer.GCMoveSystem.GCMovement;
 
 import java.awt.Point;
 import java.util.List;
-import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
@@ -34,14 +31,21 @@ import java.util.concurrent.TimeUnit;
  * floats (fh 0) and glides toward a point above the bot, rendered in the swim
  * stance (12/13) — the pet "swims" after its owner.</p>
  *
- * <p>When the bot changes map (including a death carry-home, which is just a
- * {@code changeMap}), the pets are re-placed on the new map and re-broadcast.
- * Pets with the matching looting gear sweep nearby drops (their own / a nearby
- * player's free-for-all ones) through the engine's own pickup path.</p>
+ * <p><b>Map changes / death carry-home need no code here.</b> Whenever a bot
+ * enters a map the engine's own {@code MapleMap.addPlayer} already re-places its
+ * pets on the ground and sends {@code showPet}, and every observer receives them
+ * through {@code spawnPlayerMapObject} (they are part of {@code getPets()}). So a
+ * pet follows its bot across portals, warps and the death carry-home with no
+ * follower involvement — the engine does it, this only moves them once they are
+ * on the map.</p>
+ *
+ * <p>Pets with the matching looting gear sweep nearby drops (their own / a
+ * nearby player's free-for-all ones) through the engine's own pickup path.</p>
  */
 public final class BotPetFollower {
 
-    private static final Map<Integer, Integer> LAST_MAP = new ConcurrentHashMap<>();
+    /** Bots that currently have pets — the only ones a tick visits. */
+    private static final Set<Integer> TRACKED = ConcurrentHashMap.newKeySet();
     private static ScheduledFuture<?> task;
 
     private BotPetFollower() {
@@ -62,37 +66,33 @@ public final class BotPetFollower {
             task.cancel(false);
             task = null;
         }
-        LAST_MAP.clear();
+        TRACKED.clear();
     }
 
-    /** Forget a bot's map state (called when it leaves the world). */
+    /** Begin following a bot's pets. Called by {@link BotPetController} once a bot has pets. */
+    public static void track(int botId) {
+        TRACKED.add(botId);
+    }
+
+    /** Forget a bot's state (called when its pets are removed or it leaves the world). */
     public static void forget(int botId) {
-        LAST_MAP.remove(botId);
+        TRACKED.remove(botId);
     }
 
     private static void tick(BotPetConfig config) {
         try {
-            for (BotSM bot : CharacterStorage.getAllBots().values()) {
-                Character chr = bot == null ? null : bot.getChr();
-                if (chr == null || chr.getMap() == null) {
-                    continue;
-                }
-                if (chr.getNoPets() == 0) {
-                    LAST_MAP.remove(chr.getId());
+            for (Integer botId : TRACKED) {
+                // Resolve through player storage, not the BotSM: pets are granted
+                // during createBot, which runs before the bot is wrapped in a BotSM
+                // (setAndStartBots does that afterwards). Player storage already has
+                // the bot at grant time, so this never drops a freshly-petted bot.
+                Character chr = soloMapling.server.SoloMaplingUtilities.getChr(botId);
+                if (chr == null || chr.getMap() == null || chr.getNoPets() == 0) {
+                    forget(botId); // bot gone / mid-retype / pets removed
                     continue;
                 }
                 MapleMap map = chr.getMap();
-                int mapId = chr.getMapId();
-
-                Integer last = LAST_MAP.put(chr.getId(), mapId);
-                if (last == null || last != mapId) {
-                    // Fresh pets, or a map change (portal, warp, or death carry-home):
-                    // re-place on the new map and let observers see them there.
-                    BotPetController.relocateForMap(chr);
-                    continue;
-                }
-
-                if (!GCMovement.isMapObserved(mapId)) {
+                if (!GCMovement.isMapObserved(chr.getMapId())) {
                     continue; // LOD: nobody can see it, so neither the motion nor the packet is worth it
                 }
 
@@ -118,6 +118,7 @@ public final class BotPetFollower {
         }
     }
 
+    /** Land follow: park the pet behind the bot, snapped to the ground. */
     private static void followLand(Character chr, Pet pet, int index, BotPetConfig config) {
         Point botPos = chr.getPosition();
         int facing = CharacterStance.isFacingLeft(chr.getStance()) ? -1 : 1;
@@ -142,6 +143,11 @@ public final class BotPetFollower {
         broadcastMove(chr, pet, index, target, vx, (int) Math.round(deltaY / dt), fh, stance, config);
     }
 
+    /**
+     * Swim follow: glide the pet toward a point above the bot at a fixed speed,
+     * rendered in the swim stance. Footholds are the seabed (or absent) in water,
+     * so fh stays 0 and the client floats the pet.
+     */
     private static void followSwim(Character chr, Pet pet, int index, BotPetConfig config) {
         Point botPos = chr.getPosition();
         Point target = new Point(botPos.x, botPos.y - config.swimOffset() * (index + 1));
