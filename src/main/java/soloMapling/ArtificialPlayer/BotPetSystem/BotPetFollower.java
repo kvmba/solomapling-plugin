@@ -46,6 +46,23 @@ import java.util.concurrent.TimeUnit;
  */
 public final class BotPetFollower {
 
+    // Pet stances are NOT the character stances. The wire stance byte is
+    // (actionIndex << 1) | facing (even = right, odd = left), with the OFFICIAL
+    // action order STAND, MOVE, JUMP, ALERT, PRONE, FLY, HANG:
+    //     STAND = 0/1     MOVE = 2/3      JUMP = 4/5    ALERT = 6/7
+    //     PRONE = 8/9     FLY  = 10/11    HANG = 12/13
+    // Two independent facts pin this down: the host summons a pet with
+    // setStance(0) and the pet stands still, so 0 = STAND; and moving the pet
+    // with 2/3 renders the walk, so 2/3 = MOVE. (The Journey/maplestory-wasm
+    // client swaps the first two — MOVE=0/1, STAND=2/3 — so its table is NOT
+    // used here; it disagrees with the official client.)
+    private static final int PET_STAND_RIGHT = 0;
+    private static final int PET_STAND_LEFT = 1;
+    private static final int PET_MOVE_RIGHT = 2;
+    private static final int PET_MOVE_LEFT = 3;
+    private static final int PET_FLY_RIGHT = 10;
+    private static final int PET_FLY_LEFT = 11;
+
     /** Bots that currently have pets — the only ones a tick visits. */
     private static final Set<Integer> TRACKED = ConcurrentHashMap.newKeySet();
     /** Per-pet next allowed speak time (epoch ms), keyed by pet unique id. */
@@ -124,9 +141,14 @@ public final class BotPetFollower {
             return;
         }
         MapleMap map = chr.getMap();
-        if (!GCMovement.isMapObserved(chr.getMapId())) {
-            return; // LOD: nobody can see it, so neither the motion nor the packet is worth it
-        }
+        // The pet's position is kept in sync with the bot EVERY tick (a cheap
+        // in-memory update); only the packets are gated on observability. Freezing
+        // the position while unobserved made a joining player's spawnPlayerMapObject
+        // carry a stale pet coordinate, which then snapped to the bot — a visible
+        // flash. Syncing always bounds that staleness to one tick, like an observed
+        // map. Speaking and looting stay observer-gated (they only matter to, and
+        // only broadcast to, watchers).
+        boolean observed = GCMovement.isMapObserved(chr.getMapId());
 
         boolean swim = map.isSwim();
         // Iterate by the pet-ARRAY index, not a running count: the slot in
@@ -140,26 +162,45 @@ public final class BotPetFollower {
                 continue;
             }
             if (swim) {
-                followSwim(chr, pet, idx, config);
+                followSwim(chr, pet, idx, config, observed);
             } else {
-                followLand(chr, pet, idx, config);
+                followLand(chr, pet, idx, config, observed);
             }
-            maybeSpeak(chr, pet, idx, config);
+            if (observed) {
+                maybeSpeak(chr, pet, idx, config);
+            }
         }
-        if (chr.getHp() > 0) {
+        if (observed && chr.getHp() > 0) {
             loot(chr, map, config);
         }
     }
 
     /** Land follow: park the pet behind the bot, snapped to the ground. */
-    private static void followLand(Character chr, Pet pet, int index, BotPetConfig config) {
+    private static void followLand(Character chr, Pet pet, int index, BotPetConfig config, boolean observed) {
         Point botPos = chr.getPosition();
+        // The park position is behind the BOT, so it uses the bot's facing — a
+        // Character, so the character stance encoding applies (only the pet's own
+        // animation uses the pet stance values defined above).
         int facing = CharacterStance.isFacingLeft(chr.getStance()) ? -1 : 1;
         int behind = Math.abs(config.baseOffset()) + config.stepOffset() * index; // 40, 80, 120 px behind
         Point target = new Point(botPos.x - facing * behind, botPos.y);
 
         Point cur = pet.getPos();
-        if (Math.abs(cur.x - target.x) <= config.epsPx() && Math.abs(cur.y - target.y) <= config.epsPx()) {
+        boolean withinDeadZone = Math.abs(cur.x - target.x) <= config.epsPx()
+                && Math.abs(cur.y - target.y) <= config.epsPx();
+        if (withinDeadZone) {
+            // Arrived. If the pet is still rendered mid-walk, settle it to a stand
+            // pose, or the client keeps looping the last move animation while the pet
+            // sits in place ("marching in place"). Pet stances are NOT the character
+            // stances: 0 = stand (the host summons pets with setStance(0)), and the
+            // low bit is the facing. Sent once (the stance check guards a repeat).
+            int stand = isPetFacingLeft(pet) ? PET_STAND_LEFT : PET_STAND_RIGHT;
+            if (pet.getStance() != stand) {
+                pet.setStance(stand);
+                if (observed) {
+                    broadcastMove(chr, pet, index, cur, 0, 0, pet.getFh(), stand, config);
+                }
+            }
             return;
         }
         int deltaX = target.x - cur.x;
@@ -167,21 +208,23 @@ public final class BotPetFollower {
         double dt = Math.max(0.05, config.followTickMs() / 1000.0);
         int vx = deltaX == 0 ? 0 : (int) Math.round(deltaX / dt);
         int stance = deltaX == 0
-                ? CharacterStance.STAND_RIGHT_STANCE
-                : (deltaX > 0 ? CharacterStance.WALK_RIGHT_STANCE : CharacterStance.WALK_LEFT_STANCE);
+                ? (isPetFacingLeft(pet) ? PET_STAND_LEFT : PET_STAND_RIGHT)
+                : (deltaX > 0 ? PET_MOVE_RIGHT : PET_MOVE_LEFT);
         pet.setPos(target);
         pet.setStance(stance);
         int fh = BotPetController.footholdId(chr.getMap(), target);
         pet.setFh(fh);
-        broadcastMove(chr, pet, index, target, vx, (int) Math.round(deltaY / dt), fh, stance, config);
+        if (observed) {
+            broadcastMove(chr, pet, index, target, vx, (int) Math.round(deltaY / dt), fh, stance, config);
+        }
     }
 
     /**
      * Swim follow: glide the pet toward a point above the bot at a fixed speed,
-     * rendered in the swim stance. Footholds are the seabed (or absent) in water,
-     * so fh stays 0 and the client floats the pet.
+     * rendered in the pet's FLY animation. Footholds are the seabed (or absent) in
+     * water, so fh stays 0 and the client floats the pet.
      */
-    private static void followSwim(Character chr, Pet pet, int index, BotPetConfig config) {
+    private static void followSwim(Character chr, Pet pet, int index, BotPetConfig config, boolean observed) {
         Point botPos = chr.getPosition();
         Point target = new Point(botPos.x, botPos.y - config.swimOffset() * (index + 1));
 
@@ -190,7 +233,7 @@ public final class BotPetFollower {
         double offsetY = target.y - cur.y;
         double dist = Math.hypot(offsetX, offsetY);
         if (dist <= config.swimDeadZonePx()) {
-            return;
+            return; // floating in place is the natural water idle — nothing to settle
         }
         double dt = Math.max(0.05, config.followTickMs() / 1000.0);
         double maxStep = Math.max(1.0, config.swimFollowSpeed() * dt);
@@ -200,12 +243,22 @@ public final class BotPetFollower {
 
         int newX = (int) Math.round(cur.x + stepX);
         int newY = (int) Math.round(cur.y + stepY);
-        int stance = stepX >= 0 ? CharacterStance.SWIM_RIGHT_STANCE : CharacterStance.SWIM_LEFT_STANCE;
+        int stance = stepX >= 0 ? PET_FLY_RIGHT : PET_FLY_LEFT;
         pet.setPos(new Point(newX, newY));
         pet.setStance(stance);
         pet.setFh(0);
-        broadcastMove(chr, pet, index, new Point(newX, newY),
-                (int) Math.round(stepX / dt), (int) Math.round(stepY / dt), 0, stance, config);
+        if (observed) {
+            broadcastMove(chr, pet, index, new Point(newX, newY),
+                    (int) Math.round(stepX / dt), (int) Math.round(stepY / dt), 0, stance, config);
+        }
+    }
+
+    /**
+     * Facing of a pet from its stance byte: the low bit is the facing (even =
+     * right, odd = left), so STAND 0/1 and MOVE 2/3 mirror each other.
+     */
+    private static boolean isPetFacingLeft(Pet pet) {
+        return (pet.getStance() & 1) != 0;
     }
 
     private static void broadcastMove(Character chr, Pet pet, int index, Point pos,
