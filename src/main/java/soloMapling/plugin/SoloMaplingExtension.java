@@ -27,6 +27,7 @@ import soloMapling.ArtificialPlayer.BotPartySystem.BotPartyInviteBridge;
 import soloMapling.ArtificialPlayer.BotTradeSystem.BotTradeInviteBridge;
 import soloMapling.ArtificialPlayer.BotTradeSystem.SoloMaplingTradeParticipantHook;
 import soloMapling.ArtificialPlayer.LlmSystem.SocialLlmService;
+import soloMapling.ArtificialPlayer.SocialPersonaConfig;
 import soloMapling.ArtificialPlayer.BotMedalSystem.BotMedalPool;
 import soloMapling.Environment.EnvironmentManager;
 import soloMapling.Environment.EnvironmentPopulationConfig;
@@ -132,6 +133,7 @@ public final class SoloMaplingExtension implements ServerExtension {
                 SoloMaplingLanguageConfig.dialoguePackDirectoryName());
 
         SocialLlmService.configure(runtime.config());
+        SocialPersonaConfig.configure(runtime.config());
         installCompanionRuntimeCapabilities(runtime);
 
         String populationPath = runtime.config().getString("solomapling.population-config", "");

@@ -1293,3 +1293,59 @@ SocialBot:
     emote:
       - 2
     wait: 1
+  Banter:
+    text:
+      - "That it? I expected more."
+      - "your handspeed is... a choice."
+      - "ok ok you win, you're the best (you're not)."
+      - "oh great, another keyboard warrior."
+      - "take your time, I'll wait. all day."
+      - "nice gear. from the beginner town?"
+      - "ngl that playstyle is a whole performance."
+      - "sure, only a million times better than you."
+      - "you talk like a main-street champion."
+      - "oh a big shot arrived, let me make room."
+      - "did you level by afking, or just by talking?"
+      - "stop flexing, I surrender already."
+      - "you're right. but I'm not listening."
+      - "oh really? for real? I don't believe it."
+      - "I believe you. not a single word."
+      - "your dmg is on par with me afking."
+      - "all talk, zero buttons pressed."
+      - "hold on, that sounded almost real."
+      - "little bro, mad? tilted?"
+      - "there there, just say you're upset."
+      - "don't be mad, I'm complimenting you—for trying."
+      - "fine, you win, I'll give you the mouth prize."
+      - "at that handspeed typing must be hard too."
+      - "stop hyping, the whole town can hear it."
+      - "are you here to grind or to clap back?"
+      - "ok that combo is going in my memes."
+      - "ooh feisty. 1v1 me in town, two steps."
+      - "even a dog could out-dps you—kidding."
+      - "relax, being bad is a crime, but you're re-deemable."
+      - "I'm bad, sure. but you're not much either."
+      - "go on, I'll grab a chair and watch."
+      - "anyway, get well soon, noob."
+      - "you look scary, then... that."
+      - "ok ok you're strong, happy now?"
+      - "for trash talk, this street you rank #1."
+      - "talk is all you wanted, huh."
+      - "small stuff, chill, take a seat."
+      - "you look special. for standing around."
+      - "your efficiency—nobody afks harder."
+      - "you've trained so long, almost caught up to me (no)."
+      - "stop, any more and it's a legend."
+      - "fine, you're pretty, you win."
+      - "wow that's a healthy amount of self-love."
+      - "quit it, nobody's falling for it."
+      - "calling you talented wasn't an insult."
+      - "go on, I'm listening, I won't cut in."
+      - "ooh you think you're smooth, barely."
+      - "alright, you're tough. verbally."
+    emote:
+      - 0
+      - 2
+      - 4
+      - 5
+    wait: 1

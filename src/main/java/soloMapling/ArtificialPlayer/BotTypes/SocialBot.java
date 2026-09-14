@@ -16,6 +16,8 @@ import soloMapling.ArtificialPlayer.BotMessagingSystem.MessageQueue;
 import soloMapling.ArtificialPlayer.BotPartySystem.BotPartyQueue;
 import soloMapling.ArtificialPlayer.BotPartySystem.BotRecruitManager;
 import soloMapling.ArtificialPlayer.BotSM;
+import soloMapling.ArtificialPlayer.Persona;
+import soloMapling.ArtificialPlayer.SocialPersonaConfig;
 import soloMapling.ArtificialPlayer.BotTownSystem.TownPresenceConfig;
 import soloMapling.ArtificialPlayer.BotTownSystem.TownPresenceSampler;
 import soloMapling.ArtificialPlayer.BotTownSystem.TownStation;
@@ -67,13 +69,16 @@ public class SocialBot extends BotSM {
     private static final double RARE_LINE_CHANCE = 0.01;
     private static final double GOODBYE_SIT_CHANCE = 0.40;
 
-    // Smack talk ("你 120 级还穿这破烂"): the server-rat flavour, but gated hard. It only fires
-    // when the OUTMATCHED check passes (a bully picks on someone weaker, not on a 200-geared
-    // player), only sometimes, and only once per player per cooldown - a player who keeps talking
-    // to a bot should not get roasted every single time.
-    private static final double SMACK_TALK_CHANCE = 0.25;
+    // Persona: which flavour of mouth this bot talks with. Stable per character id, so the same bot
+    // is always cheeky (or always chill) - a person does not flip personality between two lines.
+    private final Persona persona;
+
+    // Smack talk ("你 120 级还穿这破烂"): the harshest jab, kept to the harsher personas and to a
+    // high-level bot picking on a weaker player. Fires sometimes, and at most once per player per
+    // cooldown, so a player who keeps talking does not get roasted every single line.
+    private static final double SMACK_TALK_CHANCE = 0.30;
     private static final int SMACK_TALK_LEVEL_GAP = 15;   // bot must lead by this much
-    private static final long SMACK_TALK_COOLDOWN_MS = 300_000; // 5 min per player
+    private static final long SMACK_TALK_COOLDOWN_MS = 180_000; // 3 min per player
     private final Map<Integer, Long> smackTalkCooldowns = new ConcurrentHashMap<>();
     private volatile boolean wasSittingBeforeInteraction = false;
     private volatile int originalChairId = 0;
@@ -146,6 +151,7 @@ public class SocialBot extends BotSM {
         dialoguePath = DIALOGUE_PATH;
         botType = "SocialBot";
         this.variant = random.nextDouble() < 0.30 ? SocialBotVariant.INTERACTIVE : SocialBotVariant.SINGLE_RESPONSE;
+        this.persona = SocialPersonaConfig.personaFor(character.getId());
         EventBus.getInstance().subscribe(EventType.LEVEL_UP, this); // congratulate nearby levelers
     }
 
@@ -635,7 +641,9 @@ public class SocialBot extends BotSM {
             return;
         }
 
-        respondWithYamlCategory("WhatsUp", player);
+        // No structured menu pick. With the LLM off (or absent), an unclassified line still has to
+        // answer in-character: a cheeky persona jabs, the rest fall back to plain chat.
+        respondWithYamlCategory(pickResponseCategory(player), player);
     }
 
     private static boolean isGoodbyeIntent(String lower) {
@@ -861,18 +869,20 @@ public class SocialBot extends BotSM {
     }
 
     /**
-     * Picks which pool the bot answers from. Normally {@code SingleResponse} (with a rare
-     * flavour line), but a bot that clearly out-levels the player may instead smack talk.
+     * Picks which pool the bot answers from. A cheeky persona usually jabs back ({@code Banter}),
+     * escalating to the harsh {@code SmackTalk} pool only when the bot clearly out-levels the player;
+     * a rare flavour line, otherwise a plain {@code SingleResponse}.
      *
-     * <p>The level gate is the point: a bully picks on someone weaker. Without it, a 30-level bot
-     * would talk down to a 200-level player, which reads as broken rather than as attitude.
+     * <p>The level gate on the HARSH tier is the point: a bully picks on someone weaker. Without it
+     * a 30-level bot would talk down to a 200-level player, which reads as broken rather than as
+     * attitude. The light {@code Banter} tier needs no such gate - it is everyday server mouth.
      */
     private String pickResponseCategory(Character player) {
+        if (persona.cheeky() && random.nextDouble() < SocialPersonaConfig.teaseChance()) {
+            return canSmackTalk(player) ? "SmackTalk" : "Banter";
+        }
         if (random.nextDouble() < RARE_LINE_CHANCE) {
             return "Rare";
-        }
-        if (canSmackTalk(player)) {
-            return "SmackTalk";
         }
         return "SingleResponse";
     }
@@ -880,6 +890,10 @@ public class SocialBot extends BotSM {
     private boolean canSmackTalk(Character player) {
         Character chr = getChr();
         if (chr == null || player == null) {
+            return false;
+        }
+        // Only the harsher personas escalate to the roast pool.
+        if (!persona.harsh()) {
             return false;
         }
         if (random.nextDouble() >= SMACK_TALK_CHANCE) {
@@ -899,7 +913,7 @@ public class SocialBot extends BotSM {
     }
 
     private void appendGreeting(BotTiming.Chain chain, Character player) {
-        String line = getRandomLine("Greeting", player);
+        String line = personaGreeting(player);
         int emote = getRandomEmote("Greeting");
         if (line != null) {
             chain.run(() -> sayReply(line));
@@ -911,6 +925,21 @@ public class SocialBot extends BotSM {
             showInteractiveOptions(player);
             socialState = SocialBotState.AWAITING_CHOICE;
         });
+    }
+
+    // An interactive bot's opening line. A cheeky persona greets, then — most of the time — follows
+    // the hello with a jab in the same breath, so the very first thing a player hears has attitude.
+    // Two separate chains would race the hello; play them in order on one chain instead.
+    private String personaGreeting(Character player) {
+        String hello = getRandomLine("Greeting", player);
+        if (!persona.cheeky() || random.nextDouble() >= SocialPersonaConfig.teaseChance()) {
+            return hello;
+        }
+        String jab = getRandomLine(canSmackTalk(player) ? "SmackTalk" : "Banter", player);
+        if (jab == null) {
+            return hello;
+        }
+        return hello == null ? jab : hello + " " + jab;
     }
 
     // Farewell beats play on their own chain so the tick isn't blocked; the

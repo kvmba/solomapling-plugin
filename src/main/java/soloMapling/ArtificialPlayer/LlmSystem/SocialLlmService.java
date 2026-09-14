@@ -2,6 +2,7 @@ package soloMapling.ArtificialPlayer.LlmSystem;
 
 import org.gms.client.Character;
 import org.gms.extension.api.HostConfig;
+import soloMapling.ArtificialPlayer.SocialPersonaConfig;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -61,7 +62,8 @@ public final class SocialLlmService {
         SocialChatSessionStore.addUser(botId, playerId, userMessage);
 
         List<LlmMessage> messages = new ArrayList<>();
-        messages.add(LlmMessage.system(SocialLlmPromptBuilder.systemPrompt(bot, player)));
+        messages.add(LlmMessage.system(SocialLlmPromptBuilder.systemPrompt(
+                bot, player, SocialPersonaConfig.personaFor(bot.getId()))));
         messages.addAll(SocialChatSessionStore.toMessages(botId, playerId, SocialLlmConfig.historyTurns()));
 
         LlmRequest request = new LlmRequest(
