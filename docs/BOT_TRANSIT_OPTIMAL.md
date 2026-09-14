@@ -6,6 +6,14 @@
 > 本文是**可直接照着改代码**的最优方案。交通数据底稿见 `TRANSPORT_ROUTES.md`，
 > 分层说明见 `BOT_TRANSIT_PLAN.md`。
 
+> ## 📌 状态：**已实现**（本文写于实现之前；**以代码为准**）
+>
+> 文中「§一 改动清单」「§二 交通表」「§三 等待与看门狗豁免」**均已落地**：
+> `GCTaxi.VEHICLE_RIDES`（船/火车/飞艇/精灵/地铁/飞机/电梯）、出租车、NPC 直达、
+> `BotScriptedWarp` 脚本门、`GCTravel` 等待态与载具地图处理、`TrainingRegions` 20 窗口。
+> 唯 `MapleVersionManager.version` **已是 83**（非文中 55）。保留作设计依据与历史；
+> 当前状态见 `TRANSPORT_ROUTES.md` 顶部「状态更新」。
+
 ---
 
 ## 〇、一句话结论

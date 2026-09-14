@@ -5,6 +5,17 @@
 > 底层数据 `TRANSPORT_ROUTES.md` · 分层思路 `BOT_TRANSIT_PLAN.md`
 > 交通接入 `BOT_TRANSIT_OPTIMAL.md` · 船上行为 `BOT_ONBOARD_PLAN.md`
 
+> ## 📌 状态：**核心已实现**（本文写于实现之前；**以代码为准**）
+>
+> 文中的跨大陆通行 + 船上航行主体已落地：
+> ① 载具边 `GCTaxi.VEHICLE_RIDES`（船/火车/飞艇/精灵/地铁/飞机/电梯）；
+> ② 等待态与看门狗豁免（`GCTravel` 的 `waitingForTransit`、`awaitVehicle`、`waitCeilingMs`）；
+> ③ 载具地图表（`GCTransit`，12 张）；
+> ④ 船上行为：甲板走动（`BotWanderSystem`）、看海（`watchTheWater`）、遇袭躲避（`isUnderAttack`/`reactToAttack`/`sheltering`）；
+> ⑤ `TrainingRegions` 扩到 20 窗口。
+> **`MapleVersionManager.version` 已是 83**（非文中 "55 → 83" 的待办）。保留作总纲与历史；
+> 当前状态见 `TRANSPORT_ROUTES.md` 顶部「状态更新」。
+
 ---
 
 ## 第一部分 · 全局认知

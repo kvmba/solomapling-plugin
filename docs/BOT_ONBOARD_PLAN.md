@@ -5,6 +5,14 @@
 >
 > 本文只做规划，不含实现。前置依赖：`BOT_TRANSIT_OPTIMAL.md`（先把船接进世界图）。
 
+> ## 📌 状态：**主体已实现**（本文写于实现之前；**以代码为准**）
+>
+> 已于 `GCTravel` / `GCTransit` 落地：等待态与看门狗豁免、载具地图识别（12 张）、
+> 甲板走动（`BotWanderSystem`）、看海（`watchTheWater`/`sightseer`/`railSide`）、
+> 遇袭躲避（`isUnderAttack` → `reactToAttack` → `sheltering`）。
+> 与本文的差异：船上 **社交复用现有 `BotChatterSystem`**，未单独新增
+> `OnBoardDialogue.yaml` 对话包；前置的交通接入早已完成。保留作设计依据与历史。
+
 ---
 
 ## 〇、先看清：船旅程的真实结构
