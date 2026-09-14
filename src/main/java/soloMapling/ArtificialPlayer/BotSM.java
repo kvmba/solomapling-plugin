@@ -370,9 +370,11 @@ public abstract class BotSM implements EventSubscriber {
             return;
         }
         final String spoken = line;
-        boolean sameMap = isSameMap(player);
-        final org.gms.extension.event.ChatType replyChannelType =
-                sameMap ? null : (type != null ? type : org.gms.extension.event.ChatType.PARTY);
+        // Answer on the channel the line arrived on: a directed line (whisper/party/guild/buddy) is
+        // answered on THAT channel, never downgraded to a map bubble - a whisper is private, and a
+        // same-map bubble would expose its reply to everyone standing around. A null type means the
+        // line came from map chat, so the bubble is correct there.
+        final org.gms.extension.event.ChatType replyChannelType = type;
         final Character target = player;
         BotTiming.chain()
                 .stopUnless(() -> getRunning() && chr.getMap() != null)
