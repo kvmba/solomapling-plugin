@@ -15,6 +15,7 @@ import soloMapling.ArtificialPlayer.BotTypes.HenesysJQBot;
 import soloMapling.ArtificialPlayer.BotTypes.NXMerchantBot;
 import soloMapling.ArtificialPlayer.BotTypes.Henesys.HenesysPQBot;
 import soloMapling.ArtificialPlayer.BotTypes.Kerning.KerningPQBot;
+import soloMapling.ArtificialPlayer.BotTypes.Ludi.LudiPQBot;
 import soloMapling.ArtificialPlayer.BotTypes.OPQ.OPQBot;
 import soloMapling.ArtificialPlayer.BotTypes.ScrollingBot;
 import soloMapling.ArtificialPlayer.BotTypes.SellingMerchantBot;
@@ -159,6 +160,13 @@ public class BotTypeManager {
             public void createAndSetBot(Character character) {
                 KerningPQBot kpqBot = new KerningPQBot(character);
                 CharacterStorage.addActiveBot(character.getId(), kpqBot);
+            }
+        },
+        LUDI_PQ_BOT {
+            @Override
+            public void createAndSetBot(Character character) {
+                LudiPQBot lpqBot = new LudiPQBot(character);
+                CharacterStorage.addActiveBot(character.getId(), lpqBot);
             }
         },
         SOCIAL_BOT {
