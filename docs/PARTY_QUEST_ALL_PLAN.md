@@ -203,6 +203,9 @@ feat(pq): <PQ 名> — bot 可陪玩全流程
 | 13 | **Magatia PQ**（A/Z 双版本） | `6756b49` | ✅ 实现完成 |
 | 14 | **Monster Carnival (CPQ)**（陪练型） | `3f01f63` | ✅ 实现完成 |
 | 15 | **Nett's Pyramid**（独立入口） | `dd02def` | ✅ 实现完成 |
+| 16 | **Mu Lung Dojo**（组队道场） | `04ce3a7` | ✅ 实现完成（含等级差规则） |
+| 17 | **Ariant Coliseum**（捕捉竞赛） | `b49d845` | ✅ 实现完成 |
+| 18 | **Expedition 表**（Boss 远征准入） | `a55d9c6` | ✅ 实现完成 |
 
 对应的 bot 类型与命令：
 
@@ -221,6 +224,8 @@ feat(pq): <PQ 名> — bot 可陪玩全流程
 | Magatia | `MAGATIA_PQ_BOT` | `!bot mpqbot` |
 | Monster Carnival | `CARNIVAL_PQ_BOT` | `!bot cpqbot` |
 | Pyramid | `PYRAMID_PQ_BOT` | `!bot pyramidbot` |
+| Mu Lung Dojo | `DOJO_PQ_BOT` | `!bot dojobot` |
+| Ariant Coliseum | `ARIANT_PQ_BOT` | `!bot arpqbot` |
 
 ### 尚未实现
 
@@ -229,10 +234,10 @@ feat(pq): <PQ 名> — bot 可陪玩全流程
 | A 类 | 经典 9 个已实现；剩余：Treasure（服务端死局，见第九部分）、Awakening/Cafe/Holiday 等节日向 | 大部分完成 |
 | B 类 | MK_PrimeMinister(3)、DelliBattle(2)、ElementalBattle(2) | 结构同 A，未逐个实现 |
 | C 类 | Monster Carnival | ✅ 已实现（陪练型） |
-| D 类 | Ariant Coliseum（Expedition 架构 + 抢分） | 未实现 |
+| D 类 | Ariant Coliseum | ✅ 已实现 |
 | E 类 | Nett's Pyramid | ✅ 已实现 |
-| F 类 | Expedition Boss（13 种） | 未实现（30 人 Boss，风险最高） |
-| G 类 | Mu Lung Dojo（组队） | 未实现（等级差 ≤30 + warpParty） |
+| F 类 | Expedition Boss（13 种准入表已实现；Boss 战本体的 bot 行为未做） | 部分 |
+| G 类 | Mu Lung Dojo（组队） | ✅ 已实现 |
 | H 类 | Guild Quest | 未实现（需同公会） |
 
 ### 已验证 / 未验证
@@ -240,7 +245,7 @@ feat(pq): <PQ 名> — bot 可陪玩全流程
 | 项 | 状态 |
 |---|---|
 | 编译 | ✅ 每次提交前通过 |
-| 单元测试 | ✅ 910 个通过（含 29 个本次新增：Orbis 9 + Henesys 6 + Kerning 12 + Ludi 9 + Carnival 4） |
+| 单元测试 | ✅ 931 个通过（含 50 个本次新增） |
 | 数据正确性 | ✅ 全部从脚本/WZ/db 读出，并有测试锁定 |
 | **实机跑通** | ❌ **未验证** —— 需要真实客户端进本测试 |
 
@@ -271,6 +276,8 @@ feat(pq): <PQ 名> — bot 可陪玩全流程
 | Magatia | Stage 6 是否播报 combo |
 | CPQ | 是否成功召唤（CP 扣减 + 怪出现） |
 | Pyramid | 是否在禁用怪出现时停手 |
+| Dojo | 等级差是否放行（1 玩家 + bot 差值 ≤30） |
+| Ariant | 捕捉是否真的加分（Spirit Jewel 进背包） |
 
 ---
 
