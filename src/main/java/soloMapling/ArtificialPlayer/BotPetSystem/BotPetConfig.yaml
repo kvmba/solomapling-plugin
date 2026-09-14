@@ -50,11 +50,12 @@ follow:
 
 # Pet looting (only for pets with the matching gear). A pet picks up at most
 # max_per_tick items per follow tick, and at most one every cooldown_ms — so it
-# reads like a pet trotting over loot, not a vacuum.
+# reads like a pet trotting over loot, not a vacuum. It only picks MONSTER
+# drops (drops whose dropper is a mob), never a player-thrown item.
 pickup:
   max_per_tick: 1
   range: 120
-  cooldown_ms: 450
+  cooldown_ms: 1000
 
 # Pet behaviours. Each pet performs a command from its own WZ interact menu
 # (Item.wz/Pet/<id>.img/interact) — the animation AND the spoken line come from

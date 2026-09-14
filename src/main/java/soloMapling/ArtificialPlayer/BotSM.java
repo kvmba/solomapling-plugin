@@ -25,6 +25,7 @@ import soloMapling.server.BotTickService;
 
 import java.util.Collection;
 import java.util.List;
+import java.util.Map;
 
 import static soloMapling.ArtificialPlayer.BotCommandsPack.SocialCommands.botClearChalkboard;
 import static soloMapling.ArtificialPlayer.BotMessagingSystem.CharacterStorage.botLoggedIn;
@@ -348,6 +349,17 @@ public abstract class BotSM implements EventSubscriber {
             return;
         }
 
+        // Rate-limit per player: a spammed line ("hi hi hi") gets one reply, not a burst.
+        long now = System.currentTimeMillis();
+        Long until = socialReplyUntil.get(player.getId());
+        if (until != null && until > now) {
+            return;
+        }
+        socialReplyUntil.put(player.getId(), now + SOCIAL_REPLY_COOLDOWN_MS);
+        if (socialReplyUntil.size() > 256) {
+            socialReplyUntil.entrySet().removeIf(e -> e.getValue() <= now);
+        }
+
         // Prefer this bot's own node for the intent (e.g. a TrainingBot's own Greeting); fall back to
         // the shared social pool when this type has no such node, so every type can answer in kind.
         String line = BotDialogueHandler.getRandomResolvedLine(dialoguePath, botType, intent, chr, player);
@@ -396,6 +408,11 @@ public abstract class BotSM implements EventSubscriber {
     }
 
     private static final String SOCIAL_DIALOGUE_PATH = "SocialBotDialogue.yaml";
+
+    // Per-player cooldown so one player cannot make this bot (and the handful of others near them)
+    // answer the same spam line over and over. Cleaned lazily when it grows.
+    private final Map<Integer, Long> socialReplyUntil = new java.util.concurrent.ConcurrentHashMap<>();
+    private static final long SOCIAL_REPLY_COOLDOWN_MS = 2000;
 
     // The channel the next sayReply uses. Read through these rather than the fields so a bot whose
     // replies are produced on concurrent per-turn threads (CompanionBot) can scope them per turn.

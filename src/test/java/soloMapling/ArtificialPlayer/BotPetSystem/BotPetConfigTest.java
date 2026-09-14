@@ -54,7 +54,7 @@ class BotPetConfigTest {
         // pickup
         assertEquals(1, c.pickupMaxPerTick());
         assertEquals(120, c.pickupRange());
-        assertEquals(450L, c.pickupCooldownMs());
+        assertEquals(1000L, c.pickupCooldownMs());
 
         // speak
         assertEquals(0.10, c.speakChance(), 1e-9);

@@ -4,6 +4,7 @@ import org.gms.client.Character;
 import org.gms.client.inventory.Pet;
 import org.gms.constants.game.CharacterStance;
 import org.gms.net.packet.Packet;
+import org.gms.server.life.Monster;
 import org.gms.server.maps.Foothold;
 import org.gms.server.maps.MapItem;
 import org.gms.server.maps.MapObject;
@@ -361,10 +362,11 @@ public final class BotPetFollower {
     }
 
     /**
-     * Pets with looting gear sweep nearby drops. A pet loots only the drops it
-     * is entitled to (its owner's, or a free-for-all drop — including a nearby
-     * player's once its owner-protection has lapsed), so a looting pet "loots
-     * for" whoever dropped them without ever stealing a protected drop.
+     * Pets with looting gear sweep nearby MONSTER drops. A pet only picks drops it
+     * is entitled to (its owner's, or a free-for-all drop once owner-protection has
+     * lapsed) and only drops a mob actually dropped ({@code dropper} is a
+     * {@link Monster}) — never a player-thrown item — so a looting pet tidies up
+     * kills, exactly like a real player's pet.
      */
     private static void loot(Character chr, MapleMap map, BotPetConfig config) {
         long now = System.currentTimeMillis();
@@ -398,6 +400,11 @@ public final class BotPetFollower {
                     break;
                 }
                 if (!(obj instanceof MapItem mapItem)) {
+                    continue;
+                }
+                // Monster drops only: a player-thrown item (dropper is a Character)
+                // is left where it landed.
+                if (!(mapItem.getDropper() instanceof Monster)) {
                     continue;
                 }
                 if (!DropCommands.botCanLoot(chr, mapItem)) {

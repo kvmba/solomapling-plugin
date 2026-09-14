@@ -521,6 +521,19 @@ public class SocialBot extends BotSM {
         onFirstInteraction(player, message.getContent());
     }
 
+    // Idle town bot answering an unnamed social line ("你好" / "哈哈") from the crowd: a light one-line
+    // reply, never a full conversation - the player did not name this bot, so a busy ritual (walking
+    // over, sitting up, opening the menu) would be overkill and would block the spot for a real chat.
+    @Override
+    public boolean offerSocial(Character player, String content) {
+        if (isBot(player) || !isSameMap(player)
+                || !isAvailableForAmbientActions() || SocialIntent.classifyNode(content) == null) {
+            return false;
+        }
+        respondSocial(player, content, null);
+        return true;
+    }
+
     public void onFirstInteraction(Character player, String content) {
         lastRespondantMessageTime = System.currentTimeMillis();
 
