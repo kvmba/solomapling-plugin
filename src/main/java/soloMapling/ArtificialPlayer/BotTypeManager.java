@@ -13,6 +13,7 @@ import soloMapling.ArtificialPlayer.BotTypes.GachaBot;
 import soloMapling.ArtificialPlayer.BotTypes.HenesysBot;
 import soloMapling.ArtificialPlayer.BotTypes.HenesysJQBot;
 import soloMapling.ArtificialPlayer.BotTypes.NXMerchantBot;
+import soloMapling.ArtificialPlayer.BotTypes.Amoria.AmoriaPQBot;
 import soloMapling.ArtificialPlayer.BotTypes.BossRush.BossRushPQBot;
 import soloMapling.ArtificialPlayer.BotTypes.Henesys.HenesysPQBot;
 import soloMapling.ArtificialPlayer.BotTypes.Kerning.KerningPQBot;
@@ -183,6 +184,13 @@ public class BotTypeManager {
             public void createAndSetBot(Character character) {
                 PiratePQBot ppqBot = new PiratePQBot(character);
                 CharacterStorage.addActiveBot(character.getId(), ppqBot);
+            }
+        },
+        AMORIA_PQ_BOT {
+            @Override
+            public void createAndSetBot(Character character) {
+                AmoriaPQBot apqBot = new AmoriaPQBot(character);
+                CharacterStorage.addActiveBot(character.getId(), apqBot);
             }
         },
         SOCIAL_BOT {
