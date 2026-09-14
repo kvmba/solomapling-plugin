@@ -30,13 +30,16 @@ import java.util.concurrent.TimeUnit;
  * Moves a bot's pets so they follow it. One shared tick for every bot that has
  * pets (mirrors {@code GrindTickRegistry}) — no per-bot thread.
  *
- * <p>Land: the pet glides at a fixed speed toward the owner, staying on the floor
- * under its own x (never floating over a ledge) and settling to a STAND at rest.
+ * <p>Land: the pet glides at a fixed speed toward a point fanned out beside the
+ * owner (a fixed per-pet spread, so several pets stay apart and none sits on the
+ * owner), staying on the floor under its own x and settling to a STAND at rest.
  * It follows the owner's position, not its facing, so a turn never flings the pet
  * across. When the owner is airborne (a jump or a long fall) the pet goes airborne
  * with it, holding the owner's height in the JUMP pose. Water (swim maps): the pet
  * floats (fh 0) and glides toward a point above the bot, rendered in the SWIM
- * stance (12/13). A rope/ladder owner makes the pet hang (HANG, 30/31).</p>
+ * stance (12/13). A rope/ladder owner makes the pet hang (HANG, 30/31). Whenever
+ * the pet floats (water / air / rope) its foothold is cleared to 0, or a stale
+ * land foothold would anchor it to the seabed and render it walking.</p>
  *
  * <p><b>Map changes / death carry-home need no code here.</b> Whenever a bot
  * enters a map the engine's own {@code MapleMap.addPlayer} already re-places its
@@ -72,8 +75,8 @@ public final class BotPetFollower {
     private static final int PET_HANG_RIGHT = 30;
     private static final int PET_HANG_LEFT = 31;
 
-    /** Per-pet horizontal spread so a multi-pet bot's pets do not overlap. */
-    private static final int PET_SPREAD_PX = 22;
+    /** Half the distance (px) between the owner and each pet / between pets. */
+    private static final int FOLLOW_GAP_PX = 45;
     /** Probe this far above a point when searching for the ground below it. */
     private static final int GROUND_PROBE_UP = 8;
 
@@ -167,7 +170,10 @@ public final class BotPetFollower {
         // only broadcast to, watchers).
         boolean observed = GCMovement.isMapObserved(chr.getMapId());
 
-        boolean swim = map.isSwim();
+        // Water = the map says so, or the bot itself is currently swimming (they agree
+        // for maps with info/swim set; the stance check also covers a bot mid-water in
+        // a map whose flag the client and server might read differently).
+        boolean swim = map.isSwim() || CharacterStance.isSwimming(chr.getStance());
         // Iterate by the pet-ARRAY index, not a running count: the slot in
         // MOVE_PET / PET_COMMAND is the array index (the host sends it from
         // getPetIndex), so skipping a null without advancing would mis-slot a
@@ -210,10 +216,11 @@ public final class BotPetFollower {
             return;
         }
 
-        // Move toward the owner's x (a small per-index offset so a multi-pet bot's
-        // pets do not perfectly overlap). Following the owner's position rather than
-        // its facing is what keeps a turn from flinging the pet to the other side.
-        Point target = new Point(botPos.x + index * PET_SPREAD_PX, botPos.y);
+        // Move toward a per-pet point beside the owner (a fixed spread so a
+        // multi-pet bot's pets fan out instead of stacking on the owner). Following
+        // the owner's position rather than its facing is what keeps a turn from
+        // flinging the pet to the other side.
+        Point target = new Point(botPos.x + spreadFor(index), botPos.y);
 
         // Airborne owner (jump or a long fall): the pet goes airborne too and holds
         // the owner's height, rendered in the JUMP pose. Otherwise it walks the
@@ -233,7 +240,7 @@ public final class BotPetFollower {
      */
     private static void followSwim(Character chr, Pet pet, int index, BotPetConfig config, boolean observed) {
         Point botPos = chr.getPosition();
-        Point target = new Point(botPos.x, botPos.y - config.swimOffset() * (index + 1));
+        Point target = new Point(botPos.x + spreadFor(index), botPos.y - config.swimOffset() * (index + 1));
         moveTowards(chr, pet, index, pet.getPos(), target,
                 PET_SWIM_RIGHT, PET_SWIM_LEFT, PET_SWIM_RIGHT, PET_SWIM_LEFT, config, observed, true);
     }
@@ -264,7 +271,11 @@ public final class BotPetFollower {
         if (dist <= config.epsPx()) {
             int idle = isPetFacingLeft(pet) ? idleLeft : idleRight;
             if (pet.getStance() != idle) {
-                applyAndSend(chr, pet, index, cur, 0, 0, pet.getFh(), idle, config, observed);
+                // Clear the foothold when floating (water / air / rope): a stale land
+                // fh here would anchor the pet to the seabed and render it walking
+                // instead of swimming, even though the stance byte is correct.
+                int fh = noGravity ? 0 : pet.getFh();
+                applyAndSend(chr, pet, index, cur, 0, 0, fh, idle, config, observed);
             }
             return;
         }
@@ -285,6 +296,16 @@ public final class BotPetFollower {
         int fh = noGravity ? 0 : BotPetController.footholdId(chr.getMap(), new Point(nx, ny));
         applyAndSend(chr, pet, index, new Point(nx, ny),
                 (int) Math.round(stepX / dt), (int) Math.round((ny - cur.y) / dt), fh, stance, config, observed);
+    }
+
+    /**
+     * Signed x-offset for the pet at {@code index}, giving a symmetric fan around
+     * the owner (0 -> +gap, 1 -> -gap, 2 -> +2*gap) so pets never sit on the owner
+     * and stay apart from each other.
+     */
+    private static int spreadFor(int index) {
+        int step = FOLLOW_GAP_PX * (index / 2 + 1);
+        return (index % 2 == 0) ? step : -step;
     }
 
     private static void applyAndSend(Character chr, Pet pet, int index, Point pos,
