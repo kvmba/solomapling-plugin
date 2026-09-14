@@ -338,8 +338,8 @@ public class TrainingBot extends BotSM implements GrindTickRegistry.Participant 
     // A party-channel (or whisper/guild) line addressed to this bot. Party chat is a different packet
     // from map chat, so a partied grinder never saw it before; a keyword is claimed exactly like the
     // same-map party broadcast. A plain social line ("你好" / "哈哈") is answered with words on the
-    // channel it arrived on (respondSocial): a same-map speaker hears the bubble, a party member on
-    // another map hears it on the party channel - so a partied grinder answers you from afar.
+    // channel it arrived on (respondSocial), so a party member on another map hears it on the party
+    // channel - a partied grinder answers you from afar.
     @Override
     protected void onDirectChat(ChatMessage message) {
         Character player = message.getSender();

@@ -331,8 +331,9 @@ public abstract class BotSM implements EventSubscriber {
     /**
      * Answers a player's social line (greeting / praise / joke / insult...) with this bot's own
      * dialogue - its pack's node if it has one, else the shared social pool. The reply goes back on
-     * the channel it arrived on: a same-map speaker hears the map bubble, a party member on another
-     * map hears it on the party channel (never a bubble they cannot see).
+     * exactly the channel it arrived on: a directed line (whisper / party / guild / buddy) is
+     * answered there, never downgraded to a map bubble a private line's reply would leak; a null
+     * {@code type} means the line came from map chat, so the bubble is correct.
      *
      * @param type the channel the line arrived on (null = map chat)
      */

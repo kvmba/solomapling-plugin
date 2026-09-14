@@ -252,8 +252,8 @@ public class FollowerBot extends BotSM {
 
     // A party-channel (or whisper/guild) line addressed to this follower. A follow keyword is claimed
     // as before; a plain social line ("你好" / "哈哈") is answered with words on the channel it arrived
-    // on (respondSocial): a same-map leader hears the bubble, a leader on another map hears it on the
-    // party channel - so a partied follower answers you from afar.
+    // on (respondSocial), so a leader on another map hears it on the party channel - a partied follower
+    // answers you from afar.
     @Override
     protected void onDirectChat(ChatMessage message) {
         Character player = message.getSender();
