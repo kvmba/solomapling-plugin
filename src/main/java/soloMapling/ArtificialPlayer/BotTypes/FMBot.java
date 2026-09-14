@@ -21,9 +21,10 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
-import java.util.Set;
-import java.util.concurrent.TimeUnit;
 import java.util.Random;
+import java.util.Set;
+import java.util.concurrent.ThreadLocalRandom;
+import java.util.concurrent.TimeUnit;
 
 
 import static soloMapling.ArtificialPlayer.BotCommandsPack.WarpCommands.FMRoomWarpPortalId;
@@ -410,7 +411,9 @@ public class FMBot extends BotSM {
 
         for (int i = 0; i < thresholds.length; i++) {
             if (ratio <= thresholds[i]) {
-                return new Random().nextDouble() < probabilities[i];
+                // ThreadLocalRandom, not a fresh Random per call: this rolls once per item examined
+                // while browsing every shop in the FM. Same distribution - one uniform double [0, 1).
+                return ThreadLocalRandom.current().nextDouble() < probabilities[i];
             }
         }
 

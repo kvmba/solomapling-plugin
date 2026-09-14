@@ -123,14 +123,14 @@ public class SoloMaplingUtilities {
         if (x > y) {
             throw new IllegalArgumentException("x must be less than or equal to y.");
         }
-        Random random = new Random();
-        // Generate a random number between x and y (inclusive)
-        return random.nextInt(y - x + 1) + x;
+        // ThreadLocalRandom, not a fresh Random per call: bot flows hit this repeatedly (emotes,
+        // chair rolls, decorator picks) and every construction reseeds from the entropy source.
+        // Same distribution - one uniform int in [x, y]. Matches rollChanceInverse above.
+        return ThreadLocalRandom.current().nextInt(y - x + 1) + x;
     }
 
     public static int getRandomNumber(List<Integer> numbers) {
-        Random rand = new Random();
-        int index = rand.nextInt(numbers.size()); // pick a random index
+        int index = ThreadLocalRandom.current().nextInt(numbers.size()); // pick a random index
         return numbers.get(index);
     }
 

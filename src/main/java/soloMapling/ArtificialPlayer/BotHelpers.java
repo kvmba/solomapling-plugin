@@ -11,7 +11,7 @@ import soloMapling.server.BotChannelRouter;
 
 import java.awt.*;
 import java.util.List;
-import java.util.Random;
+import java.util.concurrent.ThreadLocalRandom;
 
 public class BotHelpers {
 
@@ -316,7 +316,9 @@ public class BotHelpers {
     public static Point getRandomizedPointXAxis(Point original, int range) {
         int minX = original.x - range;
         int maxX = original.x + range;
-        int randomX = new Random().nextInt(maxX - minX + 1) + minX;
+        // ThreadLocalRandom, not a fresh Random per call: FMBot hits this per shop-door walk.
+        // Same distribution - one uniform int in [minX, maxX].
+        int randomX = ThreadLocalRandom.current().nextInt(maxX - minX + 1) + minX;
         return new Point(randomX, original.y);
     }
 

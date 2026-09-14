@@ -8,7 +8,7 @@ import org.gms.constants.inventory.ItemConstants;
 import org.gms.server.ItemInformationProvider;
 
 import java.util.List;
-import java.util.Random;
+import java.util.concurrent.ThreadLocalRandom;
 
 import static soloMapling.server.SoloMaplingUtilities.getRandomNumber;
 
@@ -126,7 +126,10 @@ public class BotCustomization {
             total += pair[1];
         }
 
-        int random = new Random().nextInt(total);
+        // ThreadLocalRandom, not a fresh Random per call: decorator flows roll this repeatedly
+        // (hair/equip/permit picks) and every construction reseeds from the entropy source.
+        // Same distribution - one uniform int in [0, total).
+        int random = ThreadLocalRandom.current().nextInt(total);
         int running = 0;
 
         for (int[] pair : items) {
