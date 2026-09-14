@@ -4,6 +4,7 @@ import org.gms.client.Character;
 import org.gms.constants.game.ExpTable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import soloMapling.ArtificialPlayer.BotFlavorSystem.BotLevelUpNotice;
 import soloMapling.ArtificialPlayer.BotGrindSystem.GrindBrain;
 import soloMapling.ArtificialPlayer.BotGrindSystem.TrainingMap;
 import soloMapling.ArtificialPlayer.BotGrindSystem.TrainingMapChooser;
@@ -399,6 +400,9 @@ public final class SoloGrindController {
         if (level > startLevel) {
             log.info("Companion solo grind level up cid={} from={} to={} map={}",
                     companion.getId(), startLevel, level, companion.getMapId());
+            // Simulated kills bypass the host's gainExp, so announce the level-up the same way a real
+            // player's would be (real players only; the host switch gates it).
+            BotLevelUpNotice.announce(companion);
         }
     }
 
