@@ -33,14 +33,11 @@ public final class OPQConstants {
     // ---- Item IDs -----------------------------------------------------------
     public static final int CLOUD_PIECE    = 4001063; // Stage 1 Cloud Pieces - GOOD
 
-    // Stage 2: 7 distinct LP record items dropped by boxes
+    // Stage 2 records. Seven boxes drop seven different ones, in data-id order:
+    // 2002004 -> 4001056 ... 2002010 -> 4001062 (reactordrops). The music box accepts only
+    // the one matching today's weekday, which OrbisPQ.js picks by setting the reactor's
+    // event state to d.getDay() - see OPQOrchestrator.getTodayRecordItemId().
     public static final int RECORD_LP_FIRST = 4001056;
-    public static final int RECORD_LP_LAST  = 4001062;
-    public static final List<Integer> STAGE_2_ITEMS = List.of(
-            4001056, 4001057, 4001058, 4001059, 4001060, 4001061, 4001062
-    );
-
-    public static final List<Integer> STAGE_1_ITEMS = List.of(CLOUD_PIECE);
 
     // ---- Stage 1 reactor data ids -------------------------------------------
     // Reactor data (template) ids on map 920010000, sourced from
@@ -90,20 +87,31 @@ public final class OPQConstants {
     public static final int    STAGE_1_LOOT_FALLBACK_STEPS   =  20;
     public static final int    STAGE_1_LOOT_FALLBACK_STEP_PX = 2500;
 
-    // ---- Platform / coordinate targets --------------------------------------
-    // Stage 1 is reactor-driven, not platform-driven: bots scan the map for
-    // cloud reactors and walk to the reactor's coordinate directly. The
-    // orchestrator assigns each bot a unique reactor oid (closest-unclaimed).
+    // ---- Stage 1 drop / return zone -----------------------------------------
+    // The altar reactor ("eak") at (377,66) is what spawns Chamberlain Eak, and it fires
+    // only when a single stack of exactly 20 cloud pieces lands inside its box
+    // x∈[277,477) y∈[-34,166) (Reactor.wz/2006000.img.xml event/0: type=100, 0=4001063,
+    // 1=20, lt(-100,-100)/rb(100,100) relative to the reactor).
+    //
+    // Aim at (377,99), not at the reactor: MapleMap#calcDropPos re-seats a throw onto the
+    // ground 85px below it, and 99 is the first foothold at y>=58 under x=377. Throwing at
+    // the reactor's own (377,66) lands in the same place. The old (497,143) was 20px
+    // outside the box to the right and never triggered anything.
+    public static final Point STAGE_1_DROP_POS = new Point(377, 99);
 
-    // Stage 1 drop / return zone — where the leader stands near the NPC.
+    // Exactly this many, in ONE stack - the trigger compares item.getQuantity() against
+    // this value, so twenty loose single pieces will not fire it.
+    public static final int CLOUD_REQUIRED = 20;
 
-    // Stage 2: boxes are on platforms m3–m9 (m1/m2 are base floor and entry).
+    // ---- Stage 2 boxes are on platforms m3–m9 (m1/m2 are base floor and entry).
     public static final List<String> STAGE_2_BOX_PLATFORMS = List.of(
             "m3", "m4", "m5", "m6", "m7", "m8", "m9"
     );
 
-    // Stage 2 drop zone — bots navigate to the music box reactor position.
-    public static final String STAGE_2_DROP_PLATFORM = "m1";
+    // Music box reactor ("music") at (-1706,-240) on 920010400, trigger box
+    // x∈[-1758,-1666) y∈[-304,-161). Same landing rule: throw at (-1706,-172), the first
+    // foothold at y>=-325 under x=-1706 - the old (-1588,-127) was 78px outside on x.
+    public static final Point STAGE_2_DROP_POS = new Point(-1706, -172);
 
     // ---- Tuning -------------------------------------------------------------
     public static final long STAGE_WAIT_TIMEOUT_MS        = 120_000; // 2 min per stage wait
