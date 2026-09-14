@@ -296,6 +296,10 @@ public class ArtificialPlayerCommand extends Command {
             case "bossrushbot":
                 BotTypeManager.BotType.BOSS_RUSH_PQ_BOT.createAndSetBot(fakechar);
                 break;
+            case "ppqbot":
+            case "piratepqbot":
+                BotTypeManager.BotType.PIRATE_PQ_BOT.createAndSetBot(fakechar);
+                break;
             case "jqbot":
             case "henesysjqbot":
                 HENESYS_JQ_BOT.createAndSetBot(fakechar);
@@ -1039,6 +1043,7 @@ public class ArtificialPlayerCommand extends Command {
         player.yellowMessage("!bot kpqbot <cid>                - set as Kerning PQ bot");
         player.yellowMessage("!bot lpqbot <cid>                - set as Ludi PQ bot");
         player.yellowMessage("!bot brpqbot <cid>               - set as Boss Rush PQ bot");
+        player.yellowMessage("!bot ppqbot <cid>                - set as Pirate PQ bot");
         player.yellowMessage("!bot jqbot <cid>                 - set as JQ bot");
         player.yellowMessage("-- Bot Conversion --");
         player.yellowMessage("!bot convertfmbot <cid>          - convert to FM bot");
