@@ -129,10 +129,9 @@ public class SocialBot extends BotSM {
     // home, so a town's crowd slowly redistributes instead of every bot always returning to its street.
     private static final double ONE_WAY_STROLL_CHANCE = 0.35;
 
-    // Doorway clear: a bot that arrived through a portal stands on the map's entry pixel, and a stream of
+    // Doorway clear: a bot that arrived through a portal stands at that map's entry pixel, and a stream of
     // arrivals piles up there as a clump of statues on the doorway. The moment a stationed bot finds itself
-    // on a portal it walks off to a scattered spot, the same way the drift does. The box is generous in Y
-    // because a portal often floats above the floor the bot lands on; X is what actually marks the doorway.
+    // at a portal it walks off to a scattered spot, the same way the drift does (see onDoorway for the box).
     private static final int DOORWAY_X = 40;
     private static final int DOORWAY_Y = 60;
     // Candidates sampled for the walk-off; the farthest-from-any-portal one wins, so a bot prioritises the
@@ -351,7 +350,7 @@ public class SocialBot extends BotSM {
             return; // a player is mid-invite: never walk out from under them
         }
         Point p = chr.getPosition();
-        if (p == null || !onDoorway(chr.getMap(), p, 0, 0)) {
+        if (!onDoorway(chr.getMap(), p, 0, 0)) {
             return; // not standing on a portal - nothing to clear
         }
         Point dest = pickOffDoorwaySpot(chr);
@@ -368,16 +367,18 @@ public class SocialBot extends BotSM {
     }
 
     // True when (x,y) sits inside the doorway box of any portal on the map, widened by (padX,padY). X is
-    // what marks the door (a portal's pixel column); Y is generous because a portal often floats above the
-    // floor the bot lands on.
+    // what marks the door (a portal's pixel column, cheap to test first). The Y term is measured from the
+    // floor UNDER the portal, not the portal pixel: an arrival is dropped onto that floor, and a portal may
+    // sit well above it. Falls back to the portal pixel only when there is no floor below (no surface to rest on).
     private static boolean onDoorway(MapleMap map, Point p, int padX, int padY) {
-        if (map == null || p == null) {
-            return false;
-        }
         for (Portal portal : map.getPortals()) {
             Point pp = portal.getPosition();
-            if (pp != null && Math.abs(pp.x - p.x) <= DOORWAY_X + padX
-                    && Math.abs(pp.y - p.y) <= DOORWAY_Y + padY) {
+            if (pp == null || Math.abs(pp.x - p.x) > DOORWAY_X + padX) {
+                continue; // not this portal's column - a doorway is an X neighbourhood
+            }
+            Point floor = GCMovement.groundPointBelow(map, pp.x, pp.y);
+            int refY = floor != null ? floor.y : pp.y;
+            if (Math.abs(refY - p.y) <= DOORWAY_Y + padY) {
                 return true;
             }
         }
@@ -407,9 +408,6 @@ public class SocialBot extends BotSM {
 
     // Squared distance from p to the nearest portal on the map (Long.MAX_VALUE when there are none).
     private static long nearestPortalDistSq(MapleMap map, Point p) {
-        if (map == null || p == null) {
-            return Long.MAX_VALUE;
-        }
         long best = Long.MAX_VALUE;
         for (Portal portal : map.getPortals()) {
             Point pp = portal.getPosition();
