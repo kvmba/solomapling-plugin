@@ -33,9 +33,10 @@ import java.util.concurrent.TimeUnit;
  * <p>Land: the pet glides at a fixed speed toward the owner, staying on the floor
  * under its own x (never floating over a ledge) and settling to a STAND at rest.
  * It follows the owner's position, not its facing, so a turn never flings the pet
- * across. Water (swim maps): the pet floats (fh 0) and glides toward a point above
- * the bot, rendered in the SWIM stance (12/13). A rope/ladder owner makes the pet
- * hang (HANG, 30/31).</p>
+ * across. When the owner is airborne (a jump or a long fall) the pet goes airborne
+ * with it, holding the owner's height in the JUMP pose. Water (swim maps): the pet
+ * floats (fh 0) and glides toward a point above the bot, rendered in the SWIM
+ * stance (12/13). A rope/ladder owner makes the pet hang (HANG, 30/31).</p>
  *
  * <p><b>Map changes / death carry-home need no code here.</b> Whenever a bot
  * enters a map the engine's own {@code MapleMap.addPlayer} already re-places its
@@ -64,6 +65,8 @@ public final class BotPetFollower {
     private static final int PET_MOVE_LEFT = 3;
     private static final int PET_STAND_RIGHT = 4;
     private static final int PET_STAND_LEFT = 5;
+    private static final int PET_JUMP_RIGHT = 6;
+    private static final int PET_JUMP_LEFT = 7;
     private static final int PET_SWIM_RIGHT = 12;
     private static final int PET_SWIM_LEFT = 13;
     private static final int PET_HANG_RIGHT = 30;
@@ -203,20 +206,25 @@ public final class BotPetFollower {
         // On a rope/ladder the real pet hangs on the owner's back (HANG pose).
         if (CharacterStance.isClimbing(chr.getStance())) {
             moveTowards(chr, pet, index, pet.getPos(), botPos,
-                    PET_HANG_RIGHT, PET_HANG_LEFT, config, observed, true);
+                    PET_HANG_RIGHT, PET_HANG_LEFT, PET_HANG_RIGHT, PET_HANG_LEFT, config, observed, true);
             return;
         }
 
         // Move toward the owner's x (a small per-index offset so a multi-pet bot's
-        // pets do not perfectly overlap), ground-snapped under its own x. Following
-        // the owner's position rather than its facing is what keeps a turn from
-        // flinging the pet to the other side. A jumping owner needs no special pose:
-        // the pet keeps walking to the owner's ground position (the JUMP pose is only
-        // for a pet that is itself airborne, cf. CPet::OnResolveMoveAction).
-        Point target = groundSnap(chr.getMap(),
-                new Point(botPos.x + index * PET_SPREAD_PX, botPos.y));
-        moveTowards(chr, pet, index, pet.getPos(), target,
-                PET_STAND_RIGHT, PET_STAND_LEFT, config, observed, false);
+        // pets do not perfectly overlap). Following the owner's position rather than
+        // its facing is what keeps a turn from flinging the pet to the other side.
+        Point target = new Point(botPos.x + index * PET_SPREAD_PX, botPos.y);
+
+        // Airborne owner (jump or a long fall): the pet goes airborne too and holds
+        // the owner's height, rendered in the JUMP pose. Otherwise it walks the
+        // ground under its own x, so it never floats over a ledge.
+        if (CharacterStance.isJumping(chr.getStance())) {
+            moveTowards(chr, pet, index, pet.getPos(), target,
+                    PET_JUMP_RIGHT, PET_JUMP_LEFT, PET_JUMP_RIGHT, PET_JUMP_LEFT, config, observed, true);
+        } else {
+            moveTowards(chr, pet, index, pet.getPos(), groundSnap(chr.getMap(), target),
+                    PET_MOVE_RIGHT, PET_MOVE_LEFT, PET_STAND_RIGHT, PET_STAND_LEFT, config, observed, false);
+        }
     }
 
     /**
@@ -227,18 +235,20 @@ public final class BotPetFollower {
         Point botPos = chr.getPosition();
         Point target = new Point(botPos.x, botPos.y - config.swimOffset() * (index + 1));
         moveTowards(chr, pet, index, pet.getPos(), target,
-                PET_SWIM_RIGHT, PET_SWIM_LEFT, config, observed, true);
+                PET_SWIM_RIGHT, PET_SWIM_LEFT, PET_SWIM_RIGHT, PET_SWIM_LEFT, config, observed, true);
     }
 
     /**
-     * Shared movement core: walk the pet toward {@code target} at a fixed speed, or
-     * teleport when hopelessly far (a warp). Within the deadband it settles to the
-     * given idle stance, sent once. {@code noGravity} keeps the pet at the target's
-     * own y (water / hanging on the owner's back).
+     * Shared movement core: glide the pet toward {@code target} at a fixed speed, or
+     * teleport when hopelessly far (a warp). {@code move*}/{@code idle*} are the
+     * context's own stance pair — land walks in MOVE and rests in STAND, while water
+     * / air / rope keep their single pose (SWIM / JUMP / HANG). Within the deadband
+     * it settles to the idle pose, sent once. {@code noGravity} keeps the pet at the
+     * target's own y (water / airborne / hanging on the owner's back).
      */
     private static void moveTowards(Character chr, Pet pet, int index, Point cur, Point target,
-                                    int idleRight, int idleLeft, BotPetConfig config,
-                                    boolean observed, boolean noGravity) {
+                                    int moveRight, int moveLeft, int idleRight, int idleLeft,
+                                    BotPetConfig config, boolean observed, boolean noGravity) {
         double dx = target.x - cur.x;
         double dy = target.y - cur.y;
         double dist = Math.hypot(dx, dy);
@@ -271,7 +281,7 @@ public final class BotPetFollower {
         int stepX = nx - cur.x;
         int stance = stepX == 0
                 ? (isPetFacingLeft(pet) ? idleLeft : idleRight)
-                : (stepX > 0 ? PET_MOVE_RIGHT : PET_MOVE_LEFT);
+                : (stepX > 0 ? moveRight : moveLeft);
         int fh = noGravity ? 0 : BotPetController.footholdId(chr.getMap(), new Point(nx, ny));
         applyAndSend(chr, pet, index, new Point(nx, ny),
                 (int) Math.round(stepX / dt), (int) Math.round((ny - cur.y) / dt), fh, stance, config, observed);
