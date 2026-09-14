@@ -24,6 +24,7 @@ import soloMapling.ArtificialPlayer.BotTypes.Ludi.LudiPQBot;
 import soloMapling.ArtificialPlayer.BotTypes.Magatia.MagatiaPQBot;
 import soloMapling.ArtificialPlayer.BotTypes.OPQ.OPQBot;
 import soloMapling.ArtificialPlayer.BotTypes.Pirate.PiratePQBot;
+import soloMapling.ArtificialPlayer.BotTypes.Pyramid.PyramidPQBot;
 import soloMapling.ArtificialPlayer.BotTypes.Zakum.ZakumPQBot;
 import soloMapling.ArtificialPlayer.BotTypes.ScrollingBot;
 import soloMapling.ArtificialPlayer.BotTypes.SellingMerchantBot;
@@ -231,6 +232,13 @@ public class BotTypeManager {
             public void createAndSetBot(Character character) {
                 CarnivalPQBot cpqBot = new CarnivalPQBot(character);
                 CharacterStorage.addActiveBot(character.getId(), cpqBot);
+            }
+        },
+        PYRAMID_PQ_BOT {
+            @Override
+            public void createAndSetBot(Character character) {
+                PyramidPQBot pyrBot = new PyramidPQBot(character);
+                CharacterStorage.addActiveBot(character.getId(), pyrBot);
             }
         },
         SOCIAL_BOT {
