@@ -8,7 +8,6 @@ import java.io.Reader;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.ThreadLocalRandom;
 
 /**
  * The pool of pet item ids a bot may be given. Curated via YAML; validated with
@@ -108,23 +107,5 @@ public final class BotPetPool {
             }
         }
         return null;
-    }
-
-    /**
-     * Draw {@code count} distinct pet ids. If the pool is smaller than the
-     * request, returns as many as exist. Empty pool -> empty list.
-     */
-    public static List<Integer> drawDistinct(int count) {
-        if (pets.isEmpty() || count <= 0) {
-            return List.of();
-        }
-        List<Integer> copy = new ArrayList<>(pets);
-        int n = Math.min(count, copy.size());
-        List<Integer> out = new ArrayList<>(n);
-        ThreadLocalRandom rng = ThreadLocalRandom.current();
-        for (int i = 0; i < n; i++) {
-            out.add(copy.remove(rng.nextInt(copy.size())));
-        }
-        return out;
     }
 }

@@ -21,19 +21,17 @@ public final class BotPetAssigner {
     }
 
     /**
-     * @param level      the bot's level
-     * @param tier       the bot's performance tier (may be null -> treated as the lowest)
-     * @param pool       pet ids to draw from (already validated as pets)
-     * @param names      pet-name source
-     * @param config     tuning
-     * @param rng        randomness (injectable for tests)
+     * @param level  the bot's level
+     * @param tier   the bot's performance tier (may be null -> treated as the lowest)
+     * @param pool   pet ids to draw from (already validated as pets)
+     * @param config tuning
+     * @param rng    randomness (injectable for tests)
      * @return 0..3 {@link PetSpec}s, distinct item ids
      */
     public static List<PetSpec> assign(
             int level,
             BotTier tier,
             List<Integer> pool,
-            BotPetNamesProvider names,
             BotPetConfig config,
             Random rng) {
 
@@ -127,10 +125,5 @@ public final class BotPetAssigner {
             out.add(copy.remove(rng.nextInt(copy.size())));
         }
         return out;
-    }
-
-    /** Seam for the name source, so tests can run without the YAML. */
-    public interface BotPetNamesProvider {
-        String random();
     }
 }

@@ -49,8 +49,7 @@ public final class BotPetController {
         boolean persistent = config.persistCompanions() && CompanionRoster.isCompanion(bot.getId());
         List<Integer> pool = BotPetPool.all();
         List<PetSpec> specs = BotPetAssigner.assign(
-                bot.getLevel(), bot.getTier(), pool, BotPetNames::random, config,
-                ThreadLocalRandom.current());
+                bot.getLevel(), bot.getTier(), pool, config, ThreadLocalRandom.current());
         if (specs.isEmpty()) {
             return;
         }
@@ -125,7 +124,7 @@ public final class BotPetController {
         BotPetFollower.forget(bot.getId());
     }
 
-    public static boolean hasAnyPet(Character bot) {
+    private static boolean hasAnyPet(Character bot) {
         if (bot == null) {
             return false;
         }

@@ -42,6 +42,16 @@ class BotPetFactoryTest {
     }
 
     @Test
+    void unnamedPetGetsANonNullName() {
+        // The name is written into SPAWN_PET / SPAWN_PLAYER with no null guard, so an
+        // unnamed pet must still carry a non-null name or serialization NPEs.
+        Pet pet = BotPetFactory.createInMemory(new PetSpec(5000007, 2, false, false, false), null);
+        assertNotNull(pet);
+        assertNotNull(pet.getName(), "unnamed pet must still have a name");
+        assertTrue(!pet.getName().isBlank(), "name must not be blank");
+    }
+
+    @Test
     void inMemoryIdsAvoidTheCashIdRange() {
         // CashIdGenerator wraps below 777,000,000; in-memory ids must stay clear of it.
         Pet pet = BotPetFactory.createInMemory(new PetSpec(5000004, 1, false, false, false), null);

@@ -52,7 +52,6 @@ follow:
 pickup:
   max_per_tick: 2
   range: 120
-  player_nearby_range: 600
 
 # Pet behaviours. Each pet performs a command from its own WZ interact menu
 # (Item.wz/Pet/<id>.img/interact) — the animation AND the spoken line come from

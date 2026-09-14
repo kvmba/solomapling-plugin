@@ -17,7 +17,6 @@ class BotPetAssignerTest {
 
     private static final List<Integer> POOL =
             List.of(5000000, 5000001, 5000002, 5000003, 5000004, 5000005);
-    private static final BotPetAssigner.BotPetNamesProvider NAMES = () -> null;
 
     private static final double EPS = 1e-9;
 
@@ -58,7 +57,7 @@ class BotPetAssignerTest {
             int trials = 200_000;
             Random rng = new Random(1234 + level);
             for (int i = 0; i < trials; i++) {
-                if (!BotPetAssigner.assign(level, BotTier.S, POOL, NAMES, c, rng).isEmpty()) {
+                if (!BotPetAssigner.assign(level, BotTier.S, POOL, c, rng).isEmpty()) {
                     carried++;
                 }
             }
@@ -77,7 +76,7 @@ class BotPetAssignerTest {
         BotPetConfig c = BotPetConfig.defaults();
         Random rng = new Random(7);
         for (int i = 0; i < 1000; i++) {
-            assertTrue(BotPetAssigner.assign(9, BotTier.S, POOL, NAMES, c, rng).isEmpty());
+            assertTrue(BotPetAssigner.assign(9, BotTier.S, POOL, c, rng).isEmpty());
         }
     }
 
@@ -87,7 +86,7 @@ class BotPetAssignerTest {
         Random rng = new Random(99);
         int nonEmpty = 0;
         for (int i = 0; i < 20_000; i++) {
-            List<PetSpec> specs = BotPetAssigner.assign(120, BotTier.S, POOL, NAMES, c, rng);
+            List<PetSpec> specs = BotPetAssigner.assign(120, BotTier.S, POOL, c, rng);
             if (specs.isEmpty()) {
                 continue; // the carry gate did not fire this draw
             }
@@ -127,7 +126,7 @@ class BotPetAssignerTest {
     void emptyPoolYieldsNoPets() {
         BotPetConfig c = BotPetConfig.defaults();
         Random rng = new Random(5);
-        assertTrue(BotPetAssigner.assign(120, BotTier.S, List.of(), NAMES, c, rng).isEmpty());
+        assertTrue(BotPetAssigner.assign(120, BotTier.S, List.of(), c, rng).isEmpty());
     }
 
     @Test
@@ -136,7 +135,7 @@ class BotPetAssignerTest {
         assertTrue(!disabled.enabled(), "explicit enabled:false disables");
         Random rng = new Random(5);
         for (int i = 0; i < 1000; i++) {
-            assertTrue(BotPetAssigner.assign(120, BotTier.S, POOL, NAMES, disabled, rng).isEmpty());
+            assertTrue(BotPetAssigner.assign(120, BotTier.S, POOL, disabled, rng).isEmpty());
         }
     }
 

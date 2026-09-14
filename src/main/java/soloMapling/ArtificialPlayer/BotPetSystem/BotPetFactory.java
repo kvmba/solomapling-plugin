@@ -51,14 +51,27 @@ public final class BotPetFactory {
             pet.setLevel((byte) spec.level());
             pet.setTameness(0);
             pet.setFullness(100); // full and never registered for hunger -> never despawns
-            if (name != null && !name.isBlank()) {
-                pet.setName(name);
-            }
+            // The pet name is written into SPAWN_PET / SPAWN_PLAYER packets with no null
+            // guard, so it must never be null. A named pet gets its random name; an
+            // unnamed one gets a placeholder (only shown when a name-tag is worn).
+            pet.setName(resolveName(name));
             return pet;
         } catch (ReflectiveOperationException e) {
             System.err.println("[BotPetFactory] in-memory Pet construction failed: " + e);
             return null;
         }
+    }
+
+    /**
+     * A name that is never null/blank, so packet serialization can never NPE on it.
+     * An unnamed pet gets a short placeholder — it is only ever displayed when the
+     * pet wears a name-tag, and named pets (the common case) get a real name anyway.
+     */
+    private static String resolveName(String name) {
+        if (name != null && !name.isBlank()) {
+            return name;
+        }
+        return "Pet";
     }
 
     /**
@@ -75,9 +88,7 @@ public final class BotPetFactory {
             return null;
         }
         pet.setSummoned(true);
-        if (name != null && !name.isBlank()) {
-            pet.setName(name);
-        }
+        pet.setName(resolveName(name));
         // An Item bound to the pet id: its constructor loads the pet we just made.
         Item item = new Item(spec.itemId(), (short) 0, (short) 1, petId);
         item.setExpiration(Long.MAX_VALUE);
