@@ -53,7 +53,14 @@ public enum SocialIntent {
             new String[]{"+1", "u1s1"},
             new String[]{"嗯嗯", "哦哦", "对对", "确实", "有道理", "说得对", "说得是", "没错",
                     "没毛病", "加一", "附议", "同感", "是这样的", "就是这样", "可不咋的",
-                    "必须的", "赞同", "支持", "顶一个", "顶一下"});
+                    "必须的", "赞同", "支持", "顶一个", "顶一下"}),
+    // Last = lowest priority: a plain hello only fires when nothing sharper matched. It reuses the
+    // existing Greeting node (a bot may carry its own, else the shared social pool).
+    GREETING("Greeting",
+            new String[]{"hi", "yo", "sup", "hello", "hey", "hola"},
+            new String[]{"你好", "您好", "哈喽", "哈罗", "在吗", "在么", "在不在", "有人吗",
+                    "早上好", "中午好", "下午好", "晚上好", "晚安", "吃了吗", "吃了没",
+                    "好久不见", "老哥", "老铁", "大佬好", "帅哥", "美女", "哥们"});
 
     private final String node;
     private final String[] exact;

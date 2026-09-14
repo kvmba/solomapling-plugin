@@ -16,6 +16,7 @@ import soloMapling.ArtificialPlayer.BotOptionMenu;
 import soloMapling.ArtificialPlayer.BotPartySystem.BotPartyQueue;
 import soloMapling.ArtificialPlayer.BotPartySystem.BotRecruitManager;
 import soloMapling.ArtificialPlayer.BotSM;
+import soloMapling.ArtificialPlayer.SocialIntent;
 import soloMapling.ArtificialPlayer.BotTypeManager;
 import org.gms.server.life.Monster;
 import org.gms.server.maps.MapleMap;
@@ -336,16 +337,29 @@ public class TrainingBot extends BotSM implements GrindTickRegistry.Participant 
 
     // A party-channel (or whisper/guild) line addressed to this bot. Party chat is a different packet
     // from map chat, so a partied grinder never saw it before; a keyword is claimed exactly like the
-    // same-map party broadcast. No reply channel is armed: this bot answers with the same-map bubble
-    // its menu replies already use, so only a speaker ON its map can see the reply - and a TrainingBot
-    // recruited into a party grinds alongside that player by construction.
+    // same-map party broadcast. A plain social line ("你好" / "哈哈") is answered with words on the
+    // channel it arrived on (respondSocial): a same-map speaker hears the bubble, a party member on
+    // another map hears it on the party channel - so a partied grinder answers you from afar.
     @Override
     protected void onDirectChat(ChatMessage message) {
         Character player = message.getSender();
-        if (player == null || isBot(player) || !isSameMap(player)) {
+        if (player == null || isBot(player)) {
             return;
         }
+        if (SocialIntent.classifyNode(message.getContent()) != null) {
+            respondSocial(player, message.getContent(), message.getChatType());
+            return;
+        }
+        if (!isSameMap(player)) {
+            return; // keyword menu is a same-map interaction
+        }
         offerKeyword(player, message.getContent());
+    }
+
+    // Types that answer social chat directly (see BotSM.respondSocial).
+    @Override
+    public boolean respondsToSocialChat() {
+        return true;
     }
 
     // Shouted offer from a stranger in range: no menu, no conversation - the shout IS the

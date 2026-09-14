@@ -69,6 +69,16 @@ class SocialIntentTest {
     }
 
     @Test
+    void greetingIsTheLowestPriorityIntent() {
+        assertEquals("Greeting", SocialIntent.classifyNode("你好"));
+        assertEquals("Greeting", SocialIntent.classifyNode("哈喽"));
+        assertEquals("Greeting", SocialIntent.classifyNode("hi"));
+        assertEquals("Greeting", SocialIntent.classifyNode("早上好"));
+        // A sharper intent on the same line still wins over the plain hello.
+        assertEquals("Praise", SocialIntent.classifyNode("你好厉害"));
+    }
+
+    @Test
     void ordinaryChatIsNotASocialIntent() {
         assertNull(SocialIntent.classifyNode("我在这干啥呢"));
         assertNull(SocialIntent.classifyNode("去菜市场买菜"));

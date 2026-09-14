@@ -130,6 +130,12 @@ public class Dispatcher implements Runnable {
                 bot.nudgeSoon(0L); // speaker is on this bot's map -> answer on the next tick
                 continue;
             }
+            // No menu keyword claimed it. A social gesture ("你好" / "哈哈") is answered with words;
+            // a party member might be on another map, so the reply goes back on the party channel
+            // (respondSocial decides). This is a real reply, not a fallback-to-one-menu.
+            if (bot.offerSocial(sender, message.getContent())) {
+                continue;
+            }
             int distSq = distanceSq(origin, member.getPosition());
             if (distSq < fallbackDistSq) {
                 fallbackDistSq = distSq;
@@ -174,6 +180,13 @@ public class Dispatcher implements Runnable {
             BotSM bot = getBotById(namedBotId);
             if (bot == null) {
                 logBotNotFound(namedBotId);
+                return;
+            }
+
+            // A name call carrying a social line ("小花 你好") is answered with words, not a menu -
+            // the bot just got greeted, not asked to pick an option. Types that do not opt in keep
+            // the existing menu path below.
+            if (bot.handleSocialNameCall(message.getSender(), message.getContent())) {
                 return;
             }
 

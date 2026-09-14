@@ -20,6 +20,7 @@ import soloMapling.server.EventMessageSystem.EventBus;
 import soloMapling.server.EventMessageSystem.EventSubscriber;
 import soloMapling.server.EventMessageSystem.GameEvent;
 
+import soloMapling.server.BotTiming;
 import soloMapling.server.BotTickService;
 
 import java.util.Collection;
@@ -325,6 +326,76 @@ public abstract class BotSM implements EventSubscriber {
     public void sayReply(String line) {
         SocialCommands.BotReply(getChr(), replyChannel(), replyChannelTarget(), line);
     }
+
+    /**
+     * Answers a player's social line (greeting / praise / joke / insult...) with this bot's own
+     * dialogue - its pack's node if it has one, else the shared social pool. The reply goes back on
+     * the channel it arrived on: a same-map speaker hears the map bubble, a party member on another
+     * map hears it on the party channel (never a bubble they cannot see).
+     *
+     * @param type the channel the line arrived on (null = map chat)
+     */
+    public void respondSocial(Character player, String content, org.gms.extension.event.ChatType type) {
+        if (player == null || content == null || content.isBlank() || !getRunning()) {
+            return;
+        }
+        Character chr = getChr();
+        if (chr == null || chr.getMap() == null) {
+            return;
+        }
+        String intent = SocialIntent.classifyNode(content);
+        if (intent == null) {
+            return;
+        }
+
+        // Prefer this bot's own node for the intent (e.g. a TrainingBot's own Greeting); fall back to
+        // the shared social pool when this type has no such node, so every type can answer in kind.
+        String line = BotDialogueHandler.getRandomResolvedLine(dialoguePath, botType, intent, chr, player);
+        if (line == null) {
+            line = BotDialogueHandler.getRandomResolvedLine(SOCIAL_DIALOGUE_PATH, "SocialBot", intent, chr, player);
+        }
+        if (line == null) {
+            return;
+        }
+        final String spoken = line;
+        boolean sameMap = isSameMap(player);
+        final org.gms.extension.event.ChatType replyChannelType =
+                sameMap ? null : (type != null ? type : org.gms.extension.event.ChatType.PARTY);
+        final Character target = player;
+        BotTiming.chain()
+                .stopUnless(() -> getRunning() && chr.getMap() != null)
+                .pause(BotTiming.typingPauseFor(spoken))
+                .run(() -> SocialCommands.BotReply(chr, replyChannelType, target, spoken))
+                .start();
+    }
+
+    /** True for bot types that answer a player's social chat directly (Phase D: Training/Follower). */
+    public boolean respondsToSocialChat() {
+        return false;
+    }
+
+    /**
+     * A name call carrying a social line ("小花 你好"): answer it instead of opening a conversational
+     * menu. Off by default; the Dispatcher routes this only for types that opt in.
+     */
+    public boolean handleSocialNameCall(Character player, String content) {
+        if (!respondsToSocialChat() || !getRunning() || SocialIntent.classifyNode(content) == null) {
+            return false;
+        }
+        respondSocial(player, content, null);
+        return true;
+    }
+
+    /** A no-name map line that is a social gesture: answer it (see {@link #handleSocialNameCall}). */
+    public boolean offerSocial(Character player, String content) {
+        if (!respondsToSocialChat() || !getRunning() || SocialIntent.classifyNode(content) == null) {
+            return false;
+        }
+        respondSocial(player, content, null);
+        return true;
+    }
+
+    private static final String SOCIAL_DIALOGUE_PATH = "SocialBotDialogue.yaml";
 
     // The channel the next sayReply uses. Read through these rather than the fields so a bot whose
     // replies are produced on concurrent per-turn threads (CompanionBot) can scope them per turn.

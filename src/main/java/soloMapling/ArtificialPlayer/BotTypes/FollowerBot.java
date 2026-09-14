@@ -8,6 +8,7 @@ import soloMapling.ArtificialPlayer.BotHealthSystem.BotPotionSim;
 import soloMapling.ArtificialPlayer.BotMessagingSystem.ChatMessage;
 import soloMapling.ArtificialPlayer.BotOptionMenu;
 import soloMapling.ArtificialPlayer.BotSM;
+import soloMapling.ArtificialPlayer.SocialIntent;
 import soloMapling.ArtificialPlayer.BotTypeManager;
 import soloMapling.ArtificialPlayer.BotGrindSystem.MapMobIndex;
 import soloMapling.ArtificialPlayer.BotPartySystem.BotPartyCommands;
@@ -249,19 +250,30 @@ public class FollowerBot extends BotSM {
         }
     }
 
-    // A party-channel (or whisper/guild) line addressed to this follower. Party channel chat is a
-    // different packet from map chat, so even a same-map leader's party line never reached the bot
-    // before. A keyword is claimed exactly like the map party-broadcast path, but only from a speaker
-    // ON this bot's map: the reply is a same-map bubble (no channel is armed - its leader shares its
-    // map, and ambient follow lines stay map chat), so arming a menu for a distant speaker would just
-    // leave a hint nobody can see.
+    // A party-channel (or whisper/guild) line addressed to this follower. A follow keyword is claimed
+    // as before; a plain social line ("你好" / "哈哈") is answered with words on the channel it arrived
+    // on (respondSocial): a same-map leader hears the bubble, a leader on another map hears it on the
+    // party channel - so a partied follower answers you from afar.
     @Override
     protected void onDirectChat(ChatMessage message) {
         Character player = message.getSender();
-        if (player == null || isBot(player) || !isSameMap(player)) {
+        if (player == null || isBot(player)) {
+            return;
+        }
+        if (SocialIntent.classifyNode(message.getContent()) != null) {
+            respondSocial(player, message.getContent(), message.getChatType());
+            return;
+        }
+        if (!isSameMap(player)) {
             return;
         }
         offerKeyword(player, message.getContent());
+    }
+
+    // Types that answer social chat directly (see BotSM.respondSocial).
+    @Override
+    public boolean respondsToSocialChat() {
+        return true;
     }
 
     // ── Menu (Dispatcher routes a "botname" chat here via displayCommands) ───

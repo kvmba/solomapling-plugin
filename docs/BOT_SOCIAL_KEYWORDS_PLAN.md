@@ -1,6 +1,6 @@
 # Bot 社交关键词补充方案（国人常见：问候 / 调侃 / 夸奖 / 大笑 / 认同 / 告别 …）
 
-> 状态：**人格层（§5B）＋社交意图识别（Phase B）已实现并合入**；**§4 的大批量词表尚未全量导入**（当前为先跑通链路的精炼词集）。
+> 状态：**人格层（§5B）＋社交意图识别（Phase B/D）已实现并合入**；**§4 的大批量词表已导入核心词集**（可继续增量扩）。
 > 目标：让 bot 更懂国内玩家的日常用语——**听懂**（识别常见问候、调侃、夸奖、大笑、认同、告别等意图）并**回得上**（有对应的高频口语台词），中英双语关键词与台词同时生效。
 > 范围：以 `SocialBot` 为主，兼顾 `TrainingBot` / `FollowerBot` 的问候与告别；不含游戏类 bot（骰子/21点/游戏厅）与商人。
 
@@ -400,9 +400,11 @@ Rules:
 - **Phase A · 关键词 + 台词（无新分类器）**：往 `menu.social.*` 补问候/告别别名，往 YAML 补 `Praise/Banter/Cheer/Wow/Laugh/Agree/Apology/Thanks` 节点，SocialBot 对**菜单交互中**的这几类做浅识别。风险最低，先看现场反馈。
 - **Phase B · 社交意图匹配器 — ✅ 已实现**：`SocialIntent` 分类器（exact/contains 双规则、声明序优先级）+ 8 个台词节点（中英），接入 `onFirstInteraction` 与 `handleDialogueChoice`。识别范围为先跑通链路的精炼词集；§4 的完整词表（更大批量）可后续增量补入。
 - **Phase C · 人格层（"嘴欠"）— ✅ 已实现**：`Persona` + `SocialPersonaConfig` + 人格驱动的 `pickResponseCategory`；LLM 提示词按人格注入；新增 `Banter` 轻嘴欠池（中英）。落地范围收敛为"轻嘴欠常态 + `SmackTalk` 保留重口"（原计划的 `TeaseLight/TeaseHard/...` 多节点由 `Banter`+`SmackTalk` 两池覆盖，避免节点爆炸）。
-- **Phase D · 扩展到 TrainingBot/FollowerBot** 的问候/告别，及 `!env` 调参开关与网络缩写热更新。
+- **Phase D · 扩展到 TrainingBot/FollowerBot — ✅ 已实现**：`BotSM.respondSocial` 统一对外接口（复用各自台词包节点、缺失回落 SocialBot 社交池；**同图 → 地图气泡，跨图 → 该消息的频道（组队/私聊/公会）**）；`respondsToSocialChat()` 开关 + `handleSocialNameCall`（点名含社交语，如"小花 你好"）/ `offerSocial`（组队广播兜底）两个 Dispatcher 钩子。触发：**同图点名字**（走气泡）或**组队频道**（可跨图远程回）。
+  末尾新增 `SocialIntent.GREETING`（问候，最低优先级），`TrainingBotDialogue` 自带 `Greeting`、`FollowerBot` 无则由 SocialBot 池回落。
+  <br>**有意不做**：地图无名字的裸问候不对全图 bot 广播（否则一群 TrainingBot 齐声"嗨"）；也不动 `BotOptionMenu`（计划废弃，走"直接对话"）。
 
-> 进度：**Phase B、C 已完成**；Phase A（全量词表）、D 待做。
+> 进度：**Phase B、C、D 已完成**；Phase A（全量词表）为增量，可随时继续扩。
 
 ---
 
