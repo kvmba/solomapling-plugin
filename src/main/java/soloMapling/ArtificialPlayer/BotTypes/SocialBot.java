@@ -642,8 +642,8 @@ public class SocialBot extends BotSM {
         }
 
         // No structured menu pick. With the LLM off (or absent), an unclassified line still has to
-        // answer in-character: a cheeky persona jabs, the rest fall back to plain chat.
-        respondWithYamlCategory(pickResponseCategory(player), player);
+        // answer in-character: a cheeky persona jabs, the rest keep the plain flavour-chat answer.
+        respondWithYamlCategory(cheekyOr(player, "WhatsUp"), player);
     }
 
     private static boolean isGoodbyeIntent(String lower) {
@@ -869,17 +869,14 @@ public class SocialBot extends BotSM {
     }
 
     /**
-     * Picks which pool the bot answers from. A cheeky persona usually jabs back ({@code Banter}),
-     * escalating to the harsh {@code SmackTalk} pool only when the bot clearly out-levels the player;
-     * a rare flavour line, otherwise a plain {@code SingleResponse}.
-     *
-     * <p>The level gate on the HARSH tier is the point: a bully picks on someone weaker. Without it
-     * a 30-level bot would talk down to a 200-level player, which reads as broken rather than as
-     * attitude. The light {@code Banter} tier needs no such gate - it is everyday server mouth.
+     * Picks which pool the bot answers from. A cheeky persona usually jabs back ({@code Banter},
+     * or the harsh {@code SmackTalk} pool when it clearly out-levels the player); a rare flavour
+     * line, otherwise a plain {@code SingleResponse}.
      */
     private String pickResponseCategory(Character player) {
-        if (persona.cheeky() && random.nextDouble() < SocialPersonaConfig.teaseChance()) {
-            return canSmackTalk(player) ? "SmackTalk" : "Banter";
+        String jab = cheekyOr(player, null);
+        if (jab != null) {
+            return jab;
         }
         if (random.nextDouble() < RARE_LINE_CHANCE) {
             return "Rare";
@@ -887,19 +884,31 @@ public class SocialBot extends BotSM {
         return "SingleResponse";
     }
 
+    /**
+     * Returns {@code "SmackTalk"} or {@code "Banter"} when this persona jabs on this roll (see
+     * {@link #canSmackTalk}), otherwise {@code fallback}. One place owns the "does it jab?" roll so
+     * every reply path stays consistent.
+     */
+    private String cheekyOr(Character player, String fallback) {
+        if (persona.cheeky() && random.nextDouble() < SocialPersonaConfig.teaseChance()) {
+            return canSmackTalk(player) ? "SmackTalk" : "Banter";
+        }
+        return fallback;
+    }
+
     private boolean canSmackTalk(Character player) {
         Character chr = getChr();
         if (chr == null || player == null) {
             return false;
         }
-        // Only the harsher personas escalate to the roast pool.
+        // Only the harsher personas escalate to the roast pool, and only when the bot clearly
+        // out-levels the player - a bully picks on someone weaker, not on a 200-geared player.
         if (!persona.harsh()) {
             return false;
         }
         if (random.nextDouble() >= SMACK_TALK_CHANCE) {
             return false;
         }
-        // Only when the bot clearly out-levels the player - see pickResponseCategory().
         if (chr.getLevel() - player.getLevel() < SMACK_TALK_LEVEL_GAP) {
             return false;
         }
@@ -932,10 +941,11 @@ public class SocialBot extends BotSM {
     // Two separate chains would race the hello; play them in order on one chain instead.
     private String personaGreeting(Character player) {
         String hello = getRandomLine("Greeting", player);
-        if (!persona.cheeky() || random.nextDouble() >= SocialPersonaConfig.teaseChance()) {
+        String jabCategory = cheekyOr(player, null);
+        if (jabCategory == null) {
             return hello;
         }
-        String jab = getRandomLine(canSmackTalk(player) ? "SmackTalk" : "Banter", player);
+        String jab = getRandomLine(jabCategory, player);
         if (jab == null) {
             return hello;
         }
