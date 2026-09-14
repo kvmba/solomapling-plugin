@@ -119,5 +119,19 @@ public class OPQSharedContext {
         boxAssignments.clear();
         platformAssignments.clear();
         botTaskComplete.clear();
+        sealedSlots.clear();
+    }
+
+    // ---- Sealed room (stage 4) ----
+    // Which of the three platforms each bot takes. Assigned in registration order so the
+    // party spreads over the areas the quest asked for instead of stacking on one.
+    private final java.util.Map<Integer, Integer> sealedSlots = new java.util.concurrent.ConcurrentHashMap<>();
+
+    public int mySealedSlot(int botId) {
+        return sealedSlots.computeIfAbsent(botId, id -> sealedSlots.size());
+    }
+
+    public void clearSealedSlots() {
+        sealedSlots.clear();
     }
 }

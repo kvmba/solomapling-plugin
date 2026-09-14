@@ -139,6 +139,7 @@ public class OPQBot extends BotSM {
         STAGE_1_WAIT,
         STAGE_1_TRANSITION,
         STAGE_1_TRANSITION_PT_2,
+        MIDDLE_STAGE,
         STAGE_2_NAVIGATE,
         STAGE_2_HIT_BOX,
         STAGE_2_LOOT,
@@ -220,6 +221,9 @@ public class OPQBot extends BotSM {
                 break;
             case STAGE_1_TRANSITION_PT_2:
                 handleStage1TransitionPart2();
+                break;
+            case MIDDLE_STAGE:
+                handleMiddleStage();
                 break;
             case STAGE_2_NAVIGATE:
                 handleStage2Navigate();
@@ -636,12 +640,228 @@ public class OPQBot extends BotSM {
     }
 
     private void handleStage1TransitionPart2() {
-        // Teleport from Tower to Stage 2
-        if (getPartyLeader().getMapId() == OPQConstants.OPQ_STAGE_2) {
-            OPQOrchestrator.getInstance().followLeaderWarp(getChr(), new Point(-113,-321)); // Spawn point for stage 2 [x=-113,y=-321]
-            waitFor(1000); // settle after the warp before NAVIGATE ticks
-            transitionTo(OPQBotState.STAGE_2_NAVIGATE, "arrived in stage-2 map");
+        // The tower is the hub; the quest's middle stages are all reached from here, so hand
+        // over to the generic middle-stage driver instead of jumping straight at the music
+        // box and skipping five rooms. If the party has already worked its way to the music
+        // box room, that driver routes there on its own.
+        if (getChr().getMapId() == OPQConstants.OPQ_TOWER) {
+            transitionTo(OPQBotState.MIDDLE_STAGE, "tower reached, working the middle stages");
         }
+    }
+
+    // =========================================================================
+    // Phase: the stages between the clouds and the music box
+    // =========================================================================
+
+    /**
+     * Work whatever middle stage the party is on.
+     *
+     * <p>Orbis runs nine stages and the bot's original two (clouds, then the music box) left
+     * seven untouched, so a party that got past the clouds had nowhere to go. This drives the
+     * rest: the walkway, the storage room, the sealed room's platforms, the lounge and the
+     * levers, plus the tower work (the six scar reactors and the statue base) in between.
+     *
+     * <p>Which stage is current is read from the instance's own flags rather than guessed
+     * from the map, because several stages share a map and the flags are the only thing that
+     * says what is still outstanding. The bot stays with the leader: if the leader is not in
+     * the room this stage lives in, the bot walks back to the tower and over, which is how a
+     * player moves between rooms too.
+     */
+    private void handleMiddleStage() {
+        sharedContext_trySetPhase(OPQPhase.STAGE_2);
+
+        int stage = currentMiddleStage();
+        if (stage < 0) {
+            // Nothing outstanding that the bot can see: hand back to the exit logic, which
+            // follows the leader out when the run is over.
+            transitionTo(OPQBotState.EXIT_DETECT, "no middle stage outstanding");
+            return;
+        }
+
+        // The tower work needs no room: the scars are in the tower itself, and the statue
+        // base is the tower's own pedestal.
+        if (stage == STAGE_SCARS) {
+            if (getChr().getMapId() != OrbisPqData.TOWER_MAP) {
+                walkToTower();
+                return;
+            }
+            OrbisStages.breakScars(getChr());
+            waitFor(OPQConstants.NAVIGATE_SETTLE_MS);
+            return;
+        }
+        if (stage == STAGE_STATUE_BASE) {
+            if (getChr().getMapId() != OrbisPqData.TOWER_MAP) {
+                walkToTower();
+                return;
+            }
+            OrbisStages.placeFinalPiece(getChr());
+            waitFor(OPQConstants.NAVIGATE_SETTLE_MS);
+            return;
+        }
+        // Papa Pixie's room is not on the tower's portal list - Eak warps the party there -
+        // so the bot rides along with the leader and works the room once it arrives.
+        if (stage == STAGE_PAPA_ROOM) {
+            if (getChr().getMapId() != OrbisPqData.STAGE_PAPA) {
+                followLeaderIntoPapaRoom();
+                return;
+            }
+            OrbisStages.settlePapaRoom(getChr());
+            waitFor(OPQConstants.NAVIGATE_SETTLE_MS);
+            return;
+        }
+
+        OrbisStages.StageRoom room = OrbisStages.roomFor(stage);
+        if (room == null) {
+            transitionTo(OPQBotState.EXIT_DETECT, "stage " + stage + " has no bot room");
+            return;
+        }
+
+        // Not in the room yet: go there through the tower (that is how the quest routes
+        // between rooms - the tower is the hub, and rooms do not connect to each other).
+        if (getChr().getMapId() != room.mapId()) {
+            walkToRoom(room);
+            return;
+        }
+
+        doRoomWork(stage, room);
+    }
+
+    /**
+     * Sentinels for the work that has no room of its own: the scars and the statue base are
+     * in the tower, and Papa Pixie's room is reached by Eak rather than by a tower portal.
+     */
+    private static final int STAGE_SCARS = 7;
+    private static final int STAGE_PAPA_ROOM = 70;
+    private static final int STAGE_STATUE_BASE = 8;
+
+    /**
+     * Which stage is still outstanding, from the instance flags. Higher stages are reported
+     * first because the quest runs them in order and a later flag being unset means the
+     * earlier ones are done.
+     */
+    private int currentMiddleStage() {
+        // The chain is strictly ordered, so the first flag still unset is the stage in play.
+        // Reading it this way is what lets several stages share the tower and the lounge's
+        // sub-rooms without the bot having to guess from the map it is standing on.
+        //
+        // Stage 7 is two pieces of work under one flag: the six scar reactors in the tower,
+        // which Eak demands before he will send the party on, and then Papa Pixie's room,
+        // whose spring is what actually sets statusStg7.
+        if (readEimInt("statusStg8", -1) == -1) {
+            if (readEimInt("statusStg7", -1) == 1) {
+                return STAGE_STATUE_BASE;
+            }
+            return scarsComplete(getChr()) ? STAGE_PAPA_ROOM : STAGE_SCARS;
+        }
+        for (int stage = 6; stage >= 1; stage--) {
+            if (readEimInt("statusStg" + stage, -1) == -1
+                    && (stage == 1 || readEimInt("statusStg" + (stage - 1), -1) == 1)) {
+                return stage;
+            }
+        }
+        return -1;
+    }
+
+    /**
+     * Whether the six scar reactors in the tower are all lit, which is Eak's own test
+     * ({@code isStatueComplete}) and the gate on his sending the party to Papa Pixie.
+     *
+     * <p>There is no flag for this - no script ever sets {@code statusStg7} except the
+     * spring - so the reactors have to be read directly, exactly as Eak reads them.
+     */
+    private static boolean scarsComplete(Character bot) {
+        if (bot.getMap() == null) {
+            return false;
+        }
+        for (var reactor : bot.getMap().getAllReactors()) {
+            if (reactor.getId() >= OrbisPqData.SCAR_FIRST && reactor.getId() <= OrbisPqData.SCAR_LAST) {
+                if (reactor.getState() < 1) {
+                    return false;
+                }
+            }
+        }
+        // The tower has to actually contain them; a bot in another room reads "done".
+        return bot.getMapId() == OrbisPqData.TOWER_MAP;
+    }
+
+    private int readEimInt(String key, int fallback) {
+        return soloMapling.ArtificialPlayer.PartyQuest.PqActions.readEimInt(getChr(), key, fallback);
+    }
+
+    /** Head back to the tower, whichever room the bot is in. */
+    private void walkToTower() {
+        int here = getChr().getMapId();
+        if (here == OrbisPqData.TOWER_MAP) {
+            return;
+        }
+        OrbisStages.StageRoom room = OrbisStages.roomFor(stageOfMap(here));
+        if (room != null) {
+            MovementCommands.moveToPortal(getChr(), room.roomExitPortal());
+        } else {
+            // The lounge's sub-rooms and the other side areas all walk out the same way.
+            MovementCommands.moveToPortal(getChr(), OrbisPqData.roomExitPortal(here));
+        }
+        waitFor(OPQConstants.NAVIGATE_SETTLE_MS);
+    }
+
+    /** Reverse of {@link OrbisStages#roomFor}: which stage a room belongs to, or -1. */
+    private static int stageOfMap(int mapId) {
+        for (int stage = 1; stage <= 6; stage++) {
+            OrbisStages.StageRoom room = OrbisStages.roomFor(stage);
+            if (room != null && room.mapId() == mapId) {
+                return stage;
+            }
+        }
+        return -1;
+    }
+
+    /** Papa Pixie's room is entered by Eak's warp, so the bot simply stays with the leader. */
+    private void followLeaderIntoPapaRoom() {
+        if (getPartyLeader().getMapId() == OrbisPqData.STAGE_PAPA) {
+            OPQOrchestrator.getInstance().followLeaderWarp(getChr(),
+                    OrbisPqData.PAPA_SPRING_SPOT);
+        } else {
+            walkToTower();
+        }
+        waitFor(OPQConstants.NAVIGATE_SETTLE_MS);
+    }
+
+    /** Walk to the room's tower portal and through it, exactly as a player would. */
+    private void walkToRoom(OrbisStages.StageRoom room) {
+        if (getChr().getMapId() != OPQConstants.OPQ_TOWER) {
+            // Somewhere else entirely (a sub-room of the lounge, say): return to the tower.
+            MovementCommands.moveToPortal(getChr(), room.roomExitPortal());
+            waitFor(OPQConstants.NAVIGATE_SETTLE_MS);
+            return;
+        }
+        Point spot = room.towerSpot();
+        if (spot == null) {
+            return;
+        }
+        MovementCommands.pathFinderBeta(getChr(), spot);
+        MovementCommands.moveToPortal(getChr(), room.portalInTower());
+        waitFor(OPQConstants.NAVIGATE_SETTLE_MS);
+    }
+
+    private void doRoomWork(int stage, OrbisStages.StageRoom room) {
+        switch (stage) {
+            case 1 -> OrbisStages.huntWalkway(getChr());
+            case 2 -> OrbisStages.clearStorage(getChr());
+            case 3 -> {
+                // The music box is the one stage the bot already knew how to finish.
+                transitionTo(OPQBotState.STAGE_2_NAVIGATE, "music box room reached");
+                return;
+            }
+            case 4 -> {
+                if (!OrbisStages.standOnSealedPlatform(getChr(), sharedContext.mySealedSlot(getChr().getId()))) {
+                    debugLogf("sealed room: no published layout yet");
+                }
+            }
+            case 5 -> OrbisStages.gatherLounge(getChr());
+            case 6 -> OrbisStages.pullCorrectLevers(getChr());
+            default -> { /* nothing to do */ }
+        }
+        waitFor(OPQConstants.NAVIGATE_SETTLE_MS);
     }
 
     // =========================================================================
@@ -1046,6 +1266,11 @@ public class OPQBot extends BotSM {
         if (mapId == OPQConstants.OPQ_TOWER) return OPQBotState.STAGE_1_TRANSITION;
         if (mapId == OPQConstants.OPQ_STAGE_2) return OPQBotState.STAGE_2_NAVIGATE;
         if (mapId == OPQConstants.OPQ_EXIT_LOBBY) return OPQBotState.EXIT_DETECT;
+        // Every other room in the tower is one of the quest's middle stages, and they share
+        // the driver rather than each having a state of its own. Without this the bot would
+        // be "somewhere unexpected" in any room but the two it originally knew, and would
+        // never re-home itself back onto the party.
+        if (OrbisPqData.isOrbisRoom(mapId)) return OPQBotState.MIDDLE_STAGE;
         return null;
     }
 
