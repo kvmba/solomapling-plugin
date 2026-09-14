@@ -195,6 +195,10 @@ feat(pq): <PQ 名> — bot 可陪玩全流程
 | 5 | **Kerning PQ** 5 关 | `bfd9f9a` | ✅ 实现完成 |
 | 6 | **Ludi PQ** 9 关 | `d975418` | ✅ 实现完成 |
 | 7 | **Boss Rush PQ** | `ae91ebc` | ✅ 实现完成 |
+| 8 | **Pirate PQ** 5 关 | `c871c39` | ✅ 实现完成 |
+| 9 | **Amoria PQ** 6 关 | `948a6a4` | ✅ 实现完成 |
+| 10 | **Ellin PQ** 8 关 | `d9f9208` | ✅ 实现完成 |
+| 11 | **Zakum PQ**（矿区） | `766bfa0` | ✅ 实现完成 |
 
 对应的 bot 类型与命令：
 
@@ -205,12 +209,16 @@ feat(pq): <PQ 名> — bot 可陪玩全流程
 | Kerning | `KERNING_PQ_BOT` | `!bot kpqbot` |
 | Ludi | `LUDI_PQ_BOT` | `!bot lpqbot` |
 | Boss Rush | `BOSS_RUSH_PQ_BOT` | `!bot brpqbot` |
+| Pirate | `PIRATE_PQ_BOT` | `!bot ppqbot` |
+| Amoria | `AMORIA_PQ_BOT` | `!bot apqbot` |
+| Ellin | `ELLIN_PQ_BOT` | `!bot epqbot` |
+| Zakum | `ZAKUM_PQ_BOT` | `!bot zpqbot` |
 
 ### 尚未实现
 
 | 类别 | 内容 | 阻塞点 |
 |---|---|---|
-| A 类 | Magatia（护送 + 双版本 A/Z）、El Nath、Pirate、Amoria（6 人）、Ellin、Treasure、Zakum、Horntail | 各有独立机制（护送、变身、小游戏），需逐个调研 |
+| A 类 | Magatia（护送 + 双版本 A/Z）、Treasure（140 级）、Horntail | 各有独立机制（护送、变身、小游戏），需逐个调研 |
 | B 类 | MK_PrimeMinister(3)、DelliBattle(2)、ElementalBattle(2) 等 | 结构同 A |
 | C 类 | Monster Carnival（对抗型，bot 当对手） | 语义全新，需"陪练"设计 |
 | D 类 | Ariant Coliseum | Expedition 架构 |
