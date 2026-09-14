@@ -54,7 +54,7 @@ public final class BotPetController {
             return;
         }
 
-        int index = 0;
+        boolean granted = false;
         for (PetSpec spec : specs) {
             String name = spec.named() ? BotPetNames.random() : null;
             Pet pet = persistent
@@ -64,17 +64,25 @@ public final class BotPetController {
                 continue;
             }
             bot.addPet(pet);
-            placeAtBot(bot, pet, index);
+            // Read the slot the engine actually gave the pet (host convention, cf.
+            // SpawnPetProcessor) instead of assuming a counter: the slot is what
+            // MOVE_PET / gear slots / name-tag slots are keyed on.
+            int slot = bot.getPetIndex(pet.getUniqueId());
+            if (slot < 0) {
+                bot.removePet(pet, true); // cannot happen off an empty array; never mis-slot anyway
+                continue;
+            }
+            placeAtBot(bot, pet, slot);
             // Gear first, so the spawn broadcast already reflects the name tag
             // and looting pouches (hasPetNameTag / hasPetChatballoon read slots).
-            equipPetGear(bot, index, spec, config);
+            equipPetGear(bot, slot, spec, config);
             if (persistent) {
                 pet.saveToDb();
             }
             broadcastShow(bot, pet);
-            index++;
+            granted = true;
         }
-        if (index > 0) {
+        if (granted) {
             BotPetFollower.track(bot.getId());
         }
     }

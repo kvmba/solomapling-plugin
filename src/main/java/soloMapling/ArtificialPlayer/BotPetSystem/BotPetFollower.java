@@ -129,8 +129,13 @@ public final class BotPetFollower {
         }
 
         boolean swim = map.isSwim();
-        int idx = 0;
-        for (Pet pet : chr.getPets()) {
+        // Iterate by the pet-ARRAY index, not a running count: the slot in
+        // MOVE_PET / PET_COMMAND is the array index (the host sends it from
+        // getPetIndex), so skipping a null without advancing would mis-slot a
+        // pet that sits after a hole. Same loop shape as loot() below.
+        Pet[] pets = chr.getPets();
+        for (int idx = 0; idx < pets.length; idx++) {
+            Pet pet = pets[idx];
             if (pet == null) {
                 continue;
             }
@@ -140,7 +145,6 @@ public final class BotPetFollower {
                 followLand(chr, pet, idx, config);
             }
             maybeSpeak(chr, pet, idx, config);
-            idx++;
         }
         if (chr.getHp() > 0) {
             loot(chr, map, config);
