@@ -354,7 +354,7 @@ public class SocialBot extends BotSM {
             return; // not standing on a portal - nothing to clear
         }
         Point dest = pickOffDoorwaySpot(chr);
-        if (dest == null || onDoorway(chr.getMap(), dest, DOORWAY_ARRIVAL_PAD, DOORWAY_ARRIVAL_PAD)) {
+        if (dest == null) {
             return; // no baked nav graph / no off-door ledge reachable yet - try again on a later tick
         }
         if (chr.getChair() > 0) {
@@ -367,9 +367,10 @@ public class SocialBot extends BotSM {
     }
 
     // True when (x,y) sits inside the doorway box of any portal on the map, widened by (padX,padY). X is
-    // what marks the door (a portal's pixel column, cheap to test first). The Y term is measured from the
-    // floor UNDER the portal, not the portal pixel: an arrival is dropped onto that floor, and a portal may
-    // sit well above it. Falls back to the portal pixel only when there is no floor below (no surface to rest on).
+    // what marks the door (a portal's pixel column, cheap to test first). There are two resting spots to
+    // cover vertically: a bot put on the portal pixel itself (a plain warp / spawn fallback) and one the GC
+    // engine dropped onto the floor UNDER the portal (a stroll arrival). A portal may sit well above its
+    // floor, so testing only one of the two would miss the other; test both, not the whole column between.
     private static boolean onDoorway(MapleMap map, Point p, int padX, int padY) {
         for (Portal portal : map.getPortals()) {
             Point pp = portal.getPosition();
@@ -377,8 +378,9 @@ public class SocialBot extends BotSM {
                 continue; // not this portal's column - a doorway is an X neighbourhood
             }
             Point floor = GCMovement.groundPointBelow(map, pp.x, pp.y);
-            int refY = floor != null ? floor.y : pp.y;
-            if (Math.abs(refY - p.y) <= DOORWAY_Y + padY) {
+            int dyPixel = Math.abs(pp.y - p.y);
+            int dyFloor = floor != null ? Math.abs(floor.y - p.y) : Integer.MAX_VALUE;
+            if (Math.min(dyPixel, dyFloor) <= DOORWAY_Y + padY) {
                 return true;
             }
         }
@@ -387,9 +389,10 @@ public class SocialBot extends BotSM {
 
     // A scattered spot to walk to when clearing a doorway: sample the town's crowd spots (the same
     // anchor-weighted sampler the drift uses; seeded from where the bot stands, which on a cross-map
-    // arrival is the far map's door) and take the one furthest from any portal, so a bot leaves the door
-    // decisively rather than merely nudging off it. Null when the nav graph isn't baked yet - the caller
-    // leaves the bot where it stands and tries again on a later tick.
+    // arrival is the far map's door), keep only those that clear the doorway box by DOORWAY_ARRIVAL_PAD,
+    // and take the one furthest from any portal so a bot leaves the door decisively rather than merely
+    // nudging off it. Null when the nav graph isn't baked yet or every sample still sits in a doorway -
+    // the caller leaves the bot where it stands and tries again on a later tick.
     private Point pickOffDoorwaySpot(Character chr) {
         MapleMap map = chr.getMap();
         List<Point> spots = TownPresenceSampler.sample(map, chr.getPosition(),
@@ -397,6 +400,9 @@ public class SocialBot extends BotSM {
         Point best = null;
         long bestDistSq = -1;
         for (Point s : spots) {
+            if (onDoorway(map, s, DOORWAY_ARRIVAL_PAD, DOORWAY_ARRIVAL_PAD)) {
+                continue; // would halt inside the door (the driver stops within 8px of the target)
+            }
             long d = nearestPortalDistSq(map, s);
             if (d > bestDistSq) {
                 bestDistSq = d;
