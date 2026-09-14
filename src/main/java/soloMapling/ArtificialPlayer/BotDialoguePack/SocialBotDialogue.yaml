@@ -1349,3 +1349,129 @@ SocialBot:
       - 4
       - 5
     wait: 1
+  Apology:
+    text:
+      - "no worries."
+      - "it's fine, don't sweat it."
+      - "all good, no harm done."
+      - "you're forgiven. this time lol."
+      - "pfft, who hasn't fat-fingered that."
+      - "apology accepted. drop the 'but' next time."
+      - "cool, moving on."
+      - "im tough, im fine."
+    emote:
+      - 0
+      - 2
+    wait: 1
+  Thanks:
+    text:
+      - "no prob."
+      - "np."
+      - "happy to help."
+      - "anytime."
+      - "just carry me next run and we're even."
+      - "of course."
+      - "taking that thank-you."
+      - "noted, you owe me one (kidding)."
+    emote:
+      - 0
+      - 2
+    wait: 1
+  Praise:
+    text:
+      - "haha stop it."
+      - "eh, just grinded a lot."
+      - "lowkey, keep it up and ill get a big head."
+      - "that it? I expected a better compliment."
+      - "you flatter me."
+      - "likewise."
+      - "now im blushing (not really)."
+      - "ok that one I'll take."
+      - "sure, maybe just a million times better than you."
+      - "stop, any more and ill believe it."
+    emote:
+      - 0
+      - 2
+      - 4
+    wait: 1
+  Cheer:
+    text:
+      - "lets go!"
+      - "same to you, gl."
+      - "on it, queueing up."
+      - "thanks, you too."
+      - "steady, we got this."
+      - "go go go."
+      - "needed that, im hyped now."
+      - "ok ok, locking in."
+    emote:
+      - 0
+      - 2
+    wait: 1
+  TeaseBack:
+    text:
+      - "that it? im trying my best here."
+      - "mad? you're mad."
+      - "you're right, but you're not much either."
+      - "ok ok you're the best, happy now?"
+      - "heh. whatever helps you sleep."
+      - "fast mouth, let's see the hands."
+      - "ill admit im bad. you're not exactly good either."
+      - "ooh, tilted?"
+      - "relax, you'll get used to me outplaying you."
+      - "oh really? for real? I don't believe you."
+      - "say it plainly: you're tilted."
+      - "noted. next party, no invite for you."
+      - "go on, I'm listening, won't talk back (I will)."
+      - "being bad is a crime, but talking this much is the real offense."
+    emote:
+      - 0
+      - 2
+      - 4
+      - 5
+    wait: 1
+  Wow:
+    text:
+      - "wait, for real?"
+      - "well dang, didn't see that coming."
+      - "whoa, nice one."
+      - "ok that was actually impressive."
+      - "we're so back."
+      - "throwback vibes fr."
+      - "omg, nice."
+      - "I can't do that play, respect."
+    emote:
+      - 0
+      - 2
+      - 4
+    wait: 1
+  Laugh:
+    text:
+      - "hahahaha."
+      - "lmao im dead."
+      - "you're too funny."
+      - "im crying."
+      - "hehe, you think so too huh."
+      - "pfft, snorted."
+      - "ha, good one."
+      - "fine, your sense of humor is... something."
+    emote:
+      - 0
+      - 2
+      - 4
+      - 6
+    wait: 1
+  Agree:
+    text:
+      - "true."
+      - "yeah, fair point."
+      - "for sure."
+      - "ngl, you're right."
+      - "yep yep, agreed."
+      - "no lies detected."
+      - "now that you say it..."
+      - "mm, I feel you."
+    emote:
+      - 0
+      - 2
+    wait: 1

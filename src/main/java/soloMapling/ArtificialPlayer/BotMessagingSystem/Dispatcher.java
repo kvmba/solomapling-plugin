@@ -195,7 +195,7 @@ public class Dispatcher implements Runnable {
         }
         bot.getInteractors().setRespondant(message.getSender());
         if (bot instanceof SocialBot socialBot) {
-            socialBot.onFirstInteraction(message.getSender());
+            socialBot.onFirstInteraction(message.getSender(), message.getContent());
         }
     }
 
@@ -232,7 +232,7 @@ public class Dispatcher implements Runnable {
         }
         log("[Dispatcher] SocialBot available, setting respondant");
         socialBot.getInteractors().setRespondant(message.getSender());
-        socialBot.onFirstInteraction(message.getSender());
+        socialBot.onFirstInteraction(message.getSender(), message.getContent());
     }
 
     private void logBotNotFound(int botId) {

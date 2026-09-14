@@ -17,6 +17,7 @@ import soloMapling.ArtificialPlayer.BotPartySystem.BotPartyQueue;
 import soloMapling.ArtificialPlayer.BotPartySystem.BotRecruitManager;
 import soloMapling.ArtificialPlayer.BotSM;
 import soloMapling.ArtificialPlayer.Persona;
+import soloMapling.ArtificialPlayer.SocialIntent;
 import soloMapling.ArtificialPlayer.SocialPersonaConfig;
 import soloMapling.ArtificialPlayer.BotTownSystem.TownPresenceConfig;
 import soloMapling.ArtificialPlayer.BotTownSystem.TownPresenceSampler;
@@ -517,10 +518,10 @@ public class SocialBot extends BotSM {
         // Idle: open a new conversation on the channel the line arrived on.
         enterReplyChannel(message.getChatType(), player);
         getInteractors().setRespondant(player);
-        onFirstInteraction(player);
+        onFirstInteraction(player, message.getContent());
     }
 
-    public void onFirstInteraction(Character player) {
+    public void onFirstInteraction(Character player, String content) {
         lastRespondantMessageTime = System.currentTimeMillis();
 
         InteractionTracker tracker = getOrCreateTracker(player.getId());
@@ -548,7 +549,13 @@ public class SocialBot extends BotSM {
 
         switch (level) {
             case NORMAL:
-                if (variant == SocialBotVariant.SINGLE_RESPONSE) {
+                // A clear social gesture ("哈哈" / "你好厉害" / "就这") is answered in kind, for either
+                // variant; otherwise fall back to this bot's usual opening. The reply's own ending
+                // (endReply) shows the menu for an interactive bot and ends the chat for a one-shot one.
+                String intent = SocialIntent.classifyNode(content);
+                if (intent != null) {
+                    respondWithYamlCategory(intent, player);
+                } else if (variant == SocialBotVariant.SINGLE_RESPONSE) {
                     appendSingleResponse(chain, player);
                 } else {
                     appendGreeting(chain, player);
@@ -611,6 +618,12 @@ public class SocialBot extends BotSM {
     }
 
     private void endReply(Character player) {
+        // A one-shot bot (SINGLE_RESPONSE) never presents the interactive menu; it just answers once
+        // and lets the conversation end, exactly like its scripted opening (appendSingleResponse).
+        if (variant == SocialBotVariant.SINGLE_RESPONSE) {
+            resetConversation();
+            return;
+        }
         if (isConversationWith(player)) {
             showInteractiveOptions(player);
         }
@@ -633,6 +646,14 @@ public class SocialBot extends BotSM {
         String category = resolveMenuCategory(lower);
         if (category != null) {
             respondWithYamlCategory(category, player);
+            return;
+        }
+
+        // A clear social gesture ("哈哈" / "你好厉害" / "就这") is answered in kind - even with the
+        // LLM on, so a laugh or an insult gets its own pool rather than a generic freeform reply.
+        String intent = SocialIntent.classifyNode(content);
+        if (intent != null) {
+            respondWithYamlCategory(intent, player);
             return;
         }
 

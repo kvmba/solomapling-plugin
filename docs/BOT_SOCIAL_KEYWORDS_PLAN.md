@@ -1,16 +1,16 @@
 # Bot 社交关键词补充方案（国人常见：问候 / 调侃 / 夸奖 / 大笑 / 认同 / 告别 …）
 
-> 状态：**人格层（§5B）已实现并合入**；**关键词需（§4 大批量）与社交意图分类器仍为待实施方案**。
+> 状态：**人格层（§5B）＋社交意图识别（Phase B）已实现并合入**；**§4 的大批量词表尚未全量导入**（当前为先跑通链路的精炼词集）。
 > 目标：让 bot 更懂国内玩家的日常用语——**听懂**（识别常见问候、调侃、夸奖、大笑、认同、告别等意图）并**回得上**（有对应的高频口语台词），中英双语关键词与台词同时生效。
 > 范围：以 `SocialBot` 为主，兼顾 `TrainingBot` / `FollowerBot` 的问候与告别；不含游戏类 bot（骰子/21点/游戏厅）与商人。
 
-## 实现摘要（§5B 人格层，已合入）
+## 实现摘要（§5B 人格层 + Phase B 意图识别，已合入）
 
 - 新增 `Persona`（`TEASE/SARCASTIC/HYPE/CASUAL/CHILL/FRIENDLY`，按角色 id 稳定分派，默认偏喷子）+ `SocialPersonaConfig`（键 `solomapling.social.persona`=`cheeky|chill|off`、`solomapling.social.tease-chance`，默认 cheeky/65%）。
-- `SocialBot`：`pickResponseCategory` 改为**人格驱动**——脸皮厚人格常态出 `Banter`，仅"更毒人格 + 高出玩家≥15级 + 冷却"才升级 `SmackTalk`；`appendGreeting` 变为**问候+补刀**；LLM 关闭时的兜底回复也走人格。
-- `SocialLlmPromptBuilder`：系统提示词按人格注入"嘴欠"人设与红线（只损游戏里的事）；`SocialLlmService` 传入该 bot 的人格。
-- 新增台词节点 `Banter`（中英各 48 行，轻嘴欠日常池）；`SmackTalk` 保留为高等级专属重口池。
-- 测试 `SocialPersonaTest`（6 项）：分布偏嘴但不单一、同 id 人格稳定、harsh⊂cheeky、chill 变软、Banter 中英皆在、默认档为嘴欠。**854 项测试全绿**。
+- 新增 `SocialIntent`（`PRAISE/CHEER/PROVOKE→TeaseBack/WOW/LAUGH/AGREE/THANKS/APOLOGY`，中英双语，exact/contains 双规则、按声明序优先级）+ 台词节点（中英各 8 节点）；`SocialBot` 在 `onFirstInteraction`（第一句）与 `handleDialogueChoice`（交互中）两处接入——玩家"哈哈/就这/谢谢/抱歉"等会得到对应回复（`TeaseBack` 即"被损回怼"）。
+- `SocialBot`：`pickResponseCategory` 人格驱动（脸皮厚人格常态 `Banter`，仅"更毒人格+高出≥15级+冷却"升级 `SmackTalk`）；`appendGreeting` 问候+补刀；`endReply` 按变体收尾（SINGLE_RESPONSE 不弹菜单）。
+- `SocialLlmPromptBuilder`：系统提示词按人格注入"嘴欠"人设与红线；`SocialLlmService` 传入该 bot 的人格。
+- 测试 `SocialPersonaTest`（6）+ `SocialIntentTest`（6）。**860 项测试全绿**。
 
 ---
 
@@ -398,11 +398,11 @@ Rules:
 ## 8. 分阶段落地
 
 - **Phase A · 关键词 + 台词（无新分类器）**：往 `menu.social.*` 补问候/告别别名，往 YAML 补 `Praise/Banter/Cheer/Wow/Laugh/Agree/Apology/Thanks` 节点，SocialBot 对**菜单交互中**的这几类做浅识别。风险最低，先看现场反馈。
-- **Phase B · 社交意图匹配器**：抽 `SocialIntent` 枚举 + `classifyIntent()`，覆盖 `onFirstInteraction`（第一句即识别），支持 exact/contains 双规则与负向排除；接入 §6 优先级。
+- **Phase B · 社交意图匹配器 — ✅ 已实现**：`SocialIntent` 分类器（exact/contains 双规则、声明序优先级）+ 8 个台词节点（中英），接入 `onFirstInteraction` 与 `handleDialogueChoice`。识别范围为先跑通链路的精炼词集；§4 的完整词表（更大批量）可后续增量补入。
 - **Phase C · 人格层（"嘴欠"）— ✅ 已实现**：`Persona` + `SocialPersonaConfig` + 人格驱动的 `pickResponseCategory`；LLM 提示词按人格注入；新增 `Banter` 轻嘴欠池（中英）。落地范围收敛为"轻嘴欠常态 + `SmackTalk` 保留重口"（原计划的 `TeaseLight/TeaseHard/...` 多节点由 `Banter`+`SmackTalk` 两池覆盖，避免节点爆炸）。
 - **Phase D · 扩展到 TrainingBot/FollowerBot** 的问候/告别，及 `!env` 调参开关与网络缩写热更新。
 
-> 进度：**Phase C 已完成**；Phase A/B/D 待做。**Phase B** 是"听懂具体意图"（问候/夸/损/笑/认同）的关键，建议下一步；若暂不做，人格层已能让 bot 的**开场、任意搭话、LLM** 都带嘴欠，玩家感知最明显。
+> 进度：**Phase B、C 已完成**；Phase A（全量词表）、D 待做。
 
 ---
 

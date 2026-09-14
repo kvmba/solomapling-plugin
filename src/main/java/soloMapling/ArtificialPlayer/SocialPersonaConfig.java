@@ -57,6 +57,11 @@ public final class SocialPersonaConfig {
         return PERSONA_OFF.equals(persona) ? 0.0 : teasePct / 100.0;
     }
 
+    /** Whether social-intent recognition is on; a fully {@code off} persona disables it too. */
+    public static boolean intentEnabled() {
+        return !PERSONA_OFF.equals(persona);
+    }
+
     /** The persona a character speaks with, honoring the configured spread. */
     public static Persona personaFor(int characterId) {
         if (PERSONA_OFF.equals(persona)) {
