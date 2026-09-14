@@ -245,3 +245,33 @@ feat(pq): <PQ 名> — bot 可陪玩全流程
 5. **Boss Rush**：单人 + 1 bot，验证 bot 攻击真能造成伤害
 
 **共同风险**：`PqActions` 的 NPC 交互（`talkTo`）与 `holdArea` 的站位精度尚未在真机验证。
+
+---
+
+## 第九部分 · 服务端脚本缺陷（实现过程中发现，非 bot 问题）
+
+以下问题在**服务端脚本本身**，任何玩家（含真人）都无法完成。记录在此以免误判为 bot 实现不全。
+
+### TreasurePQ（`674030000` 系列）—— 关卡门禁永不打开
+
+| 事实 | 证据 |
+|---|---|
+| 初始化把 `statusStg1` 设为 `"0"` | `event/TreasurePQ.js:119` |
+| 出口门禁要求 `statusStg1 == 1` | `portal/guyfawkes0_esc.js:21` |
+| **全仓无任何脚本把它置 1** | 全局搜索确认 |
+
+屋子里的箱子（`6741015`）只 `rm.dropItems()`，不掉落任何能推进关卡的东西；
+`6741001`（guyfawkesRock）只 `spawnMonster(9400589)`。
+→ **该 PQ 在服务端就是死局**，bot 无法"陪着跑通"。
+
+### 结论
+
+实现 bot 之前必须先确认"这个 PQ 在服务端能通"。建议的检查方法：
+
+```bash
+# 1. 关卡门禁脚本引用的属性
+grep -o 'getIntProperty("[a-zA-Z0-9_]*"' scripts/portal/*.js scripts/npc/*.js | sort -u
+# 2. 该属性在哪被赋值（尤其是置 1 / "1" 的地方）
+grep -rn 'setProperty("statusStg1", *1\|setIntProperty("statusStg1", *1' scripts/
+# 3. 若无 → 该 PQ 不通
+```
