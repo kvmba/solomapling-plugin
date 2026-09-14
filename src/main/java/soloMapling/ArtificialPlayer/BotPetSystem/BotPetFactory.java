@@ -85,6 +85,8 @@ public final class BotPetFactory {
         }
         Pet pet = Pet.loadFromDb(spec.itemId(), (short) 0, petId);
         if (pet == null) {
+            // The row was just created; don't leave it orphaned if the reload failed.
+            Pet.deleteFromDb(bot, petId);
             return null;
         }
         pet.setSummoned(true);

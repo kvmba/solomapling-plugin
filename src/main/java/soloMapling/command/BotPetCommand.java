@@ -8,11 +8,11 @@ import soloMapling.ArtificialPlayer.BotPetSystem.BotPetSystem;
 /*
  * !botpet — bot pet feature control / diagnostics.
  *
- *   !botpet status          config + live switches
- *   !botpet enable|disable  runtime kill switch
- *   !botpet reload          re-read BotPet config/pools and restart the follower
- *   !botpet grant [botId]   force-grant pets to a bot (defaults to the GM's target)
- *   !botpet clear [botId]   strip a bot's pets (debug)
+ *   !botpet status            config + live switches
+ *   !botpet enable|disable    runtime kill switch
+ *   !botpet reload            re-read BotPet config/pools and restart the follower
+ *   !botpet grant <botId>     force-grant pets to a bot
+ *   !botpet clear <botId>     strip a bot's pets (debug)
  */
 public class BotPetCommand extends Command {
     {
