@@ -38,6 +38,7 @@ class PetCommandInterpreterTest {
         boolean sawHigh = false;
         for (int i = 0; i < 2000; i++) {
             PetInteractionTable.Interact pick = PetCommandInterpreter.pick(table, 15, rng);
+            assertTrue(pick.index() == 0 || pick.index() == 10);
             if (pick.index() == 10) {
                 sawHigh = true;
             }
@@ -56,10 +57,10 @@ class PetCommandInterpreterTest {
     }
 
     @Test
-    void weightingFavoursHigherProb() {
+    void uniformPickAcrossValidCommands() {
         List<PetInteractionTable.Interact> table = List.of(
-                it(0, 90, 1, 200),
-                it(1, 10, 1, 200));
+                it(0, 1, 1, 200),
+                it(1, 1, 1, 200));
         Random rng = new Random(4);
         int zero = 0;
         int trials = 20_000;
@@ -69,6 +70,20 @@ class PetCommandInterpreterTest {
             }
         }
         double rate = (double) zero / trials;
-        assertTrue(rate > 0.80 && rate < 0.98, "90:10 weighting => ~0.90, was " + rate);
+        assertTrue(rate > 0.45 && rate < 0.55, "two equal commands => ~0.50, was " + rate);
+    }
+
+    @Test
+    void obeyReflectsTheCommandProb() {
+        Random rng = new Random(5);
+        int obey = 0;
+        int trials = 20_000;
+        for (int i = 0; i < trials; i++) {
+            if (PetCommandInterpreter.succeeds(it(0, 30, 1, 200), rng)) {
+                obey++;
+            }
+        }
+        double rate = (double) obey / trials;
+        assertTrue(rate > 0.27 && rate < 0.33, "prob=30 => ~0.30 obey, was " + rate);
     }
 }

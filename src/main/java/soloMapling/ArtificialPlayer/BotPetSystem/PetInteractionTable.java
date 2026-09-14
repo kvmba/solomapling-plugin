@@ -16,10 +16,10 @@ import java.util.concurrent.ConcurrentHashMap;
  *
  * <p>Every pet carries its own behaviour menu in WZ: each {@code interact/<N>}
  * entry is one command the pet can perform, with a trigger probability
- * ({@code prob}, in percent), the pet-level band it belongs to ({@code l0}..
- * {@code l1}), and a {@code success}/{@code fail} sub-tree whose {@code act} is
- * the animation and whose numeric children are the speech keys the client
- * resolves against {@code String.wz/PetDialog.img}.</p>
+ * ({@code prob} — the chance the pet OBEYS it, in percent), the pet-level band
+ * it belongs to ({@code l0}..{@code l1}), and a {@code success}/{@code fail}
+ * sub-tree whose {@code act} is the animation and whose numeric children are the
+ * speech keys the client resolves against {@code String.wz/PetDialog.img}.</p>
  *
  * <p>The server does not need the speech text: it tells the client which command
  * to play ({@code PacketCreator.commandResponse}) and the client shows that pet's

@@ -238,14 +238,17 @@ public final class BotPetFollower {
         if (pick == null) {
             return; // no WZ behaviour for this pet / level
         }
+        // prob is the pet's chance to OBEY (host rolls it to pick success/fail);
+        // both branches are the pet's own act + line from its WZ, so just relay
+        // which command to play and whether it obeyed.
+        boolean obey = PetCommandInterpreter.succeeds(pick, ThreadLocalRandom.current());
         long lo = Math.min(config.speakMinIntervalMs(), config.speakMaxIntervalMs());
         long hi = Math.max(config.speakMinIntervalMs(), config.speakMaxIntervalMs());
         nextSpeakAtMs.put(pet.getUniqueId(),
                 now + lo + ThreadLocalRandom.current().nextLong(Math.max(1, hi - lo)));
-        // talk=false: the animation plays and the pet "speaks" (client shows its own line).
         boolean balloon = chr.hasPetChatballoon((byte) index);
         chr.getMap().broadcastMessage(chr,
-                PacketCreator.commandResponse(chr.getId(), (byte) index, false, pick.index(), balloon), false);
+                PacketCreator.commandResponse(chr.getId(), (byte) index, !obey, pick.index(), balloon), false);
     }
 
     /**
