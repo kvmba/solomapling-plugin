@@ -44,7 +44,19 @@ public final class TrainingMapChooser {
             {1, 1}, {15, 2}, {30, 4}, {50, 8}, {70, 10}
     };
     private static final int ANYWHERE_LEVEL = 70;            // 70+ : open the radius to the whole landmass
-    private static final int MAX_HOPS = 20;                  // "anywhere" radius; the walkable BFS stops at the coast anyway
+    // "anywhere" radius — how far from town a max-level bot may discover a hunting ground. 20 was set
+    // when a bot's continent was assumed to end at the coast; on the live world graph the walkable
+    // portal path joins a whole continent end to end, and its far content sits well past 20. Ludibrium
+    // town -> 怪兽地区 (221030601) is 57 hops — the only route climbs the entire 玩具塔 one floor at a
+    // time (221020000 -> ... -> 221024400) — and Orbis -> its far fields is 44. At 20 a high bot simply
+    // never saw the far half of the continent it stands on. 64 clears the deepest such span with
+    // headroom, and matches GCTravel.MAX_HOPS so anything discoverable is routable.
+    //
+    // NOTE this radius deliberately rides the PORTAL-ONLY graph (see GCMovement.mapsWithinHopsByDepth,
+    // which excludes taxi/ferry hops). Crossing to another continent is the job of migration
+    // (TrainingRegions), not the discovery radius: folding ferry edges in here would hand every bot the
+    // whole ~550-map world as candidates at once (measured) and let town wanderers drift between towns.
+    private static final int MAX_HOPS = 64;
 
     // ── Distance bias (fresh bots hug town, high bots venture to the edge of their reach) ──
     private static final int VENTURE_FULL_LEVEL = 50;        // level by which a bot fully prefers far maps
