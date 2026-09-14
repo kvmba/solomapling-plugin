@@ -55,6 +55,10 @@ public final class BotPetConfig {
     private static final int DEF_PICKUP_RANGE = 120;
     private static final int DEF_PLAYER_NEARBY_RANGE = 600;
 
+    private static final double DEF_SPEAK_CHANCE = 0.10;
+    private static final long DEF_SPEAK_MIN_INTERVAL_MS = 8_000L;
+    private static final long DEF_SPEAK_MAX_INTERVAL_MS = 25_000L;
+
     private static final boolean DEF_PERSIST_COMPANIONS = true;
     private static final boolean DEF_EXCLUDE_FM_SHOP = true;
 
@@ -112,6 +116,10 @@ public final class BotPetConfig {
     private final int pickupRange;
     private final int playerNearbyRange;
 
+    private final double speakChance;
+    private final long speakMinIntervalMs;
+    private final long speakMaxIntervalMs;
+
     private final boolean persistCompanions;
     private final boolean excludeFmShop;
 
@@ -143,6 +151,9 @@ public final class BotPetConfig {
         this.pickupMaxPerTick = b.pickupMaxPerTick;
         this.pickupRange = b.pickupRange;
         this.playerNearbyRange = b.playerNearbyRange;
+        this.speakChance = b.speakChance;
+        this.speakMinIntervalMs = b.speakMinIntervalMs;
+        this.speakMaxIntervalMs = b.speakMaxIntervalMs;
         this.persistCompanions = b.persistCompanions;
         this.excludeFmShop = b.excludeFmShop;
         this.countBands = b.countBands;
@@ -177,6 +188,10 @@ public final class BotPetConfig {
     public int pickupMaxPerTick() { return pickupMaxPerTick; }
     public int pickupRange() { return pickupRange; }
     public int playerNearbyRange() { return playerNearbyRange; }
+
+    public double speakChance() { return speakChance; }
+    public long speakMinIntervalMs() { return speakMinIntervalMs; }
+    public long speakMaxIntervalMs() { return speakMaxIntervalMs; }
 
     public boolean persistCompanions() { return persistCompanions; }
     public boolean excludeFmShop() { return excludeFmShop; }
@@ -260,6 +275,11 @@ public final class BotPetConfig {
         b.pickupMaxPerTick = intOf(pickup.get("max_per_tick"), DEF_PICKUP_MAX_PER_TICK);
         b.pickupRange = intOf(pickup.get("range"), DEF_PICKUP_RANGE);
         b.playerNearbyRange = intOf(pickup.get("player_nearby_range"), DEF_PLAYER_NEARBY_RANGE);
+
+        Map<String, Object> speak = map(root.get("speak"));
+        b.speakChance = dbl(speak.get("chance"), DEF_SPEAK_CHANCE);
+        b.speakMinIntervalMs = lng(speak.get("min_interval_ms"), DEF_SPEAK_MIN_INTERVAL_MS);
+        b.speakMaxIntervalMs = lng(speak.get("max_interval_ms"), DEF_SPEAK_MAX_INTERVAL_MS);
 
         Map<String, Object> persist = map(root.get("persist"));
         b.persistCompanions = bool(persist.get("companions"), DEF_PERSIST_COMPANIONS);
@@ -376,6 +396,9 @@ public final class BotPetConfig {
         int pickupMaxPerTick = DEF_PICKUP_MAX_PER_TICK;
         int pickupRange = DEF_PICKUP_RANGE;
         int playerNearbyRange = DEF_PLAYER_NEARBY_RANGE;
+        double speakChance = DEF_SPEAK_CHANCE;
+        long speakMinIntervalMs = DEF_SPEAK_MIN_INTERVAL_MS;
+        long speakMaxIntervalMs = DEF_SPEAK_MAX_INTERVAL_MS;
         boolean persistCompanions = DEF_PERSIST_COMPANIONS;
         boolean excludeFmShop = DEF_EXCLUDE_FM_SHOP;
         List<CountBand> countBands = DEF_COUNT_BANDS;

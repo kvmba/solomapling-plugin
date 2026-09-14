@@ -17,9 +17,11 @@ import soloMapling.ArtificialPlayer.GCMoveSystem.GCMovement;
 
 import java.awt.Point;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -46,6 +48,8 @@ public final class BotPetFollower {
 
     /** Bots that currently have pets — the only ones a tick visits. */
     private static final Set<Integer> TRACKED = ConcurrentHashMap.newKeySet();
+    /** Per-pet next allowed speak time (epoch ms), keyed by pet unique id. */
+    private static final Map<Integer, Long> nextSpeakAtMs = new ConcurrentHashMap<>();
     private static ScheduledFuture<?> task;
 
     private BotPetFollower() {
@@ -68,6 +72,7 @@ public final class BotPetFollower {
             task = null;
         }
         TRACKED.clear();
+        nextSpeakAtMs.clear();
     }
 
     /**
@@ -124,6 +129,7 @@ public final class BotPetFollower {
                     } else {
                         followLand(chr, pet, idx, config);
                     }
+                    maybeSpeak(chr, pet, idx, config);
                     idx++;
                 }
                 if (chr.getHp() > 0) {
@@ -200,6 +206,46 @@ public final class BotPetFollower {
         List<LifeMovementFragment> moves = List.of(move);
         Packet packet = PacketCreator.movePet(chr.getId(), pet.getUniqueId(), (byte) index, moves);
         chr.getMap().broadcastMessage(chr, packet, false);
+    }
+
+    /**
+     * Occasionally have the pet perform one of its own WZ interactions (a sit, a
+     * chat, a trick). The animation and the spoken line both come from the pet's
+     * own data: each pet's {@code Item.wz/Pet/<id>.img/interact} lists the
+     * commands it can do, and the client resolves the speech from
+     * {@code String.wz/PetDialog.img} (localized). We only tell the client which
+     * command to play, exactly as the host's own {@code PetCommandHandler} does.
+     *
+     * <p>Rate-limited per pet and gated to observed maps, so pets read as lively
+     * without flooding a busy map.</p>
+     */
+    private static void maybeSpeak(Character chr, Pet pet, int index, BotPetConfig config) {
+        long now = System.currentTimeMillis();
+        if (now < nextSpeakAtMs.getOrDefault(pet.getUniqueId(), 0L)) {
+            return;
+        }
+        // Bound the cooldown map: it is keyed per pet unique id, and over a very
+        // long run with bot churn it would otherwise grow without limit.
+        if (nextSpeakAtMs.size() > 20_000) {
+            nextSpeakAtMs.clear();
+        }
+        if (ThreadLocalRandom.current().nextDouble() >= config.speakChance()) {
+            return;
+        }
+        PetInteractionTable.Interact pick = PetCommandInterpreter.pick(
+                PetInteractionTable.interactionsFor(pet.getItemId()), pet.getLevel(),
+                ThreadLocalRandom.current());
+        if (pick == null) {
+            return; // no WZ behaviour for this pet / level
+        }
+        long lo = Math.min(config.speakMinIntervalMs(), config.speakMaxIntervalMs());
+        long hi = Math.max(config.speakMinIntervalMs(), config.speakMaxIntervalMs());
+        nextSpeakAtMs.put(pet.getUniqueId(),
+                now + lo + ThreadLocalRandom.current().nextLong(Math.max(1, hi - lo)));
+        // talk=false: the animation plays and the pet "speaks" (client shows its own line).
+        boolean balloon = chr.hasPetChatballoon((byte) index);
+        chr.getMap().broadcastMessage(chr,
+                PacketCreator.commandResponse(chr.getId(), (byte) index, false, pick.index(), balloon), false);
     }
 
     /**

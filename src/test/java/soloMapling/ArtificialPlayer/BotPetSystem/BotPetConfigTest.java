@@ -56,6 +56,11 @@ class BotPetConfigTest {
         assertEquals(2, c.pickupMaxPerTick());
         assertEquals(120, c.pickupRange());
 
+        // speak
+        assertEquals(0.10, c.speakChance(), 1e-9);
+        assertEquals(8000L, c.speakMinIntervalMs());
+        assertEquals(25000L, c.speakMaxIntervalMs());
+
         // switches
         assertTrue(c.persistCompanions());
         assertTrue(c.excludeFmShop());

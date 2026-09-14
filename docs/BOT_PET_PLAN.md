@@ -81,9 +81,11 @@ A 宠物池      BotPetPool          宠物 itemId / 名字池 / 拾取装备池
 B 分配策略    BotPetAssigner      实力(等级+tier) → (携带概率, 数量1..3, 宠物等级, 是否命名, 是否拾取)
 C 生命周期    BotPetFactory       造宠物：默认【反射内存直造·不写库】；companion【走库持久化】
              BotPetController     授予 / 召唤 / 生成广播 / 回收（FM 开店）/ 清理
-             BotPetFollower      跟随移动 + 泳图适配 + 切图/死亡回城跟随 + 宠物拾取
+             BotPetFollower      跟随移动 + 泳图适配 + 宠物拾取 + 行为/说话驱动
              BotPetNames          随机宠物名
              BotPetGear           宠物拾取/名签装备（直写 PET_EQUIP_SLOTS）
+             PetInteractionTable  读取 WZ 的宠物行为表（prob / 等级段 / act）
+             PetCommandInterpreter 纯选择器：按 prob 加权抽一条可用行为
 ```
 
 触发点：
@@ -371,8 +373,10 @@ BotPetController.removePets(fakechar)
 | `BotPetFactory` | 造宠双路径：反射内存直造（ambient）/ `createPet`+CASH 持久化（companion） |
 | `BotPetGear` | 宠物装备（拾物/磁铁/名签）直写 `PET_EQUIP_SLOTS` |
 | `BotPetController` | 授予 / 召唤 / 回收（切图重定位由宿主完成，见下） |
-| `BotPetFollower` | 全局定时驱动：跟随 + 泳图滑行 + 宠物拾取 |
+| `BotPetFollower` | 全局定时驱动：跟随 + 泳图滑行 + 宠物拾取 + 宠物行为/说话 |
 | `BotPetSystem` | 门面：bootstrap / grant / remove / reload / enabled 开关 |
+| `PetInteractionTable` | 读 `Item.wz/Pet/<id>.img/interact`：每条行为的 `prob`（触发%）/ 等级段 `l0`–`l1` / 序号 |
+| `PetCommandInterpreter` | 纯选择器：按等级段过滤 + `prob` 加权抽一条行为 |
 
 命令：`!botpet status|enable|disable|reload|grant <botId>|clear <botId>`。
 
@@ -394,7 +398,8 @@ BotPetController.removePets(fakechar)
 8. **配置**：`BotPetConfig.yaml` / `BotPetPool.yaml` / `BotPetNames.yaml`，均可放 `data/solomapling/override/...` 覆盖。
 9. **切图 / 死亡回城无需插件代码**：宿主的 `MapleMap.addPlayer` 在每次进图时已对 `getPets()` 逐只 `setPos(getGroundBelow(...))` 并 `showPet`（发给 bot 自己的 client，headless 侧为空操作），而其它观察者通过 `spawnPlayerMapObject`（`getPets()` 自动带上）收到宠物。因此宠物天然随 bot 过传送门 / 传送 / 死亡回城，follower 只需在"已在图"时维持跟随，**不做任何地图变化处理**（避免与宿主重复 showPet 导致客户端重复生成）。
 10. **宿主无"非落库"宠物工厂**：`Pet` 构造器私有，`createPet`/`loadFromDb` 都写/读库；`extension-api` 亦无宠物 API。故 ambient 的内存直造是**唯一**不落库路径，`BotPetFactoryTest` 证明其可在无 DB 环境构造出合法 `Pet`。
+11. **宠物行为/说话（WZ 驱动）**：每种宠物在 `Item.wz/Pet/<id>.img/interact` 有自己的行为菜单——每条行为的 `prob`（触发%）、等级段 `l0`–`l1`、以及 `success`/`fail` 的 `act`（动作）。台词在 `String.wz/PetDialog.img/<id>/<key>`（**有 zh-CN 本地化**）。插件按 petLevel 过滤可用行为、按 `prob` 加权抽一条，用宿主 `PacketCreator.commandResponse(cid, idx, false, commandIndex, balloon)` 触发；**动画与台词都由客户端从本地 WZ 解析**——与宿主自己的 `PetCommandHandler` 同机制。节奏：每 pet 冷却 `speak.min/max_interval_ms`，每次触发概率 `speak.chance`（默认 0.10）。
 
 **审核修正（本轮）**：移除早期版本的多余地图变化重定位（宿主已处理，避免重复 showPet）；follower 改为只遍历"有宠物的 bot"（`TRACKED` 集合）并按 `SoloMaplingUtilities.getChr` 解析（授予发生在 BotSM 包装之前）；`grantForBot` 对"已有宠物"的幂等分支补 `track`（companion 重载后仍能跟随）；`createPersistent` 在 CASH 满时清理孤儿 `pets` 行；`BotPetPool` 兼容 yamlbeans 把裸数字读成字符串。**第二轮复审**：`BotPetFollower.start` 增加 `rescan()`——否则 `!botpet reload` 清空 `TRACKED` 后，已有宠物的 bot 不再被跟随；`removePets` 增加无宠快速返回；`!botpet clear` 回显真实宠物数与 companion 说明。
 
-测试：`BotPetAssignerTest`（10 例，纯策略）+ `BotPetConfigTest`（2 例，YAML 键位 + 池加载）+ `BotPetFactoryTest`（3 例，无 DB 反射造宠）。全量 `mvn test` 835 项通过。
+测试：`BotPetAssignerTest`（10 例，纯策略）+ `BotPetConfigTest`（2 例，YAML 键位 + 池加载）+ `BotPetFactoryTest`（3 例，无 DB 反射造宠）+ `PetCommandInterpreterTest`（4 例，行为选择）。全量 `mvn test` 839 项通过。

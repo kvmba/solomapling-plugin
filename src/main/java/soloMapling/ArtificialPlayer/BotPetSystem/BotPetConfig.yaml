@@ -54,6 +54,16 @@ pickup:
   range: 120
   player_nearby_range: 600
 
+# Pet behaviours. Each pet performs a command from its own WZ interact menu
+# (Item.wz/Pet/<id>.img/interact) — the animation AND the spoken line come from
+# the pet's data; the client resolves the line from String.wz/PetDialog.img
+# (localized, so zh-CN pets speak Chinese). chance is the per-tick chance a pet
+# does something; the interval is the per-pet cooldown after it does.
+speak:
+  chance: 0.10
+  min_interval_ms: 8000
+  max_interval_ms: 25000
+
 # Persistent companions keep their pets across restarts (they are saved); ambient
 # template bots keep theirs in memory only and never touch the DB.
 persist:
