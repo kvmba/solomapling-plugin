@@ -245,6 +245,65 @@ public class BotRecruitManager {
         return dx * dx + dy * dy;
     }
 
+    // ── Social replies (no bot name typed) ───────────────────────────────────
+    // A player who chats socially ("你好" / "哈哈") without naming anyone is answered by the nearest
+    // bots on the map. Kept to a small, RANDOM number (1-3) of the closest ones: a greeting answered
+    // by the whole field would read as a scripted chorus, while one or two nearby "people" saying hi
+    // back is exactly how a real street behaves.
+    public static final int SOCIAL_MIN_REPLIES = 1;
+    public static final int SOCIAL_MAX_REPLIES = 3;
+
+    /**
+     * Hands a social line to the nearest bots inside the speaker's viewport, top {{@value
+     * #SOCIAL_MIN_REPLIES}}-{{@value #SOCIAL_MAX_REPLIES}} of them, chosen randomly, each answering
+     * through its own {@link BotSM#offerSocial}. Returns how many answered.
+     */
+    public static int broadcastSocial(Character sender, String content) {
+        if (sender == null || sender.getMap() == null) {
+            return 0;
+        }
+        Point origin = sender.getPosition();
+        if (origin == null) {
+            return 0;
+        }
+        int senderMap = sender.getMapId();
+        List<BotSM> inView = new ArrayList<>();
+        for (BotSM bot : CharacterStorage.getAllBots().values()) {
+            Character chr = bot.getChr();
+            if (chr == null || chr.getMapId() != senderMap || !bot.getRunning()) {
+                continue;
+            }
+            if (CharacterStorage.checkIfInvisibleBot(chr.getId())) {
+                continue;
+            }
+            Point p = chr.getPosition();
+            if (p == null || Math.abs(p.x - origin.x) > VIEW_HALF_W
+                    || Math.abs(p.y - origin.y) > VIEW_HALF_H) {
+                continue;
+            }
+            inView.add(bot);
+        }
+        if (inView.isEmpty()) {
+            return 0;
+        }
+        inView.sort(Comparator.comparingInt(b -> distanceSq(origin, b.getChr().getPosition())));
+        int closest = Math.min(inView.size(), SOCIAL_MAX_REPLIES);
+        // Random count in [1, closest]: how many "people" bother to look up at you.
+        int want = SOCIAL_MIN_REPLIES + random.nextInt(closest);
+        int replies = 0;
+        for (int i = 0; i < closest && replies < want; i++) {
+            BotSM bot = inView.get(i);
+            try {
+                if (bot.offerSocial(sender, content)) {
+                    replies++;
+                }
+            } catch (Exception e) {
+                debugprint("broadcastSocial: " + bot.getChr().getName() + " threw: " + e.getMessage());
+            }
+        }
+        return replies;
+    }
+
     public static boolean isArmed(int botId) {
         Armed a = ARMED.get(botId);
         return a != null && System.currentTimeMillis() <= a.expiresAtMs();

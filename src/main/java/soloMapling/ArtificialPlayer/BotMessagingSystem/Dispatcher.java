@@ -4,6 +4,7 @@ import org.gms.client.Character;
 import org.gms.net.server.world.Party;
 import org.gms.net.server.world.PartyCharacter;
 import soloMapling.ArtificialPlayer.BotPartySystem.BotRecruitManager;
+import soloMapling.ArtificialPlayer.SocialIntent;
 import soloMapling.ArtificialPlayer.BotSM;
 import soloMapling.ArtificialPlayer.BotTypes.SocialBot;
 import soloMapling.ArtificialPlayer.BotTypes.CompanionBot;
@@ -76,6 +77,14 @@ public class Dispatcher implements Runnable {
                 if (BotRecruitManager.isRecruitShout(message.getContent())) {
                     BotRecruitManager.broadcastRecruit(message.getSender(), message.getContent());
                 }
+                // A social line to nobody in particular ("你好" / "哈哈"): the nearest few bots answer
+                // it. Skipped while the sender is already mid-conversation (SocialBot respondant or an
+                // open menu), so a reply in progress is not interrupted by a stray "hi" from the crowd.
+                if (SocialIntent.classifyNode(message.getContent()) != null
+                        && !CharacterStorage.checkIfRespondant(message.getSender())
+                        && !CharacterStorage.checkIfInquirer(message.getSender())) {
+                    BotRecruitManager.broadcastSocial(message.getSender(), message.getContent());
+                }
                 handleMessageWithNoBotName(message);
             }
             // Runs in ADDITION to a name call, not instead of it: "Tiger 跟我来" should still
@@ -128,12 +137,6 @@ public class Dispatcher implements Runnable {
             if (bot.offerKeyword(sender, message.getContent())) {
                 bot.getInteractors().setInquirer(sender);
                 bot.nudgeSoon(0L); // speaker is on this bot's map -> answer on the next tick
-                continue;
-            }
-            // No menu keyword claimed it. A social gesture ("你好" / "哈哈") is answered with words;
-            // a party member might be on another map, so the reply goes back on the party channel
-            // (respondSocial decides). This is a real reply, not a fallback-to-one-menu.
-            if (bot.offerSocial(sender, message.getContent())) {
                 continue;
             }
             int distSq = distanceSq(origin, member.getPosition());
