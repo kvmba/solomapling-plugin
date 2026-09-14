@@ -212,6 +212,15 @@ final class GCTaxi {
             new VehicleEdge(600010002, 9201057, 103000100, "Subway"),   // NLC -> Kerning
             new VehicleEdge(540010100, 9270017, 540010000, "AirPlane"), // Kerning -> CBD
             new VehicleEdge(540010001, 9270018, 103000000, "AirPlane"), // CBD -> Kerning City
+            // Helios Tower elevator: the floor→car half of the ride is a BotScriptedWarp edge (the
+            // car is a vehicle map, and GCTravel waits it out the same as a deck). This is the other
+            // half — the car's arrival after the Elevator event lands it — the same way every other
+            // vehicle names where its ride ends. Without it the elevator is unroutable: 2F and 99F
+            // sit in separate portal components, so route() can never cross the tower and GCTravel
+            // bare-warps the whole trip. The car is a vehicle map, so GCTravel early-returns before
+            // the NPC lookup — these rows exist purely for routing, and npcId is never read (0).
+            new VehicleEdge(222020110, 0, 222020200, "Elevator"), // up car -> 99F
+            new VehicleEdge(222020210, 0, 222020100, "Elevator"), // down car -> 2F
     };
 
     /* The scheduled vehicle from mapId to toMapId, or null if none leaves there for it. */
