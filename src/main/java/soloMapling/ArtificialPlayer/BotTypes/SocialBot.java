@@ -39,6 +39,7 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 import org.gms.server.maps.MapleMap;
+import org.gms.server.maps.Portal;
 
 import static soloMapling.ArtificialPlayer.BotCommandsPack.SocialCommands.*;
 import static soloMapling.ArtificialPlayer.BotHelpers.isBot;
@@ -127,6 +128,20 @@ public class SocialBot extends BotSM {
     // Chance a cross-map stroll becomes a one-way move: the bot settles on the new map instead of coming
     // home, so a town's crowd slowly redistributes instead of every bot always returning to its street.
     private static final double ONE_WAY_STROLL_CHANCE = 0.35;
+
+    // Doorway clear: a bot that arrived through a portal stands on the map's entry pixel, and a stream of
+    // arrivals piles up there as a clump of statues on the doorway. The moment a stationed bot finds itself
+    // on a portal it walks off to a scattered spot, the same way the drift does. The box is generous in Y
+    // because a portal often floats above the floor the bot lands on; X is what actually marks the doorway.
+    private static final int DOORWAY_X = 40;
+    private static final int DOORWAY_Y = 60;
+    // Candidates sampled for the walk-off; the farthest-from-any-portal one wins, so a bot prioritises the
+    // least door-like landing even though the sampler is anchored on that very portal.
+    private static final int DOORWAY_PICK_SAMPLES = 8;
+    // A precise moveTarget counts as reached within 8px on each axis (GCMovementDriver), so the picked
+    // destination must clear the doorway box by more than that or the bot could halt just inside it and
+    // the clear would re-fire every tick. 16 leaves a safe margin over the 8px tolerance.
+    private static final int DOORWAY_ARRIVAL_PAD = 16;
 
     // Interactive menu shown once a player engages. Labels are localized; the keyword sets below
     // are the English ones and stay authoritative (they are matched as substrings, and a couple
@@ -229,6 +244,7 @@ public class SocialBot extends BotSM {
             BotFlavor.maybeExpress(this); // occasional idle emote / buff-flex / skill-swing (self-gated)
             BotChatter.maybeStartChatter(this); // occasional short back-and-forth with a nearby town bot
             maybeIdleChair(); // occasional sit/stand while idle - a resting townsperson
+            maybeClearDoorway(); // standing on the arrival/door ledge? walk off so arrivals don't pile on it
             maybeRelocate(); // last: rare drift to a fresh anchor-weighted spot (may block the tick's walk)
             maybeStroll(); // walk to a neighbouring town map and back (cross-map; relocation can't)
         }
@@ -311,6 +327,99 @@ public class SocialBot extends BotSM {
         }
         nextChairActionMs = now + IDLE_CHAIR_COOLDOWN_MIN_MS
                 + (long) (random.nextDouble() * (IDLE_CHAIR_COOLDOWN_MAX_MS - IDLE_CHAIR_COOLDOWN_MIN_MS));
+    }
+
+    // A bot that arrived through a portal stands on the map's entry pixel - the busiest pixel in town.
+    // Left there, a stream of arrivals piles up as a clump of statues on the doorway. The moment a
+    // stationed bot finds itself on a portal it walks off to a scattered spot, reusing the drift's own
+    // machinery (sampler pick + GC move + the relocating/reclaim safety net), so arrivals spread out
+    // instead of stacking on the door. Self-clearing: once off the portal it never fires again.
+    //
+    // Called from the ambient gate like its siblings, so relocating/strolling/conversation are already
+    // excluded; the isAvailableForAmbientActions re-check covers an earlier tick step (chatter) engaging
+    // the bot mid-tick, exactly as maybeIdleChair/maybeRelocate/maybeStroll do, and the isArmed guard
+    // mirrors them (never walk out from under a live party invite).
+    private void maybeClearDoorway() {
+        if (!isAvailableForAmbientActions()) {
+            return; // an earlier tick step (e.g. chatter) may have engaged this bot
+        }
+        Character chr = getChr();
+        if (chr == null || chr.getMap() == null) {
+            return;
+        }
+        if (BotRecruitManager.isArmed(chr.getId())) {
+            return; // a player is mid-invite: never walk out from under them
+        }
+        Point p = chr.getPosition();
+        if (p == null || !onDoorway(chr.getMap(), p, 0, 0)) {
+            return; // not standing on a portal - nothing to clear
+        }
+        Point dest = pickOffDoorwaySpot(chr);
+        if (dest == null || onDoorway(chr.getMap(), dest, DOORWAY_ARRIVAL_PAD, DOORWAY_ARRIVAL_PAD)) {
+            return; // no baked nav graph / no off-door ledge reachable yet - try again on a later tick
+        }
+        if (chr.getChair() > 0) {
+            botCancelChair(chr); // can't walk out of a chair
+        }
+        TownStation.releaseSpot(chr); // free the door ledge before the walk (re-claimed where we land)
+        relocating = true;
+        relocateStartedAtMs = System.currentTimeMillis();
+        GCMovement.move(chr, dest.x, dest.y, this::finishRelocation);
+    }
+
+    // True when (x,y) sits inside the doorway box of any portal on the map, widened by (padX,padY). X is
+    // what marks the door (a portal's pixel column); Y is generous because a portal often floats above the
+    // floor the bot lands on.
+    private static boolean onDoorway(MapleMap map, Point p, int padX, int padY) {
+        if (map == null || p == null) {
+            return false;
+        }
+        for (Portal portal : map.getPortals()) {
+            Point pp = portal.getPosition();
+            if (pp != null && Math.abs(pp.x - p.x) <= DOORWAY_X + padX
+                    && Math.abs(pp.y - p.y) <= DOORWAY_Y + padY) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    // A scattered spot to walk to when clearing a doorway: sample the town's crowd spots (the same
+    // anchor-weighted sampler the drift uses; seeded from where the bot stands, which on a cross-map
+    // arrival is the far map's door) and take the one furthest from any portal, so a bot leaves the door
+    // decisively rather than merely nudging off it. Null when the nav graph isn't baked yet - the caller
+    // leaves the bot where it stands and tries again on a later tick.
+    private Point pickOffDoorwaySpot(Character chr) {
+        MapleMap map = chr.getMap();
+        List<Point> spots = TownPresenceSampler.sample(map, chr.getPosition(),
+                DOORWAY_PICK_SAMPLES, TownPresenceConfig.overridesFor(chr.getMapId()));
+        Point best = null;
+        long bestDistSq = -1;
+        for (Point s : spots) {
+            long d = nearestPortalDistSq(map, s);
+            if (d > bestDistSq) {
+                bestDistSq = d;
+                best = s;
+            }
+        }
+        return best;
+    }
+
+    // Squared distance from p to the nearest portal on the map (Long.MAX_VALUE when there are none).
+    private static long nearestPortalDistSq(MapleMap map, Point p) {
+        if (map == null || p == null) {
+            return Long.MAX_VALUE;
+        }
+        long best = Long.MAX_VALUE;
+        for (Portal portal : map.getPortals()) {
+            Point pp = portal.getPosition();
+            if (pp != null) {
+                long dx = pp.x - p.x;
+                long dy = pp.y - p.y;
+                best = Math.min(best, dx * dx + dy * dy);
+            }
+        }
+        return best;
     }
 
     // Rare drift to a fresh anchor-weighted spot ("stand near the potion shop a while, then wander to the
