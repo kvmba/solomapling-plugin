@@ -41,7 +41,6 @@ public final class BotPetConfig {
     private static final double DEF_ITEM_POUCH_CHANCE = 0.60;
     private static final int DEF_MESO_MAGNET_ID = 1812000;
     private static final double DEF_MESO_MAGNET_CHANCE = 0.30;
-    private static final double DEF_NAME_TAG_CHANCE = 0.70;
 
     private static final long DEF_FOLLOW_TICK_MS = 300L;
     private static final int DEF_EPS_PX = 25;
@@ -58,7 +57,6 @@ public final class BotPetConfig {
     private static final long DEF_SPEAK_MAX_INTERVAL_MS = 25_000L;
 
     private static final boolean DEF_PERSIST_COMPANIONS = true;
-    private static final boolean DEF_EXCLUDE_FM_SHOP = true;
 
     /**
      * Default carry-count bands, keyed on {@code strength}. Ordered by ascending
@@ -100,7 +98,6 @@ public final class BotPetConfig {
     private final double itemPouchChance;
     private final int mesoMagnetId;
     private final double mesoMagnetChance;
-    private final double nameTagChance;
 
     private final long followTickMs;
     private final int epsPx;
@@ -117,7 +114,6 @@ public final class BotPetConfig {
     private final long speakMaxIntervalMs;
 
     private final boolean persistCompanions;
-    private final boolean excludeFmShop;
 
     private final List<CountBand> countBands;
 
@@ -136,7 +132,6 @@ public final class BotPetConfig {
         this.itemPouchChance = b.itemPouchChance;
         this.mesoMagnetId = b.mesoMagnetId;
         this.mesoMagnetChance = b.mesoMagnetChance;
-        this.nameTagChance = b.nameTagChance;
         this.followTickMs = b.followTickMs;
         this.epsPx = b.epsPx;
         this.followSpeed = b.followSpeed;
@@ -149,7 +144,6 @@ public final class BotPetConfig {
         this.speakMinIntervalMs = b.speakMinIntervalMs;
         this.speakMaxIntervalMs = b.speakMaxIntervalMs;
         this.persistCompanions = b.persistCompanions;
-        this.excludeFmShop = b.excludeFmShop;
         this.countBands = b.countBands;
     }
 
@@ -169,7 +163,6 @@ public final class BotPetConfig {
     public double itemPouchChance() { return itemPouchChance; }
     public int mesoMagnetId() { return mesoMagnetId; }
     public double mesoMagnetChance() { return mesoMagnetChance; }
-    public double nameTagChance() { return nameTagChance; }
 
     public long followTickMs() { return followTickMs; }
     public int epsPx() { return epsPx; }
@@ -186,7 +179,6 @@ public final class BotPetConfig {
     public long speakMaxIntervalMs() { return speakMaxIntervalMs; }
 
     public boolean persistCompanions() { return persistCompanions; }
-    public boolean excludeFmShop() { return excludeFmShop; }
 
     public List<CountBand> countBands() { return countBands; }
 
@@ -252,7 +244,6 @@ public final class BotPetConfig {
         Map<String, Object> magnet = map(gear.get("meso_magnet"));
         b.mesoMagnetId = intOf(magnet.get("id"), DEF_MESO_MAGNET_ID);
         b.mesoMagnetChance = dbl(magnet.get("chance"), DEF_MESO_MAGNET_CHANCE);
-        b.nameTagChance = dbl(gear.get("name_tag_chance"), DEF_NAME_TAG_CHANCE);
 
         Map<String, Object> follow = map(root.get("follow"));
         b.followTickMs = lng(follow.get("tick_ms"), DEF_FOLLOW_TICK_MS);
@@ -273,8 +264,6 @@ public final class BotPetConfig {
 
         Map<String, Object> persist = map(root.get("persist"));
         b.persistCompanions = bool(persist.get("companions"), DEF_PERSIST_COMPANIONS);
-
-        b.excludeFmShop = bool(root.get("exclude_fm_shop"), DEF_EXCLUDE_FM_SHOP);
 
         Object bandsRaw = root.get("counts");
         if (bandsRaw instanceof List<?> list && !list.isEmpty()) {
@@ -375,7 +364,6 @@ public final class BotPetConfig {
         double itemPouchChance = DEF_ITEM_POUCH_CHANCE;
         int mesoMagnetId = DEF_MESO_MAGNET_ID;
         double mesoMagnetChance = DEF_MESO_MAGNET_CHANCE;
-        double nameTagChance = DEF_NAME_TAG_CHANCE;
         long followTickMs = DEF_FOLLOW_TICK_MS;
         int epsPx = DEF_EPS_PX;
         double followSpeed = DEF_FOLLOW_SPEED;
@@ -388,7 +376,6 @@ public final class BotPetConfig {
         long speakMinIntervalMs = DEF_SPEAK_MIN_INTERVAL_MS;
         long speakMaxIntervalMs = DEF_SPEAK_MAX_INTERVAL_MS;
         boolean persistCompanions = DEF_PERSIST_COMPANIONS;
-        boolean excludeFmShop = DEF_EXCLUDE_FM_SHOP;
         List<CountBand> countBands = DEF_COUNT_BANDS;
 
         BotPetConfig build() {

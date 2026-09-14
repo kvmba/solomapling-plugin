@@ -35,7 +35,6 @@ naming: { chance: 0.70 }
 gear:
   item_pouch:  { id: 1812001, chance: 0.60 }   # loots items
   meso_magnet: { id: 1812000, chance: 0.30 }   # loots mesos
-  name_tag_chance: 0.70
 
 # Follow drive. The pet walks toward a point roughly behind the bot (offset on
 # land, above it in water), moving at `speed` px/s and only teleporting when it
@@ -72,5 +71,3 @@ speak:
 persist:
   companions: true
 
-# Free-market shop-running bots are excluded (their pet is removed when the shop opens).
-exclude_fm_shop: true

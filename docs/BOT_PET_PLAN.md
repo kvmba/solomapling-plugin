@@ -307,20 +307,20 @@ BotPetController.removePets(fakechar)
 - `BotPet.yaml`（`PluginResources` 解析）：
   ```yaml
   enabled: true
-  curve:  { p_max: 0.30, level_cap: 120, k: 1.4, tier_weight: 0.25, min_level: 10 }
+  curve:  { p_max: 0.30, level_cap: 120, exponent: 1.4, tier_weight: 0.25, min_level: 10 }
   counts: [ {sMax: 0.25, w: [100,0,0]}, {sMax: 0.50, w: [80,20,0]},
             {sMax: 0.75, w: [60,32,8]}, {sMax: 2.0, w: [45,37,18]} ]
   pet_level: { base: 1, per_strength: 4, max: 5 }
   naming:  { chance: 0.70 }
   gear:    { item_pouch: {id: 1812001, chance: 0.60},
-             meso_magnet: {id: 1812000, chance: 0.30},
-             name_tag_chance: 0.70 }
-  follow:  { tick_ms: 250, eps_px: 25, base_offset: -40, step_offset: 40, swim_offset: -12 }
-  pickup:  { max_per_tick: 2 }
+             meso_magnet: {id: 1812000, chance: 0.30} }
+  follow:  { tick_ms: 200, eps_px: 25, speed: 200.0, teleport_dist_px: 160, swim_offset: 14 }
+  pickup:  { max_per_tick: 1, range: 120, cooldown_ms: 1000 }
+  speak:   { chance: 0.10, min_interval_ms: 8000, max_interval_ms: 25000 }
   persist: { companions: true }     # 持久化 bot 是否带宠物
-  exclude_fm_shop: true
   ```
-- MMC/GM：`botpet enable|disable|status|reload`（仿 `decoratenx`）。
+- FM 开店回收是**无条件**的（决策 1），不设开关。
+- MMC/GM：`botpet status|enable|disable|reload|grant|clear`（仿 `decoratenx`）。
 - 全局 `ENABLED` 静态开关。
 
 ### 3.12 测试
@@ -388,7 +388,7 @@ BotPetController.removePets(fakechar)
 - `SoloMaplingExtension` → `onServerReady` 时 `bootstrap`、`onUnload` 时 `shutdown`、注册 `!botpet`。
 
 与规划稿的差异 / 落地细节：
-1. **泳图跟随是"物理滑行"**：宠物按 `swim_follow_speed` px/s 朝 bot 上方错位点逐 tick 逼近（带 dead-zone + 最大步长），`MOVE_PET` 带速度并置 stance 12/13 —— 即"游泳姿势 + 物理跟随"。
+1. **泳图跟随**：宠物按 `follow.speed` px/s 朝 bot 上方错位点逐 tick 逼近（带 dead-zone + 最大步长），`MOVE_PET` 带速度并置 SWIM 姿态 12/13 —— 即"游泳姿势 + 物理跟随"。
 2. **陆地图**：宠物停在 bot 身后（40/80/120px），`findBelow` 贴地（null 安全），stance 按移动方向 WALK/STAND。
 3. **宠物名签**：v83 只有一个名牌道具 `1822000`；各宠 index 写入各自的 `PET_EQUIP_SLOTS[i].nameTag()` 槽（客户端按槽判 `hasPetNameTag`）。
 4. **宠物池排除 5000028/5000047**（龙/机器人蛋），避免穿上渲染成蛋。

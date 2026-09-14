@@ -42,7 +42,6 @@ class BotPetConfigTest {
         assertEquals(0.60, c.itemPouchChance(), 1e-9);
         assertEquals(1812000, c.mesoMagnetId());
         assertEquals(0.30, c.mesoMagnetChance(), 1e-9);
-        assertEquals(0.70, c.nameTagChance(), 1e-9);
 
         // follow
         assertEquals(200L, c.followTickMs());
@@ -63,7 +62,6 @@ class BotPetConfigTest {
 
         // switches
         assertTrue(c.persistCompanions());
-        assertTrue(c.excludeFmShop());
         assertTrue(c.enabled());
     }
 
