@@ -16,6 +16,7 @@ import soloMapling.ArtificialPlayer.BotTypes.NXMerchantBot;
 import soloMapling.ArtificialPlayer.BotTypes.Amoria.AmoriaPQBot;
 import soloMapling.ArtificialPlayer.BotTypes.BossRush.BossRushPQBot;
 import soloMapling.ArtificialPlayer.BotTypes.Carnival.CarnivalPQBot;
+import soloMapling.ArtificialPlayer.BotTypes.Dojo.DojoPQBot;
 import soloMapling.ArtificialPlayer.BotTypes.Ellin.EllinPQBot;
 import soloMapling.ArtificialPlayer.BotTypes.Henesys.HenesysPQBot;
 import soloMapling.ArtificialPlayer.BotTypes.Horntail.HorntailPQBot;
@@ -239,6 +240,13 @@ public class BotTypeManager {
             public void createAndSetBot(Character character) {
                 PyramidPQBot pyrBot = new PyramidPQBot(character);
                 CharacterStorage.addActiveBot(character.getId(), pyrBot);
+            }
+        },
+        DOJO_PQ_BOT {
+            @Override
+            public void createAndSetBot(Character character) {
+                DojoPQBot dojoBot = new DojoPQBot(character);
+                CharacterStorage.addActiveBot(character.getId(), dojoBot);
             }
         },
         SOCIAL_BOT {
