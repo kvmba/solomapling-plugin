@@ -316,6 +316,10 @@ public class ArtificialPlayerCommand extends Command {
             case "horntailpqbot":
                 BotTypeManager.BotType.HORNTAIL_PQ_BOT.createAndSetBot(fakechar);
                 break;
+            case "mpqbot":
+            case "magatiapqbot":
+                BotTypeManager.BotType.MAGATIA_PQ_BOT.createAndSetBot(fakechar);
+                break;
             case "jqbot":
             case "henesysjqbot":
                 HENESYS_JQ_BOT.createAndSetBot(fakechar);
@@ -1064,6 +1068,7 @@ public class ArtificialPlayerCommand extends Command {
         player.yellowMessage("!bot epqbot <cid>                - set as Ellin PQ bot");
         player.yellowMessage("!bot zpqbot <cid>                - set as Zakum PQ bot");
         player.yellowMessage("!bot htpqbot <cid>               - set as Horntail PQ bot");
+        player.yellowMessage("!bot mpqbot <cid>                - set as Magatia PQ bot");
         player.yellowMessage("!bot jqbot <cid>                 - set as JQ bot");
         player.yellowMessage("-- Bot Conversion --");
         player.yellowMessage("!bot convertfmbot <cid>          - convert to FM bot");

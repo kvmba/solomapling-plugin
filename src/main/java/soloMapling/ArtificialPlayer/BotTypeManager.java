@@ -20,6 +20,7 @@ import soloMapling.ArtificialPlayer.BotTypes.Henesys.HenesysPQBot;
 import soloMapling.ArtificialPlayer.BotTypes.Horntail.HorntailPQBot;
 import soloMapling.ArtificialPlayer.BotTypes.Kerning.KerningPQBot;
 import soloMapling.ArtificialPlayer.BotTypes.Ludi.LudiPQBot;
+import soloMapling.ArtificialPlayer.BotTypes.Magatia.MagatiaPQBot;
 import soloMapling.ArtificialPlayer.BotTypes.OPQ.OPQBot;
 import soloMapling.ArtificialPlayer.BotTypes.Pirate.PiratePQBot;
 import soloMapling.ArtificialPlayer.BotTypes.Zakum.ZakumPQBot;
@@ -215,6 +216,13 @@ public class BotTypeManager {
             public void createAndSetBot(Character character) {
                 HorntailPQBot htpqBot = new HorntailPQBot(character);
                 CharacterStorage.addActiveBot(character.getId(), htpqBot);
+            }
+        },
+        MAGATIA_PQ_BOT {
+            @Override
+            public void createAndSetBot(Character character) {
+                MagatiaPQBot mpqBot = new MagatiaPQBot(character);
+                CharacterStorage.addActiveBot(character.getId(), mpqBot);
             }
         },
         SOCIAL_BOT {
