@@ -179,3 +179,61 @@ feat(pq): <PQ 名> — bot 可陪玩全流程
 ```
 
 **未跑通不允许提交。** 无法实机验证的，必须给出可复现的自检命令。
+
+---
+
+## 第八部分 · 实施进度（实时更新）
+
+### 已完成并推送
+
+| # | 内容 | 提交 | 状态 |
+|:--:|---|---|---|
+| 1 | 通用能力层 `PqActions`（N1–N7） | `555b092` | ✅ |
+| 2 | 通用骨架 `PartyQuestBot` | `b562df4` | ✅ |
+| 3 | **Orbis PQ** 全 9 关 | `555b092` | ✅ 实现完成 |
+| 4 | **Henesys PQ** 2 关 | `b562df4` | ✅ 实现完成 |
+| 5 | **Kerning PQ** 5 关 | `bfd9f9a` | ✅ 实现完成 |
+| 6 | **Ludi PQ** 9 关 | `d975418` | ✅ 实现完成 |
+| 7 | **Boss Rush PQ** | `ae91ebc` | ✅ 实现完成 |
+
+对应的 bot 类型与命令：
+
+| PQ | BotType | 命令 |
+|---|---|---|
+| Orbis | `OPQ_BOT` | `!bot opqbot` |
+| Henesys | `HENESYS_PQ_BOT` | `!bot hpqbot` |
+| Kerning | `KERNING_PQ_BOT` | `!bot kpqbot` |
+| Ludi | `LUDI_PQ_BOT` | `!bot lpqbot` |
+| Boss Rush | `BOSS_RUSH_PQ_BOT` | `!bot brpqbot` |
+
+### 尚未实现
+
+| 类别 | 内容 | 阻塞点 |
+|---|---|---|
+| A 类 | Magatia（护送 + 双版本 A/Z）、El Nath、Pirate、Amoria（6 人）、Ellin、Treasure、Zakum、Horntail | 各有独立机制（护送、变身、小游戏），需逐个调研 |
+| B 类 | MK_PrimeMinister(3)、DelliBattle(2)、ElementalBattle(2) 等 | 结构同 A |
+| C 类 | Monster Carnival（对抗型，bot 当对手） | 语义全新，需"陪练"设计 |
+| D 类 | Ariant Coliseum | Expedition 架构 |
+| E 类 | Nett's Pyramid | 独立 API + Act Gauge |
+| F 类 | Expedition Boss（13 种） | 30 人 Boss，风险最高 |
+| G 类 | Mu Lung Dojo（组队） | 等级差 ≤30 + warpParty |
+| H 类 | Guild Quest | 需同公会 |
+
+### 已验证 / 未验证
+
+| 项 | 状态 |
+|---|---|
+| 编译 | ✅ 每次提交前通过 |
+| 单元测试 | ✅ 906 个通过（含 25 个本次新增：Orbis 9 + Henesys 6 + Kerning 12 + Ludi 9） |
+| 数据正确性 | ✅ 全部从脚本/WZ/db 读出，并有测试锁定 |
+| **实机跑通** | ❌ **未验证** —— 需要真实客户端进本测试 |
+
+### 实机验证清单（下一步）
+
+1. **Orbis**：`!bot opqbot` 后先 `!env reactorboxes` 核对落点，再跑全 9 关
+2. **Henesys**：1 玩家 + 2 bot 进本，观察种花是否 6 朵全开
+3. **Kerning**：观察 bot 是否站到正确平台、是否播报点位
+4. **Ludi**：观察 Stage 8 bot 是否占 crate 且不占满 5 个
+5. **Boss Rush**：单人 + 1 bot，验证 bot 攻击真能造成伤害
+
+**共同风险**：`PqActions` 的 NPC 交互（`talkTo`）与 `holdArea` 的站位精度尚未在真机验证。
