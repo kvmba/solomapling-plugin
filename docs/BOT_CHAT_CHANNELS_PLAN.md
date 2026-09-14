@@ -8,8 +8,9 @@
 ## 实现摘要（与下方方案的出入，以代码为准）
 
 - 枚举名最终定为 **`ChatType`**（对齐宿主 `MULTI_CHAT` 包里的 `type`），不是 `ChatScope`；字段/形参一律叫 `type`。
-- 回复频道复用：`BotSM` 上新增 `replyType` / `replyTarget` 与 `enterReplyChannel` / `leaveReplyChannel` / `sayReply`，由 `SocialBot`、`CompanionBot` 共享；`FollowerBot` 因始终与队长同图，走**同图气泡**回复，不进频道回复路径（见 §3.5 备注）。
-- 伴侣（`CompanionBot`）仅当发送者**跨图**时才武装回复频道（同图已有气泡，武装会污染后续环境台词）。因为它的回合在**各自虚拟线程**上并发执行（同一玩家可叠两个回合；组队邀请事件回合绕过会话归属），回复频道**按"回合/发言者"作用域**（`ConcurrentHashMap<playerId, TurnReply>` 取用一次 + `ThreadLocal` 承载），不用 bot 级字段，避免并发回合串频道。
+- 回复频道复用：`BotSM` 上新增 `replyType` / `replyTarget` 与 `enterReplyChannel` / `leaveReplyChannel` / `sayReply` 及可覆写的 `replyChannel()` / `replyChannelTarget()`。`SocialBot` 直接用字段（单会话、tick 线程）；`CompanionBot` 覆写为逐回合 `ThreadLocal`；`FollowerBot`/`TrainingBot` 因始终与玩家同图，走**同图气泡**回复，不进频道回复路径（见 §3.5 备注）。
+- 伴侣（`CompanionBot`）仅当发送者**跨图**时才武装回复频道（同图已有气泡，武装会污染后续环境台词）。因为它的回合在**各自虚拟线程**上并发执行（同一玩家可叠两个回合；组队邀请事件回合绕过会话归属），回复频道**随排队的消息本身携带**（`TurnCoordinator.Message.replyType`）——频道属于该条消息的回合，既不串入他人回复、也不因消息被拒而残留，无需按玩家的旁表或清理；回合内由 `ThreadLocal` 承载给该回合的 `Say`。
+- `BotSM.directInbox` 为**有界**队列（128，`ArrayBlockingQueue` + `offer`）：玩家可私聊任意可见角色，而被停用的 bot 永不排水、未观察的刷怪 bot 排水间隔可达数分钟，无界队列会被刷爆。
 - `SocialBot` 的延迟回复（`speakAfterBeat`、`doGoodbye`）在**构建时捕获**频道（会话随后即 `resetConversation` 清空），不再在延迟回调里读 bot 级字段。
 - `TrainingBot`、`FollowerBot` 也覆盖 `onDirectChat`：二者回复走**同图气泡**，故仅在**发言者同图**时接受（跨图说话者回复不可达，不武装悬空菜单）。
 - `CompanionActionExecutor.HostEngineAdapter.say` 改为优先走 `bot.sayReply(...)`（拿 `CharacterStorage.getBotById`），无 BotSM 时回落地图气泡。

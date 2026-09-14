@@ -73,8 +73,12 @@ public abstract class BotSM implements EventSubscriber {
     // Per-bot inbox for directed channels (whisper/buddy/party/guild/alliance). Unlike the shared
     // primary/secondary queues this is addressed to exactly this bot, and unlike the Dispatcher it
     // needs no map proximity - a whisper or party line reaches a bot on any map or channel.
-    private final java.util.concurrent.ConcurrentLinkedQueue<ChatMessage> directInbox =
-            new java.util.concurrent.ConcurrentLinkedQueue<>();
+    // Bounded: a player can whisper any visible character, while a stopped bot never drains and an
+    // unobserved grinder drains on a minutes-long cadence - an unbounded queue would let a spammer
+    // grow it without limit. Full means the bot is far behind anyway; offer() then drops the newest.
+    private static final int MAX_DIRECT_INBOX = 128;
+    private final java.util.concurrent.BlockingQueue<ChatMessage> directInbox =
+            new java.util.concurrent.ArrayBlockingQueue<>(MAX_DIRECT_INBOX);
     // Drain cap per tick: a burst of whispers must not starve the bot's own FSM.
     private static final int MAX_DIRECT_CHAT_PER_TICK = 8;
 
@@ -264,7 +268,7 @@ public abstract class BotSM implements EventSubscriber {
      */
     public void postDirectChat(ChatMessage message) {
         if (message != null) {
-            directInbox.add(message);
+            directInbox.offer(message);
         }
     }
 

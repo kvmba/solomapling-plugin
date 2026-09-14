@@ -1,5 +1,6 @@
 package soloMapling.companion.agent;
 
+import org.gms.extension.event.ChatType;
 import soloMapling.companion.planner.CompanionPlannerResult;
 
 import java.time.Duration;
@@ -18,7 +19,17 @@ public final class TurnCoordinator {
 
     public enum State { ROUTINE, ENGAGED, PLANNING, EXECUTING, COOLDOWN }
 
-    public record Message(int playerCharacterId, String content) {
+    /**
+     * One queued player line. {@code replyType} is the directed channel (whisper / party / ...) this
+     * line arrived on, or null for map chat - the turn that answers this line answers on that
+     * channel. The channel rides the message, so it belongs to exactly that line: it cannot leak
+     * into another player's turn, survive a rejection, or need cross-thread cleanup.
+     */
+    public record Message(int playerCharacterId, String content, ChatType replyType) {
+        public Message(int playerCharacterId, String content) {
+            this(playerCharacterId, content, null);
+        }
+
         public Message {
             if (playerCharacterId <= 0) {
                 throw new IllegalArgumentException("playerCharacterId must be positive");

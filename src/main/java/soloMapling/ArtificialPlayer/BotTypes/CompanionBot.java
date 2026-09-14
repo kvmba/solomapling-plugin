@@ -76,16 +76,13 @@ public final class CompanionBot extends BotSM implements
     private TurnContext activeContext;
     private long lastPlayedTurnId;
 
-    // Reply channel for a directed line. Armed per SPEAKER by onDirectChat, consumed by the turn
-    // that plays that speaker's line. The turn body runs on its own chain virtual thread, so a
-    // ThreadLocal carries it precisely: two overlapping turns (two chats, or a chat plus a
-    // party-invite turn that bypasses session ownership) never inherit each other's channel.
-    private final java.util.concurrent.ConcurrentHashMap<Integer, TurnReply> directedReplyByPlayer =
-            new java.util.concurrent.ConcurrentHashMap<>();
-    private final ThreadLocal<TurnReply> activeTurnReply = new ThreadLocal<>();
-
-    private record TurnReply(org.gms.extension.event.ChatType type, Character target) {
-    }
+    // Reply channel for a directed line. It rides the queued message itself (TurnCoordinator.Message
+    // .replyType), so it belongs to exactly that line's turn: it cannot leak into another player's
+    // reply, survive a rejected line, or need cross-thread bookkeeping and cleanup. The turn body
+    // runs on its own chain virtual thread, so a ThreadLocal carries the value to that turn's Say.
+    private final ThreadLocal<org.gms.extension.event.ChatType> activeTurnReplyType =
+            new ThreadLocal<>();
+    private final ThreadLocal<Character> activeTurnReplyTarget = new ThreadLocal<>();
 
     private final GrindBrain grind = new GrindBrain(message -> { });
     private final SoloGrindController soloGrind = new SoloGrindController(grind);
@@ -149,6 +146,15 @@ public final class CompanionBot extends BotSM implements
 
     /** Dispatcher entry point. This method only enqueues immutable message data. */
     public boolean enqueuePlayerMessage(Character player, String content) {
+        return enqueuePlayerMessage(player, content, null);
+    }
+
+    /**
+     * Enqueues one player line with the channel its reply must go back on (null = map bubble). The
+     * channel rides the queued message, so it is answered on exactly that line's turn.
+     */
+    public boolean enqueuePlayerMessage(Character player, String content,
+                                        org.gms.extension.event.ChatType replyType) {
         if (player == null || content == null || content.isBlank()
                 || content.trim().length() > CompanionBrain.MAX_PLAYER_MESSAGE_LENGTH) {
             log.debug("Companion chat enqueue rejected cid={} playerCid={} length={}",
@@ -157,7 +163,8 @@ public final class CompanionBot extends BotSM implements
                     content == null ? -1 : content.trim().length());
             return false;
         }
-        boolean accepted = turns.enqueue(new TurnCoordinator.Message(player.getId(), content));
+        boolean accepted =
+                turns.enqueue(new TurnCoordinator.Message(player.getId(), content, replyType));
         log.info("Companion chat enqueue cid={} playerCid={} accepted={} state={}",
                 getChr() == null ? -1 : getChr().getId(), player.getId(), accepted, turns.state());
         log.debug("Companion chat input cid={} playerCid={} message={}",
@@ -183,39 +190,32 @@ public final class CompanionBot extends BotSM implements
     // is one more input. The map-proximity gate that governs ambient continuation is deliberately
     // NOT applied here: the player chose to address the companion directly.
     //
-    // The reply channel is armed only when the sender is elsewhere: a same-map conversation already
-    // reaches the player through the map bubble, and arming a channel for it would leak into the
-    // companion's later ambient lines. A cross-map line, by contrast, is only visible to the player
-    // if the reply comes back on the channel it arrived on.
-    //
-    // Keyed by the SPEAKER, not held on the bot: turns for different players run concurrently (two
-    // chats, or a chat plus a party-invite turn that bypasses session ownership), so a single bot-wide
-    // channel would let one player's Say fire on another player's channel. Keyed and cleared below,
-    // every Say reaches exactly the player whose turn armed it.
+    // The reply channel rides the queued line itself (enqueuePlayerMessage's replyType): a same-map
+    // line carries null and keeps the map bubble, a cross-map line carries the channel it arrived on
+    // so the answer is actually visible. Carrying it on the message is what makes it exact - it
+    // applies to that line's turn only, cannot leak into another player's reply, and needs no
+    // per-player bookkeeping or cleanup.
     @Override
     protected void onDirectChat(ChatMessage message) {
         if (message == null || !getRunning()) {
             return;
         }
-        if (!isSameMap(message.getSender())) {
-            directedReplyByPlayer.put(message.getSender().getId(),
-                    new TurnReply(message.getChatType(), message.getSender()));
-        }
-        enqueuePlayerMessage(message.getSender(), message.getContent());
+        org.gms.extension.event.ChatType replyType =
+                isSameMap(message.getSender()) ? null : message.getChatType();
+        enqueuePlayerMessage(message.getSender(), message.getContent(), replyType);
     }
 
-    // The channel this turn should answer on, or null for a map bubble; read from the ThreadLocal the
-    // turn armed in playDecision, never from bot-wide state, so concurrent turns can't cross wires.
+    // The channel this turn answers on. Armed in playDecision from the planned turn's own message
+    // (never bot-wide state), so concurrent turns - two chats, or a chat plus a party-invite turn
+    // that bypasses session ownership - can never cross wires.
     @Override
     protected org.gms.extension.event.ChatType replyChannel() {
-        TurnReply reply = activeTurnReply.get();
-        return reply == null ? null : reply.type();
+        return activeTurnReplyType.get();
     }
 
     @Override
     protected Character replyChannelTarget() {
-        TurnReply reply = activeTurnReply.get();
-        return reply == null ? null : reply.target();
+        return activeTurnReplyTarget.get();
     }
 
     public TurnCoordinator.State companionState() {
@@ -407,11 +407,15 @@ public final class CompanionBot extends BotSM implements
         if (!claimTurn(planned)) {
             return;
         }
-        // Arm this turn's reply channel from the speaker's directed line (null = map bubble). The key
-        // is consumed one-per-turn; the ThreadLocal keeps it visible only to this turn's own Say.
-        TurnReply directed = directedReplyByPlayer.remove(planned.message().playerCharacterId());
-        if (directed != null) {
-            activeTurnReply.set(directed);
+        // Arm this turn's reply channel from its own queued line (null = map bubble), and resolve the
+        // speaker the same way the resolver would. Nothing bot-wide is written, so a concurrent turn
+        // cannot inherit this one's channel.
+        org.gms.extension.event.ChatType replyType = planned.message().replyType();
+        Character replyTarget = replyType == null ? null
+                : resolveSpeaker(planned.message().playerCharacterId());
+        if (replyType != null && replyTarget != null) {
+            activeTurnReplyType.set(replyType);
+            activeTurnReplyTarget.set(replyTarget);
         }
         try {
             List<ActionExecutionResult> executions = new ArrayList<>();
@@ -454,8 +458,19 @@ public final class CompanionBot extends BotSM implements
             }
             brain.record(new CompanionBrain.CompletedTurn(context.request(), result, executions));
         } finally {
-            activeTurnReply.remove();
+            activeTurnReplyType.remove();
+            activeTurnReplyTarget.remove();
         }
+    }
+
+    // The speaker a directed line came from, resolved live from the bot's own world (the player may
+    // have walked off since). Null when the character is gone - then the reply has no recipient and
+    // falls back to the map bubble, which is the same thing a whisper to a vanished player would do.
+    private Character resolveSpeaker(int playerCharacterId) {
+        Character self = getChr();
+        return self == null || self.getWorldServer() == null
+                ? null
+                : self.getWorldServer().getPlayerStorage().getCharacterById(playerCharacterId);
     }
 
     // Atomically claims this turn as the newest one played. False when a newer turn has already
