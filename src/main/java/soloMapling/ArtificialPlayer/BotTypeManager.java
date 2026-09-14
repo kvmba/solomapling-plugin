@@ -15,6 +15,7 @@ import soloMapling.ArtificialPlayer.BotTypes.HenesysJQBot;
 import soloMapling.ArtificialPlayer.BotTypes.NXMerchantBot;
 import soloMapling.ArtificialPlayer.BotTypes.Amoria.AmoriaPQBot;
 import soloMapling.ArtificialPlayer.BotTypes.BossRush.BossRushPQBot;
+import soloMapling.ArtificialPlayer.BotTypes.Carnival.CarnivalPQBot;
 import soloMapling.ArtificialPlayer.BotTypes.Ellin.EllinPQBot;
 import soloMapling.ArtificialPlayer.BotTypes.Henesys.HenesysPQBot;
 import soloMapling.ArtificialPlayer.BotTypes.Horntail.HorntailPQBot;
@@ -223,6 +224,13 @@ public class BotTypeManager {
             public void createAndSetBot(Character character) {
                 MagatiaPQBot mpqBot = new MagatiaPQBot(character);
                 CharacterStorage.addActiveBot(character.getId(), mpqBot);
+            }
+        },
+        CARNIVAL_PQ_BOT {
+            @Override
+            public void createAndSetBot(Character character) {
+                CarnivalPQBot cpqBot = new CarnivalPQBot(character);
+                CharacterStorage.addActiveBot(character.getId(), cpqBot);
             }
         },
         SOCIAL_BOT {
