@@ -93,4 +93,58 @@ class BotMountDeterminismTest {
         }
         assertFalse(BotMount.mountIds().length == 0);
     }
+
+    @Test
+    void mountLevelCapIsBoundedAndScalesWithOwnerLevel() {
+        // The cap is a pure function of owner level: never below 1, never above 10, and monotonic.
+        int prev = 0;
+        for (int ownerLevel = 1; ownerLevel <= 200; ownerLevel++) {
+            int cap = BotMount.mountLevelCap(ownerLevel);
+            assertTrue(cap >= 1, "cap must be >= 1 for owner " + ownerLevel);
+            assertTrue(cap <= 10, "cap must be <= 10 for owner " + ownerLevel);
+            assertTrue(cap >= prev, "cap must not decrease as the owner levels up");
+            prev = cap;
+        }
+        assertEquals(1, BotMount.mountLevelCap(1));
+        assertEquals(10, BotMount.mountLevelCap(200));
+    }
+
+    @Test
+    void rolledMountLevelIsRandomButWithinTheCapAndStable() {
+        boolean sawAboveOne = false;
+        for (int cid = 100; cid < 20_000; cid++) {
+            int lv = BotMount.rolledMountLevel(cid, 100);
+            int cap = BotMount.mountLevelCap(100);
+            assertTrue(lv >= 1 && lv <= cap, "level " + lv + " must be within 1.." + cap);
+            assertEquals(lv, BotMount.rolledMountLevel(cid, 100), "level must be stable per cid");
+            if (lv > 1) {
+                sawAboveOne = true;
+            }
+        }
+        assertTrue(sawAboveOne, "levels must vary, not all be 1");
+    }
+
+    @Test
+    void rolledMountExpStaysWithinTheLevel() {
+        // exp is counted within the mount's level, so it must be a valid 0..needed-1 value and
+        // never look like it should already have levelled up.
+        for (int level = 1; level <= 10; level++) {
+            int needed = org.gms.constants.game.ExpTable.getMountExpNeededForLevel(level);
+            for (int cid = 100; cid < 5_000; cid += 7) {
+                int exp = BotMount.rolledMountExp(cid, level);
+                assertTrue(exp >= 0, "exp must be non-negative");
+                assertTrue(exp < Math.max(1, needed),
+                        "exp " + exp + " must be below level " + level + "'s requirement " + needed);
+            }
+        }
+    }
+
+    @Test
+    void rolledMountTirednessIsGentleAndStable() {
+        for (int cid = 100; cid < 20_000; cid++) {
+            int t = BotMount.rolledMountTiredness(cid);
+            assertTrue(t >= 0 && t <= 40, "tiredness " + t + " must be 0..40");
+            assertEquals(t, BotMount.rolledMountTiredness(cid), "tiredness must be stable per cid");
+        }
+    }
 }

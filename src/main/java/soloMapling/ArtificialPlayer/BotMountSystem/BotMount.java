@@ -7,6 +7,7 @@ import org.gms.client.Skill;
 import org.gms.client.SkillFactory;
 import org.gms.client.inventory.InventoryType;
 import org.gms.client.inventory.Item;
+import org.gms.constants.game.ExpTable;
 import org.gms.constants.skills.Beginner;
 import org.gms.net.server.Server;
 import org.gms.server.StatEffect;
@@ -103,6 +104,24 @@ public final class BotMount {
 
     /** Rider skill id: {@code sourceid % 10000000 == 1004} → {@code isMonsterRiding()}. */
     private static final int RIDE_SKILL = Beginner.MONSTER_RIDER;
+
+    /**
+     * A bot's mount is born with a little history instead of level 1 / 0 exp: its level, its
+     * progress toward the next level and its tiredness are all rolled deterministically from
+     * the character id, so a persistent companion keeps the same mount across restarts. The
+     * mount levels slower and further than the bot levels are high — a level-200 owner still
+     * rides a mount well short of the level-30 cap — so the numbers scale gently with owner
+     * level rather than tracking it.
+     *
+     * <p>v83's mount model (see {@code Character.Mount}): {@code level} 1..{@code getMountMaxLevel()}
+     * (30), {@code exp} counted WITHIN the current level (feeding a mount food adds exp; it flips
+     * to the next level once {@code exp >= getMountExpNeededForLevel(level)}), and {@code tiredness}
+     * 0..99 (rises while ridden; at 99 the rider is forced off). There is no "closeness"/亲密度 on a
+     * mount — that is a pet attribute — so tiredness is the mount's own wellbeing number.
+     */
+    private static final int MOUNT_MAX_ROLLED_LEVEL = 10;   // cap on the mount level a bot is born with
+    private static final int MOUNT_OWNER_LEVEL_FOR_CAP = 200; // owner level at which the roll reaches the cap
+    private static final int MOUNT_TIREDNESS_MAX = 40;       // gentle 0..40 — a used-but-cared-for mount
 
     /**
      * After an action forces a dismount (a skill, an attack, a chair), the bot will not
@@ -243,6 +262,51 @@ public final class BotMount {
         return Math.floorMod(mix(cid), 1000) < (int) Math.round(OWN_CHANCE * 1000);
     }
 
+    /** A real 骑宠 (TamingMob) item id (1902xxx), as opposed to the placeholder 0. */
+    private static boolean isRealMountItem(int itemId) {
+        return itemId >= 1902000 && itemId < 1903000;
+    }
+
+    /**
+     * Seed a freshly created mount with a deterministic history: a level scaled to the owner's
+     * level, exp counted within that level (valid — below the next level's requirement so it
+     * never auto-levels on the first food), and a gentle tiredness. Stable per character id, so
+     * a persistent companion rides the same mount across restarts.
+     */
+    private static void applyRolledGrowth(Mount mount, Character bot) {
+        int level = rolledMountLevel(bot.getId(), bot.getLevel());
+        mount.setLevel(level);
+        mount.setExp(rolledMountExp(bot.getId(), level));
+        mount.setTiredness(rolledMountTiredness(bot.getId()));
+    }
+
+    /**
+     * The highest mount level a bot of this owner level may roll: 1..{@link #MOUNT_MAX_ROLLED_LEVEL},
+     * rising with the owner's level so a higher-level bot can ride a better-grown mount (a level-200
+     * owner reaches the cap). Never tracks the owner 1:1 — the mount levels far slower than the player.
+     */
+    static int mountLevelCap(int ownerLevel) {
+        int cap = Math.min(MOUNT_MAX_ROLLED_LEVEL, Math.max(1, ExpTable.getMountMaxLevel()));
+        int level = 1 + (Math.max(1, ownerLevel) * cap) / MOUNT_OWNER_LEVEL_FOR_CAP;
+        return Math.max(1, Math.min(level, cap));
+    }
+
+    /** A per-bot random mount level in 1..{@link #mountLevelCap(int)}, stable across restarts. */
+    static int rolledMountLevel(int cid, int ownerLevel) {
+        return 1 + Math.floorMod(mix(cid) >>> 16, mountLevelCap(ownerLevel));
+    }
+
+    /** Exp within the mount's current level: 0..needed-1, a legitimate mid-level value. */
+    static int rolledMountExp(int cid, int mountLevel) {
+        int needed = ExpTable.getMountExpNeededForLevel(mountLevel);
+        return needed > 0 ? Math.floorMod(mix(cid), needed) : 0;
+    }
+
+    /** A gentle tiredness 0..{@link #MOUNT_TIREDNESS_MAX} — a used-but-cared-for mount. */
+    static int rolledMountTiredness(int cid) {
+        return Math.floorMod(mix(cid) >>> 8, MOUNT_TIREDNESS_MAX + 1);
+    }
+
     /**
      * Deterministic kit index for a character id at a given level, or -1 if the bot owns no
      * mount or qualifies for none. Each id has a fixed preferred kit rank; it rides the
@@ -352,10 +416,18 @@ public final class BotMount {
 
         // The Mount's skill id must match the rider skill the bot actually learned (1004);
         // bots are explorer jobs, whose rider skill is the plain Beginner one.
+        //
+        // A bot Character is a template clone, so Character.fromCharactersDO always gives it a
+        // Mount object (itemId 0 until it actually wears a 骑宠). Growth is rolled only when it
+        // has no real mount item yet — a reloaded companion keeps its persisted level/exp/tiredness.
         Mount mount = bot.getMapleMount();
         if (mount == null) {
-            bot.setMapleMount(new Mount(bot, kit[0], RIDE_SKILL));
+            mount = new Mount(bot, kit[0], RIDE_SKILL);
+            bot.setMapleMount(mount);
         } else {
+            if (!isRealMountItem(mount.getItemId())) {
+                applyRolledGrowth(mount, bot);
+            }
             mount.setItemId(kit[0]);
             mount.setSkillId(RIDE_SKILL);
         }
