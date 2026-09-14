@@ -55,6 +55,7 @@ public final class BotPetFollower {
         if (task != null) {
             return;
         }
+        rescan();
         long period = Math.max(100L, config.followTickMs());
         task = soloMapling.server.ExecutorServiceManager.getScheduledExecutorService()
                 .scheduleAtFixedRate(() -> tick(config), period, period, TimeUnit.MILLISECONDS);
@@ -67,6 +68,22 @@ public final class BotPetFollower {
             task = null;
         }
         TRACKED.clear();
+    }
+
+    /**
+     * Rebuild the tracked set from live bots. start() runs after a reload too, and
+     * stop() clears the set — without this, a {@code !botpet reload} would leave
+     * every already-petted bot unfollowed.
+     */
+    private static void rescan() {
+        TRACKED.clear();
+        for (Integer id : new java.util.ArrayList<>(
+                soloMapling.ArtificialPlayer.BotMessagingSystem.CharacterStorage.getAllBots().keySet())) {
+            Character chr = soloMapling.server.SoloMaplingUtilities.getChr(id);
+            if (chr != null && chr.getNoPets() > 0) {
+                TRACKED.add(id);
+            }
+        }
     }
 
     /** Begin following a bot's pets. Called by {@link BotPetController} once a bot has pets. */

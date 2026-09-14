@@ -93,6 +93,10 @@ public final class BotPetController {
         if (bot == null || CompanionRoster.isCompanion(bot.getId())) {
             return;
         }
+        if (bot.getNoPets() == 0) {
+            BotPetFollower.forget(bot.getId());
+            return; // nothing to detach (the common case)
+        }
         Pet[] pets = bot.getPets();
         for (int i = 0; i < pets.length; i++) {
             clearPetGear(bot, i);

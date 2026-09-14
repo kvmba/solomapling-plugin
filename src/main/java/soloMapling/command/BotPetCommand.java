@@ -61,7 +61,9 @@ public class BotPetCommand extends Command {
                     return;
                 }
                 BotPetSystem.remove(bot);
-                player.dropMessage("cleared pets for " + bot.getName());
+                player.dropMessage("botpet clear: " + bot.getName()
+                        + " now has " + bot.getNoPets() + " pet(s)"
+                        + " (companions keep their saved pets)");
             }
             default -> help(player);
         }

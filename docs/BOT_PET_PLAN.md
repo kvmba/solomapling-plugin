@@ -395,6 +395,6 @@ BotPetController.removePets(fakechar)
 9. **切图 / 死亡回城无需插件代码**：宿主的 `MapleMap.addPlayer` 在每次进图时已对 `getPets()` 逐只 `setPos(getGroundBelow(...))` 并 `showPet`（发给 bot 自己的 client，headless 侧为空操作），而其它观察者通过 `spawnPlayerMapObject`（`getPets()` 自动带上）收到宠物。因此宠物天然随 bot 过传送门 / 传送 / 死亡回城，follower 只需在"已在图"时维持跟随，**不做任何地图变化处理**（避免与宿主重复 showPet 导致客户端重复生成）。
 10. **宿主无"非落库"宠物工厂**：`Pet` 构造器私有，`createPet`/`loadFromDb` 都写/读库；`extension-api` 亦无宠物 API。故 ambient 的内存直造是**唯一**不落库路径，`BotPetFactoryTest` 证明其可在无 DB 环境构造出合法 `Pet`。
 
-**审核修正（本轮）**：移除早期版本的多余地图变化重定位（宿主已处理，避免重复 showPet）；follower 改为只遍历"有宠物的 bot"（`TRACKED` 集合）并按 `SoloMaplingUtilities.getChr` 解析（授予发生在 BotSM 包装之前）；`grantForBot` 对"已有宠物"的幂等分支补 `track`（companion 重载后仍能跟随）；`createPersistent` 在 CASH 满时清理孤儿 `pets` 行；`BotPetPool` 兼容 yamlbeans 把裸数字读成字符串。
+**审核修正（本轮）**：移除早期版本的多余地图变化重定位（宿主已处理，避免重复 showPet）；follower 改为只遍历"有宠物的 bot"（`TRACKED` 集合）并按 `SoloMaplingUtilities.getChr` 解析（授予发生在 BotSM 包装之前）；`grantForBot` 对"已有宠物"的幂等分支补 `track`（companion 重载后仍能跟随）；`createPersistent` 在 CASH 满时清理孤儿 `pets` 行；`BotPetPool` 兼容 yamlbeans 把裸数字读成字符串。**第二轮复审**：`BotPetFollower.start` 增加 `rescan()`——否则 `!botpet reload` 清空 `TRACKED` 后，已有宠物的 bot 不再被跟随；`removePets` 增加无宠快速返回；`!botpet clear` 回显真实宠物数与 companion 说明。
 
 测试：`BotPetAssignerTest`（10 例，纯策略）+ `BotPetConfigTest`（2 例，YAML 键位 + 池加载）+ `BotPetFactoryTest`（3 例，无 DB 反射造宠）。全量 `mvn test` 835 项通过。
