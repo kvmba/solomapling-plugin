@@ -8,6 +8,7 @@ import soloMapling.ArtificialPlayer.SocialPersonaConfig;
 import soloMapling.Environment.SoloMaplingLanguageConfig;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -30,6 +31,7 @@ class SocialIntentTest {
         assertEquals("Praise", SocialIntent.classifyNode("太强了"));
         assertEquals("Praise", SocialIntent.classifyNode("666"));
         assertEquals("Praise", SocialIntent.classifyNode("yyds"));
+        assertEquals("Praise", SocialIntent.classifyNode("nbnb"));
         assertEquals("TeaseBack", SocialIntent.classifyNode("就这？"));
         assertEquals("TeaseBack", SocialIntent.classifyNode("你太菜了"));
         assertEquals("TeaseBack", SocialIntent.classifyNode("破防了吧"));
@@ -37,10 +39,33 @@ class SocialIntentTest {
         assertEquals("Laugh", SocialIntent.classifyNode("笑死我了"));
         assertEquals("Laugh", SocialIntent.classifyNode("233"));
         assertEquals("Wow", SocialIntent.classifyNode("卧槽"));
+        assertEquals("Wow", SocialIntent.classifyNode("爷青回"));
         assertEquals("Agree", SocialIntent.classifyNode("确实"));
+        assertEquals("Agree", SocialIntent.classifyNode("顶一下"));
         assertEquals("Thanks", SocialIntent.classifyNode("谢谢老哥"));
+        assertEquals("Thanks", SocialIntent.classifyNode("老板大气"));
         assertEquals("Apology", SocialIntent.classifyNode("抱歉抱歉"));
         assertEquals("Cheer", SocialIntent.classifyNode("加油啊"));
+    }
+
+    @Test
+    void noKeywordCollidesAcrossIntentsAndNoneIsASingleChar() {
+        for (SocialIntent a : SocialIntent.values()) {
+            for (SocialIntent b : SocialIntent.values()) {
+                if (a == b) {
+                    continue;
+                }
+                for (String kw : a.words()) {
+                    assertFalse(java.util.Arrays.asList(b.words()).contains(kw),
+                            "'" + kw + "' appears in both " + a + " and " + b + " (shadowed by order)");
+                    assertFalse(java.util.Arrays.asList(b.codes()).contains(kw),
+                            "'" + kw + "' is a keyword of " + a + " and a code of " + b);
+                }
+            }
+            for (String kw : a.words()) {
+                assertTrue(kw.length() >= 2, a + ": single-char contains keyword '" + kw + "' swallows chat");
+            }
+        }
     }
 
     @Test

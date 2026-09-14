@@ -41,7 +41,8 @@ public class BotRecruitManager {
     // Deliberately short and generic: a shout is a bare offer, so anything that reads as "come
     // join us" qualifies. The localized menu labels ("要组队吗？") already carry the Chinese
     // wording, so a Chinese-speaking player's natural shout matches on 组队 without a second list.
-    private static final String[] RECRUIT_KEYWORDS = {"party", "team", "join", "group", "组队", "一起"};
+    private static final String[] RECRUIT_KEYWORDS = {"party", "team", "join", "group", "组队", "一起",
+            "求带", "带带", "抱大腿", "缺人", "来人", "收人", "还差人", "就差你", "组个队", "组一波"};
     // Kept comfortably above the InviteCoordinator's ~3-min silent timeout so the accept window no
     // longer races it - the coordinator now backstops staleness (a late accept just NOT_FOUNDs
     // harmlessly). This also keeps isArmed() true across the whole realistic invite window, which
