@@ -102,42 +102,48 @@ public final class BotPetFollower {
     }
 
     private static void tick(BotPetConfig config) {
-        try {
-            for (Integer botId : TRACKED) {
-                // Resolve through player storage, not the BotSM: pets are granted
-                // during createBot, which runs before the bot is wrapped in a BotSM
-                // (setAndStartBots does that afterwards). Player storage already has
-                // the bot at grant time, so this never drops a freshly-petted bot.
-                Character chr = soloMapling.server.SoloMaplingUtilities.getChr(botId);
-                if (chr == null || chr.getMap() == null || chr.getNoPets() == 0) {
-                    forget(botId); // bot gone / mid-retype / pets removed
-                    continue;
-                }
-                MapleMap map = chr.getMap();
-                if (!GCMovement.isMapObserved(chr.getMapId())) {
-                    continue; // LOD: nobody can see it, so neither the motion nor the packet is worth it
-                }
-
-                boolean swim = map.isSwim();
-                int idx = 0;
-                for (Pet pet : chr.getPets()) {
-                    if (pet == null) {
-                        continue;
-                    }
-                    if (swim) {
-                        followSwim(chr, pet, idx, config);
-                    } else {
-                        followLand(chr, pet, idx, config);
-                    }
-                    maybeSpeak(chr, pet, idx, config);
-                    idx++;
-                }
-                if (chr.getHp() > 0) {
-                    loot(chr, map, config);
-                }
+        for (Integer botId : TRACKED) {
+            // A broken bot must never abort the tick for every other bot (same
+            // convention as GrindTickRegistry's per-participant isolation).
+            try {
+                tickBot(botId, config);
+            } catch (Throwable t) {
+                System.err.println("[BotPetFollower] tick error for bot " + botId + ": " + t);
             }
-        } catch (Throwable t) {
-            System.err.println("[BotPetFollower] tick error: " + t);
+        }
+    }
+
+    private static void tickBot(int botId, BotPetConfig config) {
+        // Resolve through player storage, not the BotSM: pets are granted
+        // during createBot, which runs before the bot is wrapped in a BotSM
+        // (setAndStartBots does that afterwards). Player storage already has
+        // the bot at grant time, so this never drops a freshly-petted bot.
+        Character chr = soloMapling.server.SoloMaplingUtilities.getChr(botId);
+        if (chr == null || chr.getMap() == null || chr.getNoPets() == 0) {
+            forget(botId); // bot gone / mid-retype / pets removed
+            return;
+        }
+        MapleMap map = chr.getMap();
+        if (!GCMovement.isMapObserved(chr.getMapId())) {
+            return; // LOD: nobody can see it, so neither the motion nor the packet is worth it
+        }
+
+        boolean swim = map.isSwim();
+        int idx = 0;
+        for (Pet pet : chr.getPets()) {
+            if (pet == null) {
+                continue;
+            }
+            if (swim) {
+                followSwim(chr, pet, idx, config);
+            } else {
+                followLand(chr, pet, idx, config);
+            }
+            maybeSpeak(chr, pet, idx, config);
+            idx++;
+        }
+        if (chr.getHp() > 0) {
+            loot(chr, map, config);
         }
     }
 
