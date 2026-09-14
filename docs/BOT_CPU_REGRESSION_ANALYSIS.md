@@ -171,8 +171,9 @@ footholds= 990  indexed =   890.1 ns/op   （24.3× 快）
 
 ### 5.2 最快验证手段（建议在真实服上做）
 
-1. `!botpet disable`（运行时 kill switch，已实现）→ 观察 CPU 是否回落到 ~7–10%。
-   - 若回落 → 确认 P1；若不完全回落 → 差额在 P2/P3。
+> ⚠️ **修正（09-14 复核）**：`!botpet disable` **不能**用来验证本问题——它只把 `BotPetSystem.enabled` 置 false（阻止**新** bot 获得宠物），而 `BotPetFollower.tick()` 并不检查该开关，**已有宠物的 follow 计算照跑**。要真正停掉负载只有三种方式：① 改 `data/solomapling/override/ArtificialPlayer/BotPetSystem/BotPetConfig.yaml` 的 `enabled: false` 并重启（`bootstrap` 才不启动 follower）；② `!botpet clear <botId>` 逐个清宠物；③ 代码加门控。
+
+1. **离线对照（最稳）**：把 `BotPetConfig.yaml` 的 `enabled: false`（走 override 目录）→ 重启 → 测同场景 CPU。若回落 ~7–10% → 确认 P1。
 2. `!env perf` 连读两次取 delta：`movement ticks/s`、`macro ticks/s`、`wheel dispatch/s` 与 `throttle x`。
 3. 若条件允许，在宠物 tick 处加一个 `LongAdder`（每宠物查询计数与耗时），一小时内即可量化 P1 的确切份额。
 
@@ -220,3 +221,30 @@ footholds= 990  indexed =   890.1 ns/op   （24.3× 快）
 ### 6.3 与既有报告的关系
 
 `docs/PERFORMANCE_HOTSPOT_ANALYSIS.md`（`b70b25e`，09-14 10:47）覆盖的是"单次调用写法"的常数级优化，**未包含宠物跟随系统**（宠物系统在其成稿前后仍在快速迭代，且该报告的基准点 `af5c8ef` 早于宠物引入）。本报告是其必要补充：**问题不在"某次调用贵了几十纳秒"，而在"某个新子系统根本不吃 LOD 门控、且每次调用都走宿主最贵的树查询"**。
+
+---
+
+## 七、复核记录（第二次检查，09-14 23:05 UTC）
+
+对 `optimize/performance @ 93acbff`（工作区干净，无新提交）逐项复核，**报告中所有断言依旧成立**：
+
+| # | 断言 | 复核结果 |
+|:--:|---|---|
+| 1 | 宠物 tick 是 200ms 全局调度 | ✅ `BotPetConfig.yaml: tick_ms: 200` → `BotPetFollower.java:101` `scheduleAtFixedRate` |
+| 2 | 观察门控缺失（follow 计算无条件跑） | ✅ `BotPetFollower.java:171-190`：`followSwim/followLand` 不判 `observed`，仅 `maybeSpeak`/`loot` 判 |
+| 3 | 每宠物 1–3 次宿主 `findBelow` | ✅ `groundSnap`→`map.getFootholds().findBelow`（:330）、`footholdId`→同（`BotPetController.java:194`）；移动分支 3 次（:232/:290/:296） |
+| 4 | 宿主 `FootholdTree.findBelow` 仍是 O(N)+sort | ✅ 宿主 git 无相关提交，`FootholdTree.java:160-190` 原样（`LinkedList`+`Collections.sort`+trig） |
+| 5 | 坐骑 profile 加成仍在、导航图 key 仍四维 | ✅ `BotMovementProfile.java:57-58,115-118`；`GraphCacheKey(mapId,speed,jump,snowShoes)`（`BotNavigationGraphProvider.java:103`），`GRAPH_VERSION=62` |
+| 6 | `BotMount.tick` 仍挂在每次宏 tick 最前 | ✅ `BotSM.java:99` |
+| 7 | 宠物系统未使用索引版查询 | ✅ `grep findBelowIndexed/pointBelowIndexed` 在 `BotPetSystem/` 下无命中；仅 `GCMoveSystem` 四文件使用 |
+| 8 | 宠物 tick 独立于 tick wheel / LOD 节流 | ✅ `BotPetFollower` 不引用 `BotTickService`；跑在 `ExecutorServiceManager` 的 10 线程 shared pool |
+| 9 | 分支状态 | ✅ `master` 不含宠物系统（旧线）；`feat/pq-all`、`feat/pq-phase0` 与 HEAD 的宠物代码**完全一致**（同样无门控）；且这两个分支相对 HEAD **无新增全局定时器**；本地 = `origin/optimize/performance` |
+| 10 | 无新修复提交 | ✅ 全分支 `git log --all -S 'pointBelowIndexed' -- BotPetSystem/` 等查询为空；宠物系统最后改动停在 `b604ba9`（09-14 15:13） |
+
+**新发现（复核时补充）**：
+
+1. **`!botpet disable` 不是有效的验证开关**——它只阻止新授予（`BotPetSystem.enabled` 在 `grant()` 里检查），**不停止 `BotPetFollower` 的 tick**。`tick()`/`tickBot()` 均不读该开关。已修正 §5.2 的验证指引。
+2. **`feat/pq-all` / `feat/pq-phase0` 分支同样带病**：宠物代码与 HEAD 逐字节一致（同样缺观察门控、同样走宿主树查询）；若有把 PQ 内容合入的生产计划，宠物问题会一并带过去。
+3. `GCFidget`（1500ms 轮询、独立 1 线程池）也无观察门控，但它只在 `GCMovement.enable(bot)` 的 bot 上活跃（松手即 `cancel`），且 1.5s 周期下成本远小于宠物 tick，维持"非主因"的判定。
+
+**结论：问题依旧存在，未被修复；且影响所有活跃分支。**
