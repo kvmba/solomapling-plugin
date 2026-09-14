@@ -91,7 +91,8 @@ solomapling:
   language: zh-CN   # optional; defaults to gms.service.language (en-US | zh-CN)
   llm:
     enabled: false
-    api-key: ${DEEPSEEK_API_KEY:}   # or set env DEEPSEEK_API_KEY
+    api-key: ${LLM_API_KEY:}   # or set env LLM_API_KEY
+    base-url: https://api.deepseek.com   # any OpenAI-compatible endpoint
     model: deepseek-v4-flash
     max-tokens: 80
     timeout-ms: 10000
@@ -101,7 +102,7 @@ solomapling:
 
 ### SocialBot LLM chat (Hybrid)
 
-When `solomapling.llm.enabled: true` and an API key is set, **SocialBot** uses DeepSeek for **free-form player chat** during an active conversation (player must @ the bot by name first). Structured intents still use YAML:
+When `solomapling.llm.enabled: true` and an API key is set, **SocialBot** uses an OpenAI-compatible chat endpoint (DeepSeek at `https://api.deepseek.com` by default; point `base-url` at any compatible service) for **free-form player chat** during an active conversation (player must @ the bot by name first). Structured intents still use YAML:
 
 | Player intent | Handler |
 |---------------|---------|

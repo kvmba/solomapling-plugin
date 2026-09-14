@@ -19,9 +19,10 @@ public final class DeepSeekLlmClient implements LlmClient {
         this.client = Objects.requireNonNull(client, "client");
     }
 
-    public static DeepSeekLlmClient create(String apiKey) {
+    public static DeepSeekLlmClient create(String apiKey, String baseUrl) {
         return new DeepSeekLlmClient(SimpleOpenAIDeepseek.builder()
                 .apiKey(apiKey)
+                .baseUrl(baseUrl)
                 .build());
     }
 

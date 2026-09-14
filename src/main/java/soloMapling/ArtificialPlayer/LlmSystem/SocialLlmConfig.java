@@ -13,12 +13,14 @@ public final class SocialLlmConfig {
     public static final String PREFIX = "solomapling.llm.";
     public static final String KEY_ENABLED = PREFIX + "enabled";
     public static final String KEY_API_KEY = PREFIX + "api-key";
+    public static final String KEY_BASE_URL = PREFIX + "base-url";
     public static final String KEY_MODEL = PREFIX + "model";
     public static final String KEY_MAX_TOKENS = PREFIX + "max-tokens";
     public static final String KEY_TIMEOUT_MS = PREFIX + "timeout-ms";
     public static final String KEY_HISTORY_TURNS = PREFIX + "history-turns";
     public static final String KEY_FALLBACK_YAML = PREFIX + "fallback-to-yaml";
 
+    public static final String DEFAULT_BASE_URL = "https://api.deepseek.com";
     public static final String DEFAULT_MODEL = "deepseek-v4-flash";
     public static final int DEFAULT_MAX_TOKENS = 80;
     public static final int DEFAULT_TIMEOUT_MS = 10_000;
@@ -27,6 +29,7 @@ public final class SocialLlmConfig {
 
     private static volatile boolean enabled;
     private static volatile String apiKey = "";
+    private static volatile String baseUrl = DEFAULT_BASE_URL;
     private static volatile String model = DEFAULT_MODEL;
     private static volatile int maxTokens = DEFAULT_MAX_TOKENS;
     private static volatile int timeoutMs = DEFAULT_TIMEOUT_MS;
@@ -41,7 +44,8 @@ public final class SocialLlmConfig {
         enabled = config.getBool(KEY_ENABLED, false);
         apiKey = firstNonBlank(
                 config.getString(KEY_API_KEY, ""),
-                System.getenv("DEEPSEEK_API_KEY"));
+                System.getenv("LLM_API_KEY"));
+        baseUrl = config.getString(KEY_BASE_URL, DEFAULT_BASE_URL);
         model = config.getString(KEY_MODEL, DEFAULT_MODEL);
         maxTokens = clamp(config.getInt(KEY_MAX_TOKENS, DEFAULT_MAX_TOKENS), 16, 512);
         timeoutMs = clamp(config.getInt(KEY_TIMEOUT_MS, DEFAULT_TIMEOUT_MS), 2_000, 60_000);
@@ -51,7 +55,8 @@ public final class SocialLlmConfig {
 
     private static void resetDefaults() {
         enabled = false;
-        apiKey = firstNonBlank("", System.getenv("DEEPSEEK_API_KEY"));
+        apiKey = firstNonBlank("", System.getenv("LLM_API_KEY"));
+        baseUrl = DEFAULT_BASE_URL;
         model = DEFAULT_MODEL;
         maxTokens = DEFAULT_MAX_TOKENS;
         timeoutMs = DEFAULT_TIMEOUT_MS;
@@ -65,6 +70,10 @@ public final class SocialLlmConfig {
 
     public static String apiKey() {
         return apiKey;
+    }
+
+    public static String baseUrl() {
+        return baseUrl;
     }
 
     public static String model() {

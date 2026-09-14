@@ -57,7 +57,7 @@ public final class ProductionCompanionBrain implements CompanionBrain {
                     "Companion LLM is disabled"));
         }
         CompanionPlannerService planner = new CompanionPlannerService(
-                DeepSeekLlmClient.create(SocialLlmConfig.apiKey()),
+                DeepSeekLlmClient.create(SocialLlmConfig.apiKey(), SocialLlmConfig.baseUrl()),
                 new CompanionPlannerService.Settings(
                         SocialLlmConfig.model(),
                         Math.max(128, SocialLlmConfig.maxTokens()),

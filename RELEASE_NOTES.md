@@ -28,7 +28,8 @@
 solomapling:
   llm:
     enabled: false
-    api-key: ${DEEPSEEK_API_KEY:}
+    api-key: ${LLM_API_KEY:}
+    base-url: https://api.deepseek.com   # any OpenAI-compatible endpoint
     model: deepseek-v4-flash
     max-tokens: 80
     timeout-ms: 10000

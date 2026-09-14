@@ -31,8 +31,9 @@ public final class SocialLlmService {
             log.info("SocialBot LLM disabled (set {}=true and provide api-key)", SocialLlmConfig.KEY_ENABLED);
             return;
         }
-        client = DeepSeekLlmClient.create(SocialLlmConfig.apiKey());
-        log.info("SocialBot LLM enabled model={} maxTokens={} timeoutMs={} historyTurns={}",
+        client = DeepSeekLlmClient.create(SocialLlmConfig.apiKey(), SocialLlmConfig.baseUrl());
+        log.info("SocialBot LLM enabled baseUrl={} model={} maxTokens={} timeoutMs={} historyTurns={}",
+                SocialLlmConfig.baseUrl(),
                 SocialLlmConfig.model(),
                 SocialLlmConfig.maxTokens(),
                 SocialLlmConfig.timeoutMs(),
