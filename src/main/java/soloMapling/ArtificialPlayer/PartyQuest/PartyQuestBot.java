@@ -1,6 +1,7 @@
 package soloMapling.ArtificialPlayer.PartyQuest;
 
 import org.gms.client.Character;
+import soloMapling.ArtificialPlayer.BotPartySystem.BotPartyLogic;
 import soloMapling.ArtificialPlayer.BotSM;
 import soloMapling.BotLogger;
 import soloMapling.ArtificialPlayer.BotCommandsPack.WarpCommands;
@@ -49,17 +50,30 @@ public abstract class PartyQuestBot extends BotSM {
     // =========================================================================
 
     /**
-     * One tick of the shared lifecycle: leave if the run is over, otherwise work.
+     * One tick of the shared lifecycle: take an invite if one is waiting, leave if the run is
+     * over, otherwise work the stage.
      *
-     * <p>Deliberately does not try to enter the quest. A bot joins a party because a player
-     * invited it, and rides into the instance on the leader's start, so the only decision
-     * left here is whether to keep working or to go home.
+     * <p>Accepting invites happens here, before the "am I inside the quest" test, and that
+     * ordering is the whole point: a bot waiting to be recruited is by definition *not* inside
+     * the quest yet. Putting this after the check would leave every bot in this package unable
+     * to join a party at all - it would sit in the lobby looking ready and ignore the player
+     * standing in front of it.
+     *
+     * <p>What it still does not do is start the quest. A player invites the bot and the
+     * leader starts the run, which is the quests' own rule, so the only decisions here are
+     * whether to join and whether to keep working.
      */
     protected final void tickPartyQuest() {
         Character bot = getChr();
         if (bot == null || bot.getMap() == null) {
             return;
         }
+
+        // A pending invitation is answered even outside the quest - that is when they arrive.
+        if (bot.getParty() == null) {
+            BotPartyLogic.checkPartyQueue(bot);
+        }
+
         if (!isInsideQuest(bot.getMapId())) {
             return;
         }
