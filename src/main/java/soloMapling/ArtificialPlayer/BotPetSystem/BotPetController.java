@@ -90,6 +90,18 @@ public final class BotPetController {
             // Pet gear rides in the character LOOK (body parts 14/21/22/23), which
             // observers only receive on an equipChanged broadcast — the host's own
             // equip path ends the same way. Once per grant, not per pet.
+            refreshLook(bot);
+        }
+    }
+
+    /**
+     * Refresh the character look after a gear change. {@code equipChanged} is not
+     * null-map safe (it broadcasts to {@code getMap()}), and a character starts
+     * with a null map until it is placed — so a gear change on a map-less bot
+     * must skip the broadcast rather than NPE.
+     */
+    private static void refreshLook(Character bot) {
+        if (bot.getMap() != null) {
             bot.equipChanged();
         }
     }
@@ -140,7 +152,7 @@ public final class BotPetController {
         if (gearCleared) {
             // Gear rides in the character look; refresh it so observers stop
             // rendering the name tag / pouches (host's own unequip does the same).
-            bot.equipChanged();
+            refreshLook(bot);
         }
         BotPetFollower.forget(bot.getId());
     }
