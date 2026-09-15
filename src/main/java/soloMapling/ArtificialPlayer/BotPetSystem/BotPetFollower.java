@@ -251,28 +251,33 @@ public final class BotPetFollower {
             return;
         }
 
-        int tx = chr.getPosition().x + offsetFor(pet);
+        Point owner = chr.getPosition();
+        int tx = owner.x + offsetFor(pet);
         double dt = Math.max(0.05, config.followTickMs() / 1000.0);
 
-        // Official follow: a pet that has fallen too far behind does NOT sprint after the
-        // owner — it flashes to the owner's side (a warp-like reposition) and resumes.
-        // The gap is HORIZONTAL: a vertical owner move (a jump, or falling) is normally
-        // followed with the pet's own physics; only a beyond-reach horizontal lead (a
-        // fast-running owner, or a same-map teleport) re-homes it.
-        if (Math.abs(p.x - chr.getPosition().x) > LOST_PX) {
+        // Official follow: warp when the pet is left too far behind. A large HORIZONTAL
+        // lead (a fast-running owner, or a same-map teleport) beats the pet's walk; and
+        // an owner that has SETTLED on a higher platform cannot be reached by walking
+        // (a pet never jumps up), so it warps up too. A jumping owner is ignored here —
+        // its higher y is transient, so wait rather than flash.
+        boolean ownerAir = CharacterStance.isJumping(chr.getStance());
+        if (Math.abs(p.x - owner.x) > LOST_PX || (!ownerAir && owner.y < p.y - GROUND_STEP_PX)) {
             velX.remove(pet.getUniqueId());
             fallVy.remove(pet.getUniqueId());
-            Foothold fh = GCMovement.footholdBelow(chr.getMap(), tx, chr.getPosition().y - GROUND_PROBE_UP);
-            Point snap = fh == null ? new Point(tx, chr.getPosition().y) : new Point(tx, fh.calculateFooting(tx));
+            Foothold fh = GCMovement.footholdBelow(chr.getMap(), tx, owner.y - GROUND_PROBE_UP);
+            Point snap = fh == null ? new Point(tx, owner.y) : new Point(tx, fh.calculateFooting(tx));
             teleportPet(chr, pet, index, snap, fh == null ? 0 : fh.getId(),
                     isPetFacingLeft(pet) ? PET_STAND_LEFT : PET_STAND_RIGHT, config, observed);
             return;
         }
 
         MapleMap map = chr.getMap();
-        boolean ground = onGround(map, p, vy);
-        // The pet never hops into the air after a jumping owner — gravity only ever
-        // pulls it DOWN (a pet over a gap just falls).
+        // The pet stands unless the owner is clearly BELOW its floor: then it is
+        // unsupported — it drops / down-jumps THROUGH the platform to follow the owner
+        // down (landing on the first floor between it and the owner, repeating until it
+        // reaches the owner's level). Gravity only ever pulls DOWN.
+        boolean ownerBelow = owner.y > p.y + GROUND_STEP_PX;
+        boolean ground = onGround(map, p, vy) && !ownerBelow;
 
         vx = stepMotor(vx, tx - p.x, config.followSpeed(), dt);
         int nx = p.x + (int) Math.round(vx * dt);
@@ -292,7 +297,10 @@ public final class BotPetFollower {
             Foothold fh = GCMovement.footholdBelow(map, nx, p.y);
             if (fh != null) {
                 int floorY = fh.calculateFooting(nx);
-                if (!rising && ny >= floorY) { // land on the way down
+                // Only land on a floor strictly BELOW the pet: during a down-jump the
+                // platform it just dropped through is above it and must be ignored, or
+                // it would catch the pet back on top.
+                if (floorY > p.y && !rising && ny >= floorY) {
                     ny = floorY;
                     vy = 0;
                     landing = fh;
