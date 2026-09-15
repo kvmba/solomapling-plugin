@@ -359,3 +359,43 @@ grep -rn 'setProperty("statusStg1", *1\|setIntProperty("statusStg1", *1' scripts
 
 **全部实机未跑。** 上面四条门槛是从引擎源码逐行核实的，但没有任何一次真实运行。
 实机验证顺序建议：Henesys（最简单，1 玩家 + 2 bot）→ Kerning → Ludi → 其余。
+
+---
+
+## 第十一部分 · 两个致命的"流程断点"（已修复）
+
+在追问"能不能真的跑通"时发现并修掉了两处**会让整套 bot 完全失效**的问题。
+两者的共同点：**都不是关卡逻辑错，而是根本没走到关卡逻辑**。
+
+### 断点 1：bot 无法接受组队邀请（`77e72c4`）
+
+| 项 | 内容 |
+|---|---|
+| 现象 | 玩家站在 bot 旁边邀请，bot 无反应 |
+| 根因 | 共享骨架 `tickPartyQuest` 第一行是"不在副本内就 return"；而**接受邀请发生在大厅** |
+| 影响 | 14 个新 bot 全部 **无法入队** |
+| 修复 | 把 `checkPartyQueue` 挪到"是否在副本内"判断**之前** |
+
+### 断点 2：bot 不会跟随队长换图（`df6b4b5`）
+
+| 项 | 内容 |
+|---|---|
+| 现象 | 队长走到下一关，bot 留在上一关；后续关卡永远解不开 |
+| 根因 | 大部分 PQ 靠**玩家走 portal** 推进（`kpq0..4`/`lpq0..4`/…），只有少数用脚本 `warpEventTeam` 自动带走全队 |
+| **更糟的后果** | bot 仍**注册在 EIM 里** → `getPlayerCount` 仍算它 → Kerning 那种"需要恰好 3 人站矩形"的谜题**缺一个人**，且 bot 的位置在别的房间 → **谜题永远无解** |
+| 修复 | 共享骨架加 `followLeaderIntoNextRoom()`：队长换到本 PQ 的另一张图 → 走 portal 跟过去 |
+
+**修复的两个排除项**（重要）：队长仍在同图（区域谜题要原地不动，不能乱跟）；队长离开本 PQ 回城（可能只是补给，跟出去＝弃本）。
+
+### 换图方式分类（决定 bot 是否需要主动跟）
+
+| PQ | 换图方式 | bot 需要跟？ |
+|---|---|---|
+| KerningPQ | 走 portal（`kpq0..4`） | ✅ 需要（已修） |
+| EllinPQ | 走 portal（`party6_*`） | ✅ 需要（已修） |
+| MagatiaPQ | 走 portal（`jnr*`） | ✅ 需要（已修） |
+| BossRushPQ | 走 portal（`raid_stage`） | ✅ 需要（已修） |
+| LudiPQ / HenesysPQ / PiratePQ / AmoriaPQ / HorntailPQ / OrbisPQ | `warpEventTeam` 自动带走 | 不需要（已核实不误触发） |
+
+> `warpEventTeam` 内部走 `chr.changeMap` → 会自动更新队伍快照 → bot 与队长 mapid 一致 →
+> 我的跟随逻辑**天然不触发**，不会打架。
