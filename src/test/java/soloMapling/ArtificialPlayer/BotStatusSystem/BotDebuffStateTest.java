@@ -20,7 +20,7 @@ class BotDebuffStateTest {
     void freshStateHasNoEffects() {
         BotDebuffState s = new BotDebuffState(null);
 
-        assertFalse(s.any());
+        assertEquals(0, s.size());
         assertFalse(s.isFrozen());
         assertFalse(s.blocksAttack());
         assertEquals(1.0, s.moveFactor());
@@ -107,7 +107,7 @@ class BotDebuffStateTest {
     void nullDiseaseIsRejected() {
         BotDebuffState s = new BotDebuffState(null);
         assertFalse(s.apply(Disease.NULL, LONG, 1, null));
-        assertFalse(s.any());
+        assertEquals(0, s.size());
     }
 
     @Test
@@ -118,7 +118,7 @@ class BotDebuffStateTest {
 
         s.clearAll();
 
-        assertFalse(s.any());
+        assertEquals(0, s.size());
         assertFalse(s.isFrozen());
         assertEquals(1.0, s.moveFactor());
     }

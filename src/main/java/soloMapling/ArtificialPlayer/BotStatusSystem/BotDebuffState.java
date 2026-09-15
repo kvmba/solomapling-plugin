@@ -15,6 +15,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.function.Predicate;
 
 /*
  * One bot's live mob-debuffs (frozen / sealed / slowed / weakened / blinded / poisoned), with the
@@ -71,60 +72,59 @@ public final class BotDebuffState {
 
     // ── Behaviour queries ────────────────────────────────────────────────────
 
-    /** True if anything is active (cheap fast-path so callers can skip work). */
-    public boolean any() {
-        return !active.isEmpty();
-    }
-
-    /** True while this exact disease is active. */
-    public boolean has(Disease disease) {
+    /** True while this exact disease is active (package-visible: used by tests to pin the cap). */
+    boolean has(Disease disease) {
         return active.containsKey(disease);
     }
 
     /** How many diseases are active right now (0..{@link BotDebuffTable#MAX_ACTIVE}). */
-    public int size() {
+    int size() {
         return active.size();
     }
 
     /** STUN / SEDUCE: the bot cannot move or attack. */
     public boolean isFrozen() {
-        for (Disease d : active.keySet()) {
-            if (BotDebuffTable.freezes(d)) {
-                return true;
-            }
-        }
-        return false;
+        return anyMatching(BotDebuffTable::freezes);
     }
 
     /** Frozen or sealed: the bot cannot swing. */
     public boolean blocksAttack() {
-        for (Disease d : active.keySet()) {
-            if (BotDebuffTable.blocksAttack(d)) {
-                return true;
-            }
-        }
-        return false;
+        return anyMatching(BotDebuffTable::blocksAttack);
     }
 
     /** Ground speed scale while SLOW is up (1.0 = normal). */
     public double moveFactor() {
-        return active.containsKey(Disease.SLOW) ? BotDebuffTable.SLOW_MOVE_FACTOR : 1.0;
+        return anyMatching(BotDebuffTable::slows) ? BotDebuffTable.SLOW_MOVE_FACTOR : 1.0;
     }
 
     /** Damage dealt multiplier while WEAKEN is up (1.0 = normal). */
     public double outFactor() {
-        return active.containsKey(Disease.WEAKEN) ? BotDebuffTable.WEAKEN_OUT_FACTOR : 1.0;
+        return anyMatching(BotDebuffTable::weakens) ? BotDebuffTable.WEAKEN_OUT_FACTOR : 1.0;
     }
 
     /** Contact damage taken multiplier while WEAKEN is up (1.0 = normal). */
     public double takenFactor() {
-        return active.containsKey(Disease.WEAKEN) ? BotDebuffTable.WEAKEN_TAKEN_FACTOR : 1.0;
+        return anyMatching(BotDebuffTable::weakens) ? BotDebuffTable.WEAKEN_TAKEN_FACTOR : 1.0;
     }
 
     /** Roll for DARKNESS: true when this swing whiffs even though a target was in reach. */
     public boolean whiffs() {
-        return active.containsKey(Disease.DARKNESS)
+        return anyMatching(BotDebuffTable::blinds)
                 && ThreadLocalRandom.current().nextDouble() < BotDebuffTable.DARKNESS_MISS_CHANCE;
+    }
+
+    /**
+     * Whether any active disease satisfies the predicate. Keeping every behaviour query routed through
+     * the table's own predicates means {@link BotDebuffTable} really is the single statement of "what
+     * each disease does" - not just a suggestion the getters happen to ignore.
+     */
+    private boolean anyMatching(Predicate<Disease> predicate) {
+        for (Disease disease : active.keySet()) {
+            if (predicate.test(disease)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     // ── Mutation ──────────────────────────────────────────────────────────────

@@ -26,7 +26,7 @@ import java.util.concurrent.ConcurrentHashMap;
  * DARKNESS / POISON) - the same set the engine's MobSkill.applyEffect turns into a Character disease.
  * Detection is folded into the movement tick's existing nearby-mob scan (BotContactDamage), which
  * already decides which mobs are in touch range, so this adds no scan of its own and stays behind the
- * same LOD gate. The caller passes the touch verdict; this class owns only the roll + bookkeeping.
+ * same LOD gate; this class owns only the roll + bookkeeping.
  *
  * Threading: called on a bot's movement tick only; the per-bot cooldown map is shared across bots on
  * different threads, hence concurrent.
@@ -94,13 +94,9 @@ public final class BotDebuffApplier {
         };
     }
 
-    /** Resolves the concrete WZ skill. The id always resolves for a skill the mob actually has. */
+    /** Resolves the concrete WZ skill, or null when the data has none (skipped by the caller). */
     private static MobSkill skillFor(MobSkillId id) {
-        try {
-            return MobSkillFactory.getMobSkillOrThrow(id.type(), id.level());
-        } catch (RuntimeException e) {
-            return null; // malformed skill data - skip rather than kill the tick
-        }
+        return MobSkillFactory.getMobSkill(id.type(), id.level()).orElse(null);
     }
 
     // ── Cooldown bookkeeping ─────────────────────────────────────────────────────

@@ -8,6 +8,8 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import soloMapling.ArtificialPlayer.BotHealthSystem.BotDeath;
 import soloMapling.ArtificialPlayer.BotHealthSystem.BotHealthFloor;
+import soloMapling.ArtificialPlayer.BotStatusSystem.BotDebuffApplier;
+import soloMapling.ArtificialPlayer.BotStatusSystem.BotDebuffState;
 import soloMapling.companion.CompanionRoster;
 import soloMapling.server.MethodScheduler;
 import org.gms.util.PacketCreator;
@@ -126,7 +128,7 @@ final class BotContactDamage {
                     // A mob in touch range may also land a debuff (stun/seal/slow/weaken/darkness/poison).
                     // Its WZ skills are rolled here; the bot's headless client can never trigger the
                     // engine's own mob-skill path, so the plugin drives it - see BotDebuffApplier.
-                    soloMapling.ArtificialPlayer.BotStatusSystem.BotDebuffApplier.consider(bot, mob);
+                    BotDebuffApplier.consider(bot, mob);
                     applyMobHit(entry, bot, mob);
                     return;
                 }
@@ -261,8 +263,7 @@ final class BotContactDamage {
         if (dmg <= 0) {
             return 0;
         }
-        soloMapling.ArtificialPlayer.BotStatusSystem.BotDebuffState status =
-                soloMapling.ArtificialPlayer.BotStatusSystem.BotDebuffState.of(bot);
+        BotDebuffState status = BotDebuffState.of(bot);
         double factor = status != null ? status.takenFactor() : 1.0;
         return (int) Math.max(1, Math.round(dmg * factor));
     }
