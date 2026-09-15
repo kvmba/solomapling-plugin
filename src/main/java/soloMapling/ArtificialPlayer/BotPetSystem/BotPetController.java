@@ -8,6 +8,7 @@ import org.gms.constants.inventory.PetEquipSlot;
 import org.gms.server.maps.Foothold;
 import org.gms.server.maps.MapleMap;
 import org.gms.util.PacketCreator;
+import soloMapling.ArtificialPlayer.GCMoveSystem.GCMovement;
 import soloMapling.companion.CompanionRoster;
 
 import java.awt.Point;
@@ -191,7 +192,7 @@ public final class BotPetController {
         if (map == null) {
             return 0;
         }
-        Foothold fh = map.getFootholds().findBelow(p);
+        Foothold fh = GCMovement.footholdBelow(map, p.x, p.y);
         return fh == null ? 0 : fh.getId();
     }
 
@@ -200,7 +201,7 @@ public final class BotPetController {
         if (map == null) {
             return fallbackY;
         }
-        Foothold fh = map.getFootholds().findBelow(new Point(x, fallbackY));
+        Foothold fh = GCMovement.footholdBelow(map, x, fallbackY);
         return fh == null ? fallbackY : fh.calculateFooting(x);
     }
 

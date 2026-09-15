@@ -229,7 +229,14 @@ public final class BotPetFollower {
             moveTowards(chr, pet, index, pet.getPos(), target,
                     PET_JUMP_RIGHT, PET_JUMP_LEFT, PET_JUMP_RIGHT, PET_JUMP_LEFT, config, observed, true);
         } else {
-            moveTowards(chr, pet, index, pet.getPos(), groundSnap(chr.getMap(), target),
+            // Ground-snap the target so an observed pet walks the floor under its own x.
+            // Unobserved, skip the foothold query — the pet still glides toward the bot (its
+            // position stays fresh, so a joining player never sees a stale coordinate), but
+            // nobody can see its exact y, and when a player arrives the observer gate turns
+            // the query back on within a tick. This is where the bulk of the pet tick's cost
+            // sat: one host foothold lookup per pet per 200ms on every map, watched or not.
+            Point grounded = observed ? groundSnap(chr.getMap(), target) : target;
+            moveTowards(chr, pet, index, pet.getPos(), grounded,
                     PET_MOVE_RIGHT, PET_MOVE_LEFT, PET_STAND_RIGHT, PET_STAND_LEFT, config, observed, false);
         }
     }
@@ -262,8 +269,15 @@ public final class BotPetFollower {
 
         if (dist > config.teleportDistPx()) {
             // Hopelessly far (a warp slipped past the engine's own re-placement):
-            // snap, with the foothold recomputed at the target (the old fh is stale).
-            int fh = noGravity ? 0 : BotPetController.footholdId(chr.getMap(), target);
+            // snap, with the foothold recomputed at the target (the old fh is stale) — but
+            // only when a lookup is worth it (see shouldLookUpFoothold); unobserved the pet
+            // keeps its last known fh rather than pay a query nobody can see the result of.
+            int fh;
+            if (shouldLookUpFoothold(noGravity, observed)) {
+                fh = BotPetController.footholdId(chr.getMap(), target);
+            } else {
+                fh = noGravity ? 0 : pet.getFh();
+            }
             applyAndSend(chr, pet, index, target, 0, 0, fh,
                     isPetFacingLeft(pet) ? idleLeft : idleRight, config, observed);
             return;
@@ -284,7 +298,12 @@ public final class BotPetFollower {
         double scale = Math.min(1.0, maxStep / dist);
         int nx = (int) Math.round(cur.x + dx * scale);
         int ny = (int) Math.round(cur.y + dy * scale);
-        if (!noGravity) {
+        // Ground-follow (and the fh it reports) costs a foothold lookup. When the map is
+        // unobserved nobody can see the pet, so skip both: the pet still glides along the
+        // bot's own y, its stored position stays fresh, and the observer gate resumes the
+        // query on the first tick after a player arrives. This is the bulk of the pet
+        // tick's cost — one lookup per pet per 200ms on every map, watched or not.
+        if (!noGravity && observed) {
             // Stay on the floor under the new x, so the pet walks along the ground
             // instead of gliding through the air toward a foothold below.
             ny = groundSnap(chr.getMap(), new Point(nx, ny)).y;
@@ -293,9 +312,24 @@ public final class BotPetFollower {
         int stance = stepX == 0
                 ? (isPetFacingLeft(pet) ? idleLeft : idleRight)
                 : (stepX > 0 ? moveRight : moveLeft);
-        int fh = noGravity ? 0 : BotPetController.footholdId(chr.getMap(), new Point(nx, ny));
+        int fh = shouldLookUpFoothold(noGravity, observed)
+                ? BotPetController.footholdId(chr.getMap(), new Point(nx, ny))
+                : (noGravity ? 0 : pet.getFh()); // unobserved: keep the last known fh
         applyAndSend(chr, pet, index, new Point(nx, ny),
                 (int) Math.round(stepX / dt), (int) Math.round((ny - cur.y) / dt), fh, stance, config, observed);
+    }
+
+    /**
+     * Whether this tick should resolve the pet's foothold from the map. True only when the pet
+     * is landed (gravity applies) AND a real player can see the map: the ground snap and the fh
+     * it reports both cost a foothold lookup, and on an unwatched map — the whole world, with no
+     * player online — nobody can see the pet's exact y or which platform it stands on, so the
+     * query is pure waste. This is the pet tick's dominant cost (one lookup per pet per 200ms),
+     * so the LOD gate here is what keeps the follower nearly free while the world is unwatched;
+     * the first tick after a player arrives resumes the query.
+     */
+    static boolean shouldLookUpFoothold(boolean noGravity, boolean observed) {
+        return !noGravity && observed;
     }
 
     /**
@@ -327,7 +361,7 @@ public final class BotPetFollower {
         if (map == null) {
             return p;
         }
-        Foothold fh = map.getFootholds().findBelow(new Point(p.x, p.y - GROUND_PROBE_UP));
+        Foothold fh = GCMovement.footholdBelow(map, p.x, p.y - GROUND_PROBE_UP);
         return fh == null ? p : new Point(p.x, fh.calculateFooting(p.x));
     }
 

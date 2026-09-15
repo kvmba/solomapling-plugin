@@ -124,13 +124,13 @@ footholds= 990  indexed =   890.1 ns/op   （24.3× 快）
 
 ## 四、次要嫌疑（逐项排除或降级）
 
-### 4.1 P2 坐骑（`b6fe926` → `4bff919`）
+### 4.1 P2 坐骑（`b6fe926` → `4bff919`）— **经复核：与本回归无关**
 
-- `BotMount.tick()` 挂在 `BotSM.tickRunnable` 最前，**每次宏 tick 都跑**。但 `tickRunnable` 本身受未观察 36–48s 节流（训练 bot 深磨 240–480s），所以**每秒总量很小**。
-- **真正的放大点**：`BotMovementProfile.fromCharacter` 新增 `mounted()` 判定 → 骑乘时 `+20 speed / +10 jump` → **profile 分桶（5 一格）改变** → 导航图缓存 key `(mapId, speed, jump, snowshoes)` 多出一整维。70+ 级的 bot 中 35% 拥有坐骑，其中有相当比例在**未观察**时也处于骑乘态（骑乘态由 `tickRunnable` 维持，与观察无关）。
-  - 后果 1：地图上可能被缓存 **两套图**（骑/不骑），图构建（bake）是重活。
-  - 后果 2：`refreshMovementProfile` 每 20s 重算一次（`PROFILE_REFRESH_INTERVAL_MS`），**上下马（战斗时 `cancelForAction` 卸下、静默后重新上马）会让 profile 在 130/140 两桶间来回切换**，每次切换调用 `clearNavigationState`，随后 `warmGraphAsync` 重新加载/烘焙另一套图。
-  - 对**无玩家**场景：不骑乘时 `mounted()` 为假、profile 与原一致；但**仍可能**因 `mount()` 后的首次 `fromCharacter` 触发一次图缓存未命中（`peekBestGraph` → 兜底 `peekClosestGraph`）。此效应为**一次性**（图建好后驻留），与 7%→20% 的**稳态**上升关系弱，故列次要。
+> ⚠️ **修正（09-15）**：本节原先设想"无玩家时也可能上下马翻转、导致两套图 churn"。经核实**该假设为误**——见 §8.3。无真玩家稳态下 bot 不施法/不攻击（`GrindBrain.grindTick` 未观察时直接 `return`），骑乘态稳定，**不会 churn，稳态下只有一套图**。保留本节仅为记录排查过程；**结论以 §8.3 为准：坐骑不必改**。
+
+- `BotMount.tick()` 挂在 `BotSM.tickRunnable` 最前，**每次宏 tick 都跑**，但 `tickRunnable` 受未观察 36–48s 节流，每秒总量很小。
+- `BotMovementProfile.fromCharacter` 的 `mounted()` 判定（骑乘 `+20 speed / +10 jump`）确会改变 profile 分桶 → 导航图 key 多一维。**但在无玩家稳态下**：不触发 `cancelForAction`，骑乘态不翻转，`refreshMovementProfile` 每 20s 重算也返回同一 profile（`updated.equals` → 早退），故**不产生重复烘焙**。
+- 结论：对本回归（无真玩家 7%→20%）**无实质贡献**，不改动。
 
 ### 4.2 P3/P4/P5/P6 排除理由
 
@@ -179,13 +179,15 @@ footholds= 990  indexed =   890.1 ns/op   （24.3× 快）
 
 ### 5.3 修复方向（若要动，按性价比排序）
 
-| 优先级 | 改动 | 说明 |
-|:--:|---|---|
-| ★★★ | **宠物 follow 计算加 LOD 门控**（未观察只同步坐标、不查树） | 每 tick 仍同步 `pet.setPos`（防闪现），但 `groundSnap`/`footholdId` 只在 `observed` 时算；或未观察降频到 1s/4s。**无观察时成本→~0**，是 7%→20% 的直接回退手段 |
-| ★★★ | **把宠物的宿主 `findBelow` 换成 bot 侧 `pointBelowIndexed`** | 插件已有按列桶索引（24× 快），`BotNavGraphProvider` 里现成。**14–24× 常数收益**，还省下 LinkedList 分配与排序 |
-| ★★☆ | **坐骑 profile 不进导航图 key**（或骑乘只改速度语义、不改图） | 避免骑/不骑两种 profile 各自烘焙一整套图；或骑乘时取"±5 桶内最近图"已有 `peekBestGraph` 兜底即够，不必新烘焙 |
-| ★☆☆ | 宠物 tick 全局频率 200ms → 观察时 200ms / 未观察时 1–4s | 与 bot 移动层同款 LOD 节流 |
-| ★☆☆ | `BotLevelUpNotice` 复用 `LodCounts`/缓存真玩家列表 | 若升级事件在高峰期变密再考虑；当前不构成热点 |
+> **状态（09-15）**：★★★ 两条**已实施**（见 §八）；★★☆ 坐骑**经复核判定不改**（见 §8.3）；★★☆/★☆☆ 两条未做（非本回归必需）。
+
+| 优先级 | 改动 | 说明 | 状态 |
+|:--:|---|---|:--:|
+| ★★★ | **宠物 follow 计算加 LOD 门控**（未观察只同步坐标、不查树） | 每 tick 仍同步 `pet.setPos`（防闪现），但 `groundSnap`/`footholdId` 只在 `observed` 时算。**无观察时成本→~0** | ✅ 已实施 |
+| ★★★ | **把宠物的宿主 `findBelow` 换成 bot 侧索引查询** | 插件已有按列桶索引（24× 快）。**14–24× 常数收益**，还省下 `LinkedList` 分配与排序 | ✅ 已实施 |
+| ~~★★☆~~ | ~~坐骑 profile 不进导航图 key~~ | **经复核为伪命题**：无玩家稳态不翻转，无重复烘焙，不改 | ❌ 不改（§8.3） |
+| ★☆☆ | 宠物 tick 全局频率 200ms → 观察时 200ms / 未观察时 1–4s | 与 bot 移动层同款 LOD 节流；LOD 门控已移除昂贵部分，此步进一步降频（非必需） | ⬜ 未做 |
+| ★☆☆ | `BotLevelUpNotice` 复用 `LodCounts`/缓存真玩家列表 | 若升级事件在高峰期变密再考虑；当前不构成热点 | ⬜ 未做 |
 
 ---
 
@@ -248,3 +250,53 @@ footholds= 990  indexed =   890.1 ns/op   （24.3× 快）
 3. `GCFidget`（1500ms 轮询、独立 1 线程池）也无观察门控，但它只在 `GCMovement.enable(bot)` 的 bot 上活跃（松手即 `cancel`），且 1.5s 周期下成本远小于宠物 tick，维持"非主因"的判定。
 
 **结论：问题依旧存在，未被修复；且影响所有活跃分支。**
+
+---
+
+## 八、修复实施（09-15）
+
+按 §5.3 的优先级，落地了两条**必要且低风险**的修复；第三条（坐骑）经复核**判定不必改**（见下）。
+
+固定代码后：`mvn -o test` → **869 通过 / 0 失败 / 0 错误 / 1 跳过（BUILD SUCCESS）**。
+
+### 8.1 修复项 1：宠物 follow 计算加 LOD 门控（★★★，直接消除回归）
+
+`BotPetFollower`：未观察（`GCMovement.isMapObserved == false`）时**跳过所有地形查询**，只保留坐标同步（`pet.setPos`）——后者是 `fce3449` 修复闪屏的成果，必须保留。
+
+- `followLand` 的落地目标：`observed ? groundSnap(...) : target`
+- `moveTowards` 的落地分支：`if (!noGravity && observed) ny = groundSnap(...)`
+- fh 解析：抽成纯函数 `shouldLookUpFoothold(noGravity, observed)`，未观察时沿用 `pet.getFh()`（保留 `fce3449` 之前的冻结语义，且不再是每 tick 全量）
+- 水面/空中/攀绳（`noGravity`）：仍是 0 次查询，与原先一致
+
+**效果**：无真玩家稳态下，宠物项的宿主查询次数从"每宠物每 tick 1–3 次"降到 **0**；`≤1 tick` 内玩家进图即恢复（与 bot 移动层同款 LOD 语义）。防闪屏特性不受影响（位置仍每 tick 同步）。
+
+### 8.2 修复项 2：宠物查询换用插件索引版（★★★，常数级 14–24×）
+
+新增 `GCMovement.footholdBelow(map, x, y)`（包内桥接 `BotPhysicsEngine.findBelowIndexed`，即移动物理早已在用的"按列桶索引"），并把宠物系统的三处宿主 `findBelow` 全部替换：
+
+- `BotPetFollower.groundSnap`
+- `BotPetController.footholdId`
+- `BotPetController.groundY`
+
+**效果**：即使在**观察态**（玩家在场、查询无法跳过），每次查询也从宿主树的 O(N)+排序+分配到索引版的 ~O(1)，实测 **14–24× 更快**（§3.2）。这条对"有玩家的繁忙地图"同样有效。
+
+### 8.3 修复项 3：坐骑 profile 分离 —— **经复核判定不改**
+
+原 §4.1 把"坐骑 profile 维度扩展"列为次要嫌疑，**该假设经核实为误**：
+
+- 上下马翻转由 `BotMount.cancelForAction`（施法/攻击/坐下时卸下）触发；而**无真玩家稳态下 bot 根本不施法/不攻击**——`GrindBrain.grindTick` 在未观察时第 155 行直接 `return`。
+- 因此无玩家时骑乘态稳定，**不会 churn，稳态下也只有一套图**；坐骑对本回归无实质贡献。
+- 让它"图用基础 profile、物理用坐骑 profile"的改法存在真实物理耦合风险（跳边按 profile 烘焙，物理按 profile 执行），在无收益的情况下**违反最小改动原则，故不改**。
+
+（§4.1、§5.3 中关于坐骑的建议随之作废；若未来观察到"有玩家时"的图缓存抖动，再单独评估。）
+
+### 8.4 改动清单
+
+| 文件 | 改动 |
+|---|---|
+| `GCMovement.java` | +`public static Foothold footholdBelow(MapleMap,int,int)`（索引版桥接） |
+| `BotPetFollower.java` | LOD 门控（`followLand`/`moveTowards`）+ fh 沿用 + `shouldLookUpFoothold` + `groundSnap` 换索引版 |
+| `BotPetController.java` | `footholdId`/`groundY` 换索引版 |
+| `BotPetFollowerLodGateTest.java`（新增） | 3 个用例锁定 LOD 门控真值表（落+观察→查；落+未观察→不查；悬浮→不查） |
+
+**未改动**：`BotMovementProfile`、`BotNavigationGraphProvider`、`BotMount`（见 §8.3）；任一测试文件（除新增的回归测试）。

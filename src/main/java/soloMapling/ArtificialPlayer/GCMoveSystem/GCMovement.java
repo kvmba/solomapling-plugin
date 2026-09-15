@@ -1,6 +1,7 @@
 package soloMapling.ArtificialPlayer.GCMoveSystem;
 
 import org.gms.client.Character;
+import org.gms.server.maps.Foothold;
 import org.gms.server.maps.MapleMap;
 import org.gms.server.maps.Rope;
 import soloMapling.ArtificialPlayer.BotMovementSystem.MovementCommands;
@@ -840,6 +841,15 @@ public final class GCMovement {
      * raw y, so the pathfinder doesn't take a long detour to reach a mob that's really right in front. */
     public static Point groundPointBelow(MapleMap map, int x, int y) {
         return BotPhysicsEngine.findGroundPoint(map, new Point(x, y));
+    }
+
+    /* The foothold whose terrain covers x at/under y, via the same per-column indexed lookup the
+     * movement engine uses — a drop-in for FootholdTree.findBelow that is 14-24x cheaper and
+     * allocation-free (the host tree rebuilds a relevant list and sorts it per query). Null when
+     * there is no floor below the point. Exposed so the pet follower can ground its pets without
+     * paying the host tree's O(footholds) query on every 200ms tick of every pet. */
+    public static Foothold footholdBelow(MapleMap map, int x, int y) {
+        return BotPhysicsEngine.findBelowIndexed(map, new Point(x, y));
     }
 
     /* Map ids reachable from fromMapId within maxHops over WALKABLE portals plus curated scripted warps
