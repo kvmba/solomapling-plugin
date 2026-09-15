@@ -32,7 +32,8 @@ public final class TownLoiter {
     }
 
     // How many bots may claim one ledge before we prefer another - keeps a returning crowd from clumping.
-    private static final int CAPACITY_PER_LEDGE = 3;
+    // Sourced from the shared constant so it cannot drift from TownStation's CAPACITY (see that field).
+    private static final int CAPACITY_PER_LEDGE = BotSpotClaims.TOWN_LEDGE_CAPACITY;
 
     // Re-pick attempts when the first ledge we land on is already at capacity.
     private static final int PICK_ATTEMPTS = 4;

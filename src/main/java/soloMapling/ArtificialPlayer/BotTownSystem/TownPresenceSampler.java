@@ -4,6 +4,7 @@ import org.gms.server.maps.MapObject;
 import org.gms.server.maps.MapObjectType;
 import org.gms.server.maps.MapleMap;
 import org.gms.server.maps.Portal;
+import soloMapling.ArtificialPlayer.BotSpotClaims;
 import soloMapling.ArtificialPlayer.GCMoveSystem.GCMovement;
 
 import java.awt.Point;
@@ -88,6 +89,17 @@ public final class TownPresenceSampler {
     // reach it - so it would pile up unclaimed. Standing on the floor keeps the whole spray retrievable.
     public static List<Point> sample(MapleMap map, Point anchor, int count, TownOverrides overrides,
                                      boolean floorOnly) {
+        return sample(map, anchor, count, overrides, floorOnly, false);
+    }
+
+    // As above, but ledges whose live town claim is already at capacity are dropped from the draw when
+    // `avoidCrowdedLedges` is set. This is what stops a pause point from landing on a platform a crowd
+    // already fills: the stationed SocialBots claim their ledges through BotSpotClaims, and a later
+    // relocate/scatter (which samples a SINGLE point, so the sampler's own in-call spacing can do nothing)
+    // now sees those claims and steers elsewhere. Nothing is dropped when every eligible ledge is full, so
+    // a caller still gets a spot rather than nothing on a map the population has outgrown.
+    public static List<Point> sample(MapleMap map, Point anchor, int count, TownOverrides overrides,
+                                     boolean floorOnly, boolean avoidCrowdedLedges) {
         List<Point> out = new ArrayList<>();
         if (map == null || anchor == null || count <= 0) {
             return out;
@@ -113,6 +125,20 @@ public final class TownPresenceSampler {
         }
         if (floorOnly) {
             ledges = floorBand(ledges);
+        }
+        if (avoidCrowdedLedges) {
+            // Drop ledges whose live town claim is already full - only the ones this draw could use, so the
+            // read stays proportional to the eligible set (and respects the floorBand filter above).
+            int mapId = map.getId();
+            List<GCMovement.Ledge> open = new ArrayList<>();
+            for (GCMovement.Ledge l : ledges) {
+                if (!BotSpotClaims.isFull(mapId, l.regionId())) {
+                    open.add(l);
+                }
+            }
+            if (!open.isEmpty()) {
+                ledges = open;
+            }
         }
         List<Anchor> anchors = collectAnchors(map);
         double groundBandY = groundBandY(ledges);

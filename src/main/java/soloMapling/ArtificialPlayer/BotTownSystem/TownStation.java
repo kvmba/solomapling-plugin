@@ -31,9 +31,11 @@ public final class TownStation {
     private TownStation() {
     }
 
-    // How many bots may claim one ledge before we prefer another. MUST match TownLoiter.CAPACITY_PER_LEDGE
-    // so the shared BotSpotClaims cap is enforced consistently across both town consumers (Gap #3).
-    private static final int CAPACITY = 3;
+    // How many bots may claim one ledge before we prefer another. Sourced from the one shared constant
+    // (BotSpotClaims.TOWN_LEDGE_CAPACITY) so this cap cannot drift from TownLoiter's - the two used to be
+    // equal-by-convention 3's, and a mismatch would let the hang-out and roaming crowds disagree about
+    // when a ledge is full (the very huddling this registry exists to prevent).
+    private static final int CAPACITY = BotSpotClaims.TOWN_LEDGE_CAPACITY;
 
     // botId -> the ledge claim it holds, so releaseSpot() frees exactly what claimSpot() took.
     private record Claim(int mapId, int ledgeId) {
