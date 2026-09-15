@@ -33,6 +33,22 @@ public final class PqBotSpawner {
     /** Levels are picked per bot, so the lobby does not look stamped out. */
     private static final Random RANDOM = new Random();
 
+    /**
+     * How many parties' worth of bots each lobby holds. Matches the density the Orbis lobby has
+     * had all along (ten to fifteen in a room sized for five), so the quest lobbies added here
+     * do not stand out as emptier than the one that already existed.
+     */
+    private static final int BOTS_PER_PARTY_MULTIPLE = 3;
+
+    /**
+     * The same scaling the rest of the ambient population goes through, so a server set to run a
+     * lighter population runs lighter quest lobbies too rather than a fixed crowd that ignores
+     * the setting. Delegated rather than reimplemented, so the two cannot drift apart.
+     */
+    private static int scaledAmbient(int base) {
+        return soloMapling.Environment.EnvironmentManager.scaledAmbient(base);
+    }
+
     private PqBotSpawner() {
     }
 
@@ -54,7 +70,13 @@ public final class PqBotSpawner {
             return List.of();
         }
 
-        int want = point.botsToOffer(1); // one player is the case worth covering
+        // Three times what one player would need. A lobby wants a crowd the way Orbis's does,
+        // not exactly enough to start: a handful of bots that matches the party size to the
+        // person reads as a set of placeholders, and a player choosing a party wants spare
+        // bodies to pick from. The multiple is applied to the party-filling count, so each
+        // quest still offers at least one full party's worth.
+        int want = point.botsToOffer(1) * BOTS_PER_PARTY_MULTIPLE;
+        want = scaledAmbient(want);
         if (want <= 0) {
             return List.of();
         }
@@ -125,7 +147,12 @@ public final class PqBotSpawner {
     private static List<Integer> placeOn(PqRecruitPoints.Point point, List<String> platforms,
                                          int count) {
         List<Integer> ids = new ArrayList<>();
-        int perPlatform = Math.max(1, count / platforms.size());
+        // Whole share first, then one each to the leading platforms for the remainder - the
+        // same split the Orbis lobby has always used. Note the share may be zero: a room with
+        // more platforms than bots must leave most of them empty, and forcing a bot onto each
+        // (Math.max(1, ...) here was the earlier mistake) multiplies the count by the number of
+        // platforms instead of placing the number asked for.
+        int perPlatform = count / platforms.size();
         int remainder = count % platforms.size();
         for (int i = 0; i < platforms.size(); i++) {
             int here = perPlatform + (i < remainder ? 1 : 0);

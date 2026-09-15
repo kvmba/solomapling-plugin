@@ -694,7 +694,7 @@ public class EnvironmentManager {
      * <p>Unlike {@code PopulationPlan.scaled} this floors at 1 rather than 0: these are ambient
      * crowds, so a small scale should thin a crowd, not delete the spot entirely.
      */
-    static int scaledAmbient(int base) {
+    public static int scaledAmbient(int base) {
         if (base <= 0) {
             return 0;
         }
