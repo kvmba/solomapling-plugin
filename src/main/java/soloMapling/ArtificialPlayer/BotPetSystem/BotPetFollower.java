@@ -16,6 +16,7 @@ import org.gms.util.PacketCreator;
 import soloMapling.ArtificialPlayer.BotClientBinding;
 import soloMapling.ArtificialPlayer.BotCommandsPack.DropCommands;
 import soloMapling.ArtificialPlayer.GCMoveSystem.GCMovement;
+import soloMapling.ArtificialPlayer.GCMoveSystem.MapleMovement;
 
 import java.awt.Point;
 import java.util.List;
@@ -85,26 +86,10 @@ public final class BotPetFollower {
     // The pet runs its OWN physics (the client only renders the position/fh/velocity
     // we send), mirroring the bot engine's kinematics — it is not glued to the owner.
     // Numbers are the client's Physics.img values, as used by BotPhysicsEngine.
-    private static final double GRAVITY_PXS2 = 2000.0;      // land gravity
-    private static final double MAX_FALL_PXS = 670.0;       // land terminal fall
     private static final double WALK_SPEED_PXS = 100.0;     // fixed pet walk pace
-    private static final double WALK_ACCEL_PXS2 = 900.0;    // firm-ground accel (smooth ramp)
-    private static final double SLIP_WALK_ACCEL_PXSS = 1400.0;  // snow (fs<1): slow, slippery start
-    private static final double SLIP_GLIDE_DECEL_PXSS = 400.0;  // snow: long glide-out
-    private static final double APPROACH_TAU_S = 0.25;      // ease in near the target
-    private static final double JUMP_SPEED_PXS = 555.0;     // hop onto a higher platform
     private static final int JUMP_REACH_PX = 160;           // owner above this => warp instead
     private static final int GROUND_SNAP_PX = 6;            // "standing on the floor" tolerance
     private static final int LOST_PX = 500;                 // 1-D horizontal gap -> warp to the owner
-    // Water — the bot's swim model (sinks under gravity; UP-held thrust floats back up).
-    private static final double SWIM_GRAVITY_PXS2 = 590.0;
-    private static final double SWIM_UP_THRUST_PXS2 = 412.0;
-    private static final double SWIM_ACCEL_PXS2 = 600.0;
-    private static final double SWIM_FRICTION_HZ = 4.21;
-    private static final double SWIM_VEL_PXS = 140.0;
-    private static final double SWIM_MAX_SPEED_PXS = 800.0;
-    private static final double SWIM_FREE_MAX_SINK_PXS = 140.0;
-    private static final double SWIM_UP_MAX_SINK_PXS = 42.0;
     /** Vertical tolerance (px) for treating a floor as the owner's own level. */
     private static final int GROUND_STEP_PX = 40;
 
@@ -291,7 +276,7 @@ public final class BotPetFollower {
         if (air) {
             // Hop arc: gravity, land on the floor under the pet's x (a floor that is at or
             // below the owner's level — so it can land one platform UP).
-            ay = Math.min(MAX_FALL_PXS, ay + GRAVITY_PXS2 * dt);
+            ay = Math.min(MapleMovement.MAX_FALL_PXS, ay + MapleMovement.GRAVITY_PXS2 * dt);
             nx = p.x + (int) Math.round(ax * dt);
             ny = p.y + (int) Math.round(ay * dt);
             Foothold land = null;
@@ -342,7 +327,7 @@ public final class BotPetFollower {
                     if (ax == 0) {
                         ax = WALK_SPEED_PXS;
                     }
-                    ay = -JUMP_SPEED_PXS;
+                    ay = -MapleMovement.JUMP_SPEED_PXS;
                     velX.put(id, ax);
                     fallVy.put(id, ay);
                     applyAndSend(chr, pet, index, p, (int) Math.round(ax), (int) Math.round(ay), 0,
@@ -364,7 +349,7 @@ public final class BotPetFollower {
         } else {
             // Falling / down-jump: integrate gravity, land on the first floor strictly
             // below the pet (so the platform it dropped through cannot catch it back).
-            double vy = Math.min(MAX_FALL_PXS, fallVy.getOrDefault(id, 0.0) + GRAVITY_PXS2 * dt);
+            double vy = Math.min(MapleMovement.MAX_FALL_PXS, fallVy.getOrDefault(id, 0.0) + MapleMovement.GRAVITY_PXS2 * dt);
             ny = p.y + (int) Math.round(vy * dt);
             Foothold fh = GCMovement.footholdBelow(map, nx, p.y);
             if (fh != null) {
@@ -413,25 +398,14 @@ public final class BotPetFollower {
 
         double vx = velX.getOrDefault(id, 0.0);
         double vy = fallVy.getOrDefault(id, 0.0);
-        // Horizontal: hold toward the owner (accel/drag), else drag out.
+        // The SHARED water model: hold toward the owner; hold UP when it is well above,
+        // else free (small sink cap) — the same law the bots swim with.
         double dx = botX - p.x;
-        if (Math.abs(dx) > 4) {
-            vx += Math.signum(dx) * SWIM_ACCEL_PXS2 * dt;
-        }
-        double drag = Math.max(0.0, 1.0 - SWIM_FRICTION_HZ * dt);
-        vx *= drag;
-        vy *= drag;
-        vx = Math.max(-SWIM_VEL_PXS, Math.min(SWIM_VEL_PXS, vx));
-
-        // Vertical: gravity always; UP-held thrust when below the target. Terminal sink
-        // cap is small near the target (float) and larger when dropping further.
-        boolean up = targetY - p.y > 30; // owner well above -> hold UP
-        vy += SWIM_GRAVITY_PXS2 * dt;
-        if (up) {
-            vy -= SWIM_UP_THRUST_PXS2 * dt;
-        }
-        double sinkCap = up ? SWIM_UP_MAX_SINK_PXS : SWIM_FREE_MAX_SINK_PXS;
-        vy = Math.max(-SWIM_MAX_SPEED_PXS, Math.min(sinkCap, vy));
+        int moveDir = Math.abs(dx) > 4 ? (int) Math.signum(dx) : 0;
+        int verticalHold = targetY - p.y > 30 ? -1 : 0;
+        MapleMovement.SwimStep swim = MapleMovement.swimStep(vx, vy, moveDir, verticalHold, dt);
+        vx = swim.vx();
+        vy = swim.vy();
 
         int nx = p.x + (int) Math.round(vx * dt);
         int ny = p.y + (int) Math.round(vy * dt);
@@ -449,26 +423,22 @@ public final class BotPetFollower {
     }
 
     /**
-     * Horizontal motor — the bot's model. On firm ground: a smooth velocity ramp
-     * (accelerate, ease into a stop near the target, glide to a halt). On slippery
-     * ground (map {@code fs} &lt; 1, e.g. El Nath snow): the bot's kinetic model —
-     * linear ramps scaled by {@code fs}, so the top speed is the same but starting
-     * takes ~1/fs longer and it slides out over ~1/fs the distance.
+     * Horizontal motor — the SHARED core ({@link MapleMovement}), the same 8ms-step
+     * ground law the bots walk with. The pet keeps {@code vx} in px/s; inside we run
+     * the client's per-step integration toward the owner (with the map's snow/slip
+     * factor), so the pet walks — and slides on snow — exactly like a bot.
      */
-    private static double stepMotor(double v, double dx, double walkSpeed, MapleMap map, double dt) {
-        double fs = map != null ? map.getFootholdSpeed() : 1.0f;
-        if (fs > 0.0 && fs < 1.0) {
-            boolean hold = Math.abs(dx) > Math.max(2.0, Math.abs(v) * APPROACH_TAU_S);
-            double dv = (hold ? SLIP_WALK_ACCEL_PXSS : SLIP_GLIDE_DECEL_PXSS) * fs * dt;
-            double sign = hold ? Math.signum(dx) : -Math.signum(v);
-            v += sign * dv;
-            return Math.max(-walkSpeed, Math.min(walkSpeed, v));
+    private static double stepMotor(double vx, double dx, double walkPxs, MapleMap map, double dt) {
+        double hForce = MapleMovement.hForceStepForWalkSpeed(walkPxs);
+        double cap = MapleMovement.walkSpeedStep(walkPxs);
+        double fs = MapleMovement.slipScale(map);
+        int dir = Math.abs(dx) > 4 ? (int) Math.signum(dx) : 0;
+        double vStep = vx * (MapleMovement.CLIENT_STEP_MS / 1000.0);
+        int steps = MapleMovement.stepsFor(dt * 1000.0);
+        for (int i = 0; i < steps; i++) {
+            vStep = MapleMovement.groundStep(vStep, null, dir, hForce, cap, fs);
         }
-        double stopDist = Math.abs(v) * APPROACH_TAU_S;
-        double desired = Math.abs(dx) <= Math.max(2.0, stopDist) ? 0.0 : Math.signum(dx) * walkSpeed;
-        double max = WALK_ACCEL_PXS2 * dt;
-        v += Math.max(-max, Math.min(max, desired - v));
-        return Math.max(-walkSpeed, Math.min(walkSpeed, v));
+        return vStep / (MapleMovement.CLIENT_STEP_MS / 1000.0);
     }
 
     /** Whether the pet's feet rest on a floor (within a snap) and it is not rising. */

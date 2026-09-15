@@ -15,7 +15,7 @@ import java.util.concurrent.ConcurrentHashMap;
 // with types renamed (BotEntry->BotMovementState, BotCombatManager->BotContactDamage). SoloMapling
 // addition: beginPortalDrop(). Credit: NutNNut.
 final class BotPhysicsEngine {
-    private static final double CLIENT_GROUND_STEP_MS = 8.0;
+    private static final double CLIENT_GROUND_STEP_MS = MapleMovement.CLIENT_STEP_MS;
     private static final double CLIENT_GROUND_STEP_S = CLIENT_GROUND_STEP_MS / 1000.0;
     // Brake-to-stop sim bound for slippery landings: stop takes ~2.3/fs ticks from top
     // speed (11 at El Nath fs=0.2); 240 covers any fs >= ~0.01 with margin.
@@ -34,9 +34,9 @@ final class BotPhysicsEngine {
         // velocity, and rope climb/jump). Old values kept in comments for reference.
         // Ground-truth source: wz/Map.wz/Physics.img.xml (loaded by v83 client into
         // physcfg @ *[0xbebfa0]+8). Field name listed inline where applicable.
-        public int WALK_VEL = 125;                  // Physics.img walkSpeed
-        public float GRAVITY_PXS2 = 2000.0f;        // Physics.img gravityAcc
-        public float JUMP_SPEED_PXS = 555.0f;       // Physics.img jumpSpeed
+        public int WALK_VEL = (int) MapleMovement.WALK_VEL_PXS; // Physics.img walkSpeed
+        public float GRAVITY_PXS2 = (float) MapleMovement.GRAVITY_PXS2; // Physics.img gravityAcc
+        public float JUMP_SPEED_PXS = (float) MapleMovement.JUMP_SPEED_PXS; // Physics.img jumpSpeed
         public float JUMP_DOWN_PXS = 196.0f;        // measured -196 px/s down-jump kick (not in Physics.img)
         public float JUMP_ROPE_PXS = 375.0f;        // rope-jump finding (NOT applied): real client kick = (±162, -277)
         // Flash Jump (Hermit/NL) apex impulse (GreenCatMS RE'd client constants — WZ has only mpCon, no
@@ -44,7 +44,7 @@ final class BotPhysicsEngine {
         // speed%); -350 vertical re-launches the dash. See kb_bot_movement_skills_teleport_flashjump.
         public float FLASH_JUMP_H_PXS = 550.0f;
         public float FLASH_JUMP_V_PXS = -350.0f;
-        public float MAX_FALL_PXS = 670.0f;         // Physics.img fallSpeed
+        public float MAX_FALL_PXS = (float) MapleMovement.MAX_FALL_PXS; // Physics.img fallSpeed
         public double HFORCE_PXS = 16.667;          // was 20.0 (yields 125 px/s walk via hF*GROUNDSLIP/(FRICTION+SLOPEFACTOR))
         public double GROUNDSLIP = 3.0;
         public double FRICTION = 0.3;
@@ -54,8 +54,8 @@ final class BotPhysicsEngine {
         // (logs/monitored-packets-elnath-slippery-walk-left-right-spd{100,110}.log, fit
         // residuals <= 3.1 px/s) and consistent with client constants walkForce 140000 /
         // mass 100 and walkDrag 80000 / mass / 2 (client halves friction when fs<1).
-        public double SLIP_WALK_ACCEL_PXSS = 1400.0;  // x fs -> px/s^2 while a direction is held
-        public double SLIP_GLIDE_DECEL_PXSS = 400.0;  // x fs -> px/s^2 while gliding (no input)
+        public double SLIP_WALK_ACCEL_PXSS = MapleMovement.SLIP_WALK_ACCEL; // x fs -> px/s^2 while a direction is held
+        public double SLIP_GLIDE_DECEL_PXSS = MapleMovement.SLIP_GLIDE_DECEL; // x fs -> px/s^2 while gliding (no input)
         // Airborne horizontal control — CONFIRMED in disassembly (Angel.idb,
         // CVecCtrl::CalcFloat @ 0x9b2c3c) and packet-fitted (logs/monitored-packets-
         // elnath-tricky-jumps-spd100v2.log fs=0.2; logs/monitored-packets -
@@ -1389,45 +1389,11 @@ final class BotPhysicsEngine {
             entry.swimJumpRequested = false;
         }
 
-        // --- Horizontal control ---
-        if (entry.swimMoveDir != 0) {
-            double accelStep = cfg.SWIM_ACCEL_PXS2 * t * Integer.signum(entry.swimMoveDir);
-            vx += accelStep;
-        }
-
-        // Symmetric water drag.
-        double dragRetention = Math.max(0.0, 1.0 - cfg.SWIM_FRICTION_HZ * t);
-        vx *= dragRetention;
-        vy *= dragRetention;
-
-        // Apply gravity (always full strength).
-        vy += cfg.SWIM_GRAVITY_PXS2 * t;
-
-        // Continuous UP/DOWN thrust matches the v83 vForce model: pressing UP
-        // doesn't just lower the sink cap, it continuously accelerates the
-        // character upward. Without this the bot's burst trajectory falls
-        // far short of a real player's "burst + hold UP" reach.
-        if (entry.swimVerticalHold < 0) {
-            vy -= cfg.SWIM_UP_THRUST_PXS2 * t;
-        } else if (entry.swimVerticalHold > 0) {
-            vy += cfg.SWIM_DOWN_THRUST_PXS2 * t;
-        }
-
-        // Horizontal cap.
-        vx = Math.max(-cfg.SWIM_MAX_SPEED_PXS, Math.min(cfg.SWIM_MAX_SPEED_PXS, vx));
-        if (entry.swimMoveDir != 0) {
-            double cap = cfg.SWIM_VEL_PXS;
-            if (vx >  cap && entry.swimMoveDir > 0) vx =  cap;
-            if (vx < -cap && entry.swimMoveDir < 0) vx = -cap;
-        }
-        // Vertical sink cap — discrete intent picks the terminal velocity.
-        // Upward velocity (vy < 0) is unaffected so jump bursts still arc up.
-        double sinkCap = switch (Integer.signum(entry.swimVerticalHold)) {
-            case -1 -> cfg.SWIM_UP_MAX_SINK_PXS;
-            case  1 -> cfg.SWIM_DOWN_MAX_SPEED_PXS;
-            default -> cfg.SWIM_FREE_MAX_SINK_PXS;
-        };
-        vy = Math.max(-cfg.SWIM_MAX_SPEED_PXS, Math.min(sinkCap, vy));
+        // Velocity law (accel / drag / gravity / UP-DOWN thrust / caps) is the SHARED
+        // core — the same water model the pets swim with.
+        MapleMovement.SwimStep swim = MapleMovement.swimStep(vx, vy, entry.swimMoveDir, entry.swimVerticalHold, t);
+        vx = swim.vx();
+        vy = swim.vy();
 
         double nextX = entry.physX + vx * t;
         double nextY = entry.physY + vy * t;
@@ -2160,44 +2126,9 @@ final class BotPhysicsEngine {
 
     private static double applyGroundPhysicsStep(double hspeed, Foothold foothold, int desiredDir,
                                                  BotMovementProfile profile, double slipScale) {
-        double hforce = desiredDir * maxHForcePerClientStep(profile);
-        if (hforce == 0.0 && Math.abs(hspeed) < 0.1) {
-            return 0.0;
-        }
-
-        if (slipScale < 1.0) {
-            return applySlipperyGroundStep(hspeed, desiredDir, profile, slipScale);
-        }
-        double inertia = hspeed / cfg.GROUNDSLIP;
-        double slope = clampedSlope(foothold);
-        double drag = (cfg.FRICTION + cfg.SLOPEFACTOR * (1.0 + slope * -inertia)) * inertia;
-        return hspeed + (hforce - drag) * slipScale;
-    }
-
-    /*
-     * Slippery ground (fs<1) is kinetic, not the force/drag model: packet captures show
-     * LINEAR velocity ramps — constant accel SLIP_WALK_ACCEL_PXSS x fs while a
-     * direction is held (hard-capped at the profile's walk speed; the cap scales with the
-     * speed stat, the accel does not) and constant decel SLIP_GLIDE_DECEL_PXSS x fs
-     * while gliding. El Nath fs=0.2: 0 to 125 px/s in ~0.45 s, ~1.6 s / ~98 px to slide out.
-     * Slope is deliberately ignored here (captures are flat ground; snow maps mostly are).
-     */
-    private static double applySlipperyGroundStep(double hspeed, int desiredDir,
-                                                  BotMovementProfile profile, double fs) {
-        if (desiredDir != 0) {
-            double dv = cfg.SLIP_WALK_ACCEL_PXSS * fs * CLIENT_GROUND_STEP_S * CLIENT_GROUND_STEP_S;
-            double cap = maxHSpeedPerClientStep(profile);
-            return Math.clamp(hspeed + desiredDir * dv, -cap, cap);
-        }
-        double dv = cfg.SLIP_GLIDE_DECEL_PXSS * fs * CLIENT_GROUND_STEP_S * CLIENT_GROUND_STEP_S;
-        return hspeed - Math.copySign(Math.min(Math.abs(hspeed), dv), hspeed);
-    }
-
-    private static double clampedSlope(Foothold foothold) {
-        if (foothold == null) {
-            return 0.0;
-        }
-        return Math.clamp(foothold.slope(), -0.5, 0.5);
+        // Shared core (MapleMovement) — the same ground step the pets use.
+        return MapleMovement.groundStep(hspeed, foothold, desiredDir,
+                maxHForcePerClientStep(profile), maxHSpeedPerClientStep(profile), slipScale);
     }
 
     // True if a step between two endpoint positions is physically walkable (same criteria as
@@ -2215,8 +2146,7 @@ final class BotPhysicsEngine {
      * previously misread as a ground-speed scale, which made El Nath bots crawl at 20% speed.)
      */
     private static double mapGroundSlipScale(MapleMap map) {
-        float fs = map != null ? map.getFootholdSpeed() : 0.0f;
-        return fs > 0.0f && fs < 1.0f ? fs : 1.0;
+        return MapleMovement.slipScale(map);
     }
 
     /* Like .mapGroundSlipScale(MapleMap), but snowshoes (worn-shoe WZ fs >= 1, see
