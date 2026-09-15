@@ -199,10 +199,10 @@ public final class BotPetFollower {
             return; // LOD: nobody can see the pets — skip the whole pet tick
         }
 
-        // Water = the map says so, or the bot itself is currently swimming (they agree
-        // for maps with info/swim set; the stance check also covers a bot mid-water in
-        // a map whose flag the client and server might read differently).
-        boolean swim = map.isSwim() || CharacterStance.isSwimming(chr.getStance());
+        // Swim only while the BOT is actually swimming. In a swim map a bot standing on a
+        // platform walks (JQ / landing) and its pet must walk too — using the map flag
+        // alone would keep the pet swimming while the owner is on dry ground.
+        boolean swim = CharacterStance.isSwimming(chr.getStance());
         // Iterate by the pet-ARRAY index, not a running count: the slot in
         // MOVE_PET / PET_COMMAND is the array index (the host sends it from
         // getPetIndex), so skipping a null without advancing would mis-slot a
@@ -398,17 +398,27 @@ public final class BotPetFollower {
 
         double vx = velX.getOrDefault(id, 0.0);
         double vy = fallVy.getOrDefault(id, 0.0);
-        // The SHARED water model: hold toward the owner; hold UP when it is well above,
-        // else free (small sink cap) — the same law the bots swim with.
+        // The SHARED water model: hold toward the owner; when the owner is well above,
+        // HOLD UP — the bot's own up mechanic is a burst (UP alone only slows the sink),
+        // so we fire the same burst on the transition — else free-sink.
         double dx = botX - p.x;
         int moveDir = Math.abs(dx) > 4 ? (int) Math.signum(dx) : 0;
         int verticalHold = targetY - p.y > 30 ? -1 : 0;
+        if (verticalHold < 0 && vy >= 0) {
+            vy = -MapleMovement.SWIM_JUMP_BURST_PXS; // rising burst (bot swim-jump)
+        }
         MapleMovement.SwimStep swim = MapleMovement.swimStep(vx, vy, moveDir, verticalHold, dt);
         vx = swim.vx();
         vy = swim.vy();
 
         int nx = p.x + (int) Math.round(vx * dt);
         int ny = p.y + (int) Math.round(vy * dt);
+        // Clamp at the map boundary (VR bottom) like the bot: tread water, don't sink out.
+        int waterFloor = MapleMovement.swimFloorY(chr.getMap());
+        if (ny > waterFloor) {
+            ny = waterFloor;
+            vy = 0;
+        }
         velX.put(id, vx);
         fallVy.put(id, vy);
         applyAndSend(chr, pet, index, new Point(nx, ny),

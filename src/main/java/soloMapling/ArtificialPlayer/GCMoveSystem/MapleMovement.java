@@ -144,4 +144,17 @@ public final class MapleMovement {
         vy = Math.max(-SWIM_MAX_SPEED_PXS, Math.min(sinkCap, vy));
         return new SwimStep(vx, vy);
     }
+
+    /** The water's UP-held burst (px/s, negative = up) that gets a swimmer rising. */
+    public static final double SWIM_JUMP_BURST_PXS = 1000.0;
+
+    /**
+     * Lowest y a swimmer may sink to — the client's own map boundary (VR bottom), so
+     * it treads water there instead of sinking out of the map. {@code Integer.MAX_VALUE}
+     * for maps without usable VR bounds.
+     */
+    public static int swimFloorY(MapleMap map) {
+        java.awt.Rectangle area = map == null ? null : map.getMapArea();
+        return area != null && area.height > 0 ? area.y + area.height : Integer.MAX_VALUE;
+    }
 }

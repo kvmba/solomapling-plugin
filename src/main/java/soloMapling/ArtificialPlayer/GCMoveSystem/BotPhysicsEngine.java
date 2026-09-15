@@ -284,8 +284,7 @@ final class BotPhysicsEngine {
      * Integer.MAX_VALUE when the map has no usable VR bounds, so nothing changes for those maps
      * (the driver's fall-off-map recovery still backstops them). See applySwimMotion. */
     private static int swimFloorY(MapleMap map) {
-        java.awt.Rectangle area = map == null ? null : map.getMapArea();
-        return area != null && area.height > 0 ? area.y + area.height : Integer.MAX_VALUE;
+        return MapleMovement.swimFloorY(map);
     }
 
     static float jumpForcePerTick() {
