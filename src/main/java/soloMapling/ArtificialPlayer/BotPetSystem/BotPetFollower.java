@@ -32,15 +32,21 @@ import java.util.concurrent.TimeUnit;
  *
  * <p>Each pet runs its OWN physics (the client only renders the position/fh we send)
  * rather than being glued to a snapshot of the owner — see the movement below. On
- * land it accelerates toward a point beside the owner (momentum, so it lags and then
- * catches up), stands on the floor under its own x, and follows the owner's position,
- * not its facing, so a turn never flings it across. Gravity only ever pulls it DOWN,
- * so a jumped owner never drags the pet into the air; a pet whose own feet leave the
- * ground (its owner climbed a platform, or either walked off a ledge) falls under
- * gravity and lands on the floor below. A pet left too far behind does not sprint —
- * it flashes to the owner's side (official behaviour) and resumes. In water it bobs
- * (sinks under gravity, floats back up) in the SWIM stance (12/13); a rope/ladder
- * owner makes it hang (HANG, 30/31).</p>
+ * land it walks with a smooth velocity ramp (no sudden accel/decel) toward a point
+ * beside the owner, stands on the floor under its own x, and follows the owner's
+ * position, not its facing, so a turn never flings it across. Gravity only ever pulls
+ * it DOWN, so a jumped owner never drags the pet into the air; a pet whose own feet
+ * leave the ground (its owner climbed a platform, or either walked off a ledge) falls
+ * under gravity and lands on the floor below. A pet left too far behind HORIZONTALLY
+ * warps to the owner's side (official behaviour) — a vertical owner move (a jump or a
+ * fall) is followed with the pet's own physics instead. In water it bobs (sinks under
+ * gravity, floats back up) in the SWIM stance (12/13); a rope/ladder owner makes it
+ * hang (HANG, 30/31).</p>
+ *
+ * <p><b>Map changes are the engine's job.</b> On map entry the engine's own
+ * {@code MapleMap.addPlayer} re-places each pet at the owner's feet and re-sends it,
+ * and every observer gets it via {@code spawnPlayerMapObject} — so a pet rides along
+ * through any portal / warp / death carry-home with no code here.</p>
  *
  * <p><b>LOD like the bot's own movement.</b> While no real player watches the map the
  * whole pet tick is skipped — no physics, no foothold lookup, no packets. The first
@@ -81,8 +87,10 @@ public final class BotPetFollower {
     // owner. Numbers match the client's Physics.img as used by BotPhysicsEngine.
     private static final double GRAVITY_PXS2 = 2000.0;      // land gravity
     private static final double MAX_FALL_PXS = 670.0;       // land terminal fall
-    private static final double WALK_ACCEL_PXS2 = 4000.0;   // horizontal acceleration
+    private static final double WALK_ACCEL_PXS2 = 900.0;    // smooth ramp, no sudden accel/decel
+    private static final double APPROACH_TAU_S = 0.25;      // ease in near the target
     private static final int GROUND_SNAP_PX = 6;            // "standing on the floor" tolerance
+    private static final int LOST_PX = 500;                 // 1-D horizontal gap -> warp to the owner
     private static final double SWIM_GRAVITY_PXS2 = 590.0;  // underwater sink
     private static final double SWIM_BUOYANCY_PXS2 = 900.0; // float back up (net up => a bob)
     private static final double SWIM_MAX_SPEED_PXS = 800.0;
@@ -246,11 +254,12 @@ public final class BotPetFollower {
         int tx = chr.getPosition().x + offsetFor(pet);
         double dt = Math.max(0.05, config.followTickMs() / 1000.0);
 
-        // Official follow: a pet that has fallen too far from the owner does NOT sprint
-        // after it — it flashes to the owner's side (a warp-like reposition) and resumes
-        // from there. Measured in 2D, so an owner that dropped from a height (or climbed
-        // far above) also re-homes the pet to its level.
-        if (Math.hypot(p.x - tx, p.y - chr.getPosition().y) > config.teleportDistPx()) {
+        // Official follow: a pet that has fallen too far behind does NOT sprint after the
+        // owner — it flashes to the owner's side (a warp-like reposition) and resumes.
+        // The gap is HORIZONTAL: a vertical owner move (a jump, or falling) is normally
+        // followed with the pet's own physics; only a beyond-reach horizontal lead (a
+        // fast-running owner, or a same-map teleport) re-homes it.
+        if (Math.abs(p.x - chr.getPosition().x) > LOST_PX) {
             velX.remove(pet.getUniqueId());
             fallVy.remove(pet.getUniqueId());
             Foothold fh = GCMovement.footholdBelow(chr.getMap(), tx, chr.getPosition().y - GROUND_PROBE_UP);
@@ -265,7 +274,7 @@ public final class BotPetFollower {
         // The pet never hops into the air after a jumping owner — gravity only ever
         // pulls it DOWN (a pet over a gap just falls).
 
-        vx = stepMotor(vx, desiredVelocity(tx - p.x, config.followSpeed()), config.followSpeed(), dt);
+        vx = stepMotor(vx, tx - p.x, config.followSpeed(), dt);
         int nx = p.x + (int) Math.round(vx * dt);
 
         int ny = p.y;
@@ -321,7 +330,7 @@ public final class BotPetFollower {
         double vy = fallVy.getOrDefault(pet.getUniqueId(), 0.0);
 
         // Official follow: too far behind -> flash to the owner's side, don't sprint.
-        if (Math.hypot(p.x - botX, p.y - targetY) > config.teleportDistPx()) {
+        if (Math.abs(p.x - botX) > LOST_PX) {
             velX.remove(pet.getUniqueId());
             fallVy.remove(pet.getUniqueId());
             teleportPet(chr, pet, index, new Point(botX, targetY), 0,
@@ -329,7 +338,7 @@ public final class BotPetFollower {
             return;
         }
 
-        vx = stepMotor(vx, desiredVelocity(botX - p.x, config.followSpeed()), config.followSpeed(), dt);
+        vx = stepMotor(vx, botX - p.x, config.followSpeed(), dt);
         vy += SWIM_GRAVITY_PXS2 * dt;
         if (p.y > targetY) {
             vy -= SWIM_BUOYANCY_PXS2 * dt; // dropped below the target: float back up
@@ -345,16 +354,15 @@ public final class BotPetFollower {
                 vx >= 0 ? PET_SWIM_RIGHT : PET_SWIM_LEFT, config, observed);
     }
 
-    /** Desired horizontal velocity toward a target {@code dx} away; 0 within the dead zone. */
-    private static double desiredVelocity(double dx, double maxSpeed) {
-        if (Math.abs(dx) < 4) {
-            return 0;
-        }
-        return Math.signum(dx) * maxSpeed;
-    }
-
-    /** Accelerate {@code v} toward {@code desired} at WALK_ACCEL, capped at +-maxSpeed. */
-    private static double stepMotor(double v, double desired, double maxSpeed, double dt) {
+    /**
+     * Horizontal motor: a smooth velocity ramp — accelerate toward the target at
+     * WALK_ACCEL, ease into a stop within APPROACH_TAU seconds as it nears, and glide
+     * to a halt on arrival. No sudden accel/decel (unlike a bang-bang controller), so
+     * the pet reads like it is walking. Accelerating and decelerating are symmetric.
+     */
+    private static double stepMotor(double v, double dx, double maxSpeed, double dt) {
+        double stopDist = Math.abs(v) * APPROACH_TAU_S;
+        double desired = Math.abs(dx) <= Math.max(2.0, stopDist) ? 0.0 : Math.signum(dx) * maxSpeed;
         double max = WALK_ACCEL_PXS2 * dt;
         v += Math.max(-max, Math.min(max, desired - v));
         return Math.max(-maxSpeed, Math.min(maxSpeed, v));

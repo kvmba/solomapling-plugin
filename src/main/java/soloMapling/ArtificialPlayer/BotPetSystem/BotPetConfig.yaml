@@ -36,15 +36,13 @@ gear:
   item_pouch:  { id: 1812001, chance: 0.60 }   # loots items
   meso_magnet: { id: 1812000, chance: 0.30 }   # loots mesos
 
-# Follow drive. The pet walks toward a point roughly behind the bot (offset on
-# land, above it in water), moving at `speed` px/s and only teleporting when it
-# is hopelessly far (teleport_dist_px, e.g. after a warp). It snaps to the ground
-# below its own x so it never floats over a ledge.
+# Follow drive. The pet walks (smooth velocity ramp) toward a point beside the bot
+# (`speed` px/s, on land beside it and in water above it); it warps to the owner
+# only when left hopelessly far behind (e.g. after a same-map teleport).
+# It stands on the floor under its own x so it never floats over a ledge.
 follow:
   tick_ms: 200
-  eps_px: 25
-  speed: 200.0
-  teleport_dist_px: 160
+  speed: 150.0
   swim_offset: 14
 
 # Pet looting (only for pets with the matching gear). A pet picks up at most
