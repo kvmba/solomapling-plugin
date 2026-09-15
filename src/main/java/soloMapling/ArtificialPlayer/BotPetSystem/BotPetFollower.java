@@ -475,7 +475,10 @@ public final class BotPetFollower {
         // Same stillness rule as on land: only paddle once the owner has drifted clear.
         double dx = botX - p.x;
         int moveDir = Math.abs(dx) > FOLLOW_DEAD_ZONE_PX ? (int) Math.signum(dx) : 0;
-        int verticalHold = targetY - p.y > 30 ? -1 : 0;
+        // y grows downward: the pet is BELOW the target when p.y > targetY (positive),
+        // and only then should it hold UP (verticalHold -1). The old `targetY - p.y`
+        // was negated, so it never fired while the pet sank — the pet only ever sank.
+        int verticalHold = p.y - targetY > 30 ? -1 : 0;
         long now = System.currentTimeMillis();
         if (verticalHold < 0 && vy >= 0 && now >= nextSwimBurstAtMs.getOrDefault(id, 0L)) {
             vy = -MapleMovement.SWIM_JUMP_BURST_PXS; // rising burst (bot swim-jump)
