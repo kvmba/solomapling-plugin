@@ -87,6 +87,14 @@ public final class BotPetFollower {
     // we send), mirroring the bot engine's kinematics — it is not glued to the owner.
     // Numbers are the client's Physics.img values, as used by BotPhysicsEngine.
     private static final double WALK_SPEED_PXS = 100.0;     // fixed pet walk pace
+    /** The bot's own tick — the frame its vertical physics integrates on. The pet
+     *  sub-steps to this so a hop arcs exactly as high as a bot's. */
+    private static final double BOT_TICK_S = 0.05;
+    /** Air drag (bot cfg): px/s^2 toward 0, rising at terminal fall, scaled by fs. */
+    private static final double AIR_DRAG_PXSS = 1.0;
+    private static final double AIR_DRAG_TERMINAL_PXSS = 100.0;
+    /** The bot's swim-jump cooldown — a pet bursts up at the same cadence. */
+    private static final long SWIM_BURST_COOLDOWN_MS = 500L;
     private static final int JUMP_REACH_PX = 160;           // owner above this => warp instead
     private static final int GROUND_SNAP_PX = 6;            // "standing on the floor" tolerance
     private static final int LOST_PX = 500;                 // 1-D horizontal gap -> warp to the owner
@@ -108,6 +116,8 @@ public final class BotPetFollower {
     private static final Map<Integer, Double> fallVy = new ConcurrentHashMap<>();
     /** Per-pet horizontal velocity (px/s), keyed by pet unique id. */
     private static final Map<Integer, Double> velX = new ConcurrentHashMap<>();
+    /** Per-pet next allowed swim burst (epoch ms), keyed by pet unique id. */
+    private static final Map<Integer, Long> nextSwimBurstAtMs = new ConcurrentHashMap<>();
     /** Pets currently mid-hop (tracking an air arc), keyed by pet unique id. */
     private static final Set<Integer> vyAir = ConcurrentHashMap.newKeySet();
     /** Per-pet stable side offset (px) beside the owner, keyed by pet unique id. */
@@ -139,6 +149,7 @@ public final class BotPetFollower {
         fallVy.clear();
         sideOffset.clear();
         vyAir.clear();
+        nextSwimBurstAtMs.clear();
     }
 
     /**
@@ -274,20 +285,47 @@ public final class BotPetFollower {
 
         int nx, ny, fhVal, stance;
         if (air) {
-            // Hop arc: gravity, land on the floor under the pet's x (a floor that is at or
-            // below the owner's level — so it can land one platform UP).
-            ay = Math.min(MapleMovement.MAX_FALL_PXS, ay + MapleMovement.GRAVITY_PXS2 * dt);
-            nx = p.x + (int) Math.round(ax * dt);
-            ny = p.y + (int) Math.round(ay * dt);
+            // Hop arc, run on the bot's own terms: sub-step at its tick rate with the
+            // position-Verlet form, apply its air drag, and land via the same per-pixel
+            // terrain sweep its airborne physics resolves with (so slopes and thin
+            // platforms are honoured, not tunnelled through).
+            double fs = MapleMovement.slipScale(map);
+            double cx = p.x;
+            double cy = p.y;
             Foothold land = null;
-            Foothold below = GCMovement.footholdBelow(map, nx, p.y);
-            if (below != null) {
-                int fy = below.calculateFooting(nx);
-                if (ay >= 0 && ny >= fy && fy >= owner.y - GROUND_STEP_PX) {
-                    ny = fy;
-                    land = below;
+            int steps = Math.max(1, (int) Math.ceil(dt / BOT_TICK_S));
+            double t = dt / steps;
+            for (int i = 0; i < steps; i++) {
+                double drag = (ay >= MapleMovement.MAX_FALL_PXS - 1e-6 ? AIR_DRAG_TERMINAL_PXSS : AIR_DRAG_PXSS) * fs * t;
+                ax -= Math.signum(ax) * Math.min(Math.abs(ax), drag);
+                double sx = cx + ax * t;
+                double sy = cy + ay * t + 0.5 * MapleMovement.GRAVITY_PXS2 * t * t;
+                double nextVy = Math.min(MapleMovement.MAX_FALL_PXS, ay + MapleMovement.GRAVITY_PXS2 * t);
+
+                Point from = new Point((int) Math.round(cx), (int) Math.round(cy));
+                Point to = new Point((int) Math.round(sx), (int) Math.round(sy));
+                GCMovement.AirHit hit = GCMovement.sweepAir(map, from, to);
+                if (hit == null) {
+                    cx = sx;
+                    cy = sy;
+                    ay = nextVy;
+                    continue;
                 }
+                if (hit.landing()) {
+                    cx = hit.point().x;
+                    cy = hit.point().y;
+                    land = hit.foothold();
+                    break;
+                }
+                // Wall / ceiling: stop there and shed the blocked component (no knockback —
+                // pets are not touched by monsters, so terrain is all that deflects them).
+                cx = hit.point().x;
+                cy = hit.point().y;
+                ax = 0;
+                ay = 0;
             }
+            nx = (int) Math.round(cx);
+            ny = (int) Math.round(cy);
             if (land != null) {
                 vyAir.remove(id);
                 ax = 0;
@@ -338,7 +376,7 @@ public final class BotPetFollower {
         }
 
         boolean ground = onPlatform && !ownerBelow;
-        double vx = stepMotor(velX.getOrDefault(id, 0.0), tx - p.x, WALK_SPEED_PXS, map, dt);
+        double vx = stepMotor(velX.getOrDefault(id, 0.0), tx - p.x, WALK_SPEED_PXS, standing, map, dt);
         nx = p.x + (int) Math.round(vx * dt);
         vyAir.remove(id);
         ny = p.y;
@@ -347,19 +385,40 @@ public final class BotPetFollower {
             fhVal = landing.getId();
             ny = landing.calculateFooting(nx);
         } else {
-            // Falling / down-jump: integrate gravity, land on the first floor strictly
-            // below the pet (so the platform it dropped through cannot catch it back).
-            double vy = Math.min(MapleMovement.MAX_FALL_PXS, fallVy.getOrDefault(id, 0.0) + MapleMovement.GRAVITY_PXS2 * dt);
-            ny = p.y + (int) Math.round(vy * dt);
-            Foothold fh = GCMovement.footholdBelow(map, nx, p.y);
-            if (fh != null) {
-                int fy = fh.calculateFooting(nx);
-                if (fy > p.y && vy >= 0 && ny >= fy) {
-                    ny = fy;
-                    vy = 0;
-                    landing = fh;
+            // Falling / down-jump: the same sub-stepped Verlet + terrain sweep as the hop,
+            // so a drop resolves on the bot's own terms too.
+            double vy = fallVy.getOrDefault(id, 0.0);
+            double cx = p.x;
+            double cy = p.y;
+            int steps = Math.max(1, (int) Math.ceil(dt / BOT_TICK_S));
+            double t = dt / steps;
+            for (int i = 0; i < steps; i++) {
+                double sy = cy + vy * t + 0.5 * MapleMovement.GRAVITY_PXS2 * t * t;
+                double nextVy = Math.min(MapleMovement.MAX_FALL_PXS, vy + MapleMovement.GRAVITY_PXS2 * t);
+                Point from = new Point((int) Math.round(cx), (int) Math.round(cy));
+                Point to = new Point(nx, (int) Math.round(sy));
+                GCMovement.AirHit hit = GCMovement.sweepAir(map, from, to);
+                if (hit == null) {
+                    cx = nx;
+                    cy = sy;
+                    vy = nextVy;
+                    continue;
                 }
+                if (hit.landing()) {
+                    // A vertical fall only ever sweeps DOWN from the pet, so any floor it
+                    // meets is genuinely below the takeoff — settle on it.
+                    cy = hit.point().y;
+                    landing = hit.foothold();
+                    vy = 0;
+                    break;
+                }
+                cx = hit.point().x;
+                cy = hit.point().y;
+                vy = 0;
+                break;
             }
+            nx = (int) Math.round(cx);
+            ny = (int) Math.round(cy);
             fallVy.put(id, vy);
             fhVal = landing != null ? landing.getId() : 0;
         }
@@ -404,8 +463,10 @@ public final class BotPetFollower {
         double dx = botX - p.x;
         int moveDir = Math.abs(dx) > 4 ? (int) Math.signum(dx) : 0;
         int verticalHold = targetY - p.y > 30 ? -1 : 0;
-        if (verticalHold < 0 && vy >= 0) {
+        long now = System.currentTimeMillis();
+        if (verticalHold < 0 && vy >= 0 && now >= nextSwimBurstAtMs.getOrDefault(id, 0L)) {
             vy = -MapleMovement.SWIM_JUMP_BURST_PXS; // rising burst (bot swim-jump)
+            nextSwimBurstAtMs.put(id, now + SWIM_BURST_COOLDOWN_MS);
         }
         MapleMovement.SwimStep swim = MapleMovement.swimStep(vx, vy, moveDir, verticalHold, dt);
         vx = swim.vx();
@@ -438,7 +499,7 @@ public final class BotPetFollower {
      * the client's per-step integration toward the owner (with the map's snow/slip
      * factor), so the pet walks — and slides on snow — exactly like a bot.
      */
-    private static double stepMotor(double vx, double dx, double walkPxs, MapleMap map, double dt) {
+    private static double stepMotor(double vx, double dx, double walkPxs, Foothold standing, MapleMap map, double dt) {
         double hForce = MapleMovement.hForceStepForWalkSpeed(walkPxs);
         double cap = MapleMovement.walkSpeedStep(walkPxs);
         double fs = MapleMovement.slipScale(map);
@@ -446,7 +507,8 @@ public final class BotPetFollower {
         double vStep = vx * (MapleMovement.CLIENT_STEP_MS / 1000.0);
         int steps = MapleMovement.stepsFor(dt * 1000.0);
         for (int i = 0; i < steps; i++) {
-            vStep = MapleMovement.groundStep(vStep, null, dir, hForce, cap, fs);
+            // Pass the footing the pet stands on so slope participates, like a bot's.
+            vStep = MapleMovement.groundStep(vStep, standing, dir, hForce, cap, fs);
         }
         return vStep / (MapleMovement.CLIENT_STEP_MS / 1000.0);
     }

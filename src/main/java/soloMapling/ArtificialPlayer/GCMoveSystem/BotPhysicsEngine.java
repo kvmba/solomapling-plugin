@@ -223,14 +223,14 @@ final class BotPhysicsEngine {
                           int travelTimeMs) {
     }
 
-    private enum AirCollisionType {
+    enum AirCollisionType {
         NONE,
         WALL,
         CEILING,
         LAND
     }
 
-    private record AirCollision(AirCollisionType type, Point point, Foothold foothold, double progress) {
+    record AirCollision(AirCollisionType type, Point point, Foothold foothold, double progress) {
         static AirCollision none() {
             return new AirCollision(AirCollisionType.NONE, null, null, Double.POSITIVE_INFINITY);
         }
@@ -1895,7 +1895,7 @@ final class BotPhysicsEngine {
         return estimateRopeGrabTimeMs(map, from, -ropeJumpForcePerTick(profile), stepX, targetRope, 0L);
     }
 
-    private static AirCollision resolveAirCollision(MapleMap map, Point previousPos, Point nextPos) {
+    static AirCollision resolveAirCollision(MapleMap map, Point previousPos, Point nextPos) {
         if (map == null || map.getFootholds() == null || previousPos == null || nextPos == null) {
             return AirCollision.none();
         }

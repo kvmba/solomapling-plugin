@@ -852,6 +852,25 @@ public final class GCMovement {
         return BotPhysicsEngine.findBelowIndexed(map, new Point(x, y));
     }
 
+    /**
+     * The first terrain hit along the segment {@code from -> to}, using the same
+     * per-pixel sweep the bot's own airborne physics resolves with (walls, ceilings and
+     * landings). Exposed so the pet follower can arc a pet with the identical collision
+     * behaviour instead of a single-point {@link #footholdBelow} probe (which tunnels
+     * through slopes and thin platforms). Returns null when the segment is clear.
+     */
+    public static AirHit sweepAir(MapleMap map, Point from, Point to) {
+        BotPhysicsEngine.AirCollision hit = BotPhysicsEngine.resolveAirCollision(map, from, to);
+        if (hit.type() == BotPhysicsEngine.AirCollisionType.NONE) {
+            return null;
+        }
+        return new AirHit(hit.point(), hit.foothold(), hit.type() == BotPhysicsEngine.AirCollisionType.LAND);
+    }
+
+    /** Outcome of {@link #sweepAir}: where the segment stopped, the foothold (if a floor) and whether it landed. */
+    public record AirHit(Point point, Foothold foothold, boolean landing) {
+    }
+
     /* Map ids reachable from fromMapId within maxHops over WALKABLE portals plus curated scripted warps
      * (e.g. the Kerning subway entrance), so subway-style training maps are discoverable. Excludes the
      * start map and taxi/ferry hops (keeps discovery town-local). Triggers the one-time world-graph build
