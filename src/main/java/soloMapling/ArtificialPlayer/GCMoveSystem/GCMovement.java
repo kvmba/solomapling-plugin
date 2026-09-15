@@ -853,6 +853,16 @@ public final class GCMovement {
     }
 
     /**
+     * The furthest walkable floor directly ABOVE {@code (x,y)} within {@code maxRise} px —
+     * the bot's own "can I stand up there" probe (there is no findAbove on the foothold
+     * tree). Used by the pet follower to decide whether an owner one platform up is
+     * reachable by a hop. Null when there is none.
+     */
+    public static Point groundAbove(MapleMap map, int x, int y, int maxRise) {
+        return BotPhysicsEngine.findGroundPointAbove(map, new Point(x, y), maxRise);
+    }
+
+    /**
      * The first terrain hit along the segment {@code from -> to}, using the same
      * per-pixel sweep the bot's own airborne physics resolves with (walls, ceilings and
      * landings). Exposed so the pet follower can arc a pet with the identical collision

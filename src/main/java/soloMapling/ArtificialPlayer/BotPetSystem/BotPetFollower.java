@@ -96,6 +96,8 @@ public final class BotPetFollower {
     /** The bot's swim-jump cooldown — a pet bursts up at the same cadence. */
     private static final long SWIM_BURST_COOLDOWN_MS = 500L;
     private static final int JUMP_REACH_PX = 160;           // owner above this => warp instead
+    /** How far a pet's hop actually rises (measured: 76.5px) — the up-probe bound. */
+    private static final int JUMP_RISE_PX = 70;
     private static final int GROUND_SNAP_PX = 6;            // "standing on the floor" tolerance
     private static final int LOST_PX = 500;                 // 1-D horizontal gap -> warp to the owner
     /** The pet holds still until the owner drifts this far from its spot (a real pet
@@ -237,7 +239,7 @@ public final class BotPetFollower {
             }
         }
         if (observed && chr.getHp() > 0) {
-            loot(chr, map, config);
+            loot(chr, map, pets, config);
         }
     }
 
@@ -355,27 +357,30 @@ public final class BotPetFollower {
                     left ? PET_STAND_LEFT : PET_STAND_RIGHT, config, observed);
             return;
         }
-        // Hop up whenever the owner is meaningfully above and the ground continues that way
-        // (a platform/stair up), instead of warping.
+        // Hop up whenever the owner is meaningfully above and a floor one hop up reaches
+        // toward it; otherwise (owner above but unreachable) warp, so the pet never hops
+        // at a wall forever. The probe must look ABOVE the pet — footholdBelow only ever
+        // reports floors below it — and only as far as a hop can actually rise.
         boolean ownerAbove = owner.y < p.y - GROUND_STEP_PX;
         if (onPlatform && !ownerBelow && ownerAbove) {
-            Foothold ahead = GCMovement.footholdBelow(map, owner.x, p.y - GROUND_PROBE_UP);
-            if (ahead != null) {
-                int aheadY = ahead.calculateFooting(owner.x);
-                if (aheadY < p.y - GROUND_SNAP_PX) {
-                    vyAir.add(id);
-                    ax = Math.signum(owner.x - p.x) * WALK_SPEED_PXS;
-                    if (ax == 0) {
-                        ax = WALK_SPEED_PXS;
-                    }
-                    ay = -MapleMovement.JUMP_SPEED_PXS;
-                    velX.put(id, ax);
-                    fallVy.put(id, ay);
-                    applyAndSend(chr, pet, index, p, (int) Math.round(ax), (int) Math.round(ay), 0,
-                            (left ? 1 : 0) | PET_JUMP_RIGHT, config, observed);
-                    return;
-                }
+            Point above = GCMovement.groundAbove(map, owner.x, p.y, JUMP_RISE_PX);
+            boolean canHop = above != null && above.y < p.y - GROUND_SNAP_PX;
+            if (!canHop) {
+                teleportPet(chr, pet, index, new Point(tx, owner.y), 0,
+                        left ? PET_STAND_LEFT : PET_STAND_RIGHT, config, observed);
+                return;
             }
+            vyAir.add(id);
+            ax = Math.signum(owner.x - p.x) * WALK_SPEED_PXS;
+            if (ax == 0) {
+                ax = WALK_SPEED_PXS;
+            }
+            ay = -MapleMovement.JUMP_SPEED_PXS;
+            velX.put(id, ax);
+            fallVy.put(id, ay);
+            applyAndSend(chr, pet, index, p, (int) Math.round(ax), (int) Math.round(ay), 0,
+                    (left ? 1 : 0) | PET_JUMP_RIGHT, config, observed);
+            return;
         }
 
         boolean ground = onPlatform && !ownerBelow;
@@ -499,6 +504,21 @@ public final class BotPetFollower {
         velX.remove(id);
         fallVy.remove(id);
         vyAir.remove(id);
+    }
+
+    /**
+     * Drop every per-pet entry for this pet. Pet ids are handed out monotonically
+     * ({@code BotPetFactory}) and never reused, so without this the per-pet maps would
+     * grow for the life of the process as bots come and go.
+     */
+    public static void forgetPet(int petId) {
+        velX.remove(petId);
+        fallVy.remove(petId);
+        vyAir.remove(petId);
+        sideOffset.remove(petId);
+        nextSpeakAtMs.remove(petId);
+        nextPickupAtMs.remove(petId);
+        nextSwimBurstAtMs.remove(petId);
     }
 
     /**
@@ -661,9 +681,8 @@ public final class BotPetFollower {
      * {@link Monster}) — never a player-thrown item — so a looting pet tidies up
      * kills, exactly like a real player's pet.
      */
-    private static void loot(Character chr, MapleMap map, BotPetConfig config) {
+    private static void loot(Character chr, MapleMap map, Pet[] pets, BotPetConfig config) {
         long now = System.currentTimeMillis();
-        Pet[] pets = chr.getPets();
         for (int idx = 0; idx < pets.length; idx++) {
             Pet pet = pets[idx];
             if (pet == null) {

@@ -144,6 +144,7 @@ public final class BotPetController {
                 continue;
             }
             had = true;
+            BotPetFollower.forgetPet(pet.getUniqueId()); // free its per-pet state (never reused)
             pet.setSummoned(false);
             bot.removePet(pet, true);
             // In-memory pets were never written to the DB, so there is no row to
