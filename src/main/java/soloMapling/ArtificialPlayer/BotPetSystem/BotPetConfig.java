@@ -49,7 +49,7 @@ public final class BotPetConfig {
     private static final int DEF_PICKUP_RANGE = 120;
     private static final long DEF_PICKUP_COOLDOWN_MS = 1000L;
 
-    private static final double DEF_SPEAK_CHANCE = 0.10;
+    private static final double DEF_SPEAK_CHANCE = 0.25;
     private static final long DEF_SPEAK_MIN_INTERVAL_MS = 8_000L;
     private static final long DEF_SPEAK_MAX_INTERVAL_MS = 25_000L;
 

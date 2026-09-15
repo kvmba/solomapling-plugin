@@ -59,7 +59,7 @@ pickup:
 # (localized, so zh-CN pets speak Chinese). chance is the per-tick chance a pet
 # does something; the interval is the per-pet cooldown after it does.
 speak:
-  chance: 0.10
+  chance: 0.25
   min_interval_ms: 8000
   max_interval_ms: 25000
 

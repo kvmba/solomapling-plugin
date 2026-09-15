@@ -53,7 +53,7 @@ class BotPetConfigTest {
         assertEquals(1000L, c.pickupCooldownMs());
 
         // speak
-        assertEquals(0.10, c.speakChance(), 1e-9);
+        assertEquals(0.25, c.speakChance(), 1e-9);
         assertEquals(8000L, c.speakMinIntervalMs());
         assertEquals(25000L, c.speakMaxIntervalMs());
 
