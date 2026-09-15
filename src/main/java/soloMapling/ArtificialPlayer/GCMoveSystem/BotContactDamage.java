@@ -123,6 +123,10 @@ final class BotContactDamage {
                 nearby = mob;
                 if (isMobTouchingBot(entry, bot, mob)) {
                     diagnose(bot, mob, "CONTACT", getBotTouchBounds(entry, bot));
+                    // A mob in touch range may also land a debuff (stun/seal/slow/weaken/darkness/poison).
+                    // Its WZ skills are rolled here; the bot's headless client can never trigger the
+                    // engine's own mob-skill path, so the plugin drives it - see BotDebuffApplier.
+                    soloMapling.ArtificialPlayer.BotStatusSystem.BotDebuffApplier.consider(bot, mob);
                     applyMobHit(entry, bot, mob);
                     return;
                 }
@@ -162,6 +166,9 @@ final class BotContactDamage {
     private static void applyMobHit(BotMovementState entry, Character bot, Monster mob) {
         double missChance = isThief(bot) ? THIEF_MISS_CHANCE : BASE_MISS_CHANCE;
         int dmg = ThreadLocalRandom.current().nextDouble() < missChance ? 0 : rollMobDamage(mob);
+        // WEAKEN (from a mob debuff) makes the bot soak more: scale the rolled hit before the floor /
+        // lethality policy runs, so the extra damage can still finish a bot already at the health floor.
+        dmg = scaleTakenDamage(bot, dmg);
         MobHitKnockback kb = resolveMobHitKnockback(bot.getPosition(), mob.getPosition());
         MobHitDamage resolved =
                 resolveMobHitDamage(bot.getHp(), dmg, bot.getCurrentMaxHp());
@@ -246,6 +253,18 @@ final class BotContactDamage {
         double base = Math.max(1, mob.getPADamage()) * DMG_FACTOR;
         double spread = 1.0 + ThreadLocalRandom.current().nextDouble(-DMG_SPREAD, DMG_SPREAD);
         return (int) Math.max(1, Math.round(base * spread));
+    }
+
+    // Scale a landed hit by the bot's WEAKEN factor (1.0 when not weakened). Kept separate so the
+    // scaling is testable and the "no debuff" path is a straight passthrough.
+    private static int scaleTakenDamage(Character bot, int dmg) {
+        if (dmg <= 0) {
+            return 0;
+        }
+        soloMapling.ArtificialPlayer.BotStatusSystem.BotDebuffState status =
+                soloMapling.ArtificialPlayer.BotStatusSystem.BotDebuffState.of(bot);
+        double factor = status != null ? status.takenFactor() : 1.0;
+        return (int) Math.max(1, Math.round(dmg * factor));
     }
 
     // Apply fall damage on landing. fallDistancePx is the peak-to-landing descent that

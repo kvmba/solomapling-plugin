@@ -219,6 +219,21 @@ record BotMovementProfile(int totalSpeedStat, int totalJumpStat, boolean snowSho
         return totalJumpStat / (double) BASE_TOTAL_STAT;
     }
 
+    /**
+     * A copy of this profile whose effective walk speed is scaled by {@code factor} (1.0 = unchanged).
+     * Used for a SLOW debuff: the scale rides on the profile handed to the ground step, so a slowed
+     * bot accelerates to a lower walk speed without touching the graph-key bucket (the cached
+     * navigation graph still keys on the un-scaled stats). Factor is clamped to (0, 1] - a debuff can
+     * only slow, never speed the bot up.
+     */
+    BotMovementProfile speedScaled(double factor) {
+        if (factor >= 1.0 || factor <= 0.0) {
+            return this;
+        }
+        int scaled = (int) Math.round(totalSpeedStat * factor);
+        return new BotMovementProfile(scaled, totalJumpStat, snowShoes);
+    }
+
     double walkVelocityPxs() {
         return BotMovementManager.cfg.WALK_VEL * speedMultiplier();
     }

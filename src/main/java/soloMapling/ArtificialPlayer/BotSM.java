@@ -7,6 +7,7 @@ import org.gms.server.maps.MapleMap;
 import soloMapling.ArtificialPlayer.BotAttackSystem.ThrowingStarSelector;
 import soloMapling.ArtificialPlayer.BotCommandsPack.SocialCommands;
 import soloMapling.ArtificialPlayer.BotHealthSystem.BotDeath;
+import soloMapling.ArtificialPlayer.BotStatusSystem.BotDebuffState;
 import soloMapling.ArtificialPlayer.BotMessagingSystem.ChatMessage;
 import soloMapling.ArtificialPlayer.BotMessagingSystem.MessageQueue;
 import soloMapling.ArtificialPlayer.BotTradeSystem.BotTradeHandler;
@@ -89,6 +90,13 @@ public abstract class BotSM implements EventSubscriber {
      * Declared before the tick body below references it.
      */
     private final BotDeath death;
+
+    /**
+     * This bot's live mob-debuffs (STUN/SEDUCE freeze, SEAL disarm, SLOW, WEAKEN, DARKNESS, POISON).
+     * Read by the movement / attack / contact-damage layers via {@code BotDebuffState.of(chr)}; the
+     * behaviour rule for each disease lives once, in BotDebuffTable.
+     */
+    private final BotDebuffState status;
 
     // One shared tick body for every (re)schedule path - start / priority change / nudge.
     private final Runnable tickRunnable = () -> {
@@ -188,7 +196,16 @@ public abstract class BotSM implements EventSubscriber {
         // (createBot decorates, setAndStartBots then constructs us), so weapon/level/job are set.
         this.chosenStarId = ThrowingStarSelector.selectFor(chr);
         this.death = new BotDeath(chr);
+        this.status = new BotDebuffState(chr);
         debugprint(("Bot Initialized: " + this.character.getName() + ", " + this.character.getId()));
+    }
+
+    /**
+     * This bot's live mob-debuffs. Public so the movement / attack / damage layers can ask "is this
+     * bot frozen / sealed / slowed..." without knowing the bot type.
+     */
+    public BotDebuffState status() {
+        return status;
     }
 
     /**

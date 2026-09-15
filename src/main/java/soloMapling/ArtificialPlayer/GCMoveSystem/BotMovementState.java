@@ -112,6 +112,12 @@ class BotMovementState {
     long alertedUntilMs = 0L;
     boolean alertResetScheduled = false;  // guards BotContactDamage's one-shot alert-reset task
 
+    // ── Debuff state (mob diseases) ──
+    // Speed scale folded into the ground step while SLOW is active (1.0 = no debuff). Set from
+    // BotDebuff.moveFactor() at the top of the driver tick; read by applyGroundMotion so a slowed
+    // bot walks/accelerates slower without touching the graph-key profile (see BotMovementProfile.speedScaled).
+    double debuffMoveScale = 1.0;
+
     // ── Contact-damage state (cosmetic for ambience bots; real HP for rostered companions) ──
     int mobHitCooldownMs = 0;             // i-frame countdown after a contact/fall hit
     Point lastMobTouchCheckPos = null;    // previous-tick foot pos for the swept anti-tunnel AABB
