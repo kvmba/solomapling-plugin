@@ -70,4 +70,18 @@ class BotPetConfigTest {
         assertTrue(BotPetPool.all().stream().allMatch(id -> id >= 5000000 && id < 5010000),
                 "every pooled id is a pet id");
     }
+
+    @Test
+    void packagedPetNamesLoadAndAreUsable() {
+        // Guards the nickname pool: a bad encoding, a wrong key, or an over-long entry
+        // would silently empty or shrink it — and a named pet would then fall back to
+        // its default name instead of the intended nickname.
+        BotPetNames.load();
+        String name = BotPetNames.random();
+        assertTrue(name != null && !name.isBlank(), "a nickname must be drawable");
+        assertTrue(name.length() <= 7, "nickname must fit the client's name limit: " + name);
+        // The pool is Chinese; a mojibake read would produce replacement/question marks.
+        assertTrue(name.chars().anyMatch(c -> c >= 0x4E00 && c <= 0x9FFF),
+                "nickname should contain a CJK character, got: " + name);
+    }
 }

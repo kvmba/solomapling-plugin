@@ -5,14 +5,16 @@ import soloMapling.Environment.PluginResources;
 
 import java.io.Reader;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ThreadLocalRandom;
 
 /**
- * Random pet names. Kept short (<=7 chars for safety, the client truncates pet
- * names) and drawn without replacement at load time. Independent of host
- * language: a mixed pool reads fine for any locale a bot happens to be in.
+ * Random pet nicknames. Chinese (like a mainland player's pet), kept short (<=7
+ * chars — the client truncates longer pet names) and deduplicated at load time.
+ * Loaded once and cached; drawing a name is a single indexed read.
  */
 public final class BotPetNames {
 
@@ -44,12 +46,13 @@ public final class BotPetNames {
                     return;
                 }
                 List<String> loaded = new ArrayList<>();
+                Set<String> seen = new HashSet<>();
                 for (Object entry : list) {
                     if (entry == null) {
                         continue;
                     }
                     String name = String.valueOf(entry).trim();
-                    if (!name.isEmpty() && name.length() <= MAX_NAME_LEN && !loaded.contains(name)) {
+                    if (!name.isEmpty() && name.length() <= MAX_NAME_LEN && seen.add(name)) {
                         loaded.add(name);
                     }
                 }

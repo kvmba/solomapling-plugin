@@ -6,8 +6,10 @@ import soloMapling.Environment.PluginResources;
 
 import java.io.Reader;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * The pool of pet item ids a bot may be given. Curated via YAML; validated with
@@ -60,9 +62,10 @@ public final class BotPetPool {
                     return;
                 }
                 List<Integer> loaded = new ArrayList<>();
+                Set<Integer> seen = new HashSet<>();
                 for (Object entry : list) {
                     Integer id = toId(entry);
-                    if (id != null && ItemConstants.isPet(id) && !loaded.contains(id)) {
+                    if (id != null && ItemConstants.isPet(id) && seen.add(id)) {
                         loaded.add(id);
                     }
                 }
