@@ -2629,6 +2629,21 @@ final class BotPhysicsEngine {
         });
     }
 
+    /*
+     * The map's collidable vertical walls, from the shared per-tree collision index. Exposed so
+     * graphgen can probe them without walking map.getFootholds().getAllFootholds() — the host
+     * recollects a fresh LinkedList on every call, and the launch-boundary probes call this
+     * thousands of times per bake.
+     *
+     * Deliberately NOT a ThreadLocal: a bake runs on the warmup pool's platform threads AND on
+     * whatever thread called getGraph (bot ticks are one-virtual-thread-per-tick), so per-thread
+     * state would rebuild per tick and strand stale per-map copies (see GCWorldGraph's warning).
+     * The index is keyed by the FootholdTree instance, so a reloaded map gets a fresh one.
+     */
+    static java.util.List<Foothold> collidableWalls(MapleMap map) {
+        return collisionIndex(map).collidableWalls();
+    }
+
     private static void insertionSort(Foothold[] footholds) {
         for (int i = 1; i < footholds.length; i++) {
             Foothold key = footholds[i];

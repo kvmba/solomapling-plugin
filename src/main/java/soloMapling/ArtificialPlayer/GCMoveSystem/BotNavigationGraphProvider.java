@@ -1228,7 +1228,10 @@ final class BotNavigationGraphProvider {
             return;
         }
 
-        int travelMs = BotPhysicsEngine.estimateFallLandingTimeMs(map, endpoint, stepX)
+        // Reuse the landing we already simulated: estimateFallLandingTimeMs re-runs the identical
+        // simulateLanding(start, 0f, stepX, 0L) and returns landing.timeMs(), and `landing` is
+        // non-null here (null returned above), so the number is provably the same.
+        int travelMs = landing.timeMs()
                 + estimateHorizontalTravelTimeMs(actualRunway, movementProfile);
 
         addEdge(from.id, below.id, BotNavigationGraph.EdgeType.DROP,
@@ -1744,15 +1747,14 @@ final class BotNavigationGraphProvider {
             return false;
         }
 
-        Set<Integer> collidableWallIds = getCachedCollidableWallIds(map.getId());
-        if (collidableWallIds == null || collidableWallIds.isEmpty()) {
-            return false;
-        }
-
-        for (Foothold foothold : map.getFootholds().getAllFootholds()) {
-            if (!foothold.isWall()
-                    || !collidableWallIds.contains(foothold.getId())
-                    || foothold.getX1() != launchPoint.x) {
+        // Probe the shared per-tree collision index instead of recollecting every foothold:
+        // map.getFootholds().getAllFootholds() rebuilds a whole LinkedList on every call, and
+        // this probe sits inside the launch-boundary search and runs thousands of times per bake
+        // (measured: 115k recollects / 98.7M items on a 854-foothold map, ~35% of build time).
+        // The index's wall list carries exactly the CollidableWall subset (same isCollidableWall
+        // predicate, same source list), so the answer is unchanged — verified graph-identical.
+        for (Foothold foothold : BotPhysicsEngine.collidableWalls(map)) {
+            if (foothold.getX1() != launchPoint.x) {
                 continue;
             }
 
