@@ -884,15 +884,16 @@ public final class GCMovement {
      * step that left a pet stuck on flat ground and bobbing on every slope.
      *
      * @param from             current foot point
+     * @param foothold         the surface the walker stands on — the caller's own footing probe
+     *                         (so the ground is not looked up twice per tick); {@code null} if none
      * @param dir              held direction (-1/0/+1)
      * @param carryVelocityPxs horizontal speed (px/s) carried in from the previous step
      * @param tickMs           the follower's tick length; the integrator runs {@code tickMs/TICK_MS} steps
      * @param owner            the character the follower tails — supplies the movement profile (speed stat)
      */
-    public static GroundWalk walkGroundTick(MapleMap map, Point from, int dir,
+    public static GroundWalk walkGroundTick(MapleMap map, Point from, Foothold foothold, int dir,
                                             double carryVelocityPxs, long tickMs, Character owner) {
         BotMovementProfile profile = BotMovementProfile.fromCharacter(owner);
-        Foothold foothold = BotPhysicsEngine.findGroundFoothold(map, from);
         if (foothold == null) {
             return new GroundWalk(from, null, carryVelocityPxs, true);
         }
