@@ -334,7 +334,15 @@ final class GCTravel {
                 warp(bot, nextHop, "scripted portal '" + sw.portalName() + "' not on map " + cur);
                 return;
             }
-            approachAndAct(trip, bot, trigger, nextHop,
+            // The elevator door may have to be waited out (open only ~1/4 of the cycle, up to 3 min
+            // shut), and while it is shut the bot just stands on its approach point. Fan that point
+            // sideways so a crowd arriving mid-cycle queues along the door ledge instead of stacking
+            // on the one portal pixel (see GCTransit.elevatorQueueOffset).
+            Point approach = trigger;
+            if (GCTransit.isElevatorFloor(cur)) {
+                approach = new Point(trigger.x + GCTransit.elevatorQueueOffset(bot.getId()), trigger.y);
+            }
+            approachAndAct(trip, bot, approach, nextHop,
                     "scripted portal '" + sw.portalName() + "' -> map " + nextHop,
                     () -> {
                         // The Helios elevator's door is the one scripted portal that can REFUSE entry:

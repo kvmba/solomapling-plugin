@@ -43,6 +43,45 @@ class ElevatorDoorStateTest {
     }
 
     @Test
+    void theTwoFloorsAreTheQueueFloors() {
+        // GCTravel fans the approach target only on the boarding floors, so this must line up
+        // exactly with "has a door flag" and nothing else.
+        assertTrue(GCTransit.isElevatorFloor(222020100));
+        assertTrue(GCTransit.isElevatorFloor(222020200));
+        assertTrue(!GCTransit.isElevatorFloor(222020110)); // a car, not a waiting floor
+        assertTrue(!GCTransit.isElevatorFloor(222020000)); // the lobby above the shaft
+        assertTrue(!GCTransit.isElevatorFloor(0));
+    }
+
+    @Test
+    void theQueueOffsetIsStableAndItsSlotsDontOverlap() {
+        // A bot's slot must not move between polls (or the queue would jitter): the same id gives
+        // the same offset every time.
+        int a = GCTransit.elevatorQueueOffset(4242);
+        assertEquals(a, GCTransit.elevatorQueueOffset(4242));
+        // Consecutive ids land on different slots, so a crowd that sets out together fans out.
+        assertEquals(a - 20, GCTransit.elevatorQueueOffset(4241));
+        assertEquals(a + 20, GCTransit.elevatorQueueOffset(4243));
+    }
+
+    @Test
+    void theQueueOffsetsStayOnBothDoorLedges() {
+        // Every slot must land on the ~116px door ledge of each floor (measured: 2F portal -139 on
+        // ledge [-198,-82]; 99F portal -133 on [-195,-79]), or a waiting bot would be sent off the
+        // edge. Check the whole range of ids maps into both ledges.
+        int[] floors = {222020100, 222020200};
+        int[] doorX = {-139, -133};
+        int[][] ledge = {{-198, -82}, {-195, -79}};
+        for (int f = 0; f < floors.length; f++) {
+            for (int id = 0; id < 100; id++) {
+                int x = doorX[f] + GCTransit.elevatorQueueOffset(id);
+                assertTrue(x >= ledge[f][0] && x <= ledge[f][1],
+                        "slot for bot " + id + " on map " + floors[f] + " is off the ledge at x=" + x);
+            }
+        }
+    }
+
+    @Test
     void theCarsAreRecognisedAsElevatorCars() {
         // Both directions, waiting car and moving car — these are the maps a boarding bot lands in and
         // that must be spread along the floor instead of stacked on the entry portal.
