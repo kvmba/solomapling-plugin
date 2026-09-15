@@ -93,6 +93,18 @@ final class GCTravel {
     private static final double SIGHTSEE_SHARE = 0.34;
     // How close counts as "at the rail" — generous on Y, since a ledge's centre may sit below it.
     private static final int RAIL_REACH_PX = 60;
+    // While an elevator door is shut (open only ~1/4 of the cycle, up to 3 min), a bot idles on the
+    // landing instead of freezing on the portal: it strolls within +-this of the door and drops the
+    // odd line. Kept small — the measured door landings are ~116px wide and flat (2F portal -139 on
+    // ledge [-198,-82]; 99F -133 on [-195,-79]) — so a waiter stays on the landing and reaches the
+    // door within the short open window.
+    private static final int ELEVATOR_LOITER_HALF_SPAN_PX = 45;
+    private static final long ELEVATOR_LOITER_DWELL_MIN_MS = 3_000;
+    private static final long ELEVATOR_LOITER_DWELL_MAX_MS = 8_000;
+    // Pacing of the idle line a waiter drops (see maybeWaitChatter).
+    private static final long WAIT_CHATTER_MIN_MS = 25_000;
+    private static final long WAIT_CHATTER_MAX_MS = 60_000;
+    private static final int ELEVATOR_WAIT_LINES = 4;
 
     private static final ScheduledExecutorService POOL = Executors.newScheduledThreadPool(2, r -> {
         Thread t = new Thread(r, "gctravel-poll");
@@ -133,6 +145,12 @@ final class GCTravel {
         boolean sheltering;      // took cover below during an attack — stay there until it clears
         Boolean sightseer;       // null undecided; true = watches from the rail, false = strolls
         Boolean railSide;        // null undecided; true = the left rail, false = the right
+        // Idling at a shut elevator door: the spot the bot is strolling to on the landing, the beat
+        // it stands there before choosing another, and the next time it drops an idle line.
+        boolean loitering;        // true while idling on the landing for an open door
+        Point loiterTarget;
+        long loiterDwellUntilMs;
+        long nextWaitChatterAtMs;
 
         Trip(Character bot, int destMapId, Consumer<Boolean> callback) {
             this.bot = bot;
@@ -219,6 +237,10 @@ final class GCTravel {
             trip.boardingAtMs = 0L;   // this hop's cab is a different cab — board afresh
             trip.waitingForTransit = false;  // new map, new wait — don't inherit the old exemption
             trip.sheltering = false;         // new crossing, new threat — don't inherit the old cover
+            trip.loiterTarget = null;        // new map, new landing — re-pick where to idle
+            trip.loiterDwellUntilMs = 0L;
+            trip.nextWaitChatterAtMs = 0L;   // new landing, re-arm the first wait line
+            trip.loitering = false;
             // Stepped off the vehicle (the event landed us, or something moved us): drop the deck
             // stroll so the bot walks its next hop instead of idling in wander mode.
             if (!GCTransit.isVehicleMap(cur) && BotWanderSystem.isWandering(bot)) {
@@ -335,14 +357,27 @@ final class GCTravel {
                 return;
             }
             // The elevator door may have to be waited out (open only ~1/4 of the cycle, up to 3 min
-            // shut), and while it is shut the bot just stands on its approach point. Fan that point
-            // sideways so a crowd arriving mid-cycle queues along the door ledge instead of stacking
-            // on the one portal pixel (see GCTransit.elevatorQueueOffset).
-            Point approach = trigger;
-            if (GCTransit.isElevatorFloor(cur)) {
-                approach = new Point(trigger.x + GCTransit.elevatorQueueOffset(bot.getId()), trigger.y);
+            // shut). Rather than freeze the bot on the portal pixel while it is shut — which stacks a
+            // crowd on one spot and reads as a bug — idle it on the landing: it strolls near the lift,
+            // drops the odd line, and heads for the door the moment it opens. While the bot loiters
+            // this hop is exempt from the walk watchdog (waitingForTransit), since standing about is
+            // the point; approachAndAct resumes the normal walk-in once the door is open.
+            if (GCTransit.isElevatorFloor(cur) && elevatorDoorKnownShut(bot, cur)) {
+                loiterAtElevator(trip, bot, trigger);
+                return;
             }
-            approachAndAct(trip, bot, approach, nextHop,
+            // Door open (or unreadable): stop loitering and walk in. On the loiter->walk transition
+            // only, restart the hop clock: it was opened when the bot ENTERED the floor, so after a
+            // long wait the walk-in would otherwise trip HOP-CEILING at once and bare-warp past the
+            // door. Doesn't reopen on later polls (the walk ceiling must still bound the approach).
+            trip.loiterTarget = null;
+            trip.loiterDwellUntilMs = 0L;
+            if (trip.loitering) {
+                trip.loitering = false;
+                trip.hopStartAtMs = nowMs();
+            }
+            trip.waitingForTransit = false;  // walking in now, not parked — bound by the walk ceiling
+            approachAndAct(trip, bot, trigger, nextHop,
                     "scripted portal '" + sw.portalName() + "' -> map " + nextHop,
                     () -> {
                         // The Helios elevator's door is the one scripted portal that can REFUSE entry:
@@ -351,13 +386,13 @@ final class GCTravel {
                         // mid-cycle. We replace that script with a bare changeMap, so without this a
                         // bot walking up mid-cycle would slip into an empty car and — with every other
                         // arriving bot doing the same — pile onto the car's single entry portal until
-                        // a departure minutes off. Wait at the lift like a player instead.
+                        // a departure minutes off. Even a bot that reached the door just as it shut is
+                        // turned back here and re-loiters on the landing above.
                         Boolean open = GCTransit.elevatorDoorOpen(bot, cur);
                         if (open != null && !open) {
                             trip.waitingForTransit = true; // door shut — the wait is by design
                             return;
                         }
-                        trip.waitingForTransit = false;
                         if (GCTransit.isElevatorCar(sw.toMapId())) {
                             // Board onto a random player spawn of the car rather than pinning every
                             // passenger to portal 0. The car is a tiny box, so a crowd all landing on
@@ -527,7 +562,96 @@ final class GCTravel {
     // How many attack shouts exist, as transit.attack_shout.N in BotMessages (localized).
     private static final int ATTACK_SHOUTS = 5;
 
+    /*
+     * True when the elevator door is not confirmed open, so the bot should idle on the landing rather
+     * than walk in. Covers "the event says the car is moving" and "the Elevator event is missing" —
+     * the latter reads as shut (matching the boat-door convention), so a bot never walks into a car
+     * nothing will move. Idling is bounded by the transit ceiling either way. A null (map/channel
+     * unreadable, or a non-elevator map — the caller only reaches this for elevator floors) is left
+     * to the normal walk-in.
+     */
+    private static boolean elevatorDoorKnownShut(Character bot, int mapId) {
+        return Boolean.FALSE.equals(GCTransit.elevatorDoorOpen(bot, mapId));
+    }
 
+    /*
+     * Idle on the landing while the elevator door is shut: stroll to a fresh spot near the door,
+     * stand a beat, repeat — dropping the odd line — instead of freezing on the portal pixel. A player
+     * waiting for a lift does exactly this, so the crowd reads as people milling about, not a stack.
+     *
+     * The hop is marked waitingForTransit so the walk watchdog exempts the stillness between strolls,
+     * and the whole thing is bounded by the same transit ceiling a ride gets (WAIT_MAX_MS), so a door
+     * that somehow never opens still gets the bot bare-warped onward rather than parked here for good.
+     * Returns as soon as the door opens (or becomes unreadable): the main tick then walks the bot in.
+     */
+    private static void loiterAtElevator(Trip trip, Character bot, Point door) {
+        long now = nowMs();
+        trip.waitingForTransit = true; // standing about is the point — see the watchdog exemption
+        trip.loitering = true;
+
+        long ceiling = waitCeilingMs();
+        if (now - trip.hopStartAtMs >= ceiling) {
+            warp(bot, trip.destMapId, "TRANSIT-WAIT-TIMEOUT: door shut at map " + bot.getMapId()
+                    + " for " + (ceiling / 1000) + "s");
+            return;
+        }
+
+        // Drop the odd line while waiting (observed maps only, self-throttled).
+        maybeWaitChatter(trip, bot, now);
+
+        if (trip.loiterTarget == null) {
+            // Dwelling between strolls: pick a fresh spot once the beat is up.
+            if (now < trip.loiterDwellUntilMs) {
+                return;
+            }
+            int offset = ThreadLocalRandom.current()
+                    .nextInt(-ELEVATOR_LOITER_HALF_SPAN_PX, ELEVATOR_LOITER_HALF_SPAN_PX + 1);
+            int x = door.x + offset;
+            Point spot = GCMovement.groundPointBelow(bot.getMap(), x, door.y);
+            trip.loiterTarget = spot != null ? spot : new Point(x, door.y);
+            GCMovement.move(bot, trip.loiterTarget.x, trip.loiterTarget.y);
+            return;
+        }
+
+        // Walking to the chosen spot: on arrival, settle into a dwell before the next stroll.
+        Point bp = bot.getPosition();
+        boolean arrived = Math.abs(bp.x - trip.loiterTarget.x) <= ENTER_X
+                && Math.abs(bp.y - trip.loiterTarget.y) <= ENTER_Y
+                && !GCMovement.isMoving(bot);
+        if (arrived) {
+            trip.loiterTarget = null;
+            trip.loiterDwellUntilMs = now + ThreadLocalRandom.current()
+                    .nextLong(ELEVATOR_LOITER_DWELL_MIN_MS, ELEVATOR_LOITER_DWELL_MAX_MS);
+            return;
+        }
+        if (!GCMovement.isMoving(bot)) {
+            GCMovement.move(bot, trip.loiterTarget.x, trip.loiterTarget.y); // (re)issue the stroll
+        }
+    }
+
+    /*
+     * Occasionally mutter a line while waiting at the elevator, so a bot standing about reads as a
+     * bored player rather than a frozen one. Gated on a real player being able to see it (chatter is
+     * packets) and self-throttled by nextWaitChatterAtMs. The first call only arms the clock, so a
+     * fresh waiter stays quiet for one interval before its first line.
+     */
+    private static void maybeWaitChatter(Trip trip, Character bot, long now) {
+        if (trip.nextWaitChatterAtMs == 0L) {
+            trip.nextWaitChatterAtMs = now + ThreadLocalRandom.current()
+                    .nextLong(WAIT_CHATTER_MIN_MS, WAIT_CHATTER_MAX_MS);
+            return;
+        }
+        if (now < trip.nextWaitChatterAtMs) {
+            return;
+        }
+        trip.nextWaitChatterAtMs = now + ThreadLocalRandom.current()
+                .nextLong(WAIT_CHATTER_MIN_MS, WAIT_CHATTER_MAX_MS);
+        if (!GCMovement.isMapObserved(bot.getMapId())) {
+            return; // no observer — nothing worth saying
+        }
+        int line = ThreadLocalRandom.current().nextInt(ELEVATOR_WAIT_LINES);
+        SocialCommands.BotSpeak(bot, BotMessages.get("transit.elevator_wait." + line));
+    }
 
     /*
      * Walk the bot to dest, wait until it has arrived AND finished the walk (not mid-stride),

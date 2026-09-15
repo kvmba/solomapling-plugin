@@ -325,3 +325,11 @@ transit.attack_shout.1: "is that a balrog"
 transit.attack_shout.2: "everyone get below"
 transit.attack_shout.3: "no way, not today"
 transit.attack_shout.4: "that thing is huge"
+
+# ---------------------------------------------------------------------------
+# Waiting on the landing while the Helios elevator's door is shut (idle lines)
+# ---------------------------------------------------------------------------
+transit.elevator_wait.0: "is this thing ever coming"
+transit.elevator_wait.1: "these elevators are so slow"
+transit.elevator_wait.2: "almost there, just waiting on the lift"
+transit.elevator_wait.3: "going down anytime soon"

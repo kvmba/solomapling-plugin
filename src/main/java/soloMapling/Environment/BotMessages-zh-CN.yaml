@@ -347,3 +347,11 @@ transit.attack_shout.1: "那是巴洛古吗"
 transit.attack_shout.2: "大家快下去"
 transit.attack_shout.3: "不是吧，偏偏今天"
 transit.attack_shout.4: "那家伙也太大了"
+
+# ---------------------------------------------------------------------------
+# 太阳塔电梯门关闭时在门口等电梯闲聊（打发时间）
+# ---------------------------------------------------------------------------
+transit.elevator_wait.0: "这电梯到底什么时候来啊"
+transit.elevator_wait.1: "这破电梯也太慢了"
+transit.elevator_wait.2: "就差坐电梯了，等一等"
+transit.elevator_wait.3: "还下不下去啊"

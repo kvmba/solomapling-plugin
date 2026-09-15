@@ -92,24 +92,6 @@ public final class GCTransit {
         return elevatorDoorFlag(mapId) != null;
     }
 
-    // Queue spread for the elevator door, which a bot may have to WAIT out (the door is open only
-    // ~1/4 of the cycle, up to 3 min shut). While it is shut the bot just stands on its approach
-    // point, so without a spread every waiting bot stacks on the one portal pixel. Slots are 20px
-    // apart spanning +-40px — inside the ~116px door ledges (measured: 2F portal -139 on ledge
-    // [-198,-82], 99F -133 on [-195,-79], >=55px either side).
-    private static final int QUEUE_SLOTS = 5;
-    private static final int QUEUE_STEP_PX = 20;
-
-    /*
-     * A stable lateral offset from the door portal for a waiting bot, as a pure function of its id:
-     * the same bot always takes the same slot, with no state to roll or reset and no jitter between
-     * polls. Consecutive ids land on different slots, so a crowd that arrives together fans out
-     * along the ledge instead of piling up.
-     */
-    static int elevatorQueueOffset(int botId) {
-        return (Math.floorMod(botId, QUEUE_SLOTS) - QUEUE_SLOTS / 2) * QUEUE_STEP_PX;
-    }
-
     /*
      * Whether the elevator is currently letting passengers onto this floor, mirroring what its portal
      * script (elevator.js) checks before warping a player into the waiting car. The Helios elevator is
