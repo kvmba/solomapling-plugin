@@ -180,11 +180,9 @@ public final class BotDebuffState {
             return;
         }
         long now = System.currentTimeMillis();
-        for (Disease disease : active.keySet()) {
-            Entry entry = active.get(disease);
-            if (entry == null) {
-                continue;
-            }
+        for (Map.Entry<Disease, Entry> e : active.entrySet()) {
+            Disease disease = e.getKey();
+            Entry entry = e.getValue();
             if (now >= entry.expiresAtMs) {
                 if (active.remove(disease, entry)) {
                     broadcastCancel(disease);
