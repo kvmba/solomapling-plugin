@@ -308,3 +308,54 @@ grep -o 'getIntProperty("[a-zA-Z0-9_]*"' scripts/portal/*.js scripts/npc/*.js | 
 grep -rn 'setProperty("statusStg1", *1\|setIntProperty("statusStg1", *1' scripts/
 # 3. 若无 → 该 PQ 不通
 ```
+
+---
+
+## 第十部分 · 完整流程已闭环（可招募 → 可进本 → 可推进）
+
+### 进本链路的四个门槛（全部已核实通过）
+
+| # | 门槛 | 位置 | bot 是否满足 |
+|:--:|---|---|:--:|
+| 1 | `recruitMap` 上且等级在区间 | `getEligibleParty` → `ch.getMapId()==recruitMap && minLevel<=lv<=maxLevel` | ✅ `PqRecruitPoints` + `PqBotSpawner` 保证 |
+| 2 | 队伍成员 `isOnline()` | `registerParty` | ✅ `PartyCharacter` 构造即 `online=true`，bot 的 client 从不 disconnect |
+| 3 | `chr.isLoggedInWorld()` | `registerPlayer` | ✅ `BotClient.isLoggedIn()` 恒 true + `markPresentInWorld()` |
+| 4 | 快照 `mpc.mapid` 不过期 | `changeMapInternal` 里 `mpc.setMapId(to.getId())` | ✅ 走 `changeMap` 即自动刷新 |
+
+> **第 4 条是 REVIEW 里那个"快照污染"问题的根源**：插件自己的 `warpBotToLocation → setMap()`
+> 会绕开 `changeMapInternal`，导致 `mpc.mapid` 陈旧 → `getEligibleParty` 判定失败。
+> 本方案的 `PqActions` 全部走 `changeMap`，因此天然规避。
+
+### 现在玩家能做什么
+
+```
+1. 服务器启动 → 各 PQ 招募大厅自动生成对应等级区间的 bot（!env 的 late-arrivals 波次）
+2. 玩家走到某大厅（如 Henesys 100000200）→ 看到该 PQ 的 bot
+3. 邀请 bot 进队 → bot 自动接受（tickPartyQuest 里 checkPartyQueue，位置在"是否在副本内"判断之前）
+4. 队长点入口 NPC 开本 → startInstance → registerParty → 四个门槛全过 → bot 被注册进副本
+5. bot 按该 PQ 的实现逐关工作；交物类动作由队长完成
+6. 副本结束 → bot 回大厅
+```
+
+### 各 PQ 的自动生成清单
+
+| PQ | 招募地图 | 生成等级 | 生成数量 |
+|---|---|---|---|
+| HenesysPQ | 100000200 | 10–91 | 5 |
+| KerningPQ | 103000000 | 21–24 | 3 |
+| LudiPQ | 221024500 | 35–40 | 5 |
+| PiratePQ | 251010404 | 55–70 | 5 |
+| AmoriaPQ | 670010100 | 40–111 | 5 |
+| EllinPQ | 300030100 | 44–47 | 5 |
+| MagatiaPQ | 261000021 | 71–75 | 3 |
+| ZakumPQ | 211042300 | 50–118 | 5 |
+| HorntailPQ | 240050000 | 120–165 | 5 |
+| BossRushPQ | 970030000 | 1–85 | 5 |
+| OrbisPQ | 200080101 | 51–70 | 由原有 spawner 处理 |
+
+> 等级取区间**下三分之一**（见 `PqBotSpawner.levelRange`），避免在 Henesys 出现 200 多级的 bot。
+
+### 仍未验证
+
+**全部实机未跑。** 上面四条门槛是从引擎源码逐行核实的，但没有任何一次真实运行。
+实机验证顺序建议：Henesys（最简单，1 玩家 + 2 bot）→ Kerning → Ludi → 其余。
