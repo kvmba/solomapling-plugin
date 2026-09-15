@@ -1142,7 +1142,10 @@ public class EnvironmentManager {
         }
 
         if (!allBotIds.isEmpty()) {
-            setBotsLevelRange(allBotIds, 50, 70);
+            // OrbisPQ's own eligibility test (OrbisPQ.js) is level 51-70: a level-50 bot standing
+            // in the lobby is exactly as recruitable as one standing in Henesys, so the floor has
+            // to clear the quest's gate, not sit one below it.
+            setBotsLevelRange(allBotIds, 51, 70);
             setAndStartBots(allBotIds, BotTypeManager.BotType.OPQ_BOT);
             debugprint(fmt("OPQ lobby bots spawned and started: {}", allBotIds.size()));
         }
