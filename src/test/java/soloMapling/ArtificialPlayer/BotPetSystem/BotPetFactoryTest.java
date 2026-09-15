@@ -19,21 +19,22 @@ class BotPetFactoryTest {
 
     @Test
     void inMemoryPetIsBuiltWithoutDb() {
-        PetSpec spec = new PetSpec(5000001, 3, true, false, false);
-        Pet pet = BotPetFactory.createInMemory(spec, "Mochi");
+        PetSpec spec = new PetSpec(5000001, 3, 120, 90, true, false, false);
+        Pet pet = BotPetFactory.createInMemory(spec, "团团");
 
         assertNotNull(pet, "reflective construction should succeed");
         assertEquals(5000001, pet.getItemId());
         assertEquals(3, pet.getLevel());
-        assertEquals("Mochi", pet.getName());
+        assertEquals("团团", pet.getName());
         assertTrue(pet.isSummoned());
-        assertEquals(100, pet.getFullness());
+        assertEquals(90, pet.getFullness());
+        assertEquals(120, pet.getTameness());
         assertTrue(pet.getUniqueId() > 0, "pet needs a unique id for MOVE_PET");
     }
 
     @Test
     void inMemoryPetsGetDistinctIds() {
-        PetSpec spec = new PetSpec(5000002, 1, false, false, false);
+        PetSpec spec = new PetSpec(5000002, 1, 40, 80, false, false, false);
         Pet a = BotPetFactory.createInMemory(spec, null);
         Pet b = BotPetFactory.createInMemory(spec, null);
         assertNotNull(a);
@@ -45,7 +46,7 @@ class BotPetFactoryTest {
     void unnamedPetGetsANonNullName() {
         // The name is written into SPAWN_PET / SPAWN_PLAYER with no null guard, so an
         // unnamed pet must still carry a non-null name or serialization NPEs.
-        Pet pet = BotPetFactory.createInMemory(new PetSpec(5000007, 2, false, false, false), null);
+        Pet pet = BotPetFactory.createInMemory(new PetSpec(5000007, 2, 55, 70, false, false, false), null);
         assertNotNull(pet);
         assertNotNull(pet.getName(), "unnamed pet must still have a name");
         assertTrue(!pet.getName().isBlank(), "name must not be blank");
@@ -54,7 +55,7 @@ class BotPetFactoryTest {
     @Test
     void inMemoryIdsAvoidTheCashIdRange() {
         // CashIdGenerator wraps below 777,000,000; in-memory ids must stay clear of it.
-        Pet pet = BotPetFactory.createInMemory(new PetSpec(5000004, 1, false, false, false), null);
+        Pet pet = BotPetFactory.createInMemory(new PetSpec(5000004, 1, 20, 60, false, false, false), null);
         assertNotNull(pet);
         assertTrue(pet.getUniqueId() > 777_000_000,
                 "in-memory pet id must not collide with real pet ids");

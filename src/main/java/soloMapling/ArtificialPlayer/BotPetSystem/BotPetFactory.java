@@ -49,12 +49,12 @@ public final class BotPetFactory {
             Pet pet = ctor.newInstance(spec.itemId(), (short) 0, id);
             pet.setSummoned(true);
             pet.setLevel((byte) spec.level());
-            pet.setTameness(0);
-            pet.setFullness(100); // full and never registered for hunger -> never despawns
+            pet.setTameness(spec.tameness());
+            // Fullness is never registered for hunger decay, so nothing drains it.
+            pet.setFullness(spec.fullness());
             // The pet name is written into SPAWN_PET / SPAWN_PLAYER packets with no null
-            // guard, so it must never be null. A named pet gets its random name; an
-            // unnamed one gets a placeholder (only shown when a name-tag is worn).
-            pet.setName(resolveName(name));
+            // guard, so it must never be null — resolveName guarantees that.
+            pet.setName(resolveName(spec.itemId(), name));
             return pet;
         } catch (ReflectiveOperationException e) {
             System.err.println("[BotPetFactory] in-memory Pet construction failed: " + e);
@@ -64,14 +64,25 @@ public final class BotPetFactory {
 
     /**
      * A name that is never null/blank, so packet serialization can never NPE on it.
-     * An unnamed pet gets a short placeholder — it is only ever displayed when the
-     * pet wears a name-tag, and named pets (the common case) get a real name anyway.
+     * A named pet carries its nickname; an unnamed one keeps its OFFICIAL default name —
+     * the item name from String.wz (localized: "褐色小猫"), exactly like a fresh real pet.
+     * The item lookup is the shared, race-safe wrapper, and a null/blank result (a WZ gap)
+     * falls back to the placeholder so a pet is never nameless on the wire.
      */
-    private static String resolveName(String name) {
+    private static String resolveName(int itemId, String name) {
         if (name != null && !name.isBlank()) {
             return name;
         }
-        return "Pet";
+        String official = null;
+        try {
+            official = soloMapling.ArtificialPlayer.BotHelpers.itemNameOrNull(itemId);
+        } catch (RuntimeException | LinkageError e) {
+            // The WZ provider is a boundary outside this feature: it is absent in unit
+            // tests (class-init failure -> LinkageError) and its DOM walk is not thread
+            // safe (-> RuntimeException, see BotHelpers). Either way, fall through to the
+            // placeholder — a nameless wire value would NPE the pet packet.
+        }
+        return official != null && !official.isBlank() ? official : "Pet";
     }
 
     /**
@@ -79,7 +90,7 @@ public final class BotPetFactory {
      * CASH item bound to it. Returns {@code null} on failure.
      */
     public static Pet createPersistent(Character bot, PetSpec spec, String name) {
-        int petId = Pet.createPet(spec.itemId(), (byte) spec.level(), 0, 100);
+        int petId = Pet.createPet(spec.itemId(), (byte) spec.level(), spec.tameness(), spec.fullness());
         if (petId <= 0) {
             return null;
         }
@@ -90,7 +101,9 @@ public final class BotPetFactory {
             return null;
         }
         pet.setSummoned(true);
-        pet.setName(resolveName(name));
+        pet.setTameness(spec.tameness());
+        pet.setFullness(spec.fullness()); // see the in-memory note
+        pet.setName(resolveName(spec.itemId(), name));
         // An Item bound to the pet id: its constructor loads the pet we just made.
         Item item = new Item(spec.itemId(), (short) 0, (short) 1, petId);
         item.setExpiration(Long.MAX_VALUE);

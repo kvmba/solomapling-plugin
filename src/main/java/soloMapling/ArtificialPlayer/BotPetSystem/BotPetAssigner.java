@@ -17,6 +17,17 @@ import java.util.Random;
  */
 public final class BotPetAssigner {
 
+    // Closeness / fullness roll bounds (see rollTameness).
+    static final int TAMENESS_MIN = 0;
+    static final int TAMENESS_MAX = 300;
+    private static final double TAMENESS_LEVEL_CAP = 120.0;
+    private static final double TAMENESS_LEVEL_WEIGHT = 0.7;
+    private static final double TAMENESS_STRENGTH_WEIGHT = 0.3;
+    /** Spread around the level-based midpoint: a weak bot can still have a dear pet. */
+    private static final int TAMENESS_SPREAD = 60;
+    static final int FULLNESS_MIN = 60;
+    static final int FULLNESS_MAX = 100;
+
     private BotPetAssigner() {
     }
 
@@ -51,10 +62,13 @@ public final class BotPetAssigner {
         List<PetSpec> specs = new ArrayList<>(ids.size());
         for (int itemId : ids) {
             int petLevel = petLevel(strength, config);
+            int tameness = rollTameness(level, strength, rng);
+            int fullness = FULLNESS_MIN + rng.nextInt(FULLNESS_MAX - FULLNESS_MIN + 1);
             boolean named = rng.nextDouble() < config.namingChance();
             boolean pickupItem = rng.nextDouble() < config.itemPouchChance();
             boolean pickupMeso = rng.nextDouble() < config.mesoMagnetChance();
-            specs.add(new PetSpec(itemId, petLevel, named, pickupItem, pickupMeso));
+            specs.add(new PetSpec(itemId, petLevel, tameness, fullness,
+                    named, pickupItem, pickupMeso));
         }
         return specs;
     }
@@ -109,6 +123,20 @@ public final class BotPetAssigner {
             return 2;
         }
         return 3;
+    }
+
+    /**
+     * Closeness 0..300, informed by the owner: a higher-level bot generally keeps a
+     * better-cared-for pet, but it stays a wide spread (a low roll on a strong bot, or
+     * a high roll on a weak one, is normal) — it reads as "how long this pet has been
+     * with its owner", not a fixed stat.
+     */
+    static int rollTameness(int level, double strength, Random rng) {
+        double levelPart = Math.min(1.0, (double) level / TAMENESS_LEVEL_CAP);
+        double mid = (TAMENESS_MAX - TAMENESS_MIN)
+                * (TAMENESS_LEVEL_WEIGHT * levelPart + TAMENESS_STRENGTH_WEIGHT * strength);
+        int rolled = (int) Math.round(mid) + rng.nextInt(2 * TAMENESS_SPREAD + 1) - TAMENESS_SPREAD;
+        return Math.max(TAMENESS_MIN, Math.min(TAMENESS_MAX, rolled));
     }
 
     /** Pet level, deliberately low and only mildly scaled by strength. */

@@ -35,7 +35,7 @@ class BotPetConfigTest {
         assertEquals(5, c.petLevelMax());
 
         // naming
-        assertEquals(0.70, c.namingChance(), 1e-9);
+        assertEquals(0.25, c.namingChance(), 1e-9);
 
         // gear
         assertEquals(1812001, c.itemPouchId());

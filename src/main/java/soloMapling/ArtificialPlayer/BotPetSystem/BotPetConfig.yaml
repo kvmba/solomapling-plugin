@@ -28,7 +28,7 @@ counts:
 pet_level: { base: 1, per_strength: 4, max: 5 }
 
 # Chance a newly granted pet is given a random name (and a name-tag).
-naming: { chance: 0.70 }
+naming: { chance: 0.25 }
 
 # Pet looting gear (equip slot per pet index). A pet can loot only if the
 # matching gear is equipped — exactly like a real client (host PetLootHandler).

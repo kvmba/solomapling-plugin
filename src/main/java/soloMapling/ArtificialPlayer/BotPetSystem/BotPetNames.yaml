@@ -1,59 +1,116 @@
 # =============================================================================
-# Bot Pet Names - random names for named pets.
+# Bot Pet Names - nicknames a NAMED bot pet may draw (the ~25% that get a name).
 # =============================================================================
-# Names must be <= 7 characters (the client truncates longer pet names).
-# Mixed-language on purpose: a bot sharing a map with players of any locale
-# reads fine. Drawn without replacement; duplicates are dropped on load.
+# Chinese nicknames, like the names a mainland player gives a real pet.
+# Keep entries short (<= 7 chars; the client truncates longer pet names).
+# Drawn without replacement; duplicates are dropped on load.
+#
+# A pet that is NOT named keeps its official default name instead (the item name
+# from String.wz/Pet.img, e.g. "褐色小猫"), matching a fresh real pet.
 # =============================================================================
 
 names:
-  - Brownie
-  - Cocoa
-  - Mochi
-  - Biscuit
-  - Pepper
-  - Nugget
-  - Pudding
-  - Coco
-  - Momo
-  - Luna
-  - Mocha
-  - Bean
-  - Kiwi
-  - Mango
-  - Sesame
-  - Waffle
-  - Dumpling
-  - Noodle
-  - Tofu
-  - Bao
-  - Puff
-  - Snowy
-  - Shadow
-  - Sparky
-  - Bubbles
-  - Lucky
-  - Peanut
-  - Cookie
-  - Gizmo
-  - Taro
-  - Yuzu
-  - Miso
-  - Matcha
-  - Boba
-  - Chibi
-  - Kiki
-  - Lulu
-  - Nana
-  - Pip
-  - Roro
-  - Yoyo
-  - Zuzu
-  - Xiaohei
-  - Xiaobai
-  - Tuanzi
-  - Mantou
-  - Gougou
-  - Maomao
-  - Dudu
-  - Tangyuan
+  # ── 叠字小名（最常见） ──
+  - 团团
+  - 圆圆
+  - 豆豆
+  - 球球
+  - 点点
+  - 乐乐
+  - 欢欢
+  - 闹闹
+  - 皮皮
+  - 跳跳
+  - 抱抱
+  - 挠挠
+  - 呼呼
+  - 懒懒
+  - 呆呆
+  - 萌萌
+  - 乖乖
+  - 宝宝
+  - 贝贝
+  - 妮妮
+  - 糖糖
+  - 果果
+  - 多多
+  - 朵朵
+  - 泡泡
+  - 闪闪
+  - 亮亮
+  - 强强
+  - 壮壮
+  - 康康
+  # ── 小X 式 ──
+  - 小黑
+  - 小白
+  - 小黄
+  - 小灰
+  - 小花
+  - 小虎
+  - 小龙
+  - 小胖
+  - 小乖
+  - 小宝
+  - 小豆
+  - 小米
+  - 小雪
+  - 小云
+  - 小星
+  - 小月
+  # ── 食物系 ──
+  - 馒头
+  - 包子
+  - 汤圆
+  - 饺子
+  - 粽子
+  - 年糕
+  - 麻花
+  - 布丁
+  - 蛋挞
+  - 奶糖
+  - 豆花
+  - 月饼
+  - 烧麦
+  - 糖葫芦
+  # ── 动物/拟声 ──
+  - 喵喵
+  - 咪咪
+  - 汪汪
+  - 咕咕
+  - 啾啾
+  - 吱吱
+  - 嘟嘟
+  - 嘎嘎
+  # ── 宠物常用昵称 ──
+  - 旺财
+  - 来福
+  - 招财
+  - 进宝
+  - 平安
+  - 如意
+  - 吉祥
+  - 富贵
+  - 元宝
+  - 金子
+  - 银子
+  - 铁蛋
+  - 狗蛋
+  - 二狗
+  - 大壮
+  - 小花卷
+  # ── 可爱系 ──
+  - 奶昔
+  - 奶油
+  - 奶盖
+  - 布丁狗
+  - 棉花糖
+  - 小汤圆
+  - 糯米
+  - 芝麻
+  - 花卷
+  - 泡芙
+  - 蛋卷
+  - 米粒
+  - 麦子
+  - 稻香

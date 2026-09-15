@@ -35,7 +35,7 @@ public final class BotPetConfig {
     private static final int DEF_PET_LEVEL_BASE = 1;
     private static final int DEF_PET_LEVEL_PER_STRENGTH = 4;
     private static final int DEF_PET_LEVEL_MAX = 5;
-    private static final double DEF_NAMING_CHANCE = 0.70;
+    private static final double DEF_NAMING_CHANCE = 0.25;
 
     private static final int DEF_ITEM_POUCH_ID = 1812001;
     private static final double DEF_ITEM_POUCH_CHANCE = 0.60;
