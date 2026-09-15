@@ -101,9 +101,10 @@ class EnvironmentPopulationConfigTest {
     }
 
     @Test
-    void bundledYamlPacesSpawnsAtTwentyFivePerSecond() {
+    void bundledYamlDisablesSpawnPacing() {
         var plan = EnvironmentPopulationConfig.reload();
-        assertEquals(25, plan.spawnRatePerSecond());
+        // Bundled config sets spawn_rate_per_second: 0 => unlimited (pacing disabled).
+        assertTrue(plan.spawnRatePerSecond() <= 0);
     }
 
     @Test

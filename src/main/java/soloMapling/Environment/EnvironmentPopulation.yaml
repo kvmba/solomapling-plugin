@@ -26,12 +26,13 @@ scale: 1.0
 # server unresponsive to real players while the world fills. Pacing spreads the
 # same population over a longer, calm ramp instead of one burst.
 #
+# 0 (or negative) = unlimited, i.e. the old burst-everything-at-once behaviour.
+#     This disables pacing entirely.
 # 25 = twenty-five bots per second, then wait for the next second. ~1000 bots => ~40s
 #      to fully populate, with the server responsive throughout.
-# 0 (or negative) = unlimited, i.e. the old burst-everything-at-once behaviour.
 #
 # Only affects bot creation at startup and via !env / !bot spawn commands.
-spawn_rate_per_second: 25
+spawn_rate_per_second: 0
 
 waves:
   essentials:
