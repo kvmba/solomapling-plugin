@@ -275,9 +275,18 @@ public final class BotPetFollower {
         // The pet stands unless the owner is clearly BELOW its floor: then it is
         // unsupported — it drops / down-jumps THROUGH the platform to follow the owner
         // down (landing on the first floor between it and the owner, repeating until it
-        // reaches the owner's level). Gravity only ever pulls DOWN.
+        // reaches the owner's level). A forbidFallDown platform is never pass-through
+        // (matches the client / bot down-jump), so a pet on one cannot drop and warps
+        // to the owner instead. Gravity only ever pulls DOWN.
         boolean ownerBelow = owner.y > p.y + GROUND_STEP_PX;
-        boolean ground = onGround(map, p, vy) && !ownerBelow;
+        boolean onPlatform = onGround(map, p, vy);
+        Foothold standing = onPlatform ? floorUnder(map, p) : null;
+        if (ownerBelow && standing != null && standing.isForbidFallDown()) {
+            teleportPet(chr, pet, index, new Point(tx, owner.y), 0,
+                    isPetFacingLeft(pet) ? PET_STAND_LEFT : PET_STAND_RIGHT, config, observed);
+            return;
+        }
+        boolean ground = onPlatform && !ownerBelow;
 
         vx = stepMotor(vx, tx - p.x, config.followSpeed(), dt);
         int nx = p.x + (int) Math.round(vx * dt);
