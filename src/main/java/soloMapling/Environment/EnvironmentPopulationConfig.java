@@ -84,7 +84,13 @@ public final class EnvironmentPopulationConfig {
                                 boolean convertScrollBots) {
     }
 
-    public record WaveLateArrivals(boolean enabled, boolean opqLobby, List<MerchantBatch> merchants) {
+    /**
+     * @param opqLobby  whether to populate Orbis PQ's own lobby, which has its own spawner
+     * @param pqLobbies whether to populate the other quests' recruit lobbies, in the numbers and
+     *                  level bands each quest's eligibility check wants
+     */
+    public record WaveLateArrivals(boolean enabled, boolean opqLobby, boolean pqLobbies,
+                                   List<MerchantBatch> merchants) {
     }
 
     public record WaveTraining(boolean enabled, WarmNav warmNav, List<TrainingCohort> cohorts) {
@@ -326,6 +332,7 @@ public final class EnvironmentPopulationConfig {
         return new WaveLateArrivals(
                 toBool(m.get("enabled"), true),
                 toBool(m.get("opq_lobby"), true),
+                toBool(m.get("pq_lobbies"), true),
                 parseMerchants(m.get("merchants"))
         );
     }
@@ -433,7 +440,7 @@ public final class EnvironmentPopulationConfig {
                 new WaveHenesysSubAreas(true, "elnath", new HenesysBatch(10, 10, 10, 4),
                         true, true, true, true),
                 new WaveSpecialty(true, true, true, true, true, true),
-                new WaveLateArrivals(true, true, List.of(
+                new WaveLateArrivals(true, true, true, List.of(
                         new MerchantBatch("m1", 2, 2, 0),
                         new MerchantBatch("m2", 2, 2, 1),
                         new MerchantBatch("m5", 2, 2, 1)
