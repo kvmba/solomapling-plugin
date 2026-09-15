@@ -42,7 +42,6 @@ gear:
 # It stands on the floor under its own x so it never floats over a ledge.
 follow:
   tick_ms: 200
-  speed: 150.0
   swim_offset: 14
 
 # Pet looting (only for pets with the matching gear). A pet picks up at most

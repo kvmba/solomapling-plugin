@@ -43,7 +43,6 @@ public final class BotPetConfig {
     private static final double DEF_MESO_MAGNET_CHANCE = 0.30;
 
     private static final long DEF_FOLLOW_TICK_MS = 300L;
-    private static final double DEF_FOLLOW_SPEED = 200.0;
     private static final int DEF_SWIM_OFFSET = 14;
 
     private static final int DEF_PICKUP_MAX_PER_TICK = 1;
@@ -98,7 +97,6 @@ public final class BotPetConfig {
     private final double mesoMagnetChance;
 
     private final long followTickMs;
-    private final double followSpeed;
     private final int swimOffset;
 
     private final int pickupMaxPerTick;
@@ -129,7 +127,6 @@ public final class BotPetConfig {
         this.mesoMagnetId = b.mesoMagnetId;
         this.mesoMagnetChance = b.mesoMagnetChance;
         this.followTickMs = b.followTickMs;
-        this.followSpeed = b.followSpeed;
         this.swimOffset = b.swimOffset;
         this.pickupMaxPerTick = b.pickupMaxPerTick;
         this.pickupRange = b.pickupRange;
@@ -159,7 +156,6 @@ public final class BotPetConfig {
     public double mesoMagnetChance() { return mesoMagnetChance; }
 
     public long followTickMs() { return followTickMs; }
-    public double followSpeed() { return followSpeed; }
     public int swimOffset() { return swimOffset; }
 
     public int pickupMaxPerTick() { return pickupMaxPerTick; }
@@ -239,7 +235,6 @@ public final class BotPetConfig {
 
         Map<String, Object> follow = map(root.get("follow"));
         b.followTickMs = lng(follow.get("tick_ms"), DEF_FOLLOW_TICK_MS);
-        b.followSpeed = dbl(follow.get("speed"), DEF_FOLLOW_SPEED);
         b.swimOffset = intOf(follow.get("swim_offset"), DEF_SWIM_OFFSET);
 
         Map<String, Object> pickup = map(root.get("pickup"));
@@ -355,7 +350,6 @@ public final class BotPetConfig {
         int mesoMagnetId = DEF_MESO_MAGNET_ID;
         double mesoMagnetChance = DEF_MESO_MAGNET_CHANCE;
         long followTickMs = DEF_FOLLOW_TICK_MS;
-        double followSpeed = DEF_FOLLOW_SPEED;
         int swimOffset = DEF_SWIM_OFFSET;
         int pickupMaxPerTick = DEF_PICKUP_MAX_PER_TICK;
         int pickupRange = DEF_PICKUP_RANGE;

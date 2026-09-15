@@ -45,7 +45,6 @@ class BotPetConfigTest {
 
         // follow
         assertEquals(200L, c.followTickMs());
-        assertEquals(150.0, c.followSpeed(), 1e-9);
         assertEquals(14, c.swimOffset());
 
         // pickup
