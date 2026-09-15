@@ -853,6 +853,94 @@ public final class GCMovement {
     }
 
     /**
+     * The owner's own ground walk pace (px/s): Physics.img walkSpeed scaled by the bot's movement
+     * profile — exactly the speed the bot engine walks it at. A follower walks at the owner's pace
+     * instead of a fixed number (a Haste thief's pet keeps up). A null bot yields the base pace.
+     */
+    public static double walkVelocityPxs(Character bot) {
+        return BotMovementProfile.fromCharacter(bot).walkVelocityPxs();
+    }
+
+    /**
+     * The foothold the bot engine itself stands a character on at {@code p} — the SAME bidirectional
+     * probe the bot walks with ({@link BotPhysicsEngine#findGroundFoothold}: the surface at the
+     * point OR up to {@code MAX_SLOPE_UP} above / a step below, picking the closer). A ground
+     * follower uses this to decide "am I standing on terrain" so it steps UP and DOWN slopes and
+     * ledges. The old down-only {@link #footholdBelow} reported "no ground" on any uphill surface.
+     * Null when no floor is within reach.
+     */
+    public static Foothold groundFoothold(MapleMap map, Point p) {
+        return BotPhysicsEngine.findGroundFoothold(map, p);
+    }
+
+    /**
+     * One follower tick of ground walking — the SAME integrator the bot's own ground physics runs
+     * ({@link BotPhysicsEngine#simulateGroundMotion}), looped at the bot's {@code TICK_MS} so a
+     * follower that is not a bot climbs and descends slopes and steps with bit-identical terrain
+     * behaviour: the bidirectional snap ({@code MAX_SLOPE_UP} up / {@code MAX_SNAP_DROP} down),
+     * walk-region constraint, wall block and off-edge detection. The walker sets {@code dir} toward
+     * its anchor; on {@link GroundWalk#lostGround()} it has run off an edge and must fall, and a
+     * wall simply stops it (the returned speed drops to 0). This replaces the old down-only probe
+     * step that left a pet stuck on flat ground and bobbing on every slope.
+     *
+     * @param from             current foot point
+     * @param dir              held direction (-1/0/+1)
+     * @param carryVelocityPxs horizontal speed (px/s) carried in from the previous step
+     * @param tickMs           the follower's tick length; the integrator runs {@code tickMs/TICK_MS} steps
+     * @param owner            the character the follower tails — supplies the movement profile (speed stat)
+     */
+    public static GroundWalk walkGroundTick(MapleMap map, Point from, int dir,
+                                            double carryVelocityPxs, long tickMs, Character owner) {
+        BotMovementProfile profile = BotMovementProfile.fromCharacter(owner);
+        Foothold foothold = BotPhysicsEngine.findGroundFoothold(map, from);
+        if (foothold == null) {
+            return new GroundWalk(from, null, carryVelocityPxs, true);
+        }
+        double stepS = MapleMovement.CLIENT_STEP_MS / 1000.0;
+        // Thread the fractional x and the 8ms carry across the sub-steps (like the bot's own
+        // applyGroundDisplacement), so sub-pixel progress is never truncated at a tick boundary.
+        double physX = from.x;
+        Point pos = from;
+        Foothold fh = foothold;
+        double hspeed = carryVelocityPxs * stepS;
+        double carryMs = 0.0;
+        boolean lost = false;
+        int ticks = Math.max(1, (int) Math.round(tickMs / (double) BotPhysicsEngine.cfg.TICK_MS));
+        for (int i = 0; i < ticks; i++) {
+            BotPhysicsEngine.GroundStepResult r = BotPhysicsEngine.simulateGroundMotion(
+                    map, pos, fh, dir,
+                    new BotPhysicsEngine.GroundTravelState(physX, hspeed, carryMs), profile);
+            hspeed = r.state().hspeed();
+            carryMs = r.state().carryMs();
+            physX = r.state().physX();
+            pos = r.point();
+            if (r.lostGround()) {
+                lost = true;
+                break;
+            }
+            if (r.stepX() == 0) {
+                break; // no progress this step (wall or converged) — nothing more will move
+            }
+            if (r.foothold() != null) {
+                fh = r.foothold();
+            }
+        }
+        return new GroundWalk(pos, fh, hspeed / stepS, lost);
+    }
+
+    /** Outcome of {@link #walkGroundTick}: the new foot point, the foothold under it, the new speed
+     *  (px/s), and whether the walker ran off an edge (must fall). */
+    public record GroundWalk(Point point, Foothold foothold, double velocityPxs, boolean lostGround) {
+    }
+
+    /** The engine's own tick length (ms) — the frame its physics integrates on. Exposed so a
+     *  follower that is not a bot can sub-step its motion to the same cadence (a swim model is
+     *  not step-size invariant, so a coarse step drifts from the bot's). */
+    public static double botTickMs() {
+        return BotPhysicsEngine.cfg.TICK_MS;
+    }
+
+    /**
      * The furthest walkable floor directly ABOVE {@code (x,y)} within {@code maxRise} px —
      * the bot's own "can I stand up there" probe (there is no findAbove on the foothold
      * tree). Used by the pet follower to decide whether an owner one platform up is
