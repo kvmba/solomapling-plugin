@@ -326,13 +326,18 @@ final class GCMovementDriver {
         }
 
         // A mob debuff (STUN/SEDUCE) pins the bot where it stands - it must not walk, attack or be
-        // steered. This is the movement-layer half of the debuff rule (the attack layer gates swings
-        // separately).
-        if (isFrozen(bot)) {
+        // steered. This is the movement-layer half of the debuff rule; the attack layer (BotAttackDriver)
+        // gates swings and the grind brain (GrindBrain) gates its direct moves separately.
+        if (status != null && status.isFrozen()) {
             // Still let a mob touch a frozen bot (it is standing right there): run the contact-damage
-            // tick, which also advances nothing else. Then hold the bot in place.
+            // tick, then hold the pose. A climber is held ON its rope (idleOnGround would clear the
+            // climb and drop it); anything else settles to a grounded idle - mirrors the resting hold.
             BotContactDamage.tickMobDamage(entry, bot);
-            BotPhysicsEngine.idleOnGround(entry, bot);
+            if (entry.climbing) {
+                BotPhysicsEngine.holdClimb(entry, bot);
+            } else {
+                BotPhysicsEngine.idleOnGround(entry, bot);
+            }
             broadcastIfObserved(entry);
             return;
         }
@@ -638,12 +643,6 @@ final class GCMovementDriver {
 
     private static boolean isSwimMap(BotMovementState entry) {
         return entry.bot != null && entry.bot.getMap() != null && entry.bot.getMap().isSwim();
-    }
-
-    /** STUN / SEDUCE: the bot is pinned in place this tick. */
-    private static boolean isFrozen(Character bot) {
-        BotDebuffState status = BotDebuffState.of(bot);
-        return status != null && status.isFrozen();
     }
 
     private static void clearReachedMoveTarget(BotMovementState entry) {
