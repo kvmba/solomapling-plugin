@@ -4,6 +4,7 @@ import org.gms.client.Character;
 import soloMapling.ArtificialPlayer.BotPartySystem.BotPartyLogic;
 import soloMapling.ArtificialPlayer.BotSM;
 import soloMapling.BotLogger;
+import soloMapling.server.SoloMaplingUtilities;
 import soloMapling.ArtificialPlayer.BotCommandsPack.WarpCommands;
 import soloMapling.ArtificialPlayer.BotMovementSystem.MovementCommands;
 
@@ -136,13 +137,24 @@ public abstract class PartyQuestBot extends BotSM {
         return party.getLeader().getPlayer();
     }
 
-    /** Walk back to the lobby, which is where a finished run puts everyone. */
+    /**
+     * Put the bot back in the lobby, which is where a finished run leaves the party.
+     *
+     * <p>Warped directly rather than by walking a portal. Inside a quest's rooms the portals lead
+     * to the next room, not out - Kerning's {@code next00} opens onto stage 3 - so following the
+     * nearest one on the way home would walk the bot deeper into a run it is trying to leave.
+     * The quest's own exit for a finished run is a plain warp to the lobby, and this is that.
+     */
     protected final void returnToLobby(String reason) {
         if (getChr().getMapId() == lobbyMapId()) {
             return;
         }
         BotLogger.log("PQ bot " + getChr().getName() + " leaving the run: " + reason);
-        WarpCommands.botWarpMapOnPortal(getChr());
+        var lobby = SoloMaplingUtilities.getMapleMapById(lobbyMapId());
+        if (lobby == null) {
+            return; // a lobby id that does not resolve is a data error, not a reason to wander
+        }
+        getChr().changeMap(lobby, lobby.getPortal(0));
     }
 
     // =========================================================================
