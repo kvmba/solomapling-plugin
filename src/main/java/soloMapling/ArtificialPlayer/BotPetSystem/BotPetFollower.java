@@ -98,6 +98,9 @@ public final class BotPetFollower {
     private static final int JUMP_REACH_PX = 160;           // owner above this => warp instead
     private static final int GROUND_SNAP_PX = 6;            // "standing on the floor" tolerance
     private static final int LOST_PX = 500;                 // 1-D horizontal gap -> warp to the owner
+    /** The pet holds still until the owner drifts this far from its spot (a real pet
+     *  does not shuffle after every tiny step — it waits, then follows). */
+    private static final int FOLLOW_DEAD_ZONE_PX = 30;
     /** Vertical tolerance (px) for treating a floor as the owner's own level. */
     private static final int GROUND_STEP_PX = 40;
 
@@ -376,7 +379,11 @@ public final class BotPetFollower {
         }
 
         boolean ground = onPlatform && !ownerBelow;
-        double vx = stepMotor(velX.getOrDefault(id, 0.0), tx - p.x, WALK_SPEED_PXS, standing, map, dt);
+        // The owner must drift clear of the pet's spot before the pet stirs: a small step
+        // (or a brief fidget) leaves it standing, exactly like a real pet.
+        double gap = tx - p.x;
+        int followDir = Math.abs(gap) > FOLLOW_DEAD_ZONE_PX ? (int) Math.signum(gap) : 0;
+        double vx = stepMotor(velX.getOrDefault(id, 0.0), followDir, WALK_SPEED_PXS, standing, map, dt);
         nx = p.x + (int) Math.round(vx * dt);
         vyAir.remove(id);
         ny = p.y;
@@ -460,8 +467,9 @@ public final class BotPetFollower {
         // The SHARED water model: hold toward the owner; when the owner is well above,
         // HOLD UP — the bot's own up mechanic is a burst (UP alone only slows the sink),
         // so we fire the same burst on the transition — else free-sink.
+        // Same stillness rule as on land: only paddle once the owner has drifted clear.
         double dx = botX - p.x;
-        int moveDir = Math.abs(dx) > 4 ? (int) Math.signum(dx) : 0;
+        int moveDir = Math.abs(dx) > FOLLOW_DEAD_ZONE_PX ? (int) Math.signum(dx) : 0;
         int verticalHold = targetY - p.y > 30 ? -1 : 0;
         long now = System.currentTimeMillis();
         if (verticalHold < 0 && vy >= 0 && now >= nextSwimBurstAtMs.getOrDefault(id, 0L)) {
@@ -499,11 +507,10 @@ public final class BotPetFollower {
      * the client's per-step integration toward the owner (with the map's snow/slip
      * factor), so the pet walks — and slides on snow — exactly like a bot.
      */
-    private static double stepMotor(double vx, double dx, double walkPxs, Foothold standing, MapleMap map, double dt) {
+    private static double stepMotor(double vx, int dir, double walkPxs, Foothold standing, MapleMap map, double dt) {
         double hForce = MapleMovement.hForceStepForWalkSpeed(walkPxs);
         double cap = MapleMovement.walkSpeedStep(walkPxs);
         double fs = MapleMovement.slipScale(map);
-        int dir = Math.abs(dx) > 4 ? (int) Math.signum(dx) : 0;
         double vStep = vx * (MapleMovement.CLIENT_STEP_MS / 1000.0);
         int steps = MapleMovement.stepsFor(dt * 1000.0);
         for (int i = 0; i < steps; i++) {
