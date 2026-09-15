@@ -452,7 +452,7 @@ public class SocialBot extends BotSM {
         }
         MapleMap map = chr.getMap();
         List<Point> spots = TownPresenceSampler.sample(map, townAnchor != null ? townAnchor : chr.getPosition(),
-                1, TownPresenceConfig.overridesFor(chr.getMapId()));
+                1, TownPresenceConfig.overridesFor(chr.getMapId()), false, true);
         if (spots.isEmpty()) {
             nextRelocateAtMs = now + RELOCATE_MIN_MS; // no baked nav graph yet - try again later
             return;

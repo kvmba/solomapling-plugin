@@ -261,12 +261,19 @@ public final class BotWanderSystem {
     // Pick a legal spot at least MIN_STROLL away in X, retrying a few times; on a tiny ledge where nothing
     // far enough exists, accept the last pick rather than freeze. Returns null only when the picker can't
     // produce any reachable point (caller idles and retries).
+    //
+    // The stroll target also steers clear of ledges a stationed (hang-out) crowd has already filled
+    // (avoidCrowdedLedges). A wanderer used to pick by width alone and happily stroll onto an anchor-hot
+    // street the SocialBots had claimed, so the two crowds piled onto the same pause points; the pick now
+    // sees their claims and lands on open ground instead, falling back to the full span only when every
+    // eligible ledge is full, so a roam still moves.
     private static Point pickStroll(MapleMap map, Point from, Wander w) {
         Point last = null;
         for (int i = 0; i < STROLL_ATTEMPTS; i++) {
             Point p = w.banded
-                    ? BotSpotPicker.pickGroundSpot(map, from.x, from.y, w.bandLo, w.bandHi)
-                    : BotSpotPicker.pickGroundSpot(map, from.x, from.y);
+                    ? BotSpotPicker.pickGroundSpot(map, from.x, from.y, w.bandLo, w.bandHi, true)
+                    : BotSpotPicker.pickGroundSpot(map, from.x, from.y, Integer.MIN_VALUE, Integer.MAX_VALUE,
+                            true);
             if (p == null) {
                 return last;
             }

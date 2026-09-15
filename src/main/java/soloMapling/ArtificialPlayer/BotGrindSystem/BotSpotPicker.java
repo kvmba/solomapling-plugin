@@ -1,6 +1,7 @@
 package soloMapling.ArtificialPlayer.BotGrindSystem;
 
 import org.gms.server.maps.MapleMap;
+import soloMapling.ArtificialPlayer.BotSpotClaims;
 import soloMapling.ArtificialPlayer.GCMoveSystem.GCMovement;
 
 import java.awt.Point;
@@ -42,7 +43,29 @@ public final class BotSpotPicker {
     // Pick one organic ground point on a ledge whose X overlaps [x1,x2]. Vertically stacked platforms in
     // the band are all eligible (no Y constraint). Returns null when nothing qualifies - caller falls back.
     public static Point pickGroundSpot(MapleMap map, int fromX, int fromY, int x1, int x2) {
+        return pickGroundSpot(map, fromX, fromY, x1, x2, false);
+    }
+
+    // As above; `avoidCrowdedLedges` drops the candidates whose live town claim (BotSpotClaims) is already
+    // at capacity, so a caller that strolls through town - the flavor wander - never targets a ledge the
+    // stationed crowd has filled. Only the candidates are tested (not every ledge on the map), keeping the
+    // read proportional to what this pick can actually use. Nothing is dropped when every candidate is full
+    // or nothing is claimed yet, so a roam still moves on an over-packed map.
+    public static Point pickGroundSpot(MapleMap map, int fromX, int fromY, int x1, int x2,
+                                       boolean avoidCrowdedLedges) {
         List<Candidate> candidates = eligibleLedges(map, fromX, fromY, x1, x2);
+        if (avoidCrowdedLedges && !candidates.isEmpty()) {
+            int mapId = map.getId();
+            List<Candidate> open = new ArrayList<>();
+            for (Candidate c : candidates) {
+                if (!BotSpotClaims.isFull(mapId, c.ledge.regionId())) {
+                    open.add(c);
+                }
+            }
+            if (!open.isEmpty()) {
+                candidates = open;
+            }
+        }
         if (candidates.isEmpty()) {
             return null;
         }

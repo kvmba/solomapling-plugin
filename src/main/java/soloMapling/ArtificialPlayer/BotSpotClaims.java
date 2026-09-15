@@ -19,6 +19,12 @@ public final class BotSpotClaims {
     private BotSpotClaims() {
     }
 
+    // How many bots may share one town ledge before a pause-point picker should prefer another. Shared
+    // by every town consumer (TownStation, TownLoiter, and the occupancy-aware pickers) so the number
+    // lives in exactly one place - it used to be a 3 duplicated in both town classes with a "MUST match"
+    // comment, which is precisely the kind of drift that lets the hang-out and roaming crowds huddle.
+    public static final int TOWN_LEDGE_CAPACITY = 3;
+
     // mapId -> spotId -> (botId -> slotIndex)
     private static final Map<Integer, Map<Integer, Map<Integer, Integer>>> CLAIMS = new ConcurrentHashMap<>();
 
@@ -70,6 +76,13 @@ public final class BotSpotClaims {
         }
         Map<Integer, Integer> slots = bySpot.get(spotId);
         return slots == null ? 0 : slots.size();
+    }
+
+    // True once a spot holds the full town capacity, i.e. a further bot should be steered to another
+    // ledge. A convenience over holders() against TOWN_LEDGE_CAPACITY for the pause-point pickers; a
+    // spot nobody holds is never full, so an empty registry reads as wide open.
+    public static synchronized boolean isFull(int mapId, int spotId) {
+        return holders(mapId, spotId) >= TOWN_LEDGE_CAPACITY;
     }
 
     // The X sub-range [x0, x1] for slot of a capacity-K spot spanning [minX, maxX]. K=1 = whole span.
