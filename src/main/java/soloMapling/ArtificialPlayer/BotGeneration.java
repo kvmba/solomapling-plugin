@@ -437,6 +437,44 @@ public class BotGeneration {
         return onDemandBot;
     }
 
+    /**
+     * Swap a bot onto a client whose player slot belongs to it alone, so
+     * {@code client.getPlayer()} still answers with that bot <em>later</em>, on whatever
+     * thread the engine calls back on.
+     *
+     * <p>The shared per-channel client ({@link BotClientHandler#clientFor}) is right for
+     * ambient bots: they only need something to route packets and read a channel from, and
+     * sharing one saves a socket-less object per bot. It is wrong wherever the engine
+     * dereferences {@code c.getPlayer()} from a callback that outlives the call which
+     * scheduled it, and {@link BotClientBinding} cannot cover those - it holds the client
+     * monitor only for the duration of an operation, while a party-quest reactor waits five
+     * seconds on a {@code TimerManager} thread before running its script. By then
+     * {@code getPlayer()} names whatever character happens to sit on the shared client:
+     * null, or a different bot entirely.
+     *
+     * <p>Publishing the character here makes that permanently true instead. The client
+     * reports the bot's current channel, so channel routing, map resolution and
+     * {@code removeBotFromServer} all keep working as before.
+     *
+     * <p>Worth it only for bots that are few and whose engine interactions outlive their
+     * call site - party-quest participants, not the thousands of ambient walkers.
+     */
+    public static void adoptPrivateClient(Character bot) {
+        if (bot == null) {
+            return;
+        }
+        int channel = BotChannelRouter.channelOf(bot);
+        if (channel == BotChannelRouter.NONE) {
+            return;
+        }
+        Client privateClient =
+                new BotClient(SoloMaplingConstants.GameConstants.WORLD_SCANIA, channel);
+        bot.setClient(privateClient);
+        privateClient.setPlayer(bot);
+        debugprint("[BotGeneration] " + bot.getName() + " moved to a private client on channel "
+                + channel);
+    }
+
     public static void removeBotFromServer(Character fakechar) {
         // Detach pets first: they must be shown leaving while the bot is still on
         // its map. Ambient bots keep pets in memory only, so nothing is left

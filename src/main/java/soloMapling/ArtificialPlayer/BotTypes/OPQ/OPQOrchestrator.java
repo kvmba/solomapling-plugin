@@ -10,6 +10,7 @@ import java.awt.Point;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Calendar;
 import java.util.Comparator;
 import java.util.Deque;
 import java.util.HashMap;
@@ -56,6 +57,9 @@ public class OPQOrchestrator {
 
     // Leader tracking: cached on first observation by any bot, refreshed each tick.
     private volatile int leaderId = -1;
+
+    // Which bot throws the cloud stack onto the altar this run (-1 = not yet elected).
+    private int altarThrowerId = -1;
 
     // Stage 2: sorted box reactor index (oid -> sorted position 0-6, right-to-left).
     // Built lazily on first Stage 2 assignment. Cleared on reset.
@@ -292,6 +296,7 @@ public class OPQOrchestrator {
         context.setCurrentPhase(OPQPhase.RECRUITMENT);
         leaderId = -1;
         boxSortedIndex.clear();
+        altarThrowerId = -1;
     }
 
     public void mirrorPhase(OPQPhase phase) {
@@ -303,6 +308,39 @@ public class OPQOrchestrator {
     }
 
     /**
+     * Elect the one bot that should throw the cloud stack onto the altar.
+     *
+     * <p>Only one is needed: the altar consumes the first qualifying stack it sees (it sets
+     * {@code shouldCollect(false)} and moves its state past the WZ condition), and the
+     * engine's five-second-delayed {@code ActivateItemReactor} reads that stack by identity.
+     * If every bot threw, the map would collect a pile of identical stacks, all but one of
+     * which would sit there as litter, and each one is a candidate for another bot's loot
+     * sweep to pick back up before the delay elapses - which silently cancels the trigger.
+     *
+     * <p>Lowest character id wins. Re-elected while the winner is still registered, so a bot
+     * that leaves does not strand the run without a thrower.
+     */
+    public synchronized boolean isAltarThrower(int botId) {
+        boolean winnerStillHere = false;
+        int lowest = Integer.MAX_VALUE;
+        for (OPQBot bot : registeredBots) {
+            int id = bot.getChr().getId();
+            lowest = Math.min(lowest, id);
+            if (id == altarThrowerId) {
+                winnerStillHere = true;
+            }
+        }
+        if (lowest == Integer.MAX_VALUE) {
+            return false;
+        }
+        if (!winnerStillHere) {
+            altarThrowerId = lowest;
+            opqLog("Altar thrower elected: bot id " + altarThrowerId);
+        }
+        return altarThrowerId == botId;
+    }
+
+    /**
      * Hard stop — orchestrator idles, bots fall back to INACTIVE.
      */
     public synchronized void shutdownRun() {
@@ -310,6 +348,7 @@ public class OPQOrchestrator {
         context.reset();
         leaderId = -1;
         boxSortedIndex.clear();
+        altarThrowerId = -1;
     }
 
     // =========================================================================
@@ -389,8 +428,20 @@ public class OPQOrchestrator {
                 .getPlayerStorage().getCharacterById(leaderId);
     }
 
+    /**
+     * Whether Chamberlain Eak is on the leader's map yet. Eak is spawned by the altar
+     * reactor's script (2006000.js act() -> rm.spawnNpc), so his presence is a side effect
+     * of a successful altar drop rather than a stage flag. The leader may also have left
+     * the map (PQ aborted, channel change) while bots are still registered, hence the guard:
+     * this used to dereference resolveLeader() unconditionally and NPE on every tick in
+     * that window, which killed the orchestrator's tick and stalled the whole run.
+     */
     public boolean isChamberlainSpawned() {
-        return isNpcPresent(resolveLeader().getMap(), CHAMBERLAIN_EAK);
+        Character leader = resolveLeader();
+        if (leader == null || leader.getMap() == null) {
+            return false;
+        }
+        return isNpcPresent(leader.getMap(), CHAMBERLAIN_EAK);
     }
 
 
@@ -497,15 +548,22 @@ public class OPQOrchestrator {
     }
 
     /**
-     * Get the deterministic item ID that a box reactor should drop, based on sorted position.
-     * Box at sorted index 0 (rightmost/"1st") drops STAGE_2_ITEMS[0] = 4001056, etc.
+     * The record the music box accepts today, which is the only one worth carrying there.
+     * OrbisPQ.js does {@code getReactorByName("music").setEventState(d.getDay())} (JS:
+     * 0=Sunday..6=Saturday), and that number indexes the WZ event blocks in order - block[0]
+     * wants 4001056, block[6] wants 4001062.
      */
-    public int getBoxItemId(int reactorOid) {
-        Integer idx = boxSortedIndex.get(reactorOid);
-        if (idx != null && idx >= 0 && idx < OPQConstants.STAGE_2_ITEMS.size()) {
-            return OPQConstants.STAGE_2_ITEMS.get(idx);
-        }
-        return OPQConstants.STAGE_2_ITEMS.get(0);
+    public static int getTodayRecordItemId() {
+        return recordForDayOfWeek(Calendar.getInstance().get(Calendar.DAY_OF_WEEK));
+    }
+
+    /**
+     * {@link Calendar}'s day-of-week to the record that day's event block asks for. The two
+     * number days differently - Calendar starts at Sunday = 1, the JS side at Sunday = 0 -
+     * so this is the one place the offset is applied (and the reason to keep it in one place).
+     */
+    static int recordForDayOfWeek(int calendarDayOfWeek) {
+        return OPQConstants.RECORD_LP_FIRST + (calendarDayOfWeek - Calendar.SUNDAY);
     }
 
     /**

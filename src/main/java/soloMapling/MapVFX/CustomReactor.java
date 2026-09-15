@@ -12,6 +12,7 @@ import org.gms.server.maps.Reactor;
 import org.gms.server.maps.ReactorDropEntry;
 import org.gms.server.maps.ReactorFactory;
 import org.gms.util.PacketCreator;
+import org.gms.util.Pair;
 
 import java.awt.*;
 import java.util.ArrayList;
@@ -64,31 +65,6 @@ public class CustomReactor {
     }
 
     /*
-        Server-side forced drop of a single item at a reactor's position, owned by `owner`.
-        Bots have no client, so when they break a reactor via spliced hitReactor packets the
-        normal drop pipeline never fires (no owner attached, no DropEntry resolution). This
-        is the fallback: spawn one item directly via the same MapleMap#dropFromReactor path
-        the real drop code uses, attributing ownership to the bot so it can pick it up.
-     */
-    public static void dropItemAtReactor(MapleMap map, int oid, int itemId, Character owner) {
-        if (map == null || owner == null) return;
-        // Same discipline as DropCommands: an id with no localized name is half-finished WZ
-        // data, and letting one through puts a raw-English item on the floor for players.
-        if (isUnusableItem(itemId)) return;
-        Reactor reactor = map.getReactorByOid(oid);
-        if (reactor == null) return;
-
-        Item drop;
-        if (ItemConstants.getInventoryType(itemId) != InventoryType.EQUIP) {
-            drop = new Item(itemId, (short) 0, (short) 1);
-        } else {
-            drop = (Equip) ItemInformationProvider.getInstance().getEquipById(itemId);
-        }
-        Point dropPos = new Point(reactor.getPosition());
-        map.dropFromReactor(owner, reactor, drop, dropPos, (short) 0, (short) 0);
-    }
-
-    /*
         Allows you to "Hit" a reactor via server code manually. After 4, it will break
         Doesn't "Spray" Items, purely animation based.
         Ludi PQ Blue Box: 2202004
@@ -99,6 +75,69 @@ public class CustomReactor {
         state++;
         reactor.setState(state);
         map.broadcastMessage(PacketCreator.triggerReactor(reactor, (short) 0));
+    }
+
+    /*
+        Hit a reactor through the engine's own Reactor.hitReactor, i.e. the same path a
+        player's swing takes: it advances the reactor's state machine, runs its script
+        (act()) when the WZ data says the state walk is done, and re-arms the drop logic.
+        The bare hitReactor above does none of that - it bumps the state and plays the
+        animation only, so a bot breaking a quest reactor gets neither the drop
+        (2002001.js act() -> rm.dropItems()) nor the flags the map script keys on
+        (2006000.js act() -> rm.spawnNpc()).
+
+        Hit counts are per reactor and must not be assumed; callers should loop until the
+        effect they want appears. Cloud pieces take 4 hits; the Orbis altar and music box
+        take 1, through different branches of the same state walk. Re-hitting a spent
+        reactor is a no-op (isActive() goes false once its state has no WZ entry).
+
+        Requires a live client player: Reactor.hitReactor reads c.getPlayer() for its GM
+        debug line, and ReactorActionManager.dropItems returns early on a null player. A
+        bot published on its own client (BotGeneration.createPQBotClient) satisfies this;
+        on a shared client, wrap in BotClientBinding.runWithBoundPlayer.
+     */
+    public static void hitReactorWithScript(MapleMap map, int oid, Character bot) {
+        if (map == null || bot == null) return;
+        Reactor reactor = map.getReactorByOid(oid);
+        if (reactor == null) return;
+        reactor.hitReactor(false, bot.getPosition().x, (short) 0, 0, bot.getClient());
+    }
+
+    /*
+        Report every item-triggered reactor on the map: what it wants, and where a drop
+        aimed at it actually lands.
+
+        The trigger box alone is not enough to aim a throw. MapleMap#calcDropPos re-seats
+        whatever it is given onto the ground 85px below, so a throw has to be aimed at a
+        spot whose re-seated position still falls inside the box - the Orbis music box sits
+        68px above the floor its drop lands on. This prints the pair for the same reason
+        the OPQ altar bug was invisible for so long: a box that looks reachable is not.
+
+        Printed to the caller's client on purpose. debugprint() is a no-op in a normal run
+        (DebugUtilities.DEBUG is false, and it also requires a debugger attached), so a
+        diagnostic that went through it would say nothing exactly when it was needed.
+
+        The Orbis values this was written for: altar 2006000 at (377,66) wants 4001063x20
+        and lands at (377,99); music box 2008006 at (-1706,-240) wants 4001056+day and
+        lands at (-1706,-172).
+     */
+    public static void dumpItemReactorBoxes(Character chr) {
+        if (chr == null || chr.getMap() == null) return;
+        MapleMap map = chr.getMap();
+        for (Reactor reactor : map.getAllReactors()) {
+            if (reactor.getReactorType() != 100) continue;
+            Rectangle area = reactor.getArea();
+            Pair<Integer, Integer> item = reactor.getReactItem(reactor.getEventState());
+            Point at = reactor.getPosition();
+            Point landing = map.calcDropPos(at, at);
+            chr.dropMessage(6, "Item reactor: name=" + reactor.getName()
+                    + " dataId=" + reactor.getId() + " oid=" + reactor.getObjectId()
+                    + " at=" + at + " evstate=" + reactor.getEventState()
+                    + " wants=" + (item == null ? "?" : item.getLeft() + "x" + item.getRight())
+                    + " box=" + area
+                    + " drop@reactor lands on " + landing
+                    + " inside=" + area.contains(landing));
+        }
     }
 
     public static void threeHitReactor(MapleMap map, int oid) {

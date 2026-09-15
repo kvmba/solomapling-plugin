@@ -4,6 +4,7 @@ import org.gms.client.Character;
 import org.gms.client.Job;
 import org.gms.server.maps.MapleMap;
 import soloMapling.ArtificialPlayer.BotGeneration;
+import soloMapling.ArtificialPlayer.PartyQuest.PqBotSpawner;
 import soloMapling.ArtificialPlayer.BotMovementSystem.MovementCommands;
 import soloMapling.ArtificialPlayer.BotDecoratorSystem.BotDecorate;
 import soloMapling.ArtificialPlayer.BotDecoratorSystem.BotFame;
@@ -283,6 +284,12 @@ public class EnvironmentManager {
             List<Runnable> tasks = new ArrayList<>();
             if (w7.opqLobby()) {
                 tasks.add(() -> spawnOPQBotsInLobby());
+            }
+            // The other quests' recruit lobbies. Their bots are useless unless they are standing
+            // where the quest looks for them, at a level the quest accepts, so they are placed
+            // by the quest table rather than left for a player to convert by hand.
+            if (w7.pqLobbies()) {
+                tasks.add(PqBotSpawner::spawnAllQuestLobbies);
             }
             for (var m : w7.merchants()) {
                 tasks.add(() -> spawnMerchBotsBatch(m.platform(),
@@ -687,7 +694,7 @@ public class EnvironmentManager {
      * <p>Unlike {@code PopulationPlan.scaled} this floors at 1 rather than 0: these are ambient
      * crowds, so a small scale should thin a crowd, not delete the spot entirely.
      */
-    static int scaledAmbient(int base) {
+    public static int scaledAmbient(int base) {
         if (base <= 0) {
             return 0;
         }

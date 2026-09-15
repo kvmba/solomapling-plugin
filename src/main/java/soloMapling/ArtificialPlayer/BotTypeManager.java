@@ -13,7 +13,21 @@ import soloMapling.ArtificialPlayer.BotTypes.GachaBot;
 import soloMapling.ArtificialPlayer.BotTypes.HenesysBot;
 import soloMapling.ArtificialPlayer.BotTypes.HenesysJQBot;
 import soloMapling.ArtificialPlayer.BotTypes.NXMerchantBot;
+import soloMapling.ArtificialPlayer.BotTypes.Amoria.AmoriaPQBot;
+import soloMapling.ArtificialPlayer.BotTypes.Ariant.AriantPQBot;
+import soloMapling.ArtificialPlayer.BotTypes.BossRush.BossRushPQBot;
+import soloMapling.ArtificialPlayer.BotTypes.Carnival.CarnivalPQBot;
+import soloMapling.ArtificialPlayer.BotTypes.Dojo.DojoPQBot;
+import soloMapling.ArtificialPlayer.BotTypes.Ellin.EllinPQBot;
+import soloMapling.ArtificialPlayer.BotTypes.Henesys.HenesysPQBot;
+import soloMapling.ArtificialPlayer.BotTypes.Horntail.HorntailPQBot;
+import soloMapling.ArtificialPlayer.BotTypes.Kerning.KerningPQBot;
+import soloMapling.ArtificialPlayer.BotTypes.Ludi.LudiPQBot;
+import soloMapling.ArtificialPlayer.BotTypes.Magatia.MagatiaPQBot;
 import soloMapling.ArtificialPlayer.BotTypes.OPQ.OPQBot;
+import soloMapling.ArtificialPlayer.BotTypes.Pirate.PiratePQBot;
+import soloMapling.ArtificialPlayer.BotTypes.Pyramid.PyramidPQBot;
+import soloMapling.ArtificialPlayer.BotTypes.Zakum.ZakumPQBot;
 import soloMapling.ArtificialPlayer.BotTypes.ScrollingBot;
 import soloMapling.ArtificialPlayer.BotTypes.SellingMerchantBot;
 import soloMapling.ArtificialPlayer.BotTypes.BuyingMerchantBot;
@@ -143,6 +157,104 @@ public class BotTypeManager {
             public void createAndSetBot(Character character) {
                 OPQBot opqBot = new OPQBot(character);
                 CharacterStorage.addActiveBot(character.getId(), opqBot);
+            }
+        },
+        HENESYS_PQ_BOT {
+            @Override
+            public void createAndSetBot(Character character) {
+                HenesysPQBot hpqBot = new HenesysPQBot(character);
+                CharacterStorage.addActiveBot(character.getId(), hpqBot);
+            }
+        },
+        KERNING_PQ_BOT {
+            @Override
+            public void createAndSetBot(Character character) {
+                KerningPQBot kpqBot = new KerningPQBot(character);
+                CharacterStorage.addActiveBot(character.getId(), kpqBot);
+            }
+        },
+        LUDI_PQ_BOT {
+            @Override
+            public void createAndSetBot(Character character) {
+                LudiPQBot lpqBot = new LudiPQBot(character);
+                CharacterStorage.addActiveBot(character.getId(), lpqBot);
+            }
+        },
+        BOSS_RUSH_PQ_BOT {
+            @Override
+            public void createAndSetBot(Character character) {
+                BossRushPQBot brpqBot = new BossRushPQBot(character);
+                CharacterStorage.addActiveBot(character.getId(), brpqBot);
+            }
+        },
+        PIRATE_PQ_BOT {
+            @Override
+            public void createAndSetBot(Character character) {
+                PiratePQBot ppqBot = new PiratePQBot(character);
+                CharacterStorage.addActiveBot(character.getId(), ppqBot);
+            }
+        },
+        AMORIA_PQ_BOT {
+            @Override
+            public void createAndSetBot(Character character) {
+                AmoriaPQBot apqBot = new AmoriaPQBot(character);
+                CharacterStorage.addActiveBot(character.getId(), apqBot);
+            }
+        },
+        ELLIN_PQ_BOT {
+            @Override
+            public void createAndSetBot(Character character) {
+                EllinPQBot epqBot = new EllinPQBot(character);
+                CharacterStorage.addActiveBot(character.getId(), epqBot);
+            }
+        },
+        ZAKUM_PQ_BOT {
+            @Override
+            public void createAndSetBot(Character character) {
+                ZakumPQBot zpqBot = new ZakumPQBot(character);
+                CharacterStorage.addActiveBot(character.getId(), zpqBot);
+            }
+        },
+        HORNTAIL_PQ_BOT {
+            @Override
+            public void createAndSetBot(Character character) {
+                HorntailPQBot htpqBot = new HorntailPQBot(character);
+                CharacterStorage.addActiveBot(character.getId(), htpqBot);
+            }
+        },
+        MAGATIA_PQ_BOT {
+            @Override
+            public void createAndSetBot(Character character) {
+                MagatiaPQBot mpqBot = new MagatiaPQBot(character);
+                CharacterStorage.addActiveBot(character.getId(), mpqBot);
+            }
+        },
+        CARNIVAL_PQ_BOT {
+            @Override
+            public void createAndSetBot(Character character) {
+                CarnivalPQBot cpqBot = new CarnivalPQBot(character);
+                CharacterStorage.addActiveBot(character.getId(), cpqBot);
+            }
+        },
+        PYRAMID_PQ_BOT {
+            @Override
+            public void createAndSetBot(Character character) {
+                PyramidPQBot pyrBot = new PyramidPQBot(character);
+                CharacterStorage.addActiveBot(character.getId(), pyrBot);
+            }
+        },
+        DOJO_PQ_BOT {
+            @Override
+            public void createAndSetBot(Character character) {
+                DojoPQBot dojoBot = new DojoPQBot(character);
+                CharacterStorage.addActiveBot(character.getId(), dojoBot);
+            }
+        },
+        ARIANT_PQ_BOT {
+            @Override
+            public void createAndSetBot(Character character) {
+                AriantPQBot arpqBot = new AriantPQBot(character);
+                CharacterStorage.addActiveBot(character.getId(), arpqBot);
             }
         },
         SOCIAL_BOT {

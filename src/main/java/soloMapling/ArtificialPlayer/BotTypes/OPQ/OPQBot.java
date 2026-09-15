@@ -1,12 +1,14 @@
 package soloMapling.ArtificialPlayer.BotTypes.OPQ;
 
 import org.gms.client.Character;
+import org.gms.server.maps.MapItem;
 import org.gms.server.maps.MapleMap;
 import org.gms.server.maps.MapObject;
 import org.gms.server.maps.Reactor;
 import soloMapling.ArtificialPlayer.BotCommandsPack.BotAttack;
 import soloMapling.ArtificialPlayer.BotCommandsPack.DropCommands;
 import soloMapling.ArtificialPlayer.BotCommandsPack.SocialCommands;
+import soloMapling.ArtificialPlayer.BotGeneration;
 import soloMapling.ArtificialPlayer.BotLogic;
 import soloMapling.ArtificialPlayer.BotMessagingSystem.ChatMessage;
 import soloMapling.ArtificialPlayer.BotMessagingSystem.MessageQueue;
@@ -64,13 +66,18 @@ public class OPQBot extends BotSM {
     private long lastRecruitMessageAt;
     private volatile int reactorHitsThisTarget;
 
-    private int cloudPiecesLooted;
     private volatile int lootedRecordItemId = -1;
 
     public OPQBot(Character character) {
         super(character);
         dialoguePath = "OPQBotDialogue.yaml"; // TODO: add YAML or fall back gracefully
         botType = "OPQBot";
+        // Move off the shared per-channel client before doing any engine work: the PQ's
+        // reactor callbacks fire seconds after the call that arms them, on a timer thread,
+        // and read client.getPlayer() when they do. On the shared client that character is
+        // whatever bot last bound itself - or null - so the altar's spawnNpc would silently
+        // do nothing. See BotGeneration.adoptPrivateClient.
+        BotGeneration.adoptPrivateClient(character);
         this.orchestrator = OPQOrchestrator.getInstance();
         this.sharedContext = orchestrator.getSharedContext();
         orchestrator.registerBot(this);
@@ -132,6 +139,7 @@ public class OPQBot extends BotSM {
         STAGE_1_WAIT,
         STAGE_1_TRANSITION,
         STAGE_1_TRANSITION_PT_2,
+        MIDDLE_STAGE,
         STAGE_2_NAVIGATE,
         STAGE_2_HIT_BOX,
         STAGE_2_LOOT,
@@ -149,7 +157,6 @@ public class OPQBot extends BotSM {
         stageWaitStartTime = 0;
         lastRecruitMessageAt = 0;
         reactorHitsThisTarget = 0;
-        cloudPiecesLooted = 0;
         lootedRecordItemId = -1;
     }
 
@@ -214,6 +221,9 @@ public class OPQBot extends BotSM {
                 break;
             case STAGE_1_TRANSITION_PT_2:
                 handleStage1TransitionPart2();
+                break;
+            case MIDDLE_STAGE:
+                handleMiddleStage();
                 break;
             case STAGE_2_NAVIGATE:
                 handleStage2Navigate();
@@ -328,7 +338,6 @@ public class OPQBot extends BotSM {
         // the top of updateState() then flips us into STAGE_1_NAVIGATE.
 
         if (getPartyLeader().getMapId() == OPQConstants.OPQ_STAGE_1) {
-            cloudPiecesLooted = 0;
             lootedRecordItemId = -1;
             // deliberate synchronous warp: warpBotToLocation blocks through the
             // arrival choreography (up to ~7s) and nothing may overlap it
@@ -433,18 +442,14 @@ public class OPQBot extends BotSM {
         }
 
         BotAttack.basicSwing(getChr());
-        CustomReactor.hitReactor(getChr().getMap(), reactorOid);
+        CustomReactor.hitReactorWithScript(getChr().getMap(), reactorOid, getChr());
         reactorHitsThisTarget++;
 
-        // Bot-owned drop: clientless bots don't trigger the normal reactor drop
-        // pipeline, so we manually spawn the cloud piece if our hit was the one
-        // that finalized the break (state == 4 immediately after the hit).
+        // The engine drops the cloud piece itself now (2002001.js act() -> rm.dropItems()),
+        // so nothing is spawned by hand. Whether THIS swing was the one that broke it is not
+        // knowable from the caller's side - act() fires inside the engine's state walk - so
+        // the loot step that follows simply sweeps the floor either way.
         byte stateAfter = reactor.getState();
-        if (stateAfter >= 4) {
-            CustomReactor.dropItemAtReactor(getChr().getMap(), reactorOid,
-                    OPQConstants.CLOUD_PIECE, getChr());
-            debugLogf("Forced cloud drop after finalizing break: oid=" + reactorOid);
-        }
 
         if (stateAfter >= 4 || reactorHitsThisTarget >= OPQConstants.MAX_REACTOR_HITS) {
             transitionTo(OPQBotState.STAGE_1_LOOT,
@@ -483,34 +488,55 @@ public class OPQBot extends BotSM {
             }
         }
 
-        if (!found.isEmpty()) {
-            DropCommands.lootItemListOnFloor(getChr(), found);
-            cloudPiecesLooted += 1;
-            SocialCommands.BotChatbubble(getChr(), BotMessages.get("opq.cloud_pieces", cloudPiecesLooted));
+        List<MapObject> loot = dropLoneItemsOnly(found);
+        if (!loot.isEmpty()) {
+            DropCommands.lootItemListOnFloor(getChr(), loot);
+            SocialCommands.BotChatbubble(getChr(),
+                    BotMessages.get("opq.cloud_pieces", cloudPiecesCount()));
         }
         waitFor(800); // loot beat before NAVIGATE ticks
 
         debugLogf("handleStage1Loot: scannedHits=" + found.size()
-                + " cloudPiecesLooted=" + cloudPiecesLooted);
+                + " held=" + cloudPiecesCount());
 
         transitionTo(OPQBotState.STAGE_1_NAVIGATE,
                 "loot pass complete, searching for next cloud reactor");
     }
 
     private void handleStage1Return() {
-        MovementCommands.pathFinderBeta(getChr(), new Point(497, 143));
+        // Walk to the altar, not to the leader's old spot: the drop has to land inside the
+        // altar's trigger box, and the altar sits at x=377 (the old target, x=497, was 20px
+        // outside it to the right - which is why the altar never fired).
+        MovementCommands.pathFinderBeta(getChr(), OPQConstants.STAGE_1_DROP_POS);
         waitFor(OPQConstants.NAVIGATE_SETTLE_MS); // settle before DROP_ITEMS ticks
         transitionTo(OPQBotState.STAGE_1_DROP_ITEMS, "return state done.");
     }
 
     private void handleStage1DropItems() {
-        int cloudCount = cloudPiecesLooted;
-        debugLogf("handleStage1DropItems: cloudCount=" + cloudCount + " pos=" + getChr().getPosition());
-        if (cloudCount > 0) {
-            SocialCommands.BotSpeak(getChr(), BotMessages.get("opq.dropping_clouds", cloudCount,
-                    cloudCount == 1 ? "" : BotMessages.get("opq.cloud_plural")));
+        // The altar needs ONE stack of exactly CLOUD_REQUIRED pieces: MapleMap#activateItemReactors
+        // compares the stack's quantity against the required 20, so twenty loose singles never
+        // fire it. The bot layer's throws are synthetic (see DropCommands), which is what makes
+        // this workable at all - the twenty pieces are spread across whoever broke which cloud,
+        // so a bot throwing only what it personally holds would deadlock any party of two or
+        // more. A bot reaches this state only once no cloud reactor is left standing, which is
+        // the party-level equivalent of "the 20 clouds have been gathered".
+        //
+        // Exactly one bot throws (orchestrator election): the altar consumes the first
+        // qualifying stack, and extra stacks would only litter the floor - each one a candidate
+        // for another bot's loot sweep to pick up inside the engine's five-second window, which
+        // cancels the trigger.
+        boolean thrower = orchestrator.isAltarThrower(getChr().getId());
+        boolean throwing = thrower && altarStillArmed();
+        debugLogf("handleStage1DropItems: held=" + cloudPiecesCount()
+                + " thrower=" + thrower + " throwing=" + throwing
+                + " pos=" + getChr().getPosition());
+
+        if (throwing) {
+            SocialCommands.BotSpeak(getChr(), BotMessages.get("opq.dropping_clouds",
+                    OPQConstants.CLOUD_REQUIRED, BotMessages.get("opq.cloud_plural")));
             BotTiming.after(400, () ->
-                    DropCommands.botThrowItemQty(getChr(), OPQConstants.CLOUD_PIECE, cloudCount, getChr().getPosition()));
+                    DropCommands.botThrowItemQty(getChr(), OPQConstants.CLOUD_PIECE,
+                            OPQConstants.CLOUD_REQUIRED, OPQConstants.STAGE_1_DROP_POS));
             waitFor(800); // hold WAIT until the throw lands
         }
 
@@ -520,6 +546,47 @@ public class OPQBot extends BotSM {
                 "all cloud reactors broken, waiting for stage-1 clear");
     }
 
+    /**
+     * How many cloud pieces this bot is actually carrying. Picked-up drops merge into one
+     * stack per slot (InventoryManipulator.addFromDrop tops up existing slots), so the
+     * inventory is the authoritative count - a running per-drop tally drifts whenever a
+     * stack is bigger than one piece.
+     */
+    private int cloudPiecesCount() {
+        return getChr().getItemQuantity(OPQConstants.CLOUD_PIECE, false);
+    }
+
+    /**
+     * Drop multi-piece stacks from a loot list, keeping only the lone items a broken reactor
+     * leaves behind.
+     *
+     * <p>A reactor drops one piece at a time, so a stack bigger than that can only be
+     * something a party member laid down as an offering - and both of this PQ's item
+     * triggers read their stack by identity five seconds after the drop, so picking one up
+     * cancels the trigger silently. The loot scan reaches several thousand pixels, which is
+     * most of either stage map, so this cannot be left to "the bot is probably not adjacent".
+     */
+    private static List<MapObject> dropLoneItemsOnly(List<MapObject> found) {
+        return found.stream()
+                .filter(obj -> !(obj instanceof MapItem drop) || drop.getItem().getQuantity() <= 1)
+                .toList();
+    }
+
+    /**
+     * Whether the altar will still react to a drop. Its type reads 100 only while its event
+     * state still names an item condition; once it has fired, the state walk moves past the
+     * declared WZ entries and the type reads -1. Same test MapleMap#activateItemReactors
+     * applies, so this asks the question the engine itself will ask.
+     */
+    private boolean altarStillArmed() {
+        for (Reactor r : getChr().getMap().getAllReactors()) {
+            if (r.getId() == OPQConstants.STAGE_1_ALTAR_REACTOR_ID) {
+                return r.getReactorType() == 100;
+            }
+        }
+        return false;
+    }
+
     private void handleStage1Wait() {
         if (sharedContext.isStage1Complete() && orchestrator.isChamberlainSpawned()) {
             OPQOrchestrator.getInstance().followLeaderWarp(getChr(), STAGE_1_COMPLETE_TP);
@@ -527,6 +594,32 @@ public class OPQBot extends BotSM {
             MovementCommands.moveToPortal(getChr(), 4);
             transitionTo(OPQBotState.STAGE_1_TRANSITION, "stage1Complete flag flipped by orchestrator");
             return;
+        }
+
+        // Same recovery the stage-2 wait has, for the same reason: the altar only fires if a
+        // stack of exactly 20 lands in its box, so a run where that never happened (the
+        // thrower died, the stack was looted inside the engine's five-second window, the drop
+        // landed outside the box) must be able to give up rather than sit here forever. The
+        // leader leaving is the other end of the same rope - he may have exited the PQ or
+        // walked back to the lobby, and the run is over either way.
+        int leaderMap = getPartyLeader().getMapId();
+        if (leaderMap == OPQConstants.OPQ_EXIT_LOBBY) {
+            blockingSleep(1000); // deliberate: blocking follow-warp below
+            OPQOrchestrator.getInstance().followLeaderWarp(getChr(), new Point(-161, 323));
+            transitionTo(OPQBotState.EXIT_LOBBY, "leader left stage 1 — following to exit lobby");
+            return;
+        }
+        if (leaderMap == OPQConstants.OPQ_LOBBY) {
+            blockingSleep(1000); // deliberate: blocking follow-warp below
+            OPQOrchestrator.getInstance().followLeaderWarp(getChr(), new Point(-233, 174));
+            transitionTo(OPQBotState.LOOP_CHECK, "leader already in OPQ lobby");
+            return;
+        }
+
+        if (waitTimedOut()) {
+            transitionTo(OPQBotState.LOOP_CHECK,
+                    "stage-1 wait timed out after "
+                            + OPQConstants.STAGE_WAIT_TIMEOUT_MS + "ms");
         }
     }
 
@@ -547,12 +640,228 @@ public class OPQBot extends BotSM {
     }
 
     private void handleStage1TransitionPart2() {
-        // Teleport from Tower to Stage 2
-        if (getPartyLeader().getMapId() == OPQConstants.OPQ_STAGE_2) {
-            OPQOrchestrator.getInstance().followLeaderWarp(getChr(), new Point(-113,-321)); // Spawn point for stage 2 [x=-113,y=-321]
-            waitFor(1000); // settle after the warp before NAVIGATE ticks
-            transitionTo(OPQBotState.STAGE_2_NAVIGATE, "arrived in stage-2 map");
+        // The tower is the hub; the quest's middle stages are all reached from here, so hand
+        // over to the generic middle-stage driver instead of jumping straight at the music
+        // box and skipping five rooms. If the party has already worked its way to the music
+        // box room, that driver routes there on its own.
+        if (getChr().getMapId() == OPQConstants.OPQ_TOWER) {
+            transitionTo(OPQBotState.MIDDLE_STAGE, "tower reached, working the middle stages");
         }
+    }
+
+    // =========================================================================
+    // Phase: the stages between the clouds and the music box
+    // =========================================================================
+
+    /**
+     * Work whatever middle stage the party is on.
+     *
+     * <p>Orbis runs nine stages and the bot's original two (clouds, then the music box) left
+     * seven untouched, so a party that got past the clouds had nowhere to go. This drives the
+     * rest: the walkway, the storage room, the sealed room's platforms, the lounge and the
+     * levers, plus the tower work (the six scar reactors and the statue base) in between.
+     *
+     * <p>Which stage is current is read from the instance's own flags rather than guessed
+     * from the map, because several stages share a map and the flags are the only thing that
+     * says what is still outstanding. The bot stays with the leader: if the leader is not in
+     * the room this stage lives in, the bot walks back to the tower and over, which is how a
+     * player moves between rooms too.
+     */
+    private void handleMiddleStage() {
+        sharedContext_trySetPhase(OPQPhase.STAGE_2);
+
+        int stage = currentMiddleStage();
+        if (stage < 0) {
+            // Nothing outstanding that the bot can see: hand back to the exit logic, which
+            // follows the leader out when the run is over.
+            transitionTo(OPQBotState.EXIT_DETECT, "no middle stage outstanding");
+            return;
+        }
+
+        // The tower work needs no room: the scars are in the tower itself, and the statue
+        // base is the tower's own pedestal.
+        if (stage == STAGE_SCARS) {
+            if (getChr().getMapId() != OrbisPqData.TOWER_MAP) {
+                walkToTower();
+                return;
+            }
+            OrbisStages.breakScars(getChr());
+            waitFor(OPQConstants.NAVIGATE_SETTLE_MS);
+            return;
+        }
+        if (stage == STAGE_STATUE_BASE) {
+            if (getChr().getMapId() != OrbisPqData.TOWER_MAP) {
+                walkToTower();
+                return;
+            }
+            OrbisStages.placeFinalPiece(getChr());
+            waitFor(OPQConstants.NAVIGATE_SETTLE_MS);
+            return;
+        }
+        // Papa Pixie's room is not on the tower's portal list - Eak warps the party there -
+        // so the bot rides along with the leader and works the room once it arrives.
+        if (stage == STAGE_PAPA_ROOM) {
+            if (getChr().getMapId() != OrbisPqData.STAGE_PAPA) {
+                followLeaderIntoPapaRoom();
+                return;
+            }
+            OrbisStages.settlePapaRoom(getChr());
+            waitFor(OPQConstants.NAVIGATE_SETTLE_MS);
+            return;
+        }
+
+        OrbisStages.StageRoom room = OrbisStages.roomFor(stage);
+        if (room == null) {
+            transitionTo(OPQBotState.EXIT_DETECT, "stage " + stage + " has no bot room");
+            return;
+        }
+
+        // Not in the room yet: go there through the tower (that is how the quest routes
+        // between rooms - the tower is the hub, and rooms do not connect to each other).
+        if (getChr().getMapId() != room.mapId()) {
+            walkToRoom(room);
+            return;
+        }
+
+        doRoomWork(stage, room);
+    }
+
+    /**
+     * Sentinels for the work that has no room of its own: the scars and the statue base are
+     * in the tower, and Papa Pixie's room is reached by Eak rather than by a tower portal.
+     */
+    private static final int STAGE_SCARS = 7;
+    private static final int STAGE_PAPA_ROOM = 70;
+    private static final int STAGE_STATUE_BASE = 8;
+
+    /**
+     * Which stage is still outstanding, from the instance flags. Higher stages are reported
+     * first because the quest runs them in order and a later flag being unset means the
+     * earlier ones are done.
+     */
+    private int currentMiddleStage() {
+        // The chain is strictly ordered, so the first flag still unset is the stage in play.
+        // Reading it this way is what lets several stages share the tower and the lounge's
+        // sub-rooms without the bot having to guess from the map it is standing on.
+        //
+        // Stage 7 is two pieces of work under one flag: the six scar reactors in the tower,
+        // which Eak demands before he will send the party on, and then Papa Pixie's room,
+        // whose spring is what actually sets statusStg7.
+        if (readEimInt("statusStg8", -1) == -1) {
+            if (readEimInt("statusStg7", -1) == 1) {
+                return STAGE_STATUE_BASE;
+            }
+            return scarsComplete(getChr()) ? STAGE_PAPA_ROOM : STAGE_SCARS;
+        }
+        for (int stage = 6; stage >= 1; stage--) {
+            if (readEimInt("statusStg" + stage, -1) == -1
+                    && (stage == 1 || readEimInt("statusStg" + (stage - 1), -1) == 1)) {
+                return stage;
+            }
+        }
+        return -1;
+    }
+
+    /**
+     * Whether the six scar reactors in the tower are all lit, which is Eak's own test
+     * ({@code isStatueComplete}) and the gate on his sending the party to Papa Pixie.
+     *
+     * <p>There is no flag for this - no script ever sets {@code statusStg7} except the
+     * spring - so the reactors have to be read directly, exactly as Eak reads them.
+     */
+    private static boolean scarsComplete(Character bot) {
+        if (bot.getMap() == null) {
+            return false;
+        }
+        for (var reactor : bot.getMap().getAllReactors()) {
+            if (reactor.getId() >= OrbisPqData.SCAR_FIRST && reactor.getId() <= OrbisPqData.SCAR_LAST) {
+                if (reactor.getState() < 1) {
+                    return false;
+                }
+            }
+        }
+        // The tower has to actually contain them; a bot in another room reads "done".
+        return bot.getMapId() == OrbisPqData.TOWER_MAP;
+    }
+
+    private int readEimInt(String key, int fallback) {
+        return soloMapling.ArtificialPlayer.PartyQuest.PqActions.readEimInt(getChr(), key, fallback);
+    }
+
+    /** Head back to the tower, whichever room the bot is in. */
+    private void walkToTower() {
+        int here = getChr().getMapId();
+        if (here == OrbisPqData.TOWER_MAP) {
+            return;
+        }
+        OrbisStages.StageRoom room = OrbisStages.roomFor(stageOfMap(here));
+        if (room != null) {
+            MovementCommands.moveToPortal(getChr(), room.roomExitPortal());
+        } else {
+            // The lounge's sub-rooms and the other side areas all walk out the same way.
+            MovementCommands.moveToPortal(getChr(), OrbisPqData.roomExitPortal(here));
+        }
+        waitFor(OPQConstants.NAVIGATE_SETTLE_MS);
+    }
+
+    /** Reverse of {@link OrbisStages#roomFor}: which stage a room belongs to, or -1. */
+    private static int stageOfMap(int mapId) {
+        for (int stage = 1; stage <= 6; stage++) {
+            OrbisStages.StageRoom room = OrbisStages.roomFor(stage);
+            if (room != null && room.mapId() == mapId) {
+                return stage;
+            }
+        }
+        return -1;
+    }
+
+    /** Papa Pixie's room is entered by Eak's warp, so the bot simply stays with the leader. */
+    private void followLeaderIntoPapaRoom() {
+        if (getPartyLeader().getMapId() == OrbisPqData.STAGE_PAPA) {
+            OPQOrchestrator.getInstance().followLeaderWarp(getChr(),
+                    OrbisPqData.PAPA_SPRING_SPOT);
+        } else {
+            walkToTower();
+        }
+        waitFor(OPQConstants.NAVIGATE_SETTLE_MS);
+    }
+
+    /** Walk to the room's tower portal and through it, exactly as a player would. */
+    private void walkToRoom(OrbisStages.StageRoom room) {
+        if (getChr().getMapId() != OPQConstants.OPQ_TOWER) {
+            // Somewhere else entirely (a sub-room of the lounge, say): return to the tower.
+            MovementCommands.moveToPortal(getChr(), room.roomExitPortal());
+            waitFor(OPQConstants.NAVIGATE_SETTLE_MS);
+            return;
+        }
+        Point spot = room.towerSpot();
+        if (spot == null) {
+            return;
+        }
+        MovementCommands.pathFinderBeta(getChr(), spot);
+        MovementCommands.moveToPortal(getChr(), room.portalInTower());
+        waitFor(OPQConstants.NAVIGATE_SETTLE_MS);
+    }
+
+    private void doRoomWork(int stage, OrbisStages.StageRoom room) {
+        switch (stage) {
+            case 1 -> OrbisStages.huntWalkway(getChr());
+            case 2 -> OrbisStages.clearStorage(getChr());
+            case 3 -> {
+                // The music box is the one stage the bot already knew how to finish.
+                transitionTo(OPQBotState.STAGE_2_NAVIGATE, "music box room reached");
+                return;
+            }
+            case 4 -> {
+                if (!OrbisStages.standOnSealedPlatform(getChr(), sharedContext.mySealedSlot(getChr().getId()))) {
+                    debugLogf("sealed room: no published layout yet");
+                }
+            }
+            case 5 -> OrbisStages.gatherLounge(getChr());
+            case 6 -> OrbisStages.pullCorrectLevers(getChr());
+            default -> { /* nothing to do */ }
+        }
+        waitFor(OPQConstants.NAVIGATE_SETTLE_MS);
     }
 
     // =========================================================================
@@ -675,17 +984,14 @@ public class OPQBot extends BotSM {
         }
 
         BotAttack.basicSwing(getChr());
-        CustomReactor.hitReactor(getChr().getMap(), reactorOid);
+        CustomReactor.hitReactorWithScript(getChr().getMap(), reactorOid, getChr());
         reactorHitsThisTarget++;
 
+        // As in stage 1: the engine drops the record itself (2002004..2002010 -> act() ->
+        // rm.dropItems()), so nothing is spawned by hand. Which record this box yields is
+        // reactordrops' business (2002004 -> 4001056, ... in data-id order, not screen
+        // order); the loot step reads the inventory afterwards to find out.
         byte stateAfter = reactor.getState();
-        if (stateAfter >= 4) {
-            int recordItem = orchestrator.getBoxItemId(reactorOid);
-            CustomReactor.dropItemAtReactor(getChr().getMap(), reactorOid,
-                    recordItem, getChr());
-            lootedRecordItemId = recordItem;
-            debugLogf("Forced record drop (itemId=" + recordItem + ") after finalizing box break: oid=" + reactorOid);
-        }
 
         if (stateAfter >= 4 || reactorHitsThisTarget >= OPQConstants.MAX_REACTOR_HITS) {
             transitionTo(OPQBotState.STAGE_2_LOOT,
@@ -699,17 +1005,29 @@ public class OPQBot extends BotSM {
         Reactor reactor = (reactorOid != null) ? getChr().getMap().getReactorByOid(reactorOid) : null;
         Point scanCenter = (reactor != null) ? reactor.getPosition() : botPos;
 
-        // Loot the item off the floor for game state consistency
-        int[] recordFilter = OPQConstants.STAGE_2_ITEMS.stream().mapToInt(Integer::intValue).toArray();
+        // Seven boxes drop seven different records and the music box accepts only today's
+        // (OrbisPQ.js sets its event state to the weekday), so pick up that one and leave the
+        // rest - a player does the same, and hoarding the other six would only clutter the
+        // inventory and make the bot carry records it has no use for.
+        int today = OPQOrchestrator.getTodayRecordItemId();
         List<MapObject> found = BotLogic.checkForItemsOnFloor(
-                getChr(), scanCenter, OPQConstants.STAGE_1_LOOT_SCAN_RANGE_PX, recordFilter);
-        if (!found.isEmpty()) {
-            DropCommands.lootItemListOnFloor(getChr(), found);
+                getChr(), scanCenter, OPQConstants.STAGE_1_LOOT_SCAN_RANGE_PX,
+                new int[]{today});
+        // Same guard as stage 1: records drop as single items, so a stack is somebody's
+        // offering already sitting on the music box, and taking it cancels their trigger.
+        List<MapObject> loot = dropLoneItemsOnly(found);
+        if (!loot.isEmpty()) {
+            DropCommands.lootItemListOnFloor(getChr(), loot);
         }
 
-        debugLogf("handleStage2Loot: lootedRecordItemId=" + lootedRecordItemId
-                + " floorHits=" + found.size());
-        if (lootedRecordItemId > 0) {
+        // Which record the bot ended up holding is read back off the inventory rather than
+        // predicted from the box: the engine's own reactordrops decides what each box yields.
+        boolean carryingToday = getChr().getItemQuantity(today, false) > 0;
+        lootedRecordItemId = carryingToday ? today : -1;
+
+        debugLogf("handleStage2Loot: holdingToday=" + carryingToday
+                + " today=" + today + " floorHits=" + found.size());
+        if (carryingToday) {
             SocialCommands.BotChatbubble(getChr(), BotMessages.get("opq.got_record"));
         }
         waitFor(800); // loot beat before RETURN ticks
@@ -717,7 +1035,14 @@ public class OPQBot extends BotSM {
         // Clear box assignment so we can pick a new one
         sharedContext.putBoxAssignment(getChr().getId(), null);
 
-        transitionTo(OPQBotState.STAGE_2_RETURN, "loot pass complete, returning to music box");
+        if (carryingToday) {
+            // Nothing more to hunt for - take it to the music box now instead of breaking
+            // boxes the leader may still want.
+            transitionTo(OPQBotState.STAGE_2_RETURN, "holding today's record, returning to music box");
+        } else {
+            transitionTo(OPQBotState.STAGE_2_NAVIGATE,
+                    "this box did not hold today's record, trying another");
+        }
     }
 
     /**
@@ -735,7 +1060,12 @@ public class OPQBot extends BotSM {
     }
 
     private void handleStage2Return() {
-        MovementCommands.pathFinderBeta(getChr(), new Point(-1588, -127));
+        // Walk to the music box's drop cell rather than the platform the leader happens to
+        // be standing on: the box only reacts to a record landing inside
+        // x∈[-1758,-1666) y∈[-304,-161), and the old target (-1588,-127) was 78px outside it
+        // on x. The landing point already accounts for the drop re-seating itself 85px down
+        // onto the floor below the box - see OPQConstants.STAGE_2_DROP_POS.
+        MovementCommands.pathFinderBeta(getChr(), OPQConstants.STAGE_2_DROP_POS);
         waitFor(OPQConstants.NAVIGATE_SETTLE_MS); // settle before DROP_ITEMS ticks
         transitionTo(OPQBotState.STAGE_2_DROP_ITEMS,
                 "arrived at music box drop zone");
@@ -745,8 +1075,10 @@ public class OPQBot extends BotSM {
         if (lootedRecordItemId > 0) {
             SocialCommands.BotSpeak(getChr(), BotMessages.get("opq.dropping_record"));
             int recordId = lootedRecordItemId;
+            // Throw at the box's cell, not at the bot's feet: the landing cell caps how far
+            // this can travel, and the bot is only near the target here, not on it.
             BotTiming.after(400, () ->
-                    DropCommands.botThrowItem(getChr(), recordId, getChr().getPosition()));
+                    DropCommands.botThrowItem(getChr(), recordId, OPQConstants.STAGE_2_DROP_POS));
             debugLogf("handleStage2DropItems: dropping itemId=" + recordId);
             lootedRecordItemId = -1;
         } else {
@@ -875,7 +1207,6 @@ public class OPQBot extends BotSM {
         reactorHitsThisTarget = 0;
         stageWaitStartTime = 0;
         lootedRecordItemId = -1;
-        cloudPiecesLooted = 0;
 
         if (isInParty()) {
             transitionTo(OPQBotState.IN_PARTY_IDLE,
@@ -935,6 +1266,11 @@ public class OPQBot extends BotSM {
         if (mapId == OPQConstants.OPQ_TOWER) return OPQBotState.STAGE_1_TRANSITION;
         if (mapId == OPQConstants.OPQ_STAGE_2) return OPQBotState.STAGE_2_NAVIGATE;
         if (mapId == OPQConstants.OPQ_EXIT_LOBBY) return OPQBotState.EXIT_DETECT;
+        // Every other room in the tower is one of the quest's middle stages, and they share
+        // the driver rather than each having a state of its own. Without this the bot would
+        // be "somewhere unexpected" in any room but the two it originally knew, and would
+        // never re-home itself back onto the party.
+        if (OrbisPqData.isOrbisRoom(mapId)) return OPQBotState.MIDDLE_STAGE;
         return null;
     }
 
@@ -1000,9 +1336,28 @@ public class OPQBot extends BotSM {
         }
     }
 
+    /**
+     * Drop this bot's shared-context footprint when its FSM is torn down.
+     *
+     * <p>Without this the orchestrator kept every bot it had ever seen: registeredBots grew
+     * for the process lifetime, its tick never stopped once one bot had registered, and the
+     * completion checks kept counting bots that were long gone - so "all registered bots
+     * reported done" and its stage-complete flags could never fire again. Releasing the
+     * assignments here also frees their reactors for whichever bot takes over.
+     */
+    @Override
+    public synchronized void stopScheduledTask() {
+        orchestrator.unregisterBot(this);
+        super.stopScheduledTask();
+    }
+
     private void debugLogf(String msg) {
-        boolean opqDebug = false;
-        if(!opqDebug) {
+        // On by default: the OPQ FSM is all edge-triggered waits and stage flags, so a run
+        // that stalls is unreadable without its transition log (which is how the altar-drop
+        // and wrong-record bugs were found). Kept as a switch rather than deleted so it can
+        // be turned off once the stage specs are stable.
+        boolean opqDebug = true;
+        if (!opqDebug) {
             return;
         }
         String line = "[OPQBot " + getChr().getName() + " " + opqBotState + "] " + msg;

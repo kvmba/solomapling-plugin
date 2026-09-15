@@ -15,6 +15,7 @@ import soloMapling.ArtificialPlayer.BotSM;
 import soloMapling.ArtificialPlayer.BotSpotClaims;
 import soloMapling.ArtificialPlayer.BotTownSystem.TownPinsStore;
 import soloMapling.ArtificialPlayer.BotTownSystem.TownPresenceConfig;
+import soloMapling.MapVFX.CustomReactor;
 import soloMapling.ArtificialPlayer.BotTownSystem.TownPresenceSampler;
 import soloMapling.Environment.EnvironmentPopulationConfig;
 import soloMapling.ArtificialPlayer.BotTypeManager;
@@ -396,6 +397,15 @@ public class EnvironmentCommand extends Command {
                 spawnOPQBotsInLobby();
                 player.yellowMessage("OPQ lobby bots done.");
                 break;
+            case "reactorboxes":
+                // Prints each item-triggered reactor's trigger box, its required item and
+                // where a drop aimed at it lands. Aiming a throw at the reactor itself is
+                // the trap: MapleMap#calcDropPos re-seats the drop on the floor 85px below,
+                // so the cell that actually has to be inside the box is the landing point.
+                CustomReactor.dumpItemReactorBoxes(player);
+                player.yellowMessage("Item reactor boxes for map " + player.getMapId()
+                        + " printed to your chat.");
+                break;
             case "spawngzhbots":
                 player.yellowMessage("Spawning Game Zone Host Bots...");
                 spawnGameZoneHostBots();
@@ -591,6 +601,7 @@ public class EnvironmentCommand extends Command {
         player.yellowMessage("!env convertscrollbots           - convert random fillers to scroll bots");
         player.yellowMessage("-- Special Spawns --");
         player.yellowMessage("!env spawnopqbots                - spawn OPQ lobby bots");
+        player.yellowMessage("!env reactorboxes                - log item-reactor trigger boxes + drop landings on your map");
         player.yellowMessage("!env spawngzhbots                - spawn Game Zone Host bots");
         player.yellowMessage("!env spawnbjtables               - spawn Blackjack tables");
         player.yellowMessage("!env attacktest                  - spawn per-class attack test bots on Henesys Hunting Ground 1");

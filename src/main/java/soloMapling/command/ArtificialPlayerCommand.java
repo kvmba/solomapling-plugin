@@ -280,6 +280,61 @@ public class ArtificialPlayerCommand extends Command {
             case "opqbot":
                 OPQ_BOT.createAndSetBot(fakechar);
                 break;
+            case "hpqbot":
+            case "henesyspqbot":
+                BotTypeManager.BotType.HENESYS_PQ_BOT.createAndSetBot(fakechar);
+                break;
+            case "kpqbot":
+            case "kerningpqbot":
+                BotTypeManager.BotType.KERNING_PQ_BOT.createAndSetBot(fakechar);
+                break;
+            case "lpqbot":
+            case "ludipqbot":
+                BotTypeManager.BotType.LUDI_PQ_BOT.createAndSetBot(fakechar);
+                break;
+            case "brpqbot":
+            case "bossrushbot":
+                BotTypeManager.BotType.BOSS_RUSH_PQ_BOT.createAndSetBot(fakechar);
+                break;
+            case "ppqbot":
+            case "piratepqbot":
+                BotTypeManager.BotType.PIRATE_PQ_BOT.createAndSetBot(fakechar);
+                break;
+            case "apqbot":
+            case "amoriapqbot":
+                BotTypeManager.BotType.AMORIA_PQ_BOT.createAndSetBot(fakechar);
+                break;
+            case "epqbot":
+            case "ellinpqbot":
+                BotTypeManager.BotType.ELLIN_PQ_BOT.createAndSetBot(fakechar);
+                break;
+            case "zpqbot":
+            case "zakumpqbot":
+                BotTypeManager.BotType.ZAKUM_PQ_BOT.createAndSetBot(fakechar);
+                break;
+            case "htpqbot":
+            case "horntailpqbot":
+                BotTypeManager.BotType.HORNTAIL_PQ_BOT.createAndSetBot(fakechar);
+                break;
+            case "mpqbot":
+            case "magatiapqbot":
+                BotTypeManager.BotType.MAGATIA_PQ_BOT.createAndSetBot(fakechar);
+                break;
+            case "cpqbot":
+            case "carnivalbot":
+                BotTypeManager.BotType.CARNIVAL_PQ_BOT.createAndSetBot(fakechar);
+                break;
+            case "pyramidbot":
+            case "ppbot":
+                BotTypeManager.BotType.PYRAMID_PQ_BOT.createAndSetBot(fakechar);
+                break;
+            case "dojobot":
+                BotTypeManager.BotType.DOJO_PQ_BOT.createAndSetBot(fakechar);
+                break;
+            case "arpqbot":
+            case "ariantbot":
+                BotTypeManager.BotType.ARIANT_PQ_BOT.createAndSetBot(fakechar);
+                break;
             case "jqbot":
             case "henesysjqbot":
                 HENESYS_JQ_BOT.createAndSetBot(fakechar);
@@ -1019,6 +1074,20 @@ public class ArtificialPlayerCommand extends Command {
         player.yellowMessage("!bot blackjackbot <cid>          - set as blackjack dealer");
         player.yellowMessage("!bot dgbot <cid>                 - set as drop game bot");
         player.yellowMessage("!bot opqbot <cid>                - set as OPQ bot");
+        player.yellowMessage("!bot hpqbot <cid>                - set as Henesys PQ bot");
+        player.yellowMessage("!bot kpqbot <cid>                - set as Kerning PQ bot");
+        player.yellowMessage("!bot lpqbot <cid>                - set as Ludi PQ bot");
+        player.yellowMessage("!bot brpqbot <cid>               - set as Boss Rush PQ bot");
+        player.yellowMessage("!bot ppqbot <cid>                - set as Pirate PQ bot");
+        player.yellowMessage("!bot apqbot <cid>                - set as Amoria PQ bot");
+        player.yellowMessage("!bot epqbot <cid>                - set as Ellin PQ bot");
+        player.yellowMessage("!bot zpqbot <cid>                - set as Zakum PQ bot");
+        player.yellowMessage("!bot htpqbot <cid>               - set as Horntail PQ bot");
+        player.yellowMessage("!bot mpqbot <cid>                - set as Magatia PQ bot");
+        player.yellowMessage("!bot cpqbot <cid>                - set as Monster Carnival (CPQ) bot");
+        player.yellowMessage("!bot pyramidbot <cid>            - set as Nett's Pyramid bot");
+        player.yellowMessage("!bot dojobot <cid>               - set as Mu Lung Dojo bot");
+        player.yellowMessage("!bot arpqbot <cid>               - set as Ariant Coliseum bot");
         player.yellowMessage("!bot jqbot <cid>                 - set as JQ bot");
         player.yellowMessage("-- Bot Conversion --");
         player.yellowMessage("!bot convertfmbot <cid>          - convert to FM bot");
