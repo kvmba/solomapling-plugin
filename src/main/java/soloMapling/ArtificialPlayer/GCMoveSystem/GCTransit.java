@@ -60,6 +60,60 @@ public final class GCTransit {
         return SPACIOUS.contains(mapId);
     }
 
+    // The Helios Tower elevator's two cars (waiting + moving, each direction). The car is a vehicle
+    // map like a deck, but a deck is a wide walkable space while the car is a tiny box: a bot ordered
+    // in through the car's single entry portal stacks on that one pixel. GCTravel boards onto one of
+    // the car's own spawn points instead so a boarding crowd lands spread, not piled.
+    private static final Set<Integer> ELEVATOR_CARS = Set.of(
+            222020110, 222020111, 222020210, 222020211
+    );
+
+    /* True if mapId is one of the Helios elevator's cars. */
+    static boolean isElevatorCar(int mapId) {
+        return ELEVATOR_CARS.contains(mapId);
+    }
+
+    /*
+     * The event property whose "false" means the car is parked at this floor and the door is open.
+     * The elevator's portal script picks it by floor: 2F watches "goingUp", 99F watches "goingDown".
+     * Null for any other map. Split out so the floor<->flag mapping (the subtle half) is pinnable by
+     * a test without a live server.
+     */
+    static String elevatorDoorFlag(int mapId) {
+        return switch (mapId) {
+            case 222020100 -> "goingUp";    // 2F: loadable while the car is NOT going up
+            case 222020200 -> "goingDown";  // 99F: loadable while the car is NOT going down
+            default -> null;
+        };
+    }
+
+    /*
+     * Whether the elevator is currently letting passengers onto this floor, mirroring what its portal
+     * script (elevator.js) checks before warping a player into the waiting car. The Helios elevator is
+     * the one scripted door that can REFUSE entry: while the car is moving the flag is "true" and the
+     * script turns the player back. GCTravel replaces that script with a bare changeMap, so without
+     * this check a bot walking up mid-cycle slips into an empty car and sits there (stacked on the one
+     * entry portal with every other bot doing the same) until a departure minutes off.
+     *
+     * Returns null only when there is no door to consult at all — mapId is not an elevator floor, or
+     * the bot's map/channel is unreadable — and the caller steps through as before. An elevator floor
+     * whose event is missing reads as SHUT (the script's own "电梯正在维修中" refusal): entering a car
+     * nothing will ever move would strand the bot aboard, which is strictly worse than waiting in the
+     * open where the transit ceiling can still recover it.
+     */
+    static Boolean elevatorDoorOpen(Character bot, int mapId) {
+        String flag = elevatorDoorFlag(mapId);
+        if (flag == null) {
+            return null; // not an elevator floor — no door to gate
+        }
+        MapleMap map = bot == null ? null : bot.getMap();
+        if (map == null || map.getChannelServer() == null) {
+            return null; // can't read the door — don't gate on a guess
+        }
+        EventManager em = map.getChannelServer().getEventSM().getEventManager("Elevator");
+        return em != null && "false".equals(em.getProperty(flag));
+    }
+
     // Only the boat is ever attacked mid-crossing, and only on its decks: Boats.js spawns the
     // Balrog on Boat_to_Ellinia / Boat_to_Orbis and never in the cabins, which is what makes the
     // cabin a place to take shelter. Every other vehicle crosses unmolested.

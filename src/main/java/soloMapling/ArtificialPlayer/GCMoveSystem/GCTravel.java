@@ -336,8 +336,33 @@ final class GCTravel {
             }
             approachAndAct(trip, bot, trigger, nextHop,
                     "scripted portal '" + sw.portalName() + "' -> map " + nextHop,
-                    () -> warpToPortal(bot, sw.toMapId(), sw.toPortalId(),
-                            "scripted warp " + cur + " -> " + nextHop));
+                    () -> {
+                        // The Helios elevator's door is the one scripted portal that can REFUSE entry:
+                        // its script (elevator.js) warps a player into the waiting car only while the
+                        // car is parked at this floor, and turns them away ("the elevator is moving")
+                        // mid-cycle. We replace that script with a bare changeMap, so without this a
+                        // bot walking up mid-cycle would slip into an empty car and — with every other
+                        // arriving bot doing the same — pile onto the car's single entry portal until
+                        // a departure minutes off. Wait at the lift like a player instead.
+                        Boolean open = GCTransit.elevatorDoorOpen(bot, cur);
+                        if (open != null && !open) {
+                            trip.waitingForTransit = true; // door shut — the wait is by design
+                            return;
+                        }
+                        trip.waitingForTransit = false;
+                        if (GCTransit.isElevatorCar(sw.toMapId())) {
+                            // Board onto a random player spawn of the car rather than pinning every
+                            // passenger to portal 0. The car is a tiny box, so a crowd all landing on
+                            // the one portal pixel reads as a pile; the elevator event itself already
+                            // scatters its passengers across the car's spawn points when it moves them
+                            // (warpEveryone -> changeMap -> random spawn), and boarding the same way
+                            // matches that.
+                            warp(bot, sw.toMapId(), "elevator ride " + cur + " -> " + sw.toMapId());
+                        } else {
+                            warpToPortal(bot, sw.toMapId(), sw.toPortalId(),
+                                    "scripted warp " + cur + " -> " + nextHop);
+                        }
+                    });
             return;
         }
         warp(bot, nextHop, "no walkable portal/taxi/scripted-warp on map " + cur + " to " + nextHop);
