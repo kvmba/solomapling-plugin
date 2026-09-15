@@ -81,9 +81,59 @@ public abstract class PartyQuestBot extends BotSM {
             returnToLobby("no longer in a party");
             return;
         }
+
+        // Stay with the party. Most of these quests move between rooms by the players walking
+        // through a portal, not by a script warping the team, so a bot that only ever works on
+        // whatever room it happens to be standing in gets left behind at the first stage
+        // transition - registered in the instance but standing in an empty room, where it
+        // contributes nothing and, worse, is still counted by getPlayerCount for the puzzles
+        // that care how many people are present.
+        if (followLeaderIntoNextRoom()) {
+            return; // moved rooms; work resumes from the new one next tick
+        }
+
         if (workStage()) {
             returnToLobby("stage work reports the run is over");
         }
+    }
+
+    /**
+     * Walk through the portal the leader took, when the party has moved on without this bot.
+     *
+     * <p>Quests advance in one of two ways: the event script warps the whole team, or the
+     * players walk a portal whose script checks that the stage is clear. The second kind is
+     * invisible to a bot that does not walk it, and the result is not a stalled bot but a
+     * misleading one - it stays registered, so a stage that counts the party's numbers still
+     * counts it, while its position is in the room the party already left.
+     *
+     * <p>Only follows within the quest: a leader who has gone back to town is not a stage
+     * transition, and following him out would abandon the run.
+     *
+     * @return true when this bot changed rooms
+     */
+    protected final boolean followLeaderIntoNextRoom() {
+        Character leader = partyLeader();
+        if (leader == null || leader == getChr()) {
+            return false;
+        }
+        int leaderMap = leader.getMapId();
+        int here = getChr().getMapId();
+        if (leaderMap == here || !isInsideQuest(leaderMap)) {
+            return false;
+        }
+        BotLogger.log("PQ bot " + getChr().getName() + " following the leader from "
+                + here + " to " + leaderMap);
+        WarpCommands.botWarpMapOnPortal(getChr());
+        return getChr().getMapId() != here;
+    }
+
+    /** The party's leader as a character, or null when there is nobody to follow. */
+    protected final Character partyLeader() {
+        var party = getChr().getParty();
+        if (party == null || party.getLeader() == null) {
+            return null; // the leader's character is null while he is offline
+        }
+        return party.getLeader().getPlayer();
     }
 
     /** Walk back to the lobby, which is where a finished run puts everyone. */
