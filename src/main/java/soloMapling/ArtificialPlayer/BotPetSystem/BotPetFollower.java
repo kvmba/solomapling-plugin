@@ -97,9 +97,9 @@ public final class BotPetFollower {
     /** Vertical tolerance (px) for treating a floor as the owner's own level. */
     private static final int GROUND_STEP_PX = 40;
 
-    // Each pet holds its own stable random offset beside the owner, drifting slowly
-    // (a per-pet phase) so a stationary bot's pets keep jockeying for position rather
-    // than holding a rigid, evenly spaced formation — they may partly overlap.
+    // Each pet holds its own stable random offset beside the owner (±PET_OFFSET_PX,
+    // chosen once per pet), so a stationary bot's pets are not evenly spaced and may
+    // partly overlap — a natural spacing, not a rigid formation.
     private static final int PET_OFFSET_PX = 60;
 
     /** Bots that currently have pets — the only ones a tick visits. */
@@ -114,7 +114,6 @@ public final class BotPetFollower {
     private static final Map<Integer, Double> velX = new ConcurrentHashMap<>();
     /** Per-pet stable side offset (px) beside the owner, keyed by pet unique id. */
     private static final Map<Integer, Integer> sideOffset = new ConcurrentHashMap<>();
-    /** Per-pet slow drift phase (radians) for the offset wobble, keyed by pet unique id. */
     private static ScheduledFuture<?> task;
 
     private BotPetFollower() {
@@ -293,12 +292,13 @@ public final class BotPetFollower {
 
         int ny = p.y;
         Foothold landing = null;
-        if (ground) {
+        // Re-query the floor at the NEW x: if the pet stepped off the platform edge the
+        // result is null and it must FALL, not keep standing on an extrapolated slope.
+        Foothold stepFloor = ground ? floorUnder(map, new Point(nx, p.y)) : null;
+        if (stepFloor != null) {
             vy = 0;
-            landing = floorUnder(map, p);
-            if (landing != null) {
-                ny = landing.calculateFooting(nx);
-            }
+            landing = stepFloor;
+            ny = stepFloor.calculateFooting(nx);
         } else {
             boolean rising = vy < 0;
             vy = Math.min(MAX_FALL_PXS, vy + GRAVITY_PXS2 * dt);
