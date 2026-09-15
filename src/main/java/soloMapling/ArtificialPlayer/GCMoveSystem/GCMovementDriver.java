@@ -6,6 +6,7 @@ import org.gms.server.maps.Foothold;
 import org.gms.server.maps.MapleMap;
 import soloMapling.ArtificialPlayer.BotHealthSystem.BotDeath;
 import soloMapling.ArtificialPlayer.BotMovementSystem.MovementCommands;
+import soloMapling.ArtificialPlayer.BotStatusSystem.BotDebuffState;
 
 import java.awt.Point;
 import java.awt.Rectangle;
@@ -211,6 +212,17 @@ final class GCMovementDriver {
             return;
         }
 
+        // Mob debuffs run on the movement tick: advance the clock (expiry + the poison tick) and
+        // publish the SLOW scale the ground physics reads this tick. Separate from the freeze hold
+        // below so the clock keeps running while frozen — otherwise a stun would never expire.
+        BotDebuffState status = BotDebuffState.of(bot);
+        if (status != null) {
+            status.tick();
+            entry.debuffMoveScale = status.moveFactor();
+        } else {
+            entry.debuffMoveScale = 1.0;
+        }
+
         // Pending organic portal/teleport drop: hold standing at the spawn portal (the bot appears
         // up at the portal, above the floor), then release the natural fall once the load beat
         // passes. Deliberately FIRST, before the dead / chair / rope-rest / player-reaction holds:
@@ -308,6 +320,23 @@ final class GCMovementDriver {
                 BotPhysicsEngine.holdClimb(entry, bot);
             } else {
                 BotPhysicsEngine.idleOnGround(entry, bot); // shouldn't happen (rest is a rope hang), but hold anyway
+            }
+            broadcastIfObserved(entry);
+            return;
+        }
+
+        // A mob debuff (STUN/SEDUCE) pins the bot where it stands - it must not walk, attack or be
+        // steered. This is the movement-layer half of the debuff rule; the attack layer (BotAttackDriver)
+        // gates swings and the grind brain (GrindBrain) gates its direct moves separately.
+        if (status != null && status.isFrozen()) {
+            // Still let a mob touch a frozen bot (it is standing right there): run the contact-damage
+            // tick, then hold the pose. A climber is held ON its rope (idleOnGround would clear the
+            // climb and drop it); anything else settles to a grounded idle - mirrors the resting hold.
+            BotContactDamage.tickMobDamage(entry, bot);
+            if (entry.climbing) {
+                BotPhysicsEngine.holdClimb(entry, bot);
+            } else {
+                BotPhysicsEngine.idleOnGround(entry, bot);
             }
             broadcastIfObserved(entry);
             return;
@@ -662,6 +691,13 @@ final class GCMovementDriver {
         // New map: drop any in-progress reaction pause. The per-player react cooldown is intentionally
         // NOT reset here - it's tied to the player so map-hopping can't re-trigger greetings at them.
         entry.reactingUntilMs = 0L;
+        // Mob debuffs do not survive a map change (the engine does not carry diseases across maps
+        // either): clear them so a bot warped away mid-stun arrives clean.
+        BotDebuffState status = BotDebuffState.of(bot);
+        if (status != null) {
+            status.clearAll();
+        }
+        entry.debuffMoveScale = 1.0;
         // Drop any coarse plan from the previous map; onMapChange re-seeds the physics shadow below.
         entry.coarsePlan = null;
         entry.coarsePlanTarget = null;

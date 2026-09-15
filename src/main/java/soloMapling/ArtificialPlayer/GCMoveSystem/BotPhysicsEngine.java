@@ -1134,8 +1134,14 @@ final class BotPhysicsEngine {
         // held direction while sliding the other way; record it so facing/stance follow the
         // INPUT instead of the velocity-derived slide direction.
         boolean braking = desiredDir != 0 && entry.hspeed * desiredDir < 0.0;
+        // A SLOW debuff scales the profile the ground step runs, so the bot walks (and accelerates)
+        // slower. The navigation graph cache still keys on the un-scaled profile — only the live step
+        // is scaled, so a slowed bot keeps using the same baked edges.
+        BotMovementProfile stepProfile = entry.debuffMoveScale < 1.0
+                ? entry.movementProfile.speedScaled(entry.debuffMoveScale)
+                : entry.movementProfile;
         GroundStepResult step = simulateGroundMotion(map, currentPos, foothold, desiredDir,
-                new GroundTravelState(entry.physX, entry.hspeed, entry.groundPhysicsCarryMs), entry.movementProfile);
+                new GroundTravelState(entry.physX, entry.hspeed, entry.groundPhysicsCarryMs), stepProfile);
 
         // Snap-up to a *different* foothold means the bot walked off the edge and a separate
         // platform happens to be within MAX_SLOPE_UP above. That is not an uphill slope of the

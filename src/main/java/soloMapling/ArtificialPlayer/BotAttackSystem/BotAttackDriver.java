@@ -14,6 +14,7 @@ import org.gms.server.maps.MapObjectType;
 import org.gms.server.maps.MapleMap;
 import soloMapling.ArtificialPlayer.BotCommandsPack.BotAttack;
 import soloMapling.ArtificialPlayer.BotMovementSystem.MovementCommands;
+import soloMapling.ArtificialPlayer.BotStatusSystem.BotDebuffState;
 import soloMapling.ArtificialPlayer.GCMoveSystem.GCMovement;
 
 import java.awt.Point;
@@ -158,6 +159,13 @@ public final class BotAttackDriver {
         if (bot == null || bot.getMap() == null) {
             return AttackResult.miss("bot or map is null");
         }
+        // A mob debuff can disarm the bot: STUN/SEDUCE pin it entirely and SEAL blocks skills, so no
+        // swing fires. Forced attacks (the !bot attack GM test) bypass this so a dev can still probe a
+        // debuffed bot; organic swings (botAttack) honour it.
+        BotDebuffState status = BotDebuffState.of(bot);
+        if (!force && status != null && status.blocksAttack()) {
+            return AttackResult.miss("debuffed: cannot attack");
+        }
         long now = System.currentTimeMillis();
         if (!force && now < nextAttackByBot.getOrDefault(bot.getId(), 0L)) {
             return AttackResult.miss("on cooldown");
@@ -247,13 +255,24 @@ public final class BotAttackDriver {
         // decodes the lines back before applying HP.
         int linesPerMob = shadowDoubled(bot, profile.numDamage);
         double critChance = BotAttackConfig.critChanceFor(bot.getJob());
+        // WEAKEN halves-ish the bot's output; DARKNESS makes the whole swing whiff (every line 0, so
+        // the viewer renders a MISS). Both are null-safe no-ops when the bot has no debuffs.
+        double outFactor = status != null ? status.outFactor() : 1.0;
+        boolean whiff = status != null && status.whiffs();
         ThreadLocalRandom rng = ThreadLocalRandom.current();
         Map<Monster, List<Integer>> hits = new LinkedHashMap<>();
         int reported = 0;
         for (Monster mob : targets) {
             List<Integer> lines = new ArrayList<>(linesPerMob);
             for (int i = 0; i < linesPerMob; i++) {
+                if (whiff) {
+                    lines.add(0); // MISS row - no damage applied downstream
+                    continue;
+                }
                 int dmg = profile.rollDamage(bot.getLevel(), bot.getJob());
+                if (outFactor < 1.0) {
+                    dmg = (int) Math.max(1, Math.round(dmg * outFactor));
+                }
                 if (rng.nextDouble() < critChance) {
                     dmg = (int) Math.round(dmg * BotAttackConfig.CRIT_MULTIPLIER);
                     lines.add(BotAttackData.encodeCritLine(dmg)); // negative -> client shows a crit

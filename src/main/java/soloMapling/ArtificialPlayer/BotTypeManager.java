@@ -357,6 +357,7 @@ public class BotTypeManager {
             // stand it up here — otherwise the new type starts at zero HP with nobody left to
             // end the episode, and it walks around as an unkillable corpse.
             existing.death().abandon();
+            existing.status().clearAll(); // the new type starts clean - no inherited debuffs
             manuallyStopBot(fakechar);
         }
         botType.createAndSetBot(fakechar);

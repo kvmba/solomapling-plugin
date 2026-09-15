@@ -576,6 +576,7 @@ public final class CompanionBot extends BotSM implements
                 CompanionCombatRecoveryPolicy.choose(
                         progressAgeMs, mapObserved, now >= nextCombatRepairAt);
         if (recovery != CompanionCombatRecoveryPolicy.Recovery.NONE
+                && !status().isFrozen() // a frozen bot lands no hits; that stall is the debuff, not a wedge
                 && !companion.getMap().getAllMonsters().isEmpty()) {
             nextCombatRepairAt = now + COMBAT_REPAIR_COOLDOWN_MS;
             GCMovement.stop(companion);

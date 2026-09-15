@@ -4,6 +4,7 @@ import org.gms.client.Character;
 import org.gms.server.life.Monster;
 import org.gms.server.maps.MapObject;
 import soloMapling.ArtificialPlayer.BotAttackSystem.BotAttackDriver;
+import soloMapling.ArtificialPlayer.BotStatusSystem.BotDebuffState;
 import soloMapling.ArtificialPlayer.GCMoveSystem.GCMovement;
 
 import java.awt.Point;
@@ -161,6 +162,14 @@ public final class GrindBrain {
             // the watchdog gives a grace window instead of instantly judging it stuck.
             wasObserved = true;
             lastCombatProgressMs = now();
+        }
+        // STUN / SEDUCE pins the bot: the grind brain must not steer it. This ticker (GrindTickRegistry,
+        // 250ms) is separate from the movement driver, and the strategies move the body directly -
+        // blink/teleport/dash/hop - so without this gate a stunned mage would keep blinking at mobs
+        // (the driver's freeze hold only covers driver-issued movement). SEAL is NOT gated here: a
+        // sealed bot may still walk, and BotAttackDriver already blocks its swings.
+        if (isFrozen(chr)) {
+            return;
         }
         if (GCMovement.isClimbing(chr)) {
             climb.handleClimb(chr); // RECOVER inline
@@ -372,5 +381,11 @@ public final class GrindBrain {
 
     private static long now() {
         return System.currentTimeMillis();
+    }
+
+    /** STUN / SEDUCE: the bot is pinned, so the grind brain must not move or swing it this tick. */
+    private static boolean isFrozen(Character chr) {
+        BotDebuffState status = BotDebuffState.of(chr);
+        return status != null && status.isFrozen();
     }
 }

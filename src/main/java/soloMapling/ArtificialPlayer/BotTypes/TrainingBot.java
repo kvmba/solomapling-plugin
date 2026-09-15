@@ -921,6 +921,9 @@ public class TrainingBot extends BotSM implements GrindTickRegistry.Participant 
         if (recruitingNow()) {
             return false; // mid-conversation / live invite window: never teleport or bail from under the player
         }
+        if (status().isFrozen()) {
+            return false; // STUN/SEDUCE: a frozen bot lands no hits, so "no progress" is not being stuck - don't rescue-teleport it
+        }
         long stuck = grind.msSinceProgress();
         if (stuck < STUCK_TELEPORT_MS) {
             teleportedThisEpisode = false; // making (or recently made) progress → reset the ladder
