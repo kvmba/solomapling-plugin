@@ -29,7 +29,7 @@ public final class BotDebuffTable {
     public static final double WEAKEN_TAKEN_FACTOR = 1.35; // contact damage taken multiplier
 
     // DARKNESS: chance a swing whiffs (all damage lines 0 -> the viewer sees a MISS).
-    public static final double DARKNESS_MISS_CHANCE = 0.55;
+    public static final double DARKNESS_MISS_CHANCE = 0.90;
 
     // POISON: one tick of this fraction of max HP, every POISON_TICK_MS, never below the health floor.
     public static final double POISON_MAX_HP_FRACTION = 0.04;
