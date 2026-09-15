@@ -30,18 +30,17 @@ import java.util.concurrent.TimeUnit;
  * Moves a bot's pets so they follow it. One shared tick for every bot that has
  * pets (mirrors {@code GrindTickRegistry}) — no per-bot thread.
  *
- * <p>Land: the pet CHASES the owner at a fixed speed (not a lerp — it runs to catch
- * up, so a gap reads as a pursuit), heading for a stable random point beside the
- * owner (each pet picks its own spot, so a stationary bot's pets are not evenly
- * spaced and may partly overlap). It stands on the floor under its own x and follows
- * the owner's position, not its facing, so a turn never flings it across. When the
- * owner jumps or walks off a ledge the pet does NOT teleport to the owner's height:
- * it keeps its own ground and, once its own feet are unsupported, falls under its own
- * gravity (gravity only ever pulls DOWN, so a jumped owner never drags it up). Water
- * (swim maps): the pet floats (fh 0) and chases a point above the bot in the SWIM
- * stance (12/13). A rope/ladder owner makes the pet hang (HANG, 30/31). Whenever the
- * pet floats (water / rope) its foothold is cleared to 0, or a stale land foothold
- * would anchor it to the seabed and render it walking.</p>
+ * <p>Each pet runs its OWN physics (the client only renders the position/fh we send)
+ * rather than being glued to a snapshot of the owner — see the movement below. On
+ * land it accelerates toward a point beside the owner (momentum, so it lags and then
+ * catches up), stands on the floor under its own x, and follows the owner's position,
+ * not its facing, so a turn never flings it across. Gravity only ever pulls it DOWN,
+ * so a jumped owner never drags the pet into the air; a pet whose own feet leave the
+ * ground (its owner climbed a platform, or either walked off a ledge) falls under
+ * gravity and lands on the floor below. A pet left too far behind does not sprint —
+ * it flashes to the owner's side (official behaviour) and resumes. In water it bobs
+ * (sinks under gravity, floats back up) in the SWIM stance (12/13); a rope/ladder
+ * owner makes it hang (HANG, 30/31).</p>
  *
  * <p>Every tick the pet's position is kept current in memory; only the packets are
  * gated on observability, so a joining player never sees a stale coordinate. The
@@ -69,7 +68,6 @@ public final class BotPetFollower {
     private static final int PET_STAND_RIGHT = 4;
     private static final int PET_STAND_LEFT = 5;
     private static final int PET_JUMP_RIGHT = 6;
-    private static final int PET_JUMP_LEFT = 7;
     private static final int PET_SWIM_RIGHT = 12;
     private static final int PET_SWIM_LEFT = 13;
     private static final int PET_HANG_RIGHT = 30;
@@ -78,17 +76,22 @@ public final class BotPetFollower {
     /** Probe this far above a point when searching for the ground below it. */
     private static final int GROUND_PROBE_UP = 8;
 
-    // The pet walks under its own gravity (the client drives its animation from
-    // the position/fh we send), instead of being glued to the owner mid-air. The
-    // numbers mirror the client's Physics.img as used by the bot engine.
-    private static final double GRAVITY_PXS2 = 2000.0;
-    private static final double MAX_FALL_PXS = 670.0;
+    // The pet runs its OWN physics (the client only renders the position/fh/velocity
+    // we send), mirroring the bot engine's kinematic model — it is not glued to the
+    // owner. Numbers match the client's Physics.img as used by BotPhysicsEngine.
+    private static final double GRAVITY_PXS2 = 2000.0;      // land gravity
+    private static final double MAX_FALL_PXS = 670.0;       // land terminal fall
+    private static final double WALK_ACCEL_PXS2 = 4000.0;   // horizontal acceleration
+    private static final int GROUND_SNAP_PX = 6;            // "standing on the floor" tolerance
+    private static final double SWIM_GRAVITY_PXS2 = 590.0;  // underwater sink
+    private static final double SWIM_BUOYANCY_PXS2 = 900.0; // float back up (net up => a bob)
+    private static final double SWIM_MAX_SPEED_PXS = 800.0;
     /** Vertical tolerance (px) for treating a floor as the owner's own level. */
     private static final int GROUND_STEP_PX = 40;
 
-    // Each pet settles at its own stable random offset beside the owner, so a
-    // stationary bot's pets are not evenly spaced and may partly overlap — like a
-    // real pet that picks its own spot rather than a rigid formation.
+    // Each pet holds its own stable random offset beside the owner, drifting slowly
+    // (a per-pet phase) so a stationary bot's pets keep jockeying for position rather
+    // than holding a rigid, evenly spaced formation — they may partly overlap.
     private static final int PET_OFFSET_PX = 60;
 
     /** Bots that currently have pets — the only ones a tick visits. */
@@ -99,8 +102,11 @@ public final class BotPetFollower {
     private static final Map<Integer, Long> nextPickupAtMs = new ConcurrentHashMap<>();
     /** Per-pet vertical fall velocity (px/s, positive = downward), keyed by pet unique id. */
     private static final Map<Integer, Double> fallVy = new ConcurrentHashMap<>();
+    /** Per-pet horizontal velocity (px/s), keyed by pet unique id. */
+    private static final Map<Integer, Double> velX = new ConcurrentHashMap<>();
     /** Per-pet stable side offset (px) beside the owner, keyed by pet unique id. */
     private static final Map<Integer, Integer> sideOffset = new ConcurrentHashMap<>();
+    /** Per-pet slow drift phase (radians) for the offset wobble, keyed by pet unique id. */
     private static ScheduledFuture<?> task;
 
     private BotPetFollower() {
@@ -216,155 +222,172 @@ public final class BotPetFollower {
     }
 
     /**
-     * Land follow. The pet walks toward a point fanned out beside the owner and
-     * always stands on the floor under its own x. It follows the owner's position,
-     * not its facing, so a turn never flings the pet across. When the owner jumps or
-     * walks off a ledge the pet does NOT teleport to the owner's height: it stays
-     * pinned to the ground and, if it is left hanging over a gap, falls under its own
-     * gravity (see {@link #falling}). Gravity only ever pulls the pet DOWN, so a
-     * jumped owner never drags it into the air.
+     * Land follow, run as the pet's own physics (see the class note). The owner is a
+     * moving target: the pet accelerates toward a point beside it (momentum, so it
+     * lags then catches up rather than being snapped on), hops after a jumping owner,
+     * and falls under gravity when its own feet are unsupported. Gravity only pulls
+     * DOWN, so a jumped owner never drags the pet up.
      */
     private static void followLand(Character chr, Pet pet, int index, BotPetConfig config, boolean observed) {
-        Point botPos = chr.getPosition();
-        MapleMap map = chr.getMap();
-        int tx = botPos.x + offsetFor(pet);
+        Point p = pet.getPos();
+        double vx = velX.getOrDefault(pet.getUniqueId(), 0.0);
+        double vy = fallVy.getOrDefault(pet.getUniqueId(), 0.0);
 
-        // On a rope/ladder the real pet hangs on the owner's back (HANG pose).
+        // Rope/ladder owner: the real pet hangs on the owner's back (HANG pose).
         if (CharacterStance.isClimbing(chr.getStance())) {
+            velX.remove(pet.getUniqueId());
             fallVy.remove(pet.getUniqueId());
-            moveTowards(chr, pet, index, pet.getPos(), botPos,
-                    PET_HANG_RIGHT, PET_HANG_LEFT, PET_HANG_RIGHT, PET_HANG_LEFT, config, observed, true, 0);
+            applyAndSend(chr, pet, index, chr.getPosition(), 0, 0, 0,
+                    isPetFacingLeft(pet) ? PET_HANG_LEFT : PET_HANG_RIGHT, config, observed);
             return;
         }
 
-        // Unobserved: no foothold/gravity work at all (shouldLookUpFoothold is the tick's
-        // dominant cost). Walk horizontally toward the owner on the pet's own floor/y.
-        if (!shouldLookUpFoothold(false, observed)) {
-            walkOwnFloor(chr, pet, index, tx, config, observed);
-            return;
-        }
-
-        // The pet falls the moment the floor under its own feet is gone (it stepped off
-        // an edge); this runs first so a falling pet is never also walked.
-        if (falling(chr, pet, index, map, config, observed)) {
-            return;
-        }
-
-        // Floor at the owner's target x, at roughly the owner's level? If so the pet walks
-        // onto it; otherwise the owner is on another platform / over a gap, so the pet walks
-        // toward the owner's x on its own floor (and falls if that x is over a gap).
-        Foothold under = GCMovement.footholdBelow(map, tx, botPos.y - GROUND_PROBE_UP);
-        int underY = under == null ? Integer.MIN_VALUE : under.calculateFooting(tx);
-        if (under != null && Math.abs(underY - botPos.y) <= GROUND_STEP_PX) {
-            moveTowards(chr, pet, index, pet.getPos(), new Point(tx, underY),
-                    PET_MOVE_RIGHT, PET_MOVE_LEFT, PET_STAND_RIGHT, PET_STAND_LEFT, config, observed, false, under.getId());
-        } else {
-            walkOwnFloor(chr, pet, index, tx, config, observed);
-        }
-    }
-
-    /** Walk toward {@code tx} on the pet's own floor/y, keeping its own foothold. */
-    private static void walkOwnFloor(Character chr, Pet pet, int index, int tx,
-                                     BotPetConfig config, boolean observed) {
-        moveTowards(chr, pet, index, pet.getPos(), new Point(tx, pet.getPos().y),
-                PET_MOVE_RIGHT, PET_MOVE_LEFT, PET_STAND_RIGHT, PET_STAND_LEFT, config, observed, false, pet.getFh());
-    }
-
-    /**
-     * Step a pet whose own feet are unsupported: it accelerates downward under gravity
-     * and lands on the first floor below. Returns true when it was airborne (so the
-     * caller must not also walk it this tick). Gravity only ever pulls DOWN, so a
-     * jumped owner never drags the pet up.
-     */
-    private static boolean falling(Character chr, Pet pet, int index, MapleMap map,
-                                   BotPetConfig config, boolean observed) {
-        Point cur = pet.getPos();
-        Foothold below = GCMovement.footholdBelow(map, cur.x, cur.y - GROUND_PROBE_UP);
-        int floorY = below == null ? Integer.MAX_VALUE : below.calculateFooting(cur.x);
-        if (cur.y >= floorY) {
-            fallVy.remove(pet.getUniqueId()); // feet on the floor — not falling
-            return false;
-        }
+        int tx = chr.getPosition().x + offsetFor(pet);
         double dt = Math.max(0.05, config.followTickMs() / 1000.0);
-        double vy = Math.min(MAX_FALL_PXS, fallVy.getOrDefault(pet.getUniqueId(), 0.0) + GRAVITY_PXS2 * dt);
-        int ny = cur.y + (int) Math.round(vy * dt);
-        int facingLeft = isPetFacingLeft(pet) ? 1 : 0;
-        if (ny >= floorY) {
-            int stance = facingLeft | PET_STAND_RIGHT; // landed: stand on the floor below
+
+        // Official follow: a pet that has fallen too far behind does NOT sprint after
+        // the owner — it flashes to the owner's side (a warp-like reposition) and
+        // resumes following from there.
+        if (Math.abs(p.x - chr.getPosition().x) > config.teleportDistPx()) {
+            velX.remove(pet.getUniqueId());
             fallVy.remove(pet.getUniqueId());
-            applyAndSend(chr, pet, index, new Point(cur.x, floorY), 0, 0, below.getId(), stance, config, observed);
-        } else {
-            int stance = facingLeft | PET_JUMP_RIGHT; // still falling (airborne pose)
-            fallVy.put(pet.getUniqueId(), vy);
-            applyAndSend(chr, pet, index, new Point(cur.x, ny), 0, (int) Math.round(vy), 0, stance, config, observed);
+            Foothold fh = GCMovement.footholdBelow(chr.getMap(), tx, chr.getPosition().y - GROUND_PROBE_UP);
+            Point snap = fh == null ? new Point(tx, chr.getPosition().y) : new Point(tx, fh.calculateFooting(tx));
+            applyAndSend(chr, pet, index, snap, 0, 0, fh == null ? 0 : fh.getId(),
+                    isPetFacingLeft(pet) ? PET_STAND_LEFT : PET_STAND_RIGHT, config, observed);
+            return;
         }
-        return true;
+
+        // Unobserved: skip the foothold/gravity work (shouldLookUpFoothold is the tick's
+        // dominant cost). Keep x fresh with the motor and hold y; the first watched tick
+        // resumes full physics (the y fix is then a short fall, not a stale flash).
+        if (!shouldLookUpFoothold(false, observed)) {
+            vx = stepMotor(vx, desiredVelocity(tx - p.x, config.followSpeed()), config.followSpeed(), dt);
+            velX.put(pet.getUniqueId(), vx);
+            int stance = Math.abs(vx) <= 1
+                    ? (isPetFacingLeft(pet) ? PET_STAND_LEFT : PET_STAND_RIGHT)
+                    : (vx > 0 ? PET_MOVE_RIGHT : PET_MOVE_LEFT);
+            applyAndSend(chr, pet, index, new Point(p.x + (int) Math.round(vx * dt), p.y),
+                    (int) Math.round(vx), 0, pet.getFh(), stance, config, observed);
+            return;
+        }
+
+        MapleMap map = chr.getMap();
+        boolean ground = onGround(map, p, vy);
+        // The pet never hops into the air after a jumping owner — gravity only ever
+        // pulls it DOWN (a pet over a gap just falls).
+
+        vx = stepMotor(vx, desiredVelocity(tx - p.x, config.followSpeed()), config.followSpeed(), dt);
+        int nx = p.x + (int) Math.round(vx * dt);
+
+        int ny = p.y;
+        Foothold landing = null;
+        if (ground) {
+            vy = 0;
+            landing = floorUnder(map, p);
+            if (landing != null) {
+                ny = landing.calculateFooting(nx);
+            }
+        } else {
+            boolean rising = vy < 0;
+            vy = Math.min(MAX_FALL_PXS, vy + GRAVITY_PXS2 * dt);
+            ny = p.y + (int) Math.round(vy * dt);
+            Foothold fh = GCMovement.footholdBelow(map, nx, p.y);
+            if (fh != null) {
+                int floorY = fh.calculateFooting(nx);
+                if (!rising && ny >= floorY) { // land on the way down
+                    ny = floorY;
+                    vy = 0;
+                    landing = fh;
+                }
+            }
+        }
+
+        int stance;
+        if (landing == null) {
+            stance = (isPetFacingLeft(pet) ? 1 : 0) | PET_JUMP_RIGHT; // airborne pose
+        } else if (Math.abs(vx) <= 1) {
+            stance = isPetFacingLeft(pet) ? PET_STAND_LEFT : PET_STAND_RIGHT;
+        } else {
+            stance = vx > 0 ? PET_MOVE_RIGHT : PET_MOVE_LEFT;
+        }
+
+        velX.put(pet.getUniqueId(), vx);
+        fallVy.put(pet.getUniqueId(), vy);
+        applyAndSend(chr, pet, index, new Point(nx, ny),
+                (int) Math.round(vx), (int) Math.round(vy),
+                landing != null ? landing.getId() : 0, stance, config, observed);
     }
 
     /**
-     * Swim follow: glide the pet toward a point above the bot. Footholds are the
-     * seabed (or absent) in water, so fh stays 0 and the pet floats, in the SWIM pose.
+     * Swim follow: the pet bobs through the water (sinks under gravity, floats back up
+     * when it drops below the point above the owner) in the SWIM pose, chasing the
+     * owner horizontally. fh stays 0 in water.
      */
     private static void followSwim(Character chr, Pet pet, int index, BotPetConfig config, boolean observed) {
-        fallVy.remove(pet.getUniqueId());
-        Point botPos = chr.getPosition();
-        Point target = new Point(botPos.x + offsetFor(pet), botPos.y - config.swimOffset() * (index + 1));
-        moveTowards(chr, pet, index, pet.getPos(), target,
-                PET_SWIM_RIGHT, PET_SWIM_LEFT, PET_SWIM_RIGHT, PET_SWIM_LEFT, config, observed, true, 0);
+        Point p = pet.getPos();
+        int botX = chr.getPosition().x + offsetFor(pet);
+        int targetY = chr.getPosition().y - config.swimOffset() * (index + 1);
+        double dt = Math.max(0.05, config.followTickMs() / 1000.0);
+        double vx = velX.getOrDefault(pet.getUniqueId(), 0.0);
+        double vy = fallVy.getOrDefault(pet.getUniqueId(), 0.0);
+
+        // Official follow: too far behind -> flash to the owner's side, don't sprint.
+        if (Math.hypot(p.x - botX, p.y - targetY) > config.teleportDistPx()) {
+            velX.remove(pet.getUniqueId());
+            fallVy.remove(pet.getUniqueId());
+            applyAndSend(chr, pet, index, new Point(botX, targetY), 0, 0, 0,
+                    isPetFacingLeft(pet) ? PET_SWIM_LEFT : PET_SWIM_RIGHT, config, observed);
+            return;
+        }
+
+        vx = stepMotor(vx, desiredVelocity(botX - p.x, config.followSpeed()), config.followSpeed(), dt);
+        vy += SWIM_GRAVITY_PXS2 * dt;
+        if (p.y > targetY) {
+            vy -= SWIM_BUOYANCY_PXS2 * dt; // dropped below the target: float back up
+        }
+        vy = Math.max(-SWIM_MAX_SPEED_PXS, Math.min(SWIM_MAX_SPEED_PXS, vy));
+
+        int nx = p.x + (int) Math.round(vx * dt);
+        int ny = p.y + (int) Math.round(vy * dt);
+        velX.put(pet.getUniqueId(), vx);
+        fallVy.put(pet.getUniqueId(), vy);
+        applyAndSend(chr, pet, index, new Point(nx, ny),
+                (int) Math.round(vx), (int) Math.round(vy), 0,
+                vx >= 0 ? PET_SWIM_RIGHT : PET_SWIM_LEFT, config, observed);
     }
 
-    /**
-     * Shared movement core: glide the pet toward {@code target}, or re-home it when
-     * hopelessly far (a warp slipped past the engine's own map-entry placement). The
-     * {@code move*}/{@code idle*} pair is the context's own — land walks in MOVE and
-     * rests in STAND, while water / air / rope keep a single pose. {@code noGravity}
-     * keeps the pet at the target's own y (water / rope). {@code fh} is the ground to
-     * stand on; 0 when floating.
-     */
-    /**
-     * Shared movement core: CHASE the target at a fixed speed — both x and y move at
-     * up to {@code followSpeed} toward the target over the tick, so a pet runs to
-     * catch up rather than being snapped onto the target. That gap is what makes a
-     * real pet look like it is chasing. When the pet is grounded the target's y is its
-     * own floor (a level line), so the chase is horizontal; floating (water / rope /
-     * airborne) it chases in 2D. Far away it is re-homed instead of walking the whole
-     * distance.
-     */
-    private static void moveTowards(Character chr, Pet pet, int index, Point cur, Point target,
-                                    int moveRight, int moveLeft, int idleRight, int idleLeft,
-                                    BotPetConfig config, boolean observed, boolean noGravity, int fh) {
-        double dx = target.x - cur.x;
-        double dy = target.y - cur.y;
-        double dist = Math.hypot(dx, dy);
+    /** Desired horizontal velocity toward a target {@code dx} away; 0 within the dead zone. */
+    private static double desiredVelocity(double dx, double maxSpeed) {
+        if (Math.abs(dx) < 4) {
+            return 0;
+        }
+        return Math.signum(dx) * maxSpeed;
+    }
 
-        if (dist > config.teleportDistPx()) {
-            // Re-home: a warp slipped the pet past the engine's map-entry placement.
-            fallVy.remove(pet.getUniqueId());
-            applyAndSend(chr, pet, index, target, 0, 0, fh,
-                    isPetFacingLeft(pet) ? idleLeft : idleRight, config, observed);
-            return;
+    /** Accelerate {@code v} toward {@code desired} at WALK_ACCEL, capped at +-maxSpeed. */
+    private static double stepMotor(double v, double desired, double maxSpeed, double dt) {
+        double max = WALK_ACCEL_PXS2 * dt;
+        v += Math.max(-max, Math.min(max, desired - v));
+        return Math.max(-maxSpeed, Math.min(maxSpeed, v));
+    }
+
+    /** Whether the pet's feet rest on a floor (within a snap) and it is not rising. */
+    private static boolean onGround(MapleMap map, Point p, double vy) {
+        if (map == null || vy < -1) {
+            return false;
         }
-        if (dist <= config.epsPx()) {
-            int idle = isPetFacingLeft(pet) ? idleLeft : idleRight;
-            if (pet.getStance() != idle || pet.getFh() != fh) {
-                applyAndSend(chr, pet, index, cur, 0, 0, fh, idle, config, observed);
-            }
-            return;
+        Foothold fh = GCMovement.footholdBelow(map, p.x, p.y - 2);
+        return fh != null && p.y - fh.calculateFooting(p.x) <= GROUND_SNAP_PX;
+    }
+
+    /** The floor the pet stands on (within a step of its feet), or null over a gap. */
+    private static Foothold floorUnder(MapleMap map, Point p) {
+        if (map == null) {
+            return null;
         }
-        double dt = Math.max(0.05, config.followTickMs() / 1000.0);
-        double maxStep = Math.max(1.0, config.followSpeed() * dt);
-        double scale = Math.min(1.0, maxStep / dist);
-        int nx = (int) Math.round(cur.x + dx * scale);
-        int ny = (int) Math.round(cur.y + dy * scale);
-        int stepX = nx - cur.x;
-        int stance = stepX == 0
-                ? (isPetFacingLeft(pet) ? idleLeft : idleRight)
-                : (stepX > 0 ? moveRight : moveLeft);
-        // Airborne (noGravity): fh must be 0 or the client anchors the pet to the floor
-        // it should be floating above (its walk/hang/swim pose is unaffected).
-        int wireFh = noGravity ? 0 : fh;
-        applyAndSend(chr, pet, index, new Point(nx, ny),
-                (int) Math.round(stepX / dt), (int) Math.round((ny - cur.y) / dt), wireFh, stance, config, observed);
+        Foothold fh = GCMovement.footholdBelow(map, p.x, p.y - 2);
+        return fh != null && Math.abs(p.y - fh.calculateFooting(p.x)) <= GROUND_STEP_PX ? fh : null;
     }
 
     /**
