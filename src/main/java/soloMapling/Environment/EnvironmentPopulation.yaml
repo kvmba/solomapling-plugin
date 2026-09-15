@@ -109,11 +109,11 @@ waves:
       - {map: 2,     count: 6,  level_lo: 1, level_hi: 6}     # 番茄田
       # Hunting-ground continents that were missing any hub at all.
       - {map: 240070100, count: 17, level_lo: 70, level_hi: 100} # 未来之城 (23 maps)
-      - {map: 240050100, count: 13, level_lo: 95, level_hi: 130} # 生命之穴迷宫 (97-110)
+      - {map: 240050100, count: 13, level_lo: 95, level_hi: 125} # 生命之穴迷宫 (97-110)
       - {map: 261020000, count: 16, level_lo: 30, level_hi: 80}  # 卡帕莱特研究所 (9)
       - {map: 261010000, count: 10,  level_lo: 30, level_hi: 80}  # 蒙特鸠研究所 (6)
-      - {map: 260000000, count: 22, level_lo: 30, level_hi: 90}  # 阿里安特 (20 hunting maps, had none)
-      - {map: 260010000, count: 14, level_lo: 30, level_hi: 80}  # 阿里安特 西门外
+      - {map: 260000000, count: 22, level_lo: 30, level_hi: 65}  # 阿里安特 (20 hunting maps, had none)
+      - {map: 260010000, count: 14, level_lo: 30, level_hi: 65}  # 阿里安特 西门外
       - {map: 600010100, count: 8,  level_lo: 30, level_hi: 70}  # 马莱尼西亚岛 (6)
       - {map: 600020100, count: 6,  level_lo: 30, level_hi: 80}  # 内部齿轮装置 (5)
       - {map: 702070200, count: 6,  level_lo: 120, level_hi: 135}  # 藏经阁三到四层 (120-125)
@@ -162,15 +162,14 @@ waves:
       - {map: 200081500, count: 3, level_lo: 30, level_hi: 40}   # 7层 19怪 lv32
       - {map: 200081800, count: 3, level_lo: 30, level_hi: 40}   # 4层 17怪 lv33
       - {map: 200082000, count: 3, level_lo: 30, level_hi: 40}   # 2层 24怪 lv33-35
-      - {map: 200081400, count: 2, level_lo: 25, level_hi: 35}   # 8层 18怪 lv23-30
+      - {map: 200081400, count: 2, level_lo: 30, level_hi: 35}   # 8层 18怪 lv23-30
       - {map: 211000000, count: 26, level_lo: 50, level_hi: 80}
       - {map: 211000200, count: 8, level_lo: 30, level_hi: 45}   # 冰雪山丘 47怪 lv32-35
       - {map: 211040300, count: 30, level_lo: 60, level_hi: 90}
       - {map: 240000000, count: 60, level_lo: 70, level_hi: 120}
-      - {map: 240050000, count: 23, level_lo: 70, level_hi: 113}
       - {map: 240070000, count: 6, level_lo: 70, level_hi: 90}
-      - {map: 701000200, count: 8, level_lo: 30, level_hi: 90}
-      - {map: 702000000, count: 11, level_lo: 30, level_hi: 100}
+      - {map: 701000200, count: 8, level_lo: 30, level_hi: 63}
+      - {map: 702000000, count: 11, level_lo: 78, level_hi: 100}
       - {map: 702010000, count: 5, level_lo: 80, level_hi: 95}   # 嵩山 山脚 (80-90)
       - {map: 702050000, count: 8,  level_lo: 95, level_hi: 110}  # 嵩山 广场 (100-105)
       - {map: 702070100, count: 7,  level_lo: 115, level_hi: 135} # 藏经阁 (120-130)
@@ -178,10 +177,10 @@ waves:
       - {map: 230000000, count: 34, level_lo: 30, level_hi: 80}
       - {map: 250000000, count: 30, level_lo: 30, level_hi: 95}
       - {map: 251000000, count: 16, level_lo: 40, level_hi: 90}
-      - {map: 270000000, count: 13, level_lo: 90, level_hi: 150}
-      - {map: 270010000, count: 9, level_lo: 90, level_hi: 141} # 时间领主 (15 maps, had none)
+      - {map: 270000000, count: 13, level_lo: 90, level_hi: 138}
+      - {map: 270010000, count: 9, level_lo: 90, level_hi: 138} # 时间领主 (15 maps, had none)
       - {map: 800000000, count: 19, level_lo: 30, level_hi: 90}
-      - {map: 801000000, count: 15, level_lo: 45, level_hi: 130}
+      - {map: 801000000, count: 15, level_lo: 45, level_hi: 125}
       - {map: 550000000, count: 6, level_lo: 45, level_hi: 70}
       - {map: 551000000, count: 10, level_lo: 59, level_hi: 100}
       - {map: 540000000, count: 7, level_lo: 30, level_hi: 80}
@@ -200,9 +199,9 @@ waves:
       - {map: 240020100, count: 5, level_lo: 83, level_hi: 98}   # 火焰死亡战场 24怪 lv88
       - {map: 211042200, count: 5, level_lo: 38, level_hi: 100}  # 艰苦洞穴Ⅲ 37怪 lv43-90
       - {map: 230040300, count: 4, level_lo: 89, level_hi: 107}  # 危海峡谷2 34怪 lv94-97
-      - {map: 800010000, count: 4, level_lo: 3,  level_hi: 30}   # 樱花山林 36怪 lv8-20
+      - {map: 800010000, count: 4, level_lo: 30, level_hi: 40}   # 樱花山林 36怪 lv8-20
       - {map: 600020400, count: 5, level_lo: 31, level_hi: 61}   # 火之密室 71怪 lv36-51
-      - {map: 701010400, count: 4, level_lo: 20, level_hi: 66}   # 徐州平原1 23怪 lv25-56
+      - {map: 701010400, count: 4, level_lo: 20, level_hi: 63}   # 徐州平原1 23怪 lv25-56
       # 各城镇周边的热点打怪图：此前练级 bot 只落在城镇本体和其正门，
       # 玩家真正刷怪的周边地图（地铁、蚂蚁洞、云彩公园、修炼场…）全空。
       # 下面按区域补上，数量按图容量和怪物密度给，保持不挤。
@@ -218,11 +217,11 @@ waves:
       - {map: 211041600, count: 7,  level_lo: 40, level_hi: 60}   # 废矿区Ⅱ 35怪 41-57
       - {map: 220040200, count: 8,  level_lo: 30, level_hi: 45}   # 时间隧道 57怪 34-40
       - {map: 221030000, count: 8,  level_lo: 35, level_hi: 50}   # 控制地区 51怪 41
-      - {map: 230030001, count: 7,  level_lo: 20, level_hi: 35}   # 鱼之平原 53怪 23-25
-      - {map: 230030200, count: 7,  level_lo: 20, level_hi: 35}   # 矩形地带 55怪 22-23
+      - {map: 230030001, count: 7,  level_lo: 30, level_hi: 35}   # 鱼之平原 53怪 23-25
+      - {map: 230030200, count: 7,  level_lo: 30, level_hi: 35}   # 矩形地带 55怪 22-23
       - {map: 230010000, count: 7,  level_lo: 30, level_hi: 50}   # 海底叉路 49怪 36-40
-      - {map: 240010101, count: 8,  level_lo: 65, level_hi: 80}   # 毛毛森林 36怪 70-74
-      - {map: 240010100, count: 8,  level_lo: 65, level_hi: 85}   # 米纳尔森林西边境界 27怪 70-76
+      - {map: 240010101, count: 8,  level_lo: 70, level_hi: 80}   # 毛毛森林 36怪 70-74
+      - {map: 240010100, count: 8,  level_lo: 70, level_hi: 85}   # 米纳尔森林西边境界 27怪 70-76
       - {map: 240030100, count: 7,  level_lo: 85, level_hi: 110}  # 龙林1 25怪 90-105
       - {map: 250010503, count: 7,  level_lo: 50, level_hi: 70}   # 妖怪森林 34怪 55-66
       - {map: 250020200, count: 7,  level_lo: 45, level_hi: 60}   # 中级修炼场 34怪 50-51
@@ -233,11 +232,10 @@ waves:
       - {map: 270030100, count: 6,  level_lo: 75, level_hi: 125}  # 忘却之路1 24怪 80-121
       - {map: 300010100, count: 5,  level_lo: 40, level_hi: 50}   # 苔藓树丛西部森林1 9怪 42-46
       - {map: 300010400, count: 5,  level_lo: 50, level_hi: 60}   # 石头山入口 9怪 57
-      - {map: 540000200, count: 7,  level_lo: 15, level_hi: 40}   # 主要通道2 42怪 18-33
+      - {map: 540000200, count: 7,  level_lo: 16, level_hi: 40}   # 主要通道2 42怪 18-33
       - {map: 540020000, count: 7,  level_lo: 30, level_hi: 45}   # 郊区1 38怪 38
       - {map: 541000100, count: 7,  level_lo: 45, level_hi: 60}   # 神秘通道1 36怪 50-53
       - {map: 550000100, count: 6,  level_lo: 40, level_hi: 55}   # 泥泞的河岸外围 29怪 45-47
-      - {map: 551030001, count: 6,  level_lo: 65, level_hi: 80}   # 掰掰站最久的一环 48怪 68-72
       - {map: 551000200, count: 6,  level_lo: 55, level_hi: 65}   # 大红花路2 37怪 59
       - {map: 600010300, count: 8,  level_lo: 20, level_hi: 35}   # 丛林山谷 74怪 21-30
       - {map: 600010200, count: 7,  level_lo: 15, level_hi: 45}   # 克兰卡丛林盆地 51怪 19-41
@@ -245,8 +243,8 @@ waves:
       - {map: 701010300, count: 7,  level_lo: 25, level_hi: 40}   # 徐州岔道 33怪 30-35
       - {map: 701010000, count: 6,  level_lo: 10, level_hi: 30}   # 上海郊外 27怪 15-22
       - {map: 701010200, count: 6,  level_lo: 20, level_hi: 35}   # 上海北部小山 25怪 25-30
-      - {map: 800030000, count: 7,  level_lo: 25, level_hi: 40}   # 妖兽之林 41怪 30
-      - {map: 800010001, count: 7,  level_lo: 25, level_hi: 40}   # 云狐山坡 38怪 30
+      - {map: 800030000, count: 7,  level_lo: 30, level_hi: 40}   # 妖兽之林 41怪 30
+      - {map: 800010001, count: 7,  level_lo: 30, level_hi: 40}   # 云狐山坡 38怪 30
       - {map: 801010000, count: 6,  level_lo: 40, level_hi: 55}   # 昭和内部街道1 37怪 43-47
       - {map: 110010000, count: 7,  level_lo: 30, level_hi: 45}   # 海边瓜棚 63怪 37
       - {map: 110030000, count: 6,  level_lo: 30, level_hi: 55}   # 青螃蟹海滩Ⅰ 47怪 37-48

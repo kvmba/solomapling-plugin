@@ -28,8 +28,8 @@ class EnvironmentPopulationConfigTest {
     void loadsBundledYamlFromClasspathOrFs() {
         var plan = EnvironmentPopulationConfig.reload();
         assertTrue(plan.training().enabled());
-        assertEquals(135, plan.training().cohorts().size());
-        assertEquals(1608, plan.trainingCohortTotal());
+        assertEquals(133, plan.training().cohorts().size());
+        assertEquals(1579, plan.trainingCohortTotal());
         assertTrue(plan.essentials().enabled());
         assertEquals("henesys", plan.essentials().fmRegion());
         assertEquals(5, plan.essentials().fmEntrance().m1());
