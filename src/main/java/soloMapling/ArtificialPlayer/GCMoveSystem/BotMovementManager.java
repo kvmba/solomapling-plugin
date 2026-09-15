@@ -552,10 +552,18 @@ class BotMovementManager {
         // prevents the jump/sink oscillation when bot overshoots target by a
         // few px (was: any dy<0 fired a 1000+ px/s burst, then bot fell back
         // through level, repeat).
+        //
+        // Unless there is NO goal: the driver feeds the bot its OWN position as the target when
+        // resolveTarget() finds none (idle after a kill), so dx/dy are 0 and this band would tap UP
+        // forever. UP is a slow sink (SWIM_UP_MAX_SINK_PXS, 42 px/s) — the "silently floats down
+        // after a kill" report. With landable ground below, sink with the client's DOWN key
+        // (SWIM_DOWN_MAX_SPEED_PXS) instead: the same accelerated fall a player gets holding the
+        // down key. The no-ground-below case never reaches here (the stranded rescue above owns it).
         int levelBand = BotPhysicsEngine.cfg.SWIM_LEVEL_BAND_PX;
         if (Math.abs(dx) <= hRadius && Math.abs(dy) <= levelBand) {
             entry.swimMoveDir = 0;
-            entry.swimVerticalHold = -1;
+            boolean idle = entry.moveTarget == null && !entry.following && entry.farmAnchor == null;
+            entry.swimVerticalHold = (idle && hasLandingGround(entry, pos)) ? 1 : -1;
             return;
         }
 
