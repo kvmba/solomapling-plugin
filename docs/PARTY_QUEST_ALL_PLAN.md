@@ -342,11 +342,11 @@ grep -rn 'setProperty("statusStg1", *1\|setIntProperty("statusStg1", *1' scripts
 | PQ | 招募地图 | 生成等级 | 生成数量 |
 |---|---|---|---|
 | HenesysPQ | 100000200 | 10–91 | 5 |
-| KerningPQ | 103000000 | 21–24 | 3 |
-| LudiPQ | 221024500 | 35–40 | 5 |
+| KerningPQ | 103000000 | 21–30 | 3 |
+| LudiPQ | 221024500 | 35–44 | 5 |
 | PiratePQ | 251010404 | 55–70 | 5 |
 | AmoriaPQ | 670010100 | 40–111 | 5 |
-| EllinPQ | 300030100 | 44–47 | 5 |
+| EllinPQ | 300030100 | 44–53 | 5 |
 | MagatiaPQ | 261000021 | 71–75 | 3 |
 | ZakumPQ | 211042300 | 50–118 | 5 |
 | HorntailPQ | 240050000 | 120–165 | 5 |
