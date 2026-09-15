@@ -42,10 +42,10 @@ import java.util.concurrent.TimeUnit;
  * (sinks under gravity, floats back up) in the SWIM stance (12/13); a rope/ladder
  * owner makes it hang (HANG, 30/31).</p>
  *
- * <p>Every tick the pet's position is kept current in memory; only the packets are
- * gated on observability, so a joining player never sees a stale coordinate. The
- * ground/gravity work (a foothold lookup — the tick's dominant cost) is skipped
- * entirely while no real player watches the map, so the world runs pet-free of cost.</p>
+ * <p><b>LOD like the bot's own movement.</b> While no real player watches the map the
+ * whole pet tick is skipped — no physics, no foothold lookup, no packets. The first
+ * tick after a player arrives runs the full physics once, which places / falls /
+ * re-homes the pet to where it belongs, so a joining player never sees a stale pet.</p>
  *
  * <p>Pets also occasionally play one of their own WZ interactions (a chat, a pose),
  * paced per pet, and — with looting gear — pick up nearby MONSTER drops (its owner's
@@ -184,14 +184,14 @@ public final class BotPetFollower {
             return;
         }
         MapleMap map = chr.getMap();
-        // The pet's position is kept in sync with the bot EVERY tick (a cheap
-        // in-memory update); only the packets are gated on observability. Freezing
-        // the position while unobserved made a joining player's spawnPlayerMapObject
-        // carry a stale pet coordinate, which then snapped to the bot — a visible
-        // flash. Syncing always bounds that staleness to one tick, like an observed
-        // map. Speaking and looting stay observer-gated (they only matter to, and
-        // only broadcast to, watchers).
+        // LOD, like the bot's own movement: while no real player watches the map, do
+        // NOTHING for the pets — no physics, no foothold lookup, no moving. The first
+        // tick after a player arrives runs the full physics once, which places/falls/
+        // re-homes the pet to where it should be (official pets warp when left behind).
         boolean observed = GCMovement.isMapObserved(chr.getMapId());
+        if (!shouldLookUpFoothold(false, observed)) {
+            return; // LOD: nobody can see the pets — skip the whole pet tick
+        }
 
         // Water = the map says so, or the bot itself is currently swimming (they agree
         // for maps with info/swim set; the stance check also covers a bot mid-water in
@@ -224,9 +224,10 @@ public final class BotPetFollower {
     /**
      * Land follow, run as the pet's own physics (see the class note). The owner is a
      * moving target: the pet accelerates toward a point beside it (momentum, so it
-     * lags then catches up rather than being snapped on), hops after a jumping owner,
-     * and falls under gravity when its own feet are unsupported. Gravity only pulls
-     * DOWN, so a jumped owner never drags the pet up.
+     * lags then catches up rather than being snapped on) and falls under gravity when
+     * its own feet are unsupported. Gravity only ever pulls DOWN, so a jumped or
+     * falling owner never drags the pet up; a pet left too far from the owner is
+     * warped to its side ({@link #teleportPet}).
      */
     private static void followLand(Character chr, Pet pet, int index, BotPetConfig config, boolean observed) {
         Point p = pet.getPos();
@@ -245,30 +246,17 @@ public final class BotPetFollower {
         int tx = chr.getPosition().x + offsetFor(pet);
         double dt = Math.max(0.05, config.followTickMs() / 1000.0);
 
-        // Official follow: a pet that has fallen too far behind does NOT sprint after
-        // the owner — it flashes to the owner's side (a warp-like reposition) and
-        // resumes following from there.
-        if (Math.abs(p.x - chr.getPosition().x) > config.teleportDistPx()) {
+        // Official follow: a pet that has fallen too far from the owner does NOT sprint
+        // after it — it flashes to the owner's side (a warp-like reposition) and resumes
+        // from there. Measured in 2D, so an owner that dropped from a height (or climbed
+        // far above) also re-homes the pet to its level.
+        if (Math.hypot(p.x - tx, p.y - chr.getPosition().y) > config.teleportDistPx()) {
             velX.remove(pet.getUniqueId());
             fallVy.remove(pet.getUniqueId());
             Foothold fh = GCMovement.footholdBelow(chr.getMap(), tx, chr.getPosition().y - GROUND_PROBE_UP);
             Point snap = fh == null ? new Point(tx, chr.getPosition().y) : new Point(tx, fh.calculateFooting(tx));
-            applyAndSend(chr, pet, index, snap, 0, 0, fh == null ? 0 : fh.getId(),
+            teleportPet(chr, pet, index, snap, fh == null ? 0 : fh.getId(),
                     isPetFacingLeft(pet) ? PET_STAND_LEFT : PET_STAND_RIGHT, config, observed);
-            return;
-        }
-
-        // Unobserved: skip the foothold/gravity work (shouldLookUpFoothold is the tick's
-        // dominant cost). Keep x fresh with the motor and hold y; the first watched tick
-        // resumes full physics (the y fix is then a short fall, not a stale flash).
-        if (!shouldLookUpFoothold(false, observed)) {
-            vx = stepMotor(vx, desiredVelocity(tx - p.x, config.followSpeed()), config.followSpeed(), dt);
-            velX.put(pet.getUniqueId(), vx);
-            int stance = Math.abs(vx) <= 1
-                    ? (isPetFacingLeft(pet) ? PET_STAND_LEFT : PET_STAND_RIGHT)
-                    : (vx > 0 ? PET_MOVE_RIGHT : PET_MOVE_LEFT);
-            applyAndSend(chr, pet, index, new Point(p.x + (int) Math.round(vx * dt), p.y),
-                    (int) Math.round(vx), 0, pet.getFh(), stance, config, observed);
             return;
         }
 
@@ -336,7 +324,7 @@ public final class BotPetFollower {
         if (Math.hypot(p.x - botX, p.y - targetY) > config.teleportDistPx()) {
             velX.remove(pet.getUniqueId());
             fallVy.remove(pet.getUniqueId());
-            applyAndSend(chr, pet, index, new Point(botX, targetY), 0, 0, 0,
+            teleportPet(chr, pet, index, new Point(botX, targetY), 0,
                     isPetFacingLeft(pet) ? PET_SWIM_LEFT : PET_SWIM_RIGHT, config, observed);
             return;
         }
@@ -424,6 +412,24 @@ public final class BotPetFollower {
         pet.setFh(fh);
         if (observed) {
             broadcastMove(chr, pet, index, pos, vx, vy, fh, stance, config);
+        }
+    }
+
+    /**
+     * Warp the pet to {@code pos} the official way: remove it, update its position,
+     * then re-spawn it — NOT a MOVE packet sliding it across the map. Used when the
+     * pet is left too far behind.
+     */
+    private static void teleportPet(Character chr, Pet pet, int index, Point pos, int fh, int stance,
+                                    BotPetConfig config, boolean observed) {
+        if (observed) {
+            chr.getMap().broadcastMessage(chr, PacketCreator.showPet(chr, pet, true, false), false);
+        }
+        pet.setPos(pos);
+        pet.setStance(stance);
+        pet.setFh(fh);
+        if (observed) {
+            chr.getMap().broadcastMessage(chr, PacketCreator.showPet(chr, pet, false, false), false);
         }
     }
 
