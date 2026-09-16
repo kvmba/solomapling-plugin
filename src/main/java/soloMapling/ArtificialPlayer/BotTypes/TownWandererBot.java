@@ -6,6 +6,7 @@ import soloMapling.ArtificialPlayer.BotFlavorSystem.BotFlavor;
 import soloMapling.ArtificialPlayer.BotFlavorSystem.LevelUpCongrats;
 import soloMapling.ArtificialPlayer.BotGrindSystem.MapMobIndex;
 import soloMapling.ArtificialPlayer.BotSM;
+import soloMapling.ArtificialPlayer.BotTownSystem.TownRoamMaps;
 import soloMapling.ArtificialPlayer.BotWanderSystem.BotWanderSystem;
 import soloMapling.ArtificialPlayer.GCMoveSystem.GCMovement;
 import soloMapling.server.EventMessageSystem.EventBus;
@@ -106,13 +107,14 @@ public class TownWandererBot extends BotSM {
 
     // Home map + adjacent mob-free maps (town interiors / connectors) within one hop, so a wanderer can
     // drift between a town's sub-rooms with no hardcoded map/portal table. mapsWithinHops already excludes
-    // taxi/ferry hops (town-local); we drop any map that has mobs (a field, not a town room). Home-only fallback.
+    // taxi/ferry hops (town-local); we drop any map that has mobs (a field, not a town room) and any
+    // shaft-shaped map a roam must not settle in (see TownRoamMaps). Home-only fallback.
     private List<Integer> discoverTownFamily(int home) {
         List<Integer> fam = new ArrayList<>();
         fam.add(home);
         try {
             for (int m : GCMovement.mapsWithinHops(home, 1)) {
-                if (m != home && MapMobIndex.level(m) < 0) {
+                if (m != home && MapMobIndex.level(m) < 0 && !TownRoamMaps.isBanned(m)) {
                     fam.add(m);
                 }
             }

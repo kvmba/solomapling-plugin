@@ -22,6 +22,7 @@ import soloMapling.ArtificialPlayer.SocialPersonaConfig;
 import soloMapling.ArtificialPlayer.BotTownSystem.BotPortalClearance;
 import soloMapling.ArtificialPlayer.BotTownSystem.TownPresenceConfig;
 import soloMapling.ArtificialPlayer.BotTownSystem.TownPresenceSampler;
+import soloMapling.ArtificialPlayer.BotTownSystem.TownRoamMaps;
 import soloMapling.ArtificialPlayer.BotTownSystem.TownStation;
 import soloMapling.ArtificialPlayer.BotTypeManager;
 import soloMapling.ArtificialPlayer.GCMoveSystem.GCMovement;
@@ -481,8 +482,10 @@ public class SocialBot extends BotSM {
         List<Integer> options = new ArrayList<>();
         for (int neighbor : GCMovement.walkableNeighbors(chr.getMapId())) {
             // Town maps only: a neighbour carrying mobs is a hunting field, not somewhere a
-            // townsbot goes for a walk. Empty until the world graph exists (never forces its build).
-            if (MapMobIndex.level(neighbor) < 0) {
+            // townsbot goes for a walk, and a shaft-shaped town map (a full-height rope/ladder
+            // with the only floor at the bottom) is somewhere a stationed bot would read as stuck
+            // (see TownRoamMaps). Empty until the world graph exists (never forces its build).
+            if (MapMobIndex.level(neighbor) < 0 && !TownRoamMaps.isBanned(neighbor)) {
                 options.add(neighbor);
             }
         }
