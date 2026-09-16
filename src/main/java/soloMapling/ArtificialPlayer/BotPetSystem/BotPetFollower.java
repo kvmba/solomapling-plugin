@@ -398,8 +398,13 @@ public final class BotPetFollower {
         // toward it; otherwise (owner above but unreachable) warp, so the pet never hops
         // at a wall forever. The probe must look ABOVE the pet — a plain findBelow only ever
         // reports floors below it — and only as far as a hop can actually rise.
+        // A jumping owner is ignored here too (same rule as the warp above): its higher y is
+        // transient. Without this guard the branch fires on every jump — a pet on flat ground
+        // finds no floor within a hop, so it is warped up to the owner's mid-air y, then falls,
+        // then warps again (a visible flicker) instead of waiting for the owner to land.
         boolean ownerAbove = owner.y < p.y - GROUND_STEP_PX;
-        if (standing != null && !ownerBelow && ownerAbove) {
+        if (standing != null && !ownerBelow && ownerAbove
+                && !CharacterStance.isJumping(chr.getStance())) {
             Point above = GCMovement.groundAbove(map, owner.x, p.y, JUMP_RISE_PX);
             boolean canHop = above != null && above.y < p.y - GROUND_SNAP_PX;
             if (!canHop) {
