@@ -136,12 +136,12 @@ public final class BotPetFollower {
 
     // Pets trail BEHIND the owner in a spaced line (official behaviour), not on top of it and
     // never in front. The nearest pet sits TRAIL_BASE_PX behind the owner; each farther pet trails
-    // the one ahead of it by TRAIL_GAP_PX, so a 3-pet bot lines up at 40 / 85 / 130 px. The pet in
+    // the one ahead of it by TRAIL_GAP_PX, so a 3-pet bot lines up at 40 / 62 / 84 px. The pet in
     // the HIGHEST array slot leads the line (nearest the owner). Because each pet is anchored to the
     // pet ahead (its position from the previous tick), the line cascades on a move — the nearest
     // sets off first, then the next, then the next — instead of all pets jerking at once.
     private static final int TRAIL_BASE_PX = 40;
-    private static final int TRAIL_GAP_PX = 45;
+    private static final int TRAIL_GAP_PX = 22;
 
     /** Bots that currently have pets — the only ones a tick visits. */
     private static final Set<Integer> TRACKED = ConcurrentHashMap.newKeySet();
