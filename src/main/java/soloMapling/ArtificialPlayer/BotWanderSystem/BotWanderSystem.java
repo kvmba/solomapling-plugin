@@ -82,6 +82,7 @@ public final class BotWanderSystem {
         ScheduledFuture<?> task;
         byte state = DWELLING;    // start dwelling-with-expired-timer so the first tick picks immediately
         long dwellUntilMs;        // 0 -> first tick strolls right away (clears the portal fast)
+        boolean portalCleared;    // one-shot off-door step taken while unobserved (the LOD gate is otherwise a hard skip)
         Point target;
         int bestDist = Integer.MAX_VALUE;
         long progressAtMs;
@@ -211,7 +212,16 @@ public final class BotWanderSystem {
         // bot kept picking stroll targets and re-issuing moves at full rate with nobody watching.
         // Skipping while the map is unseen keeps the wander dormant until a real player arrives;
         // the next poll after promotion resumes from the dwell/walk state it left behind.
+        //
+        // One exception: a bot that just arrived through a portal stands on the map's entry pixel,
+        // and freezing the whole loop here would leave it - and every later arrival - stacked on the
+        // door until a player happens to look. Take a single off-door step on the first unobserved
+        // tick (once), then go dormant exactly as before.
         if (!GCMovement.isMapObserved(bot.getMapId())) {
+            if (!w.portalCleared) {
+                w.portalCleared = true;
+                clearPortalWhileUnobserved(w, bot);
+            }
             return;
         }
         MapleMap map = bot.getMap();
@@ -312,6 +322,27 @@ public final class BotWanderSystem {
         w.bestDist = Integer.MAX_VALUE;
         w.progressAtMs = now;
         GCMovement.move(w.bot, spot.x, spot.y);
+    }
+
+    // One-shot off-door step for an unobserved bot that just arrived through a portal: send it to a
+    // legal spot clear of the doorway so a frozen crowd never parks on the entry pixel. A no-op when
+    // the bot is not actually on a door (a bot restarting its roam in place) - that case stays dormant.
+    // No doorway clear: on a narrow/isolated arrival ledge the pick's farthest-from-portal fallback (a
+    // few px of spread) barely beats the bot's own position, so staying put is the honest result.
+    private static void clearPortalWhileUnobserved(Wander w, Character bot) {
+        MapleMap map = bot.getMap();
+        if (map == null) {
+            return;
+        }
+        Point bp = bot.getPosition();
+        if (!BotPortalClearance.onDoorway(map, bp)) {
+            return;
+        }
+        Point spot = pickStroll(map, bp, w);
+        if (spot == null) {
+            return;
+        }
+        issueMove(w, spot, nowMs());
     }
 
     private static long nowMs() {
