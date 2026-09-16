@@ -120,8 +120,13 @@ final class GCTravel {
     // the crowd leaves the landing one at a time rather than all together, and only then walks to the
     // door for its own boarding dwell (boardingDwell). Rolled once per opening so a bot doesn't
     // re-decide every poll.
-    private static final long ELEVATOR_REACTION_MIN_MS = 2_000;
-    private static final long ELEVATOR_REACTION_MAX_MS = 8_000;
+    private static final long ELEVATOR_REACTION_MIN_MS = 1_000;
+    private static final long ELEVATOR_REACTION_MAX_MS = 2_000;
+    // The elevator door's own dwell at the gate, kept separate from the cab's BOARD_DWELL: a lift is
+    // a standing ride you step straight into, not the cab's pay-the-driver transaction, so it needs
+    // only a beat at the door rather than a few seconds. See boardingDwell, which takes this band.
+    private static final long ELEVATOR_DWELL_MIN_MS = 1_000;
+    private static final long ELEVATOR_DWELL_MAX_MS = 2_000;
     // While waiting an elevator out, a bot stands a few strides back from the door — far enough to keep
     // the doorway clear, and a different distance for each waiter so the crowd spreads along the floor
     // instead of piling onto one anchor pixel (a fixed standoff would just move the pile).
@@ -445,9 +450,9 @@ final class GCTravel {
     }
 
     /*
-     * Run every poll while the bot stands at the elevator door: hold for the boarding dwell (the same
-     * "a few seconds at the door" beat boardTaxi plays at a cab, so a player doesn't see the bot blink
-     * out the instant it arrives), re-checking the door throughout, and only then step through.
+     * Run every poll while the bot stands at the elevator door: hold for the boarding dwell (a short
+     * beat at the door, ELEVATOR_DWELL_*, so a player doesn't see the bot blink out the instant it
+     * arrives), re-checking the door throughout, and only then step through.
      *
      * The re-check is what the elevator's own script (elevator.js) would do: it warps a player into the
      * waiting car only while the car is parked at this floor, and turns them away ("the elevator is
@@ -457,7 +462,7 @@ final class GCTravel {
      * during the dwell re-loiters the bot on the landing; the main tick picks the wait back up.
      */
     private static void elevatorBoarded(Trip trip, Character bot, int cur, BotScriptedWarp.WarpEdge sw) {
-        if (boardingDwell(trip, () -> {
+        if (boardingDwell(trip, ELEVATOR_DWELL_MIN_MS, ELEVATOR_DWELL_MAX_MS, () -> {
             Boolean open = GCTransit.elevatorDoorOpen(bot, cur);
             return open == null || open; // shut (or unreadable) aborts the board and re-loiters below
         })) {
@@ -490,7 +495,7 @@ final class GCTravel {
      * past it drives off.
      */
     private static void boardTaxi(Trip trip, Character bot, GCTaxi.TransitEdge taxi) {
-        if (boardingDwell(trip, () -> {
+        if (boardingDwell(trip, GCTaxi.BOARD_DWELL_MIN_MS, GCTaxi.BOARD_DWELL_MAX_MS, () -> {
             // Re-check the gate: the walk-up and the dwell can span the short boarding window (the
             // subway's is only ~50s), and stepping into the room after it shut strands the bot in an
             // empty lounge until the next sailing. Shut again -> wait at the counter; the main tick
@@ -510,15 +515,15 @@ final class GCTravel {
      * and the elevator door, which is why it is the dwell alone: the caller's stillOpen answers
      * whether the gate is still open right now, and a gate that shut mid-dwell is not the same as a
      * dwell that finished — it aborts the board (waitingForTransit) and clears the clock so the next
-     * attempt rolls a fresh dwell. Returns true while the caller should keep holding (boarding not
-     * done), false when it may step through.
+     * attempt rolls a fresh dwell. The band is the caller's (the cab's few seconds, the elevator's
+     * shorter beat). Returns true while the caller should keep holding (boarding not done), false
+     * when it may step through.
      */
-    private static boolean boardingDwell(Trip trip, BooleanSupplier stillOpen) {
+    private static boolean boardingDwell(Trip trip, long minMs, long maxMs, BooleanSupplier stillOpen) {
         long now = nowMs();
         if (trip.boardingAtMs == 0L) {
             trip.boardingAtMs = now;
-            trip.boardDwellMs = ThreadLocalRandom.current()
-                    .nextLong(GCTaxi.BOARD_DWELL_MIN_MS, GCTaxi.BOARD_DWELL_MAX_MS);
+            trip.boardDwellMs = ThreadLocalRandom.current().nextLong(minMs, maxMs);
             return true; // just got here — dwell starts now
         }
         if (now - trip.boardingAtMs < trip.boardDwellMs) {
