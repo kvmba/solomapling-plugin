@@ -425,12 +425,10 @@ final class GCTravel {
             // landing spread out rather than as one synchronised rush. While the bot idles this hop is
             // exempt from the walk watchdog (waitingForTransit), since standing about is the point;
             // approachAndAct resumes the normal walk-in once the bot is free to go.
-            if (GCTransit.isElevatorFloor(cur)) {
-                Point waitAnchor = elevatorWaitAnchor(bot, trigger);
-                if (elevatorHoldAtLanding(trip, GCTransit.elevatorDoorOpen(bot, cur))) {
-                    idleWhileWaiting(trip, bot, waitAnchor, "elevator_wait");
-                    return;
-                }
+            if (GCTransit.isElevatorFloor(cur)
+                    && elevatorHoldAtLanding(trip, GCTransit.elevatorDoorOpen(bot, cur))) {
+                idleWhileWaiting(trip, bot, elevatorWaitAnchor(bot, trigger), "elevator_wait");
+                return;
             }
             // Door open, unreadable, or not an elevator: stop idling and walk in (re-arms the hop
             // watches on the idle->walk transition; see stopIdlingAndWalk).
@@ -645,12 +643,8 @@ final class GCTravel {
      * never aim past the ledge. Falls back to the door spot when the floor can't be read.
      */
     private static Point elevatorWaitAnchor(Character bot, Point trigger) {
-        MapleMap map = bot == null ? null : bot.getMap();
-        if (map == null) {
-            return trigger;
-        }
         Point bp = bot.getPosition();
-        Foothold floor = GCMovement.footholdBelow(map, bp.x, bp.y - 1);
+        Foothold floor = GCMovement.footholdBelow(bot.getMap(), bp.x, bp.y - 1);
         if (floor == null) {
             return trigger;
         }
@@ -661,7 +655,7 @@ final class GCTravel {
         int standoff = ELEVATOR_STANDOFF_MIN_PX
                 + Math.floorMod(bot.getId(), ELEVATOR_STANDOFF_MAX_PX - ELEVATOR_STANDOFF_MIN_PX + 1);
         int x = trigger.x + roomDir * Math.min(standoff, roomMax);
-        Point spot = GCMovement.groundPointBelow(map, x, bp.y - 1);
+        Point spot = GCMovement.groundPointBelow(bot.getMap(), x, bp.y - 1);
         return spot != null ? spot : trigger;
     }
 
