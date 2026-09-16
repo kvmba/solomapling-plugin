@@ -81,8 +81,8 @@ final class MovementPlan {
     }
 
     /*
-     * The interpolated position at elapsedMs, clamped to [0, totalTimeMs]: lerp along
-     * whichever edge is in flight. Computed on demand only (lazy) — a coarse bot pays nothing per tick
+     * The position at elapsedMs, clamped to [0, totalTimeMs]: the point on whichever edge is in
+     * flight (see pointOnEdge). Computed on demand only (lazy) — a coarse bot pays nothing per tick
      * unless something actually asks where it is.
      */
     Point positionAt(long elapsedMs) {
@@ -100,9 +100,34 @@ final class MovementPlan {
         long into = elapsedMs - cumStartMs[i];
         long dur = Math.max(1, e.cost);
         double t = Math.min(1.0, (double) into / dur);
-        int x = (int) Math.round(e.startPoint.x + (e.endPoint.x - e.startPoint.x) * t);
-        int y = (int) Math.round(e.startPoint.y + (e.endPoint.y - e.startPoint.y) * t);
-        return new Point(x, y);
+        return pointOnEdge(e, t);
+    }
+
+    /*
+     * Where the bot sits partway along one edge. This plan is what an UNOBSERVED bot shows the instant
+     * a real player arrives — MapleMap spawns the bot at the current coarse position and the promoted
+     * physics then continues from it — so the point must be one a player can believe. Only a WALK edge
+     * lies along a single walkable surface, so only a WALK edge is interpolated. A JUMP/DROP/PORTAL
+     * edge's endpoints are the two LEDGES (Region.pointAt), not a walkable line, so a straight lerp
+     * would float the bot in mid-air and make it visibly drop/snap when it is seen; those edges
+     * instead quantise to a real standing point (their launch ledge, then the landing ledge). A CLIMB
+     * edge runs along a rope, so it slides y at the rope's x.
+     */
+    private static Point pointOnEdge(BotNavigationGraph.Edge e, double t) {
+        switch (e.type) {
+            case CLIMB -> {
+                int y = (int) Math.round(e.startPoint.y + (e.endPoint.y - e.startPoint.y) * t);
+                return new Point(e.startPoint.x, y);
+            }
+            case JUMP, DROP, PORTAL -> {
+                return new Point(t < 1.0 ? e.startPoint : e.endPoint);
+            }
+            default -> {
+                int x = (int) Math.round(e.startPoint.x + (e.endPoint.x - e.startPoint.x) * t);
+                int y = (int) Math.round(e.startPoint.y + (e.endPoint.y - e.startPoint.y) * t);
+                return new Point(x, y);
+            }
+        }
     }
 
     /* Index of the edge in flight at elapsedMs (skips zero-duration edges by taking the last match). */

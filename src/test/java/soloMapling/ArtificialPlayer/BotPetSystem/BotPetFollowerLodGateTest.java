@@ -19,6 +19,11 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * <p>{@code shouldLookUpFoothold} is the pure heart of that gate: query only when the pet is
  * landed (gravity applies) AND the map is observed. It is the exact predicate the two lookup sites
  * in {@code moveTowards} call, so pinning it pins the regression.
+ *
+ * <p>Note: on an unobserved map the tick still keeps each pet's POSITION fresh with pure arithmetic
+ * (no host query, no packet — see {@code syncUnobservedPositions}), so a joining player never sees a
+ * pet frozen where it stood when the map went dark. The gate here covers only the costly
+ * foothold/gravity lookup, which stays off while unwatched.
  */
 class BotPetFollowerLodGateTest {
 

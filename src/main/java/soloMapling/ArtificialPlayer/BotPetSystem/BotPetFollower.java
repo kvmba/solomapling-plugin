@@ -53,10 +53,13 @@ import java.util.concurrent.TimeUnit;
  * on which the map changes so its own movement never races that host placement (which used to
  * make a pet flicker on the new map).</p>
  *
- * <p><b>LOD like the bot's own movement.</b> While no real player watches the map the
- * whole pet tick is skipped — no physics, no foothold lookup, no packets. The first
- * tick after a player arrives runs the full physics once, which places / falls /
- * re-homes the pet to where it belongs, so a joining player never sees a stale pet.</p>
+ * <p><b>LOD like the bot's own movement.</b> While no real player watches the map the pet's
+ * physics and foothold lookups are skipped — the tick's dominant cost, and the reason the gate
+ * exists. Each pet's POSITION is still kept fresh with pure arithmetic (no host query, no packet),
+ * pinned to a trail slot beside the owner, because the host reads it to spawn the pet for a joining
+ * player: a wholly frozen position would put the pet wherever it stood when the map went dark and
+ * make it snap on the next tick. The first tick after a player arrives re-grounds / re-homes the pet
+ * the frame they arrive; the staleness is bounded to one tick, exactly as the bot's coarse position is.</p>
  *
  * <p>Pets also occasionally play one of their own WZ interactions (a chat, a pose),
  * paced per pet, and — with looting gear — pick up nearby MONSTER drops (its owner's
@@ -220,13 +223,19 @@ public final class BotPetFollower {
             return;
         }
         MapleMap map = chr.getMap();
-        // LOD, like the bot's own movement: while no real player watches the map, do
-        // NOTHING for the pets — no physics, no foothold lookup, no moving. The first
-        // tick after a player arrives runs the full physics once, which places/falls/
-        // re-homes the pet to where it should be (official pets warp when left behind).
+        // LOD, like the bot's own movement: while no real player watches the map, skip the pet's
+        // physics and ground lookups — the tick's dominant cost, and the reason this gate exists (an
+        // unwatched world of thousands of bots stays cheap). But FIRST keep every pet's POSITION
+        // fresh with pure arithmetic: the host reads pet.getPos() to spawn a pet for a joining player
+        // (spawnPlayerMapObject), so a wholly frozen position would land the pet wherever it was when
+        // the map went dark and make it snap/teleport on the next tick. No host query, no packet —
+        // just a trail slot beside the owner (see syncUnobservedPositions).
         boolean observed = GCMovement.isMapObserved(chr.getMapId());
+        if (!observed) {
+            syncUnobservedPositions(chr);
+        }
         if (!shouldLookUpFoothold(false, observed)) {
-            return; // LOD: nobody can see the pets — skip the whole pet tick
+            return; // LOD: nobody can see the pets — position kept fresh, physics/ground work skipped
         }
 
         // Iterate by the pet-ARRAY index, not a running count: the slot in
@@ -252,24 +261,8 @@ public final class BotPetFollower {
 
         // Trail targets, chained: the nearest pet (HIGHEST slot) trails the owner by
         // {@link #TRAIL_BASE_PX}, and each next pet trails the one AHEAD of it by
-        // {@link #TRAIL_GAP_PX} — reading the pet-ahead's position from the START of this tick. That
-        // stale anchor is what makes the line cascade (the nearest sets off a tick before the next,
-        // and so on) as the owner moves, and it keeps the pets at an even, fixed spacing behind the
-        // owner that never reaches in front of it.
-        int[] trailX = new int[pets.length];
-        int facing = CharacterStance.isFacingLeft(chr.getStance()) ? -1 : 1;
-        int anchorX = chr.getPosition().x;
-        boolean nearest = true;
-        for (int i = pets.length - 1; i >= 0; i--) {
-            Pet pet = pets[i];
-            if (pet == null) {
-                continue;
-            }
-            int gap = nearest ? TRAIL_BASE_PX : TRAIL_GAP_PX;
-            trailX[i] = anchorX - facing * gap;
-            anchorX = pet.getPos().x;
-            nearest = false;
-        }
+        // {@link #TRAIL_GAP_PX} — reading each pet's position from the START of this tick (see trailXs).
+        int[] trailX = trailXs(chr, pets);
 
         // Swim when the owner is swimming, OR — mirroring the bot engine's own rule
         // (isSwimMap && inAir) — when the map is a swim map and the pet's own feet find no
@@ -641,6 +634,55 @@ public final class BotPetFollower {
      */
     static boolean shouldLookUpFoothold(boolean noGravity, boolean observed) {
         return !noGravity && observed;
+    }
+
+    /**
+     * The trail target x for every pet slot: the nearest pet (HIGHEST slot) trails the owner by
+     * {@link #TRAIL_BASE_PX}, and each next pet trails the one AHEAD of it by {@link #TRAIL_GAP_PX}
+     * — reading the pet-ahead's own x from the START of this tick. That stale anchor is what makes the
+     * line cascade (the nearest sets off a tick before the next, and so on) as the owner moves, and it
+     * keeps the pets at an even, fixed spacing behind the owner that never reaches in front of it.
+     * Shared by the observed follow and the unobserved position sync so the two never disagree.
+     */
+    private static int[] trailXs(Character chr, Pet[] pets) {
+        int[] trailX = new int[pets.length];
+        int facing = CharacterStance.isFacingLeft(chr.getStance()) ? -1 : 1;
+        int anchorX = chr.getPosition().x;
+        boolean nearest = true;
+        for (int i = pets.length - 1; i >= 0; i--) {
+            Pet pet = pets[i];
+            if (pet == null) {
+                continue;
+            }
+            int gap = nearest ? TRAIL_BASE_PX : TRAIL_GAP_PX;
+            trailX[i] = anchorX - facing * gap;
+            anchorX = pet.getPos().x;
+            nearest = false;
+        }
+        return trailX;
+    }
+
+    /**
+     * Keep the pets' positions fresh on an UNOBSERVED map — pure arithmetic, no host query, no
+     * packet. The host reads {@code pet.getPos()} when it spawns a pet for a joining player
+     * ({@code spawnPlayerMapObject}), so a pet frozen where it stood when the map went dark would
+     * appear there and then snap when the tick resumes. Pinning each pet to its trail slot beside the
+     * owner (fh 0 = floats/rides the owner; the observed tick re-grounds it the frame the player
+     * arrives) bounds the staleness to one tick, exactly as the bot's own coarse position does.
+     */
+    private static void syncUnobservedPositions(Character chr) {
+        Pet[] pets = chr.getPets();
+        int[] trailX = trailXs(chr, pets);
+        int y = chr.getPosition().y;
+        for (int i = 0; i < pets.length; i++) {
+            Pet pet = pets[i];
+            if (pet == null) {
+                continue;
+            }
+            pet.setPos(new Point(trailX[i], y));
+            pet.setStance(CharacterStance.isFacingLeft(chr.getStance()) ? PET_STAND_LEFT : PET_STAND_RIGHT);
+            pet.setFh(0);
+        }
     }
 
     private static void applyAndSend(Character chr, Pet pet, int index, Point pos,

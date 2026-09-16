@@ -463,17 +463,20 @@ final class GCMovementDriver {
     }
 
     /*
-     * Promotion (COARSE -> FULL/HALO): rebuild the physics shadow at the bot's current interpolated
-     * position so the resumed physics tick doesn't snap from stale shadow coordinates. Minimal — full
+     * Promotion (COARSE -> FULL/HALO): resume physics from the bot's current analytic position.
+     *
+     * The room's new player was just spawned at this exact point (MapleMap broadcasts the bot at its
+     * live position), so the physics shadow must continue from there — snapping to a re-probed ground
+     * instead would move the bot a second time in the player's first frames, reading as a teleport.
+     * MovementPlan already keeps the coarse position on real standing/rope points (only WALK edges are
+     * interpolated), so re-seating the shadow at it is both correct and continuous. Minimal — full
      * hysteresis/safe-node reconstruction is M3.
      */
     private static void reconstructPhysicsFromCoarse(BotMovementState entry, Character bot) {
         entry.coarseActive = false;
         entry.coarsePlan = null;
         entry.coarsePlanTarget = null;
-        Point pos = bot.getPosition();
-        Point ground = BotPhysicsEngine.findGroundPoint(bot.getMap(), new Point(pos.x, pos.y - 1));
-        BotPhysicsEngine.teleportTo(entry, bot, ground != null ? ground : pos);
+        BotPhysicsEngine.teleportTo(entry, bot, bot.getPosition());
         BotMovementManager.resetEntryStateAfterTeleport(entry);
     }
 
