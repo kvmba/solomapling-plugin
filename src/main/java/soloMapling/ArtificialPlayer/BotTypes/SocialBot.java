@@ -19,6 +19,7 @@ import soloMapling.ArtificialPlayer.BotSM;
 import soloMapling.ArtificialPlayer.Persona;
 import soloMapling.ArtificialPlayer.SocialIntent;
 import soloMapling.ArtificialPlayer.SocialPersonaConfig;
+import soloMapling.ArtificialPlayer.BotTownSystem.BotPortalClearance;
 import soloMapling.ArtificialPlayer.BotTownSystem.TownPresenceConfig;
 import soloMapling.ArtificialPlayer.BotTownSystem.TownPresenceSampler;
 import soloMapling.ArtificialPlayer.BotTownSystem.TownStation;
@@ -39,7 +40,6 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 import org.gms.server.maps.MapleMap;
-import org.gms.server.maps.Portal;
 
 import static soloMapling.ArtificialPlayer.BotCommandsPack.SocialCommands.*;
 import static soloMapling.ArtificialPlayer.BotHelpers.isBot;
@@ -131,16 +131,13 @@ public class SocialBot extends BotSM {
 
     // Doorway clear: a bot that arrived through a portal stands at that map's entry pixel, and a stream of
     // arrivals piles up there as a clump of statues on the doorway. The moment a stationed bot finds itself
-    // at a portal it walks off to a scattered spot, the same way the drift does (see onDoorway for the box).
-    private static final int DOORWAY_X = 40;
-    private static final int DOORWAY_Y = 60;
+    // at a portal it walks off to a scattered spot, the same way the drift does. The doorway box and the
+    // off-door pick live in BotPortalClearance (shared with the returning-training-bot scatter and the
+    // roaming wanderers), which is terrain-only so a platform whose only way off is a swim still yields a
+    // spot - see that class.
     // Candidates sampled for the walk-off; the farthest-from-any-portal one wins, so a bot prioritises the
     // least door-like landing even though the sampler is anchored on that very portal.
     private static final int DOORWAY_PICK_SAMPLES = 8;
-    // A precise moveTarget counts as reached within 8px on each axis (GCMovementDriver), so the picked
-    // destination must clear the doorway box by more than that or the bot could halt just inside it and
-    // the clear would re-fire every tick. 16 leaves a safe margin over the 8px tolerance.
-    private static final int DOORWAY_ARRIVAL_PAD = 16;
 
     // Interactive menu shown once a player engages. Labels are localized; the keyword sets below
     // are the English ones and stay authoritative (they are matched as substrings, and a couple
@@ -350,12 +347,21 @@ public class SocialBot extends BotSM {
             return; // a player is mid-invite: never walk out from under them
         }
         Point p = chr.getPosition();
-        if (!onDoorway(chr.getMap(), p, 0, 0)) {
+        if (!BotPortalClearance.onDoorway(chr.getMap(), p)) {
             return; // not standing on a portal - nothing to clear
         }
         Point dest = pickOffDoorwaySpot(chr);
         if (dest == null) {
-            return; // no baked nav graph / no off-door ledge reachable yet - try again on a later tick
+            return; // no off-door ledge in reach yet - try again on a later tick
+        }
+        // Only walk if the spot is genuinely farther from the door than where we stand. On a narrow
+        // arrival ledge whose whole walkable ground sits inside the doorway box (an isolated floating
+        // platform), the best available spot barely improves on the bot's own position: staying put
+        // stops the clear from re-firing every tick, while still spreading arrivals off the exact pixel.
+        long hereSq = BotPortalClearance.nearestPortalDistSq(chr.getMap(), p);
+        long destSq = BotPortalClearance.nearestPortalDistSq(chr.getMap(), dest);
+        if (destSq <= hereSq + (long) BotPortalClearance.DOORWAY_ARRIVAL_PAD * BotPortalClearance.DOORWAY_ARRIVAL_PAD) {
+            return;
         }
         if (chr.getChair() > 0) {
             botCancelChair(chr); // can't walk out of a chair
@@ -366,64 +372,17 @@ public class SocialBot extends BotSM {
         GCMovement.move(chr, dest.x, dest.y, this::finishRelocation);
     }
 
-    // True when (x,y) sits inside the doorway box of any portal on the map, widened by (padX,padY). X is
-    // what marks the door (a portal's pixel column, cheap to test first). There are two resting spots to
-    // cover vertically: a bot put on the portal pixel itself (a plain warp / spawn fallback) and one the GC
-    // engine dropped onto the floor UNDER the portal (a stroll arrival). A portal may sit well above its
-    // floor, so testing only one of the two would miss the other; test both, not the whole column between.
-    private static boolean onDoorway(MapleMap map, Point p, int padX, int padY) {
-        for (Portal portal : map.getPortals()) {
-            Point pp = portal.getPosition();
-            if (pp == null || Math.abs(pp.x - p.x) > DOORWAY_X + padX) {
-                continue; // not this portal's column - a doorway is an X neighbourhood
-            }
-            Point floor = GCMovement.groundPointBelow(map, pp.x, pp.y);
-            int dyPixel = Math.abs(pp.y - p.y);
-            int dyFloor = floor != null ? Math.abs(floor.y - p.y) : Integer.MAX_VALUE;
-            if (Math.min(dyPixel, dyFloor) <= DOORWAY_Y + padY) {
-                return true;
-            }
-        }
-        return false;
-    }
-
     // A scattered spot to walk to when clearing a doorway: sample the town's crowd spots (the same
     // anchor-weighted sampler the drift uses; seeded from where the bot stands, which on a cross-map
-    // arrival is the far map's door), keep only those that clear the doorway box by DOORWAY_ARRIVAL_PAD,
-    // and take the one furthest from any portal so a bot leaves the door decisively rather than merely
-    // nudging off it. Null when the nav graph isn't baked yet or every sample still sits in a doorway -
-    // the caller leaves the bot where it stands and tries again on a later tick.
+    // arrival is the far map's door), and take the one furthest from any portal so a bot leaves the door
+    // decisively. The preferred pick must clear the doorway box (see BotPortalClearance); when the whole
+    // reachable ledge is the box, fall back to its farthest point so arrivals still fan out along it.
     private Point pickOffDoorwaySpot(Character chr) {
         MapleMap map = chr.getMap();
         List<Point> spots = TownPresenceSampler.sample(map, chr.getPosition(),
                 DOORWAY_PICK_SAMPLES, TownPresenceConfig.overridesFor(chr.getMapId()));
-        Point best = null;
-        long bestDistSq = -1;
-        for (Point s : spots) {
-            if (onDoorway(map, s, DOORWAY_ARRIVAL_PAD, DOORWAY_ARRIVAL_PAD)) {
-                continue; // would halt inside the door (the driver stops within 8px of the target)
-            }
-            long d = nearestPortalDistSq(map, s);
-            if (d > bestDistSq) {
-                bestDistSq = d;
-                best = s;
-            }
-        }
-        return best;
-    }
-
-    // Squared distance from p to the nearest portal on the map (Long.MAX_VALUE when there are none).
-    private static long nearestPortalDistSq(MapleMap map, Point p) {
-        long best = Long.MAX_VALUE;
-        for (Portal portal : map.getPortals()) {
-            Point pp = portal.getPosition();
-            if (pp != null) {
-                long dx = pp.x - p.x;
-                long dy = pp.y - p.y;
-                best = Math.min(best, dx * dx + dy * dy);
-            }
-        }
-        return best;
+        Point best = BotPortalClearance.farthestOffDoorway(map, spots);
+        return best != null ? best : BotPortalClearance.farthestFromPortal(map, spots);
     }
 
     // Rare drift to a fresh anchor-weighted spot ("stand near the potion shop a while, then wander to the

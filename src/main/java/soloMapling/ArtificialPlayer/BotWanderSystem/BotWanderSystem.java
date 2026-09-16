@@ -3,10 +3,12 @@ package soloMapling.ArtificialPlayer.BotWanderSystem;
 import org.gms.client.Character;
 import org.gms.server.maps.MapleMap;
 import soloMapling.ArtificialPlayer.BotGrindSystem.BotSpotPicker;
+import soloMapling.ArtificialPlayer.BotTownSystem.BotPortalClearance;
 import soloMapling.ArtificialPlayer.GCMoveSystem.GCMovement;
 import soloMapling.server.ExecutorServiceManager;
 
 import java.awt.Point;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Random;
@@ -267,19 +269,38 @@ public final class BotWanderSystem {
     // street the SocialBots had claimed, so the two crowds piled onto the same pause points; the pick now
     // sees their claims and lands on open ground instead, falling back to the full span only when every
     // eligible ledge is full, so a roam still moves.
+    //
+    // On a doorway (a bot that just arrived through a portal) the pick prefers a spot that clears the
+    // doorway box, so the "first tick strolls right away to clear the portal fast" actually lands the bot
+    // off the door. On an isolated arrival platform whose whole walkable ground is one narrow ledge (a
+    // float reached only by a swim / an unmodelled hop) no such spot exists; the farthest-from-portal
+    // candidate is accepted so a crowd still fans out along the ledge instead of stacking on the pixel.
     private static Point pickStroll(MapleMap map, Point from, Wander w) {
+        boolean onDoor = BotPortalClearance.onDoorway(map, from);
         Point last = null;
+        List<Point> candidates = new ArrayList<>();
         for (int i = 0; i < STROLL_ATTEMPTS; i++) {
             Point p = w.banded
                     ? BotSpotPicker.pickGroundSpot(map, from.x, from.y, w.bandLo, w.bandHi, true)
                     : BotSpotPicker.pickGroundSpot(map, from.x, from.y, Integer.MIN_VALUE, Integer.MAX_VALUE,
                             true);
             if (p == null) {
-                return last;
+                break;
             }
             last = p;
-            if (Math.abs(p.x - from.x) >= MIN_STROLL) {
+            candidates.add(p);
+            if (Math.abs(p.x - from.x) >= MIN_STROLL && (!onDoor || !BotPortalClearance.onDoorway(map, p))) {
                 return p;
+            }
+        }
+        if (onDoor) {
+            Point off = BotPortalClearance.farthestOffDoorway(map, candidates);
+            if (off != null) {
+                return off;
+            }
+            Point spread = BotPortalClearance.farthestFromPortal(map, candidates);
+            if (spread != null) {
+                return spread;
             }
         }
         return last;

@@ -106,7 +106,15 @@ public final class TownLoiter {
             }
         }
         if (chosen == null) {
-            return; // no reachable spot right now; standing on the portal beats a crash
+            // Every candidate landed on an already-full ledge. On an arrival platform whose whole
+            // walkable ground is one ledge (an isolated float reached by a swim / an unmodelled hop), a
+            // returning crowd would otherwise all halt on the portal pixel and stack. Accept the
+            // candidate farthest from any portal as a best-effort overflow spot so the surplus at least
+            // fans out along the ledge instead of piling on the door.
+            chosen = BotPortalClearance.farthestFromPortal(map, candidateSpots);
+            if (chosen == null) {
+                return; // no reachable spot at all right now; standing on the portal beats a crash
+            }
         }
 
         GCMovement.move(bot, chosen.x, chosen.y); // walk (observed) or coarse-relocate (unobserved)
