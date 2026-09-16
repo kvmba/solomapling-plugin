@@ -509,15 +509,6 @@ final class GCTravel {
     }
 
     /*
-     * Wait for a scheduled vehicle: stand at the inspector and stay there. Nothing here moves the
-     * bot onto the deck — takeoff() warps everyone in the waiting room aboard at once, so boarding
-     * "by hand" would put a bot on an empty deck minutes before the other passengers, and it would
-     * be missing from the moment the room empties, which is the one thing players actually see.
-     *
-     * Boarding windows are event-driven (and scaled by the world travel rate), so this never times
-     * the schedule itself; the transit ceiling in approachAndAct is the only backstop.
-     */
-    /*
      * How long to trust a scheduled ride before giving up on it: WAIT_MAX_MS, stretched by the
      * world's travel rate so a slower world isn't judged by a faster one's clock. Read fresh each
      * time because the rate is set by a GM command and can change under us.
