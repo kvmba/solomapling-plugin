@@ -5,7 +5,7 @@ import org.gms.provider.Data;
 import org.gms.provider.DataProviderFactory;
 import org.gms.provider.DataTool;
 import org.gms.provider.wz.WZFiles;
-import org.gms.provider.wz.XMLDomMapleData;
+import org.gms.provider.wz.XMLWZData;
 import org.gms.server.ItemInformationProvider;
 
 import java.io.FileInputStream;
@@ -254,7 +254,7 @@ public class EquipMetadataCache {
                     continue; // outside every range we track (e.g. taming mobs)
                 }
                 try (FileInputStream fis = new FileInputStream(file.toFile())) {
-                    Data itemData = new XMLDomMapleData(fis, dir);
+                    Data itemData = XMLWZData.parse(fis);
                     Data info = itemData.getChildByPath("info");
                     if (info == null) continue;
                     entries.add(new ScannedEquip(id, eqType,

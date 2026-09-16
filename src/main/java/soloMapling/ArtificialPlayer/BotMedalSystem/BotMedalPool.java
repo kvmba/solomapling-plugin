@@ -5,7 +5,7 @@ import org.gms.client.Job;
 import org.gms.provider.Data;
 import org.gms.provider.DataTool;
 import org.gms.provider.wz.WZFiles;
-import org.gms.provider.wz.XMLDomMapleData;
+import org.gms.provider.wz.XMLWZData;
 import soloMapling.ArtificialPlayer.BotHelpers;
 
 import java.io.FileInputStream;
@@ -142,7 +142,7 @@ public final class BotMedalPool {
                         continue; // not a medal
                     }
 
-                    int[] req = readRequirements(file, accessory);
+                    int[] req = readRequirements(file);
                     if (req == null) {
                         continue; // unreadable/half-finished WZ entry
                     }
@@ -193,9 +193,9 @@ public final class BotMedalPool {
      * medal's {@code info}, or null when the entry is unreadable. Read once at load so
      * the runtime eligibility check never touches WZ.
      */
-    private static int[] readRequirements(Path file, Path parent) {
+    private static int[] readRequirements(Path file) {
         try (FileInputStream fis = new FileInputStream(file.toFile())) {
-            Data itemData = new XMLDomMapleData(fis, parent);
+            Data itemData = XMLWZData.parse(fis);
             Data info = itemData.getChildByPath("info");
             if (info == null) {
                 return null;

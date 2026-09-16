@@ -13,10 +13,11 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * <p>Some WZ entries are half-finished: they exist as items but carry no
  * String.wz name (or an empty/blank one). Those ids used to flow straight into
  * shop listings, purchases and advertisements, and reading their name was also
- * the trigger for a recurring NPE - the host's XML DOM walk
- * ({@code XMLDomMapleData.getChildByPath}) is not thread safe, and bot ticks
- * share the provider trees across virtual threads, so a concurrent read could
- * return a null node instead of a value.
+ * the trigger for a recurring NPE - bot ticks share the host's provider trees
+ * across virtual threads, and the host's name lookup memoizes into a plain
+ * (non-concurrent) cache, so a concurrent read could surface a runtime
+ * exception instead of a value. (The host's WZ tree walk is itself safe now:
+ * each .img is parsed once into an immutable tree.)
  *
  * <p>Only the pure classification is asserted here; the lookup itself needs a
  * loaded WZ and is covered by the guards at each call site.

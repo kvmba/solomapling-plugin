@@ -453,14 +453,15 @@ public class ItemInformationProviderUtilities {
 
     /**
      * Item name, or null when the item has no usable name (half-finished WZ
-     * entry, or a host DOM read that lost a race). Prefer
+     * entry, or a host name lookup that lost a race on the host's
+     * non-concurrent name cache). Prefer
      * {@link soloMapling.ArtificialPlayer.BotHelpers#convertItemIdToName} when
      * the result is only printed.
      */
     public static String getItemName(int itemId) {
         try {
             return ItemInformationProvider.getInstance().getName(itemId);
-        } catch (RuntimeException e) {  // host DOM race on shared provider trees
+        } catch (RuntimeException e) {  // host name-cache race on shared provider trees
             return null;
         }
     }

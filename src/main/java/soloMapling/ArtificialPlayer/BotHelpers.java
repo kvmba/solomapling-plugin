@@ -59,23 +59,26 @@ public class BotHelpers {
     /**
      * Host item-name lookup. Returns null when the item has no usable name.
      * <p>
-     * Three separate things make the raw {@code ItemInformationProvider.getName}
-     * call unsafe from a bot tick, and all three mean the same thing to us -
-     * "this item has no name":
+     * Two things make the raw {@code ItemInformationProvider.getName} call
+     * unsafe from a bot tick, and both mean the same thing to us - "this item
+     * has no name":
      * <ul>
      *   <li>the id is a half-finished WZ entry with no String.wz record
      *       (getName already returns null for it),</li>
-     *   <li>the record exists but its name is empty/blank,</li>
-     *   <li>the host's XML DOM walk ({@code XMLDomMapleData.getChildByPath})
-     *       is not thread safe and bot ticks share those provider trees across
-     *       virtual threads, so a concurrent read surfaces an NPE instead of a
-     *       value.</li>
+     *   <li>the record exists but its name is empty/blank.</li>
      * </ul>
+     * <p>
+     * The name lookup also races when bot ticks share the host's provider
+     * trees across virtual threads: {@code getName} memoizes into the host's
+     * plain (not concurrent) {@code nameDescCache}, so a concurrent
+     * {@code put} can surface as a runtime exception instead of a value. The
+     * WZ tree walk itself is no longer a hazard - the host's XML provider
+     * parses each .img into an immutable tree, so concurrent reads are safe.
      */
     public static String itemNameOrNull(int itemId) {
         try {
             return ItemInformationProvider.getInstance().getName(itemId);
-        } catch (RuntimeException e) {  // host DOM race - see javadoc
+        } catch (RuntimeException e) {  // host name-cache race - see javadoc
             return null;
         }
     }

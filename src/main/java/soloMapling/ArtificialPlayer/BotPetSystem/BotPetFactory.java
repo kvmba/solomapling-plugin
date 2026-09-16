@@ -78,9 +78,10 @@ public final class BotPetFactory {
             official = soloMapling.ArtificialPlayer.BotHelpers.itemNameOrNull(itemId);
         } catch (RuntimeException | LinkageError e) {
             // The WZ provider is a boundary outside this feature: it is absent in unit
-            // tests (class-init failure -> LinkageError) and its DOM walk is not thread
-            // safe (-> RuntimeException, see BotHelpers). Either way, fall through to the
-            // placeholder — a nameless wire value would NPE the pet packet.
+            // tests (class-init failure -> LinkageError). A host name lookup can also lose
+            // a race on the host's non-concurrent name cache (-> RuntimeException, see
+            // BotHelpers). Either way, fall through to the placeholder — a nameless wire
+            // value would NPE the pet packet.
         }
         return official != null && !official.isBlank() ? official : "Pet";
     }
