@@ -451,8 +451,19 @@ public final class BotPetFollower {
         // Hysteresis, so pets do not crowd: start moving only once the target passes the wide dead
         // zone (a tiny owner step leaves the pet standing), but keep going until within
         // TRAIL_ARRIVE_PX, so the trailing line settles at a tight, even spacing.
+        //
+        // The follow tick is many engine ticks long (followTickMs default 300 vs a 50ms bot tick),
+        // so one held tick carries the pet ~6x as far as TRAIL_ARRIVE_PX: the band has to cover the
+        // momentum the pet cannot shed inside a single step, or it sails past its slot, sees the
+        // slot behind it on the next tick, and paces — the pet-side half of the owner's left-right
+        // sway (mapGroundSlipScale is per-map, so a snow map carries even farther). Widening the
+        // moving band by the input-free glide-out lets the pet coast the last stretch in.
         double gap = tx - p.x;
         int stopBand = Math.abs(ax) > 1 ? TRAIL_ARRIVE_PX : FOLLOW_DEAD_ZONE_PX;
+        if (Math.abs(ax) > 1) {
+            stopBand += (int) Math.ceil(
+                    MapleMovement.stopOutPxs(ax, MapleMovement.slipScale(map)));
+        }
         int followDir = Math.abs(gap) > stopBand ? (int) Math.signum(gap) : 0;
         GCMovement.GroundWalk walk = GCMovement.walkGroundTick(
                 map, p, standing, followDir, ax, config.followTickMs(), chr);

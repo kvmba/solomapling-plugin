@@ -851,6 +851,30 @@ class BotMovementManager {
             return 0;
         }
         entry.wasMovingX = true;
+        // Release the key before the momentum carries the bot past its target.
+        //
+        // calcStepX clamps the INTENT step to the remaining distance, but applyGroundMotion then
+        // integrates real momentum over the whole tick — so the tick's actual travel is whatever the
+        // current speed carries, not the clamp. With a precise target (stopDist 0/1/4) the glide-out
+        // of even a mid-speed bot is ~10-60px, far past that band: the bot sails through the target,
+        // finds it behind it on the next tick, walks back, overshoots again — the "walks, stops, then
+        // sways left-right on the spot" report.
+        //
+        // Two release triggers, both needed:
+        //   - releasing NOW already lands inside the band (let go and coast in), and
+        //   - HOLDING this tick would land beyond the band's far edge (don't push into an overshoot).
+        // Together they make the bot stop inside its band and stay there. The band is floored at 1px
+        // because positions are whole pixels: a 0px band (stopDist 0 on a launch-window approach) is
+        // a single pixel no glide can land on exactly, so the bot would hunt across it forever.
+        int dir = Integer.signum(stepX);
+        int band = Math.max(stopDist, 1);
+        int absDx = Math.abs(targetX - botX);
+        int glide = BotPhysicsEngine.groundStopOutPx(entry.hspeed, entry.movementProfile, map);
+        if (Math.abs(absDx - glide) <= band
+                || BotPhysicsEngine.groundHeldLandingPx(entry.hspeed, dir, entry.movementProfile, map) > absDx + band) {
+            entry.wasMovingX = false;
+            return 0;
+        }
         // Bang-bang approach on slippery ground: only push toward the target while the bot
         // can still brake to a stop inside the remaining distance; otherwise counter-strafe
         // (or coast) so the bot arrives able to stop in the window/radius instead of sliding

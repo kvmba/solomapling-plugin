@@ -63,6 +63,25 @@ public final class MapleMovement {
     }
 
     /**
+     * Distance (px) a ground entity travelling at {@code vPxs} still covers after the input is
+     * RELEASED — the input-free glide-out. Firm ground decays exponentially under the client's
+     * force/drag model, so the closed form is v*tau with tau = groundslip/(friction+slopefactor)
+     * seconds; slippery ground is the kinetic regime (a constant glide decel), so the stop-out is
+     * v^2/(2a). Shared by the bot's ground steer and the pet follower, which both have to know
+     * whether holding the key one more step would carry them past their target (see
+     * {@link BotPhysicsEngine#groundStopOutPx}).
+     */
+    public static double stopOutPxs(double vPxs, double fs) {
+        if (vPxs == 0.0) {
+            return 0.0;
+        }
+        if (fs >= 1.0) {
+            return Math.abs(vPxs) * CLIENT_STEP_S * GROUNDSLIP / (FRICTION + SLOPEFACTOR);
+        }
+        return vPxs * vPxs / (2 * SLIP_GLIDE_DECEL * fs);
+    }
+
+    /**
      * One 8ms ground step. {@code hspeed}/{@code hForceStep}/{@code walkCapStep} are in
      * px/step; {@code fs} is {@link #slipScale(MapleMap)}. Firm ground uses the client
      * force/drag model (with slope); slippery ground (fs &lt; 1) uses the kinetic ramps.

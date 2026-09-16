@@ -2277,6 +2277,44 @@ final class BotPhysicsEngine {
         return mapGroundSlipScale(map) < 1.0;
     }
 
+    /*
+     * Distance (px) a ground entity travelling at {@code hspeed} (px per 8ms client step) still
+     * covers after its input is RELEASED — the input-free glide-out. Callers use it to decide
+     * whether holding the key one more tick would carry them past their target: a step clamped to
+     * the REMAINING DISTANCE (calcStepX) still integrates real momentum, so on any tick whose
+     * travel plus glide-out exceeds that distance the entity sails past the target, sees it
+     * overshoot to the other side, and walks back — the left-right sway at the end of every walk
+     * (see BotMovementManager.updateStepX and BotPetFollower.followLand).
+     */
+    static int groundStopOutPx(double hspeed, BotMovementProfile profile, MapleMap map) {
+        return (int) Math.ceil(
+                MapleMovement.stopOutPxs(hspeed / CLIENT_GROUND_STEP_S, mapGroundSlipScale(map, profile)));
+    }
+
+    /*
+     * Where the bot's momentum would actually put it if it KEPT holding direction {@code dir} for
+     * the rest of this tick, then released: this tick's travel plus the glide-out from the speed
+     * that travel ends at. The glide-out alone understates this whenever the held tick still
+     * accelerates — the case that makes a bot overshoot a tight launch window.
+     *
+     * Runs the same groundStep the integrator does with a null foothold: the steer may be deciding
+     * before the ground is resolved, and a null foothold means slope 0. Slope only scales the
+     * inertia term (and is clamped to +-0.5), so this is a slight under-estimate uphill and
+     * over-estimate downhill — both absorbed by the caller's band.
+     */
+    static int groundHeldLandingPx(double hspeed, int dir, BotMovementProfile profile, MapleMap map) {
+        double fs = mapGroundSlipScale(map, profile);
+        double v = hspeed;
+        double travel = 0.0;
+        int steps = Math.max(1, cfg.TICK_MS / (int) CLIENT_GROUND_STEP_MS);
+        for (int i = 0; i < steps; i++) {
+            v = MapleMovement.groundStep(v, null, dir, maxHForcePerClientStep(profile),
+                    maxHSpeedPerClientStep(profile), fs);
+            travel += v;
+        }
+        return (int) Math.ceil(travel + MapleMovement.stopOutPxs(v / CLIENT_GROUND_STEP_S, fs));
+    }
+
     private static double maxHForcePerClientStep(BotMovementProfile profile) {
         return profileOrBase(profile).hForcePxs() * CLIENT_GROUND_STEP_S;
     }
