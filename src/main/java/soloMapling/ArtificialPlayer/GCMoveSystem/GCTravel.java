@@ -198,6 +198,24 @@ final class GCTravel {
     }
 
     /*
+     * Re-arm the per-hop watchdog clocks. approachAndAct judges a hop by how long its progress and
+     * soft-lock windows have been open, so any time a hop's approach effectively restarts — the bot
+     * lands on a new map, or resumes walking after waiting a door out — these must start over.
+     * Otherwise a stale clock (a long wait skips every poll that would advance it) reads as "stuck"
+     * on the very first poll after, and the hop is bare-warped past the door/portal it was heading for.
+     */
+    private static void resetHopWatchdogs(Trip trip) {
+        trip.settledAtMs = 0L;
+        trip.hopBestDist = Integer.MAX_VALUE;
+        trip.lastPosX = Integer.MIN_VALUE;
+        trip.lastPosY = Integer.MIN_VALUE;
+        trip.hopProgressAtMs = nowMs();
+        trip.nearTargetSinceMs = 0L;
+        trip.softLockSinceMs = 0L;
+        trip.hopStartAtMs = nowMs();
+    }
+
+    /*
      * True while a trip is parked somewhere the ride itself must resolve — waiting for boarding to
      * open, or standing on the deck mid-crossing. The bot is making no map progress on purpose, so
      * callers that treat stillness as a stall (TrainingBot's travel watchdog) must not count it.
@@ -226,14 +244,7 @@ final class GCTravel {
         // hop timer and clear any stale GCMove target so we re-target a portal on this map.
         if (cur != trip.lastMapId) {
             trip.lastMapId = cur;
-            trip.settledAtMs = 0L;
-            trip.hopBestDist = Integer.MAX_VALUE;
-            trip.lastPosX = Integer.MIN_VALUE;
-            trip.lastPosY = Integer.MIN_VALUE;
-            trip.hopProgressAtMs = nowMs();
-            trip.nearTargetSinceMs = 0L;
-            trip.softLockSinceMs = 0L;
-            trip.hopStartAtMs = nowMs();
+            resetHopWatchdogs(trip);
             trip.boardingAtMs = 0L;   // this hop's cab is a different cab — board afresh
             trip.waitingForTransit = false;  // new map, new wait — don't inherit the old exemption
             trip.sheltering = false;         // new crossing, new threat — don't inherit the old cover
@@ -367,14 +378,17 @@ final class GCTravel {
                 return;
             }
             // Door open (or unreadable): stop loitering and walk in. On the loiter->walk transition
-            // only, restart the hop clock: it was opened when the bot ENTERED the floor, so after a
-            // long wait the walk-in would otherwise trip HOP-CEILING at once and bare-warp past the
-            // door. Doesn't reopen on later polls (the walk ceiling must still bound the approach).
+            // only, re-arm the hop's watchdog clocks. They were opened when the bot first reached
+            // the floor (before the wait) and the loiter skipped every poll that would advance them,
+            // so after a wait longer than HOP_STUCK_MS/SOFT_LOCK_MS the resumed approachAndAct would
+            // see them already expired and bare-warp past the door on its first poll — the very
+            // skip-the-gate bug this gate exists to prevent. Reset exactly the new-map set, so the
+            // walk-in gets a fresh budget; the walk ceiling still bounds it afterwards.
             trip.loiterTarget = null;
             trip.loiterDwellUntilMs = 0L;
             if (trip.loitering) {
                 trip.loitering = false;
-                trip.hopStartAtMs = nowMs();
+                resetHopWatchdogs(trip);
             }
             trip.waitingForTransit = false;  // walking in now, not parked — bound by the walk ceiling
             approachAndAct(trip, bot, trigger, nextHop,
