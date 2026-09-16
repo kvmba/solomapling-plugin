@@ -47,7 +47,8 @@ public final class GCTransit {
             200090000, 200090001, 200090010, 200090011,
             200090100, 200090110, 200090200, 200090210,
             200090400, 200090410,
-            600010003, 600010005 // subway cars — roomy enough to stroll
+            600010003, 600010005, // subway cars — roomy enough to stroll
+            540010101, 540010002  // plane cabins — a cabin you can get up and walk in
     );
 
     /* True if mapId is inside a vehicle rather than a place a bot can walk around. */

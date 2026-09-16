@@ -333,3 +333,11 @@ transit.elevator_wait.0: "is this thing ever coming"
 transit.elevator_wait.1: "these elevators are so slow"
 transit.elevator_wait.2: "almost there, just waiting on the lift"
 transit.elevator_wait.3: "going down anytime soon"
+
+# ---------------------------------------------------------------------------
+# Waiting at a boat/train/subway boarding gate (idle lines; the counter, the lounge)
+# ---------------------------------------------------------------------------
+transit.ride_wait.0: "when does this thing board"
+transit.ride_wait.1: "been standing here forever"
+transit.ride_wait.2: "hope we leave on time"
+transit.ride_wait.3: "anyone know the schedule"

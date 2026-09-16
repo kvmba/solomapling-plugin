@@ -198,8 +198,8 @@ final class GCTaxi {
      * and the event that sails it. These are not warps — boarding only opens while the event's
      * "entry" is true, and it is the event, not us, that moves the bot onto the deck and later off
      * it (takeoff/arrived warp the whole map). So the bot walks to the inspector and then waits;
-     * see GCTravel.awaitVehicle. Getting into the room in the first place is a ticket-counter row
-     * in NPC_RIDES above.
+     * see GCTravel.idleWhileWaiting. Getting into the room in the first place is a ticket-counter
+     * row in NPC_RIDES above.
      */
     private static final VehicleEdge[] VEHICLE_RIDES = {
             new VehicleEdge(101000301, 1032009, 200000100, "Boats"),    // Ellinia -> Orbis Station

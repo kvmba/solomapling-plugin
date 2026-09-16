@@ -54,20 +54,31 @@ class ElevatorDoorStateTest {
     }
 
     @Test
-    void theLoiterSpanKeepsWaitersOnBothDoorLandings() throws Exception {
-        // While the door is shut a bot strolls within +-this of the portal. Both door landings are
-        // ~116px wide and flat (measured: 2F portal -139 on ledge [-198,-82]; 99F portal -133 on
-        // [-195,-79]), so the span must stay inside them or a waiter strolls off the edge and falls.
-        java.lang.reflect.Field f = GCTravel.class.getDeclaredField("ELEVATOR_LOITER_HALF_SPAN_PX");
-        f.setAccessible(true);
-        int span = (int) f.get(null);
+    void theWaitStrollStaysOnTheWaitersLedge() {
+        // While waiting at a shared point a bot strolls within +-WAIT_STROLL_HALF_SPAN of it, but the
+        // stroll is clamped to the anchor's own ledge (GCTravel.clampToSpan) so a waiter can never step
+        // off the landing. Pin that clamp: every rolled offset lands inside the ledge, both door
+        // landings included (2F portal -139 on ledge [-198,-82]; 99F -133 on [-195,-79]).
+        int margin = 12;                       // WAIT_STROLL_EDGE_MARGIN_PX
+        int span = 60;                         // WAIT_STROLL_HALF_SPAN_PX (>= the offset range)
         int[] doorX = {-139, -133};
-        int[][] ledge = {{-198, -82}, {-195, -79}};
-        for (int i = 0; i < doorX.length; i++) {
-            assertTrue(doorX[i] - span >= ledge[i][0] && doorX[i] + span <= ledge[i][1],
-                    "loiter span " + span + " pushes a waiter off landing " + i
-                            + " (door x=" + doorX[i] + ", ledge " + ledge[i][0] + ".." + ledge[i][1] + ")");
+        int[] lo = {-198, -195};
+        int[] hi = {-82, -79};
+        for (int f = 0; f < doorX.length; f++) {
+            for (int offset = -span; offset <= span; offset++) {
+                int x = GCTravel.clampToSpan(lo[f], hi[f], doorX[f], offset, margin);
+                assertTrue(x >= lo[f] + margin && x <= hi[f] - margin,
+                        "stroll x=" + x + " escaped landing " + f + " (" + lo[f] + ".." + hi[f] + ")");
+            }
         }
+    }
+
+    @Test
+    void aPointLedgeStandsStillInsteadOfStrollingOff() {
+        // A ledge narrower than the margins leave room for must not send the stroller anywhere: it
+        // stands on the anchor. This is the degenerate case that a naive clamp would blow past.
+        int x = GCTravel.clampToSpan(100, 110, 105, 60, 12); // 11px ledge, margin 12
+        assertTrue(x == 105, "a too-narrow ledge should stand still on the anchor, got x=" + x);
     }
 
     @Test
