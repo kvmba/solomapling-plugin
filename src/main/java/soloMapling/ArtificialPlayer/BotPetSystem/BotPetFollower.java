@@ -53,13 +53,16 @@ import java.util.concurrent.TimeUnit;
  * on which the map changes so its own movement never races that host placement (which used to
  * make a pet flicker on the new map).</p>
  *
- * <p><b>LOD like the bot's own movement.</b> While no real player watches the map the pet's
- * physics and foothold lookups are skipped — the tick's dominant cost, and the reason the gate
- * exists. Each pet's POSITION is still kept fresh with pure arithmetic (no host query, no packet),
- * pinned to a trail slot beside the owner, because the host reads it to spawn the pet for a joining
- * player: a wholly frozen position would put the pet wherever it stood when the map went dark and
- * make it snap on the next tick. The first tick after a player arrives re-grounds / re-homes the pet
- * the frame they arrive; the staleness is bounded to one tick, exactly as the bot's coarse position is.</p>
+ * <p><b>LOD like the bot's own movement.</b> While no real player watches the map the pet's physics
+ * and per-pet packet are skipped — the tick's dominant cost, and the reason the gate exists. Each
+ * pet's POSITION is still kept fresh, because the host reads it to spawn the pet for a joining player:
+ * a wholly frozen position would put the pet wherever it stood when the map went dark and make it snap
+ * on the next tick. The snapshot is pinned to each pet's trail slot and snapped to the floor under it
+ * by the movement engine's own per-column index — the same probe the observed tick lands on, so the
+ * two agree to the pixel and there is no spawn-then-snap; the fh travels with it (0 on a rope/water,
+ * never a ground id that would drag a roped pet off the rope). The first tick after a player arrives
+ * re-grounds / re-homes the pet the frame they arrive; the staleness is bounded to one tick, exactly
+ * as the bot's coarse position is.</p>
  *
  * <p>Pets also occasionally play one of their own WZ interactions (a chat, a pose),
  * paced per pet, and — with looting gear — pick up nearby MONSTER drops (its owner's
@@ -224,12 +227,13 @@ public final class BotPetFollower {
         }
         MapleMap map = chr.getMap();
         // LOD, like the bot's own movement: while no real player watches the map, skip the pet's
-        // physics and ground lookups — the tick's dominant cost, and the reason this gate exists (an
-        // unwatched world of thousands of bots stays cheap). But FIRST keep every pet's POSITION
-        // fresh with pure arithmetic: the host reads pet.getPos() to spawn a pet for a joining player
+        // physics and per-pet scheduling — the tick's dominant cost, and the reason this gate exists
+        // (an unwatched world of thousands of bots stays cheap). But FIRST keep every pet's POSITION
+        // fresh: the host reads pet.getPos() to spawn a pet for a joining player
         // (spawnPlayerMapObject), so a wholly frozen position would land the pet wherever it was when
-        // the map went dark and make it snap/teleport on the next tick. No host query, no packet —
-        // just a trail slot beside the owner (see syncUnobservedPositions).
+        // the map went dark and make it snap/teleport on the next tick. The snapshot is one INDEXED
+        // ground probe per pet (the same the observed tick lands on) plus arithmetic — no host tree
+        // query, no packet (see syncUnobservedPositions).
         boolean observed = GCMovement.isMapObserved(chr.getMapId());
         if (!observed) {
             syncUnobservedPositions(chr);
@@ -663,25 +667,68 @@ public final class BotPetFollower {
     }
 
     /**
-     * Keep the pets' positions fresh on an UNOBSERVED map — pure arithmetic, no host query, no
-     * packet. The host reads {@code pet.getPos()} when it spawns a pet for a joining player
-     * ({@code spawnPlayerMapObject}), so a pet frozen where it stood when the map went dark would
-     * appear there and then snap when the tick resumes. Pinning each pet to its trail slot beside the
-     * owner (fh 0 = floats/rides the owner; the observed tick re-grounds it the frame the player
-     * arrives) bounds the staleness to one tick, exactly as the bot's own coarse position does.
+     * Keep the pets' positions fresh on an UNOBSERVED map — snapshot arithmetic plus one INDEXED
+     * ground probe per pet, no packet. The host reads {@code pet.getPos()} when it spawns a pet for a
+     * joining player ({@code spawnPlayerMapObject}), so a pet frozen where it stood when the map went
+     * dark would appear there and then snap when the tick resumes; pinning each pet to its trail slot
+     * beside the owner bounds that staleness to one tick.
+     *
+     * <p>The snapshot must agree with what the observed tick will land the pet on, or the player sees
+     * it spawn in one place and get corrected the next frame. Two things matter:
+     *
+     * <ul>
+     *   <li><b>y.</b> The slot's y is the floor UNDER it, via the movement engine's own per-column
+     *       index ({@link GCMovement#groundFoothold}) — the same probe the observed tick lands on. The
+     *       probe runs from the pet's OWN current y (its last footing), never the owner's: the owner
+     *       may be mid-jump, and its y would strand the pet in mid-air. Only a floor within a step of
+     *       that footing is accepted; otherwise (the slot is off a ledge or over a gap) the pet keeps
+     *       its own y and the observed tick's lost-ground fall takes over on arrival.</li>
+     *   <li><b>fh.</b> On land the true foothold id is sent, exactly as the observed tick does. On a
+     *       rope/ladder (or in water) the owner's own y is used and fh is 0 — a pet on a rope MUST
+     *       report fh 0; a non-zero foothold id makes the client force the pet onto that foothold,
+     *       off the rope. The observed climbing/swim branches do the same.</li>
+     * </ul>
      */
     private static void syncUnobservedPositions(Character chr) {
         Pet[] pets = chr.getPets();
         int[] trailX = trailXs(chr, pets);
-        int y = chr.getPosition().y;
+        MapleMap map = chr.getMap();
+        int ownerY = chr.getPosition().y;
+        // Owner on a rope/ladder or in water: the observed tick floats / hangs the pet at the owner's
+        // own y and sends fh 0, so the snapshot inherits that instead of probing the ground beneath a
+        // rope it must stay on.
+        boolean ownerOffGround = CharacterStance.isSwimming(chr.getStance())
+                || CharacterStance.isClimbing(chr.getStance());
         for (int i = 0; i < pets.length; i++) {
             Pet pet = pets[i];
             if (pet == null) {
                 continue;
             }
-            pet.setPos(new Point(trailX[i], y));
+            int x = trailX[i];
+            int y;
+            int fh;
+            if (ownerOffGround) {
+                y = ownerY;
+                fh = 0;
+            } else {
+                // The floor under the slot, via the same probe + tolerance (standingOn) the observed
+                // tick lands the pet with — so the snapshot IS where the observed tick will put it.
+                // Probed from the pet's own last footing, not the owner's y: a jumping owner would
+                // strand the pet in mid-air. No footing within a step (the slot is over a ledge/gap)
+                // leaves the pet where it is; the observed tick's lost-ground fall handles it.
+                int footing = pet.getPos().y;
+                Foothold below = standingOn(map, new Point(x, footing));
+                if (below != null) {
+                    y = below.calculateFooting(x);
+                    fh = below.getId();
+                } else {
+                    y = footing;
+                    fh = 0;
+                }
+            }
+            pet.setPos(new Point(x, y));
             pet.setStance(CharacterStance.isFacingLeft(chr.getStance()) ? PET_STAND_LEFT : PET_STAND_RIGHT);
-            pet.setFh(0);
+            pet.setFh(fh);
         }
     }
 

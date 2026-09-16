@@ -20,10 +20,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * landed (gravity applies) AND the map is observed. It is the exact predicate the two lookup sites
  * in {@code moveTowards} call, so pinning it pins the regression.
  *
- * <p>Note: on an unobserved map the tick still keeps each pet's POSITION fresh with pure arithmetic
- * (no host query, no packet — see {@code syncUnobservedPositions}), so a joining player never sees a
- * pet frozen where it stood when the map went dark. The gate here covers only the costly
- * foothold/gravity lookup, which stays off while unwatched.
+ * <p>Note: on an unobserved map the tick still keeps each pet's POSITION fresh — snapshot arithmetic
+ * plus one INDEXED ground probe per pet (the same probe the observed tick lands on, so a joining
+ * player never sees a pet spawned mid-air and then dropped; see {@code syncUnobservedPositions}).
+ * The gate here covers only the per-tick physics and per-pet scheduling, which stay off while unwatched.
  */
 class BotPetFollowerLodGateTest {
 
