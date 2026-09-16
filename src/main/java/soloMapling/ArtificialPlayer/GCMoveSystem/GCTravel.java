@@ -22,6 +22,7 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
+import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
 
 /*
@@ -116,8 +117,9 @@ final class GCTravel {
     // back on the landing while the car is elsewhere, and only heads for the door once it opens. When
     // it does, a real passenger doesn't spring up the instant the doors part — they notice, then move.
     // This is the beat between noticing and moving: the elevator hop keeps idling that much longer, so
-    // the crowd leaves the landing one at a time rather than all together, then boardTaxi's dwell
-    // plays out at the door. Rolled once per door-opening so a bot doesn't re-decide every poll.
+    // the crowd leaves the landing one at a time rather than all together, and only then walks to the
+    // door for its own boarding dwell (boardingDwell). Rolled once per opening so a bot doesn't
+    // re-decide every poll.
     private static final long ELEVATOR_REACTION_MIN_MS = 2_000;
     private static final long ELEVATOR_REACTION_MAX_MS = 8_000;
     // While waiting an elevator out, a bot stands a few strides back from the door — far enough to keep
@@ -174,7 +176,7 @@ final class GCTravel {
         // The elevator's door-opening reaction beat. One random delay per door-opening (not per poll),
         // armed while the door is still shut and only run down once it opens; the hop idles until it
         // elapses, then the bot heads in. false whenever the door is shut again, so the next opening
-        // rolls afresh. See elevatorHoldAtLanding.
+        // rolls afresh. See elevatorBoarding, and elevatorBoarded for the dwell at the door.
         boolean elevatorReacting;
         long elevatorReactUntilMs;
 
@@ -421,12 +423,12 @@ final class GCTravel {
             // crowd on one spot. The bot idles back on the landing instead — off the door, so the
             // doorway stays clear — strolling and dropping the odd line, and only walks to the door
             // once it opens. When it does, a real passenger notices and moves a beat later, not the
-            // instant the doors part; elevatorHoldAtLanding holds that beat, so the crowd leaves the
+            // instant the doors part; elevatorBoarding holds that beat, so the crowd leaves the
             // landing spread out rather than as one synchronised rush. While the bot idles this hop is
             // exempt from the walk watchdog (waitingForTransit), since standing about is the point;
             // approachAndAct resumes the normal walk-in once the bot is free to go.
             if (GCTransit.isElevatorFloor(cur)
-                    && elevatorHoldAtLanding(trip, GCTransit.elevatorDoorOpen(bot, cur))) {
+                    && elevatorBoarding(trip, GCTransit.elevatorDoorOpen(bot, cur))) {
                 idleWhileWaiting(trip, bot, elevatorWaitAnchor(bot, trigger), "elevator_wait");
                 return;
             }
@@ -436,36 +438,42 @@ final class GCTravel {
             trip.waitingForTransit = false;  // walking in now, not parked — bound by the walk ceiling
             approachAndAct(trip, bot, trigger, nextHop,
                     "scripted portal '" + sw.portalName() + "' -> map " + nextHop,
-                    () -> {
-                        // The Helios elevator's door is the one scripted portal that can REFUSE entry:
-                        // its script (elevator.js) warps a player into the waiting car only while the
-                        // car is parked at this floor, and turns them away ("the elevator is moving")
-                        // mid-cycle. We replace that script with a bare changeMap, so without this a
-                        // bot walking up mid-cycle would slip into an empty car and — with every other
-                        // arriving bot doing the same — pile onto the car's single entry portal until
-                        // a departure minutes off. Even a bot that reached the door just as it shut is
-                        // turned back here and re-loiters on the landing above.
-                        Boolean open = GCTransit.elevatorDoorOpen(bot, cur);
-                        if (open != null && !open) {
-                            trip.waitingForTransit = true; // door shut — the wait is by design
-                            return;
-                        }
-                        if (GCTransit.isElevatorCar(sw.toMapId())) {
-                            // Board onto a random player spawn of the car rather than pinning every
-                            // passenger to portal 0. The car is a tiny box, so a crowd all landing on
-                            // the one portal pixel reads as a pile; the elevator event itself already
-                            // scatters its passengers across the car's spawn points when it moves them
-                            // (warpEveryone -> changeMap -> random spawn), and boarding the same way
-                            // matches that.
-                            warp(bot, sw.toMapId(), "elevator ride " + cur + " -> " + sw.toMapId());
-                        } else {
-                            warpToPortal(bot, sw.toMapId(), sw.toPortalId(),
-                                    "scripted warp " + cur + " -> " + nextHop);
-                        }
-                    });
+                    () -> elevatorBoarded(trip, bot, cur, sw));
             return;
         }
         warp(bot, nextHop, "no walkable portal/taxi/scripted-warp on map " + cur + " to " + nextHop);
+    }
+
+    /*
+     * Run every poll while the bot stands at the elevator door: hold for the boarding dwell (the same
+     * "a few seconds at the door" beat boardTaxi plays at a cab, so a player doesn't see the bot blink
+     * out the instant it arrives), re-checking the door throughout, and only then step through.
+     *
+     * The re-check is what the elevator's own script (elevator.js) would do: it warps a player into the
+     * waiting car only while the car is parked at this floor, and turns them away ("the elevator is
+     * moving") mid-cycle. We replace that script with a bare changeMap, so without the check a bot
+     * walking up mid-cycle would slip into an empty car and — with every other arriving bot doing the
+     * same — pile onto the car's single entry portal until a departure minutes off. A door that shuts
+     * during the dwell re-loiters the bot on the landing; the main tick picks the wait back up.
+     */
+    private static void elevatorBoarded(Trip trip, Character bot, int cur, BotScriptedWarp.WarpEdge sw) {
+        if (boardingDwell(trip, () -> {
+            Boolean open = GCTransit.elevatorDoorOpen(bot, cur);
+            return open == null || open; // shut (or unreadable) aborts the board and re-loiters below
+        })) {
+            return; // still dwelling at the door (or the door shut and the wait resumed)
+        }
+        if (GCTransit.isElevatorCar(sw.toMapId())) {
+            // Board onto a random player spawn of the car rather than pinning every passenger to
+            // portal 0. The car is a tiny box, so a crowd all landing on the one portal pixel reads as
+            // a pile; the elevator event itself already scatters its passengers across the car's spawn
+            // points when it moves them (warpEveryone -> changeMap -> random spawn), and boarding the
+            // same way matches that.
+            warp(bot, sw.toMapId(), "elevator ride " + cur + " -> " + sw.toMapId());
+        } else {
+            warpToPortal(bot, sw.toMapId(), sw.toPortalId(),
+                    "scripted warp " + cur + " -> " + sw.toMapId());
+        }
     }
 
     /*
@@ -482,29 +490,47 @@ final class GCTravel {
      * past it drives off.
      */
     private static void boardTaxi(Trip trip, Character bot, GCTaxi.TransitEdge taxi) {
+        if (boardingDwell(trip, () -> {
+            // Re-check the gate: the walk-up and the dwell can span the short boarding window (the
+            // subway's is only ~50s), and stepping into the room after it shut strands the bot in an
+            // empty lounge until the next sailing. Shut again -> wait at the counter; the main tick
+            // re-evaluates next poll and picks waiting back up.
+            GCTaxi.VehicleEdge onward = GCTaxi.vehicleFrom(taxi.toMapId());
+            return onward == null || boardingOpen(bot, onward.eventName());
+        })) {
+            return;
+        }
+        warp(bot, taxi.toMapId(), "taxi ride " + bot.getMapId() + " -> " + taxi.toMapId()
+                + " (npc " + taxi.npcId() + ")");
+    }
+
+    /*
+     * Stand at the gate for a random boarding dwell — the beat that reads as paying the driver or
+     * waiting for the doors, instead of blinking out the instant the bot arrives. Shared by the cab
+     * and the elevator door, which is why it is the dwell alone: the caller's stillOpen answers
+     * whether the gate is still open right now, and a gate that shut mid-dwell is not the same as a
+     * dwell that finished — it aborts the board (waitingForTransit) and clears the clock so the next
+     * attempt rolls a fresh dwell. Returns true while the caller should keep holding (boarding not
+     * done), false when it may step through.
+     */
+    private static boolean boardingDwell(Trip trip, BooleanSupplier stillOpen) {
         long now = nowMs();
         if (trip.boardingAtMs == 0L) {
             trip.boardingAtMs = now;
             trip.boardDwellMs = ThreadLocalRandom.current()
                     .nextLong(GCTaxi.BOARD_DWELL_MIN_MS, GCTaxi.BOARD_DWELL_MAX_MS);
-            return; // just got in — wait for the next poll to see if the dwell is up
+            return true; // just got here — dwell starts now
         }
         if (now - trip.boardingAtMs < trip.boardDwellMs) {
-            return; // still boarding — the cab hasn't left yet
+            return true; // still boarding — the gate hasn't been left yet
         }
-        // Re-check the gate: the walk-up and the dwell can span the short boarding window (the
-        // subway's is only ~50s), and stepping into the room after it shut strands the bot in an
-        // empty lounge until the next sailing. Shut again -> wait at the counter; the main tick
-        // re-evaluates next poll and picks waiting back up.
-        GCTaxi.VehicleEdge onward = GCTaxi.vehicleFrom(taxi.toMapId());
-        if (onward != null && !boardingOpen(bot, onward.eventName())) {
+        if (!stillOpen.getAsBoolean()) {
             trip.boardingAtMs = 0L;
             trip.waitingForTransit = true; // gate shut again mid-boarding — wait it out
-            return;
+            return true;
         }
-        trip.boardingAtMs = 0L;
-        warp(bot, taxi.toMapId(), "taxi ride " + bot.getMapId() + " -> " + taxi.toMapId()
-                + " (npc " + taxi.npcId() + ")");
+        trip.boardingAtMs = 0L; // dwell spent and the gate is open — the caller may step through
+        return false;
     }
 
     /*
@@ -610,7 +636,8 @@ final class GCTravel {
      * True while the elevator hop should keep idling on the landing: the door is shut, OR it has just
      * opened but the passenger's reaction beat has not run out yet. Idling is what keeps the bot OFF
      * the door while it waits, and for the first seconds after it opens, so the doorway stays clear
-     * for whoever is already walking through.
+     * for whoever is already walking through. Once this lets the bot go it walks to the door and dwells
+     * there (elevatorBoarded/boardingDwell) before stepping in.
      *
      * open == null (map/channel unreadable) must not idle: the bot would stroll forever. That path is
      * left to the normal walk-in with its own bounds, matching how elevatorDoorOpen's null is treated.
@@ -618,7 +645,7 @@ final class GCTravel {
      * opening — not from whenever the bot started waiting — and a door that opens and shuts again rolls
      * anew. Rolled once per opening (see Trip.elevatorReacting) rather than per poll.
      */
-    private static boolean elevatorHoldAtLanding(Trip trip, Boolean open) {
+    private static boolean elevatorBoarding(Trip trip, Boolean open) {
         if (open == null) {
             return false;
         }
