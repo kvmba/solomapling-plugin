@@ -104,9 +104,12 @@ final class GCTravel {
     private static final int WAIT_STROLL_EDGE_MARGIN_PX = 12;
     private static final long WAIT_STROLL_DWELL_MIN_MS = 3_000;
     private static final long WAIT_STROLL_DWELL_MAX_MS = 8_000;
-    // How many idle lines each wait-chatter set has (transit.<set>.N in BotMessages, localized).
-    private static final int WAIT_CHATTER_LINES = 4;
-    // Pacing of the idle line a waiter drops (see maybeWaitChatter).
+    // Upper bound on how many lines a transit chatter set (transit.<set>.N in BotMessages) can have.
+    // The actual count is probed per use (see chatterLineCount), so sets may differ in length and a
+    // dropped line can never surface as a raw key in chat; this is just the probe's safety cap and
+    // must stay above the largest set (currently 100 lines).
+    private static final int CHATTER_MAX_LINES = 128;
+    // Pacing of the idle line a waiting or riding passenger drops (see maybeWaitChatter).
     private static final long WAIT_CHATTER_MIN_MS = 25_000;
     private static final long WAIT_CHATTER_MAX_MS = 60_000;
 
@@ -311,6 +314,15 @@ final class GCTravel {
                 } else if (!BotWanderSystem.isWandering(bot)) {
                     BotWanderSystem.start(bot);
                 }
+            }
+            // A passenger doesn't ride in silence: drop the odd line about the crossing so a bot
+            // walking / watching the water doesn't read as a mute automaton. Each ride has its own
+            // scene-accurate set (see GCTransit.onboardChatterSet) — an elevator box can't talk about
+            // watching the sea, a subway car can't complain about the boat. Same self-throttle and
+            // observer gate as the wait chatter. Null set (a vehicle with no lines) -> say nothing.
+            String onboard = GCTransit.onboardChatterSet(cur);
+            if (onboard != null) {
+                maybeWaitChatter(trip, bot, nowMs(), onboard);
             }
             return;
         }
@@ -566,17 +578,17 @@ final class GCTravel {
         }
         if (!trip.shoutedAtAttack) {
             trip.shoutedAtAttack = true;
-            SocialCommands.BotSpeak(bot, BotMessages.get("transit.attack_shout."
-                    + ThreadLocalRandom.current().nextInt(ATTACK_SHOUTS)));
+            int shouts = chatterLineCount("attack_shout");
+            if (shouts > 0) {
+                SocialCommands.BotSpeak(bot, BotMessages.get("transit.attack_shout."
+                        + ThreadLocalRandom.current().nextInt(shouts)));
+            }
         }
         Point hatch = GCTransit.hatchPos(bot.getMap());
         if (hatch != null && !GCMovement.isMoving(bot)) {
             GCMovement.move(bot, hatch.x, hatch.y);
         }
     }
-
-    // How many attack shouts exist, as transit.attack_shout.N in BotMessages (localized).
-    private static final int ATTACK_SHOUTS = 5;
 
     /*
      * True when the elevator door is not confirmed open, so the bot should idle on the landing rather
@@ -693,11 +705,12 @@ final class GCTravel {
     }
 
     /*
-     * Occasionally mutter a line while waiting, so a bot standing about reads as a bored player
-     * rather than a frozen one. The line comes from a localized set (transit.<set>.N in BotMessages)
-     * chosen by the caller — the elevator has its own, the rides share one. Gated on a real player
-     * being able to see it (chatter is packets) and self-throttled by nextWaitChatterAtMs; the first
-     * call only arms the clock, so a fresh waiter stays quiet for one interval before its first line.
+     * Occasionally mutter a line while waiting or riding, so a bot standing about reads as a bored
+     * player rather than a frozen one. The line comes from a localized, scene-specific set
+     * (transit.<set>.N in BotMessages) chosen by the caller — the elevator, each ride and each wait
+     * gate have their own, so a line never mismatches the setting. Gated on a real player being able
+     * to see it (chatter is packets) and self-throttled by nextWaitChatterAtMs; the first call only
+     * arms the clock, so a fresh waiter stays quiet for one interval before its first line.
      */
     private static void maybeWaitChatter(Trip trip, Character bot, long now, String chatterSet) {
         if (trip.nextWaitChatterAtMs == 0L) {
@@ -713,8 +726,34 @@ final class GCTravel {
         if (!GCMovement.isMapObserved(bot.getMapId())) {
             return; // no observer — nothing worth saying
         }
-        int line = ThreadLocalRandom.current().nextInt(WAIT_CHATTER_LINES);
+        int count = chatterLineCount(chatterSet);
+        if (count <= 0) {
+            return; // set missing/empty — say nothing rather than a raw key
+        }
+        int line = ThreadLocalRandom.current().nextInt(count);
         SocialCommands.BotSpeak(bot, BotMessages.get("transit." + chatterSet + "." + line));
+    }
+
+    /*
+     * How many lines a chatter set actually has, by probing transit.<set>.0, .1, ... until one
+     * resolves to itself (BotMessages returns the key on a miss) up to CHATTER_MAX_LINES. Probed
+     * rather than hardcoded so sets may differ in length and a line dropped from the YAML shrinks the
+     * range instead of surfacing as a raw key in chat. The result is cached per set name.
+     */
+    private static final Map<String, Integer> CHATTER_COUNTS = new ConcurrentHashMap<>();
+
+    private static int chatterLineCount(String chatterSet) {
+        return CHATTER_COUNTS.computeIfAbsent(chatterSet, key -> {
+            int n = 0;
+            while (n < CHATTER_MAX_LINES) {
+                String k = "transit." + key + "." + n;
+                if (BotMessages.get(k).equals(k)) {
+                    break; // unresolved -> key echoed back -> past the end of the set
+                }
+                n++;
+            }
+            return n;
+        });
     }
 
     /*

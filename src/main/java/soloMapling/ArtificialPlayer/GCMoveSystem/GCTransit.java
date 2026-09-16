@@ -61,6 +61,34 @@ public final class GCTransit {
         return SPACIOUS.contains(mapId);
     }
 
+    /*
+     * Which chatter set a passenger aboard mapId draws its idle lines from — the lines are
+     * scene-specific on purpose (a bot in the elevator box can't talk about watching the sea, and a
+     * subway passenger can't complain about the boat being slow), so each ride gets its own set:
+     *   elevator — the Helios box (rides up/down between 2F and 99F)
+     *   boat     — the ship decks and cabins (to Ellinia / Orbis)
+     *   train    — the Ludibrium train decks
+     *   airship  — the Leafre airship decks and cabins
+     *   genie    — the Ariant flying carpet
+     *   subway   — the Kerning <-> NLC subway cars
+     *   plane    — the CBD / Kerning airplane cabins
+     * Null for a non-vehicle map, or a vehicle with no set of its own (the caller then speaks nothing).
+     */
+    static String onboardChatterSet(int mapId) {
+        if (ELEVATOR_CARS.contains(mapId)) {
+            return "onboard_elevator";
+        }
+        return switch (mapId) {
+            case 200090000, 200090001, 200090010, 200090011 -> "onboard_boat";
+            case 200090100, 200090110 -> "onboard_train";
+            case 200090200, 200090210 -> "onboard_airship";
+            case 200090400, 200090410 -> "onboard_genie";
+            case 600010003, 600010005 -> "onboard_subway";
+            case 540010101, 540010002 -> "onboard_plane";
+            default -> null;
+        };
+    }
+
     // The Helios Tower elevator's two cars (waiting + moving, each direction). The car is a vehicle
     // map like a deck, but a deck is a wide walkable space while the car is a tiny box: a bot ordered
     // in through the car's single entry portal stacks on that one pixel. GCTravel boards onto one of
