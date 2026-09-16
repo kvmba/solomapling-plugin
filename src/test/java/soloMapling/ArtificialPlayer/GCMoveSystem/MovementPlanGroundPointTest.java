@@ -11,10 +11,10 @@ import static org.junit.jupiter.api.Assertions.assertNotEquals;
 /**
  * Guards that an unobserved bot's analytic position is always a point a player could believe, because
  * that position is what MapleMap spawns the bot at the instant a real player arrives (and what the
- * promoted physics then continues from). Only a WALK edge lies along a single walkable surface, so
- * only a WALK edge may be interpolated; a JUMP/DROP/PORTAL edge's endpoints are two LEDGES, not a
- * walkable line, so a straight lerp would float the bot in mid-air and make it visibly drop/snap when
- * seen. Those must quantise to a real ledge point; a CLIMB edge must stay on the rope's x.
+ * promoted physics then continues from). Only a WALK edge lies along one walkable surface, so only a
+ * WALK edge may be interpolated; every other edge (JUMP / DROP / CLIMB / PORTAL) crosses empty space,
+ * so a straight lerp would float the bot in mid-air and make it visibly drop/snap when seen. Those
+ * must quantise to a real standing point.
  */
 class MovementPlanGroundPointTest {
 
@@ -50,9 +50,21 @@ class MovementPlanGroundPointTest {
     }
 
     @Test
-    void climbEdgeSlidesVerticallyAtTheRopeX() {
+    void jumpGrabOnRopeHoldsALaunchPointNotMidAir() {
+        // A jump-to-grab edge is typed CLIMB but runs from a ground launch point to a rope point at a
+        // DIFFERENT x: it must quantise, never lerp onto the empty line between them.
+        MovementPlan p = plan(BotNavigationGraph.EdgeType.CLIMB, new Point(10, 300), new Point(210, 120));
+        assertEquals(new Point(10, 300), p.positionAt(50), "holds the launch point");
+        assertNotEquals(new Point(110, 210), p.positionAt(50));
+    }
+
+    @Test
+    void climbUpRopeHoldsTheStartAnchor() {
+        // A vertical climb (start and end on the same rope, same x): still quantises — the bot holds
+        // the rope anchor it grabbed, never lerping up the rope unseen.
         MovementPlan p = plan(BotNavigationGraph.EdgeType.CLIMB, new Point(200, 300), new Point(200, 100));
-        assertEquals(new Point(200, 200), p.positionAt(50));
+        assertEquals(new Point(200, 300), p.positionAt(50));
+        assertNotEquals(new Point(200, 200), p.positionAt(50));
     }
 
     @Test

@@ -106,28 +106,21 @@ final class MovementPlan {
     /*
      * Where the bot sits partway along one edge. This plan is what an UNOBSERVED bot shows the instant
      * a real player arrives — MapleMap spawns the bot at the current coarse position and the promoted
-     * physics then continues from it — so the point must be one a player can believe. Only a WALK edge
-     * lies along a single walkable surface, so only a WALK edge is interpolated. A JUMP/DROP/PORTAL
-     * edge's endpoints are the two LEDGES (Region.pointAt), not a walkable line, so a straight lerp
-     * would float the bot in mid-air and make it visibly drop/snap when it is seen; those edges
-     * instead quantise to a real standing point (their launch ledge, then the landing ledge). A CLIMB
-     * edge runs along a rope, so it slides y at the rope's x.
+     * physics then continues from it — so the point must be one a player can believe.
+     *
+     * A WALK edge is the only edge that lies along one walkable surface, so it is interpolated. Every
+     * other edge (JUMP / DROP / CLIMB / PORTAL) crosses empty space — between two ledges, or onto a
+     * rope — so a straight lerp would float the bot in mid-air, which the player's spawn then shows
+     * and the promoted physics snaps away; those quantise to a real standing point (the launch point,
+     * then the landing point at the end) instead.
      */
     private static Point pointOnEdge(BotNavigationGraph.Edge e, double t) {
-        switch (e.type) {
-            case CLIMB -> {
-                int y = (int) Math.round(e.startPoint.y + (e.endPoint.y - e.startPoint.y) * t);
-                return new Point(e.startPoint.x, y);
-            }
-            case JUMP, DROP, PORTAL -> {
-                return new Point(t < 1.0 ? e.startPoint : e.endPoint);
-            }
-            default -> {
-                int x = (int) Math.round(e.startPoint.x + (e.endPoint.x - e.startPoint.x) * t);
-                int y = (int) Math.round(e.startPoint.y + (e.endPoint.y - e.startPoint.y) * t);
-                return new Point(x, y);
-            }
+        if (e.type != BotNavigationGraph.EdgeType.WALK) {
+            return new Point(t < 1.0 ? e.startPoint : e.endPoint);
         }
+        int x = (int) Math.round(e.startPoint.x + (e.endPoint.x - e.startPoint.x) * t);
+        int y = (int) Math.round(e.startPoint.y + (e.endPoint.y - e.startPoint.y) * t);
+        return new Point(x, y);
     }
 
     /* Index of the edge in flight at elapsedMs (skips zero-duration edges by taking the last match). */
