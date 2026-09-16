@@ -90,19 +90,20 @@ public final class BotPetFollower {
     private static final int PET_HANG_RIGHT = 30;
     private static final int PET_HANG_LEFT = 31;
 
-    // ── fh (foothold id) sent with a pet — SHARED RULE, bot and pet alike ────────
+    // ── fh (foothold id) sent with a pet — SHARED RULE with the bot ──────────────
     // fh is LIVE data, not decoration: the client reads the 16-bit value and snaps the entity onto
     // the named foothold's footing; a rope/ladder index (high bit set) instead binds it to that rope's
-    // render page. The bot follows this same rule (see BotMovementManager.resolveBroadcastFhId — the
+    // render page. The bot follows the same rule (see BotMovementManager.resolveBroadcastFhId — the
     // authoritative note, incl. the rope two's-complement encoding). For BOTH:
     //   • on land: send the REAL foothold id under the entity. The observed follow (followLand) and
     //     the unobserved snapshot (syncUnobservedPositions) must both be the SAME surface, or a
     //     joining player sees the entity spawn on one surface and the next observed tick pull it to
     //     another.
-    //   • on a rope/ladder, in water, or in mid-air: send 0. A non-zero id forces the entity onto that
-    //     foothold — for a roped entity that means it is dragged OFF the rope. (A pet hangs via the
-    //     HANG stance and reports 0; the bot's rope case is the two's-complement index above.)
-    // Every fh passed below is one of those two cases; do not invent a third.
+    //   • off land (rope/ladder, water, mid-air): never send the ground id under the entity — a
+    //     non-zero id forces the client to snap it onto that foothold, off the rope / out of the air.
+    //     The bot sends its rope's negative index (the encoding above); a PET has no rope-index form,
+    //     so it sends 0 and conveys the rope through the HANG stance instead.
+    // Every fh passed below is one of those cases; do not invent another.
 
     // The pet runs its OWN physics (the client only renders the position/fh/velocity
     // we send), but through the ENGINE'S OWN primitives (GCMovement / MapleMovement) so it
