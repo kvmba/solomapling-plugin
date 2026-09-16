@@ -639,23 +639,21 @@ final class GCTravel {
      * The standoff is seeded from the bot's id, so it is random across the crowd (waiters fan out
      * along the floor) yet stable for one bot across the whole wait (a fresh roll every poll would
      * walk the anchor about and drag the stroll with it). It is measured on the room's side of the
-     * floor — the wider side, which is away from the shaft — and clamped to the floor's end so it can
-     * never aim past the ledge. Falls back to the door spot when the floor can't be read.
+     * door — whichever side the bot approaches from — and landed on the floor below it, so the anchor
+     * is a room-floor spot and not the door's own narrow shelf (where a bot that just had the door
+     * shut on it happens to be standing, and where a crowd would re-pile). Falls back to the room
+     * floor on the other side of the door when the first pick finds no ground — the room is wider
+     * than any standoff, so one side always lands — and to the door spot itself only if neither does.
      */
     private static Point elevatorWaitAnchor(Character bot, Point trigger) {
         Point bp = bot.getPosition();
-        Foothold floor = GCMovement.footholdBelow(bot.getMap(), bp.x, bp.y - 1);
-        if (floor == null) {
-            return trigger;
-        }
-        int lo = Math.min(floor.getX1(), floor.getX2());
-        int hi = Math.max(floor.getX1(), floor.getX2());
-        int roomDir = hi - trigger.x >= trigger.x - lo ? 1 : -1; // the floor's wider side is the room
-        int roomMax = Math.max(0, (roomDir > 0 ? hi - trigger.x : trigger.x - lo) - WAIT_STROLL_EDGE_MARGIN_PX);
         int standoff = ELEVATOR_STANDOFF_MIN_PX
                 + Math.floorMod(bot.getId(), ELEVATOR_STANDOFF_MAX_PX - ELEVATOR_STANDOFF_MIN_PX + 1);
-        int x = trigger.x + roomDir * Math.min(standoff, roomMax);
-        Point spot = GCMovement.groundPointBelow(bot.getMap(), x, bp.y - 1);
+        int dir = bp.x >= trigger.x ? 1 : -1; // back the way the bot came, off the door
+        Point spot = GCMovement.groundPointBelow(bot.getMap(), trigger.x + dir * standoff, trigger.y - 1);
+        if (spot == null) {
+            spot = GCMovement.groundPointBelow(bot.getMap(), trigger.x - dir * standoff, trigger.y - 1);
+        }
         return spot != null ? spot : trigger;
     }
 
