@@ -2,6 +2,7 @@ package soloMapling.Environment;
 
 import org.gms.client.Character;
 import org.gms.server.maps.MapleMap;
+import org.gms.server.maps.Rope;
 import soloMapling.ArtificialPlayer.GCMoveSystem.GCMovement;
 import soloMapling.ArtificialPlayer.BotGeneration;
 import soloMapling.ArtificialPlayer.BotHelpers;
@@ -47,6 +48,43 @@ public class PlatformPlacement {
 
     private static final Random random = new Random();
 
+    // A spawned bot must stand on the floor, not perched on a rope/ladder. The Free Market
+    // entrance's m1/m2 platforms are FLAT and span the map's whole width
+    // (m1 y=4 x∈[387,1499], m2 y=-266 x∈[425,1462]), and the map's ladders sit at x=933
+    // (y -264..2) and x=1033 (y -804..-538) — inside those spans. A uniform x-pick therefore
+    // lands the odd spawn straight on a ladder column, where the bot renders the standing pose
+    // on the ladder sprite (a real climber needs the ROPE/LADDER stance, which a freshly spawned
+    // static bot never gets). Nudge the spawn x clear of any rope/ladder column before the bot
+    // is created, so it lands on open ground instead.
+    private static final int LADDER_CLEAR_X = 18;  // px clear of the rope's x axis
+    private static final int LADDER_CLEAR_Y = 24;  // px past the rope's ends (sprite overhang)
+
+    /**
+     * Shift {@code spawn} clear of every rope/ladder column in {@code ropes} (keeps its y, clamps x
+     * to [minX, maxX]). A point already off every column is returned unchanged; a point on a column
+     * is nudged to the side it already leans toward (right when exactly on the axis). An empty list
+     * is non-fatal — the point is returned as-is.
+     */
+    static Point avoidLadderColumn(List<Rope> ropes, Point spawn, int minX, int maxX) {
+        if (ropes == null || ropes.isEmpty() || spawn == null) {
+            return spawn;
+        }
+        int x = spawn.x;
+        for (Rope rope : ropes) {
+            if (Math.abs(x - rope.x()) > LADDER_CLEAR_X) {
+                continue;
+            }
+            if (spawn.y < rope.topY() - LADDER_CLEAR_Y || spawn.y > rope.bottomY() + LADDER_CLEAR_Y) {
+                continue;
+            }
+            x = x < rope.x() ? rope.x() - LADDER_CLEAR_X : rope.x() + LADDER_CLEAR_X;
+        }
+        if (x == spawn.x) {
+            return spawn;
+        }
+        return new Point(Math.max(minX, Math.min(maxX, x)), spawn.y);
+    }
+
     public static List<Integer> spawnBotsOnMapOnPlatform(int numBots, int mapId, String platform_id) {
         Platform flatPlatform = PlatformParser.parsePlatform(mapId, platform_id);
         List<Point> occupied = Collections.synchronizedList(new ArrayList<>());
@@ -55,10 +93,19 @@ public class PlatformPlacement {
 
         debugprint(fmt("Spawning {} bots on {} at platform: {}", numBots, mapId, platform_id));
 
+        MapleMap spawnMap = getMapleMapById(mapId);
+        List<Rope> ropes = spawnMap == null ? List.of() : spawnMap.getRopes();
         // Pre-generate all spawn points (must be sequential to avoid overlaps)
         List<Point> spawnPoints = new ArrayList<>();
         for (int i = 0; i < numBots; i++) {
             Point spawn = findUnoccupiedPoint(flatPlatform, occupied);
+            // Keep the spawn off any rope/ladder column so the bot lands on open floor
+            // (see avoidLadderColumn) instead of rendering a standing pose on a ladder.
+            // FLAT only: a flat platform's y is constant, so moving x never leaves the surface,
+            // whereas on a SLOPED platform the recorded y belongs to its own x.
+            if (flatPlatform.isFlat()) {
+                spawn = avoidLadderColumn(ropes, spawn, flatPlatform.getMinX(), flatPlatform.getMaxX());
+            }
             occupied.add(spawn);
             spawnPoints.add(spawn);
         }
