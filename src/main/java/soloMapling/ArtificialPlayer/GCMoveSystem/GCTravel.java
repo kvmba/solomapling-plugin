@@ -120,10 +120,11 @@ final class GCTravel {
     // plays out at the door. Rolled once per door-opening so a bot doesn't re-decide every poll.
     private static final long ELEVATOR_REACTION_MIN_MS = 2_000;
     private static final long ELEVATOR_REACTION_MAX_MS = 8_000;
-    // How far back from the door a waiting passenger idles — enough to clear the doorway, still a few
-    // strides from it. The door sits at the mouth of an enclosed h002/h001 landing whose span is far
-    // wider than this, so the anchor lands on open floor rather than against the back wall.
-    private static final int ELEVATOR_WAIT_BACK_PX = 60;
+    // While waiting an elevator out, a bot stands a few strides back from the door — far enough to keep
+    // the doorway clear, and a different distance for each waiter so the crowd spreads along the floor
+    // instead of piling onto one anchor pixel (a fixed standoff would just move the pile).
+    private static final int ELEVATOR_STANDOFF_MIN_PX = 60;
+    private static final int ELEVATOR_STANDOFF_MAX_PX = 180;
 
     private static final ScheduledExecutorService POOL = Executors.newScheduledThreadPool(2, r -> {
         Thread t = new Thread(r, "gctravel-poll");
@@ -633,21 +634,34 @@ final class GCTravel {
     }
 
     /*
-     * Where a bot idles while it waits an elevator out: back on the landing, off the door — a real
-     * passenger stands a few strides away and steps up when the doors part, rather than leaning on
-     * them. Anchored on the floor this far back from the door, toward the room the bot spawned in (so
-     * the stroll stays on the same landing); falls back to the door spot itself when the map or its
-     * footholds can't be read, which just means waiting exactly where the old code did.
+     * Where a bot idles while it waits an elevator out. The door sits on a narrow shelf at the mouth
+     * of the shaft; a crowd holding that shelf (or the pixel on the door) piles up, so the bot waits
+     * back on the room floor it arrived on instead — off the door, and off whoever is boarding.
+     *
+     * The standoff is seeded from the bot's id, so it is random across the crowd (waiters fan out
+     * along the floor) yet stable for one bot across the whole wait (a fresh roll every poll would
+     * walk the anchor about and drag the stroll with it). It is measured on the room's side of the
+     * floor — the wider side, which is away from the shaft — and clamped to the floor's end so it can
+     * never aim past the ledge. Falls back to the door spot when the floor can't be read.
      */
     private static Point elevatorWaitAnchor(Character bot, Point trigger) {
         MapleMap map = bot == null ? null : bot.getMap();
         if (map == null) {
             return trigger;
         }
-        Portal door = map.getPortal("in00");
-        int doorX = door != null ? door.getPosition().x : trigger.x;
-        int roomDir = bot.getPosition().x >= doorX ? 1 : -1; // the bot spawned in the room, not at the door
-        Point spot = GCMovement.groundPointBelow(map, doorX + roomDir * ELEVATOR_WAIT_BACK_PX, trigger.y - 1);
+        Point bp = bot.getPosition();
+        Foothold floor = GCMovement.footholdBelow(map, bp.x, bp.y - 1);
+        if (floor == null) {
+            return trigger;
+        }
+        int lo = Math.min(floor.getX1(), floor.getX2());
+        int hi = Math.max(floor.getX1(), floor.getX2());
+        int roomDir = hi - trigger.x >= trigger.x - lo ? 1 : -1; // the floor's wider side is the room
+        int roomMax = Math.max(0, (roomDir > 0 ? hi - trigger.x : trigger.x - lo) - WAIT_STROLL_EDGE_MARGIN_PX);
+        int standoff = ELEVATOR_STANDOFF_MIN_PX
+                + Math.floorMod(bot.getId(), ELEVATOR_STANDOFF_MAX_PX - ELEVATOR_STANDOFF_MIN_PX + 1);
+        int x = trigger.x + roomDir * Math.min(standoff, roomMax);
+        Point spot = GCMovement.groundPointBelow(map, x, bp.y - 1);
         return spot != null ? spot : trigger;
     }
 
