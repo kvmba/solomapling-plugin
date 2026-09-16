@@ -1011,6 +1011,10 @@ class BotMovementManager {
     // Real clients report the foothold ID they're standing on in every move packet.
     // While airborne they keep sending the last-known ground fh, so cache it on the entry.
     //
+    // SHARED RULE — bot and pet alike (the pet side is BotPetFollower's class-header fh note): on
+    // land send the real foothold id; on a rope/ladder/water/in mid-air send 0. A non-zero fh makes
+    // the client snap the entity onto that foothold, so a roped one gets dragged off the rope.
+    //
     // LADDER/ROPE: while climbing, a real client sends a NEGATIVE fh whose magnitude is the
     // ladder/rope index — the client tests fh & 0x8000 to tell "on a rope" from "on ground",
     // and that is what makes it bind the character to the rope and take the rope's page as

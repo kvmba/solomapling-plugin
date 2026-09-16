@@ -178,6 +178,11 @@ public final class BotPetController {
      * a swim map footholds are the seabed / can be missing, so it floats (fh=0)
      * and the follower glides it instead. Pets are nudged apart by index so a
      * multi-pet bot's pets do not stack on one pixel.
+     *
+     * <p>fh follows the SHARED fh rule (see BotPetFollower's class header): the real foothold id on
+     * land, 0 in water. The client snaps the pet onto this id, so the spawn must be the same surface
+     * the follower will land it on — hence {@link GCMovement#footholdBelow} here and {@code standingOn}
+     * there both resolve the floor under the pet's own x.
      */
     static void placeAtBot(Character bot, Pet pet, int index) {
         MapleMap map = bot.getMap();
@@ -186,7 +191,7 @@ public final class BotPetController {
         Point p = new Point(x, map != null && map.isSwim() ? pos.y : groundY(map, x, pos.y));
         pet.setPos(p);
         pet.setStance(PET_STAND_RIGHT); // 4; 0 is the pet's MOVE pose, not stand
-        pet.setFh(map != null && map.isSwim() ? 0 : footholdId(map, p));
+        pet.setFh(map != null && map.isSwim() ? 0 : footholdId(map, p)); // fh rule: land id / water 0
     }
 
     static int footholdId(MapleMap map, Point p) {

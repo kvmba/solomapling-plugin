@@ -90,6 +90,20 @@ public final class BotPetFollower {
     private static final int PET_HANG_RIGHT = 30;
     private static final int PET_HANG_LEFT = 31;
 
+    // ── fh (foothold id) sent with a pet — SHARED RULE, bot and pet alike ────────
+    // fh is LIVE data, not decoration: the client reads the 16-bit value and snaps the entity onto
+    // the named foothold's footing; a rope/ladder index (high bit set) instead binds it to that rope's
+    // render page. The bot follows this same rule (see BotMovementManager.resolveBroadcastFhId — the
+    // authoritative note, incl. the rope two's-complement encoding). For BOTH:
+    //   • on land: send the REAL foothold id under the entity. The observed follow (followLand) and
+    //     the unobserved snapshot (syncUnobservedPositions) must both be the SAME surface, or a
+    //     joining player sees the entity spawn on one surface and the next observed tick pull it to
+    //     another.
+    //   • on a rope/ladder, in water, or in mid-air: send 0. A non-zero id forces the entity onto that
+    //     foothold — for a roped entity that means it is dragged OFF the rope. (A pet hangs via the
+    //     HANG stance and reports 0; the bot's rope case is the two's-complement index above.)
+    // Every fh passed below is one of those two cases; do not invent a third.
+
     // The pet runs its OWN physics (the client only renders the position/fh/velocity
     // we send), but through the ENGINE'S OWN primitives (GCMovement / MapleMovement) so it
     // climbs, descends, hops and swims exactly like a bot — see followLand / followSwim.
@@ -326,6 +340,8 @@ public final class BotPetFollower {
         // Rope/ladder owner: the pet hangs on the owner's back (HANG pose) — no physics.
         if (CharacterStance.isClimbing(chr.getStance())) {
             clearMotion(id);
+            // fh 0: a pet on a rope must report no foothold id — a non-zero one makes the client
+            // force the pet onto that foothold and off the rope (see the fh rule at the top).
             applyAndSend(chr, pet, index, chr.getPosition(), 0, 0, 0,
                     left ? PET_HANG_LEFT : PET_HANG_RIGHT, config, observed);
             return;
@@ -342,6 +358,8 @@ public final class BotPetFollower {
             clearMotion(id);
             // Snap onto the owner's own terrain via the engine's bidirectional probe, so the pet
             // reappears standing where a bot would (a sloped/stepped surface, not a down-only miss).
+            // fh = the real foothold id (land); 0 when the probe finds nothing (pet stays on the
+            // owner's y — the fh rule: a bogus id would snap it to the wrong surface).
             Foothold fh = GCMovement.groundFoothold(map, new Point(tx, owner.y));
             Point snap = fh == null ? new Point(tx, owner.y) : new Point(tx, fh.calculateFooting(tx));
             teleportPet(chr, pet, index, snap, fh == null ? 0 : fh.getId(),
@@ -361,12 +379,12 @@ public final class BotPetFollower {
                 vyAir.remove(id);
                 ax = 0;
                 ay = 0;
-                fhVal = step.landed().getId();
+                fhVal = step.landed().getId(); // landed: the real foothold id (fh rule)
                 stance = left ? PET_STAND_LEFT : PET_STAND_RIGHT;
             } else {
                 ax = step.ax();
                 ay = step.ay();
-                fhVal = 0;
+                fhVal = 0; // mid-air: no foothold — fh must be 0 (fh rule)
                 stance = (left ? 1 : 0) | PET_JUMP_RIGHT;
             }
             velX.put(id, ax);
@@ -387,6 +405,8 @@ public final class BotPetFollower {
         boolean ownerBelow = owner.y > p.y + GROUND_STEP_PX;
         if (ownerBelow && standing != null && standing.isForbidFallDown()) {
             // A forbidFallDown platform is never pass-through, so the pet cannot drop.
+            // fh 0: placed AT the owner's level (a real floor) and re-grounded next tick; sending
+            // the footing id here would fight that (fh rule).
             teleportPet(chr, pet, index, new Point(tx, owner.y), 0,
                     left ? PET_STAND_LEFT : PET_STAND_RIGHT, config, observed);
             return;
@@ -405,6 +425,7 @@ public final class BotPetFollower {
             Point above = GCMovement.groundAbove(map, owner.x, p.y, JUMP_RISE_PX);
             boolean canHop = above != null && above.y < p.y - GROUND_SNAP_PX;
             if (!canHop) {
+                // fh 0: placed AT the owner's level and re-grounded next tick (fh rule).
                 teleportPet(chr, pet, index, new Point(tx, owner.y), 0,
                         left ? PET_STAND_LEFT : PET_STAND_RIGHT, config, observed);
                 return;
@@ -418,6 +439,7 @@ public final class BotPetFollower {
             ay = -MapleMovement.JUMP_SPEED_PXS;
             velX.put(id, ax);
             fallVy.put(id, ay);
+            // fh 0: the hop launches airborne — no foothold (fh rule).
             applyAndSend(chr, pet, index, p, (int) Math.round(ax), (int) Math.round(ay), 0,
                     (left ? 1 : 0) | PET_JUMP_RIGHT, config, observed);
             return;
@@ -732,6 +754,8 @@ public final class BotPetFollower {
         }
     }
 
+    // All fh parameters below (applyAndSend / teleportPet / broadcastMove) follow the SHARED fh rule
+    // at the top of the class — land: the real foothold id; rope/water/air: 0. Do not pass another.
     private static void applyAndSend(Character chr, Pet pet, int index, Point pos,
                                      int vx, int vy, int fh, int stance, BotPetConfig config, boolean observed) {
         pet.setPos(pos);
@@ -772,7 +796,7 @@ public final class BotPetFollower {
                                       int vx, int vy, int fh, int stance, BotPetConfig config) {
         AbsoluteLifeMovement move = new AbsoluteLifeMovement(0, pos, (int) config.followTickMs(), stance);
         move.setPixelsPerSecond(new Point(vx, vy));
-        move.setFh(fh);
+        move.setFh(fh); // the client snaps the pet onto this foothold (see the class's fh rule)
         List<LifeMovementFragment> moves = List.of(move);
         Packet packet = PacketCreator.movePet(chr.getId(), pet.getUniqueId(), (byte) index, moves);
         chr.getMap().broadcastMessage(chr, packet, false);

@@ -241,12 +241,14 @@ final class GCMovementSkills {
     // The fragment path itself: [numCommands][cmd4 @ origin][cmd3 @ dest][cmd0 settle @ dest].
     // Pure byte assembly — pulled out of broadcastTeleport so the layout is directly testable
     // (a wrong fragment order or count is exactly how the sprite silently teleports instead of blinking).
+    // fh per the SHARED fh rule (BotMovementManager.resolveBroadcastFhId / BotPetFollower's header):
+    // the ground id on land, 0 while airborne (the cmd3 appear-fragment lands mid-air -> fh 0).
     static byte[] teleportPath(MapleMap map, Point origin, Point dest, int stance) {
         byte[] data = new byte[1 + 10 + 10 + 14];
         int i = 0;
         data[i++] = 3; // numCommands
         i = putTeleportFrag(data, i, CMD_TELEPORT_APPEAR, origin.x, origin.y, footholdIdAt(map, origin), stance);
-        i = putTeleportFrag(data, i, CMD_TELEPORT_DISAPPEAR, dest.x, dest.y, 0, stance);
+        i = putTeleportFrag(data, i, CMD_TELEPORT_DISAPPEAR, dest.x, dest.y, 0, stance); // mid-air: fh 0
         putAbsoluteFrag(data, i, dest.x, dest.y, 0, 0, footholdIdAt(map, dest), stance, MOVE_DURATION_MS);
         return data;
     }
