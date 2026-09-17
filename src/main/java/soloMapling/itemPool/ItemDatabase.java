@@ -32,7 +32,13 @@ public class ItemDatabase {
         List<String> itemPools = Arrays.asList(
                 "thief.yaml", "common.yaml", "etc.yaml",
                 "scrolls.yaml", "darkscrolls.yaml",
-                "useables.yaml"); // Add more options as needed
+                "useables.yaml",
+                // Class pools were omitted here, so getItemPrice() returned null for
+                // every warrior/mage/bowman equip and for chairs/mastery books. Every
+                // consumer then fell back to a sentinel (getEquipMarketValue -> 100,
+                // multiplyWzPriceByJobStyle -> 0), making the rarest gear dirt-cheap.
+                "warrior.yaml", "mage.yaml", "bowman.yaml",
+                "masteryBook.yaml", "chair.yaml");
 
         for (String itemPool : itemPools) {
             String yamlFile = "itemPool/itemConfig/" + itemPool;

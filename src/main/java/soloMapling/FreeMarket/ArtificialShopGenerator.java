@@ -375,9 +375,19 @@ public class ArtificialShopGenerator {
         }
     }
 
+    /**
+     * Price at or above which a whole-store gimmick (1-meso / quitting / cheap
+     * sale) leaves an item alone. These gimmicks used to slash every listing,
+     * so a shop could put a 50m White Scroll on the shelf for 1 meso purely
+     * because the shop rolled the 1-in-10000 "1 MESO SHOP" variant.
+     */
+    private static final int RARE_ITEM_DISCOUNT_FLOOR = 10_000_000;
+
     public static void setOneMesoShop(HiredMerchantArtificial merchant) {
         for (PlayerShopItem psItem : merchant.getItems()) {
-            psItem.setPrice(1);
+            if (psItem.getPrice() < RARE_ITEM_DISCOUNT_FLOOR) {
+                psItem.setPrice(1);
+            }
         }
     }
 
@@ -391,6 +401,9 @@ public class ArtificialShopGenerator {
 
     public static void applyDiscountWholeStore(HiredMerchantArtificial merchant, double percentage) {
         for (PlayerShopItem psItem : merchant.getItems()) {
+            if (psItem.getPrice() >= RARE_ITEM_DISCOUNT_FLOOR) {
+                continue; // never discount genuinely rare stock
+            }
             psItem.setPrice((int) (psItem.getPrice() * percentage));
         }
     }

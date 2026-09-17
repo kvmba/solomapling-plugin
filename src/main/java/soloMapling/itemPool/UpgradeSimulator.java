@@ -8,12 +8,14 @@ import java.text.NumberFormat;
 import java.util.ArrayList;
 import java.util.Locale;
 import java.util.Map;
+import java.util.SortedMap;
 
 import static soloMapling.FreeMarket.EquipListGenerator.generateCleanItemEquip;
 import static soloMapling.itemPool.UniqueStatBonusList.applySellablesDeduction;
 import static soloMapling.itemPool.UniqueStatBonusList.correctAnomalies;
 import static soloMapling.server.MapleVersionManager.getItemPoolVersion;
 import static soloMapling.itemPool.ItemSelector.getScrollNodeData;
+import static soloMapling.itemPool.ItemInformationProviderUtilities.getWzPrice;
 import static soloMapling.itemPool.ScrollInfoManager.getScrollInfo;
 
 public class UpgradeSimulator {
@@ -99,11 +101,40 @@ public class UpgradeSimulator {
 
     // Method to get the price for a given stat bonus key
     public static Long getPriceForStatBonus(UniqueStatBonusList statPriceMap, int statBonus) {
-        Long price = statPriceMap.getStatBonusList().get(statBonus);
+        SortedMap<Integer, Long> prices = statPriceMap.getStatBonusList();
+        Long price = prices.get(statBonus);
         if (price != null) {
             return price;
         }
-        return 1L;
+        // No exact entry: fall back to the highest reachable band at or below the
+        // requested one. Returning 1L here used to make any rare, off-band stat
+        // roll (e.g. a >maxBonus roll from randomized upgrade stats) sell for a
+        // single meso, which is a big part of "rare items are absurdly cheap".
+        SortedMap<Integer, Long> below = prices.headMap(statBonus);
+        return below.isEmpty() ? 1L : below.get(below.lastKey());
+    }
+
+    // Base item cost for market valuation. Prefer the curated item-pool price;
+    // fall back to the WZ price when the item is not in any pool, so gear missing
+    // from the YAML tables is valued at its real worth instead of the old sentinel.
+    // WZ access is an external boundary, so a failure still degrades to a sentinel
+    // rather than aborting the pricing call.
+    private static final long FALLBACK_BASE_ITEM_COST = 1000L;
+
+    private static long resolveBaseItemCost(int itemId) {
+        try {
+            Integer pooled = ItemDatabase.getInstance().getItemPrice(itemId);
+            if (pooled != null && pooled > 0) {
+                return pooled;
+            }
+            Integer wz = getWzPrice(itemId);
+            if (wz != null && wz > 0) {
+                return wz;
+            }
+        } catch (Exception e) {
+            // fall through to sentinel
+        }
+        return FALLBACK_BASE_ITEM_COST;
     }
 
     public static Equip ScrollGivenItem(Equip sellItem) {
@@ -159,13 +190,7 @@ public class UpgradeSimulator {
         ScrolledItemComparator comp = new ScrolledItemComparator(equip);
         int scrolledStatBonus = comp.getHighestStatValueDifference();
 
-        long baseItemCost;
-        try {
-            baseItemCost = ItemDatabase.getInstance().getItemPrice(equip.getItemId());
-        } catch (Exception e) {
-            baseItemCost = 100;
-//            throw new RuntimeException(e);
-        }
+        long baseItemCost = resolveBaseItemCost(equip.getItemId());
         ScrollInfoManager.ScrollInfo scrollInfo = getScrollInfo(equip, comp);
         if (scrollInfo == null) {
             return (int) baseItemCost;
