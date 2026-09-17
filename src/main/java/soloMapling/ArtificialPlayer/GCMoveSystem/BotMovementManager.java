@@ -862,8 +862,17 @@ class BotMovementManager {
         //
         // Two release triggers, both needed:
         //   - releasing NOW already lands inside the band (let go and coast in), and
-        //   - HOLDING this tick would land beyond the band's far edge (don't push into an overshoot).
+        //   - HOLDING this tick would carry well past the target (don't push into an overshoot).
         // Together they make the bot stop inside its band and stay there.
+        //
+        // The held trigger's margin is HALF the band (floored at 1), not the whole band. With the
+        // whole band (`held > absDx + stopDist`) a WALK edge (stopDist 4) had a dead zone at a
+        // mid-high speed (~157-167, hs ~1.6): releasing now lands SHORT of the band (glide < absDx-4)
+        // AND holding this tick still does not clear the far edge (held <= absDx+4), so neither
+        // trigger fired. The bot took the step, the residual momentum carried it across the 4px band
+        // and out the far side, it walked back next tick, and paced left-right forever — the "原地踏步"
+        // report. Halving the margin closes that dead zone while, at stopDist 1 (CLIMB/PORTAL),
+        // max(1, 0) == 1 keeps the exact same threshold and settle point as before.
         //
         // NOT for stopDist 0. A 0 band is never a settle — it is a LAUNCH-WINDOW approach (JUMP and
         // straight-DROP take 0 from preciseNavStopDist; a directional walk-off drop takes 0 from
@@ -878,7 +887,7 @@ class BotMovementManager {
             int absDx = Math.abs(targetX - botX);
             int glide = BotPhysicsEngine.groundStopOutPx(entry.hspeed, entry.movementProfile, map);
             if (Math.abs(absDx - glide) <= stopDist
-                    || BotPhysicsEngine.groundHeldLandingPx(entry.hspeed, dir, entry.movementProfile, map) > absDx + stopDist) {
+                    || BotPhysicsEngine.groundHeldLandingPx(entry.hspeed, dir, entry.movementProfile, map) > absDx + Math.max(1, stopDist / 2)) {
                 entry.wasMovingX = false;
                 return 0;
             }
