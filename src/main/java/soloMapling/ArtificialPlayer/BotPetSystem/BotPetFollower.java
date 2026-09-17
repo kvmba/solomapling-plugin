@@ -506,11 +506,18 @@ public final class BotPetFollower {
         // share ONE surface, and the follower offset (up to FOLLOW_MAX_PX along the incline) alone
         // makes |owner.y - pet.y| exceed the step — so the chase fires every tick against the
         // horizontal settle: the pet hops down-slope then walks back up. That is the up/down bob
-        // reported on underwater slopes. When the owner stands on the pet's OWN foothold there is no
-        // platform to reach: skip the chase and let the walk below follow the slope. A genuinely
-        // higher/lower platform is a different foothold, so the pet still hops/warps/falls to it.
+        // reported on underwater slopes. When the owner stands on the pet's own walk-CONNECTED surface
+        // there is no platform to reach: skip the chase and let the walk below follow the slope. A
+        // genuinely higher/lower platform is a different surface, so the pet still hops/warps/falls to
+        // it.
+        //
+        // The test is the engine's own nav REGION, not foothold identity: a slope is stitched from many
+        // short foothold segments, so the pet and owner routinely rest on two DIFFERENT segments of the
+        // same continuous slope and a foothold-identity test misses them — the chase still fired and the
+        // pet still bobbed. The engine already models a connected walkable surface as a region (see
+        // BotNavigationGraph.Region), so compare that.
         boolean ownerOnSameSurface = map.isSwim() && standing != null
-                && standing == findStandingFoothold(map, owner);
+                && ownerOnSameWalkSurface(map, standing, owner);
         if (!ownerOnSameSurface && ownerBelow && standing != null && standing.isForbidFallDown()) {
             // A forbidFallDown platform is never pass-through, so the pet cannot drop. Warp onto a
             // real footing at the owner's level (resolveSafeLanding keeps it on a surface within a step of
@@ -597,7 +604,7 @@ public final class BotPetFollower {
         // down-slope from a drop: walking DOWN a slope lowers the pet (walk.point().y > p.y, handled
         // by the engine's own snap), so no fall is needed; standing on a ledge the owner has left
         // keeps the pet level, so it must fall — a genuine straight drop, not a downhill glide.
-        // Owner on the pet's own foothold only (ownerOnSameSurface note above): an owner lower on
+        // Owner on the pet's own walk surface only (ownerOnSameSurface note above): an owner lower on
         // the pet's own swim-map slope must not make the pet drop off it — the pet sticks to the
         // slope, and a genuine edge still falls via walk.lostGround() below.
         boolean ownerBelowAndNotWalkingDown = !ownerOnSameSurface && ownerBelow && walk.point().y <= p.y;
@@ -691,6 +698,45 @@ public final class BotPetFollower {
     private static Foothold findStandingFoothold(MapleMap map, Point p) {
         Foothold fh = GCMovement.groundFoothold(map, p);
         return fh != null && Math.abs(p.y - fh.calculateFooting(p.x)) <= GROUND_STEP_PX ? fh : null;
+    }
+
+    /**
+     * Whether the owner rests on the SAME continuous walk surface as the pet — the engine's own nav
+     * region ({@link soloMapling.ArtificialPlayer.GCMoveSystem.GCMovement#peekRegionIdOfFoothold}),
+     * not foothold identity. A slope is stitched from many short foothold segments, so the pet and a
+     * resting owner routinely stand on two DIFFERENT segments of the SAME slope; a foothold-identity
+     * test calls that "a different surface" and lets the vertical chase fire every tick, which is the
+     * up/down bob on an underwater slope (see the note at the call site). A region is the
+     * walk-connected union of its footholds, so it answers the question the chase actually means to
+     * ask. Peek-only (never triggers a graph build).
+     *
+     * <p>The owner must still be GROUNDED within {@link #GROUND_STEP_PX} to share a surface — the same
+     * one ground probe the old foothold test made — so an airborne owner (or one over a gap) is never
+     * treated as standing on the pet's slope. Given a grounded owner footing, the two share a surface
+     * iff their regions match; when a region does not resolve (an unbaked map, or a footing in no
+     * region) it degrades to foothold identity, i.e. exactly the previous behaviour.</p>
+     */
+    private static boolean ownerOnSameWalkSurface(MapleMap map, Foothold standing, Point owner) {
+        Foothold ownerFooting = findStandingFoothold(map, owner);
+        if (standing == ownerFooting) {
+            return true; // same foothold — trivially the same surface
+        }
+        return sameWalkSurface(
+                GCMovement.peekRegionIdOfFoothold(map, standing),
+                GCMovement.peekRegionIdOfFoothold(map, ownerFooting));
+    }
+
+    /**
+     * Pure decision seam (like {@link #shouldResolveFoothold}): two footings are on the same walk
+     * surface iff both resolve to a baked nav region and those regions are equal. A slope is many
+     * foothold segments but ONE region, so region identity is what tells a shared slope apart from a
+     * genuinely different platform — foothold identity is too fine and let the vertical chase fire on
+     * a shared slope (the underwater-slope bob). An unresolved region (unbaked map, or a footing in no
+     * region, both returned as &lt; 0) yields false, matching the old foothold-identity test for two
+     * genuinely different footings.
+     */
+    static boolean sameWalkSurface(int petRegion, int ownerRegion) {
+        return petRegion >= 0 && petRegion == ownerRegion;
     }
 
     /**

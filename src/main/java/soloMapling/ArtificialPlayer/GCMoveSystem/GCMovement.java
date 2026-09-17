@@ -768,6 +768,27 @@ public final class GCMovement {
     /* Sentinel from peekRegionIdAt: the map has no baked nav graph, so no ledge is answerable. */
     public static final int UNBAKED_REGION = -2;
 
+    /*
+     * The walk-region id this specific FOOTHOLD belongs to, on an ALREADY-baked graph — or
+     * UNBAKED_REGION when the map isn't baked, or -1 when the foothold is in no region (e.g. a wall).
+     *
+     * Needed because a region (the walk-connected union of footholds) is the right granularity for
+     * "same surface", while foothold identity is too fine: a single slope is stitched from many short
+     * foothold segments, so two points on one slope routinely sit on two different footholds. Lets a
+     * follower compare surfaces without re-deriving the region from a point. Peek-only, like
+     * peekRegionIdAt: it never triggers a build.
+     */
+    public static int peekRegionIdOfFoothold(MapleMap map, Foothold foothold) {
+        if (foothold == null) {
+            return -1;
+        }
+        BotNavigationGraph g = BotNavigationGraphProvider.peekGraph(map);
+        if (g == null) {
+            return UNBAKED_REGION;
+        }
+        return g.regionIdByFootholdId.getOrDefault(foothold.getId(), -1);
+    }
+
     /* The set of region ids reachable from the ledge under (fromX,fromY) (empty if it's on none). */
     public static java.util.Set<Integer> reachableRegions(MapleMap map, int fromX, int fromY) {
         BotNavigationGraph g = BotNavigationGraphProvider.getGraph(map);
