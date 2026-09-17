@@ -5,6 +5,7 @@ import soloMapling.ArtificialPlayer.GCMoveSystem.GCMovement;
 import soloMapling.ArtificialPlayer.GCMoveSystem.MapleMovement;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -46,5 +47,22 @@ class BotPetFollowBehaviorTest {
                 / (2.0 * MapleMovement.GRAVITY_PXS2));
         assertEquals(expectedRise, jump.risePx(),
                 "base hop rise must be the profile-consistent apex v^2/2g");
+    }
+
+    /**
+     * The pet-drops-then-teleports fix: re-home the pets only on the falling edge of "owner was
+     * climbing" AND only once the owner is grounded. A mid-climb jump-off leaves the owner airborne,
+     * and its pets must NOT be warped onto a landing the owner has not reached.
+     */
+    @Test
+    void rehomesOnlyOnTheGroundedStepOffEdge() {
+        assertTrue(BotPetFollower.ownerSteppedOffRopeTop(true, false, true),
+                "was climbing, now grounded (walking/standing) => re-home onto the landing");
+        assertFalse(BotPetFollower.ownerSteppedOffRopeTop(true, false, false),
+                "jumped off the rope mid-climb (owner airborne) => normal follow, no re-home");
+        assertFalse(BotPetFollower.ownerSteppedOffRopeTop(true, true, true),
+                "still climbing => no edge");
+        assertFalse(BotPetFollower.ownerSteppedOffRopeTop(false, false, true),
+                "already off the rope on the previous tick => not this edge");
     }
 }

@@ -48,8 +48,10 @@ import java.util.concurrent.TimeUnit;
  * below. A pet left too far behind HORIZONTALLY warps to the owner's side (official behaviour) — a
  * vertical owner move (a jump or a fall) is followed with the pet's own physics instead. It swims
  * (SWIM stance 12/13) while its owner swims, or in a water map whenever its own feet find no ground;
- * a rope/ladder owner makes it hang (HANG, 30/31). On a WATER map's slope it sticks to the slope
- * (no land-style hop/warp/drop, which would bob it up and down). Every warp (too far behind, owner
+ * a rope/ladder owner makes it hang (HANG, 30/31). When the owner steps OFF the rope TOP onto the
+ * platform, the pet is re-homed onto the owner's landing that tick ({@link #ownerSteppedOffRopeTop})
+ * instead of free-falling off the now-empty rope column and warping back. On a WATER map's slope it
+ * sticks to the slope (no land-style hop/warp/drop, which would bob it up and down). Every warp (too far behind, owner
  * unreachable above, forbidFallDown) lands on a REAL footing via {@link #resolveSafeLanding}, and a
  * pet that leaves the map's VR bounds is snapped back to the owner as a last resort
  * ({@link #recoverIfFallenOffMap}) — so a lost-footing pet can never free-fall off the map.</p>
@@ -187,6 +189,11 @@ public final class BotPetFollower {
     /** Per-bot whether its owner was moving on the previous tick — the fall of this edge (the owner
      *  stopping) re-rolls every pet's follow distance, so a resting bot's pets pick fresh spots. */
     private static final Map<Integer, Boolean> lastOwnerMovingByBot = new ConcurrentHashMap<>();
+    /** Per-bot whether its owner was hanging on a rope/ladder on the previous tick — the fall of this
+     *  edge (the owner stepping off the rope top) re-homes every pet onto the owner's landing, so a
+     *  pet left on the now-empty rope column does not free-fall and then warp back (the
+     *  pet-drops-then-teleports bug; see the steppedOffRopeTop note in {@link #tickBot}). */
+    private static final Map<Integer, Boolean> lastOwnerClimbingByBot = new ConcurrentHashMap<>();
     /** Per-pet follow distance (px) along the owner's facing, keyed by pet unique id. Re-rolled
      *  whenever the owner stops; a pet with no entry yet (freshly granted) draws one on its first tick. */
     private static final Map<Integer, Integer> followDistanceByPet = new ConcurrentHashMap<>();
@@ -220,6 +227,7 @@ public final class BotPetFollower {
         nextSwimBurstAtMs.clear();
         lastMapIdByBot.clear();
         lastOwnerMovingByBot.clear();
+        lastOwnerClimbingByBot.clear();
         followDistanceByPet.clear();
     }
 
@@ -249,6 +257,7 @@ public final class BotPetFollower {
         TRACKED.remove(botId);
         lastMapIdByBot.remove(botId);
         lastOwnerMovingByBot.remove(botId);
+        lastOwnerClimbingByBot.remove(botId);
     }
 
     private static void tick(BotPetConfig config) {
@@ -274,6 +283,15 @@ public final class BotPetFollower {
             return;
         }
         MapleMap map = chr.getMap();
+        // Track the owner's climbing state on EVERY tick, before any early return below, so the
+        // falling edge that re-homes the pets (see the steppedOffRopeTop note further down) is never
+        // missed or left stale across a dark (unobserved) stretch or a map change — the pet tick is
+        // 200ms while the bot ticks at 50ms, so a whole climb can start and end between two observed
+        // ticks otherwise.
+        boolean ownerClimbing = CharacterStance.isClimbing(chr.getStance());
+        boolean ownerGrounded = CharacterStance.isStanding(chr.getStance())
+                || CharacterStance.isWalking(chr.getStance());
+        boolean ownerWasClimbing = Boolean.TRUE.equals(lastOwnerClimbingByBot.put(botId, ownerClimbing));
         // LOD, like the bot's own movement: while no real player watches the map, skip the pet's
         // physics and per-pet scheduling — the tick's dominant cost, and the reason this gate exists
         // (an unwatched world of thousands of bots stays cheap). But FIRST keep every pet's POSITION
@@ -322,6 +340,19 @@ public final class BotPetFollower {
         // Each pet's own target x: its independent distance behind the owner (no pet-to-pet formation).
         int[] followX = computeFollowTargetXs(chr, pets);
 
+        // The owner STEPPING OFF A ROPE/LADDER onto the top platform is the moment to re-home every
+        // pet onto the owner's own landing. While the owner climbed, the follower pinned each pet to
+        // the owner's position on the rope column (fh 0, no footing). The instant the owner stands on
+        // the top platform the pet takes the ground path — but the rope column it still stands on
+        // usually has no foothold (the top-exit landing may sit up to TOP_EXIT_X_TOL px off the rope
+        // column), so that walk finds no ground and the pet free-falls to a lower ledge, then warps
+        // back beside the owner — the reported "pet drops the moment the bot tops the ladder, then
+        // teleports back". Warping it this one tick, onto the owner's real landing, avoids the whole
+        // drop-then-teleport flicker. Gated on the owner having LANDED (grounded) so a jump-off-rope
+        // (owner airborne) is left to the normal follow — only the top step-off is re-homed.
+        boolean steppedOffRopeTop =
+                ownerSteppedOffRopeTop(ownerWasClimbing, ownerClimbing, ownerGrounded);
+
         // Swim when the owner is swimming, OR — mirroring the bot engine's own rule
         // (isSwimMap && inAir) — when the map is a swim map and the pet's own feet find no
         // ground: on a platform in a swim map the pet walks, but once it is in the water
@@ -343,6 +374,17 @@ public final class BotPetFollower {
             // (and re-warp) forever. Runs before the swim/land split so it also rescues a pet that
             // sank out of a swim map.
             if (recoverIfFallenOffMap(chr, pet, idx, map, config, observed)) {
+                continue;
+            }
+            // Just stepped off a rope/ladder: put the pet on the owner's real landing this tick
+            // instead of letting the ground path free-fall it off the now-empty rope column (see the
+            // steppedOffRopeTop note above). Only when the pet is still on the rope column — a pet
+            // that genuinely walked or fell away follows normally.
+            if (steppedOffRopeTop && pet.getFh() == 0) {
+                clearMotion(pet.getUniqueId());
+                WarpLanding land = resolveSafeLanding(map, followX[idx], chr.getPosition());
+                teleportPet(chr, pet, idx, land.pos(), land.fh(),
+                        isPetFacingLeft(pet) ? PET_STAND_LEFT : PET_STAND_RIGHT, config, observed);
                 continue;
             }
             // One footing probe per pet per tick, shared by the swim decision and the land walk
@@ -877,6 +919,19 @@ public final class BotPetFollower {
      *  Exposed so a test can pin the band without duplicating the constants. */
     static int[] followDistanceRange() {
         return new int[]{FOLLOW_MIN_PX, FOLLOW_MAX_PX};
+    }
+
+    /**
+     * Whether this tick re-homes the pets onto the owner's landing because the owner just stepped OFF
+     * a rope/ladder. True on the falling edge of "owner was climbing" — the previous tick the owner
+     * hung on a rope (the pets were pinned to it), this tick it no longer does — AND the owner is now
+     * GROUNDED. The grounded gate matters: a bot that JUMPS off a rope mid-climb is airborne, and its
+     * pets must follow with their own physics, not be warped onto a landing it has not reached yet;
+     * only walking off the rope TOP onto the platform re-homes them. Package-private pure seam so a
+     * test can pin the edge without a live map (see {@link BotPetFollowBehaviorTest}).
+     */
+    static boolean ownerSteppedOffRopeTop(boolean wasClimbing, boolean climbing, boolean grounded) {
+        return wasClimbing && !climbing && grounded;
     }
 
     /**
