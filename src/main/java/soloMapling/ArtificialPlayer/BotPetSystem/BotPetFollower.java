@@ -36,20 +36,22 @@ import java.util.concurrent.TimeUnit;
  * rather than being glued to a snapshot of the owner — but through the ENGINE'S OWN
  * primitives ({@link GCMovement} / {@link MapleMovement}), so it has a bot's full terrain
  * ability: it walks slopes and steps up and down, is stopped by walls, runs off a ledge and
- * falls, hops to a reachable platform above, and swims. Its hop launches at the OWNER's own jump
- * speed and probes only as high as the owner can rise, so a platform the owner can jump onto is
- * never one its pet cannot reach. Each pet follows INDEPENDENTLY at its own random distance behind
- * the owner (facing-relative, {@link #FOLLOW_MIN_PX}..{@link #FOLLOW_MAX_PX} px) — there is no
- * pet-to-pet formation — and the distance is re-rolled every time the owner stops moving, so a
- * resting bot's pets settle at fresh, independent spots. Gravity only ever pulls a pet DOWN, so a
- * jumped owner never drags it into the air; a pet whose own feet leave the ground (its owner climbed
- * a platform, or either walked off a ledge) falls under gravity and lands on the floor below. A pet
- * left too far behind HORIZONTALLY warps to the owner's side (official behaviour) — a vertical owner
- * move (a jump or a fall) is followed with the pet's own physics instead. It swims (SWIM stance
- * 12/13) while its owner swims, or in a water map whenever its own feet find no ground; a
- * rope/ladder owner makes it hang (HANG, 30/31). Every warp (too far behind, owner unreachable
- * above, forbidFallDown) lands on a REAL footing via {@link #resolveSafeLanding}, and a pet that
- * leaves the map's VR bounds is snapped back to the owner as a last resort
+ * falls, hops to a reachable platform above, and swims. Its walk and hop come from the OWNER's own
+ * movement profile reduced by {@code (index + 1) * PET_STAT_STEP} points (floored at the base stat),
+ * so pet 1 is a touch slower / lower-jumping than its owner, pet 2 a touch more, and so on — and a
+ * platform the owner can jump onto is still one its pet can reach. Each pet follows INDEPENDENTLY at
+ * its own random distance behind the owner (facing-relative, {@link #FOLLOW_MIN_PX}..{@link #FOLLOW_MAX_PX} px)
+ * — there is no pet-to-pet formation — and the distance is re-rolled every time the owner stops
+ * moving, so a resting bot's pets settle at fresh, independent spots. Gravity only ever pulls a pet
+ * DOWN, so a jumped owner never drags it into the air; a pet whose own feet leave the ground (its
+ * owner climbed a platform, or either walked off a ledge) falls under gravity and lands on the floor
+ * below. A pet left too far behind HORIZONTALLY warps to the owner's side (official behaviour) — a
+ * vertical owner move (a jump or a fall) is followed with the pet's own physics instead. It swims
+ * (SWIM stance 12/13) while its owner swims, or in a water map whenever its own feet find no ground;
+ * a rope/ladder owner makes it hang (HANG, 30/31). On a WATER map's slope it sticks to the slope
+ * (no land-style hop/warp/drop, which would bob it up and down). Every warp (too far behind, owner
+ * unreachable above, forbidFallDown) lands on a REAL footing via {@link #resolveSafeLanding}, and a
+ * pet that leaves the map's VR bounds is snapped back to the owner as a last resort
  * ({@link #recoverIfFallenOffMap}) — so a lost-footing pet can never free-fall off the map.</p>
  *
  * <p><b>Map changes are the engine's job.</b> On map entry the engine's own
@@ -158,6 +160,12 @@ public final class BotPetFollower {
     // do not shuffle while it walks.
     private static final int FOLLOW_MIN_PX = 30;
     private static final int FOLLOW_MAX_PX = 80;
+
+    /** Movement-stat points a pet loses versus its owner, per array slot: pet 1 = −2, pet 2 = −4,
+     *  pet 3 = −6 (i.e. {@code (index + 1) * 2}). Floored at the base stat by
+     *  {@link soloMapling.ArtificialPlayer.GCMoveSystem.GCMovement}'s follower profile, so a pet is
+     *  always a touch slower / lower-jumping than its owner but never below an unbuffed character. */
+    private static final int PET_STAT_STEP = 2;
 
     /** Bots that currently have pets — the only ones a tick visits. */
     private static final Set<Integer> TRACKED = ConcurrentHashMap.newKeySet();
@@ -438,7 +446,17 @@ public final class BotPetFollower {
         // up/down bob) and never registered a platform to hop from.
         // (Provided by the caller, which already probed it once for the swim decision.)
         boolean ownerBelow = owner.y > p.y + GROUND_STEP_PX;
-        if (ownerBelow && standing != null && standing.isForbidFallDown()) {
+        // The vertical platform chase (hop up to an owner above / warp down to one below / fall to a
+        // lower ledge) assumes discrete stacked platforms. In a SWIM map on a SLOPE, owner and pet
+        // share ONE surface, and the follower offset (up to FOLLOW_MAX_PX along the incline) alone
+        // makes |owner.y - pet.y| exceed the step — so the chase fires every tick against the
+        // horizontal settle: the pet hops down-slope then walks back up. That is the up/down bob
+        // reported on underwater slopes. When the owner stands on the pet's OWN foothold there is no
+        // platform to reach: skip the chase and let the walk below follow the slope. A genuinely
+        // higher/lower platform is a different foothold, so the pet still hops/warps/falls to it.
+        boolean ownerOnSameSurface = map.isSwim() && standing != null
+                && standing == findStandingFoothold(map, owner);
+        if (!ownerOnSameSurface && ownerBelow && standing != null && standing.isForbidFallDown()) {
             // A forbidFallDown platform is never pass-through, so the pet cannot drop. Warp onto a
             // real footing at the owner's level (resolveSafeLanding keeps it on a surface within a step of
             // the owner, not the owner's raw y over a gap). fh is the landed foothold id, or 0 when
@@ -461,10 +479,13 @@ public final class BotPetFollower {
         // transient. Without this guard the branch fires on every jump — a pet on flat ground
         // finds no floor within a hop, so it is warped up to the owner's mid-air y, then falls,
         // then warps again (a visible flicker) instead of waiting for the owner to land.
+        // Gated to a DIFFERENT footing: in a swim map on the owner's own slope the pet follows the
+        // slope with the walk below instead (see the ownerOnSameSurface note above) — hopping to an
+        // "owner above" on one shared seabed slope is the bob.
         boolean ownerAbove = owner.y < p.y - GROUND_STEP_PX;
-        if (standing != null && !ownerBelow && ownerAbove
+        if (!ownerOnSameSurface && standing != null && !ownerBelow && ownerAbove
                 && !CharacterStance.isJumping(chr.getStance())) {
-            GCMovement.JumpProfile jump = GCMovement.jumpProfile(chr);
+            GCMovement.JumpProfile jump = GCMovement.jumpProfile(chr, statReduction(index));
             int probeRise = Math.max(GROUND_SNAP_PX + 1, jump.risePx() - JUMP_RISE_MARGIN_PX);
             Point above = GCMovement.groundAbove(map, owner.x, p.y, probeRise);
             boolean canHop = above != null && above.y < p.y - GROUND_SNAP_PX;
@@ -477,7 +498,7 @@ public final class BotPetFollower {
                         left ? PET_STAND_LEFT : PET_STAND_RIGHT, config, observed);
                 return;
             }
-            double hopVx = GCMovement.walkVelocityPxs(chr);
+            double hopVx = GCMovement.walkVelocityPxs(chr, statReduction(index));
             vyAir.add(id);
             ax = Math.signum(owner.x - p.x) * hopVx;
             if (ax == 0) {
@@ -512,7 +533,7 @@ public final class BotPetFollower {
         }
         int followDir = Math.abs(gap) > stopBand ? (int) Math.signum(gap) : 0;
         GCMovement.GroundWalk walk = GCMovement.walkGroundTick(
-                map, p, standing, followDir, ax, config.followTickMs(), chr);
+                map, p, standing, followDir, ax, config.followTickMs(), chr, statReduction(index));
         double vx = walk.velocityPxs();
         velX.put(id, vx);
 
@@ -521,7 +542,10 @@ public final class BotPetFollower {
         // down-slope from a drop: walking DOWN a slope lowers the pet (walk.point().y > p.y, handled
         // by the engine's own snap), so no fall is needed; standing on a ledge the owner has left
         // keeps the pet level, so it must fall — a genuine straight drop, not a downhill glide.
-        boolean ownerBelowAndNotWalkingDown = ownerBelow && walk.point().y <= p.y;
+        // Owner on the pet's own foothold only (ownerOnSameSurface note above): an owner lower on
+        // the pet's own swim-map slope must not make the pet drop off it — the pet sticks to the
+        // slope, and a genuine edge still falls via walk.lostGround() below.
+        boolean ownerBelowAndNotWalkingDown = !ownerOnSameSurface && ownerBelow && walk.point().y <= p.y;
         if (walk.lostGround() || ownerBelowAndNotWalkingDown) {
             // Fall from the walk's end point (the edge, or p + this tick's horizontal step) through
             // the engine's per-pixel sweep, keeping the horizontal step — like the bot's beginFall.
@@ -720,7 +744,9 @@ public final class BotPetFollower {
         int verticalHold = p.y - targetY > SWIM_LEVEL_BAND_PX ? -1 : 0;
         long now = System.currentTimeMillis();
         if (verticalHold < 0 && vy >= 0 && now >= nextSwimBurstAtMs.getOrDefault(id, 0L)) {
-            vy = -MapleMovement.SWIM_JUMP_BURST_PXS; // rising burst (bot swim-jump)
+            // The bot engine scales its swim-jump burst by the SPEED stat; match it (reduced by this
+            // pet's per-index offset) so a speed-buffed owner's pet bursts the same as it does.
+            vy = -GCMovement.swimBurstPxs(chr, statReduction(index)); // rising burst (bot swim-jump)
             nextSwimBurstAtMs.put(id, now + SWIM_BURST_COOLDOWN_MS);
         }
         // The water drag is NOT step-size invariant (vx *= max(0, 1 - 4.21*t)): one 300ms step
@@ -810,6 +836,16 @@ public final class BotPetFollower {
             followX[i] = ownerX - facing * currentFollowDistance(pet);
         }
         return followX;
+    }
+
+    /**
+     * This pet's movement-stat reduction versus its owner: {@code (index + 1) * PET_STAT_STEP} —
+     * pet slot 1 loses 2, slot 2 loses 4, slot 3 loses 6. Applied to both walk speed and jump so a
+     * pet is always a touch slower / lower-jumping than its owner (see
+     * {@link #PET_STAT_STEP}).
+     */
+    private static int statReduction(int index) {
+        return (index + 1) * PET_STAT_STEP;
     }
 
     /**

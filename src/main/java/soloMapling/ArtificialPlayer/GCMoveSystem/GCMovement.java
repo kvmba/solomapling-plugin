@@ -862,6 +862,15 @@ public final class GCMovement {
     }
 
     /**
+     * As {@link #walkVelocityPxs(Character)}, for a follower whose walk stat is reduced by
+     * {@code statReduction} points (floored at the base stat). The pet follower passes its per-index
+     * offset so a pet is a touch slower than its owner at that exact amount.
+     */
+    public static double walkVelocityPxs(Character bot, int statReduction) {
+        return followerProfile(bot, statReduction).walkVelocityPxs();
+    }
+
+    /**
      * A nearby follower's jump — vertical launch speed (px/s, positive up) and rise (px) — taken
      * from the SAME movement profile the engine drives {@code owner} with, so a follower hops
      * exactly as high as its owner can. The pet follower uses this so a platform the owner can jump
@@ -869,9 +878,31 @@ public final class GCMovement {
      * (apex = v^2/2g), not a fixed base-stat hop.
      */
     public static JumpProfile jumpProfile(Character owner) {
-        float jumpPxs = BotMovementProfile.fromCharacter(owner).jumpSpeedPxs();
+        return jumpProfile(owner, 0);
+    }
+
+    /** As {@link #jumpProfile(Character)}, with the follower's jump stat reduced by
+     *  {@code statReduction} points (floored at the base stat) for the pet's per-index offset. */
+    public static JumpProfile jumpProfile(Character owner, int statReduction) {
+        float jumpPxs = followerProfile(owner, statReduction).jumpSpeedPxs();
         int rise = (int) (jumpPxs * jumpPxs / (2.0 * MapleMovement.GRAVITY_PXS2));
         return new JumpProfile(jumpPxs, rise);
+    }
+
+    /** The owner's movement profile with both walk and jump stats reduced by {@code statReduction}
+     *  (floored at the base stat) — the follower equivalent of {@link BotMovementProfile#fromCharacter}. */
+    private static BotMovementProfile followerProfile(Character owner, int statReduction) {
+        return BotMovementProfile.fromCharacter(owner).reducedBy(statReduction);
+    }
+
+    /**
+     * A follower's swim-jump burst (px/s, up): the shared water burst scaled by the follower's own
+     * SPEED stat (floored at the base stat), mirroring how the bot engine scales its bear. Without
+     * this a speed-buffed owner would burst higher than its pet; the pet matches to within its
+     * per-index offset.
+     */
+    public static double swimBurstPxs(Character owner, int statReduction) {
+        return MapleMovement.SWIM_JUMP_BURST_PXS * followerProfile(owner, statReduction).speedMultiplier();
     }
 
     /** A follower's hop: the launch speed (px/s, up) and the rise (px) it can clear. */
@@ -910,7 +941,18 @@ public final class GCMovement {
      */
     public static GroundWalk walkGroundTick(MapleMap map, Point from, Foothold foothold, int dir,
                                             double carryVelocityPxs, long tickMs, Character owner) {
-        BotMovementProfile profile = BotMovementProfile.fromCharacter(owner);
+        return walkGroundTick(map, from, foothold, dir, carryVelocityPxs, tickMs, owner, 0);
+    }
+
+    /**
+     * As {@link #walkGroundTick(MapleMap, Point, Foothold, int, double, long, Character)}, with the
+     * walker's movement profile reduced by {@code statReduction} points (floored at the base stat) —
+     * the pet follower's per-index speed offset, so a pet walks just slower than its owner.
+     */
+    public static GroundWalk walkGroundTick(MapleMap map, Point from, Foothold foothold, int dir,
+                                            double carryVelocityPxs, long tickMs, Character owner,
+                                            int statReduction) {
+        BotMovementProfile profile = followerProfile(owner, statReduction);
         if (foothold == null) {
             return new GroundWalk(from, null, carryVelocityPxs, true);
         }

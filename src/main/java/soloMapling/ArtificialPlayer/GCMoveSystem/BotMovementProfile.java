@@ -58,10 +58,12 @@ record BotMovementProfile(int totalSpeedStat, int totalJumpStat, boolean snowSho
     static final int MOUNT_JUMP_BONUS = 10;
 
     BotMovementProfile {
-        totalSpeedStat = bucketStat(totalSpeedStat);
-        totalJumpStat = bucketStat(totalJumpStat);
-        totalSpeedStat = Math.min(totalSpeedStat, MAX_EFFECTIVE_SPEED_STAT);
-        totalJumpStat = Math.min(totalJumpStat, MAX_EFFECTIVE_JUMP_STAT);
+        // Clamp only, NOT bucket: a follower's reduced stats (reducedBy) must survive exactly. The
+        // bot builders (fromCharacter / speedScaled) bucket explicitly before constructing, so a
+        // bot's graph-key profile is bit-for-bit unchanged; a follower never bakes a graph, so it
+        // wants the exact value.
+        totalSpeedStat = Math.min(Math.max(1, totalSpeedStat), MAX_EFFECTIVE_SPEED_STAT);
+        totalJumpStat = Math.min(Math.max(1, totalJumpStat), MAX_EFFECTIVE_JUMP_STAT);
     }
 
     BotMovementProfile(int totalSpeedStat, int totalJumpStat) {
@@ -116,7 +118,9 @@ record BotMovementProfile(int totalSpeedStat, int totalJumpStat, boolean snowSho
             totalSpeed += MOUNT_SPEED_BONUS;
             totalJump += MOUNT_JUMP_BONUS;
         }
-        return new BotMovementProfile(totalSpeed, totalJump, wearsSnowShoes(character));
+        // Bucket here (not in the canonical constructor) so the bot's graph key stays on exact
+        // multiples of STAT_BUCKET_SIZE, while a follower profile can hold an exact reduced stat.
+        return new BotMovementProfile(bucketStat(totalSpeed), bucketStat(totalJump), wearsSnowShoes(character));
     }
 
     /** True while the bot is actually riding (the MONSTER_RIDING buff is registered). */
@@ -231,7 +235,22 @@ record BotMovementProfile(int totalSpeedStat, int totalJumpStat, boolean snowSho
             return this;
         }
         int scaled = (int) Math.round(totalSpeedStat * factor);
-        return new BotMovementProfile(scaled, totalJumpStat, snowShoes);
+        // Bucket explicitly (the canonical constructor no longer does) so a slowed bot keeps the
+        // exact prior behaviour / graph-key alignment.
+        return new BotMovementProfile(bucketStat(scaled), totalJumpStat, snowShoes);
+    }
+
+    /**
+     * A follower's profile: the owner's walk and jump stats each reduced by {@code delta} points,
+     * floored at the base stat ({@link #BASE_TOTAL_STAT}) so a pet is a touch slower / lower-jumping
+     * than its owner but never worse than an unbuffed character. The pet follower uses this for its
+     * per-index offset ({@code delta = (petIndex + 1) * 2}). Deliberately exact (no bucketing) — a
+     * follower never bakes a navigation graph, so there is no graph key to keep aligned.
+     */
+    BotMovementProfile reducedBy(int delta) {
+        int speed = Math.max(BASE_TOTAL_STAT, totalSpeedStat - delta);
+        int jump = Math.max(BASE_TOTAL_STAT, totalJumpStat - delta);
+        return new BotMovementProfile(speed, jump, snowShoes);
     }
 
     double walkVelocityPxs() {
