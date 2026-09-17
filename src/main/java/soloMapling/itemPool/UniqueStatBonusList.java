@@ -3,10 +3,11 @@ package soloMapling.itemPool;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.SortedMap;
 import java.util.TreeMap;
 
 public class UniqueStatBonusList {
-    private Map<Integer, Long> statBonusMap;
+    private SortedMap<Integer, Long> statBonusMap;
 
     static double midway_price_multiplier = 0.60;
 
@@ -30,7 +31,7 @@ public class UniqueStatBonusList {
     }
 
     // Method to get the unique list of stat bonus and price pairs
-    public Map<Integer, Long> getStatBonusList() {
+    public SortedMap<Integer, Long> getStatBonusList() {
         return statBonusMap;
     }
 

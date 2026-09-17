@@ -141,6 +141,12 @@ public class ItemSelector {
             }
             result = toInteger(entry.getValue());
         }
+        // Every price key is newer than the running item-pool version (e.g. a
+        // v65 entry while the pool is at v55). -1 used to leak out as a real
+        // price; fall back to the earliest known price instead.
+        if (result < 0 && !sortedMap.isEmpty()) {
+            result = toInteger(sortedMap.get(sortedMap.firstKey()));
+        }
         return result;
     }
 
