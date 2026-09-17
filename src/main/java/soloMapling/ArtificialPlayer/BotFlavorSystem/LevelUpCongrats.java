@@ -11,6 +11,7 @@ import java.util.concurrent.ThreadLocalRandom;
 
 import static soloMapling.ArtificialPlayer.BotCommandsPack.SocialCommands.BotEmote;
 import static soloMapling.ArtificialPlayer.BotCommandsPack.SocialCommands.BotSpeak;
+import static soloMapling.ArtificialPlayer.BotCommandsPack.SocialCommands.BotSpeakPlain;
 import static soloMapling.ArtificialPlayer.BotDialogueHandler.getRandomResolvedLine;
 import static soloMapling.ArtificialPlayer.BotMovementSystem.MovementCommands.botFaceTowardsPoint;
 
@@ -93,7 +94,7 @@ public final class LevelUpCongrats {
                 .pauseRandom(300, 700)
                 .run(() -> {
                     if (spoken != null) {
-                        BotSpeak(me, spoken);
+                        BotSpeakPlain(me, spoken);
                     }
                 })
                 .pause(400)

@@ -853,10 +853,8 @@ public class SocialBot extends BotSM {
             // node) an unconditional pause is the bot silently staring for seconds.
             chain.pause(BotTiming.typingPauseFor(line))
                     .run(() -> botFaceTowardsPoint(getChr(), player.getPosition()))
-                    .run(() -> sayReply(line));
-            if (emote > 0) {
-                chain.pause(400).run(() -> BotEmote(getChr(), emote));
-            }
+                    .run(() -> sayReplyPlain(line));
+            appendLineEmote(chain, emote);
         }
         chain.run(() -> endReply(player));
         chain.start();
@@ -916,10 +914,8 @@ public class SocialBot extends BotSM {
             // dialogue node doesn't read as the bot thinking for seconds.
             chain.pause(BotTiming.typingPauseFor(line))
                     .run(() -> botFaceTowardsPoint(getChr(), player.getPosition()))
-                    .run(() -> sayReply(line));
-            if (emote > 0) {
-                chain.pause(400).run(() -> BotEmote(getChr(), emote));
-            }
+                    .run(() -> sayReplyPlain(line));
+            appendLineEmote(chain, emote);
         }
         if (accepted) {
             chain.run(this::resetConversation); // hint clears; the tick poll now waits for the invite
@@ -966,11 +962,9 @@ public class SocialBot extends BotSM {
         String line = getRandomLine(category, player);
         int emote = getRandomEmote(category);
         if (line != null) {
-            chain.run(() -> sayReply(line))
+            chain.run(() -> sayReplyPlain(line))
                     .pauseRandom(500, 1000);
-            if (emote > 0) {
-                chain.run(() -> BotEmote(getChr(), emote));
-            }
+            appendLineEmote(chain, emote);
         }
         chain.run(() -> botFaceTowardsPoint(getChr(), player.getPosition()));
         appendResit(chain);
@@ -1034,10 +1028,8 @@ public class SocialBot extends BotSM {
         String line = personaGreeting(player);
         int emote = getRandomEmote("Greeting");
         if (line != null) {
-            chain.run(() -> sayReply(line));
-            if (emote > 0) {
-                chain.pause(400).run(() -> BotEmote(getChr(), emote));
-            }
+            chain.run(() -> sayReplyPlain(line));
+            appendLineEmote(chain, emote);
         }
         chain.run(() -> {
             showInteractiveOptions(player);
@@ -1077,10 +1069,8 @@ public class SocialBot extends BotSM {
         });
         if (line != null) {
             chain.pause(BotTiming.typingPauseFor(line))
-                    .run(() -> BotReply(getChr(), channelType, player, line));
-            if (emote > 0) {
-                chain.pause(400).run(() -> BotEmote(getChr(), emote));
-            }
+                    .run(() -> BotReplyPlain(getChr(), channelType, player, line));
+            appendLineEmote(chain, emote);
         }
         appendResit(chain);
         chain.start();
@@ -1119,6 +1109,12 @@ public class SocialBot extends BotSM {
                 BotReply(chr, channelType, channelTarget, line);
             }
         });
+    }
+
+    // Plays the line's own (mood-matched) emote when it has one, else the shared random
+    // speak-face roll - the same rule BotSpeak uses, so a reply never double-faces.
+    private void appendLineEmote(BotTiming.Chain chain, int emote) {
+        chain.pause(400).run(() -> emoteAfterLine(getChr(), emote));
     }
 
     // Decides the re-sit at build time; the sit itself lands as a later beat.

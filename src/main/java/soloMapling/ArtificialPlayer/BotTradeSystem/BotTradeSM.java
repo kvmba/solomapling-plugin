@@ -13,6 +13,7 @@ import java.util.List;
 
 import static soloMapling.ArtificialPlayer.BotCommandsPack.SocialCommands.BotEmote;
 import static soloMapling.ArtificialPlayer.BotCommandsPack.SocialCommands.BotSpeak;
+import static soloMapling.ArtificialPlayer.BotCommandsPack.SocialCommands.BotSpeakPlain;
 import static soloMapling.ArtificialPlayer.BotHelpers.convertItemIdToName;
 import static soloMapling.ArtificialPlayer.BotHelpers.isUnusableItem;
 import static soloMapling.ArtificialPlayer.BotTradeSystem.BotTradeCommands.getTradePartnerCharacter;
@@ -186,10 +187,10 @@ public class BotTradeSM {
 
                 if (lastTradeResult != Trade.TradeResult.SUCCESSFUL) {
                     BotEmote(getChr(), 4);
-                    BotSpeak(getChr(), BotMessages.get("trade.why_decline"));
+                    BotSpeakPlain(getChr(), BotMessages.get("trade.why_decline"));
                 } else {
                     BotEmote(getChr(), 2);
-                    BotSpeak(getChr(), BotMessages.get("trade.thank_you"));
+                    BotSpeakPlain(getChr(), BotMessages.get("trade.thank_you"));
                     getParent().setLastTradeResult(Trade.TradeResult.SUCCESSFUL);
                 }
                 getParent().waitFor(2000); // farewell beat before COMPLETED ticks

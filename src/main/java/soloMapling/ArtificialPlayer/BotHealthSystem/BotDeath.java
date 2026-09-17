@@ -255,7 +255,7 @@ public final class BotDeath {
         if (spoken == null || spoken.text() == null || spoken.text().isBlank()) {
             return;
         }
-        SocialCommands.BotSpeak(chr, spoken.text());
+        SocialCommands.BotSpeakPlain(chr, spoken.text());
         // Play the face the line was written for (a weeping line cries, an angry one scowls).
         // The emote comes from the line that was actually picked, not a blind palette draw;
         // 0 means the line defined none, in which case no expression is sent.

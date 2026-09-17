@@ -19,6 +19,7 @@ import java.util.concurrent.TimeUnit;
 
 import static soloMapling.ArtificialPlayer.BotCommandsPack.SocialCommands.BotEmote;
 import static soloMapling.ArtificialPlayer.BotCommandsPack.SocialCommands.BotSpeak;
+import static soloMapling.ArtificialPlayer.BotCommandsPack.SocialCommands.BotSpeakPlain;
 import static soloMapling.ArtificialPlayer.BotHelpers.isBot;
 import static soloMapling.ArtificialPlayer.BotHelpers.blockingSleep;
 import static soloMapling.ArtificialPlayer.BotMovementSystem.MovementCommands.botFaceTowardsPoint;
@@ -343,7 +344,7 @@ public class ConversationManager {
                 blockingSleep((int) line.getDelayMs());
             }
 
-            BotSpeak(speaker, line.getText());
+            BotSpeakPlain(speaker, line.getText());
             if (line.hasEmote()) {
                 BotEmote(speaker, line.getEmote());
             }

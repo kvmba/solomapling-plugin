@@ -18,6 +18,7 @@ import java.io.Reader;
 
 import static soloMapling.ArtificialPlayer.BotCommandsPack.SocialCommands.BotDialogue;
 import static soloMapling.ArtificialPlayer.BotCommandsPack.SocialCommands.BotEmote;
+import static soloMapling.ArtificialPlayer.BotCommandsPack.SocialCommands.emoteAfterLine;
 
 public class BotDialogueHandler {
 
@@ -486,7 +487,9 @@ public class BotDialogueHandler {
             return;
         }
         BotDialogue(character, textToShow);
-        BotEmote(character, emote);
+        // Line's own emote if it has one, else the shared "speaking occasionally shows a face" roll -
+        // so dialogue playback obeys the same rule as BotSpeak without double-firing.
+        emoteAfterLine(character, emote);
         BotHelpers.blockingSleep(dialog.getDuration());
     }
 

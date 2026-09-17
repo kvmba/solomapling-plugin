@@ -5,9 +5,11 @@ import org.gms.extension.event.ChatType;
 import org.gms.net.server.Server;
 import soloMapling.ArtificialPlayer.BotHelpers;
 import org.gms.util.PacketCreator;
+import soloMapling.ArtificialPlayer.GCMoveSystem.GCMovement;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.ThreadLocalRandom;
 
 import static soloMapling.server.SoloMaplingUtilities.generateRandomNumber;
 
@@ -23,11 +25,63 @@ public class SocialCommands {
         fakechar.getMap().broadcastMessage(PacketCreator.getChatText(fakechar.getId(), message, fakechar.isGM(), (byte) 0));
     }
 
+    // Chance an ordinary spoken line is punctuated by a facial expression. The face is a random
+    // standard expression from the friendly palette - deliberately NOT matched to the line's mood;
+    // the mood-matched path lives in the dialogue packs (each line's own `emote`). Rolled only when a
+    // real player is on the map, since the expression is a packet nobody would otherwise see.
+    public static final double SPEAK_EMOTE_CHANCE = 0.60;
+
+    // Same pleasant palette BotFlavor / BotChatter use for idle chatter (F-keys 1,2,5,6): we skip
+    // the sour ones (3 troubled / 4 cry / 7 stunned) so a random face on an ordinary line reads as
+    // lively, not despondent.
+    private static final int[] SPEAK_EMOTES = {1, 2, 5, 6};
+
+    /**
+     * Speaks a line, and occasionally (see {@link #SPEAK_EMOTE_CHANCE}) flashes a random expression
+     * with it. Use this for ordinary chatter; use {@link #BotSpeakPlain} when the caller already
+     * plays its own emote for the same utterance (scripted dialogue, per-line/event faces).
+     */
     public static void BotSpeak(Character fakechar, String message) {
         if (botChatTypingStyle) {
             BotChatbubbleTyping(fakechar, message, 150);
         } else {
             BotFullChat(fakechar, message);
+        }
+        maybeEmoteOnSpeak(fakechar);
+    }
+
+    /** Speaks a line with no random expression - for callers that manage their own emote. */
+    public static void BotSpeakPlain(Character fakechar, String message) {
+        if (botChatTypingStyle) {
+            BotChatbubbleTyping(fakechar, message, 150);
+        } else {
+            BotFullChat(fakechar, message);
+        }
+    }
+
+    private static void maybeEmoteOnSpeak(Character fakechar) {
+        if (fakechar == null || fakechar.getMap() == null) {
+            return;
+        }
+        if (!GCMovement.isMapObserved(fakechar.getMapId())) {
+            return; // nobody watching - the expression is just a packet, don't pay for it
+        }
+        if (ThreadLocalRandom.current().nextDouble() < SPEAK_EMOTE_CHANCE) {
+            BotEmote(fakechar, SPEAK_EMOTES[ThreadLocalRandom.current().nextInt(SPEAK_EMOTES.length)]);
+        }
+    }
+
+    /**
+     * Plays the emote a spoken line asked for, or - when it asked for none ({@code preferred <= 0}) -
+     * the same random {@link #SPEAK_EMOTE_CHANCE} face {@link #BotSpeak} would. Lets dialogue
+     * playback share the "speaking occasionally shows a face" rule while still honouring a line's
+     * own mood-matched emote when it has one.
+     */
+    public static void emoteAfterLine(Character fakechar, int preferred) {
+        if (preferred > 0) {
+            BotEmote(fakechar, preferred);
+        } else {
+            maybeEmoteOnSpeak(fakechar);
         }
     }
 
@@ -50,6 +104,25 @@ public class SocialCommands {
             BotSpeak(fakechar, message);
             return;
         }
+        BotReplyOnChannel(fakechar, type, player, message);
+    }
+
+    /**
+     * Like {@link #BotReply} but never rolls the random speak-face - for callers that play their own
+     * (mood-matched) emote for the same utterance.
+     */
+    public static void BotReplyPlain(Character fakechar, ChatType type, Character player, String message) {
+        if (fakechar == null || message == null) {
+            return;
+        }
+        if (type == null) {
+            BotSpeakPlain(fakechar, message);
+            return;
+        }
+        BotReplyOnChannel(fakechar, type, player, message);
+    }
+
+    private static void BotReplyOnChannel(Character fakechar, ChatType type, Character player, String message) {
         switch (type) {
             case WHISPER -> BotReplyWhisper(fakechar, player, message);
             case PARTY -> BotReplyParty(fakechar, message);
@@ -139,7 +212,9 @@ public class SocialCommands {
             return;
         }
         for (int i = 0; i < dialogue.size(); i++) {
-            BotSpeak(fakechar, dialogue.get(i));
+            // Plain playback: the dialogue engine plays the node's own emote after the lines, so a
+            // random per-line face here would fight that (and flash a different mood every line).
+            BotSpeakPlain(fakechar, dialogue.get(i));
             if (i < dialogue.size() - 1) { // Skip sleep for the last element
                 BotHelpers.blockingSleep(5000);
             }

@@ -251,7 +251,7 @@ public class DiceBot extends BotSM {
         int sum = rolls[0] + rolls[1];
         boolean isOdd = sum % 2 != 0;
         boolean playerWins = calculateIfPlayerWins(isOdd);
-        SocialCommands.BotSpeak(getChr(), BotMessages.get("dice.result", rolls[0], rolls[1],
+        SocialCommands.BotSpeakPlain(getChr(), BotMessages.get("dice.result", rolls[0], rolls[1],
                 isOdd ? BotMessages.get("dice.result_han") : BotMessages.get("dice.result_cho")));
         SocialCommands.BotEmote(getChr(), 2);
 

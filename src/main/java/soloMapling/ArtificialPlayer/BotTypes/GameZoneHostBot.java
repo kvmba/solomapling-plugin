@@ -20,6 +20,7 @@ import java.util.concurrent.TimeUnit;
 import static soloMapling.ArtificialPlayer.BotCommandsPack.SocialCommands.BotChatbubble;
 import static soloMapling.ArtificialPlayer.BotCommandsPack.SocialCommands.BotEmote;
 import static soloMapling.ArtificialPlayer.BotCommandsPack.SocialCommands.BotSpeak;
+import static soloMapling.ArtificialPlayer.BotCommandsPack.SocialCommands.BotSpeakPlain;
 import static soloMapling.BotLogger.log;
 import static soloMapling.server.SoloMaplingUtilities.random;
 
@@ -304,7 +305,7 @@ public class GameZoneHostBot extends BotSM {
                 return;
             }
         }
-        BotSpeak(getChr(), BotMessages.get("gamezone.no_such_drink"));
+        BotSpeakPlain(getChr(), BotMessages.get("gamezone.no_such_drink"));
         BotEmote(getChr(), 6);
     }
 }

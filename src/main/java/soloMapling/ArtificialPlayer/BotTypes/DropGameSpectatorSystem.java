@@ -15,6 +15,7 @@ import java.util.Random;
 
 import static soloMapling.ArtificialPlayer.BotCommandsPack.SocialCommands.BotEmote;
 import static soloMapling.ArtificialPlayer.BotCommandsPack.SocialCommands.BotSpeak;
+import static soloMapling.ArtificialPlayer.BotCommandsPack.SocialCommands.BotSpeakPlain;
 import static soloMapling.ArtificialPlayer.BotHelpers.convertItemIdToName;
 import static soloMapling.ArtificialPlayer.BotHelpers.isBot;
 import static soloMapling.ArtificialPlayer.BotHelpers.isUnusableItem;
@@ -100,7 +101,7 @@ public class DropGameSpectatorSystem {
         String line = lines.get(random.nextInt(lines.size()));
         line = line.replace("{item}", itemName);
 
-        BotSpeak(bot, line);
+        BotSpeakPlain(bot, line);
 
         List<Integer> emotes = dialog.getEmotes();
         if (emotes != null && !emotes.isEmpty()) {
