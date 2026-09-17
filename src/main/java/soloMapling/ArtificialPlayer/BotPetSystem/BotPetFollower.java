@@ -40,9 +40,13 @@ import java.util.concurrent.TimeUnit;
  * movement profile reduced by {@code (index + 1) * PET_STAT_STEP} points (floored at the base stat),
  * so pet 1 is a touch slower / lower-jumping than its owner, pet 2 a touch more, and so on — and a
  * platform the owner can jump onto is still one its pet can reach. Each pet follows INDEPENDENTLY at
- * its own random distance behind the owner (facing-relative, {@link #FOLLOW_MIN_PX}..{@link #FOLLOW_MAX_PX} px)
- * — there is no pet-to-pet formation — and the distance is re-rolled every time the owner stops
- * moving, so a resting bot's pets settle at fresh, independent spots. Gravity only ever pulls a pet
+ * its own random "comfort" distance from the owner ({@link #FOLLOW_MIN_PX}..{@link #FOLLOW_MAX_PX} px)
+ * — there is no pet-to-pet formation — and that distance is held STABLE (never re-rolled), so a
+ * resting bot's pets simply stand. The follow is a one-sided LEASH: a pet only closes distance when
+ * the owner has drawn MORE than its comfort distance away, and never moves to open the gap. So the
+ * owner turning in place, stepping a little, or walking toward the pet leaves the pet standing — it
+ * never runs around behind the owner and never flees an approaching owner (see
+ * {@link #followTargetX}). Gravity only ever pulls a pet
  * DOWN, so a jumped owner never drags it into the air; a pet whose own feet leave the ground (its
  * owner climbed a platform, or either walked off a ledge) falls under gravity and lands on the floor
  * below. A pet left too far behind HORIZONTALLY warps to the owner's side (official behaviour) — a
@@ -100,6 +104,12 @@ public final class BotPetFollower {
     private static final int PET_HANG_RIGHT = 30;
     private static final int PET_HANG_LEFT = 31;
 
+    /** The {@code act} byte of a PET_CHAT: which of the pet's own chat variants to play. The pet WZ
+     *  {@code chat} animation is index 0 (the host's {@code PetChatHandler} accepts 0..9), and any
+     *  value renders the same speech bubble — the bubble is drawn from the text, the act only picks
+     *  the pet's talking animation. */
+    private static final int PET_CHAT_ACT = 0;
+
     // ── fh (foothold id) sent with a pet — SHARED RULE with the bot ──────────────
     // fh is LIVE data, not decoration: the client reads the 16-bit value and snaps the entity onto
     // the named foothold's footing; a rope/ladder index (high bit set) instead binds it to that rope's
@@ -144,22 +154,26 @@ public final class BotPetFollower {
      *  fallen out of the map and snapped back to the owner. Mirrors the bot driver's own
      *  fall-off-map recovery (see {@link #recoverIfFallenOffMap}). */
     private static final int FALL_OFF_MAP_SLACK_PX = 240;
-    /** The pet holds still until its target drifts this far from its spot (a real pet does not
-     *  shuffle after every tiny step — it waits, then follows). Once it IS moving it keeps going
-     *  until within {@link #FOLLOW_ARRIVE_PX}, so a pet settles at its spot instead of drifting. */
+    /** Slack (px) added to a pet's own comfort distance before it starts closing in: the owner has
+     *  to be this much MORE than the comfort distance away before the pet walks. The
+     *  {@code comfort} is the resting stand-off both when the owner walks TOWARD the pet and when
+     *  it walks AWAY, so the pet neither flees an approaching owner nor shuffles after it. A pet
+     *  that IS moving keeps going until within {@link #FOLLOW_ARRIVE_PX}, so it settles instead of
+     *  drifting. */
     private static final int FOLLOW_DEAD_ZONE_PX = 30;
     /** How close (px) counts as "in the slot": a pet that is already moving stops here, so a pet
-     *  holds a tight, even spacing instead of drifting anywhere inside the wider dead zone. */
+     *  settles at its comfort distance instead of overshooting toward the owner. */
     private static final int FOLLOW_ARRIVE_PX = 4;
     /** Vertical tolerance (px) for treating a floor as the owner's own level. */
     private static final int GROUND_STEP_PX = 40;
 
-    // Each pet follows INDEPENDENTLY behind the owner, at its own random distance in
-    // [FOLLOW_MIN_PX, FOLLOW_MAX_PX] measured along the owner's facing (so a pet is never sent in
-    // front of the owner). There is no pet-to-pet formation: a pet's spot depends only on the
-    // owner, never on where another pet stands. The distance is re-rolled each time the owner STOPS
-    // moving (see {@link #computeFollowTargetXs}), so a resting bot's pets settle at fresh, spread-out spots and
-    // do not shuffle while it walks.
+    // Each pet follows INDEPENDENTLY, holding its own random "comfort" distance in
+    // [FOLLOW_MIN_PX, FOLLOW_MAX_PX] from the owner. That distance is a STABLE per-pet value, never
+    // re-rolled — so a resting bot's pets simply stand, at rest. The follow is a one-sided LEASH
+    // (see {@link #followTargetX}): the pet only closes distance once the owner has drawn more than
+    // its comfort (plus {@link #FOLLOW_DEAD_ZONE_PX}) away, and never moves to open the gap. The
+    // owner turning in place therefore leaves every pet exactly where it stands, and a pet on the
+    // side an owner walks toward holds its ground rather than running around or fleeing.
     private static final int FOLLOW_MIN_PX = 30;
     private static final int FOLLOW_MAX_PX = 80;
 
@@ -186,16 +200,14 @@ public final class BotPetFollower {
     /** Per-bot last-seen map id — detects a map change so the pet skips the tick the host
      *  re-places it (avoids racing the host's placement with a stale-coordinate warp). */
     private static final Map<Integer, Integer> lastMapIdByBot = new ConcurrentHashMap<>();
-    /** Per-bot whether its owner was moving on the previous tick — the fall of this edge (the owner
-     *  stopping) re-rolls every pet's follow distance, so a resting bot's pets pick fresh spots. */
-    private static final Map<Integer, Boolean> lastOwnerMovingByBot = new ConcurrentHashMap<>();
     /** Per-bot whether its owner was hanging on a rope/ladder on the previous tick — the fall of this
      *  edge (the owner stepping off the rope top) re-homes every pet onto the owner's landing, so a
      *  pet left on the now-empty rope column does not free-fall and then warp back (the
      *  pet-drops-then-teleports bug; see the steppedOffRopeTop note in {@link #tickBot}). */
     private static final Map<Integer, Boolean> lastOwnerClimbingByBot = new ConcurrentHashMap<>();
-    /** Per-pet follow distance (px) along the owner's facing, keyed by pet unique id. Re-rolled
-     *  whenever the owner stops; a pet with no entry yet (freshly granted) draws one on its first tick. */
+    /** Per-pet comfort distance (px) from the owner, keyed by pet unique id. Drawn ONCE and held for
+     *  the pet's life, so a resting bot's pets simply stand (the leash closes distance only when the
+     *  owner has drawn further than this; see {@link #followTargetX}). */
     private static final Map<Integer, Integer> followDistanceByPet = new ConcurrentHashMap<>();
     private static ScheduledFuture<?> task;
 
@@ -226,7 +238,6 @@ public final class BotPetFollower {
         vyAir.clear();
         nextSwimBurstAtMs.clear();
         lastMapIdByBot.clear();
-        lastOwnerMovingByBot.clear();
         lastOwnerClimbingByBot.clear();
         followDistanceByPet.clear();
     }
@@ -256,7 +267,6 @@ public final class BotPetFollower {
     public static void forget(int botId) {
         TRACKED.remove(botId);
         lastMapIdByBot.remove(botId);
-        lastOwnerMovingByBot.remove(botId);
         lastOwnerClimbingByBot.remove(botId);
     }
 
@@ -329,15 +339,9 @@ public final class BotPetFollower {
             return;
         }
 
-        // The owner STOPPING is the moment to re-roll every pet's follow distance, so a resting
-        // bot's pets pick fresh, independent spots (see the FOLLOW_MIN/MAX note). lastOwnerMovingByBot
-        // makes this a one-shot edge, not every tick of the stop.
-        boolean ownerMoving = GCMovement.isMoving(chr);
-        if (Boolean.TRUE.equals(lastOwnerMovingByBot.put(botId, ownerMoving)) && !ownerMoving) {
-            rerollFollowDistances(pets);
-        }
-
-        // Each pet's own target x: its independent distance behind the owner (no pet-to-pet formation).
+        // Each pet's own target x: the restraint point of its one-sided leash to the owner (see
+        // followTargetX). This is NOT where the pet should stand — a pet inside its leash does not
+        // move at all — it is the point the pet is only ever pulled TOWARD, never pushed away from.
         int[] followX = computeFollowTargetXs(chr, pets);
 
         // The owner STEPPING OFF A ROPE/LADDER onto the top platform is the moment to re-home every
@@ -737,9 +741,10 @@ public final class BotPetFollower {
         }
         clearMotion(pet.getUniqueId());
         boolean left = CharacterStance.isFacingLeft(chr.getStance());
-        int facing = left ? -1 : 1;
         Point owner = chr.getPosition();
-        int targetX = owner.x - facing * currentFollowDistance(pet);
+        // Re-home onto the pet's OWN side of the leash (followTargetX) — never the owner's facing
+        // side, which would teleport a pet that had fallen on the far side around behind the owner.
+        int targetX = followTargetX(owner.x, p.x, currentFollowDistance(pet));
         WarpLanding land = resolveSafeLanding(map, targetX, owner);
         teleportPet(chr, pet, index, land.pos(), land.fh(),
                 left ? PET_STAND_LEFT : PET_STAND_RIGHT, config, observed);
@@ -858,26 +863,50 @@ public final class BotPetFollower {
     }
 
     /**
-     * The follow target x for every pet slot: each pet's OWN distance behind the owner, measured
-     * along the owner's facing (so a pet is never sent in front of it). There is NO pet-to-pet
-     * formation — a pet's spot depends only on the owner and its own random distance (see
-     * {@link #FOLLOW_MIN_PX}..{@link #FOLLOW_MAX_PX}, re-rolled on each owner stop by
-     * {@link #rerollFollowDistances}). A pet with no recorded distance yet (freshly granted, or the
-     * first unobserved tick) draws one here, so the observed follow and the unobserved position sync
-     * never disagree.
+     * The follow target x for every pet slot: the restraint point of each pet's one-sided leash
+     * (see {@link #followTargetX}). It is NOT where the pet should stand — a pet already within its
+     * comfort distance does not move at all — only the point a pet is pulled TOWARD when the owner
+     * has drawn too far away. There is NO pet-to-pet formation: a pet's leash depends only on the
+     * owner and its own stable comfort distance ({@link #FOLLOW_MIN_PX}..{@link #FOLLOW_MAX_PX}),
+     * drawn once by {@link #currentFollowDistance} and never re-rolled. The observed follow and the
+     * unobserved position sync share this, so a joining player sees no spawn-then-snap.
      */
     private static int[] computeFollowTargetXs(Character chr, Pet[] pets) {
         int[] followX = new int[pets.length];
-        int facing = CharacterStance.isFacingLeft(chr.getStance()) ? -1 : 1;
         int ownerX = chr.getPosition().x;
         for (int i = 0; i < pets.length; i++) {
             Pet pet = pets[i];
             if (pet == null) {
                 continue;
             }
-            followX[i] = ownerX - facing * currentFollowDistance(pet);
+            followX[i] = followTargetX(ownerX, pet.getPos().x, currentFollowDistance(pet));
         }
         return followX;
+    }
+
+    /**
+     * The pure restraint point of a pet's one-sided LEASH — the essence of the follow behaviour.
+     *
+     * <p>Packaged as a static seam (like {@link #shouldResolveFoothold}) so the rule is covered
+     * without a live map. A pet holds its own {@code comfort} distance to the owner and only ever
+     * CLOSES a gap, never opens one:</p>
+     * <ul>
+     *   <li><b>Within the leash</b> ({@code |petX - ownerX| <= comfort}) — including the owner
+     *       turning in place, stepping, or walking toward the pet — the restraint point IS the pet's
+     *       own x, so the walk direction resolves to zero and the pet simply stands. It never runs
+     *       around behind the owner and never flees an approaching one.</li>
+     *   <li><b>Drawn beyond the leash</b> the restraint point sits on the comfort ring on the pet's
+     *       OWN side (never across the owner), so the pet walks just far enough to restore the
+     *       comfort gap and then stops.</li>
+     * </ul>
+     */
+    static int followTargetX(int ownerX, int petX, int comfort) {
+        int delta = petX - ownerX;
+        if (Math.abs(delta) <= comfort) {
+            return petX; // inside the leash: nothing pulls the pet — stand exactly where it is
+        }
+        int side = delta > 0 ? 1 : -1; // the pet's own side, so it is never sent past the owner
+        return ownerX + side * comfort;
     }
 
     /**
@@ -891,26 +920,17 @@ public final class BotPetFollower {
     }
 
     /**
-     * This pet's own follow distance (px) behind the owner: its recorded value, or a fresh random
-     * one drawn (and recorded) on first use — so a freshly granted pet and an unobserved-tick pet
-     * both get a stable distance that the observed follow and the position sync then agree on.
+     * This pet's own comfort distance (px) from the owner: its recorded value, or a fresh random one
+     * drawn (and recorded) on first use — so a freshly granted pet and an unobserved-tick pet both
+     * get a stable distance that the observed follow and the position sync agree on. Drawn once and
+     * held, so a resting bot's pets simply stand (the leash never re-rolls).
      */
     private static int currentFollowDistance(Pet pet) {
         return followDistanceByPet.computeIfAbsent(pet.getUniqueId(), id -> randomFollowDistance());
     }
 
-    /** Re-roll every present pet's follow distance — called the moment the owner stops moving, so a
-     *  resting bot's pets pick fresh, independent spots instead of holding one fixed distance. */
-    private static void rerollFollowDistances(Pet[] pets) {
-        for (Pet pet : pets) {
-            if (pet != null) {
-                followDistanceByPet.put(pet.getUniqueId(), randomFollowDistance());
-            }
-        }
-    }
-
-    /** A fresh follow distance (px) in {@code [FOLLOW_MIN_PX, FOLLOW_MAX_PX]}. Package-private test
-     *  seam (like {@link #shouldResolveFoothold}): pins the band a pet's random offset must fall in. */
+    /** A fresh comfort distance (px) in {@code [FOLLOW_MIN_PX, FOLLOW_MAX_PX]}. Package-private test
+     *  seam (like {@link #shouldResolveFoothold}): pins the band a pet's leash must fall in. */
     static int randomFollowDistance() {
         return FOLLOW_MIN_PX + ThreadLocalRandom.current().nextInt(FOLLOW_MAX_PX - FOLLOW_MIN_PX + 1);
     }
@@ -1054,15 +1074,21 @@ public final class BotPetFollower {
     }
 
     /**
-     * Occasionally have the pet perform one of its own WZ interactions (a sit, a
-     * chat, a trick). The animation and the spoken line both come from the pet's
-     * own data: each pet's {@code Item.wz/Pet/<id>.img/interact} lists the
-     * commands it can do, and the client resolves the speech from
-     * {@code String.wz/PetDialog.img} (localized). We only tell the client which
-     * command to play, exactly as the host's own {@code PetCommandHandler} does.
+     * Have the pet perform one of its own WZ interactions (a sit, a stretch, a trick) AND speak the
+     * matching line. The animation comes from the pet's {@code Item.wz/Pet/<id>.img/interact} menu
+     * (a command the pet can do); the line comes from {@code String.wz/PetDialog.img/<id>}
+     * (localized — the zh-CN data reads Chinese).
      *
-     * <p>Rate-limited per pet and gated to observed maps, so pets read as lively
-     * without flooding a busy map.</p>
+     * <p><b>Two packets, because one is not enough.</b> {@code PET_COMMAND}
+     * ({@code PacketCreator.commandResponse}) carries only the animation index — no text — so it
+     * makes a pet perform without ever speaking (the reported "only an action, no words"). The line
+     * is sent explicitly in a {@code PET_CHAT} ({@code PacketCreator.petChat}), exactly how the host
+     * relays a real player's {@code /pet} chat. The animation and the line are picked from the SAME
+     * command, so a pet never says one thing while doing another; the line is the {@code success}
+     * corpus when the pet obeyed and the {@code fail} corpus when it refused, matching the act.</p>
+     *
+     * <p>Rate-limited per pet and gated to observed maps, so pets read as lively without flooding a
+     * busy map.</p>
      */
     private static void maybeSpeak(Character chr, Pet pet, int index, BotPetConfig config) {
         long now = System.currentTimeMillis();
@@ -1084,16 +1110,24 @@ public final class BotPetFollower {
             return; // no WZ behaviour for this pet / level
         }
         // prob is the pet's chance to OBEY (host rolls it to pick success/fail);
-        // both branches are the pet's own act + line from its WZ, so just relay
-        // which command to play and whether it obeyed.
+        // both branches are the pet's own act + line from its WZ, so relay which
+        // command to play and whether it obeyed.
         boolean obey = PetCommandInterpreter.succeeds(pick, ThreadLocalRandom.current());
         long lo = Math.min(config.speakMinIntervalMs(), config.speakMaxIntervalMs());
         long hi = Math.max(config.speakMinIntervalMs(), config.speakMaxIntervalMs());
         nextSpeakAtMs.put(pet.getUniqueId(),
                 now + lo + ThreadLocalRandom.current().nextLong(Math.max(1, hi - lo)));
         boolean balloon = chr.hasPetChatballoon((byte) index);
+        // The animation (a WZ interact act) — the pet performs.
         chr.getMap().broadcastMessage(chr,
                 PacketCreator.commandResponse(chr.getId(), (byte) index, !obey, pick.index(), balloon), false);
+        // The spoken line — the pet talks. PET_COMMAND carries no text, so WITHOUT this the pet only
+        // ever animates; this is the packet that actually shows the bubble.
+        String line = PetDialogTable.lineFor(pet.getItemId(), pick.index(), obey, ThreadLocalRandom.current());
+        if (line != null) {
+            chr.getMap().broadcastMessage(chr,
+                    PacketCreator.petChat(chr.getId(), (byte) index, PET_CHAT_ACT, line, balloon), false);
+        }
     }
 
     /**
