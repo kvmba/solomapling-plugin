@@ -39,8 +39,14 @@ import java.util.Set;
  *       name resolves through the host's localized String.wz. On a zh-CN server that
  *       means a name carrying han characters ({@link BotHelpers#isUsableItem(int)});
  *       half-finished WZ entries with no Chinese name are dropped.</li>
- *   <li><b>No fame / pet-intimacy titles</b> — medals whose name carries
+ *   <li><b>No fame / pet-intimacy / social titles</b> — medals whose name carries
  *       {@code 人气 / 宠物 / 亲密 / 好友} are excluded.</li>
+ *   <li><b>No event / season titles</b> — medals whose name carries an event/season
+ *       fragment ({@code 2010 / 遗物 / 嘉年华 / 热爱冒险岛}) or whose WZ entry is flagged
+ *       {@code timeLimited} are excluded.</li>
+ *   <li><b>No gaudy "XX王" titles</b> — a name ending in {@code 王} (base name, medal
+ *       suffix stripped) is excluded. Boss-slaying titles such as {@code 暗黑龙王杀手}
+ *       keep their "王" inside the boss name and are unaffected.</li>
  * </ul>
  */
 public final class BotMedalPool {
@@ -52,8 +58,15 @@ public final class BotMedalPool {
     /** Medal equip slot (BodyPart.MEDAL = 49 → client-encoded -49). */
     public static final short MEDAL_SLOT = -49;
 
-    /** Name fragments that mark a title we must NOT hand out. */
-    private static final String[] EXCLUDED_NAME_FRAGMENTS = {"人气", "宠物", "亲密", "好友"};
+    /** Name fragments that mark a title we must NOT hand out (social / event / season). */
+    private static final String[] EXCLUDED_NAME_FRAGMENTS = {
+            "人气", "宠物", "亲密", "好友",   // fame / pet-intimacy / social
+            "2010", "遗物", "嘉年华", "热爱冒险岛" // event / season
+    };
+
+    /** Value-score cut points (see {@link #valueScore(int[])}): &lt;LOW is 低, &lt;HIGH is 中, else 高. */
+    static final int VALUE_LOW_MAX = 10;
+    static final int VALUE_MID_MAX = 20;
 
     /** One admissible medal. Requirements come straight from WZ, read once at load. */
     public static final class Medal {
@@ -65,9 +78,11 @@ public final class BotMedalPool {
         public final int reqInt;
         public final int reqLuk;
         public final int reqPop;
+        /** Display-value score derived from the medal's own inc* bonuses; higher = fancier. */
+        public final int value;
         public final String name;
 
-        Medal(int id, int[] req, String name) {
+        Medal(int id, int[] req, int value, String name) {
             this.id = id;
             this.reqLevel = req[0];
             this.reqJob = req[1];
@@ -76,12 +91,14 @@ public final class BotMedalPool {
             this.reqInt = req[4];
             this.reqLuk = req[5];
             this.reqPop = req[6];
+            this.value = value;
             this.name = name;
         }
 
         @Override
         public String toString() {
-            return id + " " + name + " [lv" + reqLevel + (reqJob == 0 ? "" : " job" + reqJob) + "]";
+            return id + " " + name + " [lv" + reqLevel + (reqJob == 0 ? "" : " job" + reqJob)
+                    + " v" + value + "]";
         }
     }
 
@@ -142,9 +159,15 @@ public final class BotMedalPool {
                         continue; // not a medal
                     }
 
-                    int[] req = readRequirements(file);
+                    int[] req = readStats(file);
                     if (req == null) {
                         continue; // unreadable/half-finished WZ entry
+                    }
+                    // req layout: {reqLevel, reqJob, reqSTR, reqDEX, reqINT, reqLUK, reqPOP,
+                    //              incSTR, incDEX, incINT, incLUK, incMHP, incMMP, incPAD, incMAD,
+                    //              incACC, incEVA, incSpeed, incJump, timeLimited}
+                    if (req[19] != 0) {
+                        continue; // event / limited-time title
                     }
 
                     // Legality gate: real, named (Chinese on a zh-CN server) item.
@@ -153,9 +176,12 @@ public final class BotMedalPool {
                     }
                     String name = BotHelpers.convertItemIdToName(id);
                     if (isExcludedName(name)) {
-                        continue; // 人气 / 宠物亲密度 类称号不投放
+                        continue; // fame / pet / social / event / season
                     }
-                    found.add(new Medal(id, req, name));
+                    if (isGaudyKingTitle(name)) {
+                        continue; // gaudy "XX王" title
+                    }
+                    found.add(new Medal(id, req, valueScore(req), name));
                 }
             }
 
@@ -189,11 +215,45 @@ public final class BotMedalPool {
     }
 
     /**
-     * Reads {@code {reqLevel, reqJob, reqSTR, reqDEX, reqINT, reqLUK, reqPOP}} from a
-     * medal's {@code info}, or null when the entry is unreadable. Read once at load so
-     * the runtime eligibility check never touches WZ.
+     * Whether {@code name} is a gaudy "XX王" title (the base name, medal suffix stripped,
+     * ends in {@code 王} or {@code 王者}). {@code 暗黑龙王杀手} keeps its "王" inside the boss
+     * name and does NOT match — only titles that literally end in 王/王者 are rejected.
      */
-    private static int[] readRequirements(Path file) {
+    static boolean isGaudyKingTitle(String name) {
+        if (name == null || name.equals("NULL")) {
+            return false;
+        }
+        String base = name.endsWith("勋章") ? name.substring(0, name.length() - 2) : name;
+        return base.endsWith("王") || base.endsWith("王者");
+    }
+
+    /**
+     * Display-value score from a medal's own inc* bonuses, used to bias the pool toward
+     * plain titles. Weights are a rough "how impressive does this look" heuristic, not a
+     * combat-power measure (bot combat does not read these; see {@link BotEquipStats}).
+     *
+     * @param s the {@link #readStats} array (indices 7..18 are incSTR..incJump)
+     */
+    static int valueScore(int[] s) {
+        int stat = s[7] + s[8] + s[9] + s[10];            // incSTR/DEX/INT/LUK
+        int hp = (s[11] + s[12]) / 20;                    // incMHP/incMMP
+        int atk = 2 * (s[13] + s[14]);                    // incPAD/incMAD
+        int acc = (s[15] + s[16]) / 4;                    // incACC/incEVA
+        int mov = (s[17] + s[18]) / 3;                    // incSpeed/incJump
+        return stat + hp + atk + acc + mov;
+    }
+
+    /**
+     * Reads the medal's requirement fields plus the inc* bonuses and the event flag, or
+     * null when the entry is unreadable. Read once at load so the runtime eligibility
+     * check never touches WZ. Layout:
+     * <pre>
+     *   0 reqLevel  1 reqJob  2 reqSTR  3 reqDEX  4 reqINT  5 reqLUK  6 reqPOP
+     *   7 incSTR    8 incDEX  9 incINT 10 incLUK 11 incMHP 12 incMMP 13 incPAD
+     *  14 incMAD   15 incACC 16 incEVA 17 incSpeed 18 incJump 19 timeLimited
+     * </pre>
+     */
+    private static int[] readStats(Path file) {
         try (FileInputStream fis = new FileInputStream(file.toFile())) {
             Data itemData = XMLWZData.parse(fis);
             Data info = itemData.getChildByPath("info");
@@ -207,7 +267,20 @@ public final class BotMedalPool {
                     DataTool.getInt("reqDEX", info, 0),
                     DataTool.getInt("reqINT", info, 0),
                     DataTool.getInt("reqLUK", info, 0),
-                    DataTool.getInt("reqPOP", info, 0)
+                    DataTool.getInt("reqPOP", info, 0),
+                    DataTool.getInt("incSTR", info, 0),
+                    DataTool.getInt("incDEX", info, 0),
+                    DataTool.getInt("incINT", info, 0),
+                    DataTool.getInt("incLUK", info, 0),
+                    DataTool.getInt("incMHP", info, 0),
+                    DataTool.getInt("incMMP", info, 0),
+                    DataTool.getInt("incPAD", info, 0),
+                    DataTool.getInt("incMAD", info, 0),
+                    DataTool.getInt("incACC", info, 0),
+                    DataTool.getInt("incEVA", info, 0),
+                    DataTool.getInt("incSpeed", info, 0),
+                    DataTool.getInt("incJump", info, 0),
+                    info.getChildByPath("timeLimited") != null ? 1 : 0
             };
         } catch (Exception e) {
             return null;
