@@ -14,16 +14,15 @@ import java.util.concurrent.ThreadLocalRandom;
  * without a live server.
  *
  * <p><b>Wear probability</b> rises with level from {@link #MIN_LEVEL} (10) to a
- * {@value #P_MAX} cap, reached at {@link #L_CAP}: a bot just off Maple Island wears
- * nothing, a veteran has a one-in-two chance of a title. The bot's level is already
- * final when this runs ({@code BotDecorate.setBotVariables} calls it after
- * {@code BotFame.apply}).
+ * {@value #P_MAX} cap, reached at {@link #L_CAP}. Bots in this server only span levels
+ * {@code 10..80} (see {@code BotDecorate.generateBotLevel}), so the cap is reached
+ * early and roughly {@value #P_MAX} of the population wears a title — "about 60%",
+ * the product brief.
  *
- * <p><b>Tiering</b>: the eligible pool splits into a <i>basic</i> tier
- * ({@code reqLevel == 0}, wear-anywhere titles) and an <i>advanced</i> tier
- * ({@code reqLevel > 0}, titles unlock as the bot levels). The chance of drawing from
- * the advanced tier climbs with level, so low-level bots get plain titles and
- * high-level bots get the fancier ones.
+ * <p><b>Value tiering</b>: medals are split by their WZ-derived {@link
+ * BotMedalPool.Medal#value} into <i>low</i> / <i>mid</i> / <i>high</i>. A draw is
+ * weighted {@code 6:3:1} across those tiers, so the plain titles dominate (~60% of
+ * everything handed out) while the fancier ones stay rare — "配发低价值为主".
  */
 public final class BotMedalAssigner {
 
@@ -31,17 +30,15 @@ public final class BotMedalAssigner {
     public static final int MIN_LEVEL = 10;
 
     /** Ceiling on the share of the population wearing a title. */
-    public static final double P_MAX = 0.50;
+    public static final double P_MAX = 0.65;
 
     /** Level at which the wear probability reaches {@link #P_MAX}. */
-    public static final int L_CAP = 130;
+    public static final int L_CAP = 20;
 
-    /** Advanced (reqLevel > 0) tier only enters play from this level. */
-    public static final int ADV_MIN_LEVEL = 30;
-
-    /** Advanced-tier chance floor / ceiling (scaled between {@link #ADV_MIN_LEVEL} and {@link #L_CAP}). */
-    private static final double ADV_MIN = 0.05;
-    private static final double ADV_MAX = 0.70;
+    /** Tier draw weights: low : mid : high value. */
+    private static final double W_LOW = 6.0;
+    private static final double W_MID = 3.0;
+    private static final double W_HIGH = 1.0;
 
     /** Within a tier, lower ids (older/classic titles) are slightly favoured. */
     private static final double ID_DECAY = 0.0015;
@@ -55,16 +52,7 @@ public final class BotMedalAssigner {
             return 0.0;
         }
         double t = (double) (level - MIN_LEVEL) / (L_CAP - MIN_LEVEL);
-        return Math.min(P_MAX, P_MAX * Math.max(0.0, t));
-    }
-
-    /** Probability of drawing from the advanced tier at {@code level}. */
-    static double advancedChance(int level) {
-        if (level < ADV_MIN_LEVEL) {
-            return 0.0;
-        }
-        double t = (double) (level - ADV_MIN_LEVEL) / (L_CAP - ADV_MIN_LEVEL);
-        return Math.min(ADV_MAX, ADV_MIN + (ADV_MAX - ADV_MIN) * Math.max(0.0, t));
+        return Math.min(P_MAX, P_MAX * Math.max(0.0, Math.min(1.0, t)));
     }
 
     /**
@@ -79,26 +67,56 @@ public final class BotMedalAssigner {
 
     /**
      * Pure core: choose one medal from an already level/job-filtered pool, or null if
-     * the pool is empty. Tiered by {@code reqLevel} with a low-id bias inside the tier.
+     * the pool is empty. Weighted {@code 6:3:1} across the low/mid/high value tiers
+     * (missing tiers drop out and the rest renormalise), with a low-id bias inside the
+     * chosen tier.
+     *
+     * @param level unused for the draw (kept so callers/tests share one signature)
      */
     static Medal pickFrom(List<Medal> eligible, int level, Random rng) {
         if (eligible == null || eligible.isEmpty()) {
             return null;
         }
 
-        List<Medal> basic = new ArrayList<>();
-        List<Medal> advanced = new ArrayList<>();
+        List<Medal> low = new ArrayList<>();
+        List<Medal> mid = new ArrayList<>();
+        List<Medal> high = new ArrayList<>();
         for (Medal m : eligible) {
-            (m.reqLevel == 0 ? basic : advanced).add(m);
+            if (m.value < BotMedalPool.VALUE_LOW_MAX) {
+                low.add(m);
+            } else if (m.value < BotMedalPool.VALUE_MID_MAX) {
+                mid.add(m);
+            } else {
+                high.add(m);
+            }
         }
 
-        List<Medal> tier = (rng.nextDouble() < advancedChance(level) && !advanced.isEmpty())
-                ? advanced
-                : basic;
+        List<Medal> tier = pickTier(low, mid, high, rng);
         if (tier.isEmpty()) {
-            tier = eligible; // requested tier has nothing wearable → use whatever is eligible
+            tier = eligible; // no tier matched (shouldn't happen) → use whatever is eligible
         }
         return weightedById(tier, rng);
+    }
+
+    /** Weighted 6:3:1 draw across the non-empty value tiers; falls back to {@code low}. */
+    private static List<Medal> pickTier(List<Medal> low, List<Medal> mid, List<Medal> high, Random rng) {
+        double total = 0.0;
+        if (!low.isEmpty()) total += W_LOW;
+        if (!mid.isEmpty()) total += W_MID;
+        if (!high.isEmpty()) total += W_HIGH;
+        if (total <= 0.0) {
+            return low;
+        }
+        double roll = rng.nextDouble() * total;
+        if (!low.isEmpty()) {
+            roll -= W_LOW;
+            if (roll <= 0.0) return low;
+        }
+        if (!mid.isEmpty()) {
+            roll -= W_MID;
+            if (roll <= 0.0) return mid;
+        }
+        return high.isEmpty() ? mid : high;
     }
 
     /** Weighted draw favouring lower ids so classic titles recur. */

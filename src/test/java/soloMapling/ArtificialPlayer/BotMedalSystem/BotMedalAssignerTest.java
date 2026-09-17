@@ -16,8 +16,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * Pure-logic checks for the bot 称号 (medal) assignment math — no game server, no WZ.
  *
  * <p>Pins the product rules: no title below level 10, the share wearing one rises
- * monotonically to a 50% ceiling, higher levels favour the advanced (reqLevel>0)
- * tier, and the pick is always one of the supplied (already legal & wearable) medals.
+ * monotonically to a {@value BotMedalAssigner#P_MAX} ceiling reached by {@link
+ * BotMedalAssigner#L_CAP}, the plain (low-value) titles dominate at ~60% of everything
+ * handed out, and the pick is always one of the supplied (already legal &amp; wearable)
+ * medals.
  */
 class BotMedalAssignerTest {
 
@@ -31,51 +33,65 @@ class BotMedalAssignerTest {
     }
 
     @Test
-    void wearChanceRisesMonotonicallyToHalf() {
+    void wearChanceRisesMonotonicallyToCap() {
         double prev = -1.0;
         for (int lv = 1; lv <= 200; lv++) {
             double p = BotMedalAssigner.wearChance(lv);
             assertTrue(p >= prev, "wear chance dropped at level " + lv);
-            assertTrue(p <= BotMedalAssigner.P_MAX + 1e-9, "wear chance exceeded 50% at " + lv);
+            assertTrue(p <= BotMedalAssigner.P_MAX + 1e-9, "wear chance exceeded cap at " + lv);
             prev = p;
         }
-        // Reaches the 50% ceiling and holds there.
-        assertEquals(0.50, BotMedalAssigner.wearChance(BotMedalAssigner.L_CAP), 1e-9);
-        assertEquals(0.50, BotMedalAssigner.wearChance(200), 1e-9);
+        // Reaches the ceiling at L_CAP and holds there.
+        assertEquals(BotMedalAssigner.P_MAX, BotMedalAssigner.wearChance(BotMedalAssigner.L_CAP), 1e-9);
+        assertEquals(BotMedalAssigner.P_MAX, BotMedalAssigner.wearChance(200), 1e-9);
     }
 
     @Test
-    void empiricalShareMatchesCurveAndCapsAtHalf() {
+    void empiricalShareMatchesCurveAndCapsAtCap() {
         Random rng = new Random(7);
-        // Mid-level: about 1 in 3.
-        double at50 = empiricalShare(50, rng, 200_000);
-        assertTrue(at50 > 0.12 && at50 < 0.22, "lvl50 share was " + at50);
-        // Top end never exceeds 50%.
-        double at130 = empiricalShare(130, rng, 200_000);
-        assertTrue(at130 > 0.46 && at130 <= 0.51, "lvl130 share was " + at130);
+        // At the cap level: about 65%.
+        double at20 = empiricalShare(20, rng, 200_000);
+        assertTrue(at20 > 0.61 && at20 < 0.69, "lvl20 share was " + at20);
+        // Halfway up the slope (lv15): about half the cap.
+        double at15 = empiricalShare(15, rng, 200_000);
+        assertTrue(at15 > 0.28 && at15 < 0.37, "lvl15 share was " + at15);
     }
 
     @Test
-    void advancedTierFavouredAtHigherLevels() {
+    void lowValueTierDominatesAtAboutSixtyPercent() {
         Random rng = new Random(3);
-        // Same pool: mostly reqLevel 0 with some reqLevel 70 titles.
-        List<Medal> pool = poolWithAdvanced();
+        // A pool shaped like the live one: many low-value, fewer mid, few high.
+        List<Medal> pool = mixedPool();
 
-        int lowAdvanced = 0;
-        int highAdvanced = 0;
-        for (int i = 0; i < SAMPLES; i++) {
-            if (BotMedalAssigner.pickFrom(pool, 20, rng).reqLevel > 0) lowAdvanced++;
-            if (BotMedalAssigner.pickFrom(pool, 120, rng).reqLevel > 0) highAdvanced++;
+        int low = 0, mid = 0, high = 0;
+        for (int i = 0; i < 200_000; i++) {
+            Medal m = BotMedalAssigner.pickFrom(pool, 50, rng);
+            if (m.value < BotMedalPool.VALUE_LOW_MAX) low++;
+            else if (m.value < BotMedalPool.VALUE_MID_MAX) mid++;
+            else high++;
         }
-        assertTrue(highAdvanced > lowAdvanced,
-                "advanced picks did not rise with level: low=" + lowAdvanced + " high=" + highAdvanced);
-        assertEquals(0, lowAdvanced, "level 20 (below ADV_MIN_LEVEL) should never get an advanced title");
+        double lowShare = low / 200_000.0;
+        assertTrue(lowShare > 0.55 && lowShare < 0.65, "low-value share was " + lowShare);
+        assertTrue(mid > high, "mid tier should outdraw high tier");
+    }
+
+    @Test
+    void missingTierRenormalisesWithoutCrash() {
+        Random rng = new Random(9);
+        // Only high-value medals: the assigner must still pick one.
+        List<Medal> onlyHigh = List.of(medal(1142165, 0, 22), medal(1142151, 50, 20));
+        assertNotNull(BotMedalAssigner.pickFrom(onlyHigh, 100, rng));
+        // Only low-value medals.
+        List<Medal> onlyLow = List.of(medal(1142000, 0, 5), medal(1142004, 0, 6));
+        for (int i = 0; i < 100; i++) {
+            assertTrue(BotMedalAssigner.pickFrom(onlyLow, 50, rng).value < BotMedalPool.VALUE_LOW_MAX);
+        }
     }
 
     @Test
     void pickOnlyReturnsEligibleMedals() {
         Random rng = new Random(11);
-        List<Medal> pool = poolWithAdvanced();
+        List<Medal> pool = mixedPool();
         for (int i = 0; i < 1000; i++) {
             Medal m = BotMedalAssigner.pickFrom(pool, 100, rng);
             assertNotNull(m);
@@ -89,27 +105,19 @@ class BotMedalAssignerTest {
         assertNull(BotMedalAssigner.pickFrom(null, 100, new Random(1)));
     }
 
-    @Test
-    void highestReachesAdvancedTierMostOfTheTimeWhenOnlyAdvancedWearable() {
-        // Only advanced (reqLevel 60) medals in the pool: the assigner must still pick one.
-        List<Medal> onlyAdvanced = List.of(medal(1142153, 60), medal(1142154, 60));
-        assertNotNull(BotMedalAssigner.pickFrom(onlyAdvanced, 100, new Random(2)));
-    }
-
     // ── helpers ─────────────────────────────────────────────────────────────
 
-    private static Medal medal(int id, int reqLevel) {
-        return new Medal(id, new int[]{reqLevel, 0, 0, 0, 0, 0, 0}, "m" + id);
+    private static Medal medal(int id, int reqLevel, int value) {
+        return new Medal(id, new int[]{reqLevel, 0, 0, 0, 0, 0, 0}, value, "m" + id);
     }
 
-    private static List<Medal> poolWithAdvanced() {
+    /** 10 low / 6 mid / 4 high — a rough stand-in for the live 31/34/15 pool shape. */
+    private static List<Medal> mixedPool() {
         List<Medal> pool = new ArrayList<>();
-        for (int id = 1142000; id < 1142010; id++) {   // 10 basic (reqLevel 0)
-            pool.add(medal(id, 0));
-        }
-        for (int id = 1142109; id < 1142114; id++) {   // 5 advanced (reqLevel 70)
-            pool.add(medal(id, 70));
-        }
+        int id = 1142000;
+        for (int i = 0; i < 10; i++) pool.add(medal(id++, 0, 4));   // low
+        for (int i = 0; i < 6; i++) pool.add(medal(id++, 0, 14));   // mid
+        for (int i = 0; i < 4; i++) pool.add(medal(id++, 0, 30));   // high
         return pool;
     }
 
