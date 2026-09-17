@@ -14,12 +14,14 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * mover, pets included).
  *
  * <p>{@code calcStepX} clamps the INTENT step to the remaining distance, but the tick then
- * integrates real momentum (the client's 8ms ground steps). On a precise target — stopDist 0 on a
- * JUMP / straight-DROP launch-waypoint approach, 1 on CLIMB/PORTAL, 4 on a WALK edge — that clamp
- * is far smaller than the travel the current speed carries (~50px of glide-out at walk speed on
- * firm ground): the bot sails through the target, finds it behind it on the next tick, walks back,
- * overshoots again, forever. {@link BotMovementManager#updateStepX} releases the key when either
- * letting go would already land inside the band, or holding one more tick would land past it.
+ * integrates real momentum (the client's 8ms ground steps). On a precise SETTLE target — 1 on
+ * CLIMB/PORTAL, 4 on a WALK edge — that clamp is far smaller than the travel the current speed
+ * carries (~50px of glide-out at walk speed on firm ground): the bot sails through the target,
+ * finds it behind it on the next tick, walks back, overshoots again, forever.
+ * {@link BotMovementManager#updateStepX} releases the key when either letting go would already land
+ * inside the band, or holding one more tick would land past it. A stopDist-0 target is a
+ * LAUNCH-WINDOW approach, not a settle, so it is deliberately exempt (see
+ * {@code aLaunchApproachReachesItsWindow}).
  *
  * <p>A real {@code MapleMap}/{@code Character} cannot be built in a unit test — their constructors
  * trip the Spring-backed {@code Server} static initializer and Mockito is not on the test classpath
@@ -29,7 +31,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * ({@link MapleMovement#groundStep} under the live {@link BotPhysicsEngine#cfg} constants,
  * sub-stepped at {@code TICK_MS / 8ms} with the same carry the engine threads). What is asserted is
  * the emergent behaviour in the three directions the report cares about: the bot settles instead of
- * hunting, it still walks INTO a tight launch window, and a long walk is never throttled by it.
+ * hunting, a launch approach still reaches its window, and a long walk is never throttled by it.
  *
  * <p>Before the fix the same sweep reached 24-31px of settled travel (a full left-right sway) in 30
  * of 77 speed/stopDist cells; after it, 0 of 77.
@@ -130,10 +132,11 @@ class GroundSwayTest {
 
     @Test
     void aStoppedBotNeverSwaysAtAnyPreciseStopDist() {
-        // 0 = JUMP / straight-DROP approach, 1 = CLIMB/PORTAL anchor, 4 = WALK edge and move();
-        // the looser bands (8/16/30) are the non-precise hold radii. Every combination used to
-        // leave the bot pacing around its target; the settled window must be perfectly still.
-        for (int stopDist : new int[]{0, 1, 2, 4, 8, 16, 30}) {
+        // 1 = CLIMB/PORTAL anchor, 4 = WALK edge and move(); the looser bands (8/16/30) are the
+        // non-precise hold radii. Every combination used to leave the bot pacing around its target;
+        // the settled window must be perfectly still. stopDist 0 is NOT a settle — it is a launch-
+        // window approach, covered by aLaunchApproachReachesItsWindow below.
+        for (int stopDist : new int[]{1, 2, 4, 8, 16, 30}) {
             for (int speed : new int[]{95, 100, 105, 110, 120, 125, 140, 160, 180, 200, 250}) {
                 for (int offset : new int[]{1, 2, 3, 5, 8, 12, 16, 20, 30, 40, 60, 90, 150, 300, 800}) {
                     Settle s = settle(speed, 1000 - offset, 1000, stopDist, 500);
@@ -152,8 +155,8 @@ class GroundSwayTest {
     void theBotStopsInsideItsOwnBand() {
         // Settling must not become "stop wherever": the residual distance to the target has to stay
         // inside the caller's band (or one tick of travel, whichever is wider — whole pixels mean a
-        // 0px band cannot be hit exactly).
-        for (int stopDist : new int[]{0, 1, 4, 8, 30}) {
+        // tight band cannot be hit exactly).
+        for (int stopDist : new int[]{1, 4, 8, 30}) {
             for (int speed : new int[]{100, 105, 125, 200, 250}) {
                 int allowed = Math.max(stopDist, walkStep(new BotMovementProfile(speed, 100)));
                 for (int offset : new int[]{5, 40, 200, 800}) {
@@ -168,20 +171,50 @@ class GroundSwayTest {
     }
 
     @Test
-    void aTightLaunchWindowIsStillEntered() {
-        // The point of stopDist=0 is to walk INTO a launch window; 2px is the tightest in the game
-        // (El Nath, fs=0.2). The contract the nav actually uses is its own exec gate —
-        // |botX - launchX| <= walkStep — so a release rule that parks the bot outside that gate
-        // would make the committed edge impossible to fire. That is the regression this pins.
+    void aLaunchApproachReachesItsWindow() {
+        // stopDist=0 is a LAUNCH-WINDOW approach (JUMP and straight-DROP from preciseNavStopDist; a
+        // directional walk-off drop from planGroundAction), NOT a settle: the bot must walk INTO the
+        // window and KEEP its momentum. The nav's own 0-tolerance gates decide the fire — a
+        // directional walk-off drop needs botPos.x >= startPoint.x, a JUMP/straight-drop needs
+        // botPos.x inside [launchMinX, launchMaxX]. A release that coasts to a halt just short of the
+        // window leaves the committed edge impossible to fire ("reaches the ledge and stands there
+        // forever"), which is what this pins.
+        int windowMin = 1000;
+        int windowMax = 1040;
         for (int speed : new int[]{95, 100, 105, 110, 120, 125, 140, 160, 180, 200, 250}) {
-            int gate = walkStep(new BotMovementProfile(speed, 100));
+            // Directional walk-off drop: the runway start is the steering target and the 0-tolerance gate.
             for (int offset : new int[]{6, 20, 60, 200, 600, 1200}) {
-                Settle s = settle(speed, 1000 - offset, 1000, 0, 600);
-                assertTrue(Math.abs(s.finalX() - 1000) <= gate,
-                        "speed=" + speed + " offset=" + offset + ": settled at " + s.finalX()
-                                + ", outside the launch gate (|dx| <= " + gate + ")");
+                Walker w = new Walker(new BotMovementProfile(speed, 100), windowMin - offset);
+                w.state.navEdge = directionalDrop(windowMin, windowMax);
+                boolean reached = false;
+                for (int t = 0; t < 1000 && !reached; t++) {
+                    w.tick(windowMin, 0);
+                    reached = w.x() >= windowMin; // the drop's own gate: botPos.x >= startPoint.x
+                }
+                assertTrue(reached, "speed=" + speed + " offset=" + offset
+                        + ": never reached the walk-off runway (stopped at " + w.x()
+                        + ", runway start " + windowMin + ")");
+            }
+            // JUMP / straight-drop: steer to clamp(botX, minX+4, maxX-4); the bot must enter the window.
+            for (int offset : new int[]{6, 20, 60, 200, 600, 1200}) {
+                Walker w = new Walker(new BotMovementProfile(speed, 100), windowMin - offset);
+                boolean entered = false;
+                for (int t = 0; t < 1000 && !entered; t++) {
+                    int target = Math.clamp(w.x(), windowMin + 4, windowMax - 4);
+                    w.tick(target, 0);
+                    entered = w.x() >= windowMin && w.x() <= windowMax;
+                }
+                assertTrue(entered, "speed=" + speed + " offset=" + offset
+                        + ": never entered the launch window [" + windowMin + "," + windowMax + "]");
             }
         }
+    }
+
+    /** A directional walk-off DROP edge: launchStepX != 0, runway start at {@code startX}. */
+    private static BotNavigationGraph.Edge directionalDrop(int startX, int endX) {
+        return new BotNavigationGraph.Edge(1, 2, BotNavigationGraph.EdgeType.DROP,
+                new Point(startX, 0), new Point(endX, 300),
+                /*launchStepX*/ 12, 0, 0, 0, 0, 500);
     }
 
     @Test
