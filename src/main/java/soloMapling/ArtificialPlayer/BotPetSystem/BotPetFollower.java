@@ -346,7 +346,7 @@ public final class BotPetFollower {
      * lags then catches up rather than being snapped on) and falls under gravity when
      * its own feet are unsupported. Gravity only ever pulls DOWN, so a jumped or
      * falling owner never drags the pet up; a pet left too far from the owner is
-     * warped to its side ({@link #teleportPet}).
+     * warped to a real footing beside it ({@link #teleportPet} / {@link #safeLanding}).
      */
     private static void followLand(Character chr, Pet pet, int index, int tx, Foothold standing,
                                    BotPetConfig config, boolean observed) {
@@ -380,13 +380,8 @@ public final class BotPetFollower {
         if (Math.abs(p.x - owner.x) > LOST_PX || (!CharacterStance.isJumping(chr.getStance())
                 && owner.y < p.y - JUMP_REACH_PX)) {
             clearMotion(id);
-            // Snap onto the owner's own terrain via the engine's bidirectional probe, so the pet
-            // reappears standing where a bot would (a sloped/stepped surface, not a down-only miss).
-            // fh = the real foothold id (land); 0 when the probe finds nothing (pet stays on the
-            // owner's y — the fh rule: a bogus id would snap it to the wrong surface).
-            Foothold fh = GCMovement.groundFoothold(map, new Point(tx, owner.y));
-            Point snap = fh == null ? new Point(tx, owner.y) : new Point(tx, fh.calculateFooting(tx));
-            teleportPet(chr, pet, index, snap, fh == null ? 0 : fh.getId(),
+            Landing land = safeLanding(map, tx, owner);
+            teleportPet(chr, pet, index, land.pos(), land.fh(),
                     left ? PET_STAND_LEFT : PET_STAND_RIGHT, config, observed);
             return;
         }
@@ -428,10 +423,12 @@ public final class BotPetFollower {
         // (Provided by the caller, which already probed it once for the swim decision.)
         boolean ownerBelow = owner.y > p.y + GROUND_STEP_PX;
         if (ownerBelow && standing != null && standing.isForbidFallDown()) {
-            // A forbidFallDown platform is never pass-through, so the pet cannot drop.
-            // fh 0: placed AT the owner's level (a real floor) and re-grounded next tick; sending
-            // the footing id here would fight that (fh rule).
-            teleportPet(chr, pet, index, new Point(tx, owner.y), 0,
+            // A forbidFallDown platform is never pass-through, so the pet cannot drop. Warp onto a
+            // real footing at the owner's level (safeLanding keeps it on a surface within a step of
+            // the owner, not the owner's raw y over a gap). fh is the landed foothold id, or 0 when
+            // no surface is in range (the fh rule: a bogus id would snap it to the wrong surface).
+            Landing land = safeLanding(map, tx, owner);
+            teleportPet(chr, pet, index, land.pos(), land.fh(),
                     left ? PET_STAND_LEFT : PET_STAND_RIGHT, config, observed);
             return;
         }
@@ -456,8 +453,11 @@ public final class BotPetFollower {
             Point above = GCMovement.groundAbove(map, owner.x, p.y, probeRise);
             boolean canHop = above != null && above.y < p.y - GROUND_SNAP_PX;
             if (!canHop) {
-                // fh 0: placed AT the owner's level and re-grounded next tick (fh rule).
-                teleportPet(chr, pet, index, new Point(tx, owner.y), 0,
+                // Owner above but no floor within a hop: warp onto a real footing at the owner's
+                // level (safeLanding keeps it on a surface within a step of the owner, never the
+                // owner's raw y over a gap). fh = the landed foothold id, or 0 when none is in range.
+                Landing land = safeLanding(map, tx, owner);
+                teleportPet(chr, pet, index, land.pos(), land.fh(),
                         left ? PET_STAND_LEFT : PET_STAND_RIGHT, config, observed);
                 return;
             }
@@ -596,6 +596,36 @@ public final class BotPetFollower {
     private static Foothold standingOn(MapleMap map, Point p) {
         Foothold fh = GCMovement.groundFoothold(map, p);
         return fh != null && Math.abs(p.y - fh.calculateFooting(p.x)) <= GROUND_STEP_PX ? fh : null;
+    }
+
+    /**
+     * A warp landing that keeps the pet on a REAL footing instead of dropping it off a ledge or into
+     * a gap. The old warps used the raw {@link GCMovement#groundFoothold} probe (no drop cap: it
+     * returns the first floor at ANY depth, e.g. a platform far below, or a swim map's seabed) — so a
+     * warp could deposit the pet far below the owner, or at the owner's raw y over empty air (a pet
+     * dropped into space then falls / re-warps every tick: a flicker loop). This tries the pet's own
+     * slot {@code (tx, owner.y)} first — accepted only when a floor sits within {@link #GROUND_STEP_PX}
+     * of the owner's level ({@link #standingOn}) — then falls back to the owner's OWN column, whose
+     * floor is almost always valid. The returned fh is that floor's id, or 0 when neither column has a
+     * floor in range (the fh rule: land => real id, no floor => 0, never a bogus id).
+     */
+    private static Landing safeLanding(MapleMap map, int tx, Point owner) {
+        Foothold onSlot = standingOn(map, new Point(tx, owner.y));
+        if (onSlot != null) {
+            return new Landing(new Point(tx, onSlot.calculateFooting(tx)), onSlot.getId());
+        }
+        Foothold onOwner = standingOn(map, owner);
+        if (onOwner != null) {
+            return new Landing(new Point(owner.x, onOwner.calculateFooting(owner.x)), onOwner.getId());
+        }
+        // No footing within a step at either column: keep the owner's raw level with fh 0 (safe only
+        // because the slot is over a gap — the pet then follows normally and falls onto whatever is
+        // below, with the same result as the surrounding follow logic).
+        return new Landing(new Point(tx, owner.y), 0);
+    }
+
+    /** A warp landing: where to put the pet and the foothold id to report (0 = none in range). */
+    private record Landing(Point pos, int fh) {
     }
 
     /**
