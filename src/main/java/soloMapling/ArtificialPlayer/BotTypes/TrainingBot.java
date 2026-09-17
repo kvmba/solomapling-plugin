@@ -240,6 +240,7 @@ public class TrainingBot extends BotSM implements GrindTickRegistry.Participant 
     private long lastExpAccrualMs = 0;
     private long nextChatterMs = 0;        // throttle gate for ambient grind chatter
     private long nextBuffMs = 0;           // re-buff gate while grinding (only advances after an actual buff)
+    private boolean silentNextBuff = false; // next buff is an on-arrival re-show: aura only, no cast animation
     private int lastKnownLevel = -1;       // tracks level to detect a level-up worth announcing
 
     // Sleepywood sauna flavor trip — an async errand that runs off the macro FSM; the IN_TOWN tick parks on it.
@@ -858,6 +859,7 @@ public class TrainingBot extends BotSM implements GrindTickRegistry.Participant 
             breaks.schedule(grindUntilMs, resumingFromBreak);
             lastExpAccrualMs = now();
             nextBuffMs = now(); // buff up as soon as a player can see it (looks already-buffed on arrival)
+            silentNextBuff = true; // ...without broadcasting a cast animation at the new arrival
             GrindTickRegistry.getInstance().register(this);
             lastKnownLevel = chr.getLevel();
             if (!resumingFromBreak) {
@@ -1140,7 +1142,11 @@ public class TrainingBot extends BotSM implements GrindTickRegistry.Participant 
         if (!GCMovement.isMapObserved(chr.getMapId())) {
             return; // hold the timer until it's worth showing.
         }
-        BotBuffDriver.forceBuff(chr);
+        if (!GCMovement.isGrounded(chr)) {
+            return; // no buffing from a rope / mid-air; the timer holds, so it fires once grounded.
+        }
+        BotBuffDriver.forceBuff(chr, silentNextBuff);
+        silentNextBuff = false; // one-shot: only the first (on-arrival) show is silent
         nextBuffMs = now() + BUFF_MIN_MS + (long) (rng.nextDouble() * (BUFF_MAX_MS - BUFF_MIN_MS));
     }
 

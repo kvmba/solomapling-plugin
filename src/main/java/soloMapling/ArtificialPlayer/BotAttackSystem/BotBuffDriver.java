@@ -33,7 +33,7 @@ public final class BotBuffDriver {
      * and cheap; safe to call every tick for every bot.
      */
     public static void botBuff(Character bot) {
-        castDueBuffs(bot, false);
+        castDueBuffs(bot, false, false);
     }
 
     /*
@@ -42,7 +42,16 @@ public final class BotBuffDriver {
      * buffs broadcast (0 means this bot's job has no configured buffs).
      */
     public static int forceBuff(Character bot) {
-        return castDueBuffs(bot, true);
+        return castDueBuffs(bot, true, false);
+    }
+
+    /*
+     * As {@link #forceBuff(Character)} but silent: only the persistent aura is shown, never the
+     * cast animation. Used for a bot's on-arrival re-show, so a player walking in sees bots that
+     * already look buffed instead of every bot on the map casting at them at once.
+     */
+    public static int forceBuff(Character bot, boolean silent) {
+        return castDueBuffs(bot, true, silent);
     }
 
     /* Release a despawned bot's recast timers so the map doesn't grow unbounded. */
@@ -62,7 +71,7 @@ public final class BotBuffDriver {
         return true;
     }
 
-    private static int castDueBuffs(Character bot, boolean force) {
+    private static int castDueBuffs(Character bot, boolean force, boolean silent) {
         if (bot == null) return 0;
 
         List<Integer> buffIds = BotBuffConfig.buffsForJob(bot.getJob());
@@ -81,7 +90,7 @@ public final class BotBuffDriver {
             // off-thread (never blocks the caller). The recast timer is set now so the
             // loop won't re-trigger before the scheduled cast runs. castBuff shows the
             // bot's animation and, for party buffs, spreads to nearby party members.
-            MethodScheduler.runAfterDelay(() -> BotBuffEffects.castBuff(bot, sid), cast * STAGGER_MS);
+            MethodScheduler.runAfterDelay(() -> BotBuffEffects.castBuff(bot, sid, silent), cast * STAGGER_MS);
 
             int durationMs = BotBuffEffects.durationOf(sid);
             long recastAt = durationMs > 0 ? now + (long) (durationMs * 0.9) : now + FALLBACK_RECAST_MS;

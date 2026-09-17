@@ -37,6 +37,18 @@ public final class BotBuffEffects {
      * skill/effect can't be resolved. Does NOT apply any stat.
      */
     public static int showBuff(Character bot, int skillId) {
+        return showBuff(bot, skillId, false);
+    }
+
+    /*
+     * As {@link #showBuff(Character, int)}, but when silent is true the map-wide cast animation
+     * (showBuffEffect) is skipped and only the persistent aura (giveForeignBuff) is broadcast.
+     * Used for the on-arrival re-show: a bot that meets a player should look as if it was ALREADY
+     * buffed (the aura is simply there), not be caught mid-cast playing a buff animation for the
+     * new arrival. The periodic re-buff keeps the default (animated) path - a grinder topping
+     * itself up mid-session is normal and reads as organic.
+     */
+    public static int showBuff(Character bot, int skillId, boolean silent) {
         if (bot == null || bot.getMap() == null) return 0;
 
         // Casting a skill is never done from the saddle - drop the mount first so the
@@ -52,13 +64,15 @@ public final class BotBuffEffects {
         Skill skill = SkillFactory.getSkill(skillId);
         if (skill == null) return 0;
 
-        bot.getMap().broadcastMessage(bot,
-                PacketCreator.showBuffEffect(bot.getId(), skillId, CAST_EFFECT_ID), false);
-
         // The persistent aura needs the buff's stat list (cheap memoized lookup,
         // no applyTo). Skip silently if the skill has no stat ups.
         StatEffect effect = skill.getEffect(skill.getMaxLevel());
         if (effect == null) return 0;
+
+        if (!silent) {
+            bot.getMap().broadcastMessage(bot,
+                    PacketCreator.showBuffEffect(bot.getId(), skillId, CAST_EFFECT_ID), false);
+        }
 
         if (!effect.getStatups().isEmpty()) {
             bot.getMap().broadcastMessage(bot,
@@ -92,7 +106,13 @@ public final class BotBuffEffects {
      * buff's WZ duration (ms) for recast cadence.
      */
     public static int castBuff(Character bot, int skillId) {
-        showBuff(bot, skillId);
+        return castBuff(bot, skillId, false);
+    }
+
+    /* As {@link #castBuff(Character, int)} but with the silent on-arrival re-show semantics of
+     * {@link #showBuff(Character, int, boolean)}: no cast animation, only the aura (+ party spread). */
+    public static int castBuff(Character bot, int skillId, boolean silent) {
+        showBuff(bot, skillId, silent);
 
         Skill skill = SkillFactory.getSkill(skillId);
         if (skill == null) return 0;
