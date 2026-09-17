@@ -103,6 +103,11 @@ public final class BotPetFollower {
     //     non-zero id forces the client to snap it onto that foothold, off the rope / out of the air.
     //     The bot sends its rope's negative index (the encoding above); a PET has no rope-index form,
     //     so it sends 0 and conveys the rope through the HANG stance instead.
+    //   • SUMMON (BotPetController.placeAtBot and the host's MapleMap.addPlayer re-summon): fh is
+    //     always 0. A bot pet is COORDINATE-DRIVEN — the client's fh-based foothold landing applies
+    //     to a real player's own character, not to a bot entity, so fh 0 tells the client to place
+    //     the pet at the coordinates we send and not adhere it to a foothold. The pet starts at the
+    //     owner's position; the follower grounds it from its own following ticks.
     // Every fh passed below is one of those cases; do not invent another.
 
     // The pet runs its OWN physics (the client only renders the position/fh/velocity

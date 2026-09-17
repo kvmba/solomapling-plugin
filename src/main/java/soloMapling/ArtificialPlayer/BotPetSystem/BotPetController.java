@@ -3,6 +3,7 @@ package soloMapling.ArtificialPlayer.BotPetSystem;
 import org.gms.client.Character;
 import org.gms.client.inventory.InventoryType;
 import org.gms.client.inventory.Pet;
+import org.gms.constants.game.CharacterStance;
 import org.gms.constants.inventory.ItemConstants;
 import org.gms.constants.inventory.PetEquipSlot;
 import org.gms.server.maps.Foothold;
@@ -30,8 +31,10 @@ public final class BotPetController {
 
     /** Horizontal spread between a bot's pets so they do not stack on one pixel. */
     private static final int SPAWN_X_SPREAD = 22;
-    /** Pet STAND-right stance (see BotPetFollower); 0 is the pet's MOVE pose, not stand. */
+    /** Pet STAND poses (see BotPetFollower). 0 is the pet's MOVE pose, not a stand — the summon
+     *  must pick the one matching the bot's own facing, not a fixed side. */
     private static final int PET_STAND_RIGHT = 4;
+    private static final int PET_STAND_LEFT = 5;
 
     /**
      * Give {@code bot} its pets, if the policy says so. Idempotent: a bot that
@@ -175,14 +178,16 @@ public final class BotPetController {
 
     /**
      * Place a pet near the bot. On land it stands on the floor under its own x; in
-     * a swim map footholds are the seabed / can be missing, so it floats (fh=0)
-     * and the follower glides it instead. Pets are nudged apart by index so a
-     * multi-pet bot's pets do not stack on one pixel.
+     * a swim map footholds are the seabed / can be missing, so it floats at the
+     * owner's y. Pets are nudged apart by index so a multi-pet bot's pets do not
+     * stack on one pixel.
      *
-     * <p>fh follows the SHARED fh rule (see BotPetFollower's class header): the real foothold id on
-     * land, 0 in water. The client snaps the pet onto this id, so the spawn must be the same surface
-     * the follower will land it on — hence {@link GCMovement#footholdBelow} here and {@code standingOn}
-     * there both resolve the floor under the pet's own x.
+     * <p>fh is <b>0</b>. A bot pet is COORDINATE-DRIVEN: the client's fh-based foothold landing
+     * is handled for a real player's own character, not for a bot entity — so fh 0 makes the
+     * client place the pet at the coordinates we send and not adhere it to a foothold. That is
+     * exactly what summon wants: the pet starts at the owner's position, and the follower grounds
+     * it from its own following ticks. The map-entry re-summon ({@code MapleMap.addPlayer}) likewise
+     * sends fh 0.
      */
     static void placeAtBot(Character bot, Pet pet, int index) {
         MapleMap map = bot.getMap();
@@ -190,16 +195,10 @@ public final class BotPetController {
         int x = pos.x + (index + 1) * SPAWN_X_SPREAD;
         Point p = new Point(x, map != null && map.isSwim() ? pos.y : groundY(map, x, pos.y));
         pet.setPos(p);
-        pet.setStance(PET_STAND_RIGHT); // 4; 0 is the pet's MOVE pose, not stand
-        pet.setFh(map != null && map.isSwim() ? 0 : footholdId(map, p)); // fh rule: land id / water 0
-    }
-
-    static int footholdId(MapleMap map, Point p) {
-        if (map == null) {
-            return 0;
-        }
-        Foothold fh = GCMovement.footholdBelow(map, p.x, p.y);
-        return fh == null ? 0 : fh.getId();
+        // Stand facing the same way the bot does, not a fixed side: the pet spawns already
+        // turned the way its owner is, instead of snapping round on the first follow tick.
+        pet.setStance(CharacterStance.isFacingLeft(bot.getStance()) ? PET_STAND_LEFT : PET_STAND_RIGHT);
+        pet.setFh(0); // summon: fh 0 => client uses our coordinates, no foothold adherence
     }
 
     /** The y of the floor under x, falling back to {@code fallbackY} when there is none. */
