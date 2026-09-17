@@ -345,6 +345,11 @@ public abstract class BotSM implements EventSubscriber {
         SocialCommands.BotReply(getChr(), replyChannel(), replyChannelTarget(), line);
     }
 
+    /** As {@link #sayReply}, but no random speak-face - the caller plays its own emote. */
+    public void sayReplyPlain(String line) {
+        SocialCommands.BotReplyPlain(getChr(), replyChannel(), replyChannelTarget(), line);
+    }
+
     /**
      * Answers a player's social line (greeting / praise / joke / insult...) with this bot's own
      * dialogue - its pack's node if it has one, else the shared social pool. The reply goes back on

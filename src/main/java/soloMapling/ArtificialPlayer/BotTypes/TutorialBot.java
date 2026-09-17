@@ -34,6 +34,7 @@ import java.util.concurrent.TimeUnit;
 import static soloMapling.ArtificialPlayer.BotCommandsPack.DropCommands.botLootSelectedItems;
 import static soloMapling.ArtificialPlayer.BotCommandsPack.SocialCommands.BotEmote;
 import static soloMapling.ArtificialPlayer.BotCommandsPack.SocialCommands.BotSpeak;
+import static soloMapling.ArtificialPlayer.BotCommandsPack.SocialCommands.BotSpeakPlain;
 import static soloMapling.ArtificialPlayer.BotCommandsPack.DropCommands.botThrowEquipsInARow;
 import static soloMapling.ArtificialPlayer.BotCommandsPack.VFXCommands.botScrollSuccess;
 import static soloMapling.ArtificialPlayer.BotHelpers.convertItemIdToName;
@@ -302,7 +303,7 @@ public class TutorialBot extends BotSM {
             }
         }
         // If no matching item is found
-        BotSpeak(getChr(), BotMessages.get("tutorial.type_name_correctly"));
+        BotSpeakPlain(getChr(), BotMessages.get("tutorial.type_name_correctly"));
         BotEmote(getChr(), 6);
     }
 

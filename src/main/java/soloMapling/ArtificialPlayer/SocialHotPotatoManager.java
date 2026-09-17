@@ -283,7 +283,7 @@ public class SocialHotPotatoManager {
         String category = SOCIAL_CATEGORIES[random.nextInt(SOCIAL_CATEGORIES.length)];
         String line = getRandomLine(SOCIAL_DIALOGUE_PATH, SOCIAL_BOT_TYPE, category);
         if (line != null) {
-            BotSpeak(bot, line);
+            BotSpeakPlain(bot, line);
         }
     }
 

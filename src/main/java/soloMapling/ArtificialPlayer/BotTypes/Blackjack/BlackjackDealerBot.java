@@ -333,7 +333,7 @@ public class BlackjackDealerBot extends BotSM {
             SocialCommands.BotSpeak(getChr(), BotMessages.get("blackjack.bust"));
             triggerDealerReaction("DealerLoss");
         } else if (handValue == 21) {
-            SocialCommands.BotSpeak(getChr(), BotMessages.get("blackjack.dealer_twenty_one"));
+            SocialCommands.BotSpeakPlain(getChr(), BotMessages.get("blackjack.dealer_twenty_one"));
             SocialCommands.BotEmote(getChr(), 3);
         }
 
@@ -667,7 +667,7 @@ public class BlackjackDealerBot extends BotSM {
         SocialCommands.BotEmote(player.getCharacter(), dialog.getEmote());
         if (random.nextDouble() < 0.30) {
             String line = dialog.getDialogue(random.nextInt(dialog.getDialogue().size()));
-            SocialCommands.BotSpeak(player.getCharacter(), line);
+            SocialCommands.BotSpeakPlain(player.getCharacter(), line);
         }
     }
 
@@ -678,7 +678,7 @@ public class BlackjackDealerBot extends BotSM {
         SocialCommands.BotEmote(getChr(), dialog.getEmote());
         if (random.nextDouble() < 0.55) {
             String line = dialog.getDialogue(random.nextInt(dialog.getDialogue().size()));
-            SocialCommands.BotSpeak(getChr(), line);
+            SocialCommands.BotSpeakPlain(getChr(), line);
         }
     }
 
@@ -707,7 +707,7 @@ public class BlackjackDealerBot extends BotSM {
                     }
                 }
 
-                SocialCommands.BotSpeak(botChr, spokenLine);
+                SocialCommands.BotSpeakPlain(botChr, spokenLine);
 
                 if (decision.equals("hit")) {
                     player.setResponseStatus("RESPONDED");

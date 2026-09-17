@@ -20,6 +20,7 @@ import java.util.concurrent.ThreadLocalRandom;
 
 import static soloMapling.ArtificialPlayer.BotCommandsPack.SocialCommands.BotEmote;
 import static soloMapling.ArtificialPlayer.BotCommandsPack.SocialCommands.BotSpeak;
+import static soloMapling.ArtificialPlayer.BotCommandsPack.SocialCommands.BotSpeakPlain;
 import static soloMapling.ArtificialPlayer.BotHelpers.isBot;
 import static soloMapling.ArtificialPlayer.BotMovementSystem.MovementCommands.botFaceTowardsPoint;
 
@@ -229,7 +230,7 @@ public final class BotChatter {
             }
             line = filled.get();
         }
-        BotSpeak(speaker, line);
+        BotSpeakPlain(speaker, line);
         if (ThreadLocalRandom.current().nextDouble() < CHATTER_EMOTE_CHANCE) {
             BotEmote(speaker, FRIENDLY_EMOTES[ThreadLocalRandom.current().nextInt(FRIENDLY_EMOTES.length)]);
         }
