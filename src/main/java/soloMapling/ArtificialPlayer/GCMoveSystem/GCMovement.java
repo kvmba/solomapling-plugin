@@ -862,6 +862,23 @@ public final class GCMovement {
     }
 
     /**
+     * A nearby follower's jump — vertical launch speed (px/s, positive up) and rise (px) — taken
+     * from the SAME movement profile the engine drives {@code owner} with, so a follower hops
+     * exactly as high as its owner can. The pet follower uses this so a platform the owner can jump
+     * onto is never one its pet cannot reach: the pet's hop rises by the owner's own jump feel
+     * (apex = v^2/2g), not a fixed base-stat hop.
+     */
+    public static JumpFeel jumpFeel(Character owner) {
+        float jumpPxs = BotMovementProfile.fromCharacter(owner).jumpSpeedPxs();
+        int rise = (int) (jumpPxs * jumpPxs / (2.0 * MapleMovement.GRAVITY_PXS2));
+        return new JumpFeel(jumpPxs, rise);
+    }
+
+    /** A follower's hop: the launch speed (px/s, up) and the rise (px) it can clear. */
+    public record JumpFeel(float jumpSpeedPxs, int risePx) {
+    }
+
+    /**
      * The foothold the bot engine itself stands a character on at {@code p} — the SAME bidirectional
      * probe the bot walks with ({@link BotPhysicsEngine#findGroundFoothold}: the surface at the
      * point OR up to {@code MAX_SLOPE_UP} above / a step below, picking the closer). A ground
