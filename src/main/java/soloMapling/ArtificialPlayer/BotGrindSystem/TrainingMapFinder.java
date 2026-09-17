@@ -16,6 +16,10 @@ import java.util.Set;
 // allowed original-content regions are rejected (TrainingRegions) so a bot never grinds/warps into a
 // single-person instance or into Leafre / Aqua Road / new-school content even if a portal reaches it.
 //
+// Level/count come from MapMobIndex's HUNTABLE view (grindable mobs only - not boss-flagged, exp>0),
+// not the all-spawns view: a map that only lists caged "exhibit" animals (the Aquarium zoo, 230000003)
+// must never be offered as a hunting ground, however many display mobs it holds.
+//
 // Our own creation. Replaces TrainingBot's old REGIONS table.
 public final class TrainingMapFinder {
 
@@ -72,9 +76,9 @@ public final class TrainingMapFinder {
                 continue; // outside original-content regions (Leafre / Aqua Road / new-school etc.)
             }
             MapMobIndex.MapMobInfo info = MapMobIndex.info(mapId);
-            int lvl = info.medianLevel();
-            if (lvl < 1 || info.mobCount() < MIN_MOB_COUNT) {
-                continue; // no mobs (town) or too few to be a grind map
+            int lvl = info.huntableMedianLevel();
+            if (lvl < 1 || info.huntableCount() < MIN_MOB_COUNT) {
+                continue; // no grindable mobs (town, or an exhibit-only map like the zoo) / too few
             }
             if (lvl >= minMob && lvl <= maxMob) {
                 eligible.add(new TrainingMap(mapId, lvl, hops));

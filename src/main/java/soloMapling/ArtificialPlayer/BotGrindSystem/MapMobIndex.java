@@ -20,6 +20,14 @@ import java.util.concurrent.ConcurrentHashMap;
 // comes from its MonsterStats. Lazy per map, cached forever after. Deterministic - no recordings, no
 // config. Maps with no mobs (towns) report level -1 and are naturally skipped by callers.
 //
+// Two counts are kept per map, and the difference matters:
+//   - mobCount / medianLevel cover EVERY mob spawn, including non-combat "exhibit" mobs (boss-flagged
+//     caged/display animals with no meaningful exp — e.g. the zoo on 230000003). Town-presence and
+//     death/field consumers want "does this map have mobs at all".
+//   - huntableCount / huntableMedianLevel cover only mobs a bot may actually grind (not boss-flagged,
+//     positive exp). A training bot must key off THESE, or it will pick a caged-exhibit map as a
+//     hunting ground and swing at animals that grant nothing.
+//
 // Our own creation. Lets a TrainingBot discover level-appropriate nearby maps without a hand-authored
 // table.
 public final class MapMobIndex {
@@ -34,8 +42,12 @@ public final class MapMobIndex {
     public record SpawnPos(int x, int y, int fhGroup) {
     }
 
-    public record MapMobInfo(int medianLevel, int mobCount, List<Integer> mobIds, List<SpawnPos> spawnPoints) {
-        static final MapMobInfo NONE = new MapMobInfo(-1, 0, List.of(), List.of());
+    // medianLevel/mobCount span EVERY mob spawn (incl. exhibit/boss "display" mobs) — the "has mobs at
+    // all" view. huntableMedianLevel/huntableCount span only grindable mobs (not boss-flagged, exp>0),
+    // which is the count a TRAINING bot must select by. Both are -1 / 0 when the respective set is empty.
+    public record MapMobInfo(int medianLevel, int mobCount, int huntableMedianLevel, int huntableCount,
+                             List<Integer> mobIds, List<SpawnPos> spawnPoints) {
+        static final MapMobInfo NONE = new MapMobInfo(-1, 0, -1, 0, List.of(), List.of());
     }
 
     // Shared, lazily-created WZ handle. Deliberately NOT a ThreadLocal: bot ticks are dispatched
@@ -68,6 +80,7 @@ public final class MapMobIndex {
 
     private static final Map<Integer, MapMobInfo> CACHE = new ConcurrentHashMap<>();
     private static final Map<Integer, Integer> MOB_LEVEL = new ConcurrentHashMap<>();
+    private static final Map<Integer, Boolean> HUNTABLE = new ConcurrentHashMap<>();
 
     // Representative (median) mob level of a map, or -1 if it has no mobs (towns, etc.).
     public static int level(int mapId) {
@@ -107,6 +120,7 @@ public final class MapMobIndex {
             }
             Map<Integer, Integer> fhGroups = footholdGroups(mapData);
             List<Integer> levels = new ArrayList<>();
+            List<Integer> huntableLevels = new ArrayList<>();
             List<Integer> mobIds = new ArrayList<>();
             List<SpawnPos> positions = new ArrayList<>();
             for (Data entry : life) {
@@ -126,6 +140,9 @@ public final class MapMobIndex {
                 int lvl = mobLevel(mobId);
                 if (lvl > 0) {
                     levels.add(lvl);
+                    if (isHuntable(mobId)) {
+                        huntableLevels.add(lvl);
+                    }
                     mobIds.add(mobId);
                     // x + cy is what MapFactory feeds calcPointBelow for the live spawn point; close
                     // enough for cluster counting without loading the map.
@@ -139,7 +156,11 @@ public final class MapMobIndex {
                 return MapMobInfo.NONE;
             }
             Collections.sort(levels);
-            return new MapMobInfo(levels.get(levels.size() / 2), levels.size(), mobIds, positions);
+            Collections.sort(huntableLevels);
+            int huntableMedian = huntableLevels.isEmpty()
+                    ? -1 : huntableLevels.get(huntableLevels.size() / 2);
+            return new MapMobInfo(levels.get(levels.size() / 2), levels.size(),
+                    huntableMedian, huntableLevels.size(), mobIds, positions);
         } catch (RuntimeException e) {
             return MapMobInfo.NONE;
         }
@@ -198,6 +219,28 @@ public final class MapMobIndex {
                 return (m == null || m.getStats() == null) ? -1 : m.getStats().getLevel();
             } catch (RuntimeException e) {
                 return -1;
+            }
+        });
+    }
+
+    // Whether a bot may make a grind target of this mob: not a boss, and grants exp. Boss-flagged mobs
+    // are summons, gate-keepers and CAGED DISPLAY ANIMALS (the Aquarium zoo: 9500200-9500204, boss=1,
+    // exp 0-10) — content a training bot must never treat as a hunting ground, however many of them a
+    // map lists. exp>0 additionally drops exp-less script props (e.g. 6130201 小鬼怪, exp 0) that sit on
+    // an otherwise-mobless map and would otherwise read as grindable.
+    //
+    // Memoized like MOB_LEVEL: LifeFactory.getMonster is the expensive part and is already cached by the
+    // level lookup, so this reads cheap after the first touch per mob.
+    private static boolean isHuntable(int mobId) {
+        return HUNTABLE.computeIfAbsent(mobId, id -> {
+            try {
+                Monster m = LifeFactory.getMonster(id);
+                if (m == null || m.getStats() == null) {
+                    return false;
+                }
+                return !m.isBoss() && m.getExp() > 0;
+            } catch (RuntimeException e) {
+                return false;
             }
         });
     }
