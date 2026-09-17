@@ -40,7 +40,7 @@ public final class PetInteractionTable {
     }
 
     private static final Map<Integer, List<Interact>> CACHE = new ConcurrentHashMap<>();
-    private static volatile DataProvider itemWz;
+    private static volatile DataProvider itemProvider;
 
     private PetInteractionTable() {
     }
@@ -51,15 +51,15 @@ public final class PetInteractionTable {
         if (cached != null) {
             return cached;
         }
-        List<Interact> loaded = load(petItemId);
+        List<Interact> loaded = loadInteractions(petItemId);
         CACHE.put(petItemId, loaded);
         return loaded;
     }
 
-    private static List<Interact> load(int petItemId) {
+    private static List<Interact> loadInteractions(int petItemId) {
         List<Interact> out = new ArrayList<>();
         try {
-            DataProvider provider = itemWz();
+            DataProvider provider = itemProvider();
             if (provider == null) {
                 return out;
             }
@@ -72,7 +72,7 @@ public final class PetInteractionTable {
                 return out;
             }
             for (Data entry : interact.getChildren()) {
-                Integer index = asInt(entry.getName());
+                Integer index = parseIntOrNull(entry.getName());
                 if (index == null) {
                     continue;
                 }
@@ -88,20 +88,20 @@ public final class PetInteractionTable {
         return List.copyOf(out);
     }
 
-    private static DataProvider itemWz() {
-        DataProvider p = itemWz;
+    private static DataProvider itemProvider() {
+        DataProvider p = itemProvider;
         if (p == null) {
             synchronized (PetInteractionTable.class) {
-                if (itemWz == null) {
-                    itemWz = DataProviderFactory.getDataProvider(WZFiles.ITEM);
+                if (itemProvider == null) {
+                    itemProvider = DataProviderFactory.getDataProvider(WZFiles.ITEM);
                 }
-                p = itemWz;
+                p = itemProvider;
             }
         }
         return p;
     }
 
-    private static Integer asInt(String s) {
+    private static Integer parseIntOrNull(String s) {
         if (s == null || s.isEmpty()) {
             return null;
         }

@@ -64,7 +64,7 @@ public final class BotPetPool {
                 List<Integer> loaded = new ArrayList<>();
                 Set<Integer> seen = new HashSet<>();
                 for (Object entry : list) {
-                    Integer id = toId(entry);
+                    Integer id = parsePetId(entry);
                     if (id != null && ItemConstants.isPet(id) && seen.add(id)) {
                         loaded.add(id);
                     }
@@ -84,7 +84,7 @@ public final class BotPetPool {
     }
 
     @SuppressWarnings("unchecked")
-    private static Integer toId(Object entry) {
+    private static Integer parsePetId(Object entry) {
         if (entry instanceof Number n) {
             return n.intValue();
         }

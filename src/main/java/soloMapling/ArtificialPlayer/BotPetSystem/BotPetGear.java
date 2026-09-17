@@ -27,24 +27,24 @@ public final class BotPetGear {
     private static final int NAME_TAG_RING_ID = 1822000;
 
     public static boolean equipItemPouch(Character bot, int petIndex, int itemId) {
-        return equip(bot, petIndex, itemId, ItemConstants.PET_EQUIP_SLOTS.get(petIndex).itemPouch());
+        return equipPetItem(bot, petIndex, itemId, ItemConstants.PET_EQUIP_SLOTS.get(petIndex).itemPouch());
     }
 
     public static boolean equipMesoMagnet(Character bot, int petIndex, int itemId) {
-        return equip(bot, petIndex, itemId, ItemConstants.PET_EQUIP_SLOTS.get(petIndex).mesoMagnet());
+        return equipPetItem(bot, petIndex, itemId, ItemConstants.PET_EQUIP_SLOTS.get(petIndex).mesoMagnet());
     }
 
     public static boolean equipNameTag(Character bot, int petIndex) {
         // A name tag only shows if the pet has a real name; harmless otherwise.
-        return equip(bot, petIndex, NAME_TAG_RING_ID, ItemConstants.PET_EQUIP_SLOTS.get(petIndex).nameTag());
+        return equipPetItem(bot, petIndex, NAME_TAG_RING_ID, ItemConstants.PET_EQUIP_SLOTS.get(petIndex).nameTag());
     }
 
     /** @return true when an item was actually written to the slot */
-    private static boolean equip(Character bot, int petIndex, int itemId, short slot) {
+    private static boolean equipPetItem(Character bot, int petIndex, int itemId, short slot) {
         if (bot == null || bot.getInventory(InventoryType.EQUIPPED) == null) {
             return false;
         }
-        Equip source = equipOf(itemId);
+        Equip source = resolveEquipItem(itemId);
         if (source == null) {
             return false;
         }
@@ -58,7 +58,7 @@ public final class BotPetGear {
     }
 
     /** Pet gear are Equip items; {@code getEquipById} returns an {@link Equip}. */
-    private static Equip equipOf(int itemId) {
+    private static Equip resolveEquipItem(int itemId) {
         Item item = ItemInformationProvider.getInstance().getEquipById(itemId);
         return (item instanceof Equip equip) ? equip : null;
     }

@@ -19,6 +19,7 @@ import soloMapling.ArtificialPlayer.GCMoveSystem.GCMovement;
 import soloMapling.ArtificialPlayer.GCMoveSystem.MapleMovement;
 
 import java.awt.Point;
+import java.awt.Rectangle;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -46,7 +47,10 @@ import java.util.concurrent.TimeUnit;
  * left too far behind HORIZONTALLY warps to the owner's side (official behaviour) — a vertical owner
  * move (a jump or a fall) is followed with the pet's own physics instead. It swims (SWIM stance
  * 12/13) while its owner swims, or in a water map whenever its own feet find no ground; a
- * rope/ladder owner makes it hang (HANG, 30/31).</p>
+ * rope/ladder owner makes it hang (HANG, 30/31). Every warp (too far behind, owner unreachable
+ * above, forbidFallDown) lands on a REAL footing via {@link #resolveSafeLanding}, and a pet that
+ * leaves the map's VR bounds is snapped back to the owner as a last resort
+ * ({@link #recoverIfFallenOffMap}) — so a lost-footing pet can never free-fall off the map.</p>
  *
  * <p><b>Map changes are the engine's job.</b> On map entry the engine's own
  * {@code MapleMap.addPlayer} re-places each pet at the owner's feet and re-sends it,
@@ -128,10 +132,14 @@ public final class BotPetFollower {
     private static final int SWIM_LEVEL_BAND_PX = 30;
     private static final int JUMP_REACH_PX = 160;           // owner above this => warp instead
     /** Safety margin (px) under the owner's true hop rise for the up-probe bound: the probe must
-     *  never offer a floor the launch cannot actually clear (see {@link GCMovement#jumpFeel}). */
+     *  never offer a floor the launch cannot actually clear (see {@link GCMovement#jumpProfile}). */
     private static final int JUMP_RISE_MARGIN_PX = 8;
     private static final int GROUND_SNAP_PX = 6;            // "standing on the floor" tolerance
     private static final int LOST_PX = 500;                 // 1-D horizontal gap -> warp to the owner
+    /** Slack (px) past the map's VR rectangle below/left/right at which a pet is treated as
+     *  fallen out of the map and snapped back to the owner. Mirrors the bot driver's own
+     *  fall-off-map recovery (see {@link #recoverIfFallenOffMap}). */
+    private static final int FALL_OFF_MAP_SLACK_PX = 240;
     /** The pet holds still until its target drifts this far from its spot (a real pet does not
      *  shuffle after every tiny step — it waits, then follows). Once it IS moving it keeps going
      *  until within {@link #FOLLOW_ARRIVE_PX}, so a pet settles at its spot instead of drifting. */
@@ -146,7 +154,7 @@ public final class BotPetFollower {
     // [FOLLOW_MIN_PX, FOLLOW_MAX_PX] measured along the owner's facing (so a pet is never sent in
     // front of the owner). There is no pet-to-pet formation: a pet's spot depends only on the
     // owner, never on where another pet stands. The distance is re-rolled each time the owner STOPS
-    // moving (see {@link #followXs}), so a resting bot's pets settle at fresh, spread-out spots and
+    // moving (see {@link #computeFollowTargetXs}), so a resting bot's pets settle at fresh, spread-out spots and
     // do not shuffle while it walks.
     private static final int FOLLOW_MIN_PX = 30;
     private static final int FOLLOW_MAX_PX = 80;
@@ -173,7 +181,7 @@ public final class BotPetFollower {
     private static final Map<Integer, Boolean> lastOwnerMovingByBot = new ConcurrentHashMap<>();
     /** Per-pet follow distance (px) along the owner's facing, keyed by pet unique id. Re-rolled
      *  whenever the owner stops; a pet with no entry yet (freshly granted) draws one on its first tick. */
-    private static final Map<Integer, Integer> followOffsetByPet = new ConcurrentHashMap<>();
+    private static final Map<Integer, Integer> followDistanceByPet = new ConcurrentHashMap<>();
     private static ScheduledFuture<?> task;
 
     private BotPetFollower() {
@@ -183,7 +191,7 @@ public final class BotPetFollower {
         if (task != null) {
             return;
         }
-        rescan();
+        rescanTrackedBots();
         long period = Math.max(100L, config.followTickMs());
         task = soloMapling.server.ExecutorServiceManager.getScheduledExecutorService()
                 .scheduleAtFixedRate(() -> tick(config), period, period, TimeUnit.MILLISECONDS);
@@ -204,7 +212,7 @@ public final class BotPetFollower {
         nextSwimBurstAtMs.clear();
         lastMapIdByBot.clear();
         lastOwnerMovingByBot.clear();
-        followOffsetByPet.clear();
+        followDistanceByPet.clear();
     }
 
     /**
@@ -212,7 +220,7 @@ public final class BotPetFollower {
      * stop() clears the set — without this, a {@code !botpet reload} would leave
      * every already-petted bot unfollowed.
      */
-    private static void rescan() {
+    private static void rescanTrackedBots() {
         TRACKED.clear();
         for (Integer id : new java.util.ArrayList<>(
                 soloMapling.ArtificialPlayer.BotMessagingSystem.CharacterStorage.getAllBots().keySet())) {
@@ -270,14 +278,14 @@ public final class BotPetFollower {
         if (!observed) {
             syncUnobservedPositions(chr, config);
         }
-        if (!shouldLookUpFoothold(false, observed)) {
+        if (!shouldResolveFoothold(false, observed)) {
             return; // LOD: nobody can see the pets — position kept fresh, physics/ground work skipped
         }
 
         // Iterate by the pet-ARRAY index, not a running count: the slot in
         // MOVE_PET / PET_COMMAND is the array index (the host sends it from
         // getPetIndex), so skipping a null without advancing would mis-slot a
-        // pet that sits after a hole. Same loop shape as loot() below.
+        // pet that sits after a hole. Same loop shape as collectLoot() below.
         Pet[] pets = chr.getPets();
 
         // Map change: the host's MapleMap.addPlayer has already re-placed every pet at the
@@ -300,11 +308,11 @@ public final class BotPetFollower {
         // makes this a one-shot edge, not every tick of the stop.
         boolean ownerMoving = GCMovement.isMoving(chr);
         if (Boolean.TRUE.equals(lastOwnerMovingByBot.put(botId, ownerMoving)) && !ownerMoving) {
-            rerollFollowOffsets(pets);
+            rerollFollowDistances(pets);
         }
 
         // Each pet's own target x: its independent distance behind the owner (no pet-to-pet formation).
-        int[] followX = followXs(chr, pets);
+        int[] followX = computeFollowTargetXs(chr, pets);
 
         // Swim when the owner is swimming, OR — mirroring the bot engine's own rule
         // (isSwimMap && inAir) — when the map is a swim map and the pet's own feet find no
@@ -321,10 +329,18 @@ public final class BotPetFollower {
             if (pet == null) {
                 continue;
             }
+            // Fallback: a pet that has fallen out of the map's VR bounds (below the floor or off a
+            // side) is snapped back to the owner. Land falls have no bottom clamp, so nothing else
+            // catches a pet that lost its footing into open space — without this it would free-fall
+            // (and re-warp) forever. Runs before the swim/land split so it also rescues a pet that
+            // sank out of a swim map.
+            if (recoverIfFallenOffMap(chr, pet, idx, map, config, observed)) {
+                continue;
+            }
             // One footing probe per pet per tick, shared by the swim decision and the land walk
             // (it used to be probed twice on a swim map). Skipped entirely while the owner swims —
             // every pet swims then, so the surface under it is not consulted.
-            Foothold standing = ownerSwimming ? null : standingOn(map, pet.getPos());
+            Foothold standing = ownerSwimming ? null : findStandingFoothold(map, pet.getPos());
             boolean swim = ownerSwimming || (swimMap && standing == null);
             if (swim) {
                 followSwim(chr, pet, idx, followX[idx], config, observed);
@@ -336,7 +352,7 @@ public final class BotPetFollower {
             }
         }
         if (observed && chr.getHp() > 0) {
-            loot(chr, map, pets, config);
+            collectLoot(chr, map, pets, config);
         }
     }
 
@@ -346,9 +362,9 @@ public final class BotPetFollower {
      * lags then catches up rather than being snapped on) and falls under gravity when
      * its own feet are unsupported. Gravity only ever pulls DOWN, so a jumped or
      * falling owner never drags the pet up; a pet left too far from the owner is
-     * warped to a real footing beside it ({@link #teleportPet} / {@link #safeLanding}).
+     * warped to a real footing beside it ({@link #teleportPet} / {@link #resolveSafeLanding}).
      */
-    private static void followLand(Character chr, Pet pet, int index, int tx, Foothold standing,
+    private static void followLand(Character chr, Pet pet, int index, int targetX, Foothold standing,
                                    BotPetConfig config, boolean observed) {
         Point p = pet.getPos();
         MapleMap map = chr.getMap();
@@ -356,7 +372,7 @@ public final class BotPetFollower {
         boolean left = isPetFacingLeft(pet);
         double dt = Math.max(0.05, config.followTickMs() / 1000.0);
 
-        // Airborne tracking: tx+vy once a hop starts, until it lands.
+        // Airborne tracking: targetX + vy once a hop starts, until it lands.
         double ax = velX.getOrDefault(id, 0.0);
         double ay = fallVy.getOrDefault(id, 0.0);
         boolean air = vyAir.contains(id);
@@ -366,7 +382,7 @@ public final class BotPetFollower {
             clearMotion(id);
             // fh 0: a pet on a rope must report no foothold id — a non-zero one makes the client
             // force the pet onto that foothold and off the rope (see the fh rule at the top).
-            applyAndSend(chr, pet, index, chr.getPosition(), 0, 0, 0,
+            applyAndBroadcast(chr, pet, index, chr.getPosition(), 0, 0, 0,
                     left ? PET_HANG_LEFT : PET_HANG_RIGHT, config, observed);
             return;
         }
@@ -380,7 +396,7 @@ public final class BotPetFollower {
         if (Math.abs(p.x - owner.x) > LOST_PX || (!CharacterStance.isJumping(chr.getStance())
                 && owner.y < p.y - JUMP_REACH_PX)) {
             clearMotion(id);
-            Landing land = safeLanding(map, tx, owner);
+            WarpLanding land = resolveSafeLanding(map, targetX, owner);
             teleportPet(chr, pet, index, land.pos(), land.fh(),
                     left ? PET_STAND_LEFT : PET_STAND_RIGHT, config, observed);
             return;
@@ -388,10 +404,10 @@ public final class BotPetFollower {
 
         int nx, ny, fhVal, stance;
         if (air) {
-            // Hop / drop arc, run on the bot's own terms (see airStep): sub-stepped Verlet
+            // Hop / drop arc, run on the bot's own terms (see simulateAirStep): sub-stepped Verlet
             // with the bot's air drag, landing via the same per-pixel terrain sweep its
             // airborne physics resolves with.
-            AirStep step = airStep(map, p, ax, ay, dt);
+            AirStep step = simulateAirStep(map, p, ax, ay, dt);
             nx = step.point().x;
             ny = step.point().y;
             if (step.landed() != null) {
@@ -408,7 +424,7 @@ public final class BotPetFollower {
             }
             velX.put(id, ax);
             fallVy.put(id, ay);
-            applyAndSend(chr, pet, index, new Point(nx, ny),
+            applyAndBroadcast(chr, pet, index, new Point(nx, ny),
                     (int) Math.round(ax), (int) Math.round(ay), fhVal, stance, config, observed);
             return;
         }
@@ -424,10 +440,10 @@ public final class BotPetFollower {
         boolean ownerBelow = owner.y > p.y + GROUND_STEP_PX;
         if (ownerBelow && standing != null && standing.isForbidFallDown()) {
             // A forbidFallDown platform is never pass-through, so the pet cannot drop. Warp onto a
-            // real footing at the owner's level (safeLanding keeps it on a surface within a step of
+            // real footing at the owner's level (resolveSafeLanding keeps it on a surface within a step of
             // the owner, not the owner's raw y over a gap). fh is the landed foothold id, or 0 when
             // no surface is in range (the fh rule: a bogus id would snap it to the wrong surface).
-            Landing land = safeLanding(map, tx, owner);
+            WarpLanding land = resolveSafeLanding(map, targetX, owner);
             teleportPet(chr, pet, index, land.pos(), land.fh(),
                     left ? PET_STAND_LEFT : PET_STAND_RIGHT, config, observed);
             return;
@@ -436,7 +452,7 @@ public final class BotPetFollower {
         // toward it; otherwise (owner above but unreachable) warp, so the pet never hops
         // at a wall forever. The probe must look ABOVE the pet — a plain findBelow only ever
         // reports floors below it — and only as far as the pet's hop can actually rise. That
-        // rise comes from the OWNER's own jump feel ({@link GCMovement#jumpFeel}), so a platform
+        // rise comes from the OWNER's own jump profile ({@link GCMovement#jumpProfile}), so a platform
         // the owner can jump onto is never one its pet cannot reach (the height-parity bug: the
         // pet used to launch at the base-stat 555 px/s and fall short of a higher-jump bot's
         // reach). The probe stops {@link #JUMP_RISE_MARGIN_PX} short of the true rise so it never
@@ -448,15 +464,15 @@ public final class BotPetFollower {
         boolean ownerAbove = owner.y < p.y - GROUND_STEP_PX;
         if (standing != null && !ownerBelow && ownerAbove
                 && !CharacterStance.isJumping(chr.getStance())) {
-            GCMovement.JumpFeel feel = GCMovement.jumpFeel(chr);
-            int probeRise = Math.max(GROUND_SNAP_PX + 1, feel.risePx() - JUMP_RISE_MARGIN_PX);
+            GCMovement.JumpProfile jump = GCMovement.jumpProfile(chr);
+            int probeRise = Math.max(GROUND_SNAP_PX + 1, jump.risePx() - JUMP_RISE_MARGIN_PX);
             Point above = GCMovement.groundAbove(map, owner.x, p.y, probeRise);
             boolean canHop = above != null && above.y < p.y - GROUND_SNAP_PX;
             if (!canHop) {
                 // Owner above but no floor within a hop: warp onto a real footing at the owner's
-                // level (safeLanding keeps it on a surface within a step of the owner, never the
+                // level (resolveSafeLanding keeps it on a surface within a step of the owner, never the
                 // owner's raw y over a gap). fh = the landed foothold id, or 0 when none is in range.
-                Landing land = safeLanding(map, tx, owner);
+                WarpLanding land = resolveSafeLanding(map, targetX, owner);
                 teleportPet(chr, pet, index, land.pos(), land.fh(),
                         left ? PET_STAND_LEFT : PET_STAND_RIGHT, config, observed);
                 return;
@@ -467,11 +483,11 @@ public final class BotPetFollower {
             if (ax == 0) {
                 ax = hopVx;
             }
-            ay = -feel.jumpSpeedPxs();
+            ay = -jump.jumpSpeedPxs();
             velX.put(id, ax);
             fallVy.put(id, ay);
             // fh 0: the hop launches airborne — no foothold (fh rule).
-            applyAndSend(chr, pet, index, p, (int) Math.round(ax), (int) Math.round(ay), 0,
+            applyAndBroadcast(chr, pet, index, p, (int) Math.round(ax), (int) Math.round(ay), 0,
                     (left ? 1 : 0) | PET_JUMP_RIGHT, config, observed);
             return;
         }
@@ -488,7 +504,7 @@ public final class BotPetFollower {
         // spot behind it on the next tick, and paces — the pet-side half of the owner's left-right
         // sway (mapGroundSlipScale is per-map, so a snow map carries even farther). Widening the
         // moving band by the input-free glide-out lets the pet coast the last stretch in.
-        double gap = tx - p.x;
+        double gap = targetX - p.x;
         int stopBand = Math.abs(ax) > 1 ? FOLLOW_ARRIVE_PX : FOLLOW_DEAD_ZONE_PX;
         if (Math.abs(ax) > 1) {
             stopBand += (int) Math.ceil(
@@ -509,7 +525,7 @@ public final class BotPetFollower {
         if (walk.lostGround() || ownerBelowAndNotWalkingDown) {
             // Fall from the walk's end point (the edge, or p + this tick's horizontal step) through
             // the engine's per-pixel sweep, keeping the horizontal step — like the bot's beginFall.
-            AirStep step = airStep(map, walk.point(), vx, 0.0, dt);
+            AirStep step = simulateAirStep(map, walk.point(), vx, 0.0, dt);
             nx = step.point().x;
             ny = step.point().y;
             if (step.landed() != null) {
@@ -533,7 +549,7 @@ public final class BotPetFollower {
                     ? (left ? PET_STAND_LEFT : PET_STAND_RIGHT)
                     : (vx > 0 ? PET_MOVE_RIGHT : PET_MOVE_LEFT);
         }
-        applyAndSend(chr, pet, index, new Point(nx, ny),
+        applyAndBroadcast(chr, pet, index, new Point(nx, ny),
                 (int) Math.round(vx), 0, fhVal, stance, config, observed);
     }
 
@@ -545,7 +561,7 @@ public final class BotPetFollower {
      * ceiling (both velocity components shed: pets are not touched by monsters, so terrain is
      * all that deflects them).
      */
-    private static AirStep airStep(MapleMap map, Point p, double ax, double ay, double dt) {
+    private static AirStep simulateAirStep(MapleMap map, Point p, double ax, double ay, double dt) {
         double fs = MapleMovement.slipScale(map);
         double cx = p.x;
         double cy = p.y;
@@ -581,7 +597,7 @@ public final class BotPetFollower {
         return new AirStep(new Point((int) Math.round(cx), (int) Math.round(cy)), ax, ay, land);
     }
 
-    /** Outcome of {@link #airStep}: the new point, the shed/tracked velocity (px/s) and the
+    /** Outcome of {@link #simulateAirStep}: the new point, the shed/tracked velocity (px/s) and the
      *  foothold landed on ({@code null} when still airborne or stopped by a wall/ceiling). */
     private record AirStep(Point point, double ax, double ay, Foothold landed) {
     }
@@ -593,7 +609,7 @@ public final class BotPetFollower {
      * map's seabed hundreds of px down), so it cannot answer "is the pet grounded": this bounds
      * it. Null when the pet is over a gap, or its floor is too far to be its footing.
      */
-    private static Foothold standingOn(MapleMap map, Point p) {
+    private static Foothold findStandingFoothold(MapleMap map, Point p) {
         Foothold fh = GCMovement.groundFoothold(map, p);
         return fh != null && Math.abs(p.y - fh.calculateFooting(p.x)) <= GROUND_STEP_PX ? fh : null;
     }
@@ -604,39 +620,75 @@ public final class BotPetFollower {
      * returns the first floor at ANY depth, e.g. a platform far below, or a swim map's seabed) — so a
      * warp could deposit the pet far below the owner, or at the owner's raw y over empty air (a pet
      * dropped into space then falls / re-warps every tick: a flicker loop). This tries the pet's own
-     * slot {@code (tx, owner.y)} first — accepted only when a floor sits within {@link #GROUND_STEP_PX}
-     * of the owner's level ({@link #standingOn}) — then falls back to the owner's OWN column, whose
+     * slot {@code (targetX, owner.y)} first — accepted only when a floor sits within {@link #GROUND_STEP_PX}
+     * of the owner's level ({@link #findStandingFoothold}) — then falls back to the owner's OWN column, whose
      * floor is almost always valid. The returned fh is that floor's id, or 0 when neither column has a
      * floor in range (the fh rule: land => real id, no floor => 0, never a bogus id).
      */
-    private static Landing safeLanding(MapleMap map, int tx, Point owner) {
-        Foothold onSlot = standingOn(map, new Point(tx, owner.y));
+    private static WarpLanding resolveSafeLanding(MapleMap map, int targetX, Point owner) {
+        Foothold onSlot = findStandingFoothold(map, new Point(targetX, owner.y));
         if (onSlot != null) {
-            return new Landing(new Point(tx, onSlot.calculateFooting(tx)), onSlot.getId());
+            return new WarpLanding(new Point(targetX, onSlot.calculateFooting(targetX)), onSlot.getId());
         }
-        Foothold onOwner = standingOn(map, owner);
+        Foothold onOwner = findStandingFoothold(map, owner);
         if (onOwner != null) {
-            return new Landing(new Point(owner.x, onOwner.calculateFooting(owner.x)), onOwner.getId());
+            return new WarpLanding(new Point(owner.x, onOwner.calculateFooting(owner.x)), onOwner.getId());
         }
         // No footing within a step at either column: keep the owner's raw level with fh 0 (safe only
         // because the slot is over a gap — the pet then follows normally and falls onto whatever is
         // below, with the same result as the surrounding follow logic).
-        return new Landing(new Point(tx, owner.y), 0);
+        return new WarpLanding(new Point(targetX, owner.y), 0);
     }
 
     /** A warp landing: where to put the pet and the foothold id to report (0 = none in range). */
-    private record Landing(Point pos, int fh) {
+    private record WarpLanding(Point pos, int fh) {
+    }
+
+    /**
+     * Fallback pull-back for a pet that has left the map: a pet whose y has fallen
+     * {@link #FALL_OFF_MAP_SLACK_PX} below (or x off a side of) the map's VR rectangle is snapped
+     * back beside its OWNER, exactly like the bot driver's own fall-off-map recovery. Land physics
+     * has no bottom clamp, so a pet that lost its footing into open space would otherwise free-fall
+     * forever (nothing else catches it); this bounds that. Returns true when it recovered the pet
+     * (so the caller skips normal follow this tick).
+     *
+     * <p>Only lands on a real footing (via {@link #resolveSafeLanding}, which keeps the pet on a
+     * surface within a step of the owner and reports the correct fh) and never warps on a map with
+     * no usable VR bounds (nothing to say the pet is out).</p>
+     */
+    private static boolean recoverIfFallenOffMap(Character chr, Pet pet, int index, MapleMap map,
+                                                 BotPetConfig config, boolean observed) {
+        Rectangle area = map.getMapArea();
+        if (area == null || area.width <= 0 || area.height <= 0) {
+            return false; // no usable VR bounds — cannot tell inside from outside
+        }
+        Point p = pet.getPos();
+        boolean belowFloor = p.y > area.y + area.height + FALL_OFF_MAP_SLACK_PX;
+        boolean offSide = p.x < area.x - FALL_OFF_MAP_SLACK_PX
+                || p.x > area.x + area.width + FALL_OFF_MAP_SLACK_PX;
+        if (!belowFloor && !offSide) {
+            return false;
+        }
+        clearMotion(pet.getUniqueId());
+        boolean left = CharacterStance.isFacingLeft(chr.getStance());
+        int facing = left ? -1 : 1;
+        Point owner = chr.getPosition();
+        int targetX = owner.x - facing * currentFollowDistance(pet);
+        WarpLanding land = resolveSafeLanding(map, targetX, owner);
+        teleportPet(chr, pet, index, land.pos(), land.fh(),
+                left ? PET_STAND_LEFT : PET_STAND_RIGHT, config, observed);
+        return true;
     }
 
     /**
      * Swim follow — the bot's swim model: the pet sinks under water gravity, and floats
      * back up (UP-held thrust, sink capped near zero) once it drops below the point above
      * the owner, with horizontal drag/accel. A sink-and-float bob that mirrors the bot's
-     * swim. fh stays 0 in water. The target x is the pet's own follow slot ({@code tx}, the
+     * swim. fh stays 0 in water. The target x is the pet's own follow slot ({@code targetX}, the
      * same independent offset as on land — no per-index stacking), and every pet floats at the
      * same {@link BotPetConfig#swimOffset} above the owner (independent, not a depth staircase).
      */
-    private static void followSwim(Character chr, Pet pet, int index, int tx,
+    private static void followSwim(Character chr, Pet pet, int index, int targetX,
                                    BotPetConfig config, boolean observed) {
         Point p = pet.getPos();
         Integer id = pet.getUniqueId();
@@ -644,9 +696,9 @@ public final class BotPetFollower {
         double dt = Math.max(0.05, config.followTickMs() / 1000.0);
         vyAir.remove(id);
 
-        if (Math.abs(p.x - tx) > LOST_PX) {
+        if (Math.abs(p.x - targetX) > LOST_PX) {
             clearMotion(id);
-            teleportPet(chr, pet, index, new Point(tx, targetY), 0,
+            teleportPet(chr, pet, index, new Point(targetX, targetY), 0,
                     isPetFacingLeft(pet) ? PET_SWIM_LEFT : PET_SWIM_RIGHT, config, observed);
             return;
         }
@@ -659,7 +711,7 @@ public final class BotPetFollower {
         // Same stillness rule as on land: only paddle once the target has drifted clear.
         // Hysteresis as on land: start once past the wide dead zone, keep paddling until within
         // FOLLOW_ARRIVE_PX, so a pet holds its spot instead of drifting.
-        double dx = tx - p.x;
+        double dx = targetX - p.x;
         int stopBand = Math.abs(vx) > 1 ? FOLLOW_ARRIVE_PX : FOLLOW_DEAD_ZONE_PX;
         int moveDir = Math.abs(dx) > stopBand ? (int) Math.signum(dx) : 0;
         // y grows downward: the pet is BELOW the target when p.y > targetY (positive),
@@ -698,7 +750,7 @@ public final class BotPetFollower {
         }
         velX.put(id, vx);
         fallVy.put(id, vy);
-        applyAndSend(chr, pet, index, new Point(nx, ny),
+        applyAndBroadcast(chr, pet, index, new Point(nx, ny),
                 (int) Math.round(vx), (int) Math.round(vy), 0,
                 vx >= 0 ? PET_SWIM_RIGHT : PET_SWIM_LEFT, config, observed);
     }
@@ -721,7 +773,7 @@ public final class BotPetFollower {
         nextSpeakAtMs.remove(petId);
         nextPickupAtMs.remove(petId);
         nextSwimBurstAtMs.remove(petId);
-        followOffsetByPet.remove(petId);
+        followDistanceByPet.remove(petId);
     }
 
     /**
@@ -733,7 +785,7 @@ public final class BotPetFollower {
      * nearly free while the world is unwatched; the first tick after a player arrives
      * resumes it.
      */
-    static boolean shouldLookUpFoothold(boolean noGravity, boolean observed) {
+    static boolean shouldResolveFoothold(boolean noGravity, boolean observed) {
         return !noGravity && observed;
     }
 
@@ -742,11 +794,11 @@ public final class BotPetFollower {
      * along the owner's facing (so a pet is never sent in front of it). There is NO pet-to-pet
      * formation — a pet's spot depends only on the owner and its own random distance (see
      * {@link #FOLLOW_MIN_PX}..{@link #FOLLOW_MAX_PX}, re-rolled on each owner stop by
-     * {@link #rerollFollowOffsets}). A pet with no recorded distance yet (freshly granted, or the
+     * {@link #rerollFollowDistances}). A pet with no recorded distance yet (freshly granted, or the
      * first unobserved tick) draws one here, so the observed follow and the unobserved position sync
      * never disagree.
      */
-    private static int[] followXs(Character chr, Pet[] pets) {
+    private static int[] computeFollowTargetXs(Character chr, Pet[] pets) {
         int[] followX = new int[pets.length];
         int facing = CharacterStance.isFacingLeft(chr.getStance()) ? -1 : 1;
         int ownerX = chr.getPosition().x;
@@ -755,31 +807,39 @@ public final class BotPetFollower {
             if (pet == null) {
                 continue;
             }
-            int offset = followOffsetByPet.computeIfAbsent(pet.getUniqueId(), id -> randomFollowOffset());
-            followX[i] = ownerX - facing * offset;
+            followX[i] = ownerX - facing * currentFollowDistance(pet);
         }
         return followX;
     }
 
+    /**
+     * This pet's own follow distance (px) behind the owner: its recorded value, or a fresh random
+     * one drawn (and recorded) on first use — so a freshly granted pet and an unobserved-tick pet
+     * both get a stable distance that the observed follow and the position sync then agree on.
+     */
+    private static int currentFollowDistance(Pet pet) {
+        return followDistanceByPet.computeIfAbsent(pet.getUniqueId(), id -> randomFollowDistance());
+    }
+
     /** Re-roll every present pet's follow distance — called the moment the owner stops moving, so a
      *  resting bot's pets pick fresh, independent spots instead of holding one fixed distance. */
-    private static void rerollFollowOffsets(Pet[] pets) {
+    private static void rerollFollowDistances(Pet[] pets) {
         for (Pet pet : pets) {
             if (pet != null) {
-                followOffsetByPet.put(pet.getUniqueId(), randomFollowOffset());
+                followDistanceByPet.put(pet.getUniqueId(), randomFollowDistance());
             }
         }
     }
 
     /** A fresh follow distance (px) in {@code [FOLLOW_MIN_PX, FOLLOW_MAX_PX]}. Package-private test
-     *  seam (like {@link #shouldLookUpFoothold}): pins the band a pet's random offset must fall in. */
-    static int randomFollowOffset() {
+     *  seam (like {@link #shouldResolveFoothold}): pins the band a pet's random offset must fall in. */
+    static int randomFollowDistance() {
         return FOLLOW_MIN_PX + ThreadLocalRandom.current().nextInt(FOLLOW_MAX_PX - FOLLOW_MIN_PX + 1);
     }
 
     /** The follow-distance band (px) — {@code [min, max]} — a pet's independent offset draws from.
      *  Exposed so a test can pin the band without duplicating the constants. */
-    static int[] followOffsetRange() {
+    static int[] followDistanceRange() {
         return new int[]{FOLLOW_MIN_PX, FOLLOW_MAX_PX};
     }
 
@@ -811,7 +871,7 @@ public final class BotPetFollower {
      */
     private static void syncUnobservedPositions(Character chr, BotPetConfig config) {
         Pet[] pets = chr.getPets();
-        int[] followX = followXs(chr, pets);
+        int[] followX = computeFollowTargetXs(chr, pets);
         MapleMap map = chr.getMap();
         int ownerY = chr.getPosition().y;
         // Owner on a rope/ladder or in water: the observed tick neither probes nor moves the pet on
@@ -833,13 +893,13 @@ public final class BotPetFollower {
                 y = ownerClimbing ? ownerY : ownerY - config.swimOffset();
                 fh = 0;
             } else {
-                // The floor under the slot, via the same probe + tolerance (standingOn) the observed
+                // The floor under the slot, via the same probe + tolerance (findStandingFoothold) the observed
                 // tick lands the pet with — so the snapshot IS where the observed tick will put it.
                 // Probed from the pet's own last footing, not the owner's y: a jumping owner would
                 // strand the pet in mid-air. No footing within a step (the slot is over a ledge/gap)
                 // leaves the pet where it is; the observed tick's lost-ground fall handles it.
                 int footing = pet.getPos().y;
-                Foothold below = standingOn(map, new Point(x, footing));
+                Foothold below = findStandingFoothold(map, new Point(x, footing));
                 if (below != null) {
                     y = below.calculateFooting(x);
                     fh = below.getId();
@@ -854,9 +914,9 @@ public final class BotPetFollower {
         }
     }
 
-    // All fh parameters below (applyAndSend / teleportPet / broadcastMove) follow the SHARED fh rule
+    // All fh parameters below (applyAndBroadcast / teleportPet / broadcastMove) follow the SHARED fh rule
     // at the top of the class — land: the real foothold id; rope/water/air: 0. Do not pass another.
-    private static void applyAndSend(Character chr, Pet pet, int index, Point pos,
+    private static void applyAndBroadcast(Character chr, Pet pet, int index, Point pos,
                                      int vx, int vy, int fh, int stance, BotPetConfig config, boolean observed) {
         pet.setPos(pos);
         pet.setStance(stance);
@@ -952,7 +1012,7 @@ public final class BotPetFollower {
      * {@link Monster}) — never a player-thrown item — so a looting pet tidies up
      * kills, exactly like a real player's pet.
      */
-    private static void loot(Character chr, MapleMap map, Pet[] pets, BotPetConfig config) {
+    private static void collectLoot(Character chr, MapleMap map, Pet[] pets, BotPetConfig config) {
         long now = System.currentTimeMillis();
         for (int idx = 0; idx < pets.length; idx++) {
             Pet pet = pets[idx];

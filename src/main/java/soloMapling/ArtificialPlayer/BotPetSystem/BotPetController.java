@@ -193,7 +193,7 @@ public final class BotPetController {
         MapleMap map = bot.getMap();
         Point pos = bot.getPosition();
         int x = pos.x + (index + 1) * SPAWN_X_SPREAD;
-        Point p = new Point(x, map != null && map.isSwim() ? pos.y : groundY(map, x, pos.y));
+        Point p = new Point(x, map != null && map.isSwim() ? pos.y : findGroundY(map, x, pos.y));
         pet.setPos(p);
         // Stand facing the same way the bot does, not a fixed side: the pet spawns already
         // turned the way its owner is, instead of snapping round on the first follow tick.
@@ -202,7 +202,7 @@ public final class BotPetController {
     }
 
     /** The y of the floor under x, falling back to {@code fallbackY} when there is none. */
-    private static int groundY(MapleMap map, int x, int fallbackY) {
+    private static int findGroundY(MapleMap map, int x, int fallbackY) {
         if (map == null) {
             return fallbackY;
         }

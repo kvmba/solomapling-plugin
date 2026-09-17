@@ -865,17 +865,17 @@ public final class GCMovement {
      * A nearby follower's jump — vertical launch speed (px/s, positive up) and rise (px) — taken
      * from the SAME movement profile the engine drives {@code owner} with, so a follower hops
      * exactly as high as its owner can. The pet follower uses this so a platform the owner can jump
-     * onto is never one its pet cannot reach: the pet's hop rises by the owner's own jump feel
+     * onto is never one its pet cannot reach: the pet's hop rises by the owner's own jump profile
      * (apex = v^2/2g), not a fixed base-stat hop.
      */
-    public static JumpFeel jumpFeel(Character owner) {
+    public static JumpProfile jumpProfile(Character owner) {
         float jumpPxs = BotMovementProfile.fromCharacter(owner).jumpSpeedPxs();
         int rise = (int) (jumpPxs * jumpPxs / (2.0 * MapleMovement.GRAVITY_PXS2));
-        return new JumpFeel(jumpPxs, rise);
+        return new JumpProfile(jumpPxs, rise);
     }
 
     /** A follower's hop: the launch speed (px/s, up) and the rise (px) it can clear. */
-    public record JumpFeel(float jumpSpeedPxs, int risePx) {
+    public record JumpProfile(float jumpSpeedPxs, int risePx) {
     }
 
     /**

@@ -16,7 +16,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * fix skips that lookup when nobody can see it; the pet still glides (position stays fresh), only
  * the foothold query is gated.
  *
- * <p>{@code shouldLookUpFoothold} is the pure heart of that gate: query only when the pet is
+ * <p>{@code shouldResolveFoothold} is the pure heart of that gate: query only when the pet is
  * landed (gravity applies) AND the map is observed. It is the exact predicate the two lookup sites
  * in {@code moveTowards} call, so pinning it pins the regression.
  *
@@ -29,7 +29,7 @@ class BotPetFollowerLodGateTest {
 
     @Test
     void looksUpOnlyWhenLandedAndObserved() {
-        assertTrue(BotPetFollower.shouldLookUpFoothold(false, true),
+        assertTrue(BotPetFollower.shouldResolveFoothold(false, true),
                 "landed on an observed map: resolve the foothold");
     }
 
@@ -37,7 +37,7 @@ class BotPetFollowerLodGateTest {
     void skipsLookupWhenUnobserved() {
         // The regression: an unobserved map (the whole world with no players) must not pay the
         // per-pet foothold query, even though the pet is landed.
-        assertFalse(BotPetFollower.shouldLookUpFoothold(false, false),
+        assertFalse(BotPetFollower.shouldResolveFoothold(false, false),
                 "landed but unobserved: no player can see the pet's foothold, so skip the query");
     }
 
@@ -45,9 +45,9 @@ class BotPetFollowerLodGateTest {
     void skipsLookupWhenFloating() {
         // Water / airborne / rope: the pet floats with fh 0, so a ground query would be wrong even
         // on an observed map.
-        assertFalse(BotPetFollower.shouldLookUpFoothold(true, true),
+        assertFalse(BotPetFollower.shouldResolveFoothold(true, true),
                 "floating on an observed map: no ground foothold applies");
-        assertFalse(BotPetFollower.shouldLookUpFoothold(true, false),
+        assertFalse(BotPetFollower.shouldResolveFoothold(true, false),
                 "floating and unwatched: no lookup");
     }
 }
