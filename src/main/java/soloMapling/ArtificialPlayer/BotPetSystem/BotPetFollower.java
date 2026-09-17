@@ -1020,7 +1020,11 @@ public final class BotPetFollower {
                 }
             }
             pet.setPos(new Point(x, y));
-            pet.setStance(CharacterStance.isFacingLeft(chr.getStance()) ? PET_STAND_LEFT : PET_STAND_RIGHT);
+            // Keep the pet's OWN facing, exactly as the observed tick does (it derives the stance
+            // from the pet, never the owner): the pet does not react to the owner turning, so the
+            // snapshot must not flip it either, or a joining player sees it spawn facing a direction
+            // the next observed tick never asked for.
+            pet.setStance(isPetFacingLeft(pet) ? PET_STAND_LEFT : PET_STAND_RIGHT);
             pet.setFh(fh);
         }
     }
