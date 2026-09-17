@@ -7,6 +7,7 @@ import soloMapling.ArtificialPlayer.BotMessagingSystem.ChatMessage;
 import soloMapling.ArtificialPlayer.BotMessagingSystem.MessageQueue;
 import soloMapling.ArtificialPlayer.BotSM;
 import soloMapling.ArtificialPlayer.BotTradeSystem.BotTradeSM;
+import soloMapling.ArtificialPlayer.GCMoveSystem.GCMovement;
 import soloMapling.server.BotTiming;
 
 import java.util.Collections;
@@ -161,11 +162,18 @@ public class NXMerchantBot extends BotSM {
                 nxState = NXState.ADVERTISE;
                 break;
             case ADVERTISE:
-                // 4% (1/25) Chance to advertise flavor, 96% chance to advertise NX
-                if (rollChanceInverse(25)) {
-                    getDialogueHandler().executeBotFlavorDialogue(getRandomElement(FLAVOR_NODES), this);
-                } else {
-                    advertise();
+                // Shout only once the bot has settled. The CHECK_TRADES shuffle below can still be in
+                // flight from the previous cycle, and its path may cross a ladder/stairs — hold the
+                // line instead of shouting mid-walk (the "merchant shouting while on the stairs"
+                // report). Movement is untouched: tryPlatformShuffle still runs in CHECK_TRADES, so
+                // the bot keeps moving freely — only the shout waits for it to stand still.
+                if (!GCMovement.isMoving(getChr())) {
+                    // 4% (1/25) Chance to advertise flavor, 96% chance to advertise NX
+                    if (rollChanceInverse(25)) {
+                        getDialogueHandler().executeBotFlavorDialogue(getRandomElement(FLAVOR_NODES), this);
+                    } else {
+                        advertise();
+                    }
                 }
                 nxState = NXState.CHECK_TRADES;
                 break;
