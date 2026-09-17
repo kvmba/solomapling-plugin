@@ -37,7 +37,7 @@ public class BotDecorateNX {
     public static boolean ENABLED = true;
 
     /** Flat chance per bot to even consider NX. Independent of tier. */
-    private static final double NX_BASE_CHANCE = 0.20;
+    private static final double NX_BASE_CHANCE = 0.35;
 
     /** Chance to skip the NX weapon even if the weapon slot was picked. */
     private static final double WEAPON_OPT_OUT_CHANCE = 0.40;

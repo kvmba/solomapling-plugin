@@ -334,7 +334,7 @@ public class BotDecorate {
         }
 
         // NX cosmetic layer - runs on every bot regardless of which equip path
-        // it took. Its own 30% base gate decides whether the bot actually gets
+        // it took. Its own 35% base gate decides whether the bot actually gets
         // any NX pieces.
         BotDecorateNX.apply(bot);
         BotFame.apply(bot);
