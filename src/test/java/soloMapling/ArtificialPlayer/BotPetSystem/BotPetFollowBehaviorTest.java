@@ -65,4 +65,25 @@ class BotPetFollowBehaviorTest {
         assertFalse(BotPetFollower.ownerSteppedOffRopeTop(false, false, true),
                 "already off the rope on the previous tick => not this edge");
     }
+
+    /**
+     * The underwater-slope bob: the vertical platform chase (hop up / warp down / drop to a lower
+     * ledge) must be skipped when owner and pet share ONE continuous walk surface. A slope is built
+     * from many short foothold segments, so the pet and a resting owner routinely sit on two DIFFERENT
+     * footholds of the SAME slope — a foothold-identity test misses that and the chase fired every
+     * tick (the pet hops down-slope, walks back up, repeats). The decision therefore keys on the
+     * engine's nav REGION (the walk-connected union of footholds), which spans a slope's many
+     * segments; a genuinely different platform is a different region.
+     */
+    @Test
+    void sameSurfaceIsRegionIdentityNotFootholdIdentity() {
+        assertTrue(BotPetFollower.sameWalkSurface(7, 7),
+                "pet and owner on the same nav region => one shared slope, even across its segments");
+        assertFalse(BotPetFollower.sameWalkSurface(7, 9),
+                "different nav regions => a genuinely different platform, so the chase still fires");
+        assertFalse(BotPetFollower.sameWalkSurface(-1, -1),
+                "neither footing resolves to a region => not a shared surface (old foothold-identity path)");
+        assertFalse(BotPetFollower.sameWalkSurface(GCMovement.UNBAKED_REGION, GCMovement.UNBAKED_REGION),
+                "unbaked map => regions do not resolve, so not a shared surface");
+    }
 }
