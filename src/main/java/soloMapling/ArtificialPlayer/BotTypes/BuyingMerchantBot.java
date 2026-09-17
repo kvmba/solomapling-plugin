@@ -6,6 +6,7 @@ import soloMapling.ArtificialPlayer.BotMessagingSystem.ChatMessage;
 import soloMapling.ArtificialPlayer.BotMessagingSystem.MessageQueue;
 import soloMapling.ArtificialPlayer.BotSM;
 import soloMapling.ArtificialPlayer.BotTradeSystem.BotTradeSM;
+import soloMapling.ArtificialPlayer.GCMoveSystem.GCMovement;
 import soloMapling.FreeMarket.FMItem;
 
 import java.util.Collections;
@@ -211,10 +212,17 @@ public class BuyingMerchantBot extends BotSM {
                 buyingState = BuyingState.ADVERTISE;
                 break;
             case ADVERTISE:
-                if (rollChanceInverse(25)) {
-                    getDialogueHandler().executeBotFlavorDialogue(getRandomElement(FLAVOR_NODES), this);
-                } else {
-                    advertise();
+                // Shout only once the bot has settled. A shuffle from an earlier tick can still be in
+                // flight, and its path may cross a ladder/stairs — hold the line instead of shouting
+                // mid-walk (the "merchant shouting while on the stairs" report). Movement stays free:
+                // the shuffle below still runs, so the bot is never kept off a ladder — only the shout
+                // waits for it to stand still.
+                if (!GCMovement.isMoving(getChr())) {
+                    if (rollChanceInverse(25)) {
+                        getDialogueHandler().executeBotFlavorDialogue(getRandomElement(FLAVOR_NODES), this);
+                    } else {
+                        advertise();
+                    }
                 }
                 movedDuringAdvertise = tryPlatformShuffleWhileAdvertising();
                 buyingState = BuyingState.CHECK_TRADES;
