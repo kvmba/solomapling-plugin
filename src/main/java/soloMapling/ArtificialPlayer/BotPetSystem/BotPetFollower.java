@@ -134,11 +134,11 @@ public final class BotPetFollower {
     private static final int LOST_PX = 500;                 // 1-D horizontal gap -> warp to the owner
     /** The pet holds still until its target drifts this far from its spot (a real pet does not
      *  shuffle after every tiny step — it waits, then follows). Once it IS moving it keeps going
-     *  until within {@link #TRAIL_ARRIVE_PX}, so a pet settles at its spot instead of drifting. */
+     *  until within {@link #FOLLOW_ARRIVE_PX}, so a pet settles at its spot instead of drifting. */
     private static final int FOLLOW_DEAD_ZONE_PX = 30;
     /** How close (px) counts as "in the slot": a pet that is already moving stops here, so a pet
      *  holds a tight, even spacing instead of drifting anywhere inside the wider dead zone. */
-    private static final int TRAIL_ARRIVE_PX = 4;
+    private static final int FOLLOW_ARRIVE_PX = 4;
     /** Vertical tolerance (px) for treating a floor as the owner's own level. */
     private static final int GROUND_STEP_PX = 40;
 
@@ -268,7 +268,7 @@ public final class BotPetFollower {
         // query, no packet (see syncUnobservedPositions).
         boolean observed = GCMovement.isMapObserved(chr.getMapId());
         if (!observed) {
-            syncUnobservedPositions(chr);
+            syncUnobservedPositions(chr, config);
         }
         if (!shouldLookUpFoothold(false, observed)) {
             return; // LOD: nobody can see the pets — position kept fresh, physics/ground work skipped
@@ -480,16 +480,16 @@ public final class BotPetFollower {
         // ledges, is blocked by walls and detected walking off an edge — identically to a bot.
         // Hysteresis, so pets do not crowd: start moving only once the target passes the wide dead
         // zone (a tiny owner step leaves the pet standing), but keep going until within
-        // TRAIL_ARRIVE_PX, so a pet settles at its spot at a tight spacing.
+        // FOLLOW_ARRIVE_PX, so a pet settles at its spot at a tight spacing.
         //
         // The follow tick is many engine ticks long (followTickMs default 300 vs a 50ms bot tick),
-        // so one held tick carries the pet ~6x as far as TRAIL_ARRIVE_PX: the band has to cover the
+        // so one held tick carries the pet ~6x as far as FOLLOW_ARRIVE_PX: the band has to cover the
         // momentum the pet cannot shed inside a single step, or it sails past its spot, sees the
         // spot behind it on the next tick, and paces — the pet-side half of the owner's left-right
         // sway (mapGroundSlipScale is per-map, so a snow map carries even farther). Widening the
         // moving band by the input-free glide-out lets the pet coast the last stretch in.
         double gap = tx - p.x;
-        int stopBand = Math.abs(ax) > 1 ? TRAIL_ARRIVE_PX : FOLLOW_DEAD_ZONE_PX;
+        int stopBand = Math.abs(ax) > 1 ? FOLLOW_ARRIVE_PX : FOLLOW_DEAD_ZONE_PX;
         if (Math.abs(ax) > 1) {
             stopBand += (int) Math.ceil(
                     MapleMovement.stopOutPxs(ax, MapleMovement.slipScale(map)));
@@ -602,19 +602,21 @@ public final class BotPetFollower {
      * Swim follow — the bot's swim model: the pet sinks under water gravity, and floats
      * back up (UP-held thrust, sink capped near zero) once it drops below the point above
      * the owner, with horizontal drag/accel. A sink-and-float bob that mirrors the bot's
-     * swim. fh stays 0 in water.
+     * swim. fh stays 0 in water. The target x is the pet's own follow slot ({@code tx}, the
+     * same independent offset as on land — no per-index stacking), and every pet floats at the
+     * same {@link BotPetConfig#swimOffset} above the owner (independent, not a depth staircase).
      */
-    private static void followSwim(Character chr, Pet pet, int index, int botX,
+    private static void followSwim(Character chr, Pet pet, int index, int tx,
                                    BotPetConfig config, boolean observed) {
         Point p = pet.getPos();
         Integer id = pet.getUniqueId();
-        int targetY = chr.getPosition().y - config.swimOffset() * (index + 1);
+        int targetY = chr.getPosition().y - config.swimOffset();
         double dt = Math.max(0.05, config.followTickMs() / 1000.0);
         vyAir.remove(id);
 
-        if (Math.abs(p.x - botX) > LOST_PX) {
+        if (Math.abs(p.x - tx) > LOST_PX) {
             clearMotion(id);
-            teleportPet(chr, pet, index, new Point(botX, targetY), 0,
+            teleportPet(chr, pet, index, new Point(tx, targetY), 0,
                     isPetFacingLeft(pet) ? PET_SWIM_LEFT : PET_SWIM_RIGHT, config, observed);
             return;
         }
@@ -626,9 +628,9 @@ public final class BotPetFollower {
         // so we fire the same burst on the transition — else free-sink.
         // Same stillness rule as on land: only paddle once the target has drifted clear.
         // Hysteresis as on land: start once past the wide dead zone, keep paddling until within
-        // TRAIL_ARRIVE_PX, so a pet holds its spot instead of drifting.
-        double dx = botX - p.x;
-        int stopBand = Math.abs(vx) > 1 ? TRAIL_ARRIVE_PX : FOLLOW_DEAD_ZONE_PX;
+        // FOLLOW_ARRIVE_PX, so a pet holds its spot instead of drifting.
+        double dx = tx - p.x;
+        int stopBand = Math.abs(vx) > 1 ? FOLLOW_ARRIVE_PX : FOLLOW_DEAD_ZONE_PX;
         int moveDir = Math.abs(dx) > stopBand ? (int) Math.signum(dx) : 0;
         // y grows downward: the pet is BELOW the target when p.y > targetY (positive),
         // and only then should it hold UP (verticalHold -1). The old `targetY - p.y`
@@ -769,21 +771,26 @@ public final class BotPetFollower {
      *       that footing is accepted; otherwise (the slot is off a ledge or over a gap) the pet keeps
      *       its own y and the observed tick's lost-ground fall takes over on arrival.</li>
      *   <li><b>fh.</b> On land the true foothold id is sent, exactly as the observed tick does. On a
-     *       rope/ladder (or in water) the owner's own y is used and fh is 0 — a pet on a rope MUST
-     *       report fh 0; a non-zero foothold id makes the client force the pet onto that foothold,
-     *       off the rope. The observed climbing/swim branches do the same.</li>
+     *       rope/ladder (or in water) fh is 0 — a pet on a rope MUST report fh 0; a non-zero foothold
+     *       id makes the client force the pet onto that foothold, off the rope. The observed
+     *       climbing/swim branches do the same. The <b>y</b> matches each branch too: a climbing
+     *       owner hangs the pet AT the owner's own y, a swimming one floats it
+     *       {@link BotPetConfig#swimOffset} above — the snapshot uses the same y as the observed tick
+     *       so a joining player sees no spawn-then-jump.</li>
      * </ul>
      */
-    private static void syncUnobservedPositions(Character chr) {
+    private static void syncUnobservedPositions(Character chr, BotPetConfig config) {
         Pet[] pets = chr.getPets();
         int[] followX = followXs(chr, pets);
         MapleMap map = chr.getMap();
         int ownerY = chr.getPosition().y;
-        // Owner on a rope/ladder or in water: the observed tick floats / hangs the pet at the owner's
-        // own y and sends fh 0, so the snapshot inherits that instead of probing the ground beneath a
-        // rope it must stay on.
-        boolean ownerOffGround = CharacterStance.isSwimming(chr.getStance())
-                || CharacterStance.isClimbing(chr.getStance());
+        // Owner on a rope/ladder or in water: the observed tick neither probes nor moves the pet on
+        // the ground, so the snapshot inherits that instead of probing the ground beneath a rope it
+        // must stay on. Climbing and swimming differ in y: a climber hangs at the owner's own y, a
+        // swimmer floats swimOffset above (followSwim) — the two must agree with the observed tick.
+        boolean ownerClimbing = CharacterStance.isClimbing(chr.getStance());
+        boolean ownerSwimming = CharacterStance.isSwimming(chr.getStance());
+        boolean ownerOffGround = ownerClimbing || ownerSwimming;
         for (int i = 0; i < pets.length; i++) {
             Pet pet = pets[i];
             if (pet == null) {
@@ -793,7 +800,7 @@ public final class BotPetFollower {
             int y;
             int fh;
             if (ownerOffGround) {
-                y = ownerY;
+                y = ownerClimbing ? ownerY : ownerY - config.swimOffset();
                 fh = 0;
             } else {
                 // The floor under the slot, via the same probe + tolerance (standingOn) the observed
