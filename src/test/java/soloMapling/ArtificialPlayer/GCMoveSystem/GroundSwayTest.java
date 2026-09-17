@@ -138,7 +138,7 @@ class GroundSwayTest {
         // window approach, covered by aLaunchApproachReachesItsWindow below.
         for (int stopDist : new int[]{1, 2, 4, 8, 16, 30}) {
             for (int speed : new int[]{95, 100, 105, 110, 120, 125, 140, 160, 180, 200, 250}) {
-                for (int offset : new int[]{1, 2, 3, 5, 8, 12, 16, 20, 30, 40, 60, 90, 150, 300, 800}) {
+                for (int offset = 1; offset <= 260; offset++) {
                     Settle s = settle(speed, 1000 - offset, 1000, stopDist, 500);
                     assertEquals(0, s.reversals(),
                             "speed=" + speed + " stopDist=" + stopDist + " offset=" + offset
@@ -152,14 +152,33 @@ class GroundSwayTest {
     }
 
     @Test
+    void aWALKEdgeSettleDoesNotPaceAtAnySpeed() {
+        // Targeted at the exact dead zone that reopened the sway: a WALK edge (stopDist 4) approached at
+        // a mid-high speed (~157-167). Sweeps the whole plausible stat range at fine offset granularity,
+        // so the band the old sparse offset list stepped over is covered explicitly.
+        for (int speed = 95; speed <= 210; speed++) {
+            for (int offset = 1; offset <= 400; offset++) {
+                Settle s = settle(speed, 1000 - offset, 1000, 4, 500);
+                assertEquals(0, s.reversals(),
+                        "speed=" + speed + " offset=" + offset + ": WALK-edge settle still reverses");
+                assertTrue(s.span() <= 1,
+                        "speed=" + speed + " offset=" + offset + ": WALK-edge settle still travels "
+                                + s.span() + "px");
+            }
+        }
+    }
+
+    @Test
     void theBotStopsInsideItsOwnBand() {
         // Settling must not become "stop wherever": the residual distance to the target has to stay
         // inside the caller's band (or one tick of travel, whichever is wider — whole pixels mean a
-        // tight band cannot be hit exactly).
+        // tight band cannot be hit exactly). Swept continuously: the sparse offset lists this test used
+        // to carry let a fix that killed the sway by stalling short (a WALK-edge bot parking before its
+        // band, a CLIMB/PORTAL bot stalling outside the 8px arrival box) slip through.
         for (int stopDist : new int[]{1, 4, 8, 30}) {
-            for (int speed : new int[]{100, 105, 125, 200, 250}) {
+            for (int speed : new int[]{100, 105, 125, 160, 183, 200, 250}) {
                 int allowed = Math.max(stopDist, walkStep(new BotMovementProfile(speed, 100)));
-                for (int offset : new int[]{5, 40, 200, 800}) {
+                for (int offset = 1; offset <= 400; offset++) {
                     Settle s = settle(speed, 1000 - offset, 1000, stopDist, 500);
                     assertTrue(Math.abs(s.finalX() - 1000) <= allowed,
                             "speed=" + speed + " stopDist=" + stopDist + " offset=" + offset
