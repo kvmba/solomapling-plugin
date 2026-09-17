@@ -23,6 +23,8 @@ import java.util.Set;
 //   - NPC positions are the strongest anchor (life clusters around shops and quest givers); portal
 //     positions are a weaker anchor (foot traffic near entrances). Each anchor projects a 2-D gaussian
 //     bump onto nearby reachable ledges (tight in Y so an NPC pulls its own platform, not the column).
+//     A ledge takes the STRONGEST single anchor's pull (max, not sum), so a town's NPC cluster cannot
+//     compound into a hotspot that swallows the whole crowd; see anchorPullAt.
 //   - A shape profile decays weight with height above the map's main ground band, so tall maps
 //     (Ellinia) concentrate low and wide maps (Kerning) spread horizontally - falls out of the geometry.
 //   - A thin uniform tail (~1 in 11 picks) ignores the weighting and lands anywhere reachable, so a few
@@ -37,9 +39,12 @@ public final class TownPresenceSampler {
 
     private static final Random RANDOM = new Random();
 
-    // Anchor pull strengths and falloff.
-    private static final double NPC_STRENGTH = 1.0;
-    private static final double PORTAL_STRENGTH = 0.45;
+    // Anchor pull strengths and falloff. Package-private so a test pins the portal-is-weak contract
+    // against the real values (no drift).
+    static final double NPC_STRENGTH = 1.0;
+    // Weak: portals mark foot traffic, not destinations. Kept well under NPC_STRENGTH so the doorway
+    // reads as mildly busier instead of a spawn hotspot ("挤在传送门门口").
+    static final double PORTAL_STRENGTH = 0.2;
     private static final double SIGMA_X = 260.0;   // horizontal spread of an anchor's pull (px)
     private static final double SIGMA_Y = 130.0;   // vertical spread - keeps a pull on the anchor's platform
 
@@ -47,8 +52,11 @@ public final class TownPresenceSampler {
     private static final double HEIGHT_DECAY = 320.0;
 
     // Weight floor every reachable ledge keeps even with no anchor nearby, so the uniform tail and quiet
-    // corners are still reachable (a fully-zero ledge would be unreachable to the weighted picks).
-    private static final double BASE_WEIGHT = 0.15;
+    // corners are still reachable (a fully-zero ledge would be unreachable to the weighted picks). Raised
+    // from 0.15 so the anchor peaks dominate less: with the old floor a single hot street outweighed the
+    // rest of the map by >30x and drew the whole stationed cohort onto it. At 0.5 a hot NPC street reads
+    // ~3x a plain ledge - visible "lived in" clustering without the pile-up.
+    private static final double BASE_WEIGHT = 0.5;
 
     // Fraction of picks that ignore weighting entirely (organic stragglers on low-weight ledges).
     private static final double TAIL_FRACTION = 0.09;
@@ -242,11 +250,31 @@ public final class TownPresenceSampler {
         double span = Math.max(1, l.maxX() - l.minX());
         double heightAbove = Math.max(0.0, groundBandY - l.centerY()); // Y grows downward -> higher = smaller Y
         double shape = Math.exp(-heightAbove / HEIGHT_DECAY);
-        double pull = 0.0;
-        for (Anchor a : anchors) {
-            pull += anchorPull(a, nearestX(l, a.x), l.centerY());
-        }
+        double pull = anchorPullAt(l, anchors);
         return span * shape * (BASE_WEIGHT + pull) * ov.boostMultiplier(l.centerX(), l.centerY());
+    }
+
+    // The anchor pull on a ledge: the STRONGEST single nearby anchor, not the sum. Summing made a town's
+    // NPC cluster multiply its own draw (5 shopkeepers packed together gave a 5x weight) so the whole
+    // stationed cohort piled onto the one hot street; max() anchors the ledge to the nearest shop/quest
+    // giver without letting a dense cluster of them compound into a black hole. Each anchor pulls at the
+    // closest X on the ledge span to itself (where it pulls hardest).
+    private static double anchorPullAt(GCMovement.Ledge l, List<Anchor> anchors) {
+        double best = 0.0;
+        for (Anchor a : anchors) {
+            best = Math.max(best, anchorPull(a, nearestX(l, a.x), l.centerY()));
+        }
+        return best;
+    }
+
+    // Strongest single anchor's pull at an explicit (x,y) - the max form the X pick uses so it does not
+    // compound either (see anchorPullAt). Package-private so a test can pin the max-not-sum contract.
+    static double anchorPullAtX(int x, int y, List<Anchor> anchors) {
+        double best = 0.0;
+        for (Anchor a : anchors) {
+            best = Math.max(best, anchorPull(a, x, y));
+        }
+        return best;
     }
 
     // A single anchor's 2-D gaussian pull at (x,y).
@@ -276,10 +304,7 @@ public final class TownPresenceSampler {
             if (ov.isBanned(x, l.centerY())) {
                 continue; // never place inside a ban zone
             }
-            double pull = 0.0;
-            for (Anchor a : anchors) {
-                pull += anchorPull(a, x, l.centerY());
-            }
+            double pull = anchorPullAtX(x, l.centerY(), anchors);
             double score = pull * ov.boostMultiplier(x, l.centerY()) - crowding(x, taken);
             if (score > bestScore) {
                 bestScore = score;
@@ -417,6 +442,7 @@ public final class TownPresenceSampler {
         return sb.toString();
     }
 
-    private record Anchor(int x, int y, double strength) {
+    // Package-private (not private) so a test can pin the max-not-sum anchor-pull contract.
+    record Anchor(int x, int y, double strength) {
     }
 }
