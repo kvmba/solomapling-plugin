@@ -334,6 +334,22 @@ public class BotDialogueHandler {
     }
 
     public static String getRandomResolvedLine(String dialoguePath, String botType, String node, Character speaker, Character player) {
+        SpokenLine spoken = getRandomResolvedLineAndEmote(dialoguePath, botType, node, speaker, player);
+        return spoken == null ? null : spoken.text();
+    }
+
+    // A line to speak together with the mood-matched emote for it. The face belongs to the line
+    // that was actually chosen (its tagged override, else the node palette) — a caller that speaks
+    // the text can then play the expression the writing intended. emote is 0 when none is defined
+    // (the caller then plays no face, same as before).
+    public record SpokenLine(String text, int emote) {
+    }
+
+    // Same selection policy as getRandomResolvedLine — bounded re-rolls of token-bearing lines,
+    // then a token-free fallback so a raw {TOKEN} never reaches chat — but it also returns the
+    // emote tied to the chosen line. Returns null when the node is missing/empty or nothing is
+    // speakable (caller stays silent).
+    public static SpokenLine getRandomResolvedLineAndEmote(String dialoguePath, String botType, String node, Character speaker, Character player) {
         DialogueConstructor dialog = getDialogueCon(dialoguePath, botType, node);
         if (dialog == null || dialog.getDialogue().isEmpty()) {
             return null;
@@ -342,18 +358,19 @@ public class BotDialogueHandler {
         int n = lines.size();
         int tries = Math.min(CONTEXT_REROLLS, n);
         for (int attempt = 0; attempt < tries; attempt++) {
-            String raw = lines.get(RANDOM.nextInt(n));
+            int idx = RANDOM.nextInt(n);
+            String raw = lines.get(idx);
             if (!DialogueContextResolver.hasTokens(raw)) {
-                return raw;
+                return new SpokenLine(raw, dialog.getEmoteForIndex(idx));
             }
             Optional<String> filled = DialogueContextResolver.fill(raw, speaker, player);
             if (filled.isPresent()) {
-                return filled.get();
+                return new SpokenLine(filled.get(), dialog.getEmoteForIndex(idx));
             }
         }
-        for (String line : lines) {
-            if (!DialogueContextResolver.hasTokens(line)) {
-                return line;
+        for (int i = 0; i < n; i++) {
+            if (!DialogueContextResolver.hasTokens(lines.get(i))) {
+                return new SpokenLine(lines.get(i), dialog.getEmoteForIndex(i));
             }
         }
         return null;
