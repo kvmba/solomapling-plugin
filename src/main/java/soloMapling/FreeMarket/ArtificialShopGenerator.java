@@ -376,17 +376,43 @@ public class ArtificialShopGenerator {
     }
 
     /**
-     * Price at or above which a whole-store gimmick (1-meso / quitting / cheap
-     * sale) leaves an item alone. These gimmicks used to slash every listing,
-     * so a shop could put a 50m White Scroll on the shelf for 1 meso purely
-     * because the shop rolled the 1-in-10000 "1 MESO SHOP" variant.
+     * Whole-store gimmicks (1-meso shop, quitting/cheap sale) must not put the
+     * best goods on a fire sale, or a shop could shelve a 50m White Scroll for
+     * 1 meso purely because it rolled the 1-in-10000 "1 MESO SHOP" variant.
+     *
+     * <p>The protected cut is adaptively the shop's own top decile by listing
+     * price, not a fixed number: a hard floor (it used to be 10m) leaves the
+     * sub-10m rare band - S-rank dark scrolls, mastery books, the odd S equip -
+     * exposed, because "rare" is relative to the store's own stock, not to an
+     * absolute meso amount.
      */
-    private static final int RARE_ITEM_DISCOUNT_FLOOR = 10_000_000;
+    private static final double RARE_STOCK_PROTECTED_FRACTION = 0.10;
+
+    /** Mask of the priciest {@value #RARE_STOCK_PROTECTED_FRACTION} of the stock. */
+    private static boolean[] rareStockMask(List<PlayerShopItem> items) {
+        int n = items.size();
+        boolean[] protect = new boolean[n];
+
+        Integer[] order = new Integer[n];
+        for (int i = 0; i < n; i++) {
+            order[i] = i;
+        }
+        java.util.Arrays.sort(order, java.util.Comparator.comparingInt(i -> items.get(i).getPrice()));
+
+        int protectCount = (int) Math.ceil(n * RARE_STOCK_PROTECTED_FRACTION);
+        for (int k = n - protectCount; k < n; k++) {
+            protect[order[k]] = true;
+        }
+        return protect;
+    }
 
     public static void setOneMesoShop(HiredMerchantArtificial merchant) {
-        for (PlayerShopItem psItem : merchant.getItems()) {
-            if (psItem.getPrice() < RARE_ITEM_DISCOUNT_FLOOR) {
-                psItem.setPrice(1);
+        List<PlayerShopItem> items = merchant.getItems();
+        boolean[] protect = rareStockMask(items);
+
+        for (int i = 0; i < items.size(); i++) {
+            if (!protect[i]) {
+                items.get(i).setPrice(1);
             }
         }
     }
@@ -400,11 +426,14 @@ public class ArtificialShopGenerator {
     }
 
     public static void applyDiscountWholeStore(HiredMerchantArtificial merchant, double percentage) {
-        for (PlayerShopItem psItem : merchant.getItems()) {
-            if (psItem.getPrice() >= RARE_ITEM_DISCOUNT_FLOOR) {
-                continue; // never discount genuinely rare stock
+        List<PlayerShopItem> items = merchant.getItems();
+        boolean[] protect = rareStockMask(items);
+
+        for (int i = 0; i < items.size(); i++) {
+            if (!protect[i]) {
+                PlayerShopItem psItem = items.get(i);
+                psItem.setPrice((int) (psItem.getPrice() * percentage));
             }
-            psItem.setPrice((int) (psItem.getPrice() * percentage));
         }
     }
 
