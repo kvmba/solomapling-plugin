@@ -30,29 +30,46 @@ class PetLeashAndChatTest {
         // Owner at x=100, pet resting to the LEFT at x=40 (60px away, inside its comfort 80).
         // The old facing model sent the target to the owner's back, flipping the pet across when
         // the owner turned; the leash target is the pet's OWN x, so nothing pulls it.
-        assertEquals(40, BotPetFollower.followTargetX(100, 40, 80),
+        assertEquals(40, BotPetFollower.followTargetX(100, 40, 80, false),
                 "pet inside its leash stands where it is, whatever the owner faces");
         // Same owner, pet on the RIGHT at x=160: still held in place.
-        assertEquals(160, BotPetFollower.followTargetX(100, 160, 80),
+        assertEquals(160, BotPetFollower.followTargetX(100, 160, 80, false),
                 "a pet inside the leash is unaffected on the other side too");
     }
 
     @Test
     void ownerWalkingTowardThePetDoesNotPushIt() {
         // Pet at x=40, owner advances from 100 to 60: |40-60|=20 <= 80, so the pet still stands.
-        assertEquals(40, BotPetFollower.followTargetX(60, 40, 80),
+        assertEquals(40, BotPetFollower.followTargetX(60, 40, 80, false),
                 "an approaching owner must not push the pet (no fleeing)");
+        // And even while the owner is MOVING right through the pet's pixel, it holds (ownerMoving).
+        assertEquals(50, BotPetFollower.followTargetX(50, 50, 80, true),
+                "an owner walking through the pet must not push it");
     }
 
     @Test
     void petClosesOnlyWhenDrawnBeyondItsLeashStayingOnItsOwnSide() {
         // Pet at x=0, owner walked to x=120 (gap 120 > comfort 80): the leash restrains on the
         // PET's side (x=40), never across the owner to the far side.
-        assertEquals(40, BotPetFollower.followTargetX(120, 0, 80),
+        assertEquals(40, BotPetFollower.followTargetX(120, 0, 80, false),
                 "a drawn-out pet walks to the comfort ring on its OWN side");
         // Mirror: pet at x=200, owner at x=80 (gap 120): restraint at 160.
-        assertEquals(160, BotPetFollower.followTargetX(80, 200, 80),
+        assertEquals(160, BotPetFollower.followTargetX(80, 200, 80, false),
                 "symmetrical on the other side (never sent past the owner)");
+    }
+
+    @Test
+    void standingOwnerNeverLetsAPetRestInsideIt() {
+        // The host re-places every pet on the owner's pixel at map entry; a standing owner must walk
+        // the pet back out (else it stays stacked inside the bot forever).
+        int comfort = 80;
+        int out = BotPetFollower.followTargetX(500, 500, comfort, false);
+        assertTrue(Math.abs(out - 500) > 30,
+                "a pet collapsed onto a STANDING owner steps out past the walk dead zone, got " + out);
+        assertTrue(Math.abs(out - 500) <= comfort, "the step-out stays within the comfort band");
+        // But an owner WALKING through the pet's pixel still leaves it put.
+        assertEquals(500, BotPetFollower.followTargetX(500, 500, comfort, true),
+                "no step-out while the owner is moving (would read as fleeing)");
     }
 
     @Test

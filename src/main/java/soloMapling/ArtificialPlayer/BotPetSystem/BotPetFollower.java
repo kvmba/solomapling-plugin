@@ -164,6 +164,13 @@ public final class BotPetFollower {
     /** How close (px) counts as "in the slot": a pet that is already moving stops here, so a pet
      *  settles at its comfort distance instead of overshooting toward the owner. */
     private static final int FOLLOW_ARRIVE_PX = 4;
+    /** A resting pet keeps at least this gap (px) from a STANDING owner. The host re-places every
+     *  pet exactly on the owner at each map entry ({@code MapleMap.addPlayer}), and the one-sided
+     *  leash never opens a gap on its own, so without this a still bot's pets would sit stacked
+     *  inside it forever. Only the TRIGGER — the walk-out target is the pet's comfort ring, so the
+     *  pets separate to their normal spacing. Kept below {@link #FOLLOW_MIN_PX}. Gated on the owner
+     *  standing still: an owner walking THROUGH a pet must not push it (that reads as fleeing). */
+    private static final int FOLLOW_MIN_GAP_PX = 16;
     /** Vertical tolerance (px) for treating a floor as the owner's own level. */
     private static final int GROUND_STEP_PX = 40;
 
@@ -342,7 +349,9 @@ public final class BotPetFollower {
         // Each pet's own target x: the restraint point of its one-sided leash to the owner (see
         // followTargetX). This is NOT where the pet should stand — a pet inside its leash does not
         // move at all — it is the point the pet is only ever pulled TOWARD, never pushed away from.
-        int[] followX = computeFollowTargetXs(chr, pets);
+        // ownerMoving gates the "never rest inside a standing owner" step-out so an owner walking
+        // through its pet still never pushes it.
+        int[] followX = computeFollowTargetXs(chr, pets, GCMovement.isMoving(chr));
 
         // The owner STEPPING OFF A ROPE/LADDER onto the top platform is the moment to re-home every
         // pet onto the owner's own landing. While the owner climbed, the follower pinned each pet to
@@ -744,7 +753,9 @@ public final class BotPetFollower {
         Point owner = chr.getPosition();
         // Re-home onto the pet's OWN side of the leash (followTargetX) — never the owner's facing
         // side, which would teleport a pet that had fallen on the far side around behind the owner.
-        int targetX = followTargetX(owner.x, p.x, currentFollowDistance(pet));
+        // A fallen pet is far outside the VR bounds (gap >> comfort), so the rest-inside step-out
+        // never applies here; pass ownerMoving=true to make that explicit.
+        int targetX = followTargetX(owner.x, p.x, currentFollowDistance(pet), true);
         WarpLanding land = resolveSafeLanding(map, targetX, owner);
         teleportPet(chr, pet, index, land.pos(), land.fh(),
                 left ? PET_STAND_LEFT : PET_STAND_RIGHT, config, observed);
@@ -871,7 +882,7 @@ public final class BotPetFollower {
      * drawn once by {@link #currentFollowDistance} and never re-rolled. The observed follow and the
      * unobserved position sync share this, so a joining player sees no spawn-then-snap.
      */
-    private static int[] computeFollowTargetXs(Character chr, Pet[] pets) {
+    private static int[] computeFollowTargetXs(Character chr, Pet[] pets, boolean ownerMoving) {
         int[] followX = new int[pets.length];
         int ownerX = chr.getPosition().x;
         for (int i = 0; i < pets.length; i++) {
@@ -879,7 +890,7 @@ public final class BotPetFollower {
             if (pet == null) {
                 continue;
             }
-            followX[i] = followTargetX(ownerX, pet.getPos().x, currentFollowDistance(pet));
+            followX[i] = followTargetX(ownerX, pet.getPos().x, currentFollowDistance(pet), ownerMoving);
         }
         return followX;
     }
@@ -898,11 +909,25 @@ public final class BotPetFollower {
      *   <li><b>Drawn beyond the leash</b> the restraint point sits on the comfort ring on the pet's
      *       OWN side (never across the owner), so the pet walks just far enough to restore the
      *       comfort gap and then stops.</li>
+     *   <li><b>Collapsed ONTO a standing owner</b> (gap under {@link #FOLLOW_MIN_GAP_PX}, which the
+     *       host's map-entry re-place produces) the pet steps back out to its comfort ring on its own
+     *       side — a pet never RESTS inside its owner. Gated on {@code ownerMoving}: while the owner
+     *       walks through its pet it holds instead, so an approaching owner still never pushes it.</li>
      * </ul>
      */
-    static int followTargetX(int ownerX, int petX, int comfort) {
+    static int followTargetX(int ownerX, int petX, int comfort, boolean ownerMoving) {
         int delta = petX - ownerX;
-        if (Math.abs(delta) <= comfort) {
+        int gap = Math.abs(delta);
+        if (gap <= comfort) {
+            if (!ownerMoving && gap < FOLLOW_MIN_GAP_PX) {
+                // On the owner's own pixel with the owner standing still: step out to the comfort
+                // ring on the pet's own side (delta 0 resolves to the right, matching the grant
+                // spread). The ring clears the walk dead zone so the pet actually takes the step;
+                // the owner WALKING case falls through to the hold below, so an approaching owner
+                // never pushes the pet (that would read as fleeing).
+                int ring = Math.max(comfort, FOLLOW_DEAD_ZONE_PX + 1);
+                return ownerX + (delta >= 0 ? 1 : -1) * ring;
+            }
             return petX; // inside the leash: nothing pulls the pet — stand exactly where it is
         }
         int side = delta > 0 ? 1 : -1; // the pet's own side, so it is never sent past the owner
@@ -982,7 +1007,7 @@ public final class BotPetFollower {
      */
     private static void syncUnobservedPositions(Character chr, BotPetConfig config) {
         Pet[] pets = chr.getPets();
-        int[] followX = computeFollowTargetXs(chr, pets);
+        int[] followX = computeFollowTargetXs(chr, pets, GCMovement.isMoving(chr));
         MapleMap map = chr.getMap();
         int ownerY = chr.getPosition().y;
         // Owner on a rope/ladder or in water: the observed tick neither probes nor moves the pet on
