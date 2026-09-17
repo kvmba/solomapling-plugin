@@ -250,11 +250,18 @@ public final class BotDeath {
         if (!GCMovement.isMapObserved(chr.getMapId())) {
             return; // nobody watching — advance the clock without paying for a line
         }
-        String line = BotDialogueHandler.getRandomResolvedLine(DIALOGUE_PATH, "BotDeath", node(), chr, null);
-        if (line == null || line.isBlank()) {
+        BotDialogueHandler.SpokenLine spoken =
+                BotDialogueHandler.getRandomResolvedLineAndEmote(DIALOGUE_PATH, "BotDeath", node(), chr, null);
+        if (spoken == null || spoken.text() == null || spoken.text().isBlank()) {
             return;
         }
-        SocialCommands.BotSpeak(chr, line);
+        SocialCommands.BotSpeak(chr, spoken.text());
+        // Play the face the line was written for (a weeping line cries, an angry one scowls).
+        // The emote comes from the line that was actually picked, not a blind palette draw;
+        // 0 means the line defined none, in which case no expression is sent.
+        if (spoken.emote() > 0) {
+            SocialCommands.BotEmote(chr, spoken.emote());
+        }
     }
 
     /**
