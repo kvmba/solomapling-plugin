@@ -64,15 +64,18 @@ public final class BotBuffEffects {
         Skill skill = SkillFactory.getSkill(skillId);
         if (skill == null) return 0;
 
-        // The persistent aura needs the buff's stat list (cheap memoized lookup,
-        // no applyTo). Skip silently if the skill has no stat ups.
-        StatEffect effect = skill.getEffect(skill.getMaxLevel());
-        if (effect == null) return 0;
-
+        // Fire the cast animation for every resolvable skill, BEFORE the effect lookup: an id that
+        // exists in Skill.wz but has no StatEffect at max level should still play its cast (the aura
+        // below is the only part that needs the stat list). Skipped only for the silent on-arrival show.
         if (!silent) {
             bot.getMap().broadcastMessage(bot,
                     PacketCreator.showBuffEffect(bot.getId(), skillId, CAST_EFFECT_ID), false);
         }
+
+        // The persistent aura needs the buff's stat list (cheap memoized lookup,
+        // no applyTo). Skip silently if the skill has no stat ups.
+        StatEffect effect = skill.getEffect(skill.getMaxLevel());
+        if (effect == null) return 0;
 
         if (!effect.getStatups().isEmpty()) {
             bot.getMap().broadcastMessage(bot,
