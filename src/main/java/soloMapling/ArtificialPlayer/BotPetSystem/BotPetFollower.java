@@ -160,7 +160,7 @@ public final class BotPetFollower {
      *  it walks AWAY, so the pet neither flees an approaching owner nor shuffles after it. A pet
      *  that IS moving keeps going until within {@link #FOLLOW_ARRIVE_PX}, so it settles instead of
      *  drifting. */
-    private static final int FOLLOW_DEAD_ZONE_PX = 30;
+    private static final int FOLLOW_DEAD_ZONE_PX = 15;
     /** How close (px) counts as "in the slot": a pet that is already moving stops here, so a pet
      *  settles at its comfort distance instead of overshooting toward the owner. */
     private static final int FOLLOW_ARRIVE_PX = 4;
@@ -170,7 +170,7 @@ public final class BotPetFollower {
      *  inside it forever. Only the TRIGGER — the walk-out target is the pet's comfort ring, so the
      *  pets separate to their normal spacing. Kept below {@link #FOLLOW_MIN_PX}. Gated on the owner
      *  standing still: an owner walking THROUGH a pet must not push it (that reads as fleeing). */
-    private static final int FOLLOW_MIN_GAP_PX = 16;
+    private static final int FOLLOW_MIN_GAP_PX = 8;
     /** Vertical tolerance (px) for treating a floor as the owner's own level. */
     private static final int GROUND_STEP_PX = 40;
 
@@ -181,8 +181,8 @@ public final class BotPetFollower {
     // its comfort (plus {@link #FOLLOW_DEAD_ZONE_PX}) away, and never moves to open the gap. The
     // owner turning in place therefore leaves every pet exactly where it stands, and a pet on the
     // side an owner walks toward holds its ground rather than running around or fleeing.
-    private static final int FOLLOW_MIN_PX = 30;
-    private static final int FOLLOW_MAX_PX = 80;
+    private static final int FOLLOW_MIN_PX = 15;
+    private static final int FOLLOW_MAX_PX = 40;
 
     /** Movement-stat points a pet loses versus its owner, per array slot: pet 1 = −2, pet 2 = −4,
      *  pet 3 = −6 (i.e. {@code (index + 1) * 2}). Floored at the base stat by
