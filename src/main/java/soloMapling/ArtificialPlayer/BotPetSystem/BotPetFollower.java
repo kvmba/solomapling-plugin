@@ -49,7 +49,14 @@ import java.util.concurrent.TimeUnit;
  * {@link #followTargetX}). Gravity only ever pulls a pet
  * DOWN, so a jumped owner never drags it into the air; a pet whose own feet leave the ground (its
  * owner climbed a platform, or either walked off a ledge) falls under gravity and lands on the floor
- * below. A pet left too far behind HORIZONTALLY warps to the owner's side (official behaviour) — a
+ * below. When the owner LANDS on a footing BELOW the pet, the pet does not fall from rest (that read
+ * as being yanked / dragged): it HOPS down with its OWN physics — a short upward launch
+ * ({@link #DROP_HOP_UP_PXS}) then a fall, under its OWN JUMP pose, so the descent reads as the pet
+ * jumping down after its owner. The hop stays on the pet's own column (never aimed at the owner's
+ * landing), so a narrow lower ledge is not overshot and the client's fh snap can never pull it onto
+ * the owner. (An owner on a forbidFallDown platform is the exception — that surface is never
+ * pass-through, so the pet cannot drop and still warps.) A pet left
+ * too far behind HORIZONTALLY warps to the owner's side (official behaviour) — a
  * vertical owner move (a jump or a fall) is followed with the pet's own physics instead. It swims
  * (SWIM stance 12/13) while its owner swims, or in a water map whenever its own feet find no ground;
  * a rope/ladder owner makes it hang (HANG, 30/31). When the owner steps OFF the rope TOP onto the
@@ -145,6 +152,15 @@ public final class BotPetFollower {
      *  (mirrors the bot's cfg.SWIM_LEVEL_BAND_PX). */
     private static final int SWIM_LEVEL_BAND_PX = 30;
     private static final int JUMP_REACH_PX = 160;           // owner above this => warp instead
+    /** The pet's drop-hop: a short upward launch, applied when the owner has landed BELOW it and the
+     *  pet is standing on a ledge its owner has left. Gravity drives the descent, so the rise is
+     *  cosmetic — a few px of lift is what makes the descent read as the pet JUMPING down (under its
+     *  own JUMP pose) rather than sliding / being yanked off the ledge. The hop stays on the pet's own
+     *  column (its horizontal speed is the walk's own exit velocity, ~0 when standing): a hop aimed at
+     *  the owner would read as the pet being reeled in, and could carry it past a narrow lower ledge,
+     *  while the client's per-landing foothold snap would pull it onto the owner's column — the
+     *  "pulled" read we are removing. */
+    static final double DROP_HOP_UP_PXS = -120.0;
     /** Safety margin (px) under the owner's true hop rise for the up-probe bound: the probe must
      *  never offer a floor the launch cannot actually clear (see {@link GCMovement#jumpProfile}). */
     private static final int JUMP_RISE_MARGIN_PX = 8;
@@ -455,7 +471,9 @@ public final class BotPetFollower {
         // Warp (official: remove -> reposition -> respawn) when left behind: a large
         // HORIZONTAL lead the walk cannot make up, or an owner settled far ABOVE (a pet
         // can hop one platform but not a long climb). A jumping owner is ignored (its
-        // higher y is transient).
+        // higher y is transient). This is an UP-only threshold: an owner BELOW the pet is
+        // never warped — that is the reported "the pet is YANKED down after the bot", and it
+        // is followed with the pet's own drop-hop/physics instead (see the fall branch below).
         if (Math.abs(p.x - owner.x) > LOST_PX || (!CharacterStance.isJumping(chr.getStance())
                 && owner.y < p.y - JUMP_REACH_PX)) {
             clearMotion(id);
@@ -519,10 +537,12 @@ public final class BotPetFollower {
         boolean ownerOnSameSurface = map.isSwim() && standing != null
                 && ownerOnSameWalkSurface(map, standing, owner);
         if (!ownerOnSameSurface && ownerBelow && standing != null && standing.isForbidFallDown()) {
-            // A forbidFallDown platform is never pass-through, so the pet cannot drop. Warp onto a
-            // real footing at the owner's level (resolveSafeLanding keeps it on a surface within a step of
-            // the owner, not the owner's raw y over a gap). fh is the landed foothold id, or 0 when
-            // no surface is in range (the fh rule: a bogus id would snap it to the wrong surface).
+            // A forbidFallDown platform is never pass-through (the engine's own down-jump rule), so
+            // a pet standing on one CANNOT drop through to a lower owner at all — a drop-hop off its
+            // x would just re-land on the same platform. Warp onto a real footing at the owner's
+            // level instead (resolveSafeLanding keeps it on a surface within a step of the owner, not
+            // the owner's raw y over a gap). fh is the landed foothold id, or 0 when no surface is in
+            // range (the fh rule: a bogus id would snap it to the wrong surface).
             WarpLanding land = resolveSafeLanding(map, targetX, owner);
             teleportPet(chr, pet, index, land.pos(), land.fh(),
                     left ? PET_STAND_LEFT : PET_STAND_RIGHT, config, observed);
@@ -621,9 +641,21 @@ public final class BotPetFollower {
         // slope, and a genuine edge still falls via walk.lostGround() below.
         boolean ownerBelowAndNotWalkingDown = !ownerOnSameSurface && ownerBelow && walk.point().y <= p.y;
         if (walk.lostGround() || ownerBelowAndNotWalkingDown) {
-            // Fall from the walk's end point (the edge, or p + this tick's horizontal step) through
-            // the engine's per-pixel sweep, keeping the horizontal step — like the bot's beginFall.
-            AirStep step = simulateAirStep(map, walk.point(), vx, 0.0, dt);
+            // A pet that has to go DOWN leaves with a short upward launch rather than the old
+            // zero-velocity drop, so its descent is a real arc (a hop, then a fall) instead of the
+            // physics-free slide that read as the pet being YANKED down after the owner. Two ways in,
+            // distinguished by cause:
+            //   • the pet's OWN walk ran off an edge: a genuine walk-off — it keeps the walk's exit
+            //     speed and simply starts falling from the edge, exactly as before (no launch).
+            //   • the OWNER dropped to a footing below and the walk did not bring the pet down to it:
+            //     the pet is standing on a ledge its owner has left. It HOPS down — the same straight
+            //     column (the walk's own exit velocity, which is ~0 here), but with an upward launch
+            //     so the descent reads as the pet jumping down on its own. It is deliberately NOT
+            //     aimed at the owner's landing: a hop toward the owner would read as the pet being
+            //     reeled in, and could carry it past a narrow lower ledge. Keeping the column also
+            //     means the client's per-landing fh snap can never pull it onto the owner.
+            double launchVy = walk.lostGround() ? 0.0 : DROP_HOP_UP_PXS;
+            AirStep step = simulateAirStep(map, walk.point(), vx, launchVy, dt);
             nx = step.point().x;
             ny = step.point().y;
             if (step.landed() != null) {
@@ -632,6 +664,9 @@ public final class BotPetFollower {
                 vyAir.remove(id);
                 fallVy.put(id, 0.0);
             } else {
+                // Mid-air: keep the real velocity components so an observer renders the arc (it
+                // used to publish vy 0 below, which is why any drop looked like a slide, not a fall).
+                velX.put(id, step.ax());
                 vyAir.add(id);
                 fallVy.put(id, step.ay());
                 fhVal = 0;
@@ -647,8 +682,12 @@ public final class BotPetFollower {
                     ? (left ? PET_STAND_LEFT : PET_STAND_RIGHT)
                     : (vx > 0 ? PET_MOVE_RIGHT : PET_MOVE_LEFT);
         }
+        // Publish the real vertical speed while airborne so the observer renders the fall (a landed
+        // step keeps it at 0). The old hard-coded 0 is what made every pet drop — hop or gravity —
+        // look like a physics-free slide.
+        int outVy = vyAir.contains(id) ? (int) Math.round(fallVy.getOrDefault(id, 0.0)) : 0;
         applyAndBroadcast(chr, pet, index, new Point(nx, ny),
-                (int) Math.round(vx), 0, fhVal, stance, config, observed);
+                (int) Math.round(velX.getOrDefault(id, 0.0)), outVy, fhVal, stance, config, observed);
     }
 
     /**
