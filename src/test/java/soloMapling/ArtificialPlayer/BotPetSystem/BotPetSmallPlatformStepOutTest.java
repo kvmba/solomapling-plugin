@@ -6,6 +6,7 @@ import org.junit.jupiter.api.Test;
 import java.awt.Point;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -40,7 +41,7 @@ class BotPetSmallPlatformStepOutTest {
 
     private static int stepOut(int targetX, int ownerX, int petX, Foothold fh) {
         return BotPetFollower.stepOutTargetOnPlatform(null, targetX, ownerX, new Point(petX, 500), fh,
-                WALK_PXS, TICK_MS);
+                () -> WALK_PXS, TICK_MS);
     }
 
     @Test
@@ -116,6 +117,28 @@ class BotPetSmallPlatformStepOutTest {
         int ring = BotPetFollower.followTargetX(100, 100, 40, false);
         // No foothold at all (the pet is over a gap): nothing to bound the step-out against.
         assertEquals(ring, BotPetFollower.stepOutTargetOnPlatform(null, ring, 100, new Point(100, 500),
-                null, WALK_PXS, TICK_MS));
+                null, () -> WALK_PXS, TICK_MS));
+    }
+
+    @Test
+    void walkVelocityIsOnlyDerivedWhenTheStepOutActuallyNeedsPulling() {
+        // Deriving the walk velocity rebuilds the owner's movement profile, so the common targets the
+        // rule returns untouched straight away must never touch the supplier — otherwise every ordinary
+        // follow tick pays for a profile rebuild it does not need.
+        boolean[] asked = {false};
+        java.util.function.DoubleSupplier probe = () -> {
+            asked[0] = true;
+            return WALK_PXS;
+        };
+        // Hold target (delta 0) and leash-close target (reverse side): both short-circuit up front.
+        BotPetFollower.stepOutTargetOnPlatform(null, 40, 100, new Point(40, 500),
+                ledge(10, 90, 500), probe, TICK_MS);
+        BotPetFollower.stepOutTargetOnPlatform(null, 140, 100, new Point(200, 500),
+                ledge(150, 400, 500), probe, TICK_MS);
+        assertFalse(asked[0], "hold/leash-close targets must not derive the walk velocity");
+        // A real step-out does need it to compute the safe margin.
+        BotPetFollower.stepOutTargetOnPlatform(null, 140, 100, new Point(100, 500),
+                ledge(80, 150, 500), probe, TICK_MS);
+        assertTrue(asked[0], "a step-out into the edge does need the walk velocity");
     }
 }

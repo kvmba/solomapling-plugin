@@ -585,7 +585,7 @@ public final class BotPetFollower {
         // Only the step-out is affected: a hold target equals the pet's own x and a leash-close
         // target sits between the pet and its owner, so normal following is untouched.
         targetX = stepOutTargetOnPlatform(map, targetX, owner.x, p, standing,
-                GCMovement.walkVelocityPxs(chr, statReduction(index)), config.followTickMs());
+                () -> GCMovement.walkVelocityPxs(chr, statReduction(index)), config.followTickMs());
 
         // Walk with the engine's OWN ground integrator: the pet steps UP and DOWN slopes and
         // ledges, is blocked by walls and detected walking off an edge — identically to a bot.
@@ -1015,11 +1015,14 @@ public final class BotPetFollower {
      *
      * <p>The platform extent comes from the engine's own walk region under the pet (its connected
      * walk surface — see {@link GCMovement#peekLedgeAt}), falling back to the single foothold
-     * segment when the map isn't baked. Package-private static seam so the rule is covered without a
-     * live map.</p>
+     * segment when the map isn't baked. {@code walkVelocityPxs} is a supplier, not a value, because
+     * deriving it is not free ({@link GCMovement#walkVelocityPxs} rebuilds the owner's movement
+     * profile) and the common hold/leash-close targets return before it is ever needed. Package-private
+     * static seam so the rule is covered without a live map.</p>
      */
     static int stepOutTargetOnPlatform(MapleMap map, int targetX, int ownerX, Point petPos,
-                                       Foothold standing, double walkVelocityPxs, long followTickMs) {
+                                       Foothold standing, java.util.function.DoubleSupplier walkVelocityPxs,
+                                       long followTickMs) {
         if (standing == null) {
             return targetX; // no ground under the pet to bound the step-out against
         }
@@ -1045,7 +1048,7 @@ public final class BotPetFollower {
         // walking toward), and never past where the pet already stands — so the leash never reverses
         // and a narrow ledge the pet already sits outside of simply holds. Every already-safe ring is
         // returned unchanged, leaving normal following untouched.
-        int inset = stepOutEdgeInset(walkVelocityPxs, followTickMs);
+        int inset = stepOutEdgeInset(walkVelocityPxs.getAsDouble(), followTickMs);
         return petSide > 0
                 ? Math.max(petX, Math.min(targetX, hi - inset))
                 : Math.min(petX, Math.max(targetX, lo + inset));
