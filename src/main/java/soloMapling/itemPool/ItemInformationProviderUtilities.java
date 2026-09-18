@@ -445,17 +445,18 @@ public class ItemInformationProviderUtilities {
     /**
      * Whole-price of an item, with a level-scaled estimate for equips whose WZ
      * entry carries no usable price (0 / a handful of mesos: event rewards, boss
-     * drops, half-finished data). The old flat sentinel (5,000,000) both valued
-     * a Lv10 starter the same as a Lv120 endgame piece and created a 50x cliff
-     * between price 50 and 51; scaling by required level keeps missing-price
-     * gear monotonic and sane.
+     * drops, half-finished data). The old flat sentinel (5,000,000) valued a
+     * Lv10 starter the same as a Lv120 endgame piece and created a huge cliff
+     * against a neighbouring item priced 51. Scaling by required level keeps
+     * missing-price gear monotonic and in the same ballpark as priced gear of
+     * the same level (WZ medians run ~12k at Lv20 up to ~360k at Lv120).
      */
     public static Integer getWzPrice(int itemId) {
         ItemInformationProvider ii = ItemInformationProvider.getInstance();
         int price = ii.getWholePrice(itemId);
         if (price <= 50) { // WZ has no usable price - estimate from required level
             int level = ii.getEquipLevelReq(itemId);
-            price = 50_000 + level * level * 300;
+            price = 50_000 + level * level * 100;
         }
         return price;
     }
