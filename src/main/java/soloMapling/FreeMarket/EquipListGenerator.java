@@ -60,10 +60,10 @@ public class EquipListGenerator {
             if (checkIfEquipIsScrollable(sellItem)) {
                 Equip scrolledItem = ScrollGivenItem(sellItem);
                 price = getEquipMarketValue(scrolledItem);
-                equipList.add(new FMEquip(scrolledItem, price));
+                equipList.add(new FMEquip(scrolledItem, applyRarePriceOverride(itemId, price)));
 //                }
             } else {
-                equipList.add(new FMEquip(sellItem, price));
+                equipList.add(new FMEquip(sellItem, applyRarePriceOverride(itemId, price)));
             }
         }
         return equipList;
@@ -167,12 +167,23 @@ public class EquipListGenerator {
                 Map<Integer, Integer> priceMap = Map.of(1, price);
                 ItemNode item = new ItemNode(null, null, null, priceMap);
                 price = getEquipMarketValue(scrolledItem);
-                return (new FMEquip(scrolledItem, price));
+                return (new FMEquip(scrolledItem, applyRarePriceOverride(itemId, price)));
             } else {
-                return (new FMEquip(sellItem, price));
+                return (new FMEquip(sellItem, applyRarePriceOverride(itemId, price)));
             }
         }
         return null; // failed to process
+    }
+
+    /**
+     * Raise the price of curated rare / BIS gear to its 国服 market value (see
+     * {@code rareItemPrices.yaml}). WZ price is a shop-resale number, so without
+     * this a Zakum Helmet or Brown Work Gloves listed for far less than common
+     * gear. Used as a floor: a genuinely higher scrolled valuation is kept.
+     */
+    public static int applyRarePriceOverride(int itemId, int price) {
+        Integer rare = DesirableEquipList.getRarePrice(itemId);
+        return (rare != null && rare > price) ? rare : price;
     }
 
 
