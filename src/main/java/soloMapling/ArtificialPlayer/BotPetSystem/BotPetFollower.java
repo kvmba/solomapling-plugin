@@ -575,6 +575,18 @@ public final class BotPetFollower {
             return;
         }
 
+        // A standing owner with its pet collapsed onto it (the host re-places every pet on the owner
+        // at map entry) makes {@link #followTargetX} step the pet back out to its comfort ring on its
+        // own side. That ring is a blind x offset: on a SMALL platform it can fall past the ledge, so
+        // the pet walks off the edge, drops, and is warped back beside the owner — then repeats (the
+        // reported drop-then-pull-back loop). Pull that one target back to a standable point on the
+        // pet's own platform, keeping a whole tick's walk OUT from the edge so the pet's own momentum
+        // cannot carry it off (the tick is many client steps long — see {@link #stepOutEdgeInset}).
+        // Only the step-out is affected: a hold target equals the pet's own x and a leash-close
+        // target sits between the pet and its owner, so normal following is untouched.
+        targetX = stepOutTargetOnPlatform(map, targetX, owner.x, p, standing,
+                GCMovement.walkVelocityPxs(chr, statReduction(index)), config.followTickMs());
+
         // Walk with the engine's OWN ground integrator: the pet steps UP and DOWN slopes and
         // ledges, is blocked by walls and detected walking off an edge — identically to a bot.
         // Hysteresis, so pets do not crowd: start moving only once the target passes the wide dead
@@ -978,6 +990,77 @@ public final class BotPetFollower {
         }
         int side = delta > 0 ? 1 : -1; // the pet's own side, so it is never sent past the owner
         return ownerX + side * comfort;
+    }
+
+    /**
+     * Pull a step-OUT target back onto the pet's own platform so a small ledge cannot send the pet
+     * off the edge (the reported drop-then-pull-back loop). {@link #followTargetX} steps a pet that
+     * has been collapsed onto a STANDING owner (the host re-places every pet on the owner at map
+     * entry) back out to its comfort ring on its own side. That ring is a blind {@code owner ±
+     * comfort} offset — on a platform narrower than the ring it lands PAST the ledge, so the pet
+     * walks off, falls, and is warped back beside the owner, then repeats.
+     *
+     * <p>Clamping the target to the edge is NOT enough: the pet starts the tick at rest but a whole
+     * follow tick is many client ground steps, so it accelerates to {@code walkVelocityPxs} and
+     * glides {@link #stepOutEdgeInset} px — past the edge. The target is therefore pulled back to
+     * that margin INSIDE the edge the step-out aims at, and never past where the pet already stands;
+     * a ledge so narrow the pet already sits outside the safe band simply holds (the leash never
+     * reverses inward, which would read as fleeing).</p>
+     *
+     * <p>Only the step-out is affected: it is the one target that aims further OUTWARD than where the
+     * pet already stands. A hold target (inside the leash) equals the pet's own x, and a leash-close
+     * target (pet drawn beyond its comfort) lands BETWEEN the pet and the owner — the reverse side.
+     * Both are returned untouched, so normal following is unchanged; a ring already inside the
+     * margin is returned untouched too, so only the overflowing case moves.</p>
+     *
+     * <p>The platform extent comes from the engine's own walk region under the pet (its connected
+     * walk surface — see {@link GCMovement#peekLedgeAt}), falling back to the single foothold
+     * segment when the map isn't baked. Package-private static seam so the rule is covered without a
+     * live map.</p>
+     */
+    static int stepOutTargetOnPlatform(MapleMap map, int targetX, int ownerX, Point petPos,
+                                       Foothold standing, double walkVelocityPxs, long followTickMs) {
+        if (standing == null) {
+            return targetX; // no ground under the pet to bound the step-out against
+        }
+        int petX = petPos.x;
+        int dx = targetX - petX;
+        if (dx == 0) {
+            return targetX; // a hold target: the pet is not being steered at all
+        }
+        int petSide = petX >= ownerX ? 1 : -1;
+        if (Integer.signum(dx) != petSide) {
+            return targetX; // a leash-close target heads back toward the owner — never capped
+        }
+        int lo, hi;
+        GCMovement.Ledge ledge = GCMovement.peekLedgeAt(map, petX, petPos.y);
+        if (ledge != null) {
+            lo = ledge.minX();
+            hi = ledge.maxX();
+        } else {
+            lo = Math.min(standing.getX1(), standing.getX2());
+            hi = Math.max(standing.getX1(), standing.getX2());
+        }
+        // Pull the target back only at the FAR edge in the step-out direction (the edge the pet is
+        // walking toward), and never past where the pet already stands — so the leash never reverses
+        // and a narrow ledge the pet already sits outside of simply holds. Every already-safe ring is
+        // returned unchanged, leaving normal following untouched.
+        int inset = stepOutEdgeInset(walkVelocityPxs, followTickMs);
+        return petSide > 0
+                ? Math.max(petX, Math.min(targetX, hi - inset))
+                : Math.min(petX, Math.max(targetX, lo + inset));
+    }
+
+    /**
+     * The px a pet covers along the ground in one follow tick once it is up to speed — the margin a
+     * step-out target must keep from the platform edge so the pet's own momentum cannot carry it off.
+     * The pet starts the tick at rest but accelerates through the tick's many client ground steps
+     * (see {@link GCMovement#walkGroundTick}), so its travel is close to (a little under)
+     * {@code walkVelocityPxs * tickMs}; rounded up, plus {@link #FOLLOW_ARRIVE_PX} so the walk's own
+     * arrive band never reaches the edge either.
+     */
+    static int stepOutEdgeInset(double walkVelocityPxs, long followTickMs) {
+        return (int) Math.ceil(Math.abs(walkVelocityPxs) * followTickMs / 1000.0) + FOLLOW_ARRIVE_PX;
     }
 
     /**
