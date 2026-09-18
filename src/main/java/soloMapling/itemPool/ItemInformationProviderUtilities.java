@@ -442,11 +442,20 @@ public class ItemInformationProviderUtilities {
         return getAllItemIdsByEquipType(equipType, true);
     }
 
+    /**
+     * Whole-price of an item, with a level-scaled estimate for equips whose WZ
+     * entry carries no usable price (0 / a handful of mesos: event rewards, boss
+     * drops, half-finished data). The old flat sentinel (5,000,000) both valued
+     * a Lv10 starter the same as a Lv120 endgame piece and created a 50x cliff
+     * between price 50 and 51; scaling by required level keeps missing-price
+     * gear monotonic and sane.
+     */
     public static Integer getWzPrice(int itemId) {
         ItemInformationProvider ii = ItemInformationProvider.getInstance();
         int price = ii.getWholePrice(itemId);
-        if (price <= 50) { // Random items have no value
-            price = 5000000; // todo procedurally calculate value based on level?
+        if (price <= 50) { // WZ has no usable price - estimate from required level
+            int level = ii.getEquipLevelReq(itemId);
+            price = 50_000 + level * level * 300;
         }
         return price;
     }

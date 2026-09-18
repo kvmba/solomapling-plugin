@@ -1,0 +1,41 @@
+# =============================================================================
+# Rare / iconic equip override prices
+# =============================================================================
+# The Free Market prices most gear from its WZ "price" field (x a job-style
+# multiplier). WZ price is a *shop resale* number, not a market value, so the
+# most sought-after gear in the game carries a small WZ price and ended up on
+# the shelf for less than junk: a Zakum Helmet listed for ~1m while an ordinary
+# Lv70 weapon listed for 4m.
+#
+# This table overrides that for genuinely rare / best-in-slot gear. Values are
+# in mesos and follow 国服 (ChinaMS) v83 market conventions: BOSS-unique and
+# top BIS pieces are worth tens to hundreds of times an ordinary shop equip
+# (common Lv70 gear sits around 0.5-1m), topping out below the 2.147b int cap.
+# They are deliberately human-curated and meant to be tuned - edit freely, the
+# loader needs no code change.
+#
+# Format:  <item id>: <price in mesos>   # name
+# Anything not listed here prices exactly as before.
+# =============================================================================
+
+# ── 传说 / BOSS 独有 ────────────────────────────────────────────────────────
+1002357: 150000000   # 扎昆头盔 Zakum Helmet (BIS 帽)
+1122000: 250000000   # 炎魔项链 Horntail Necklace (BIS 项链)
+1002390: 80000000    # 扎昆头盔(2)
+1002430: 60000000    # 扎昆头盔(3)
+1002572: 40000000    # 海盗船长帽 Lord Pirate's Hat (BIS 帽)
+
+# ── 顶级 BIS ────────────────────────────────────────────────────────────────
+1082149: 120000000   # 褐工地手套 Brown Work Gloves (BIS 手套)
+1102084: 60000000    # 粉盖亚披风 Pink Gaia Cape
+1092049: 50000000    # 龙战士短刀 Dragon Khanjar
+1102053: 25000000    # 破旧斗篷 Old Raggedy Cape
+
+# ── 枫叶 / 活动 稀有 ────────────────────────────────────────────────────────
+1302020: 30000000    # 枫叶剑 Maple Sword
+1472030: 30000000    # 枫叶爪 Maple Claw
+1382009: 25000000    # 枫叶法杖 Maple Staff
+1452016: 25000000    # 枫叶弓 Maple Bow
+1332025: 20000000    # 枫叶短刀 Maple Wagner
+1002511: 12000000    # 枫叶帽 Maple Hat
+1092030: 8000000     # 枫叶盾 Maple Shield

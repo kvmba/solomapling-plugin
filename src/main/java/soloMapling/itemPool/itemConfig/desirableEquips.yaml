@@ -6,26 +6,37 @@
 # Organize by whatever grouping makes sense (class, slot, theme, etc.)
 # Add items here that are low-level or low WZ-price but still desirable (BIS, rare, iconic).
 #
-# Example:
-#   Warrior BIS:
-#     - 1002357   # Zakum Helmet
-#     - 1082149   # Brown Work Gloves
+# Pair these with a market price in rareItemPrices.yaml: whitelisting lets the
+# item reach a shelf at all, the price table decides it does not list for peanuts.
 
 Warrior BIS:
-  - 1002357   # Zakum Helmet
+  - 1002357   # 扎昆头盔 Zakum Helmet
 
 Thief BIS:
-  - 1472030   # Korean Fan (Claw)
+  - 1472030   # 枫叶爪 Maple Claw
+  - 1332025   # 枫叶短刀 Maple Wagner
+  - 1092049   # 龙战士短刀 Dragon Khanjar
 
 Mage BIS:
+  - 1382009   # 枫叶法杖 Maple Staff
 
 Bowman BIS:
+  - 1452016   # 枫叶弓 Maple Bow
 
 Common BIS:
-  - 1082149   # Brown Work Gloves
+  - 1082149   # 褐工地手套 Brown Work Gloves
+  - 1002390   # 扎昆头盔(2) Zakum Helmet (2)
+  - 1002430   # 扎昆头盔(3) Zakum Helmet (3)
+  - 1002572   # 海盗船长帽 Lord Pirate's Hat
+  - 1002511   # 枫叶帽 Maple Hat
+  - 1102084   # 粉盖亚披风 Pink Gaia Cape
+  - 1102053   # 破旧斗篷 Old Raggedy Cape
+  - 1092030   # 枫叶盾 Maple Shield
 
 Rare Masks:
 
 Iconic Weapons:
+  - 1302020   # 枫叶剑 Maple Sword
 
 Rare Accessories:
+  - 1122000   # 炎魔项链 Horntail Necklace
