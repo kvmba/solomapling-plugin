@@ -1,34 +1,29 @@
 package soloMapling.ArtificialPlayer.BotTownSystem;
 
-import org.gms.server.maps.MapObject;
-import org.gms.server.maps.MapObjectType;
+import org.gms.server.maps.Foothold;
 import org.gms.server.maps.MapleMap;
-import org.gms.server.maps.Portal;
 import soloMapling.ArtificialPlayer.BotSpotClaims;
 import soloMapling.ArtificialPlayer.GCMoveSystem.GCMovement;
 
 import java.awt.Point;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Random;
 import java.util.Set;
 
-// Anchor-weighted town scatter: pick N ground spots on a map from a weighted distribution instead of
-// uniformly, so ambient bots read as "lived in" (hanging out near shops/quest givers, concentrated on
-// the main streets) rather than sprinkled evenly. Zero map-specific code - every signal is WZ-derived:
+// Uniform town scatter: pick N ground spots anywhere on a map's reachable walkable ground, spread out
+// rather than clustered. Zero map-specific code - every signal is WZ-derived:
 //
-//   - NPC positions are the strongest anchor (life clusters around shops and quest givers); portal
-//     positions are a weaker anchor (foot traffic near entrances). Each anchor projects a 2-D gaussian
-//     bump onto nearby reachable ledges (tight in Y so an NPC pulls its own platform, not the column).
-//     A ledge takes the STRONGEST single anchor's pull (max, not sum), so a town's NPC cluster cannot
-//     compound into a hotspot that swallows the whole crowd; see anchorPullAt.
-//   - A shape profile decays weight with height above the map's main ground band, so tall maps
-//     (Ellinia) concentrate low and wide maps (Kerning) spread horizontally - falls out of the geometry.
-//   - A thin uniform tail (~1 in 11 picks) ignores the weighting and lands anywhere reachable, so a few
-//     organic stragglers end up on rarely-visited high ledges (the "someone's up on the crane" effect).
+//   - A ledge is weighted by its WALKABLE WIDTH, so the draw is uniform over the ground (every pixel of
+//     reachable ledge is equally likely, a 1000px street holds ten times a 100px terrace). This is what
+//     "random position across the whole map" means spatially: no ledge is favoured, so the crowd fans out
+//     over streets, terraces and back platforms alike instead of piling onto the shop street.
+//   - Capacity and spacing keep it from being crowded: a ledge absorbs at most one bot per MIN_BAND_PX of
+//     width (overflow spills by width onto other platforms), and picks on one ledge keep MIN_SPACING apart.
+//   - Curation overrides compose: a ledge whose centre sits in a ban zone is dropped (weight 0) and a
+//     boost zone multiplies a ledge's weight (pull more of the crowd to a plaza).
 //
 // Reads terrain only through the generic GCMovement spatial queries (same discipline as BotSpotPicker),
 // so placement stays out of the movement package. Our own creation (not a GreenCat extraction).
@@ -39,36 +34,14 @@ public final class TownPresenceSampler {
 
     private static final Random RANDOM = new Random();
 
-    // Anchor pull strengths and falloff. Package-private so a test pins the portal-is-weak contract
-    // against the real values (no drift).
-    static final double NPC_STRENGTH = 1.0;
-    // Weak: portals mark foot traffic, not destinations. Kept well under NPC_STRENGTH so the doorway
-    // reads as mildly busier instead of a spawn hotspot ("挤在传送门门口").
-    static final double PORTAL_STRENGTH = 0.2;
-    private static final double SIGMA_X = 260.0;   // horizontal spread of an anchor's pull (px)
-    private static final double SIGMA_Y = 130.0;   // vertical spread - keeps a pull on the anchor's platform
-
-    // Height (px) above the main ground band at which the shape profile drops weight by ~1/e.
-    private static final double HEIGHT_DECAY = 320.0;
-
-    // Weight floor every reachable ledge keeps even with no anchor nearby, so the uniform tail and quiet
-    // corners are still reachable (a fully-zero ledge would be unreachable to the weighted picks). Raised
-    // from 0.15 so the anchor peaks dominate less: with the old floor a single hot street outweighed the
-    // rest of the map by >30x and drew the whole stationed cohort onto it. At 0.5 a hot NPC street reads
-    // ~3x a plain ledge - visible "lived in" clustering without the pile-up.
-    private static final double BASE_WEIGHT = 0.5;
-
-    // Fraction of picks that ignore weighting entirely (organic stragglers on low-weight ledges).
-    private static final double TAIL_FRACTION = 0.09;
-
     // Best-effort horizontal gap between spots sharing a ledge, and how hard we try to honor it.
     private static final int MIN_SPACING = 30;
-    private static final int X_CANDIDATES = 7; // X samples scored per ledge pick (bias toward anchors)
+    private static final int X_CANDIDATES = 7; // X samples scored per ledge pick (least-crowded wins)
 
     // Min walkable width one hosted bot needs (room to stand apart and drift a little). Caps how many
-    // picks a single ledge may absorb: anchor weighting has no ceiling of its own, so without this a hot
-    // floor near an NPC/portal draws the WHOLE cohort and stacks it on one platform. Mirrors the
-    // section-per-band capacity BotSpotClaims enforces on the same ledges once the bots are live.
+    // picks a single ledge may absorb: without this a wide street could draw the WHOLE cohort and stack
+    // it end to end. Mirrors the section-per-band capacity BotSpotClaims enforces on the same ledges once
+    // the bots are live.
     private static final int MIN_BAND_PX = 200;
 
     // How close (in Y) a ledge must sit to the lowest ledge to count as the map's floor band. The
@@ -77,16 +50,15 @@ public final class TownPresenceSampler {
     // ~30px higher). 40 takes those in while still excluding a genuinely separate first floor.
     private static final int FLOOR_BAND_TOLERANCE = 40;
 
-    // Pick up to `count` anchor-weighted ground spots on `map`, reachable from `anchor` (the town spawn
-    // portal). Returns fewer than count only if the nav graph isn't baked / there are no ledges; the
-    // caller falls back to the anchor for any shortfall (same contract as BotSpotPicker).
+    // Pick up to `count` ground spots spread across `map`, reachable from `anchor` (the town spawn
+    // portal). Returns fewer than count only if the map has no ground at all; an unbaked nav graph is
+    // covered by a random foothold scatter, so the caller never has to stack bots on one anchor pixel.
     public static List<Point> sample(MapleMap map, Point anchor, int count) {
         return sample(map, anchor, count, TownOverrides.EMPTY);
     }
 
     // As sample(), but composing the curation overrides: pinned spots are placed first, ban zones are
-    // never placed in, and boost zones pull more of the crowd. Overrides compose with the algorithm - the
-    // weighted distribution is still the floor everywhere the owner hasn't hand-touched.
+    // never placed in, and boost zones pull more of the crowd.
     public static List<Point> sample(MapleMap map, Point anchor, int count, TownOverrides overrides) {
         return sample(map, anchor, count, overrides, false);
     }
@@ -129,6 +101,10 @@ public final class TownPresenceSampler {
 
         List<GCMovement.Ledge> ledges = reachableLedges(map, anchor);
         if (ledges.isEmpty()) {
+            // The nav graph yields no walkable ledge (unbaked / degenerate map). Rather than return an empty
+            // list - which makes the caller stack every bot on one anchor pixel - top up with a terrain
+            // scatter across the map's raw footholds, so the cohort still lands spread out.
+            out.addAll(footholdScatter(map, count - out.size(), floorOnly));
             return out;
         }
         if (floorOnly) {
@@ -148,19 +124,17 @@ public final class TownPresenceSampler {
                 ledges = open;
             }
         }
-        List<Anchor> anchors = collectAnchors(map);
-        double groundBandY = groundBandY(ledges);
 
         double[] weights = new double[ledges.size()];
         for (int i = 0; i < ledges.size(); i++) {
-            weights[i] = ledgeWeight(ledges.get(i), anchors, groundBandY, ov);
+            weights[i] = ledgeWeight(ledges.get(i), ov);
         }
 
         Map<Integer, List<Integer>> occupiedByLedge = new HashMap<>();
         for (int i = 0; i < remaining; i++) {
             GCMovement.Ledge l = pickLedge(ledges, weights, occupiedByLedge);
             List<Integer> taken = occupiedByLedge.computeIfAbsent(l.regionId(), k -> new ArrayList<>());
-            int x = pickX(l, anchors, taken, ov);
+            int x = pickX(l, taken, ov);
             taken.add(x);
             Point ground = GCMovement.groundPointInRegion(map, l.regionId(), x);
             out.add(ground != null ? ground : new Point(x, l.centerY()));
@@ -168,8 +142,59 @@ public final class TownPresenceSampler {
         return out;
     }
 
-    // Walkable ledges reachable from the anchor. Mirrors BotSpotPicker: if the anchor resolves to no
-    // reachable region (off a ledge), don't filter rather than come back empty.
+    // Terrain-only scatter for maps with no baked nav graph: `count` ground points at random footholds /
+    // random X (via the per-column indexed ground query the movement engine uses, so no graph build is
+    // triggered). `floorOnly` restricts the draw to the map's lowest foothold band, honoring the same
+    // contract as the nav-ledge path (GachaBot's item spray must land on ground the bot can walk to).
+    // Skips walls and zero-width footholds. Best-effort: fewer than `count` only when the map has almost
+    // no ground.
+    static List<Point> footholdScatter(MapleMap map, int count, boolean floorOnly) {
+        List<Point> out = new ArrayList<>();
+        if (map == null || map.getFootholds() == null || count <= 0) {
+            return out;
+        }
+        List<Foothold> walkable = new ArrayList<>();
+        for (Foothold f : map.getFootholds().getAllFootholds()) {
+            if (!f.isWall() && f.getX2() > f.getX1()) {
+                walkable.add(f);
+            }
+        }
+        if (floorOnly) {
+            walkable = footholdFloorBand(walkable);
+        }
+        if (walkable.isEmpty()) {
+            return out;
+        }
+        for (int i = 0; i < count; i++) {
+            Foothold f = walkable.get(RANDOM.nextInt(walkable.size()));
+            int x = f.getX1() + RANDOM.nextInt(f.getX2() - f.getX1() + 1);
+            // Ground line at x (slope-aware). groundPointBelow probes from the foothold's y, so it always
+            // finds this foothold rather than one below it.
+            Point ground = GCMovement.groundPointBelow(map, x, Math.min(f.getY1(), f.getY2()));
+            out.add(ground != null ? ground : new Point(x, Math.max(f.getY1(), f.getY2())));
+        }
+        return out;
+    }
+
+    // Lowest foothold band: footholds whose mid Y sits within FLOOR_BAND_TOLERANCE of the map's deepest
+    // foothold (largest Y, since Y grows downward). The terrain-only twin of floorBand for the nav ledges.
+    // Package-private so a test can pin the band contract without a MapleMap.
+    static List<Foothold> footholdFloorBand(List<Foothold> walkable) {
+        int floor = Integer.MIN_VALUE;
+        for (Foothold f : walkable) {
+            floor = Math.max(floor, (f.getY1() + f.getY2()) / 2);
+        }
+        List<Foothold> out = new ArrayList<>();
+        for (Foothold f : walkable) {
+            if (floor - (f.getY1() + f.getY2()) / 2 <= FLOOR_BAND_TOLERANCE) {
+                out.add(f);
+            }
+        }
+        return out;
+    }
+
+    // Reachable walkable ledges. Returns empty when the nav graph has no walkable ledge; sample() then
+    // uses footholdScatter so a spawn never collapses onto one point.
     private static List<GCMovement.Ledge> reachableLedges(MapleMap map, Point anchor) {
         List<GCMovement.Ledge> all = GCMovement.walkableLedges(map);
         if (all.isEmpty()) {
@@ -186,42 +211,6 @@ public final class TownPresenceSampler {
             }
         }
         return out.isEmpty() ? all : out;
-    }
-
-    // NPCs (strong) + portals (weak) as pull anchors. NPCs define shops / quest givers / interior rooms;
-    // portals mark the entrances foot traffic gathers near.
-    private static List<Anchor> collectAnchors(MapleMap map) {
-        List<Anchor> anchors = new ArrayList<>();
-        for (MapObject npc : map.getMapObjectsInRange(new Point(0, 0), Double.POSITIVE_INFINITY,
-                Arrays.asList(MapObjectType.NPC))) {
-            Point p = npc.getPosition();
-            if (p != null) {
-                anchors.add(new Anchor(p.x, p.y, NPC_STRENGTH));
-            }
-        }
-        for (Portal portal : map.getPortals()) {
-            Point p = portal.getPosition();
-            if (p != null) {
-                anchors.add(new Anchor(p.x, p.y, PORTAL_STRENGTH));
-            }
-        }
-        return anchors;
-    }
-
-    // The Y of the map's main ground band: the lowest-on-screen (largest Y) among the broad platforms,
-    // so height decay is measured from the floor players actually stand on, not a high sliver.
-    private static double groundBandY(List<GCMovement.Ledge> ledges) {
-        int maxSpan = 1;
-        for (GCMovement.Ledge l : ledges) {
-            maxSpan = Math.max(maxSpan, l.maxX() - l.minX());
-        }
-        int band = Integer.MIN_VALUE;
-        for (GCMovement.Ledge l : ledges) {
-            if ((l.maxX() - l.minX()) >= maxSpan / 2) {
-                band = Math.max(band, l.centerY()); // broad platform -> candidate floor
-            }
-        }
-        return band == Integer.MIN_VALUE ? ledges.get(0).centerY() : band;
     }
 
     // Just the ledges in the map's lowest band: anything whose centreY sits within FLOOR_BAND_TOLERANCE
@@ -241,59 +230,22 @@ public final class TownPresenceSampler {
         return out;
     }
 
-    // Per-ledge weight = span * shape-profile * (floor + anchor pull), then curation overrides: a ledge
-    // whose center sits in a ban zone is excluded (weight 0); a boost zone multiplies its weight.
-    private static double ledgeWeight(GCMovement.Ledge l, List<Anchor> anchors, double groundBandY, TownOverrides ov) {
+    // Per-ledge weight = walkable width, so the draw is uniform across the map's ground (no ledge favoured
+    // by an NPC, shop or doorway - that anchor pull was what packed the crowd onto the hot street). Curation
+    // overrides still compose: a ledge whose centre sits in a ban zone is excluded (weight 0); a boost zone
+    // multiplies its weight. Package-private so a test can pin the width-proportional contract.
+    static double ledgeWeight(GCMovement.Ledge l, TownOverrides ov) {
         if (ov.isBanned(l.centerX(), l.centerY())) {
             return 0.0;
         }
         double span = Math.max(1, l.maxX() - l.minX());
-        double heightAbove = Math.max(0.0, groundBandY - l.centerY()); // Y grows downward -> higher = smaller Y
-        double shape = Math.exp(-heightAbove / HEIGHT_DECAY);
-        double pull = anchorPullAt(l, anchors);
-        return span * shape * (BASE_WEIGHT + pull) * ov.boostMultiplier(l.centerX(), l.centerY());
+        return span * ov.boostMultiplier(l.centerX(), l.centerY());
     }
 
-    // The anchor pull on a ledge: the STRONGEST single nearby anchor, not the sum. Summing made a town's
-    // NPC cluster multiply its own draw (5 shopkeepers packed together gave a 5x weight) so the whole
-    // stationed cohort piled onto the one hot street; max() anchors the ledge to the nearest shop/quest
-    // giver without letting a dense cluster of them compound into a black hole. Each anchor pulls at the
-    // closest X on the ledge span to itself (where it pulls hardest).
-    private static double anchorPullAt(GCMovement.Ledge l, List<Anchor> anchors) {
-        double best = 0.0;
-        for (Anchor a : anchors) {
-            best = Math.max(best, anchorPull(a, nearestX(l, a.x), l.centerY()));
-        }
-        return best;
-    }
-
-    // Strongest single anchor's pull at an explicit (x,y) - the max form the X pick uses so it does not
-    // compound either (see anchorPullAt). Package-private so a test can pin the max-not-sum contract.
-    static double anchorPullAtX(int x, int y, List<Anchor> anchors) {
-        double best = 0.0;
-        for (Anchor a : anchors) {
-            best = Math.max(best, anchorPull(a, x, y));
-        }
-        return best;
-    }
-
-    // A single anchor's 2-D gaussian pull at (x,y).
-    private static double anchorPull(Anchor a, int x, int y) {
-        double dx = a.x - x;
-        double dy = a.y - y;
-        return a.strength * Math.exp(-(dx * dx) / (2 * SIGMA_X * SIGMA_X))
-                * Math.exp(-(dy * dy) / (2 * SIGMA_Y * SIGMA_Y));
-    }
-
-    // Closest X on the ledge span to a given x (the point where the anchor pulls hardest on this ledge).
-    private static int nearestX(GCMovement.Ledge l, int x) {
-        return Math.max(l.minX(), Math.min(l.maxX(), x));
-    }
-
-    // Pick an X on the ledge biased toward its strongest nearby anchor, honoring best-effort spacing and
-    // the curation overrides (never land in a ban zone; a boost zone raises the local score). Scores a
-    // handful of uniform candidates and keeps the best.
-    private static int pickX(GCMovement.Ledge l, List<Anchor> anchors, List<Integer> taken, TownOverrides ov) {
+    // Pick an X on the ledge, honoring best-effort spacing and the curation overrides (never land in a ban
+    // zone; a boost zone raises the local score). Scores a handful of uniform candidates and keeps the best,
+    // so co-located picks spread out instead of stacking.
+    private static int pickX(GCMovement.Ledge l, List<Integer> taken, TownOverrides ov) {
         if (l.maxX() <= l.minX()) {
             return l.minX();
         }
@@ -304,8 +256,7 @@ public final class TownPresenceSampler {
             if (ov.isBanned(x, l.centerY())) {
                 continue; // never place inside a ban zone
             }
-            double pull = anchorPullAtX(x, l.centerY(), anchors);
-            double score = pull * ov.boostMultiplier(x, l.centerY()) - crowding(x, taken);
+            double score = ov.boostMultiplier(x, l.centerY()) - crowding(x, taken);
             if (score > bestScore) {
                 bestScore = score;
                 best = x;
@@ -326,17 +277,12 @@ public final class TownPresenceSampler {
         return penalty;
     }
 
-    // Pick which ledge the next spot lands on. The uniform straggler tail escapes the anchor weighting
-    // (so a few bots reach rarely-visited ledges); the weighted pick follows it. Both skip ledges already
-    // at their width-derived capacity, so the cohort spills sideways onto other platforms instead of
-    // stacking on the hot floor - the tail is about WHERE ON THE MAP, not about exceeding capacity.
-    // If every ledge is full the cohort has genuinely outgrown the map; the overflow then spreads by
-    // platform width (not anchor pull, which would just re-fill the hot floor).
+    // Pick which ledge the next spot lands on: a width-weighted draw that skips ledges already at their
+    // width-derived capacity, so the cohort spills sideways onto other platforms instead of stacking on one
+    // street. If every ledge is full the cohort has genuinely outgrown the map; the overflow then spreads by
+    // platform width (same distribution, ignoring the capacity filter).
     static GCMovement.Ledge pickLedge(List<GCMovement.Ledge> ledges, double[] weights,
                                       Map<Integer, List<Integer>> occupiedByLedge) {
-        if (RANDOM.nextDouble() < TAIL_FRACTION) {
-            return pickUniformWithRoom(ledges, occupiedByLedge);
-        }
         double total = 0.0;
         for (int i = 0; i < ledges.size(); i++) {
             if (hasRoom(ledges.get(i), occupiedByLedge)) {
@@ -359,28 +305,12 @@ public final class TownPresenceSampler {
         return ledges.get(ledges.size() - 1);
     }
 
-    // A uniform draw among the ledges that still have room (the straggler tail); falls back to the full
-    // set only when every ledge is full, where the caller's fallback then spreads by width.
-    private static GCMovement.Ledge pickUniformWithRoom(List<GCMovement.Ledge> ledges,
-                                                       Map<Integer, List<Integer>> occupiedByLedge) {
-        List<GCMovement.Ledge> open = new ArrayList<>();
-        for (GCMovement.Ledge l : ledges) {
-            if (hasRoom(l, occupiedByLedge)) {
-                open.add(l);
-            }
-        }
-        if (open.isEmpty()) {
-            return pickByWidth(ledges);
-        }
-        return open.get(RANDOM.nextInt(open.size()));
-    }
-
     private static boolean hasRoom(GCMovement.Ledge l, Map<Integer, List<Integer>> occupiedByLedge) {
         return occupiedByLedge.getOrDefault(l.regionId(), List.of()).size() < ledgeCapacity(l);
     }
 
-    // Overflow sharing: weight each ledge by its walkable width so the surplus spreads in proportion to
-    // available ground, never re-concentrating on the anchor-heavy platform.
+    // Overflow sharing (and the fallback when every ledge is full): weight each ledge by its walkable width
+    // so the surplus spreads in proportion to available ground, never re-concentrating on one platform.
     private static GCMovement.Ledge pickByWidth(List<GCMovement.Ledge> ledges) {
         long total = 0;
         for (GCMovement.Ledge l : ledges) {
@@ -403,9 +333,10 @@ public final class TownPresenceSampler {
         return Math.max(1, (l.maxX() - l.minX()) / MIN_BAND_PX);
     }
 
-    // Human-readable dump of where weight concentrates on a map: anchor count + the top-N ledges by
-    // weight (region id, X span, centerY, relative weight %). Feeds the !env townpresence weights command
-    // so tuning is tune -> look -> tune without a restart. Diagnostics only.
+    // Human-readable dump of where the scatter concentrates: ledge count + the top-N ledges by weight
+    // (region id, X span, centerY, relative weight %). With a width-only weight this is essentially the
+    // widest platforms on the map. Feeds the !env townpresence weights command so tuning is
+    // tune -> look -> tune without a restart. Diagnostics only.
     public static String describe(MapleMap map, Point anchor, int topN) {
         return describe(map, anchor, topN, TownOverrides.EMPTY);
     }
@@ -419,19 +350,17 @@ public final class TownPresenceSampler {
         if (ledges.isEmpty()) {
             return "town weights: no baked ledges (nav graph not built yet)";
         }
-        List<Anchor> anchors = collectAnchors(map);
-        double groundBandY = groundBandY(ledges);
         double total = 0.0;
         List<double[]> rows = new ArrayList<>(); // {regionId, minX, maxX, centerY, weight}
         for (GCMovement.Ledge l : ledges) {
-            double w = ledgeWeight(l, anchors, groundBandY, ov);
+            double w = ledgeWeight(l, ov);
             total += w;
             rows.add(new double[]{l.regionId(), l.minX(), l.maxX(), l.centerY(), w});
         }
         rows.sort((a, b) -> Double.compare(b[4], a[4]));
         StringBuilder sb = new StringBuilder();
-        sb.append(String.format("town weights map=%d: %d ledges, %d anchors, groundBandY=%.0f, %d pins%n",
-                map.getId(), ledges.size(), anchors.size(), groundBandY, ov.pins().size()));
+        sb.append(String.format("town weights map=%d: %d ledges, %d pins (uniform by walkable width)%n",
+                map.getId(), ledges.size(), ov.pins().size()));
         int limit = Math.min(topN, rows.size());
         for (int i = 0; i < limit; i++) {
             double[] r = rows.get(i);
@@ -440,9 +369,5 @@ public final class TownPresenceSampler {
                     i + 1, (int) r[0], r[1], r[2], r[3], pct));
         }
         return sb.toString();
-    }
-
-    // Package-private (not private) so a test can pin the max-not-sum anchor-pull contract.
-    record Anchor(int x, int y, double strength) {
     }
 }

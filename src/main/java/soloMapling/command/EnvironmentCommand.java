@@ -628,7 +628,7 @@ public class EnvironmentCommand extends Command {
         player.yellowMessage("!env townpresence spawn [map n lo hi] - spawn a town's social cohort (no args = all towns)");
         player.yellowMessage("!env townpresence here [count]   - spawn stationed social bots on your current map (dry-run)");
         player.yellowMessage("!env townpresence wander [map n lo hi] - spawn roaming wanderers (no map = your current map)");
-        player.yellowMessage("!env townpresence weights [topN] - dump anchor-weighted ledge weights for this map");
+        player.yellowMessage("!env townpresence weights [topN] - dump per-ledge scatter weights for this map");
         player.yellowMessage("!env townpresence mark [mapId]   - pin your current spot (stand where you want a bot) -> TownPins.txt");
         player.yellowMessage("-- Bot Chatter --");
         player.yellowMessage("!env chatter                     - readout: knobs, exchanges loaded, bots mid-chat");

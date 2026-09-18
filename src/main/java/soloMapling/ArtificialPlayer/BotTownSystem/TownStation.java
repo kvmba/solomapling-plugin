@@ -11,7 +11,7 @@ import java.util.concurrent.ConcurrentHashMap;
 
 
 // Positional life for OLD-engine stationed town bots (SocialBot) without a GC retrofit: hold a claimed
-// ledge in town and occasionally drift to a fresh anchor-weighted spot, so a town crowd looks alive rather
+// ledge in town and occasionally drift to a fresh spread-out spot, so a town crowd looks alive rather
 // than pinned to its spawn pixel.
 //
 // Engine-agnostic on the claim side (pure BotSpotClaims registry keyed by (mapId, ledgeId), read via the

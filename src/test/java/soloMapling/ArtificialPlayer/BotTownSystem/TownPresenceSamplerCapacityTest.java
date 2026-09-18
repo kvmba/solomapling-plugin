@@ -12,14 +12,14 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Proves the anchor-weighted town scatter can't stack a whole cohort on one platform.
+ * Proves the town scatter can't stack a whole cohort on one platform.
  *
- * <p>Before the capacity term, {@code sample()} drew ledges purely by anchor weight (NPC/portal pull
- * over a tiny floor), so a hot floor near a shop drew every pick and the cohort piled onto it. The fix
- * caps each ledge at a width-derived number of hosted bots ({@link TownPresenceSampler#ledgeCapacity})
- * and skips full ledges in the draw. These tests pin that contract: the spatial distribution is
- * otherwise free to change, but "no ledge absorbs more than it can hold while room exists elsewhere"
- * must always hold.
+ * <p>Before the capacity term, {@code sample()} drew ledges by weight alone (once an anchor pull over a
+ * tiny floor; now just walkable width), so a single wide/hot floor drew every pick and the cohort piled
+ * onto it. The fix caps each ledge at a width-derived number of hosted bots
+ * ({@link TownPresenceSampler#ledgeCapacity}) and skips full ledges in the draw. These tests pin that
+ * contract: the spatial distribution is otherwise free to change, but "no ledge absorbs more than it can
+ * hold while room exists elsewhere" must always hold.
  */
 class TownPresenceSamplerCapacityTest {
 

@@ -461,20 +461,20 @@ public class EnvironmentManager {
                 BotTypeManager.BotType.GACHA_BOT, true);
     }
 
-    // Spawn n stationed ambient SocialBots on a map at anchor-weighted ground spots (near NPCs/shops, on
-    // the main ground band, with a thin straggler tail - see TownPresenceSampler). Returns how many created.
+    // Spawn n stationed ambient SocialBots on a map at spread-out ground spots (uniformly across the whole
+    // reachable map, never clustered - see TownPresenceSampler). Returns how many created.
     public static int spawnSocialCohort(int mapId, int n, int loLevel, int hiLevel) {
         return spawnTownCohort(mapId, n, loLevel, hiLevel, BotTypeManager.BotType.SOCIAL_BOT);
     }
 
-    // Spawn n roaming TownWandererBots seeded at anchor-weighted spots on a town's main map; they fan out
+    // Spawn n roaming TownWandererBots seeded at spread-out spots on a town's main map; they fan out
     // and drift its map family on their own. The generic (non-Henesys) counterpart to HenesysBot.
     public static int spawnTownWanderers(int mapId, int n, int loLevel, int hiLevel) {
         return spawnTownCohort(mapId, n, loLevel, hiLevel, BotTypeManager.BotType.TOWN_WANDERER_BOT);
     }
 
-    // Shared town-cohort spawn: place n bots at anchor-weighted ground spots on the map (mirrors
-    // spawnScatteredTrainingBots but with the weighted sampler), typed as `type`.
+    // Shared town-cohort spawn: place n bots at spread-out ground spots on the map (mirrors
+    // spawnScatteredTrainingBots but with the uniform sampler), typed as `type`.
     private static int spawnTownCohort(int mapId, int n, int loLevel, int hiLevel, BotTypeManager.BotType type) {
         return spawnTownCohort(mapId, n, loLevel, hiLevel, type, false);
     }

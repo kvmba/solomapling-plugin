@@ -242,7 +242,7 @@ public class SocialBot extends BotSM {
             BotChatter.maybeStartChatter(this); // occasional short back-and-forth with a nearby town bot
             maybeIdleChair(); // occasional sit/stand while idle - a resting townsperson
             maybeClearDoorway(); // standing on the arrival/door ledge? walk off so arrivals don't pile on it
-            maybeRelocate(); // last: rare drift to a fresh anchor-weighted spot (may block the tick's walk)
+            maybeRelocate(); // last: rare drift to a fresh spread-out spot (may block the tick's walk)
             maybeStroll(); // walk to a neighbouring town map and back (cross-map; relocation can't)
         }
         pollRecruitInvite(); // last: a JOINED poll converts this bot to a FollowerBot
@@ -374,7 +374,7 @@ public class SocialBot extends BotSM {
     }
 
     // A scattered spot to walk to when clearing a doorway: sample the town's crowd spots (the same
-    // anchor-weighted sampler the drift uses; seeded from where the bot stands, which on a cross-map
+    // uniform sampler the drift uses; seeded from where the bot stands, which on a cross-map
     // arrival is the far map's door), and take the one furthest from any portal so a bot leaves the door
     // decisively. The preferred pick must clear the doorway box (see BotPortalClearance); when the whole
     // reachable ledge is the box, fall back to its farthest point so arrivals still fan out along it.
@@ -386,7 +386,7 @@ public class SocialBot extends BotSM {
         return best != null ? best : BotPortalClearance.farthestFromPortal(map, spots);
     }
 
-    // Rare drift to a fresh anchor-weighted spot ("stand near the potion shop a while, then wander to the
+    // Rare drift to a fresh spread-out spot ("stand near the potion shop a while, then wander to the
     // smithy"), so a town crowd redistributes instead of standing on its spawn pixels forever.
     //
     // The walk is the GC engine (WZ terrain, no recordings), issued asynchronously: the bot keeps its

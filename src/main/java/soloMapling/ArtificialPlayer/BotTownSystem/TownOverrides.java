@@ -3,7 +3,7 @@ package soloMapling.ArtificialPlayer.BotTownSystem;
 import java.awt.Point;
 import java.util.List;
 
-// Per-map curation overrides that compose with the anchor-weighted algorithm (TownPresenceSampler):
+// Per-map curation overrides that compose with the uniform width-weighted algorithm (TownPresenceSampler):
 //   - pins:  exact points that are always placed first (hand-polish exactly where taste matters);
 //   - ban:   rectangles where no bot is ever placed (kill a bad spot - a wall corner, the crane top);
 //   - boost: rectangles whose ledges get their weight multiplied (pull more of the crowd to a plaza).
