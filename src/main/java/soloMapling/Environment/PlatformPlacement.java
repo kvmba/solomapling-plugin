@@ -85,6 +85,25 @@ public class PlatformPlacement {
         return new Point(Math.max(minX, Math.min(maxX, x)), spawn.y);
     }
 
+    // The point a bot should really stand on for a platform: an occupancy-free spot nudged clear of
+    // any rope/ladder column (see avoidLadderColumn). Mirrors the SPAWN path's nudge in
+    // spawnBotsOnMapOnPlatform, but for the MOVE path (botMoveToPlatformAnyUnoccupiedSpot*) — the
+    // FM merchants shuffle to "the current platform" or a named one, and the entrance's flat m1/m2
+    // span the whole map width, ladder columns included. Without the nudge a shuffle target can land
+    // on the ladder axis, where the bot walks to and renders a STAND pose on the ladder sprite (the
+    // "merchant standing on the stairs" report).
+    //
+    // FLAT only: a flat platform's y is constant, so moving x never leaves the surface; on a SLOPED
+    // platform the recorded y belongs to its own x, so moving x alone would drop the bot off it.
+    private static Point standSpot(int mapId, Platform platform, Point spot) {
+        if (!platform.isFlat()) {
+            return spot;
+        }
+        MapleMap map = getMapleMapById(mapId);
+        List<Rope> ropes = map == null ? List.of() : map.getRopes();
+        return avoidLadderColumn(ropes, spot, platform.getMinX(), platform.getMaxX());
+    }
+
     public static List<Integer> spawnBotsOnMapOnPlatform(int numBots, int mapId, String platform_id) {
         Platform flatPlatform = PlatformParser.parsePlatform(mapId, platform_id);
         List<Point> occupied = Collections.synchronizedList(new ArrayList<>());
@@ -391,7 +410,8 @@ public class PlatformPlacement {
 
         List<Point> occupiedPointsOnPlatform = getListOfCharacterCoordinates(getAllCharsOnPlatform(mapId, platform));
         Platform flatPlatform = PlatformParser.parsePlatform(mapId, platform);
-        Point unoccupiedPt = findUnoccupiedPoint(flatPlatform, occupiedPointsOnPlatform);
+        Point unoccupiedPt = standSpot(mapId, flatPlatform,
+                findUnoccupiedPoint(flatPlatform, occupiedPointsOnPlatform));
         MovementCommands.pathFinderBeta(fakechar, unoccupiedPt);
     }
 
@@ -400,7 +420,8 @@ public class PlatformPlacement {
 
         List<Point> occupiedPointsOnPlatform = getListOfCharacterCoordinates(getAllCharsOnPlatform(mapId, platform));
         Platform flatPlatform = PlatformParser.parsePlatform(mapId, platform);
-        Point unoccupiedPt = findUnoccupiedPoint(flatPlatform, occupiedPointsOnPlatform);
+        Point unoccupiedPt = standSpot(mapId, flatPlatform,
+                findUnoccupiedPoint(flatPlatform, occupiedPointsOnPlatform));
         MovementCommands.pathFinderAware(fakechar, unoccupiedPt);
     }
 
@@ -417,7 +438,8 @@ public class PlatformPlacement {
         int mapId = fakechar.getMapId();
         List<Point> occupiedPointsOnPlatform = getListOfCharacterCoordinates(getAllCharsOnPlatform(mapId, platform));
         Platform flatPlatform = PlatformParser.parsePlatform(mapId, platform);
-        Point unoccupiedPt = findUnoccupiedPoint(flatPlatform, occupiedPointsOnPlatform);
+        Point unoccupiedPt = standSpot(mapId, flatPlatform,
+                findUnoccupiedPoint(flatPlatform, occupiedPointsOnPlatform));
         if (unoccupiedPt == null) {
             return;
         }
@@ -446,12 +468,20 @@ public class PlatformPlacement {
     /**
      * Finds which platform a given position belongs to on a specific map.
      *
+     * <p>Only MAIN platforms ({@code m*}) are considered: a character is only ever standing on a
+     * walkable surface. The {@code c*} "connector" recordings are climb/shaft paths across empty
+     * space (a ladder column or a stair run), and their reference points are the mid-air positions
+     * a climber passes through — so resolving a standable position onto one and then walking a bot
+     * there parks it standing in the air / on the ladder sprite (the Free Market entrance report:
+     * a merchant shuffling "to its current platform" on m1/m2 at an x over the ladder column landed
+     * on a {@code c*} recording and stood in mid-air). Callers want the surface under the bot.
+     *
      * @param mapId    The map ID to search
      * @param position The position to check
-     * @return The platform identifier or null if not found
+     * @return The main platform identifier (e.g., "m1", "m2") or null if not on any of them
      */
     public static String findPlatformAtPosition(int mapId, Point position) {
-        List<String> platformIds = getAvailablePlatformIds(mapId);
+        List<String> platformIds = getMainPlatformIds(mapId);
 
         if (platformIds.isEmpty()) {
             return null;
