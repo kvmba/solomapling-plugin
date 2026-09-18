@@ -3,6 +3,8 @@ package soloMapling.ArtificialPlayer.BotPetSystem;
 import org.gms.client.Character;
 import org.gms.client.inventory.Pet;
 import org.gms.constants.game.CharacterStance;
+import org.gms.net.opcodes.SendOpcode;
+import org.gms.net.packet.OutPacket;
 import org.gms.net.packet.Packet;
 import org.gms.server.life.Monster;
 import org.gms.server.maps.Foothold;
@@ -110,6 +112,19 @@ public final class BotPetFollower {
     private static final int PET_SWIM_LEFT = 13;
     private static final int PET_HANG_RIGHT = 30;
     private static final int PET_HANG_LEFT = 31;
+
+    // ── Pet effects (UserEffect "Pet", Effect.wz/PetEff.img) ─────────────────────
+    // The official pet-effect packet is a UserEffect carrying a PET sub-type; the client plays the
+    // matching PetEff.img animation. The host already uses this exact shape for the pet level-up
+    // effect (PacketCreator.showOwnPetLevelUp / showPetLevelUp), hard-coding sub-type 0. The two
+    // effects a following pet actually produces are TELEPORT (the warp puff when it is left behind
+    // and re-homes) and HANG_ON_BACK (hopping onto the owner's back when the owner grabs a rope /
+    // ladder). Sub-type values are the GMS PetEffectType enum (LevelUp=0, Teleport=1, HangOnBack=2,
+    // Evolution=3); the leading UserEffect type byte that marks a PET effect is 4 (see the host's
+    // own pet packets — do not change it without the client).
+    private static final int PET_EFFECT_EFFECT_TYPE = 4;
+    private static final int PET_EFFECT_TELEPORT = 1;
+    private static final int PET_EFFECT_HANG_ON_BACK = 2;
 
     /** The {@code act} byte of a PET_CHAT: which of the pet's own chat variants to play. The pet WZ
      *  {@code chat} animation is index 0 (the host's {@code PetChatHandler} accepts 0..9), and any
@@ -381,6 +396,11 @@ public final class BotPetFollower {
         // (owner airborne) is left to the normal follow — only the top step-off is re-homed.
         boolean steppedOffRopeTop =
                 ownerSteppedOffRopeTop(ownerWasClimbing, ownerClimbing, ownerGrounded);
+        // The FALLING edge of ownerWasClimbing (see above): the owner has just grabbed a rope /
+        // ladder. The pet hops onto the owner's back (HANG pose) from this tick on, so play its
+        // PetEff.img hang-on-back effect ONCE on this transition — the official puff that marks the
+        // pet mounting the owner's back.
+        boolean grabbedRope = !ownerWasClimbing && ownerClimbing;
 
         // Swim when the owner is swimming, OR — mirroring the bot engine's own rule
         // (isSwimMap && inAir) — when the map is a swim map and the pet's own feet find no
@@ -425,6 +445,12 @@ public final class BotPetFollower {
                 followSwim(chr, pet, idx, followX[idx], config, observed);
             } else {
                 followLand(chr, pet, idx, followX[idx], standing, config, observed);
+            }
+            // The owner just grabbed a rope/ladder: the pet has now hopped onto its back (the HANG
+            // pose followLand broadcasts above) — play the hang-on-back puff once. Done AFTER the
+            // follow call so it rides the same frame the HANG pose first appears, not the frame before.
+            if (grabbedRope && observed) {
+                broadcastPetEffect(chr, idx, PET_EFFECT_HANG_ON_BACK);
             }
             if (observed) {
                 maybeSpeak(chr, pet, idx, config);
@@ -1252,7 +1278,38 @@ public final class BotPetFollower {
         pet.setFh(fh);
         if (observed) {
             chr.getMap().broadcastMessage(chr, PacketCreator.showPet(chr, pet, false, false), false);
+            // The official warp puff: a re-homed pet plays its own PetEff.img "warp" through the
+            // pet Teleport effect right as it re-spawns at the owner's side.
+            broadcastPetEffect(chr, index, PET_EFFECT_TELEPORT);
         }
+    }
+
+    /**
+     * Play one of the pet's own {@code Effect.wz/PetEff.img} effects for observers: the same
+     * {@code UserEffect "Pet"} shape the host uses for the level-up effect
+     * ({@code PacketCreator.showOwnPetLevelUp} / {@code showPetLevelUp}), with the sub-type passed in
+     * instead of a hard-coded {@code 0}. {@code SHOW_FOREIGN_EFFECT} is the observers' copy — a bot's
+     * own headless client renders nothing, so that is the one that matters here (see the host: the
+     * own copy goes to the owner's client, the foreign copy to the map).
+     *
+     * <p>Sub-types are the GMS {@code PetEffectType} values: 1 = Teleport, 2 = HangOnBack.</p>
+     */
+    private static void broadcastPetEffect(Character chr, int index, int subType) {
+        chr.getMap().broadcastMessage(chr, petEffectPacket(chr.getId(), index, subType), false);
+    }
+
+    /**
+     * A pet-effect packet, split out (like {@code shouldResolveFoothold}) so the layout is pinned by
+     * a unit test without a live {@code Character}/{@code MapleMap}:
+     * {@code [opcode SHOW_FOREIGN_EFFECT][int cid][byte 4 = UserEffect Pet][byte subType][byte petIndex]}.
+     */
+    static Packet petEffectPacket(int cid, int petIndex, int subType) {
+        OutPacket p = OutPacket.create(SendOpcode.SHOW_FOREIGN_EFFECT);
+        p.writeInt(cid);
+        p.writeByte(PET_EFFECT_EFFECT_TYPE); // UserEffect nEffectType = Pet
+        p.writeByte(subType);                // PetEffectType: 1 = Teleport, 2 = HangOnBack
+        p.writeByte((byte) petIndex);        // pet slot
+        return p;
     }
 
     /**
