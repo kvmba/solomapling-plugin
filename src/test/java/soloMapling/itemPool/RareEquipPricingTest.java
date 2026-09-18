@@ -36,6 +36,19 @@ class RareEquipPricingTest {
     }
 
     @Test
+    void iconicGearStaysOnTheWhitelistEvenWhenUntradeable() {
+        DesirableEquipList.load();
+        // The whitelist is dual-purpose: shops use it to let low-level/low-WZ gear
+        // reach a shelf, and bot dialogue (DialogueContextResolver) uses it to
+        // rank a player's worn gear as "genuinely good". Iconic-but-untradeable
+        // items (Zakum Helmet) must therefore stay listed even though no override
+        // applies to them.
+        assertTrue(DesirableEquipList.isDesirable(1002357), "Zakum Helmet must stay whitelisted for dialogue");
+        assertTrue(DesirableEquipList.isDesirable(1082149), "Brown Work Gloves must stay whitelisted");
+        assertTrue(DesirableEquipList.isDesirable(1472030), "Maple Claw must stay whitelisted");
+    }
+
+    @Test
     void rareOverrideLiftsACheapPriceToItsMarketValue() {
         DesirableEquipList.load();
         int rare = DesirableEquipList.getRarePrice(1082149);

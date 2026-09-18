@@ -5,39 +5,28 @@
 Free Market shelves are priced from each item's **WZ `price` field**, scaled by a
 job-style multiplier (`multiplyWzPriceByJobStyle`) or, for scrolled gear, by a
 "minimum cost to create this stat roll" DP (`getEquipMarketValue`). WZ `price`
-is a *shop resale* number, not a market value, so the two disagree with what an
-item is actually worth:
+is a *shop resale* number, not a market value, so sought-after gear listed for
+less than junk:
 
 | item | WZ price | listed before | should be |
 |---|---|---|---|
-| 扎昆头盔 Zakum Helmet `1002357` | 500,000 | ~1 m | BOSS 独有, BIS |
 | 褐工地手套 Brown Work Gloves `1082149` | 3,000 | ~6 k | BIS 手套 |
 | 枫叶爪 Maple Claw `1472030` | 40,000 | ~90 k | 稀有活动武器 |
 | ordinary Lv70 weapon | 300,000 | ~0.6–4 m | — |
 
-The most sought-after gear listed for **less than junk**. Three independent causes:
-
-1. **No rare/BIS price** — the curated whitelist (`desirableEquips.yaml`) only
-   let those items *reach a shelf*; it never changed their price.
-   `processItemIdToFMEquip` even carried a commented-out
-   `todo … overwrite the price for BIS rare price`.
-2. **WZ sentinel cliff** — items whose WZ price was `0..50` were all snapped to a
-   flat `5,000,000`, while `price = 51` stayed `51`.
-3. **Narrow coverage** — even after (1)+(2), only the handful of top items were
-   touched; the whole second tier of famous Maple / Elemental gear still listed
-   at junk prices (a Lv130 Elemental Staff at ~243k).
+Root cause: the curated whitelist (`desirableEquips.yaml`) only let those items
+*reach a shelf*; it never changed their price. `processItemIdToFMEquip` even
+carried a commented-out `todo … overwrite the price for BIS rare price`.
 
 ## What changed
 
 1. **`rareItemPrices.yaml`** — a curated id → 国服 price table (59 entries),
    loaded by `DesirableEquipList`, exposed via `getRarePrice`.
 2. **`EquipListGenerator.applyRarePriceOverride(itemId, price)`** — applied on
-   both pricing paths, as a **floor** (a higher scrolled valuation is kept).
+   both shelf-pricing paths, as a **floor** (a higher scrolled valuation is
+   kept).
 3. **`desirableEquips.yaml`** — whitelists every priced item that would not
    otherwise reach a shelf, so the override actually bites.
-4. **`getWzPrice`** — the flat `5,000,000` sentinel becomes a level-scaled
-   estimate `50,000 + reqLevel² × 100` (≈90k at Lv20, ≈1.5m at Lv120): monotonic
-   with level, no cliff, and in the same ballpark as priced gear of that level.
 
 ## Correctness invariants (verified against the host's own GMS083 WZ data)
 
@@ -55,6 +44,28 @@ Every id in the price table satisfies all of:
 A script over `/workspace/GMS083/gms-server/wz` enforces these; the table has
 **0 unreachable entries**.
 
+## The whitelist is dual-purpose
+
+`isDesirable` has three callers: the two shop paths **and**
+`DialogueContextResolver` (`notableGear` / `pickNotableDrop`), where bots rank a
+player's worn gear as "genuinely good / iconic". So iconic gear must stay
+whitelisted **even when untradeable** (shops skip untradeable ids before the
+whitelist is consulted, but dialogue still wants them). A regression that
+dropped `1002357` / `1082149` was caught and guarded by
+`RareEquipPricingTest#iconicGearStaysOnTheWhitelistEvenWhenUntradeable`.
+
+## Out of scope (deliberately not touched)
+
+- **`getWzPrice`'s flat `5,000,000` sentinel** for WZ prices 0..50: verified
+  **unreachable** from FM shelf pricing (the IIPU price-floor excludes non-
+  whitelisted low-WZ items, every reachable whitelisted id has an override, and
+  all class pools are indexed in `ItemDatabase` so the scrolled base never hits
+  the fallback). Changing it would be an unrelated edit and is left alone
+  (AGENTS.md "最小改动"). It still affects bot *trade* valuation, which is a
+  separate concern.
+- The scrolled-DP price inflation and the relative-top-decile fire-sale guard
+  are separate issues, not covered here.
+
 ## Grounding
 
 Real-time 国服 market prices could not be fetched (search engines return only
@@ -71,6 +82,7 @@ No code change, no reload hook — read once at startup.
 
 ## Tests
 
-`RareEquipPricingTest` (6 cases): overrides load, untradeable ids are absent,
-cheap price is lifted, the override is a floor not a ceiling, unlisted items are
-untouched, rare outvalues ordinary. Full suite: 1074 tests, 0 failures.
+`RareEquipPricingTest` (7 cases): overrides load, untradeable ids are absent,
+iconic ids stay whitelisted for dialogue, cheap price is lifted, the override is
+a floor not a ceiling, unlisted items are untouched, rare outvalues ordinary.
+Full suite: 1075 tests, 0 failures.
