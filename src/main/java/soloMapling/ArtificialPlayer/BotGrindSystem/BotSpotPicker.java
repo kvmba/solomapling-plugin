@@ -115,7 +115,11 @@ public final class BotSpotPicker {
         int bandHi = Math.max(x1, x2);
 
         Set<Integer> reachable = GCMovement.reachableRegions(map, fromX, fromY);
-        boolean filter = !reachable.isEmpty();
+        // Swim maps: their ledges are separate islands in the walk graph (the only link is swimming,
+        // which the graph does not model), so a reachability filter would confine a roam to the platform
+        // the bot arrived on. The swim integrator follows a raw target across open water, so every ledge
+        // is reachable - don't filter.
+        boolean filter = !reachable.isEmpty() && !map.isSwim();
 
         for (GCMovement.Ledge l : ledges) {
             if (filter && !reachable.contains(l.regionId())) {

@@ -140,7 +140,10 @@ public final class BotWanderSystem {
             return null;
         }
         Set<Integer> reachable = from != null ? GCMovement.reachableRegions(map, from.x, from.y) : Set.of();
-        boolean filter = !reachable.isEmpty();
+        // Swim maps: the ledges are separate islands in the walk graph (linked only by swimming, which the
+        // graph does not model), so a reachability filter would trap the roam band on the arrival platform
+        // and the bot would only micro-drift there. Every ledge is reachable by swim - keep the full span.
+        boolean filter = !reachable.isEmpty() && !map.isSwim();
         int min = Integer.MAX_VALUE;
         int max = Integer.MIN_VALUE;
         for (GCMovement.Ledge l : ledges) {

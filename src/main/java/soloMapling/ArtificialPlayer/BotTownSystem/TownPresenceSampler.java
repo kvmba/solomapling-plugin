@@ -195,9 +195,15 @@ public final class TownPresenceSampler {
 
     // Reachable walkable ledges. Returns empty when the nav graph has no walkable ledge; sample() then
     // uses footholdScatter so a spawn never collapses onto one point.
+    //
+    // Swim maps skip the reachability filter: their ledges (a deck, a floating platform) are separate
+    // islands in the walk graph - the only way between them is swimming, which the graph does not model -
+    // so filtering would confine every pick to the arrival platform and pile the crowd on its door. The
+    // runtime swim integrator follows a raw target across open water (see GCMovement), so a spot on any
+    // ledge is reachable; the whole map is the fair draw.
     private static List<GCMovement.Ledge> reachableLedges(MapleMap map, Point anchor) {
         List<GCMovement.Ledge> all = GCMovement.walkableLedges(map);
-        if (all.isEmpty()) {
+        if (all.isEmpty() || map.isSwim()) {
             return all;
         }
         Set<Integer> reachable = GCMovement.reachableRegions(map, anchor.x, anchor.y);
