@@ -114,17 +114,23 @@ public final class BotPetFollower {
     private static final int PET_HANG_LEFT = 31;
 
     // ── Pet effects (UserEffect "Pet", Effect.wz/PetEff.img) ─────────────────────
-    // The official pet-effect packet is a UserEffect carrying a PET sub-type; the client plays the
-    // matching PetEff.img animation. The host already uses this exact shape for the pet level-up
-    // effect (PacketCreator.showOwnPetLevelUp / showPetLevelUp), hard-coding sub-type 0. The two
-    // effects a following pet actually produces are TELEPORT (the warp puff when it is left behind
-    // and re-homes) and HANG_ON_BACK (hopping onto the owner's back when the owner grabs a rope /
-    // ladder). Sub-type values are the GMS PetEffectType enum (LevelUp=0, Teleport=1, HangOnBack=2,
-    // Evolution=3); the leading UserEffect type byte that marks a PET effect is 4 (see the host's
-    // own pet packets — do not change it without the client).
-    private static final int PET_EFFECT_EFFECT_TYPE = 4;
-    private static final int PET_EFFECT_TELEPORT = 1;
-    private static final int PET_EFFECT_HANG_ON_BACK = 2;
+    // The pet-effect packet is a UserEffect carrying a PET sub-type; the leading type byte 4 is the
+    // one the host's OWN pet packets use for a PET effect (PacketCreator.showOwnPetLevelUp /
+    // showPetLevelUp), so 4 is verified against the host — do not change it without the client.
+    // The packet SHAPE is likewise the host's, only the sub-type generalised from the hard-coded 0.
+    //
+    // The sub-type values are the GMS PetEffectType enum (kinoko: LevelUp=0, Teleport=1, HangOnBack=2,
+    // Evolution=3) and Effect.wz/PetEff.img really does carry Basic/{LevelUp,Teleport,hang,Evolution},
+    // so the numbers and resources exist. NOTE, however: no reference server we could read ever
+    // SENDS sub-type 1 or 2 — kinoko defines the enum but only ever emits LevelUp(0), and the client
+    // reimplementations model teleport/hang as the pet's own WARP/HANG STANCE (PetLook) rather than a
+    // UserEffect. So assigning Teleport=1 / HangOnBack=2 to these two triggers is an INFERENCE, not
+    // an observed fact: it is the only channel with a matching enum, but the client may ignore the
+    // sub-type or render a different effect. VERIFY IN-GAME before trusting it; if a real client does
+    // not show the puff, the fallback is the pet WARP/HANG stance route.
+    private static final int PET_EFFECT_EFFECT_TYPE = 4; // verified: host's own PET effect type byte
+    private static final int PET_EFFECT_TELEPORT = 1;    // inferred from PetEffectType (see note)
+    private static final int PET_EFFECT_HANG_ON_BACK = 2; // inferred from PetEffectType (see note)
 
     /** The {@code act} byte of a PET_CHAT: which of the pet's own chat variants to play. The pet WZ
      *  {@code chat} animation is index 0 (the host's {@code PetChatHandler} accepts 0..9), and any
@@ -446,10 +452,12 @@ public final class BotPetFollower {
             } else {
                 followLand(chr, pet, idx, followX[idx], standing, config, observed);
             }
-            // The owner just grabbed a rope/ladder: the pet has now hopped onto its back (the HANG
-            // pose followLand broadcasts above) — play the hang-on-back puff once. Done AFTER the
-            // follow call so it rides the same frame the HANG pose first appears, not the frame before.
-            if (grabbedRope && observed) {
+            // The owner just grabbed a rope/ladder: on the LAND path followLand pins the pet to the
+            // owner's back (HANG pose) this tick, so play the hang-on-back puff once. Gated on !swim:
+            // in a swim map whose column under the pet finds no ground the pet takes followSwim
+            // (SWIM pose, not HANG), so the puff would otherwise fire with no hang to match. Done
+            // AFTER the follow call so it rides the same frame the HANG pose first appears.
+            if (grabbedRope && !swim && observed) {
                 broadcastPetEffect(chr, idx, PET_EFFECT_HANG_ON_BACK);
             }
             if (observed) {
