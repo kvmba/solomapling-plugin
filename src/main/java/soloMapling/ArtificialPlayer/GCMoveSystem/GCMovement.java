@@ -1,6 +1,7 @@
 package soloMapling.ArtificialPlayer.GCMoveSystem;
 
 import org.gms.client.Character;
+import org.gms.constants.game.CharacterStance;
 import org.gms.server.maps.Foothold;
 import org.gms.server.maps.MapleMap;
 import org.gms.server.maps.Rope;
@@ -505,6 +506,53 @@ public final class GCMovement {
     public static boolean isClimbing(Character bot) {
         BotMovementState st = bot == null ? null : STATES.get(bot.getId());
         return st != null && st.climbing;
+    }
+
+    /**
+     * The rope/ladder fh (wire value) when {@code chr} is currently on one, else 0.
+     * A real client tests {@code fh & 0x8000} to tell "on a rope" from "on ground" and binds the
+     * character to that rope (and takes the rope's page). So the value is the rope's
+     * two's-complement NEGATIVE 1-based index — {@code (-idx) & 0xFFFF} — NOT {@code 0x8000 | idx},
+     * which decodes to 32767 and silently means "no rope". Base 1 because
+     * FootholdTree_FindLadderOrRope rejects index 0.
+     *
+     * <p>Exposed so the recorded-path engine (MovementCommands.findFootHoldId) sends the same rope
+     * encoding the movement engine broadcasts with (BotMovementManager.resolveBroadcastFhId) instead
+     * of a plain ground id while climbing — a positive id lets the client snap the character onto
+     * that foothold, i.e. "nailed to the ground" off the rope.
+     *
+     * <p>Unlike the movement engine, which holds the rope in its state ({@code entry.climbRope}),
+     * this resolves the rope from the character's own climbing stance + position, because the
+     * recorded-path engine's characters are not under GC control and have no such state.
+     */
+    public static int ropeFh(Character chr) {
+        // Gate on the climbing stance first: the common (non-climbing) case must not touch the map or
+        // allocate the getRopes() wrapper. The pure core re-checks the stance for its direct callers.
+        if (chr == null || !CharacterStance.isClimbing(chr.getStance())) {
+            return 0;
+        }
+        MapleMap map = chr.getMap();
+        Point pos = chr.getPosition();
+        return ropeFh(chr.getStance(), pos.x, pos.y, map == null ? null : map.getRopes());
+    }
+
+    /**
+     * Pure core of {@link #ropeFh(Character)} — no engine objects, so it is unit-testable. Returns
+     * the two's-complement negative 1-based index of the rope/ladder the point sits on, or 0 when
+     * the point is not climbing or not on a rope column.
+     */
+    static int ropeFh(int stance, int x, int y, List<Rope> ropes) {
+        if (!CharacterStance.isClimbing(stance) || ropes == null) {
+            return 0;
+        }
+        for (int i = 0; i < ropes.size(); i++) {
+            Rope rope = ropes.get(i);
+            if (Math.abs(x - rope.x()) <= BotPhysicsEngine.cfg.ROPE_GRAB_X
+                    && y >= rope.topY() && y <= rope.bottomY()) {
+                return (-(i + 1)) & 0xFFFF; // 1-based two's complement; client rejects index 0
+            }
+        }
+        return 0;
     }
 
     /* True while the bot is standing on solid ground under GC control: not airborne, not swimming, not on
