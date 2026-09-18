@@ -5,6 +5,7 @@ import org.gms.client.inventory.InventoryType;
 import org.gms.client.inventory.Item;
 import org.gms.server.maps.PlayerShopItem;
 import soloMapling.server.MapleVersionManager;
+import soloMapling.itemPool.DesirableEquipList;
 import soloMapling.itemPool.ItemNode;
 import soloMapling.itemPool.QuantitySelector;
 
@@ -380,15 +381,30 @@ public class ArtificialShopGenerator {
      * best goods on a fire sale, or a shop could shelve a 50m White Scroll for
      * 1 meso purely because it rolled the 1-in-10000 "1 MESO SHOP" variant.
      *
-     * <p>The protected cut is adaptively the shop's own top decile by listing
-     * price, not a fixed number: a hard floor (it used to be 10m) leaves the
-     * sub-10m rare band - S-rank dark scrolls, mastery books, the odd S equip -
-     * exposed, because "rare" is relative to the store's own stock, not to an
-     * absolute meso amount.
+     * <p>An item is spared when <b>any</b> of three signals fires, so neither a
+     * store-relative nor an absolute notion of "rare" can be fooled alone:
+     * <ol>
+     *   <li><b>curated rare</b> - the id is in {@code rareItemPrices.yaml}
+     *       (authoritative, and level-agnostic: an iconic 3m BIS item is spared
+     *       even in a shop where nothing is expensive);</li>
+     *   <li><b>top decile by listing price</b> - the store's own priciest slice
+     *       (kept from the earlier fix: "rare" relative to the stock);</li>
+     *   <li><b>absolute floor</b> - the listing is worth at least
+     *       {@link #RARE_ITEM_ABSOLUTE_FLOOR} mesos, so a valuable non-curated
+     *       item (a White Scroll, an S-rank dark scroll) is spared even in an
+     *       all-expensive shop where the decile alone would leave it exposed.</li>
+     * </ol>
      */
     private static final double RARE_STOCK_PROTECTED_FRACTION = 0.10;
 
-    /** Mask of the priciest {@value #RARE_STOCK_PROTECTED_FRACTION} of the stock. */
+    /** Absolute "genuinely rare" price, the top-decile boundary of the item
+     * pool (see the itemConfig price distribution). Complements the curated id
+     * list for valuable items that are not curated. */
+    private static final int RARE_ITEM_ABSOLUTE_FLOOR = 5_000_000;
+
+    /** Mask of the priciest {@value #RARE_STOCK_PROTECTED_FRACTION} of the stock,
+     * unioned with every curated-rare id and every listing at/above
+     * {@link #RARE_ITEM_ABSOLUTE_FLOOR}. */
     private static boolean[] rareStockMask(List<PlayerShopItem> items) {
         int n = items.size();
         boolean[] protect = new boolean[n];
@@ -402,6 +418,14 @@ public class ArtificialShopGenerator {
         int protectCount = (int) Math.ceil(n * RARE_STOCK_PROTECTED_FRACTION);
         for (int k = n - protectCount; k < n; k++) {
             protect[order[k]] = true;
+        }
+
+        for (int i = 0; i < n; i++) {
+            PlayerShopItem item = items.get(i);
+            if (item.getPrice() >= RARE_ITEM_ABSOLUTE_FLOOR
+                    || DesirableEquipList.getRarePrice(item.getItem().getItemId()) != null) {
+                protect[i] = true;
+            }
         }
         return protect;
     }

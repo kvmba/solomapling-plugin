@@ -24,15 +24,39 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  */
 class ShopDiscountRarityFloorTest {
 
+    // A curated-rare id (Zakum Helmet (2)) and a plain, uncurated id (Elixir).
+    private static final int CURATED_RARE_ID = 1002390;
+    private static final int PLAIN_ID = 2000004;
+
+    static {
+        // rareStockMask consults the curated-rare table by id; load it the way
+        // the plugin does at startup.
+        soloMapling.itemPool.DesirableEquipList.load();
+    }
+
     private static HiredMerchantArtificial merchantWith(int... prices) throws Exception {
         HiredMerchantArtificial merchant =
                 (HiredMerchantArtificial) unsafe().allocateInstance(HiredMerchantArtificial.class);
 
         List<PlayerShopItem> items = new ArrayList<>();
         for (int price : prices) {
-            items.add(new PlayerShopItem(new Item(2000004, (short) 0, (short) 1), (short) 1, price));
+            items.add(new PlayerShopItem(new Item(PLAIN_ID, (short) 0, (short) 1), (short) 1, price));
         }
 
+        Field itemsField = itemsField();
+        itemsField.setAccessible(true);
+        itemsField.set(merchant, items);
+        return merchant;
+    }
+
+    /** Build a store where each item gets its own id/price pair. */
+    private static HiredMerchantArtificial merchantOf(int[][] idPricePairs) throws Exception {
+        HiredMerchantArtificial merchant =
+                (HiredMerchantArtificial) unsafe().allocateInstance(HiredMerchantArtificial.class);
+        List<PlayerShopItem> items = new ArrayList<>();
+        for (int[] pair : idPricePairs) {
+            items.add(new PlayerShopItem(new Item(pair[0], (short) 0, (short) 1), (short) 1, pair[1]));
+        }
         Field itemsField = itemsField();
         itemsField.setAccessible(true);
         itemsField.set(merchant, items);
@@ -119,5 +143,49 @@ class ShopDiscountRarityFloorTest {
 
         List<PlayerShopItem> items = itemsOf(merchant);
         assertEquals(4_500_000, items.get(0).getPrice(), "a lone item is always the top decile");
+    }
+
+    @Test
+    void curatedRareIsSparedEvenWhenItIsNotThePriciest() throws Exception {
+        // Two items: a plain 50m item and a curated rare at 3m (below the 5m
+        // absolute floor). The top-decile rule spares only the 50m item; without
+        // the curated-id signal the 3m iconic rare would be fire-saled.
+        HiredMerchantArtificial merchant = merchantOf(new int[][]{
+                {PLAIN_ID, 50_000_000},
+                {CURATED_RARE_ID, 3_000_000}});
+        ArtificialShopGenerator.setOneMesoShop(merchant);
+
+        List<PlayerShopItem> items = itemsOf(merchant);
+        assertEquals(50_000_000, items.get(0).getPrice(), "top-decile item must be spared");
+        assertEquals(3_000_000, items.get(1).getPrice(), "curated rare must be spared by id");
+    }
+
+    @Test
+    void absoluteFloorSparesValuableUncuratedStockBeyondTheDecile() throws Exception {
+        // Three plain items: the decile spares only the 50m one, but the 8m item
+        // is also genuinely rare and must be spared by the absolute floor. The
+        // 1m item is ordinary and still gets fire-saled.
+        HiredMerchantArtificial merchant = merchantOf(new int[][]{
+                {PLAIN_ID, 50_000_000},
+                {PLAIN_ID, 8_000_000},
+                {PLAIN_ID, 1_000_000}});
+        ArtificialShopGenerator.setOneMesoShop(merchant);
+
+        List<PlayerShopItem> items = itemsOf(merchant);
+        assertEquals(50_000_000, items.get(0).getPrice(), "top-decile item must be spared");
+        assertEquals(8_000_000, items.get(1).getPrice(), "above-floor item must be spared");
+        assertEquals(1, items.get(2).getPrice(), "ordinary stock still goes to 1 meso");
+    }
+
+    @Test
+    void curatedRareIsSparedByWholesaleDiscountToo() throws Exception {
+        HiredMerchantArtificial merchant = merchantOf(new int[][]{
+                {PLAIN_ID, 50_000_000},
+                {CURATED_RARE_ID, 3_000_000}});
+        ArtificialShopGenerator.applyQuittingSaleDiscount(merchant); // x0.7
+
+        List<PlayerShopItem> items = itemsOf(merchant);
+        assertEquals(50_000_000, items.get(0).getPrice(), "top-decile item must not be discounted");
+        assertEquals(3_000_000, items.get(1).getPrice(), "curated rare must not be discounted");
     }
 }

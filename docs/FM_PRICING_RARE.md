@@ -54,6 +54,21 @@ whitelist is consulted, but dialogue still wants them). A regression that
 dropped `1002357` / `1082149` was caught and guarded by
 `RareEquipPricingTest#iconicGearStaysOnTheWhitelistEvenWhenUntradeable`.
 
+## Follow-ups
+
+- **Scrolled-DP price inflation** — `minimumCostToCreateEquipCalculator` used
+  `(cost + price) / rate`, which compounded the whole accumulated cost every
+  slot and pinned the top stat bands at the 2,147,483,647 int cap (distinct
+  rolls all listed for the same price). Fixed to the additive marginal cost
+  `cost + price / rate`: a failed scroll consumes a slot but does not undo
+  earlier successes, so cost accumulates additively. Guarded by
+  `ScrolledValuationCapTest`.
+- **Fire-sale protection** — `rareStockMask` protected only the store-relative
+  top decile, so a mid-tier rare in a small shop (few decile slots) could still
+  be fire-saled. It now spares an item when **any** of three signals fires:
+  curated-rare id (`rareItemPrices.yaml`), top decile by price, or an absolute
+  `RARE_ITEM_ABSOLUTE_FLOOR` (5m). Covered by `ShopDiscountRarityFloorTest`.
+
 ## Out of scope (deliberately not touched)
 
 - **`getWzPrice`'s flat `5,000,000` sentinel** for WZ prices 0..50: verified
@@ -63,8 +78,6 @@ dropped `1002357` / `1082149` was caught and guarded by
   the fallback). Changing it would be an unrelated edit and is left alone
   (AGENTS.md "最小改动"). It still affects bot *trade* valuation, which is a
   separate concern.
-- The scrolled-DP price inflation and the relative-top-decile fire-sale guard
-  are separate issues, not covered here.
 
 ## Grounding
 
@@ -85,4 +98,4 @@ No code change, no reload hook — read once at startup.
 `RareEquipPricingTest` (7 cases): overrides load, untradeable ids are absent,
 iconic ids stay whitelisted for dialogue, cheap price is lifted, the override is
 a floor not a ceiling, unlisted items are untouched, rare outvalues ordinary.
-Full suite: 1075 tests, 0 failures.
+Full suite: 1083 tests, 0 failures (`ScrolledValuationCapTest` + `ShopDiscountRarityFloorTest` cover the follow-ups).

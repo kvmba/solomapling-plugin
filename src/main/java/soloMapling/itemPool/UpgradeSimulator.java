@@ -55,12 +55,20 @@ public class UpgradeSimulator {
         }
         costArray[0][0] = baseItemCost; // Set base item cost at (0,0)
 
-        // Compute minimum costs
+        // Compute minimum costs.
+        //
+        // Marginal expected cost of one successful scroll = price / successRate
+        // (you attempt 100/rate times on average). A failed scroll in MapleStory
+        // consumes a slot but does NOT undo earlier successes, so the accumulated
+        // cost is only ADDED to - it is not re-inflated by 1/rate each step.
+        // The old form ((cost + price) / rate) compounded the whole accumulated
+        // cost every slot, which grew price geometrically and pinned the top bands
+        // at the 2,147,483,647 int cap (many distinct rolls collapsing to one price).
         for (int i = 0; i < slots; i++) {
             for (int j = 0; j <= maxBonus - maxIncrement; j++) {
                 for (Scroll scroll : scrolls) {
                     if (scroll.successRate > 0) { // Prevent division by zero
-                        double newCost = (costArray[i][j] + scroll.price) / (scroll.successRate / 100.0);
+                        double newCost = costArray[i][j] + scroll.price / (scroll.successRate / 100.0);
                         int newBonus = j + scroll.statBonus;
                         if (newBonus <= maxBonus) {
                             costArray[i + 1][newBonus] = Math.min(costArray[i + 1][newBonus], newCost);
