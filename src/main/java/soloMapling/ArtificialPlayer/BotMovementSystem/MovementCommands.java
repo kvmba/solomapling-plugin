@@ -315,7 +315,18 @@ public class MovementCommands {
         return fakechar.getMap().getFootholds().findBelow(pos);
     }
 
+    /**
+     * The fh (foothold) value to put on the wire for this bot: the rope's two's-complement NEGATIVE
+     * index while climbing (see {@link GCMovement#ropeFh}), otherwise the real foothold id under the
+     * entity (0 when none) — the recorded-path engine used to send a plain ground id even on a rope,
+     * which the client uses to snap the character onto that foothold, i.e. "nailed to the ground"
+     * instead of bound to the rope.
+     */
     public static int findFootHoldId(Character fakechar) {
+        int ropeFh = GCMovement.ropeFh(fakechar);
+        if (ropeFh != 0) {
+            return ropeFh;
+        }
         Foothold fh = getFootHoldObject(fakechar);
         if (fh != null) {
             return fh.getId();
