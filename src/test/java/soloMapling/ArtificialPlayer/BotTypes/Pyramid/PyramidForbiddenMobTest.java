@@ -8,17 +8,18 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /**
  * Locks the Pyramid "forbidden monster" ids.
  *
- * <p>Duarte warns against attacking the Pharaoh Jr. Yeti because attacking it lands a MISS, which
- * costs the party gauge. The trap this guards against is a silent one: the briefing prints the
- * mark as an item icon ({@code #v04032424#}), so it is easy to compare a mob's id against that
- * ITEM id - a check that can never match, leaving the bot free to kill the one monster that
- * matters. These cases pin the real MONSTER ids.
+ * <p>Duarte warns the party off the Pharaoh Jr. Yeti that carries the "Missed Mark". The trap
+ * this guards against is a silent one: the briefing prints the mark as an item icon
+ * ({@code #v04032424#}), so it is easy to compare a monster's id against that ITEM id - a check
+ * that can never be equal, which left the guard doing nothing at all. These cases pin the real
+ * MONSTER ids the spawner uses.
  */
 class PyramidForbiddenMobTest {
 
     @Test
     void theForbiddenMonstersAreTheOnesTheSpawnerActuallyUses() {
-        // killing_BonusSetting.js spawns 9700019 in ordinary bonus rooms and 9700029 in two maps.
+        // killing_BonusSetting.js spawns 9700019 in the ordinary bonus rooms and 9700029 in the
+        // two maps it special-cases (926010013 / 926010070).
         assertTrue(PyramidPqData.isForbidden(9700019), "the decoy in the bonus rooms");
         assertTrue(PyramidPqData.isForbidden(9700029), "the decoy variant two maps use");
     }
