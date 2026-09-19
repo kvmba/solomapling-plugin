@@ -338,7 +338,7 @@ BotDetailSystem/
    `Collections.sort` → 等级 10 bot 会抛 `UnsupportedOperationException`。已改为始终返回可变 `ArrayList`（提交 #3）。
 7. **GM 巡检（#4）**：`!bot detail <cid>` 打印窗口三类实际数据（读活引擎态，非预设输入）；`!bot rerolldetail <cid>`。
 8. **测试**：`BotMonsterBookTest`(4) / `BotMedalBookTest`(6) / `BotWishListTest`(5) 全绿；
-   全套 **1147 tests, 0 failures**（去反射后、rebase 到 `optimize/performance` 现 tip 的复测）。
+   全套测试 0 failures（去反射后又经两次上游 rebase 复测；基数随上游合入而变化，最新为 1150）。
 9. **宿主改动**：仅 1 处——`MonsterBook.setCardCounts`（§11.2）；其余宿主工作树不变。
 
 > 注：本节 3/8 于第三轮审查更新（去反射后的最终形态）。
