@@ -68,7 +68,7 @@ public class BotOptionMenu {
      * bot instead of to all of them.
      */
     public boolean offerDirect(Character player, String content) {
-        if (player == null || match(content) < 0) {
+        if (player == null || !matches(content)) {
             return false;
         }
         pendingKeyword = content;
@@ -144,6 +144,20 @@ public class BotOptionMenu {
     // menu's show() repaints the hint).
     public void deactivate() {
         active = false;
+    }
+
+    /**
+     * Whether a line is one of this menu's own options (by number or keyword) - the same predicate
+     * {@link #match} dispatches on, exposed so an owner can ask "is this MY keyword?" BEFORE some
+     * other reader (e.g. {@code SocialIntent}) claims the line and answers it as chatter.
+     *
+     * <p>Without this, a functional keyword that happens to CONTAIN a social-intent substring is
+     * swallowed by the social reader: "就这里" ("train right here") contains PROVOKE's "就这", so a
+     * FollowerBot answered it as an insult and the station-here handoff never ran. The bot's own
+     * option keyword is authoritative and must win.
+     */
+    public boolean matches(String content) {
+        return match(content) >= 0;
     }
 
     private int match(String content) {

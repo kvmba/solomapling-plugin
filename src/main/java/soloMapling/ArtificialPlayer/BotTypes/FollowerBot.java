@@ -260,7 +260,12 @@ public class FollowerBot extends BotSM {
         if (player == null || isBot(player)) {
             return;
         }
-        if (SocialIntent.classifyNode(message.getContent()) != null) {
+        // A functional keyword outranks the social reading of the same words: "就这里" ("train right
+        // here") CONTAINS PROVOKE's "就这", so checking the social intent first insulted the player
+        // and swallowed the station-here command. Only a line this bot does NOT claim as its own
+        // option is answered as chatter (see BotSM.claimsOwnKeyword).
+        if (SocialIntent.classifyNode(message.getContent()) != null
+                && !claimsOwnKeyword(message.getContent())) {
             respondSocial(player, message.getContent(), message.getChatType());
             return;
         }
@@ -274,6 +279,12 @@ public class FollowerBot extends BotSM {
     @Override
     public boolean respondsToSocialChat() {
         return true;
+    }
+
+    // This bot's own functional options: the follow-from-afar words and its option menu.
+    @Override
+    public boolean claimsOwnKeyword(String content) {
+        return isFollowWord(content) || menu.matches(content);
     }
 
     // ── Menu (Dispatcher routes a "botname" chat here via displayCommands) ───
