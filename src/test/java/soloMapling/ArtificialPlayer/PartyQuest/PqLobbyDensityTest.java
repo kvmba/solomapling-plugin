@@ -6,13 +6,13 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Locks how many bots each quest lobby holds, and how they are spread across its platforms.
+ * Locks how many bots each quest lobby holds.
  *
- * <p>Two mistakes are easy here and both are silent. Placing exactly one party's worth makes a
- * lobby look like a set of placeholders, which is why the count is a multiple; and rounding each
- * platform's share up to at least one bot - which is what {@code Math.max(1, ...)} did, and what
- * this caught - multiplies the count by the number of platforms whenever a map has more platforms
- * than bots. Neither shows up as an error; the room just fills with the wrong number of bots.
+ * <p>Placing exactly one party's worth makes a lobby look like a set of placeholders, which is
+ * why the count is a multiple; the counts themselves come straight from each quest's
+ * {@code maxPlayers}, so this guards the table against a silent edit. How the bots are spread
+ * is no longer a per-platform split here - they are scattered across the map's WZ terrain by
+ * {@code PlatformPlacement.spawnBotsOnMap} - so only the totals are asserted.
  */
 class PqLobbyDensityTest {
 
@@ -49,54 +49,5 @@ class PqLobbyDensityTest {
         assertEquals(15, PqRecruitPoints.byName("LudiPQ").botsToOffer(1) * EXPECTED_MULTIPLE);
         assertEquals(15, PqRecruitPoints.byName("HorntailPQ").botsToOffer(1) * EXPECTED_MULTIPLE);
         assertEquals(9, PqRecruitPoints.byName("MagatiaPQ").botsToOffer(1) * EXPECTED_MULTIPLE);
-    }
-
-    @Test
-    void spreadingNeverPlacesMoreThanAsked() {
-        // The distribution rule, checked across the shapes that actually occur: fewer bots than
-        // platforms, more, and an exact division. Overshooting is the failure mode that the
-        // platform count turns into a multiplier.
-        int[] counts = {15, 9, 5, 1};
-        int[] platforms = {3, 5, 8, 20};
-        for (int count : counts) {
-            for (int n : platforms) {
-                assertEquals(count, distribute(count, n),
-                        "placing " + count + " bots over " + n + " platforms");
-            }
-        }
-    }
-
-    @Test
-    void spreadingLeavesPlatformsEmptyWhenThereAreMoreOfThem() {
-        // Three bots and twenty platforms: the whole share is zero, and only the first three
-        // platforms get one each. The earlier Math.max(1, ...) made this twenty.
-        assertEquals(0, perPlatformShare(3, 20));
-        assertEquals(3, distribute(3, 20));
-    }
-
-    @Test
-    void aMapWithNoPlatformsPlacesNothing() {
-        assertEquals(0, distribute(15, 0));
-    }
-
-    /** The spawner's own split: whole share each, then one more to the leading platforms. */
-    private static int distribute(int count, int platforms) {
-        if (platforms <= 0) {
-            return 0;
-        }
-        int share = perPlatformShare(count, platforms);
-        int remainder = count % platforms;
-        int total = 0;
-        for (int i = 0; i < platforms; i++) {
-            int here = share + (i < remainder ? 1 : 0);
-            if (here > 0) {
-                total += here;
-            }
-        }
-        return total;
-    }
-
-    private static int perPlatformShare(int count, int platforms) {
-        return platforms <= 0 ? 0 : count / platforms;
     }
 }
