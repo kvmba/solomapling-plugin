@@ -21,7 +21,8 @@ import java.util.concurrent.ThreadLocalRandom;
 // can actually traverse the stack. Ours (SoloMapling); map-archetype grinding, STACK phase.
 final class StackStrategy implements GrindStrategy {
 
-    private static final long WAIT_PATIENCE_MS = 5_000;      // stack lull tolerance before considering a relocate
+    private static final long WAIT_PATIENCE_MIN_MS = 2_000;  // stack lull tolerance before CONSIDERING a relocate
+    private static final long WAIT_PATIENCE_MAX_MS = 4_000;  // rolled fresh per lull so layered bots don't leave together
     private static final long UNPRODUCTIVE_MS = 20_000;      // cumulative no-kill window that (with patience) relocates
     private static final long LEDGE_FALLBACK_MS = 2_500;     // assigned ledge dry this long -> hunt the whole stack
     private static final long RELOCATE_EXCLUDE_MS = 30_000;  // down-weight a just-left stack so it isn't re-picked at once
@@ -50,7 +51,9 @@ final class StackStrategy implements GrindStrategy {
     private boolean ledgeFallback = false;       // hunting the whole stack because the assigned ledge dried
     private int excludedPrimaryIdx = -1;         // just-left stack, down-weighted for RELOCATE_EXCLUDE_MS
     private long excludedUntilMs = 0L;
-    private long waitStartedMs = 0L;
+    // Fresh per WAIT episode: now + a random window (ticker-thread only), so two bots sharing a stack
+    // don't relocate off the same dry lull on the same tick.
+    private long waitPatienceDeadlineMs = 0L;
     private volatile boolean mapSaturated = false;
 
     StackStrategy(GrindBrain brain) {
@@ -102,7 +105,7 @@ final class StackStrategy implements GrindStrategy {
         ledgeFallback = false;
         excludedPrimaryIdx = -1;
         excludedUntilMs = 0L;
-        waitStartedMs = 0L;
+        waitPatienceDeadlineMs = 0L;
         mapSaturated = false;
         state = State.SELECT_STACK;
     }
@@ -346,7 +349,8 @@ final class StackStrategy implements GrindStrategy {
 
     private void enterWait(Character chr) {
         b.engaged = false;
-        waitStartedMs = now();
+        waitPatienceDeadlineMs = now() + WAIT_PATIENCE_MIN_MS
+                + (long) (b.rng.nextDouble() * (WAIT_PATIENCE_MAX_MS - WAIT_PATIENCE_MIN_MS));
         // Spend the lull back on the assigned floor's anchor so layered bots hold visible levels.
         Spot a = assigned;
         Point pos = chr.getPosition();
@@ -381,7 +385,7 @@ final class StackStrategy implements GrindStrategy {
         if (b.loot.tryWalkAndLoot(chr, leash[0], leash[1], Math.max(300, (st.x1() - st.x0()) / 2))) {
             return;
         }
-        if (now() - waitStartedMs >= WAIT_PATIENCE_MS && now() - b.lastKillMs >= UNPRODUCTIVE_MS) {
+        if (now() >= waitPatienceDeadlineMs && now() - b.lastKillMs >= UNPRODUCTIVE_MS) {
             toRelocate();
         }
     }

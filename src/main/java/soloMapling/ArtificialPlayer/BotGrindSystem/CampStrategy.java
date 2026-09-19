@@ -28,10 +28,15 @@ import java.util.Set;
 class CampStrategy implements GrindStrategy {
 
     // ── Regime-adjusted patience: COMPACT maps camp through the respawn lull (dense, fast refill);
-    //    SPREAD/SPARSE maps leave a dry spot sooner. Knob DEFAULTS only — the FSM is identical. ──
-    private static final long WAIT_PATIENCE_COMPACT_MS = 8_000;  // lull tolerance before CONSIDERING a relocate
-    private static final long WAIT_PATIENCE_SPREAD_MS = 4_000;
-    private static final long WAIT_PATIENCE_SPARSE_MS = 2_500;
+    //    SPREAD/SPARSE maps leave a dry spot sooner. Knob DEFAULTS only — the FSM is identical.
+    //    Each lull rolls a fresh [MIN,MAX) window so a cohort standing dry simultaneously doesn't turn
+    //    and leave in lockstep. ──
+    private static final long WAIT_PATIENCE_COMPACT_MIN_MS = 3_000;  // lull tolerance before CONSIDERING a relocate
+    private static final long WAIT_PATIENCE_COMPACT_MAX_MS = 6_000;
+    private static final long WAIT_PATIENCE_SPREAD_MIN_MS = 1_500;
+    private static final long WAIT_PATIENCE_SPREAD_MAX_MS = 3_000;
+    private static final long WAIT_PATIENCE_SPARSE_MIN_MS = 1_000;
+    private static final long WAIT_PATIENCE_SPARSE_MAX_MS = 2_000;
     private static final long UNPRODUCTIVE_COMPACT_MS = 35_000;  // cumulative no-kill window that (with patience) relocates
     private static final long UNPRODUCTIVE_SPREAD_MS = 18_000;
     private static final long UNPRODUCTIVE_SPARSE_MS = 10_000;
@@ -71,9 +76,12 @@ class CampStrategy implements GrindStrategy {
     private boolean bandFallback = false;    // hunting spot-wide because the band dried; cleared on a band acquisition
     int excludedSpotIndex = -1;              // just-left spot, down-weighted for RELOCATE_EXCLUDE_MS (pickSpot reads it)
     long excludedUntilMs = 0L;
-    private long waitStartedMs = 0L;
+    // Rolls fresh per WAIT episode (ticker-thread only): now + a random regime-window. Anchoring the
+    // deadline once at entry — instead of re-rolling each tick — means one episode draws exactly one
+    // sample (no per-tick drift) and the compare in doWait is a pure `now() >= deadline`.
+    private long waitPatienceDeadlineMs = 0L;
 
-    // Anchor-proximity watchdog state (ticker-thread only, mirroring waitStartedMs).
+    // Anchor-proximity watchdog state (ticker-thread only, mirroring the wait deadline).
     private long offAnchorSinceMs = 0L;      // when the bot first read off the anchor ledge (0 = on it)
     private long hardReturnAt = 0L;          // when the current pathfind-home was issued (0 = none pending)
     private long lastReturnedMs = 0L;        // when we last hard-teleported home (arms the re-anchor window)
@@ -132,7 +140,7 @@ class CampStrategy implements GrindStrategy {
         bandEmptySinceMs = 0L;
         bandFallback = false;
         mapSaturated = false;
-        waitStartedMs = 0L;
+        waitPatienceDeadlineMs = 0L;
         resetAnchorWatchdog();
         state = State.SELECT_SPOT;
     }
@@ -370,7 +378,7 @@ class CampStrategy implements GrindStrategy {
         // one "last move target" with the approach made the bot flip direction whenever it swapped
         // between chasing a mob and walking to a drop - the sideways shuffle after a kill.
         b.lastMoveTargetX = Integer.MIN_VALUE;
-        waitStartedMs = now();
+        waitPatienceDeadlineMs = now() + rollWaitPatienceMs(chr);
         // On a shared spot, spend the lull standing at the personal band's center: sharers on a long
         // platform then hold visibly spaced positions instead of bunching wherever the last kill landed.
         int[] band = personalBand(chr, s);
@@ -424,7 +432,7 @@ class CampStrategy implements GrindStrategy {
         // dead ledge — so cut the cumulative no-kill wait short and relocate now. The live-mob term in
         // SpotFinder.pickBest then aims us at the mob-bearing platform. When the whole map is dry this
         // stays false and the bot still camps the respawn out (map changes are the macro brain's job).
-        boolean lullOver = now() - waitStartedMs >= waitPatienceMs(chr);
+        boolean lullOver = now() >= waitPatienceDeadlineMs;
         if (lullOver && (now() - b.lastKillMs >= unproductiveMs(chr) || anotherSpotHasMobs(chr, s))) {
             toRelocate();
         }
@@ -491,11 +499,16 @@ class CampStrategy implements GrindStrategy {
         return (p != null) ? p.regime() : MapGrindProfile.Regime.COMPACT;
     }
 
-    private long waitPatienceMs(Character chr) {
+    // A fresh random lull window per WAIT episode (regime-scaled), so a cohort of dry bots doesn't
+    // relocate in lockstep. Rolled once at enterWait and cached in waitPatienceDeadlineMs.
+    private long rollWaitPatienceMs(Character chr) {
         return switch (regime(chr)) {
-            case COMPACT -> WAIT_PATIENCE_COMPACT_MS;
-            case SPREAD -> WAIT_PATIENCE_SPREAD_MS;
-            case SPARSE -> WAIT_PATIENCE_SPARSE_MS;
+            case COMPACT -> WAIT_PATIENCE_COMPACT_MIN_MS
+                    + (long) (b.rng.nextDouble() * (WAIT_PATIENCE_COMPACT_MAX_MS - WAIT_PATIENCE_COMPACT_MIN_MS));
+            case SPREAD -> WAIT_PATIENCE_SPREAD_MIN_MS
+                    + (long) (b.rng.nextDouble() * (WAIT_PATIENCE_SPREAD_MAX_MS - WAIT_PATIENCE_SPREAD_MIN_MS));
+            case SPARSE -> WAIT_PATIENCE_SPARSE_MIN_MS
+                    + (long) (b.rng.nextDouble() * (WAIT_PATIENCE_SPARSE_MAX_MS - WAIT_PATIENCE_SPARSE_MIN_MS));
         };
     }
 
