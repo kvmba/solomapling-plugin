@@ -220,17 +220,19 @@ public final class BotPetFollower {
     // its comfort (plus {@link #FOLLOW_DEAD_ZONE_PX}) away, and never moves to open the gap. The
     // owner turning in place therefore leaves every pet exactly where it stands, and a pet on the
     // side an owner walks toward holds its ground rather than running around or fleeing.
-    private static final int FOLLOW_MIN_PX = 15;
-    private static final int FOLLOW_MAX_PX = 40;
+    // Both ends are 50% wider than the original 15..40 (rounded to whole px: 22.5 -> 23, 60 exact),
+    // so a pet keeps a looser stand-off from its bot.
+    private static final int FOLLOW_MIN_PX = 23;
+    private static final int FOLLOW_MAX_PX = 60;
 
     /** Base comfort of each pet SLOT, held BEYOND its own drawn comfort — so a multi-pet bot's pets
      *  rest on DIFFERENT rings instead of all collapsing onto the one-sided {@code ±FOLLOW_MAX}
      *  ring (the reported "multi-pet spacing too small"). Index 0 is 0, so a LONE pet is unchanged
-     *  (the single-pet spacing is fine). The steps are deliberately UNEVEN — 0 / 32 / 58, not a
-     *  +30/+60 staircase — so a three-pet bot does not read as a mechanical formation. This only
+     *  (the single-pet spacing is fine). The steps are deliberately UNEVEN — 0 / 48 / 87, not a
+     *  +40/+80 staircase — so a three-pet bot does not read as a mechanical formation. This only
      *  widens how far OUT a pet MAY rest; pets may still overlap when their own draws drift close,
      *  and the chase/physics below is untouched (it keys on the comfort magnitude alone). */
-    private static final int[] PET_SLOT_SPREAD_PX = {0, 32, 58};
+    private static final int[] PET_SLOT_SPREAD_PX = {0, 48, 87};
 
     /** Movement-stat points a pet loses versus its owner, per array slot: pet 1 = −2, pet 2 = −4,
      *  pet 3 = −6 (i.e. {@code (index + 1) * 2}). Floored at the base stat by
