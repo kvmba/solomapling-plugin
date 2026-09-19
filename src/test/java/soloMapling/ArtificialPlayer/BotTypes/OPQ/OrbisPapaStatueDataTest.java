@@ -66,4 +66,12 @@ class OrbisPapaStatueDataTest {
         int landingY = -897;
         assertTrue(landingY >= -916 - 48 && landingY < -916 + 48, "statue-base landing is inside its box");
     }
+
+    @Test
+    void theFinalPieceIsTheOneTheLeaderMustCarry() {
+        // The spring drops exactly one 4001055, and Papa's room only lets the party out for a
+        // LEADER holding it (party3_gardenin: isEventLeader() && haveItem(4001055,1)). So the bot
+        // must never loot it - grabbing it would strand the party in the room.
+        assertEquals(4001055, OrbisPqData.STATUE_PIECE_8);
+    }
 }

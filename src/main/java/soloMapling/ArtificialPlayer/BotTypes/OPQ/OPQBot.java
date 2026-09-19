@@ -783,15 +783,23 @@ public class OPQBot extends BotSM {
     }
 
     /**
-     * Whether the six scar reactors in the tower are all lit, which is Eak's own test
+     * Whether the six scar reactors in the tower are already lit, which is Eak's own test
      * ({@code isStatueComplete}) and the gate on his sending the party to Papa Pixie.
      *
      * <p>There is no flag for this - no script sets {@code statusStg7} except the spring - so the
-     * reactors are read directly, exactly as Eak reads them. Only meaningful in the tower, where
-     * the scars live; a bot in another room reads false.
+     * reactors are read directly, exactly as Eak reads them. The scars live only in the tower,
+     * so a bot in another room cannot see them; but standing in Papa Pixie's room means Eak has
+     * already sent the party there, and he only does that once the statue is complete - so that
+     * room counts as "done" rather than bouncing the bot back to the tower it cannot reach.
      */
     private static boolean scarsComplete(Character bot) {
-        if (bot.getMap() == null || bot.getMapId() != OrbisPqData.TOWER_MAP) {
+        if (bot.getMap() == null) {
+            return false;
+        }
+        if (bot.getMapId() == OrbisPqData.STAGE_PAPA) {
+            return true; // Eak only warps here once isStatueComplete()
+        }
+        if (bot.getMapId() != OrbisPqData.TOWER_MAP) {
             return false;
         }
         for (var reactor : bot.getMap().getAllReactors()) {
