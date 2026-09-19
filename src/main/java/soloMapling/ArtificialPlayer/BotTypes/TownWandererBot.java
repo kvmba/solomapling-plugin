@@ -105,16 +105,17 @@ public class TownWandererBot extends BotSM {
         wanderState = WanderState.IDLE;
     }
 
-    // Home map + adjacent mob-free maps (town interiors / connectors) within one hop, so a wanderer can
-    // drift between a town's sub-rooms with no hardcoded map/portal table. mapsWithinHops already excludes
-    // taxi/ferry hops (town-local); we drop any map that has mobs (a field, not a town room) and any
-    // shaft-shaped map a roam must not settle in (see TownRoamMaps). Home-only fallback.
+    // Home map + adjacent town maps (WZ town flag) or mobless connectors within one hop, so a wanderer
+    // can drift between a town's sub-rooms with no hardcoded map/portal table. mapsWithinHops already
+    // excludes taxi/ferry hops (town-local); we keep town maps and town interiors/connectors (see
+    // MapMobIndex.isTown) and drop any shaft-shaped map a roam must not settle in (see TownRoamMaps).
+    // Home-only fallback.
     private List<Integer> discoverTownFamily(int home) {
         List<Integer> fam = new ArrayList<>();
         fam.add(home);
         try {
             for (int m : GCMovement.mapsWithinHops(home, 1)) {
-                if (m != home && MapMobIndex.level(m) < 0 && !TownRoamMaps.isBanned(m)) {
+                if (m != home && MapMobIndex.isTown(m) && !TownRoamMaps.isBanned(m)) {
                     fam.add(m);
                 }
             }
