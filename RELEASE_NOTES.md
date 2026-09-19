@@ -12,7 +12,7 @@
   - Bot buffs cover the pirate boosters (2nd), Transformation / Octopus (3rd) and Maple Warrior / Speed Infusion (4th).
   - `!bot spawn ... pirate` and `!bot trainhere <brawler|...|corsair>` are accepted.
   - Free-Market pirate shops now stock pirate gear instead of falling back to classless common items.
-  - Note: pirate attack skills render their weapon's default swing/shot rather than a bespoke pose — the client action ids for pirate skills are not in the action enum the plugin draws its overrides from.
+  - Pirate attack skills carry their real body-action poses (straight / somersault / doubleupper / eburster / triplefire / cannon / ...), read from the v83 client's own action table.
 - **Bot fame was the bot's internal character id.** `BotGeneration` set every artificial player's 人气度 to its own cid (`setFame(botId)`, a debug leftover from the upstream port), so all bots showed a five-digit reputation starting at 20000. Fame is now rolled from level and tier instead (see `BotFame`):
   - low-level bots land around **-10..30** (beginners sit in the low single digits)
   - the ceiling grows with level but never exceeds **300**
