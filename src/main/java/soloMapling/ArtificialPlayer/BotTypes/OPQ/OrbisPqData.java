@@ -53,6 +53,17 @@ public final class OrbisPqData {
     public static final List<Integer> LOUNGE_ROOMS =
             List.of(920010601, 920010602, 920010603, 920010604);
 
+    /** The lounge sub-rooms' doors, in the order their {@code in0N} portals list them. */
+    public static final String[] LOUNGE_ENTRY_PORTALS = {"in00", "in01", "in02", "in03"};
+
+    /** The door a lounge sub-room walks back out of. */
+    public static final String LOUNGE_EXIT_PORTAL = "out00";
+
+    /** The sub-room door for a rotation index (wraps). */
+    public static String loungeEntryPortal(int index) {
+        return LOUNGE_ENTRY_PORTALS[Math.floorMod(index, LOUNGE_ENTRY_PORTALS.length)];
+    }
+
     // =========================================================================
     // NPCs
     // =========================================================================
@@ -254,6 +265,24 @@ public final class OrbisPqData {
         };
     }
 
+    /**
+     * The portal name the tower enters a room by, read off the map data (portal id {@code 4} is
+     * {@code in00}, and so on). Named rather than numeric because the tower's room portals are
+     * script portals whose names the scripts key on.
+     */
+    public static String towerPortalName(int portalId) {
+        return switch (portalId) {
+            case 4 -> "in00";
+            case 5 -> "in02";
+            case 12 -> "in01";
+            case 13 -> "in03";
+            case 14 -> "in05";
+            case 15 -> "in04";
+            case 16 -> "in06";
+            default -> null;
+        };
+    }
+
     /** Where to stand in the tower to reach a room. */
     public static Point towerSpotFor(int roomMap) {
         return switch (roomMap) {
@@ -286,25 +315,13 @@ public final class OrbisPqData {
     }
 
     /**
-     * The portal in a room that leads back to the tower.
+     * The name of the portal a room walks out to the tower by.
      *
-     * <p>Most rooms share {@code party3_roomout}, whose script switches on the map to pick an
-     * exit portal, so the ids differ per room; Papa Pixie's room has its own portal
-     * ({@code party3_gardenin}), and it only lets the <em>leader</em> through once he holds
-     * {@code 4001055}, which is why the bot cannot walk itself out of that room and follows
-     * the leader instead.
+     * <p>Most rooms publish it as {@code st00} (entered by {@code party3_roomout}, whose script
+     * switches on the map id); the lounge's sub-rooms, the jail and the prize room use
+     * {@code out00}. Papa Pixie's room is leader-only ({@code party3_gardenin}) and has no
+     * walk-out, which is why the bot leaves it by following the leader. Found by name rather than
+     * by id because the ids differ per room.
      */
-    public static int roomExitPortal(int roomMap) {
-        return switch (roomMap) {
-            case STAGE_WALKWAY -> 4;
-            case STAGE_STORAGE -> 12;
-            case STAGE_MUSIC   -> 5;
-            case STAGE_SEALED  -> 13;
-            case STAGE_LOUNGE  -> 15;
-            case STAGE_UP      -> 14;
-            case STAGE_PRIZE   -> 16;
-            case STAGE_PAPA    -> 1;
-            default -> -1;
-        };
-    }
+    public static final String ROOM_EXIT_PORTAL_NAME = "st00";
 }

@@ -25,28 +25,79 @@ public final class OrbisStages {
     }
 
     /**
-     * A bot's standing order for a stage: which map it is, and how many of the party need to
-     * be in it. The runner uses this to decide whether the party has moved on without it.
+     * A bot's standing order for a stage: which map it is, the tower portal that reaches it, and
+     * where to stand in the tower to take that portal.
      */
-    public record StageRoom(int mapId, int portalInTower, Point towerSpot, int roomExitPortal) {
+    public record StageRoom(int mapId, int portalInTower, Point towerSpot) {
     }
 
     public static StageRoom roomFor(int stage) {
         return switch (stage) {
             case 1 -> new StageRoom(OrbisPqData.STAGE_WALKWAY, 4,
-                    OrbisPqData.towerSpotFor(OrbisPqData.STAGE_WALKWAY), 4);
+                    OrbisPqData.towerSpotFor(OrbisPqData.STAGE_WALKWAY));
             case 2 -> new StageRoom(OrbisPqData.STAGE_STORAGE, 12,
-                    OrbisPqData.towerSpotFor(OrbisPqData.STAGE_STORAGE), 12);
+                    OrbisPqData.towerSpotFor(OrbisPqData.STAGE_STORAGE));
             case 3 -> new StageRoom(OrbisPqData.STAGE_MUSIC, 5,
-                    OrbisPqData.towerSpotFor(OrbisPqData.STAGE_MUSIC), 5);
+                    OrbisPqData.towerSpotFor(OrbisPqData.STAGE_MUSIC));
             case 4 -> new StageRoom(OrbisPqData.STAGE_SEALED, 13,
-                    OrbisPqData.towerSpotFor(OrbisPqData.STAGE_SEALED), 13);
+                    OrbisPqData.towerSpotFor(OrbisPqData.STAGE_SEALED));
             case 5 -> new StageRoom(OrbisPqData.STAGE_LOUNGE, 15,
-                    OrbisPqData.towerSpotFor(OrbisPqData.STAGE_LOUNGE), 15);
+                    OrbisPqData.towerSpotFor(OrbisPqData.STAGE_LOUNGE));
             case 6 -> new StageRoom(OrbisPqData.STAGE_UP, 14,
-                    OrbisPqData.towerSpotFor(OrbisPqData.STAGE_UP), 14);
+                    OrbisPqData.towerSpotFor(OrbisPqData.STAGE_UP));
             default -> null;
         };
+    }
+
+    // =========================================================================
+    // Which stage is in play
+    // =========================================================================
+
+    /**
+     * The sentinels the stage picker returns for the three pieces of work that have no room of
+     * their own: the six scar reactors left in the tower when the party arrives there, and (once
+     * the scars are lit) Papa Pixie's room, which the spring's flag ends; then the final statue
+     * base. They are deliberately not 1..6 so a caller can tell them from a room stage.
+     */
+    public static final int SCARS_STAGE = 7;
+    public static final int PAPA_STAGE = 70;
+    public static final int STATUE_STAGE = 8;
+
+    /**
+     * Which stage of the run after the clouds is still in play, from the instance flags alone.
+     *
+     * <p>The stages run in strict order. Each {@code statusStgN} starts at -1, moves to 0 as the
+     * stage opens, and reaches its cleared value when Eak clears it. That cleared value is 1 for
+     * every stage except stage 3, whose music box sets it to 0 and Eak then sets it to 2 - so a
+     * plain "{@code == 1}" test would report stage 3 as never clearing.
+     *
+     * <p>Returned as a plain int, taking the flags as an array indexed 1..8, so the whole
+     * decision is testable without a live map. -1 means the run is over.
+     *
+     * @param stg       {@code statusStg1..8} (-1 when the quest has not touched the flag)
+     * @param scarsDone whether all six scar reactors in the tower are already lit
+     */
+    public static int middleStage(int[] stg, boolean scarsDone) {
+        for (int stage = 1; stage <= 6; stage++) {
+            if (!cleared(stage, stg[stage])) {
+                return stage;
+            }
+        }
+        if (stg[7] != 1) {
+            // Stage 7 is two pieces of work under one flag: light the six scars in the tower,
+            // then settle Papa Pixie's room, whose spring is what actually sets statusStg7.
+            return scarsDone ? PAPA_STAGE : SCARS_STAGE;
+        }
+        if (stg[8] != 1) {
+            return STATUE_STAGE;
+        }
+        return -1;
+    }
+
+    /** Whether a stage's flag has reached the value Eak leaves it at when the stage is cleared. */
+    private static boolean cleared(int stage, int flag) {
+        // Stage 3 is the one stage whose cleared value is not 1 (the music box sets 0, Eak sets 2).
+        return stage == 3 ? flag >= 1 : flag == 1;
     }
 
     // =========================================================================
