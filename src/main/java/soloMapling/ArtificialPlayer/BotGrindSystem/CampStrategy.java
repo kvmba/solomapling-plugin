@@ -3,6 +3,7 @@ package soloMapling.ArtificialPlayer.BotGrindSystem;
 import org.gms.client.Character;
 import org.gms.server.life.Monster;
 import org.gms.server.maps.MapObject;
+import org.gms.server.maps.MapleMap;
 import soloMapling.ArtificialPlayer.BotSpotClaims;
 import soloMapling.ArtificialPlayer.GCMoveSystem.GCMovement;
 
@@ -417,10 +418,53 @@ class CampStrategy implements GrindStrategy {
             return;
         }
         // Pile cleared and no mob — hold position and wait out the respawn lull (regime-scaled: a sparse
-        // or spread map gives up on a dry spot much sooner than a dense compact one).
-        if (now() - waitStartedMs >= waitPatienceMs(chr) && now() - b.lastKillMs >= unproductiveMs(chr)) {
+        // or spread map gives up on a dry spot much sooner than a dense compact one). But a lull only
+        // makes sense while the rest of the map is quiet too: if ANOTHER reachable platform on this map
+        // is holding live mobs, a player would just walk over and keep killing instead of staring at a
+        // dead ledge — so cut the cumulative no-kill wait short and relocate now. The live-mob term in
+        // SpotFinder.pickBest then aims us at the mob-bearing platform. When the whole map is dry this
+        // stays false and the bot still camps the respawn out (map changes are the macro brain's job).
+        boolean lullOver = now() - waitStartedMs >= waitPatienceMs(chr);
+        if (lullOver && (now() - b.lastKillMs >= unproductiveMs(chr) || anotherSpotHasMobs(chr, s))) {
             toRelocate();
         }
+    }
+
+    // True when another reachable, not-yet-full platform on this map currently holds live hostiles — the
+    // "there ARE mobs to fight, just not HERE" case that should end a dead-platform lull instead of
+    // waiting it out. Reachability shares pickBest's filter (an island ledge the bot can't walk to never
+    // counts); a full spot is skipped too, since leaving our own spot for a saturated one just trades a
+    // dead ledge for a queue (the macro crowd-bail owns that case). The current spot is skipped so its
+    // own (empty) radius can't keep us here.
+    private boolean anotherSpotHasMobs(Character chr, Spot current) {
+        MapleMap map = chr.getMap();
+        Point pos = chr.getPosition();
+        if (map == null || pos == null) {
+            return false;
+        }
+        MapGrindProfile p = SpotFinder.profileIfBuilt(map.getId());
+        if (p == null) {
+            return false;
+        }
+        Set<Integer> reach = GCMovement.reachableRegions(map, pos.x, pos.y);
+        boolean filter = !reach.isEmpty();
+        List<Spot> spots = p.spots();
+        for (int i = 0; i < spots.size(); i++) {
+            Spot s = spots.get(i);
+            if (s == current) {
+                continue;
+            }
+            if (filter && s.regionId() >= 0 && !reach.contains(s.regionId())) {
+                continue; // unreachable island ledge
+            }
+            if (BotSpotClaims.holders(map.getId(), i) >= s.shareCap()) {
+                continue; // already full — leaving our spot for it would just move us from lull to queue
+            }
+            if (SpotFinder.liveHostilesWithin(map, s) > 0) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private void toRelocate() {
