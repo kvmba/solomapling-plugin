@@ -38,6 +38,18 @@ class BotPetFollowBehaviorTest {
     }
 
     @Test
+    void petSlotSpreadIsZeroForALonePetAndWidensForTheOnesBehind() {
+        assertEquals(0, BotPetFollower.slotSpreadPx(0),
+                "slot 0 holds no extra spread, so a lone pet's spacing is unchanged");
+        int s1 = BotPetFollower.slotSpreadPx(1);
+        int s2 = BotPetFollower.slotSpreadPx(2);
+        assertTrue(s1 > 0 && s2 > s1,
+                "a multi-pet bot's later slots must rest on wider rings, got " + s1 + " then " + s2);
+        // NOT a uniform staircase: a constant step would read as a mechanical formation.
+        assertTrue(s2 - s1 != s1, "the per-slot steps must be uneven, got steps " + s1 + " and " + (s2 - s1));
+    }
+
+    @Test
     void baseOwnerHopRiseMatchesThePhysics() {
         // Null owner => base movement profile (jump stat 100 => base jump speed, x1 multiplier).
         GCMovement.JumpProfile jump = GCMovement.jumpProfile(null);

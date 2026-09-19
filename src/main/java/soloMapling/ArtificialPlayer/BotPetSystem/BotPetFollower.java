@@ -42,9 +42,11 @@ import java.util.concurrent.TimeUnit;
  * movement profile reduced by {@code (index + 1) * PET_STAT_STEP} points (floored at the base stat),
  * so pet 1 is a touch slower / lower-jumping than its owner, pet 2 a touch more, and so on — and a
  * platform the owner can jump onto is still one its pet can reach. Each pet follows INDEPENDENTLY at
- * its own random "comfort" distance from the owner ({@link #FOLLOW_MIN_PX}..{@link #FOLLOW_MAX_PX} px)
- * — there is no pet-to-pet formation — and that distance is held STABLE (never re-rolled), so a
- * resting bot's pets simply stand. The follow is a one-sided LEASH: a pet only closes distance when
+ * its own random "comfort" distance from the owner ({@link #FOLLOW_MIN_PX}..{@link #FOLLOW_MAX_PX} px,
+ * plus its SLOT's {@link #PET_SLOT_SPREAD_PX} so a multi-pet bot's pets rest on different rings).
+ * There is no pet-to-pet coupling — a target depends only on the owner and the pet's own slot, never
+ * on where another pet stands — and that distance is held STABLE (never re-rolled), so a resting
+ * bot's pets simply stand. The follow is a one-sided LEASH: a pet only closes distance when
  * the owner has drawn MORE than its comfort distance away, and never moves to open the gap. So the
  * owner turning in place, stepping a little, or walking toward the pet leaves the pet standing — it
  * never runs around behind the owner and never flees an approaching owner (see
@@ -220,6 +222,15 @@ public final class BotPetFollower {
     // side an owner walks toward holds its ground rather than running around or fleeing.
     private static final int FOLLOW_MIN_PX = 15;
     private static final int FOLLOW_MAX_PX = 40;
+
+    /** Base comfort of each pet SLOT, held BEYOND its own drawn comfort — so a multi-pet bot's pets
+     *  rest on DIFFERENT rings instead of all collapsing onto the one-sided {@code ±FOLLOW_MAX}
+     *  ring (the reported "multi-pet spacing too small"). Index 0 is 0, so a LONE pet is unchanged
+     *  (the single-pet spacing is fine). The steps are deliberately UNEVEN — 0 / 32 / 58, not a
+     *  +30/+60 staircase — so a three-pet bot does not read as a mechanical formation. This only
+     *  widens how far OUT a pet MAY rest; pets may still overlap when their own draws drift close,
+     *  and the chase/physics below is untouched (it keys on the comfort magnitude alone). */
+    private static final int[] PET_SLOT_SPREAD_PX = {0, 32, 58};
 
     /** Movement-stat points a pet loses versus its owner, per array slot: pet 1 = −2, pet 2 = −4,
      *  pet 3 = −6 (i.e. {@code (index + 1) * 2}). Floored at the base stat by
@@ -556,13 +567,13 @@ public final class BotPetFollower {
         boolean ownerBelow = owner.y > p.y + GROUND_STEP_PX;
         // The vertical platform chase (hop up to an owner above / warp down to one below / fall to a
         // lower ledge) assumes discrete stacked platforms. In a SWIM map on a SLOPE, owner and pet
-        // share ONE surface, and the follower offset (up to FOLLOW_MAX_PX along the incline) alone
-        // makes |owner.y - pet.y| exceed the step — so the chase fires every tick against the
-        // horizontal settle: the pet hops down-slope then walks back up. That is the up/down bob
-        // reported on underwater slopes. When the owner stands on the pet's own walk-CONNECTED surface
-        // there is no platform to reach: skip the chase and let the walk below follow the slope. A
-        // genuinely higher/lower platform is a different surface, so the pet still hops/warps/falls to
-        // it.
+        // share ONE surface, and the follower offset (own comfort plus the slot's spread, along the
+        // incline) alone makes |owner.y - pet.y| exceed the step — so the chase fires every tick
+        // against the horizontal settle: the pet hops down-slope then walks back up. That is the
+        // up/down bob reported on underwater slopes. When the owner stands on the pet's own
+        // walk-CONNECTED surface there is no platform to reach: skip the chase and let the walk
+        // below follow the slope. A genuinely higher/lower platform is a different surface, so the
+        // pet still hops/warps/falls to it.
         //
         // The test is the engine's own nav REGION, not foothold identity: a slope is stitched from many
         // short foothold segments, so the pet and owner routinely rest on two DIFFERENT segments of the
@@ -898,7 +909,7 @@ public final class BotPetFollower {
         // side, which would teleport a pet that had fallen on the far side around behind the owner.
         // A fallen pet is far outside the VR bounds (gap >> comfort), so the rest-inside step-out
         // never applies here; pass ownerMoving=true to make that explicit.
-        int targetX = followTargetX(owner.x, p.x, currentFollowDistance(pet), true);
+        int targetX = followTargetX(owner.x, p.x, currentFollowDistance(pet, index), true);
         WarpLanding land = resolveSafeLanding(map, targetX, owner);
         teleportPet(chr, pet, index, land.pos(), land.fh(),
                 left ? PET_STAND_LEFT : PET_STAND_RIGHT, config, observed);
@@ -1021,8 +1032,9 @@ public final class BotPetFollower {
      * (see {@link #followTargetX}). It is NOT where the pet should stand — a pet already within its
      * comfort distance does not move at all — only the point a pet is pulled TOWARD when the owner
      * has drawn too far away. There is NO pet-to-pet formation: a pet's leash depends only on the
-     * owner and its own stable comfort distance ({@link #FOLLOW_MIN_PX}..{@link #FOLLOW_MAX_PX}),
-     * drawn once by {@link #currentFollowDistance} and never re-rolled. The observed follow and the
+     * owner and its own stable comfort distance ({@link #FOLLOW_MIN_PX}..{@link #FOLLOW_MAX_PX}
+     * drawn once by {@link #currentFollowDistance}, plus its SLOT's {@link #PET_SLOT_SPREAD_PX} so a
+     * multi-pet bot's pets rest on different rings) and never re-rolled. The observed follow and the
      * unobserved position sync share this, so a joining player sees no spawn-then-snap.
      */
     private static int[] computeFollowTargetXs(Character chr, Pet[] pets, boolean ownerMoving) {
@@ -1033,7 +1045,7 @@ public final class BotPetFollower {
             if (pet == null) {
                 continue;
             }
-            followX[i] = followTargetX(ownerX, pet.getPos().x, currentFollowDistance(pet), ownerMoving);
+            followX[i] = followTargetX(ownerX, pet.getPos().x, currentFollowDistance(pet, i), ownerMoving);
         }
         return followX;
     }
@@ -1196,15 +1208,32 @@ public final class BotPetFollower {
      * drawn (and recorded) on first use — so a freshly granted pet and an unobserved-tick pet both
      * get a stable distance that the observed follow and the position sync agree on. Drawn once and
      * held, so a resting bot's pets simply stand (the leash never re-rolls).
+     *
+     * <p>The recorded value is the drawn base PLUS this SLOT's {@link #PET_SLOT_SPREAD_PX}, so a
+     * multi-pet bot's pets rest on different rings (slot 0 is spread 0, so a LONE pet is unchanged).
+     * Recorded per pet id (never re-rolled), so the observed follow and the unobserved sync agree,
+     * and the chase/physics below is untouched — it keys on the comfort magnitude alone, only
+     * further out.</p>
      */
-    private static int currentFollowDistance(Pet pet) {
-        return followDistanceByPet.computeIfAbsent(pet.getUniqueId(), id -> randomFollowDistance());
+    private static int currentFollowDistance(Pet pet, int index) {
+        return followDistanceByPet.computeIfAbsent(pet.getUniqueId(),
+                id -> randomFollowDistance() + slotSpreadPx(index));
     }
 
     /** A fresh comfort distance (px) in {@code [FOLLOW_MIN_PX, FOLLOW_MAX_PX]}. Package-private test
      *  seam (like {@link #shouldResolveFoothold}): pins the band a pet's leash must fall in. */
     static int randomFollowDistance() {
         return FOLLOW_MIN_PX + ThreadLocalRandom.current().nextInt(FOLLOW_MAX_PX - FOLLOW_MIN_PX + 1);
+    }
+
+    /** The base comfort this pet SLOT holds BEYOND its own drawn comfort ({@link #PET_SLOT_SPREAD_PX}),
+     *  indexed by the pet array slot. Index 0 is 0, so a LONE pet's spacing is unchanged. The table
+     *  has one entry per pet slot — the engine's own {@code Pet[3]} ({@code Character.getPets}), which
+     *  is also the loop bound that feeds {@code index} in — so the index is always in range.
+     *  Package-private test seam (pins the lone-pet-unchanged rule and the non-uniform widening
+     *  without a live map). */
+    static int slotSpreadPx(int index) {
+        return PET_SLOT_SPREAD_PX[index];
     }
 
     /** The follow-distance band (px) — {@code [min, max]} — a pet's independent offset draws from.
