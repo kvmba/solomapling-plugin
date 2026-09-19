@@ -13,7 +13,6 @@ import org.gms.constants.skills.DragonKnight;
 import org.gms.constants.skills.FPArchMage;
 import org.gms.constants.skills.FPMage;
 import org.gms.constants.skills.FPWizard;
-import org.gms.constants.skills.Gunslinger;
 import org.gms.constants.skills.Hermit;
 import org.gms.constants.skills.Hero;
 import org.gms.constants.skills.ILArchMage;
@@ -53,8 +52,8 @@ public final class BotAttackData {
     private static final int SWING_T1 = 9, SWING_T2 = 10, SWING_T3 = 11; // 2H swing
     private static final int SWING_P1 = 13, STAB_T1 = 19;                // polearm
     private static final int STAB_O1 = 16, STAB_O2 = 17;                 // 1H stab
-    private static final int SHOOT_1 = 22, SHOOT_2 = 23;                 // bow/crossbow draw + fire
-    private static final int SHOT = 93;                                  // "shot" (gun fire, as used by gunslingers)
+    private static final int SHOOT_1 = 22, SHOOT_2 = 23;                 // bow draw / crossbow fire
+    private static final int SHOOT_F = 27;                               // gun fire ("shootF", the gun's own pose)
     private static final int CLAW_1 = 24, CLAW_2 = 25, CLAW_3 = 26;      // claw throw
     private static final int WAND_1 = 28, WAND_2 = 29;                   // wand/staff cast
     // The client maps the direction byte through a FIXED internal enum (the client's
@@ -110,10 +109,11 @@ public final class BotAttackData {
     // A shared {shoot1, shoot2} pool made each weapon fire the wrong pose ~half the time.
     private static final int[] BOW_VARIANTS        = {SHOOT_1};
     private static final int[] CROSSBOW_VARIANTS   = {SHOOT_2};
-    // A gun fires with the "shot" pose (shootF/shoot6 would draw a bow/crossbow). Every v83
-    // gunslinger/buccaneer attack has an explicit SKILL_ACTION entry, so this only backs a
-    // gun-toting bot's no-skill basic swing.
-    private static final int[] GUN_VARIANTS        = {SHOT};
+    // A gun shoots with "shootF" - the pose its own weapon img carries. (Not "shot"=93: that action
+    // is on the body but on no weapon img. Not a melee swing either: a gun img has no swing/stab
+    // node.) A gunslinger's single-target Invisible Shot has no action node in Skill.wz, so it and
+    // a no-skill gun swing both land here; everything else is an explicit SKILL_ACTION entry.
+    private static final int[] GUN_VARIANTS        = {SHOOT_F};
 
     // Skills whose character keyframe differs from the weapon default, taken from each
     // skill's Skill.wz "action" node. A skill not listed uses its weapon's swing/cast/shoot
@@ -160,7 +160,6 @@ public final class BotAttackData {
             Map.entry(Buccaneer.SNATCH,              SNATCH),          // 5121005 -> "snatch"
             // Gunslinger / corsair line (gun, ranged)
             Map.entry(Pirate.DOUBLE_SHOT,            DOUBLEFIRE),      // 5001003 -> "doublefire"
-            Map.entry(Gunslinger.INVISIBLE_SHOT,     DOUBLEFIRE),      // 5201001 -> no action node; single gun shot
             Map.entry(Outlaw.BURST_FIRE,             TRIPLEFIRE),      // 5210000 -> "triplefire" (3-round burst)
             Map.entry(Outlaw.FLAME_THROWER,          FLAMEBURNER),     // 5211004 -> "fireburner"
             Map.entry(Outlaw.ICE_SPLITTER,           COOLINGEFFECT),   // 5211005 -> "coolingeffect"
@@ -266,7 +265,7 @@ public final class BotAttackData {
             case CLAW                                                   -> CLAW_VARIANTS;
             case BOW                                                    -> BOW_VARIANTS;      // shoot1 (bow draw)
             case CROSSBOW                                               -> CROSSBOW_VARIANTS; // shoot2 (crossbow)
-            case GUN                                                    -> GUN_VARIANTS;      // shot (gun fire)
+            case GUN                                                    -> GUN_VARIANTS;      // shootF (gun fire)
             default                                                     -> DEFAULT_1H_VARIANTS; // 1H/dagger/knuckle/unarmed
         };
     }
