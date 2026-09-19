@@ -67,24 +67,23 @@ public class MagatiaPQBot extends PartyQuestBot {
     }
 
     /**
-     * Stage 6's published per-slot combination.
+     * Stage 6's published combination.
      *
-     * <p>Read rather than tried: the quest writes one property per slot before anyone
-     * attempts the puzzle, which is the difference between a bot that helps and one that
-     * makes the same guesses the party was already making.
+     * <p>Each {@code stage6_combN} property is a ten-digit string of digits 0-3, not a number -
+     * the stage's climbing puzzle reads one digit per row. So it is read as a string and spoken
+     * back as one, and only the properties the quest actually writes are read.
      */
     private void readCombination() {
         StringBuilder plan = new StringBuilder();
         for (int slot = 0; slot < MagatiaPqData.STAGE_6_SLOTS; slot++) {
-            int answer = PqActions.readEimInt(getChr(),
-                    MagatiaPqData.stage6Key(slot), Integer.MIN_VALUE);
-            if (answer == Integer.MIN_VALUE) {
+            String digits = PqActions.readEimString(getChr(), MagatiaPqData.stage6Key(slot));
+            if (digits == null) {
                 return; // not published yet; the party has not reached the prompt
             }
             if (slot > 0) {
                 plan.append(", ");
             }
-            plan.append(answer);
+            plan.append(digits);
         }
         PqActions.say(getChr(), "Stage 6: " + plan);
     }
@@ -103,11 +102,13 @@ public class MagatiaPQBot extends PartyQuestBot {
     /**
      * Which stage is in play, from the quest's flags.
      *
-     * <p>Read downwards from the last one, because the flags are set in order and the newest
-     * outstanding one is the stage the party is on.
+     * <p>Read upwards from the first one: the quest runs the stages in order and sets each
+     * {@code statusStgN} to 1 as it clears, so the lowest flag still at 0 is the one in play.
+     * (Reading downwards reported the highest unfinished stage - usually 7 - and so never
+     * surfaced the stage-6 combination the bot is here to help with.)
      */
     private int currentStage() {
-        for (int stage = 7; stage >= 1; stage--) {
+        for (int stage = 1; stage <= 7; stage++) {
             if (PqActions.readEimInt(getChr(), "statusStg" + stage, 0) == 0) {
                 return stage;
             }
