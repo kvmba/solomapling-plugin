@@ -416,7 +416,13 @@ public abstract class BotSM implements EventSubscriber {
      * menu. Off by default; the Dispatcher routes this only for types that opt in.
      */
     public boolean handleSocialNameCall(Character player, String content) {
-        if (!respondsToSocialChat() || !getRunning() || SocialIntent.classifyNode(content) == null) {
+        // classifyNode() stays AHEAD of claimsOwnKeyword(): it is the null/blank gate (and the
+        // "social at all?" test), so the keyword probe only ever sees a non-blank line and needs no
+        // guard of its own. Order between the two does not change the outcome - neither has side
+        // effects - only which one short-circuits.
+        if (!respondsToSocialChat() || !getRunning()
+                || SocialIntent.classifyNode(content) == null
+                || claimsOwnKeyword(content)) {
             return false;
         }
         respondSocial(player, content, null);
@@ -425,11 +431,33 @@ public abstract class BotSM implements EventSubscriber {
 
     /** A no-name map line that is a social gesture: answer it (see {@link #handleSocialNameCall}). */
     public boolean offerSocial(Character player, String content) {
-        if (!respondsToSocialChat() || !getRunning() || SocialIntent.classifyNode(content) == null) {
+        if (!respondsToSocialChat() || !getRunning()
+                || SocialIntent.classifyNode(content) == null
+                || claimsOwnKeyword(content)) {
             return false;
         }
         respondSocial(player, content, null);
         return true;
+    }
+
+    /**
+     * True when {@code content} is one of THIS bot's own functional options (an option-menu keyword,
+     * a "follow me" phrase, ...). Whenever it returns true the social-intent reader stands down, so
+     * a functional keyword that merely CONTAINS a social substring is acted on rather than answered
+     * as chatter.
+     *
+     * <p>This is the documented priority - "the functional menu intents (party / follow) ... always
+     * win" (see {@link SocialIntent}) - enforced where it was silently breaking: PROVOKE's "就这"
+     * is a substring of the follower's "就这里" ("train right here"), so a FollowerBot answered the
+     * station-here command as an insult and the handoff never ran. Default false: types with no
+     * option menu claim nothing.
+     *
+     * <p>Callers must gate on a non-blank line first (the social readers run it after
+     * {@link SocialIntent#classifyNode}, which is what rejects blank/null); overrides dereference
+     * the content, so it is not a null-tolerant probe.
+     */
+    public boolean claimsOwnKeyword(String content) {
+        return false;
     }
 
     private static final String SOCIAL_DIALOGUE_PATH = "SocialBotDialogue.yaml";

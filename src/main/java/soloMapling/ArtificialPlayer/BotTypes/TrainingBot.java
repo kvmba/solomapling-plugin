@@ -347,7 +347,11 @@ public class TrainingBot extends BotSM implements GrindTickRegistry.Participant 
         if (player == null || isBot(player)) {
             return;
         }
-        if (SocialIntent.classifyNode(message.getContent()) != null) {
+        // A functional keyword outranks the social reading of the same words: the follower's "就这里"
+        // CONTAINS PROVOKE's "就这", and this bot's live menu may carry it too, so checking the social
+        // intent first answered the command as chatter and swallowed it (see BotSM.claimsOwnKeyword).
+        if (SocialIntent.classifyNode(message.getContent()) != null
+                && !claimsOwnKeyword(message.getContent())) {
             respondSocial(player, message.getContent(), message.getChatType());
             return;
         }
@@ -361,6 +365,12 @@ public class TrainingBot extends BotSM implements GrindTickRegistry.Participant 
     @Override
     public boolean respondsToSocialChat() {
         return true;
+    }
+
+    // This bot's own functional options: whichever menu variant is live for its current party state.
+    @Override
+    public boolean claimsOwnKeyword(String content) {
+        return (getChr().getParty() != null ? partyMenu : soloMenu).matches(content);
     }
 
     // Shouted offer from a stranger in range: no menu, no conversation - the shout IS the
@@ -463,6 +473,19 @@ public class TrainingBot extends BotSM implements GrindTickRegistry.Participant 
         // this the far map becomes its permanent home and it never returns to its old circuit.
         int returning = BotRecruitManager.consumeReturnHome(getChr().getId());
         homeMapId = returning > 0 ? returning : getChr().getMapId();
+        // Station-here handoff (FollowerBot's "Train here with me!" / !bot trainhere): the player
+        // pinned THIS map, so grind it now and skip the DECIDE round-trip. doDecide would consume the
+        // same flag one macro tick later; collapsing it here removes a full 2-6s cycle from the
+        // command's latency (the follower is freshly converted and its first tick IS this doInit).
+        int mapId = getChr().getMapId();
+        int mobLevel = MapMobIndex.level(mapId);
+        if (BotRecruitManager.consumeStationHere(getChr().getId()) && mobLevel >= 0) {
+            debugChat("INIT: station-here -> grind current map " + mapId);
+            setTrainTarget(mapId, Math.max(1, mobLevel));
+            firstTrip = false;
+            enterPhase(Phase.GRIND);
+            return;
+        }
         // No mobs here → it's a town: do the town beat first. Has mobs → a field: decide immediately.
         enterPhase(MapMobIndex.level(homeMapId) < 0 ? Phase.IN_TOWN : Phase.DECIDE);
     }
@@ -721,15 +744,9 @@ public class TrainingBot extends BotSM implements GrindTickRegistry.Participant 
     // toward level-appropriate + less-crowded maps, with a chance to chill at an easier map.
     private void doDecide() {
         Character chr = getChr();
-        // Station-here handoff (FollowerBot's "Train here with me!"): grind the current map, skip
-        // discovery entirely - the map BFS excludes its origin, so without this the bot always migrates.
-        if (BotRecruitManager.consumeStationHere(chr.getId()) && MapMobIndex.level(chr.getMapId()) >= 0) {
-            debugChat("DECIDE: station-here -> grind current map " + chr.getMapId());
-            setTrainTarget(chr.getMapId(), Math.max(1, MapMobIndex.level(chr.getMapId())));
-            firstTrip = false;
-            enterPhase(Phase.GRIND);
-            return;
-        }
+        // The station-here handoff is consumed in doInit, before the first DECIDE: the pin belongs to
+        // the freshly converted/spawned bot's very first tick, and handling it there skips a whole
+        // DECIDE cycle (2-6s). See doInit.
         // Party-aware: partied with a real player -> train on their map (or hold the current map
         // while they're parked somewhere mobless). Deliberately skips the capacity/crowd weighting -
         // the player chose this map, and party EXP needs same-map anyway.
