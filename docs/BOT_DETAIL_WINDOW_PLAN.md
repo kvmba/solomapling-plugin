@@ -267,7 +267,7 @@ BotDetailSystem/
 | 商城未就绪致池空 | 运行期惰性取池、空则 no-op，下次 spawn 自然补 |
 | 同伴 `clear` 误删真实 29xxx 记录 | 低概率（同伴为 bot）；如需可在 `clear` 前只删"本方案投的"（MVP 不做，YAGNI） |
 | `bookLevel` 与宿主口径差异 | 精确复刻 `calculateLevel()` 公式 |
-| **注入时点并发**：bot 先 `placeBotOnMap` 再 `setBotVariables`，窗口极小内玩家可能读到半写状态 | 与既有 `BotFame/BotMedal/BotEquipStats` **同一模式**（它们也在地图放置后改角色态），故**沿用现有风格**；写值自洽、只影响瞬态显示，不崩溃。若要更强一致，可在写计数器时**反射获取 `MonsterBook.lock` 并加锁**（列为可选，MVP 不做，避免过度设计） |
+| **注入时点并发**：bot 先 `placeBotOnMap` 再 `setBotVariables`，窗口极小内玩家可能读到半写状态 | 与既有 `BotFame/BotMedal/BotEquipStats` **同一模式**（它们也在地图放置后改角色态），故**沿用现有风格**；写值自洽、只影响瞬态显示，不崩溃。计数写入本身经宿主 `setCardCounts` 在 `MonsterBook.lock` 下原子完成 |
 
 ---
 
@@ -313,7 +313,7 @@ BotDetailSystem/
 
 - 宿主代码定位**先走 CodeGraph**（`codegraph explore`），命中文件不再 Read；插件主仓同理（worktree 无索引时回主仓路径查询）。
 - 关键 API 用 `javap -p` 对**已编译宿主类**复核可见性（如 `baseClassBit` 实为包私有）。
-- 关键运行库事实（反射可写 private int）用最小样例**实测**，不靠推断。
+- 关键行为用**真实数据/运行时小样例实测**（去反射后改为宿主 public API 直调），不靠推断。
 - 数据源用脚本对**真实 WZ 文件**统计（卡 343 / 勋章任务 28 / 可投 22 / 商品 2010）。
 
 ---
@@ -327,8 +327,8 @@ BotDetailSystem/
 2. **注入点合计 9 处**（提交 #1 一次接线完成，后续子项复用同一批注入点，无需再加）：
    `BotDecorate.setBotVariables` ×3（随机路径、参数路径主路径、beginner 分支）、`BotGeneration.loadPersistentBot` ×1、
    `EnvironmentManager` ×2、`ArtificialPlayerCommand`（`rerollmedal`/`setlevel`/`setjob`）×3。
-3. **怪物卡（#1）**：只写 3 个私有计数器（反射，`Field` 静态缓存），`cover` 恒 0。`bookLevel` 复刻
-   `MonsterBook.calculateLevel()`。池扫 `Item.wz/Consume/0238.img.xml` = **343** 张（普通 295 / 特殊 48）。
+3. **怪物卡（#1）**：经宿主 public `MonsterBook.setCardCounts(normal,special)` 写计数（宿主内部重算 `bookLevel`），
+   `cover` 恒 0。池扫 `Item.wz/Consume/0238.img.xml` = **343** 张（普通 295 / 特殊 48）。
 4. **勋章收藏（#2）**：`Quest.wz/Act.img.xml` 运行时读取实测 = **28** 条映射（脚本 vs 运行时曾出现
    `29509`/`29580` 一处差异，**以运行时读取为准**）。可投集合复用 `BotMedalPool.eligibleFor`；bot 等级带内 **22** 条可用。
    写 `getQuestNAdd(...).setStatus(COMPLETED)`。
@@ -337,9 +337,11 @@ BotDetailSystem/
 6. **发现的真实缺陷（已修）**：共享 `BotDetailRoll.sample` 在 `k<=0` 时返回不可变 `List.of()`，而心愿单调用处对其
    `Collections.sort` → 等级 10 bot 会抛 `UnsupportedOperationException`。已改为始终返回可变 `ArrayList`（提交 #3）。
 7. **GM 巡检（#4）**：`!bot detail <cid>` 打印窗口三类实际数据（读活引擎态，非预设输入）；`!bot rerolldetail <cid>`。
-8. **测试**：`BotMonsterBookTest`(5) / `BotMedalBookTest`(6) / `BotWishListTest`(5) 全绿；
-   全套 **1151 tests, 0 failures**（提交 #4 前跑）。
+8. **测试**：`BotMonsterBookTest`(4) / `BotMedalBookTest`(6) / `BotWishListTest`(5) 全绿；
+   全套 **1147 tests, 0 failures**（去反射后、rebase 到 `optimize/performance` 现 tip 的复测）。
 9. **宿主改动**：仅 1 处——`MonsterBook.setCardCounts`（§11.2）；其余宿主工作树不变。
+
+> 注：本节 3/8 于第三轮审查更新（去反射后的最终形态）。
 
 ### 11.1 自审（第二次完整审查）发现并修复的真实缺陷
 

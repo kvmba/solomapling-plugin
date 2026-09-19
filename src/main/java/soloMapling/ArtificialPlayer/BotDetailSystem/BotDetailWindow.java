@@ -15,9 +15,10 @@ import java.util.List;
  * this fills it in with plausible, per-bot values at spawn.
  *
  * <p>Everything here is pure in-memory {@link Character} state, so the window is populated the
- * moment the bot exists - no packet code, no host change, no new event. Injected at the single
- * decoration finishing point ({@code BotDecorate.setBotVariables}) and at persistent-companion load
- * ({@code BotGeneration.loadPersistentBot}), exactly like {@code BotMedal}.
+ * moment the bot exists - no packet code, no new event. Injected at the single decoration finishing
+ * point ({@code BotDecorate.setBotVariables}) and at persistent-companion load
+ * ({@code BotGeneration.loadPersistentBot}), exactly like {@code BotMedal}. The monster-book
+ * aggregate is written through the host's {@code MonsterBook.setCardCounts}.
  *
  * <p>Deterministic per character id, so a companion shows the same content across restarts and a
  * re-roll is idempotent. Called only on the decoration/load path (never per tick).
