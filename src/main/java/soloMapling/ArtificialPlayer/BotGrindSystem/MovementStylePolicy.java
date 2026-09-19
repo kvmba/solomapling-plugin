@@ -12,7 +12,11 @@ public final class MovementStylePolicy {
         if (bot == null || bot.getJob() == null) {
             return MovementStyle.PLANTED;
         }
-        int id = bot.getJob().getId();
+        return forJobId(bot.getJob().getId());
+    }
+
+    /** The movement style for a job id (split out so the job->style table is unit-testable). */
+    static MovementStyle forJobId(int id) {
         if (isTeleportMage(id)) {
             return MovementStyle.TELEPORT;
         }
@@ -25,6 +29,12 @@ public final class MovementStylePolicy {
         if (isRangedBowman(id)) {
             return MovementStyle.RANGED;
         }
+        if (isRangedPirate(id)) {
+            // The gunslinger line (gun, ranged) holds distance like a bowman, so it neither kites into
+            // melee nor steps into the pack for an AoE - it fires from range. The brawler line is melee
+            // and stays PLANTED (see the fall-through), and 1st-job pirate (500) stays PLANTED too.
+            return MovementStyle.RANGED;
+        }
         return MovementStyle.PLANTED;
     }
 
@@ -32,6 +42,12 @@ public final class MovementStylePolicy {
     // 1st-job Bowman (300) stays PLANTED so low-levels read organic.
     private static boolean isRangedBowman(int id) {
         return (id >= 310 && id <= 312) || (id >= 320 && id <= 322);
+    }
+
+    // Pirate gunslinger line: Gunslinger/Outlaw/Corsair (520-522). A gun is a ranged weapon, so these
+    // hold distance. Brawler/Marauder/Buccaneer (510-512) swing a knuckle in melee and are NOT ranged.
+    private static boolean isRangedPirate(int id) {
+        return id >= 520 && id <= 522;
     }
 
     // Magician 2nd job and above (base Magician 200 has no Teleport): 210-212 F/P, 220-222 I/L, 230-232 Cleric.
