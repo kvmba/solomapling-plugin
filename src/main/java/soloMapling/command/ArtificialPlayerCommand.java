@@ -16,6 +16,7 @@ import soloMapling.ArtificialPlayer.BotDecoratorSystem.BotDecorateBody;
 import soloMapling.ArtificialPlayer.BotDecoratorSystem.BotDecorateEquips;
 import soloMapling.ArtificialPlayer.BotDecoratorSystem.BotDecorateNX;
 import soloMapling.ArtificialPlayer.BotDecoratorSystem.BotFame;
+import soloMapling.ArtificialPlayer.BotDetailSystem.BotDetailWindow;
 import soloMapling.ArtificialPlayer.BotMedalSystem.BotMedal;
 import soloMapling.ArtificialPlayer.BotMedalSystem.BotMedalAssigner;
 import soloMapling.ArtificialPlayer.BotMedalSystem.BotMedalPool;
@@ -488,6 +489,7 @@ public class ArtificialPlayerCommand extends Command {
             }
             case "rerollmedal":
                 BotMedal.reroll(fakechar);
+                BotDetailWindow.reroll(fakechar); // the medal collection tracks the worn medal
                 int rerolled = BotMedal.currentMedalId(fakechar);
                 player.yellowMessage("Re-rolled " + fakechar.getName() + " (lv" + fakechar.getLevel()
                         + ") title -> " + (rerolled == 0 ? "none"
@@ -612,6 +614,7 @@ public class ArtificialPlayerCommand extends Command {
                 // Level is a medal wearability requirement, so re-roll the title to match
                 // (a level-down must not leave an unwearable medal on).
                 BotMedal.reroll(fakechar);
+                BotDetailWindow.reroll(fakechar); // detail-window data is level-based too
                 player.yellowMessage("Set " + fakechar.getName() + " to level " + input3);
                 break;
             case "setclass":
@@ -625,6 +628,7 @@ public class ArtificialPlayerCommand extends Command {
                 fakechar.setJob(newJob);
                 // Job feeds the medal's reqJob gate, so re-roll the title to match the new class.
                 BotMedal.reroll(fakechar);
+                BotDetailWindow.reroll(fakechar); // the medal collection filters by job too
                 player.yellowMessage("Set " + fakechar.getName() + " to job " + newJob + " (" + input3
                         + ") - buffs: " + BotBuffConfig.buffsForJob(newJob));
                 break;

@@ -8,6 +8,7 @@ import soloMapling.ArtificialPlayer.PartyQuest.PqBotSpawner;
 import soloMapling.ArtificialPlayer.BotMovementSystem.MovementCommands;
 import soloMapling.ArtificialPlayer.BotDecoratorSystem.BotDecorate;
 import soloMapling.ArtificialPlayer.BotDecoratorSystem.BotFame;
+import soloMapling.ArtificialPlayer.BotDetailSystem.BotDetailWindow;
 import soloMapling.ArtificialPlayer.BotMedalSystem.BotMedal;
 import soloMapling.ArtificialPlayer.BotDecoratorSystem.BotDecorationQueue;
 import soloMapling.ArtificialPlayer.BotDecoratorSystem.BotEquipChecker;
@@ -887,6 +888,7 @@ public class EnvironmentManager {
                 EquipBot(bot, slot.weaponId());
                 BotFame.apply(bot);   // re-roll: fame was generated from the spawn-time level
                 BotMedal.reroll(bot); // re-roll the title so it matches the forced level/job
+                BotDetailWindow.reroll(bot); // re-roll detail-window data for the forced level
                 setAndStartBots(List.of(bot.getId()), BotTypeManager.BotType.TEST_ATTACK_BOT);
             });
         }
@@ -1148,6 +1150,8 @@ public class EnvironmentManager {
                 BotFame.apply(bot);
                 // Same for the title (medal): level-based roll, so re-roll after the override.
                 BotMedal.reroll(bot);
+                // And the detail-window data: its counts are level-based too.
+                BotDetailWindow.reroll(bot);
             }
         }
     }

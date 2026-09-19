@@ -33,6 +33,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import static soloMapling.ArtificialPlayer.BotClientHandler.getBotClient;
 import static soloMapling.ArtificialPlayer.BotCommandsPack.WarpCommands.botEnterPortalDropDown;
 import soloMapling.ArtificialPlayer.BotDecoratorSystem.BotFame;
+import soloMapling.ArtificialPlayer.BotDetailSystem.BotDetailWindow;
 import soloMapling.ArtificialPlayer.BotMedalSystem.BotMedal;
 import static soloMapling.ArtificialPlayer.BotDecoratorSystem.BotDecorate.setBotVariables;
 import static soloMapling.ArtificialPlayer.BotMovementSystem.MovementCommands.microTurnAroundToLeft;
@@ -339,6 +340,9 @@ public class BotGeneration {
         // their character, so a granted medal sticks across restarts — reroll() clears any
         // previous one first, keeping it to at most one at a time.
         BotMedal.reroll(companion);
+        // Companion loads persisted state, not a rolled template, so preset the detail-window
+        // data here too; the roll is deterministic per cid, so it stays stable across restarts.
+        BotDetailWindow.apply(companion);
         debugprint("[BotGeneration] loaded persistent companion "
                 + companion.getName() + " (" + companion.getId() + ")");
         return companion;

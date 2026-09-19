@@ -28,6 +28,7 @@ import soloMapling.ArtificialPlayer.BotTradeSystem.BotTradeInviteBridge;
 import soloMapling.ArtificialPlayer.BotTradeSystem.SoloMaplingTradeParticipantHook;
 import soloMapling.ArtificialPlayer.LlmSystem.SocialLlmService;
 import soloMapling.ArtificialPlayer.SocialPersonaConfig;
+import soloMapling.ArtificialPlayer.BotDetailSystem.BotMonsterBook;
 import soloMapling.ArtificialPlayer.BotMedalSystem.BotMedalPool;
 import soloMapling.Environment.EnvironmentManager;
 import soloMapling.Environment.EnvironmentPopulationConfig;
@@ -160,6 +161,7 @@ public final class SoloMaplingExtension implements ServerExtension {
             EquipMetadataCache.initialize();
             DesirableEquipList.load();
             BotMedalPool.load();
+            BotMonsterBook.load();
             log.info("SoloMapling EquipMetadataCache + DesirableEquipList loaded");
         } catch (Throwable t) {
             log.warn("SoloMapling equip metadata prefetch failed (bots may still start lazily): {}", t.toString());
