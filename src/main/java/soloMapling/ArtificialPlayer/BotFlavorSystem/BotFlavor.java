@@ -67,6 +67,13 @@ public final class BotFlavor {
         if (GCMovement.isClimbing(chr)) {
             return;
         }
+        // Hard gate: never during a portal arrival. The bot is floated then dropped on entry (only on
+        // observed maps - the same condition as this gate), so without this a SKILL_SWING / BUFF_FLEX
+        // fires in mid-air in front of the player watching the entry. Scoped to the arrival window only,
+        // not to a plain jump or a swim (see GCMovement.isPortalArriving), so idle town life is untouched.
+        if (GCMovement.isPortalArriving(chr)) {
+            return;
+        }
 
         long now = System.currentTimeMillis();
         Long until = cooldownUntil.get(chr.getId());

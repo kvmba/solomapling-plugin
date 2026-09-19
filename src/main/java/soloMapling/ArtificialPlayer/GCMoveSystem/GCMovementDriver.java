@@ -55,6 +55,10 @@ final class GCMovementDriver {
     // Mirrors WarpCommands.botEnterPortalDropDown (the recorded engine's ~1.5s lag before the drop).
     private static final long PORTAL_DROP_DELAY_MS = 1500;
     private static final int PORTAL_DROP_DELAY_JITTER_MS = 600; // + 0..600ms so arrivals aren't uniform
+    // Extra beat past the drop release during which the idle-expression layer stays silent, so the
+    // natural fall to the floor completes before the bot thinks about emoting. A 60px drop at gravity
+    // 2000px/s^2 lands in ~0.25s; this leaves generous headroom. See BotMovementState.portalArrivalGuardUntilMs.
+    private static final int PORTAL_FALL_GUARD_MS = 1_500;
     // Abandon a move target the bot can't get closer to for this long (unreachable / blocked / bug),
     // so a bot never tries to reach a point forever. The clock resets on any real progress.
     private static final long MOVE_NO_PROGRESS_MS = 8_000;
@@ -734,6 +738,9 @@ final class GCMovementDriver {
             // as "pending drop" instead.
             entry.portalDropAtMs = System.currentTimeMillis() + PORTAL_DROP_DELAY_MS
                     + ThreadLocalRandom.current().nextInt(PORTAL_DROP_DELAY_JITTER_MS + 1);
+            // Also silence flavor for the float + the fall that follows the drop release, so an arriving
+            // bot doesn't swing a skill in mid-air in front of the player who is watching the entry.
+            entry.portalArrivalGuardUntilMs = entry.portalDropAtMs + PORTAL_FALL_GUARD_MS;
             int floatY = Math.min(spawn.y, ground.y - PORTAL_FLOAT_HEIGHT_PX);
             BotPhysicsEngine.teleportTo(entry, bot, new Point(spawn.x, floatY));
         } else {

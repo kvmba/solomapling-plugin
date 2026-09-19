@@ -508,6 +508,17 @@ public final class GCMovement {
         return st != null && st.climbing;
     }
 
+    /* True while the bot is mid portal-arrival: the map-entry float + the natural fall that follows it.
+     * The idle-expression layer (BotFlavor) refuses to perform during this window, so an entering bot
+     * never swings a skill / flexes a buff in mid-air. Deliberately a map-entry clock, NOT an inAir /
+     * swimming pose test: swimming also carries inAir (on a swim map a bot is airborne for long
+     * stretches), and a plain jump carries it too, so a pose-based gate would silence both. The window
+     * is armed with the drop on map change and lapses on its own. */
+    public static boolean isPortalArriving(Character bot) {
+        BotMovementState st = bot == null ? null : STATES.get(bot.getId());
+        return st != null && System.currentTimeMillis() < st.portalArrivalGuardUntilMs;
+    }
+
     /**
      * The rope/ladder fh (wire value) when {@code chr} is currently on one, else 0.
      * A real client tests {@code fh & 0x8000} to tell "on a rope" from "on ground" and binds the
