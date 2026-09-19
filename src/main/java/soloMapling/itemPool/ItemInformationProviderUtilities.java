@@ -118,8 +118,8 @@ public class ItemInformationProviderUtilities {
                 ));
                 break;
             case PIRATE:
-                // An unbranched pirate (500) can carry either line's weapon. getJobStyle() only
-                // returns PIRATE for the 500 job, so this covers exactly the pre-branch case.
+                // Reached by Free-Market shop generation, which passes the raw Job.PIRATE constant
+                // (not a getJobStyle() result - see below). Either pirate weapon is valid.
                 equipTypes.addAll(List.of(
                         EquipType.KNUCKLER,
                         EquipType.PISTOL
@@ -127,9 +127,9 @@ public class ItemInformationProviderUtilities {
                 break;
             case BRAWLER:
             case GUNSLINGER:
-                // getJobStyle() resolves the branched pirate line to BRAWLER/GUNSLINGER; Brawler
-                // carries a knuckle, Gunslinger a gun. Both share the pirate reqJob (16). No shield
-                // in v83.
+                // getJobStyle() resolves EVERY pirate job to BRAWLER/GUNSLINGER (never PIRATE), so
+                // this is the case the decorator's style-based call actually hits. Brawler carries a
+                // knuckle, gunslinger a gun; both share the pirate reqJob (16). No shield in v83.
                 equipTypes.addAll(List.of(
                         EquipType.KNUCKLER,
                         EquipType.PISTOL
