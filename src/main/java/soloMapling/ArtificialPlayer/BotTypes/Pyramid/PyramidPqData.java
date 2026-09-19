@@ -46,15 +46,19 @@ public final class PyramidPqData {
     public static final String[] MODES = {"EASY", "NORMAL", "HARD", "HELL"};
 
     /**
-     * The monster the quest warns against attacking - the Pharaoh Jr. Yeti that carries the
-     * "Missed Mark". Duarte names the mark in his briefing as {@code #v04032424#}, which is why
-     * the item id shows up there; the actual forbidden MONSTERS are these two ids. Getting this
-     * wrong (comparing a mob id against the mark's item id) makes the check match nothing, so a
-     * bot would happily kill the one monster that costs the party its gauge.
+     * The monster Duarte warns against attacking - the Pharaoh Jr. Yeti that carries the "Missed
+     * Mark". The briefing prints the mark as an item icon ({@code #v04032424#}), which is why the
+     * ITEM id {@code 4032424} appears there; the forbidden MONSTERS are these two ids.
      *
-     * <p>9700019 is the decoy in the ordinary bonus rooms; 9700029 is the variant two maps use
-     * ({@code killing_BonusSetting.js}: maps 926010013 and 926010070). Both are named
-     * "Pharaoh Jr. Yeti".
+     * <p>{@code 9700019} is the decoy in the ordinary bonus rooms and {@code 9700029} is the
+     * variant two of them use ({@code killing_BonusSetting.js}: maps 926010013 / 926010070); both
+     * are named "Pharaoh Jr. Yeti". Keeping the two apart matters because the old check compared a
+     * monster id against the mark's item id, which can never be equal - so the guard silently did
+     * nothing rather than holding the bot back.
+     *
+     * <p>Note that, in this server, the decoy is a {@code 1} HP mob with no special defence and the
+     * bonus rooms that spawn it sit outside the maps this bot plays, so the guard is a safety net
+     * rather than a fix for a live miss.
      */
     public static final int FORBIDDEN_MOB = 9700019;
     public static final int FORBIDDEN_MOB_ALT = 9700029;
