@@ -30,8 +30,11 @@ public final class BotWishList {
     private static final int LEVEL_FLOOR = 10;
     private static final int LEVEL_CEIL = 80;
 
-    private static volatile Map<Integer, ModifiedCashItemDO> cachedSource;
-    private static volatile List<Integer> cachedPool = List.of();
+    /** The filtered pool plus the catalog map it was derived from, published as one reference. */
+    private record CachedPool(Map<Integer, ModifiedCashItemDO> source, List<Integer> pool) {
+    }
+
+    private static volatile CachedPool cached;
 
     private BotWishList() {
     }
@@ -62,8 +65,9 @@ public final class BotWishList {
     /** On-sale, non-package SNs from the host catalog, cached against the catalog's identity. */
     static List<Integer> pool() {
         Map<Integer, ModifiedCashItemDO> source = CashItemFactory.getItems();
-        if (source == cachedSource) {
-            return cachedPool;
+        CachedPool current = cached;
+        if (current != null && current.source() == source) {
+            return current.pool();
         }
         List<Integer> pool = new ArrayList<>();
         for (Map.Entry<Integer, ModifiedCashItemDO> e : source.entrySet()) {
@@ -72,9 +76,9 @@ public final class BotWishList {
                 pool.add(e.getKey());
             }
         }
-        cachedPool = Collections.unmodifiableList(pool);
-        cachedSource = source;
-        return cachedPool;
+        CachedPool built = new CachedPool(source, Collections.unmodifiableList(pool));
+        cached = built;
+        return built.pool();
     }
 
     /**

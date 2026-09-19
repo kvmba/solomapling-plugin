@@ -32,7 +32,7 @@ public final class BotDetailWindow {
 
     /** Populate the bot's detail-window data. Call after level/job/fame/medal are final. */
     public static void apply(Character bot) {
-        if (!ENABLED || bot == null) {
+        if (!ENABLED || bot == null || bot.getMap() == null) {
             return;
         }
         BotMonsterBook.apply(bot);
@@ -42,7 +42,7 @@ public final class BotDetailWindow {
 
     /** Re-roll after a level/job override, so the shown data matches the bot's final state. */
     public static void reroll(Character bot) {
-        if (!ENABLED || bot == null) {
+        if (!ENABLED || bot == null || bot.getMap() == null) {
             return;
         }
         BotMonsterBook.clear(bot);

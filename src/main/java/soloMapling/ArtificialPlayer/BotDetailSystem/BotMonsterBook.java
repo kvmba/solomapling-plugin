@@ -95,7 +95,7 @@ public final class BotMonsterBook {
 
     /** Write a deterministic monster-book aggregate onto the bot. No-op when pools are empty. */
     public static void apply(Character bot) {
-        if (bot == null || bot.getMap() == null || normalPool.isEmpty()) {
+        if (bot == null || normalPool.isEmpty()) {
             return;
         }
         int normal = Math.min(pickCount(bot.getId(), bot.getLevel(), NORMAL_MIN, NORMAL_MAX, 0),

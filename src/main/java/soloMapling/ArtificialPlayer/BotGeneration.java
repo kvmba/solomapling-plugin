@@ -341,8 +341,11 @@ public class BotGeneration {
         // previous one first, keeping it to at most one at a time.
         BotMedal.reroll(companion);
         // Companion loads persisted state, not a rolled template, so preset the detail-window
-        // data here too; the roll is deterministic per cid, so it stays stable across restarts.
-        BotDetailWindow.apply(companion);
+        // data here too. Use reroll (clear + apply), NOT apply: a companion persists its quests
+        // (saveCharToDB), so add-only would accumulate medal-collection quests across restarts as
+        // its level changes. reroll keeps the collection equal to the deterministic set for the
+        // companion's current level, matching BotMedal above.
+        BotDetailWindow.reroll(companion);
         debugprint("[BotGeneration] loaded persistent companion "
                 + companion.getName() + " (" + companion.getId() + ")");
         return companion;
