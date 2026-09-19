@@ -117,6 +117,24 @@ public class ItemInformationProviderUtilities {
                         EquipType.DAGGER
                 ));
                 break;
+            case PIRATE:
+                // Reached by Free-Market shop generation, which passes the raw Job.PIRATE constant
+                // (not a getJobStyle() result - see below). Either pirate weapon is valid.
+                equipTypes.addAll(List.of(
+                        EquipType.KNUCKLER,
+                        EquipType.PISTOL
+                ));
+                break;
+            case BRAWLER:
+            case GUNSLINGER:
+                // getJobStyle() resolves EVERY pirate job to BRAWLER/GUNSLINGER (never PIRATE), so
+                // this is the case the decorator's style-based call actually hits. Brawler carries a
+                // knuckle, gunslinger a gun; both share the pirate reqJob (16). No shield in v83.
+                equipTypes.addAll(List.of(
+                        EquipType.KNUCKLER,
+                        EquipType.PISTOL
+                ));
+                break;
             default:
                 break;
         }
@@ -157,6 +175,13 @@ public class ItemInformationProviderUtilities {
         // 1:1 reverse lookup (no two job styles mapping to value 4).
         if (jobStyle == Job.CROSSBOWMAN) {
             jobStyle = Job.BOWMAN;
+        }
+        // A pirate's getJobStyle() resolves to BRAWLER/GUNSLINGER (host Job.getJobStyleInternal
+        // branches on STR>DEX), not PIRATE - neither is in JOB_TO_REQ_MAP, so without this a
+        // pirate falls back to reqJob 0 (classless gear) and can never wear its knuckle/gun or
+        // pirate armour. Both lines wear reqJob 16, the pirate bitmask.
+        if (jobStyle == Job.BRAWLER || jobStyle == Job.GUNSLINGER) {
+            jobStyle = Job.PIRATE;
         }
         return JOB_TO_REQ_MAP.getOrDefault(jobStyle, 0);
     }

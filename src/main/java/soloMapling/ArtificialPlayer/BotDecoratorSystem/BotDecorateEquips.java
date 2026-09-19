@@ -10,6 +10,7 @@ import java.util.List;
 import java.util.Random;
 
 import static soloMapling.ArtificialPlayer.BotDecoratorSystem.JobPathLogic.determineBowmanPath;
+import static soloMapling.ArtificialPlayer.BotDecoratorSystem.JobPathLogic.determinePiratePath;
 import static soloMapling.ArtificialPlayer.BotDecoratorSystem.JobPathLogic.determineThiefPath;
 import static soloMapling.ArtificialPlayer.BotDecoratorSystem.JobPathLogic.determineWarriorPath;
 import static soloMapling.itemPool.ItemInformationProviderUtilities.getRandomEquipForWearing;
@@ -334,6 +335,19 @@ public class BotDecorateEquips {
                 break;
 
             // Add other job types as needed
+            case BRAWLER:
+            case GUNSLINGER:
+                // A pirate always resolves to BRAWLER or GUNSLINGER (never PIRATE), so these two
+                // cases cover the whole line. The branch is read from the job id (determinePiratePath)
+                // rather than the style: the decorator runs before STR/DEX are aligned, so the style
+                // reads BRAWLER for every pirate. Knuckle for the brawler line, gun for the gunslinger
+                // line; a 500 first-job pirate (unbranched) picks randomly. No shield in v83.
+                if (determinePiratePath(character) == Job.BRAWLER) {
+                    possibleWeapons.add(EquipType.KNUCKLER);
+                } else {
+                    possibleWeapons.add(EquipType.PISTOL);
+                }
+                break;
             default:
                 // Default beginner weapon
                 possibleWeapons.add(EquipType.SWORD);

@@ -81,4 +81,23 @@ public class JobPathLogic {
         }
     }
 
+    /**
+     * Determines which pirate path a character is on from its job id. Read from the id rather
+     * than getJobStyle() because the decorator runs before STR/DEX are aligned, so a pirate's
+     * style would read as BRAWLER (STR>DEX default) regardless of the true branch.
+     * @param character The pirate character
+     * @return The pirate path
+     */
+    public static Job determinePiratePath(Character character) {
+        int jobId = character.getJob().getId();
+
+        if (jobId == 510 || jobId == 511 || jobId == 512) { // Brawler, Marauder, Buccaneer
+            return Job.BRAWLER;
+        } else if (jobId == 520 || jobId == 521 || jobId == 522) { // Gunslinger, Outlaw, Corsair
+            return Job.GUNSLINGER;
+        }
+        // Unbranched 1st-job pirate: brawler is the more common pick, mirroring rollPirateBrawler.
+        return Math.random() < 0.55 ? Job.BRAWLER : Job.GUNSLINGER;
+    }
+
 }

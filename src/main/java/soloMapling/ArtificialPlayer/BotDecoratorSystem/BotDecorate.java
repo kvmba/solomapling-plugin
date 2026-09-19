@@ -134,20 +134,23 @@ public class BotDecorate {
         return selectJobForClass(rollBaseClass(), level);
     }
 
-    // Weighted base-class roll (Pirate excluded). Skewed to match v83 nostalgia:
-    // thieves everywhere, mages second, warriors third, bowmen the rarest.
-    // Both roll sites (generic decoration + training-bot spawn) go through here
-    // so the population mix stays in sync. Returns 1=Warrior 2=Magician 3=Bowman 4=Thief.
+    // Weighted base-class roll. Skewed to match v83 nostalgia: thieves everywhere,
+    // mages second, warriors third, bowmen the rarest; pirates (a post-v83 addition)
+    // the rarest of all. Both roll sites (generic decoration + training-bot spawn) go
+    // through here so the population mix stays in sync.
+    // Returns 1=Warrior 2=Magician 3=Bowman 4=Thief 5=Pirate.
     public static int rollBaseClass() {
         int roll = (int) (Math.random() * 100); // 0..99
-        if (roll < 31) return 4;       // THIEF    31%
-        else if (roll < 56) return 2;  // MAGICIAN 25%  (31..55)
-        else if (roll < 80) return 1;  // WARRIOR  24%  (56..79)
-        else return 3;                 // BOWMAN   20%  (80..99)
+        if (roll < 30) return 4;       // THIEF    30%
+        else if (roll < 54) return 2;  // MAGICIAN 24%  (30..53)
+        else if (roll < 77) return 1;  // WARRIOR  23%  (54..76)
+        else if (roll < 94) return 3;  // BOWMAN   17%  (77..93)
+        else return 5;                 // PIRATE    6%  (94..99)
     }
 
     // Sub-path rolls, weighted per class. Path indices match the tier switches below
-    // (warrior: 1 Fighter / 2 Page / 3 Spearman; mage: 1 F-P / 2 I-L / 3 Cleric).
+    // (warrior: 1 Fighter / 2 Page / 3 Spearman; mage: 1 F-P / 2 I-L / 3 Cleric;
+    // pirate: 1 Brawler / 2 Gunslinger).
     private static int rollWarriorPath() {
         int roll = (int) (Math.random() * 100);
         if (roll < 44) return 3;       // SPEARMAN 44%
@@ -164,6 +167,11 @@ public class BotDecorate {
 
     // Thief: assassin slightly over bandit. Bowman stays an even 50/50.
     private static boolean rollThiefAssassin() {
+        return Math.random() < 0.55;
+    }
+
+    // Pirate: brawler (knuckle) slightly over gunslinger, mirroring the thief split.
+    private static boolean rollPirateBrawler() {
         return Math.random() < 0.55;
     }
 
@@ -184,6 +192,8 @@ public class BotDecorate {
                     return 300; // BOWMAN
                 case 4:
                     return 400; // THIEF
+                case 5:
+                    return 500; // PIRATE
                 default:
                     return 0;  // BEGINNER (fallback)
             }
@@ -216,6 +226,8 @@ public class BotDecorate {
                     return (Math.random() < 0.5) ? 310 : 320; // HUNTER or CROSSBOWMAN
                 case 4: // THIEF paths
                     return rollThiefAssassin() ? 410 : 420; // ASSASSIN or BANDIT
+                case 5: // PIRATE paths
+                    return rollPirateBrawler() ? 510 : 520; // BRAWLER or GUNSLINGER
                 default:
                     return 0; // BEGINNER (fallback)
             }
@@ -248,6 +260,8 @@ public class BotDecorate {
                     return (Math.random() < 0.5) ? 311 : 321; // RANGER or SNIPER
                 case 4: // THIEF paths
                     return rollThiefAssassin() ? 411 : 421; // HERMIT or CHIEFBANDIT
+                case 5: // PIRATE paths
+                    return rollPirateBrawler() ? 511 : 521; // MARAUDER or OUTLAW
                 default:
                     return 0; // BEGINNER (fallback)
             }
@@ -279,6 +293,8 @@ public class BotDecorate {
                 return (Math.random() < 0.5) ? 312 : 322; // BOWMASTER or MARKSMAN
             case 4: // THIEF paths
                 return rollThiefAssassin() ? 412 : 422; // NIGHTLORD or SHADOWER
+            case 5: // PIRATE paths
+                return rollPirateBrawler() ? 512 : 522; // BUCCANEER or CORSAIR
             default:
                 return 0; // BEGINNER (fallback)
         }
