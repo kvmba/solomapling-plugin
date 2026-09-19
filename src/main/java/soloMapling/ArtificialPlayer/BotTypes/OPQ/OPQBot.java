@@ -81,12 +81,10 @@ public class OPQBot extends BotSM {
         // whatever bot last bound itself - or null - so the altar's spawnNpc would silently
         // do nothing. See BotGeneration.adoptPrivateClient.
         BotGeneration.adoptPrivateClient(character);
-        // Drive this bot with the dynamic (WZ-terrain) engine for its whole life. Two reasons:
-        // the recorded-path engine replayed a Haste-speed player's packets at 1:1, so OPQ bots
-        // walked ~40% too fast; and recordings only ever existed for a handful of maps, so any
-        // quest room without one left the bot unable to move at all. Enable here (before the FSM
-        // and before any arrival warp) so the map-entry choreography already sees it as
-        // dynamic-controlled and skips replaying the recorded drop.
+        // OPQBot extends BotSM directly (not PartyQuestBot), so it does not inherit the base
+        // class's GCMovement.enable - wire the dynamic engine here. Enable before the FSM and any
+        // arrival warp so the map-entry choreography sees it as dynamic-controlled and skips the
+        // recorded portal drop.
         GCMovement.enable(character);
         this.orchestrator = OPQOrchestrator.getInstance();
         this.sharedContext = orchestrator.getSharedContext();
@@ -1397,10 +1395,8 @@ public class OPQBot extends BotSM {
     @Override
     public synchronized void stopScheduledTask() {
         orchestrator.unregisterBot(this);
-        // Release the dynamic engine (and the shared movement lock it holds) when this bot is
-        // converted away or stopped. The recency-triggered converter reverses bot types on the
-        // SAME character, so leaving GC control enabled would cost the next owner a redundant
-        // driver and a held lock.
+        // OPQBot extends BotSM directly, so it does not inherit PartyQuestBot's GCMovement.disable.
+        // Release the dynamic engine (and the shared movement lock it holds) on stop/convert.
         GCMovement.disable(getChr());
         super.stopScheduledTask();
     }

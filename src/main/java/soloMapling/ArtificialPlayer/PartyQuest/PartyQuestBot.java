@@ -6,6 +6,7 @@ import soloMapling.ArtificialPlayer.BotSM;
 import soloMapling.BotLogger;
 import soloMapling.server.SoloMaplingUtilities;
 import soloMapling.ArtificialPlayer.BotCommandsPack.WarpCommands;
+import soloMapling.ArtificialPlayer.GCMoveSystem.GCMovement;
 
 import java.util.function.BooleanSupplier;
 
@@ -29,6 +30,21 @@ public abstract class PartyQuestBot extends BotSM {
 
     protected PartyQuestBot(Character character) {
         super(character);
+        // Drive every quest bot with the dynamic (WZ-terrain) engine for its whole life. The
+        // recorded-path engine replayed a Haste-speed player's packets at 1:1 (quest bots walked
+        // ~40% too fast) and only ever had data for a handful of maps (any other quest room left
+        // the bot unable to move). Enabling here - before the FSM starts and before any arrival
+        // warp - means the walk helpers in {@link PqActions} have a driver, and the map-entry
+        // choreography already sees the bot as dynamic-controlled and skips the recorded drop.
+        GCMovement.enable(character);
+    }
+
+    @Override
+    public synchronized void stopScheduledTask() {
+        // Release the dynamic engine (and the shared movement lock it holds) when this bot is
+        // stopped or converted away, so the next bot type on this character starts clean.
+        GCMovement.disable(getChr());
+        super.stopScheduledTask();
     }
 
     /** Where the run happens: the map that proves the bot is inside the quest. */
