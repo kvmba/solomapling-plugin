@@ -6,9 +6,9 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Pure-logic checks for the monster-book preset - no WZ, no game server. Locks the two
- * contracts that matter: the count curve (0 below the level floor, monotone, bounded) and the
- * replay of the host's book-level formula.
+ * Pure-logic checks for the monster-book preset - no WZ, no game server. Locks the count curve:
+ * 0 below the level floor, bounded, monotone in level, and stable per (cid, level). The host owns
+ * the book-level derivation now (see {@code MonsterBook.setCardCounts}).
  */
 class BotMonsterBookTest {
 
