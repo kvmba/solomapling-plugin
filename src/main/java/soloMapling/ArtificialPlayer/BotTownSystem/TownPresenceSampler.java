@@ -13,13 +13,14 @@ import java.util.Map;
 import java.util.Random;
 import java.util.Set;
 
-// Uniform town scatter: pick N ground spots anywhere on a map's reachable walkable ground, spread out
-// rather than clustered. Zero map-specific code - every signal is WZ-derived:
+// Centre-hot town scatter: pick N ground spots across a map's reachable walkable ground, densest at the
+// map's horizontal centre and thinning toward the left/right ends. Zero map-specific code - every signal
+// is WZ-derived:
 //
-//   - A ledge is weighted by its WALKABLE WIDTH, so the draw is uniform over the ground (every pixel of
-//     reachable ledge is equally likely, a 1000px street holds ten times a 100px terrace). This is what
-//     "random position across the whole map" means spatially: no ledge is favoured, so the crowd fans out
-//     over streets, terraces and back platforms alike instead of piling onto the shop street.
+//   - A ledge's draw weight is its WALKABLE WIDTH times its CENTRALITY (see centerHotspotWeight): a pixel
+//     near the map's horizontal centre is ~4.4x as likely as one at the extreme end. So the crowd reads as
+//     a town square - busiest mid-map, a few stragglers out at the edges - rather than an even sprinkle or
+//     an NPC/portal hotspot.
 //   - Capacity and spacing keep it from being crowded: a ledge absorbs at most one bot per MIN_BAND_PX of
 //     width (overflow spills by width onto other platforms), and picks on one ledge keep MIN_SPACING apart.
 //   - Curation overrides compose: a ledge whose centre sits in a ban zone is dropped (weight 0) and a
@@ -37,6 +38,8 @@ public final class TownPresenceSampler {
     // Best-effort horizontal gap between spots sharing a ledge, and how hard we try to honor it.
     private static final int MIN_SPACING = 30;
     private static final int X_CANDIDATES = 7; // X samples scored per ledge pick (least-crowded wins)
+    // Rejection tries to land a centre-biased X before falling back to a plain uniform draw.
+    private static final int X_CENTRAL_TRIES = 5;
 
     // Min walkable width one hosted bot needs (room to stand apart and drift a little). Caps how many
     // picks a single ledge may absorb: without this a wide street could draw the WHOLE cohort and stack
@@ -49,6 +52,25 @@ public final class TownPresenceSampler {
     // its pieces sit up to a step apart (Kerning's widest floor piece is 116px and its neighbours are
     // ~30px higher). 40 takes those in while still excluding a genuinely separate first floor.
     private static final int FLOOR_BAND_TOLERANCE = 40;
+
+    // Centre-hot falloff: a ledge's weight is scaled by how near its X sits to the map's horizontal
+    // centre, as a gaussian with sigma = this fraction of the half-span. 0.58 puts the extreme end at
+    // exp(-1 / (2 * 0.58^2)) = ~0.226, i.e. the middle of the map is ~4.4x as busy as its ends - a town
+    // square that thickens toward the centre without emptying the edges.
+    private static final double CENTER_SIGMA_FRAC = 0.58;
+
+    // Centrality weight in X alone: 1.0 at the map's horizontal centre, ~0.22 at either extreme end.
+    // Only X is used - a town reads as a left-right street band, so the crowd thickens mid-map while
+    // upper/lower ledges keep whatever the width weighting already gives them. Returns 1.0 when the span
+    // is a point (nothing to bias). Package-private so a test can pin the curve without a MapleMap.
+    static double centerHotspotWeight(int x, int minX, int maxX) {
+        double half = (maxX - minX) / 2.0;
+        if (half <= 0.0) {
+            return 1.0;
+        }
+        double d = (x - (minX + maxX) / 2.0) / (CENTER_SIGMA_FRAC * half);
+        return Math.exp(-0.5 * d * d);
+    }
 
     // Pick up to `count` ground spots spread across `map`, reachable from `anchor` (the town spawn
     // portal). Returns fewer than count only if the map has no ground at all; an unbaked nav graph is
@@ -126,15 +148,22 @@ public final class TownPresenceSampler {
         }
 
         double[] weights = new double[ledges.size()];
+        int spanMinX = Integer.MAX_VALUE;
+        int spanMaxX = Integer.MIN_VALUE;
+        for (GCMovement.Ledge l : ledges) {
+            spanMinX = Math.min(spanMinX, l.minX());
+            spanMaxX = Math.max(spanMaxX, l.maxX());
+        }
         for (int i = 0; i < ledges.size(); i++) {
-            weights[i] = ledgeWeight(ledges.get(i), ov);
+            GCMovement.Ledge l = ledges.get(i);
+            weights[i] = ledgeWeight(l, ov) * centerHotspotWeight(l.centerX(), spanMinX, spanMaxX);
         }
 
         Map<Integer, List<Integer>> occupiedByLedge = new HashMap<>();
         for (int i = 0; i < remaining; i++) {
             GCMovement.Ledge l = pickLedge(ledges, weights, occupiedByLedge);
             List<Integer> taken = occupiedByLedge.computeIfAbsent(l.regionId(), k -> new ArrayList<>());
-            int x = pickX(l, taken, ov);
+            int x = pickX(l, taken, ov, spanMinX, spanMaxX);
             taken.add(x);
             Point ground = GCMovement.groundPointInRegion(map, l.regionId(), x);
             out.add(ground != null ? ground : new Point(x, l.centerY()));
@@ -236,10 +265,10 @@ public final class TownPresenceSampler {
         return out;
     }
 
-    // Per-ledge weight = walkable width, so the draw is uniform across the map's ground (no ledge favoured
-    // by an NPC, shop or doorway - that anchor pull was what packed the crowd onto the hot street). Curation
-    // overrides still compose: a ledge whose centre sits in a ban zone is excluded (weight 0); a boost zone
-    // multiplies its weight. Package-private so a test can pin the width-proportional contract.
+    // Per-ledge weight = walkable width, times the curation boost (no NPC/shop/doorway pull - that anchor
+    // weighting was what packed the crowd onto one street). The centre-hot centrality is applied by the
+    // caller on top of this. Curation overrides compose: a ledge whose centre sits in a ban zone is excluded
+    // (weight 0). Package-private so a test can pin the width-proportional contract.
     static double ledgeWeight(GCMovement.Ledge l, TownOverrides ov) {
         if (ov.isBanned(l.centerX(), l.centerY())) {
             return 0.0;
@@ -248,17 +277,19 @@ public final class TownPresenceSampler {
         return span * ov.boostMultiplier(l.centerX(), l.centerY());
     }
 
-    // Pick an X on the ledge, honoring best-effort spacing and the curation overrides (never land in a ban
-    // zone; a boost zone raises the local score). Scores a handful of uniform candidates and keeps the best,
-    // so co-located picks spread out instead of stacking.
-    private static int pickX(GCMovement.Ledge l, List<Integer> taken, TownOverrides ov) {
+    // Pick an X on the ledge, honoring best-effort spacing, the centre-hot bias, and the curation overrides
+    // (never land in a ban zone; a boost zone raises the local score). Candidates are drawn centre-biased
+    // (centralX) so a single long street still thickens toward the middle; as before, the best-scoring one
+    // wins (boost minus crowding), defaulting to the ledge's left end when every candidate is banned.
+    private static int pickX(GCMovement.Ledge l, List<Integer> taken, TownOverrides ov,
+                             int mapMinX, int mapMaxX) {
         if (l.maxX() <= l.minX()) {
             return l.minX();
         }
         int best = l.minX();
         double bestScore = -Double.MAX_VALUE;
         for (int i = 0; i < X_CANDIDATES; i++) {
-            int x = l.minX() + RANDOM.nextInt(l.maxX() - l.minX() + 1);
+            int x = centralX(l, mapMinX, mapMaxX);
             if (ov.isBanned(x, l.centerY())) {
                 continue; // never place inside a ban zone
             }
@@ -269,6 +300,24 @@ public final class TownPresenceSampler {
             }
         }
         return best;
+    }
+
+    // A centre-biased X in the ledge's span: rejection-sampled with density proportional to the centrality
+    // weight, so picks concentrate toward the map's horizontal middle. Falls back to a plain uniform draw
+    // after a few tries (a candidate far from centre is simply more likely to be rejected and retried).
+    private static int centralX(GCMovement.Ledge l, int mapMinX, int mapMaxX) {
+        int lo = l.minX();
+        int hi = l.maxX();
+        if (hi <= lo) {
+            return lo;
+        }
+        for (int i = 0; i < X_CENTRAL_TRIES; i++) {
+            int x = lo + RANDOM.nextInt(hi - lo + 1);
+            if (RANDOM.nextDouble() < centerHotspotWeight(x, mapMinX, mapMaxX)) {
+                return x;
+            }
+        }
+        return lo + RANDOM.nextInt(hi - lo + 1);
     }
 
     // Penalty for landing within MIN_SPACING of an already-taken X on this ledge (keeps spots from stacking).
@@ -340,8 +389,8 @@ public final class TownPresenceSampler {
     }
 
     // Human-readable dump of where the scatter concentrates: ledge count + the top-N ledges by weight
-    // (region id, X span, centerY, relative weight %). With a width-only weight this is essentially the
-    // widest platforms on the map. Feeds the !env townpresence weights command so tuning is
+    // (region id, X span, centerY, relative weight %). With the centre-hot weight this is essentially the
+    // wide platforms near the middle of the map. Feeds the !env townpresence weights command so tuning is
     // tune -> look -> tune without a restart. Diagnostics only.
     public static String describe(MapleMap map, Point anchor, int topN) {
         return describe(map, anchor, topN, TownOverrides.EMPTY);
@@ -358,14 +407,21 @@ public final class TownPresenceSampler {
         }
         double total = 0.0;
         List<double[]> rows = new ArrayList<>(); // {regionId, minX, maxX, centerY, weight}
+        int spanMinX = Integer.MAX_VALUE;
+        int spanMaxX = Integer.MIN_VALUE;
         for (GCMovement.Ledge l : ledges) {
-            double w = ledgeWeight(l, ov);
+            spanMinX = Math.min(spanMinX, l.minX());
+            spanMaxX = Math.max(spanMaxX, l.maxX());
+        }
+        for (GCMovement.Ledge l : ledges) {
+            double w = ledgeWeight(l, ov) * centerHotspotWeight(l.centerX(), spanMinX, spanMaxX);
             total += w;
             rows.add(new double[]{l.regionId(), l.minX(), l.maxX(), l.centerY(), w});
         }
         rows.sort((a, b) -> Double.compare(b[4], a[4]));
         StringBuilder sb = new StringBuilder();
-        sb.append(String.format("town weights map=%d: %d ledges, %d pins (uniform by walkable width)%n",
+        sb.append(String.format(
+                "town weights map=%d: %d ledges, %d pins (centre-hot by walkable width+centrality)%n",
                 map.getId(), ledges.size(), ov.pins().size()));
         int limit = Math.min(topN, rows.size());
         for (int i = 0; i < limit; i++) {

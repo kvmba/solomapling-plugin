@@ -12,14 +12,15 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Pins the uniform (anchor-free) town scatter contract.
+ * Pins the centre-hot, anchor-free town scatter contract.
  *
  * <p>Regression: the sampler used to weight every ledge by an NPC/portal gaussian pull, so a town's
- * stationed crowd piled onto the shop street / doorway ("bot 堆积在 NPC 旁边"). The rule is now uniform
- * across the map: a ledge's weight is its walkable WIDTH alone, so no ledge is favoured by a nearby NPC,
- * shop or portal and the crowd fans out over the whole reachable ground.
+ * stationed crowd piled onto the shop street / doorway ("bot 堆积在 NPC 旁边"). The rule is now
+ * anchor-free and centre-hot: a ledge's weight is its walkable WIDTH times its centrality in X
+ * ({@link TownPresenceSampler#centerHotspotWeight}), so no ledge is favoured by a nearby NPC, shop or
+ * portal, and the crowd thickens toward the map's horizontal middle (~4.4x) rather than over the ends.
  */
-class TownPresenceSamplerUniformTest {
+class TownPresenceSamplerCenterHotspotTest {
 
     private static GCMovement.Ledge ledge(int regionId, int minX, int maxX) {
         int centerX = (minX + maxX) / 2;
@@ -64,8 +65,8 @@ class TownPresenceSamplerUniformTest {
 
     @Test
     void wideDrawSpreadsAcrossManyLedges() {
-        // One field of equal-width ledges: a width-only weight draws all of them near-equally, so a cohort
-        // of one-per-ledge touches most of the map rather than piling onto a single one.
+        // One field of equal-width ledges with equal weights: the draw touches each once (capacity 1)
+        // rather than piling onto a single ledge, before the capacity filter spills any remainder.
         List<GCMovement.Ledge> ledges = new ArrayList<>();
         for (int id = 1; id <= 10; id++) {
             ledges.add(ledge(id, 0, 200)); // capacity 1 each
@@ -105,5 +106,23 @@ class TownPresenceSamplerUniformTest {
     @Test
     void footholdFloorBandOfAnEmptyListIsEmpty() {
         assertTrue(TownPresenceSampler.footholdFloorBand(List.of()).isEmpty());
+    }
+
+    @Test
+    void centralityPeaksAtTheCentreAndThinsToTheEnds() {
+        // X only: 1.0 at the map's horizontal midpoint, and ~0.226 (1 / ~4.4x) at either extreme end.
+        assertEquals(1.0, TownPresenceSampler.centerHotspotWeight(500, 0, 1000), 1e-9, "centre is full weight");
+        double end = TownPresenceSampler.centerHotspotWeight(0, 0, 1000);
+        assertEquals(0.2262, end, 1e-3, "an extreme end is ~1/4.4 of the centre");
+        assertEquals(end, TownPresenceSampler.centerHotspotWeight(1000, 0, 1000), 1e-9, "both ends are symmetric");
+        // Monotone: nearer the centre is never lighter than farther out.
+        assertTrue(TownPresenceSampler.centerHotspotWeight(400, 0, 1000)
+                > TownPresenceSampler.centerHotspotWeight(100, 0, 1000));
+    }
+
+    @Test
+    void centralityIsFlatOnAZeroWidthSpan() {
+        // A degenerate span (a single column) has no centre to bias toward - must not divide by zero.
+        assertEquals(1.0, TownPresenceSampler.centerHotspotWeight(50, 50, 50), 1e-9);
     }
 }
