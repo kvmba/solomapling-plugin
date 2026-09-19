@@ -57,8 +57,14 @@ public final class SpotFinder {
     private static final double LEDGE_EXTENT_W = 1.0;      // per 100px of anchor-ledge length (mild room-to-fight bonus)
     private static final int LEDGE_EXTENT_CAP_PX = 1_000;  // extent bonus saturates at ~two screens of platform
     private static final double SELECT_JITTER = 12.0;      // additive noise ≈ one spawn point, so identical cohorts decorrelate
-    private static final double LIVE_MOB_W = 6.0;          // per live hostile in radius now (start-hot bias)
-    private static final double DISTANCE_W = 0.015;        // per px to the anchor (prefer near → minimal traversal)
+    // Live-mob pull: a spot with hostiles UP RIGHT NOW is worth much more than a marginally denser dry one,
+    // so a relocating bot grabs the pack it is walking past instead of trekking to a far empty ledge. One
+    // mob (24) outweighs ~2.4 same-ledge spawn points — enough to beat a modest feed/distance edge.
+    private static final double LIVE_MOB_W = 24.0;         // per live hostile in radius now (start-hot bias)
+    // Anti-traversal lever: cost per px to the anchor. At 0.04 a platform 1000px away pays ~40 points (≈4
+    // same-ledge spawns), so "near and has mobs" reliably beats "far and merely denser" — a player would
+    // clear what's on their screen before running to the far side of the field.
+    private static final double DISTANCE_W = 0.04;         // per px to the anchor (prefer near → minimal traversal)
     private static final double CROWDING_W = 30.0;         // per claimant (spread the cohort)
     // Soft cap, scaled by overflow: each holder past the cap costs a full penalty step. The step dwarfs
     // every other term, so under saturation ranking degenerates to "fewest holders first, score second" —
