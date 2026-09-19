@@ -250,43 +250,102 @@ public final class OrbisStages {
     }
 
     /**
-     * Work Papa Pixie's room: summon, gather a seed, and feed the spring.
+     * Work Papa Pixie's room, which is a chain of item-triggered reactors rather than a puzzle.
      *
-     * <p>The stage flag is set by the spring reactor's script, so the sequence is not
-     * optional - {@code statusStg7} stays unset until a {@code 4001054} lands on it. The
-     * seeds come from the mobs the room's pots summon, so the pots have to be hit first;
-     * the room stops summoning once it has produced enough, which is the quest's own pacing.
+     * <p>Every reactor here is {@code type 100}: it fires only when the item it wants is DROPPED
+     * inside its box (hitting one does nothing). Feeding a pot ({@code 2001000/2001001}) its medal
+     * {@code 4001053} makes the room's mobs appear; those mobs drop the medal the pots take, and
+     * the darker one drops {@code 4001074} that the traps ({@code 2001016}) take. Feeding a trap a
+     * {@code 4001074} ends the room and brings Papa Pixie ({@code 9300039}) out; he drops the Root
+     * of Life ({@code 4001054}), and the spring ({@code 2002003}) takes that and is what sets
+     * {@code statusStg7}.
+     *
+     * <p>This is the honest limit of a non-leader bot here: the mobs drop each item on whoever
+     * kills them, so the bot loots its own share and feeds the reactors exactly as a player does.
+     * If another member carries the item, the helper's copy is what the flag needs; the loop just
+     * keeps working the room until the flag moves.
      *
      * <p>Returns true once the stage flag has moved, so the caller can stop looping.
      */
     public static boolean settlePapaRoom(Character bot) {
         if (PqActions.readEimInt(bot, "statusStg7", -1) != -1) {
+            // The spring has fired (its act() set the flag and dropped the final piece). Grab the
+            // piece it left under the bot before handing back, so the statue base can be finished.
+            PqActions.loot(bot, OrbisPqData.PAPA_SPRING_SPOT, 4_000,
+                    new int[]{OrbisPqData.STATUE_PIECE_8});
             return true;
         }
 
-        // A seed already in hand goes straight onto the spring; that drop is the finish.
+        // The finish: drop the Root of Life onto the spring, whose script sets the flag.
         if (PqActions.countItem(bot, OrbisPqData.PAPA_SEED) > 0) {
-            PqActions.walkTo(bot, OrbisPqData.PAPA_SPRING_SPOT);
-            PqActions.dropStack(bot, OrbisPqData.PAPA_SEED, 1, OrbisPqData.PAPA_SPRING_SPOT);
+            dropOn(bot, OrbisPqData.PAPA_SPRING_REACTOR, OrbisPqData.PAPA_SPRING_SPOT,
+                    OrbisPqData.PAPA_SEED);
             return PqActions.readEimInt(bot, "statusStg7", -1) != -1;
         }
 
-        // Otherwise make the room summon, kill what it produces, and take a seed off it.
-        int pot = findPotOid(bot);
-        if (pot >= 0) {
-            PqActions.hitReactor(bot, pot);
+        // With a trap item, end the room: feed a trap and Papa Pixie appears; his death is what
+        // produces the Root of Life.
+        if (PqActions.countItem(bot, OrbisPqData.PAPA_TRAP_ITEM) > 0) {
+            feedReactor(bot, OrbisPqData.PAPA_TRAP, OrbisPqData.PAPA_TRAP_ITEM);
+            return false;
         }
-        huntMobs(bot, OrbisPqData.PAPA_MOB, OrbisPqData.PAPA_MOB_BLACK);
-        PqActions.loot(bot, bot.getPosition(), 4_000, new int[]{OrbisPqData.PAPA_SEED});
+
+        // With a medal, feed a pot, which is what makes the room summon its mobs and drop more.
+        if (PqActions.countItem(bot, OrbisPqData.PAPA_MEDAL) > 0) {
+            if (feedReactor(bot, OrbisPqData.PAPA_POT, OrbisPqData.PAPA_MEDAL)
+                    || feedReactor(bot, OrbisPqData.PAPA_POT_ALT, OrbisPqData.PAPA_MEDAL)) {
+                return false;
+            }
+        }
+
+        // Otherwise fight what is here (Papa, or the mobs a pot summoned) and take their drops.
+        // The loot is confined to this branch on purpose: a seed the bot has just dropped on the
+        // spring must NOT be picked back up, because the spring reads its stack five seconds later
+        // and a pickup in that window cancels the trigger.
+        if (mobsPresent(bot, OrbisPqData.PAPA_MOB_LOW, OrbisPqData.PAPA_MOB_HIGH)) {
+            huntMobs(bot, OrbisPqData.PAPA_MOB_LOW, OrbisPqData.PAPA_MOB_HIGH);
+            PqActions.loot(bot, bot.getPosition(), 4_000,
+                    new int[]{OrbisPqData.PAPA_MEDAL, OrbisPqData.PAPA_TRAP_ITEM, OrbisPqData.PAPA_SEED});
+        }
         return false;
     }
 
-    private static int findPotOid(Character bot) {
+    /** Drop {@code qty} of an item on the named reactor's trigger box, or return false. */
+    private static boolean dropOn(Character bot, int reactorDataId, Point fallbackSpot, int itemId) {
+        int oid = findReactorOid(bot, reactorDataId);
+        Point at = oid >= 0 ? reactorPos(bot, oid) : fallbackSpot;
+        if (at == null) {
+            return false;
+        }
+        PqActions.walkTo(bot, at);
+        PqActions.dropStack(bot, itemId, 1, at);
+        return true;
+    }
+
+    /** Feed the first live reactor of a data id its item; false when none is standing. */
+    private static boolean feedReactor(Character bot, int reactorDataId, int itemId) {
+        int oid = findReactorOid(bot, reactorDataId);
+        if (oid < 0) {
+            return false;
+        }
+        Point at = reactorPos(bot, oid);
+        PqActions.walkTo(bot, at);
+        PqActions.dropStack(bot, itemId, 1, at);
+        return true;
+    }
+
+    /** The oid of the first reactor of a data id that is alive and not in its end state. */
+    private static int findReactorOid(Character bot, int dataId) {
         return bot.getMap().getAllReactors().stream()
-                .filter(r -> r.getId() == OrbisPqData.PAPA_POT || r.getId() == OrbisPqData.PAPA_POT_ALT)
-                .filter(r -> r.getState() == 0)
+                .filter(r -> r.getId() == dataId && r.isAlive() && r.getState() < 4)
                 .mapToInt(r -> r.getObjectId())
                 .findFirst().orElse(-1);
+    }
+
+    /** A reactor's position, or null when it is gone. */
+    private static Point reactorPos(Character bot, int oid) {
+        var reactor = bot.getMap().getReactorByOid(oid);
+        return reactor != null ? reactor.getPosition() : null;
     }
 
     // =========================================================================
@@ -296,14 +355,23 @@ public final class OrbisStages {
     /**
      * Put the final piece on the statue base.
      *
-     * <p>Unlike the other drops this one is a plain {@code 1}, so there is no stack-size
-     * trap - but the base is an item-triggered reactor all the same, so the throw still has
-     * to land inside its box, which is what {@link OrbisPqData#STATUE_BASE_SPOT} is for.
+     * <p>The base ({@code 2006001}, "minerva") is item-triggered on one {@code 4001055}; dropping
+     * it inside the base's box is what spawns Minerva, clears the quest and sets
+     * {@code statusStg8}. Hitting the base would do nothing, so this walks to it and drops. The
+     * landing point already accounts for the drop re-seating itself 85px down onto the floor,
+     * which is inside the box - see {@link OrbisPqData#STATUE_BASE_SPOT}.
      */
     public static void placeFinalPiece(Character bot) {
-        if (PqActions.countItem(bot, OrbisPqData.STATUE_PIECE_8) > 0) {
-            PqActions.dropStack(bot, OrbisPqData.STATUE_PIECE_8, 1, OrbisPqData.STATUE_BASE_SPOT);
+        if (PqActions.countItem(bot, OrbisPqData.STATUE_PIECE_8) <= 0) {
+            return;
         }
+        int oid = findReactorOid(bot, OrbisPqData.STATUE_BASE_REACTOR);
+        Point at = oid >= 0 ? reactorPos(bot, oid) : OrbisPqData.STATUE_BASE_SPOT;
+        if (at == null) {
+            return;
+        }
+        PqActions.walkTo(bot, at);
+        PqActions.dropStack(bot, OrbisPqData.STATUE_PIECE_8, 1, at);
     }
 
     // =========================================================================

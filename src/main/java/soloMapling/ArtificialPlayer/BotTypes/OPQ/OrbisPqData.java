@@ -200,25 +200,39 @@ public final class OrbisPqData {
     // =========================================================================
 
     /**
-     * The spring ({@code 2002003}, named "pot") that ends this stage: it wants one
-     * {@code 4001054} dropped on it, and its script is what sets {@code statusStg7} and
-     * stops the summoning.
+     * The Papa Pixie chain, straight off the map's reactors and their scripts.
      *
-     * <p>Reaching that drop is the actual stage. Hitting the pots ({@code 2001000},
-     * {@code 2001001}) summons mobs while the map allows it, and those mobs drop the seed;
-     * with the seed in hand the spring will take it. Breaking the six scar reactors is a
-     * different, earlier thing (it lives in the tower and is what makes Eak send the party
-     * here at all), so it is listed separately below.
+     * <p>The pots ({@code 2001000}/{@code 2001001}) are item-triggered on {@code 4001053} - feed a
+     * pot its medal and the room's mobs ({@code 9300048}, sometimes the darker {@code 9300049})
+     * appear, and those mobs drop the very medal the pots take. The "trap" reactors
+     * ({@code 2001016}) are item-triggered on {@code 4001074}, which the darker mob drops; feeding
+     * one a {@code 4001074} kills the room and makes Papa Pixie ({@code 9300039}) appear. Papa
+     * drops the Root of Life ({@code 4001054}), and the spring ({@code 2002003}) takes that and is
+     * what actually sets {@code statusStg7} (and lets Minerva's final piece fall).
+     *
+     * <p>Reaching that spring drop is the stage. Breaking the six scar reactors is a different,
+     * earlier thing (it lives in the tower and is what makes Eak send the party here at all).
      */
     public static final int PAPA_SPRING_REACTOR = 2002003;
     public static final Point PAPA_SPRING_SPOT = new Point(-755, 19);
+    /** The Root of Life Papa Pixie drops and the spring wants. */
     public static final int PAPA_SEED = 4001054;
+    /** The pots that spawn the room's mobs, on {@code 4001053}. */
     public static final int PAPA_POT = 2001000;
     public static final int PAPA_POT_ALT = 2001001;
-    /** The mobs the pots summon, and the one Papa Pixie arrives as. */
-    public static final int PAPA_MOB = 9300048;
-    public static final int PAPA_MOB_BLACK = 9300049;
-    public static final int PAPA_BOSS = 9300039;
+    /** The medal the summoned mobs drop and the pots take. */
+    public static final int PAPA_MEDAL = 4001053;
+    /** The "trap" reactors that end the room and reveal Papa, on {@code 4001074}. */
+    public static final int PAPA_TRAP = 2001016;
+    /** The item the darker mob drops and a trap takes. */
+    public static final int PAPA_TRAP_ITEM = 4001074;
+    /**
+     * Every monster this room can hold, as one id range: Papa Pixie ({@code 9300039}) and the two
+     * it summons ({@code 9300048}/{@code 9300049}) are contiguous, so a fight-and-loot loop can
+     * cover the room with a single range test.
+     */
+    public static final int PAPA_MOB_LOW = 9300039;
+    public static final int PAPA_MOB_HIGH = 9300049;
 
     /**
      * The six scar reactors, which live <em>in the tower</em> rather than in a room of their
