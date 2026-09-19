@@ -32,14 +32,23 @@ public final class MagatiaPqData {
 
     public static final int RECRUIT_MAP_A = 261000021; // Alcadno
     public static final int RECRUIT_MAP_Z = 261000011; // Zenumist
-    public static final int ENTRY_MAP = 926110000;
-    public static final int LAST_MAP  = 926110600;
 
-    /** The room whose monsters carry the stage-1/2 items. */
+    // The two versions run in parallel map ranges: Alcadno in 92611xxxx, Zenumist in 92610xxxx.
+    // They share every mechanic (same statusStgN flags, same stage6_combN keys), so one bot plays
+    // either - but it has to recognise both ranges, or a Zenumist run looks like "not in a quest".
+    public static final int ENTRY_MAP_A = 926110000;
+    public static final int LAST_MAP_A  = 926110600;
+    public static final int ENTRY_MAP_Z = 926100000;
+    public static final int LAST_MAP_Z  = 926100600;
+
+    /** The Alcadno run's entry map. Kept named for callers that need one. */
+    public static final int ENTRY_MAP = ENTRY_MAP_A;
+
+    /** The room whose monsters carry the stage-1/2 items (Alcadno range). */
     public static final int MOB_ROOM_1 = 926110100;
     public static final int MOB_ROOM_2 = 926110200;
 
-    /** The three sub-rooms that carry the stage-1 pair. */
+    /** The three sub-rooms that carry the stage-1 pair (Alcadno range). */
     public static final int SUB_ROOM_201 = 926110201;
     public static final int SUB_ROOM_202 = 926110202;
     public static final int SUB_ROOM_203 = 926110203;
@@ -75,8 +84,13 @@ public final class MagatiaPqData {
     /** Whether the party has done what the escort wants; a fail means the run is over. */
     public static final String ESCORT_FAIL = "escortFail";
 
-    /** A map is one of the quest's rooms if it falls in the run. */
+    /**
+     * A map is one of the quest's rooms if it falls in either version's run: the Alcadno range
+     * ({@code 92611xxxx}) or the Zenumist one ({@code 92610xxxx}). Both are needed - the bot is
+     * spawned from both lobbies and Eak's stages are identical, only the map ids differ.
+     */
     public static boolean isQuestRoom(int mapId) {
-        return mapId >= ENTRY_MAP && mapId <= LAST_MAP;
+        return (mapId >= ENTRY_MAP_A && mapId <= LAST_MAP_A)
+                || (mapId >= ENTRY_MAP_Z && mapId <= LAST_MAP_Z);
     }
 }
