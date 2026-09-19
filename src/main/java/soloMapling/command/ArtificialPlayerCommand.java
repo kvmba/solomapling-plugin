@@ -758,13 +758,13 @@ public class ArtificialPlayerCommand extends Command {
         String verb = params[0].toLowerCase();
         if (params.length < 3) {
             player.yellowMessage("Usage: !bot " + verb
-                    + " <warrior|mage|bow|thief> <jobtier 1-4 | level 10-200> [count]");
+                    + " <warrior|mage|bow|thief|pirate> <jobtier 1-4 | level 10-200> [count]");
             return;
         }
 
         Integer baseClass = parseGenre(params[1]);
         if (baseClass == null) {
-            player.yellowMessage("Unknown class '" + params[1] + "'. Use warrior | mage | bow | thief.");
+            player.yellowMessage("Unknown class '" + params[1] + "'. Use warrior | mage | bow | thief | pirate.");
             return;
         }
 
@@ -817,13 +817,14 @@ public class ArtificialPlayerCommand extends Command {
         }
     }
 
-    /** Map a class-genre word to the base-class id used by the decorator (1-4), or null if unknown. */
+    /** Map a class-genre word to the base-class id used by the decorator (1-5), or null if unknown. */
     private static Integer parseGenre(String s) {
         switch (s.toLowerCase()) {
             case "warrior", "war", "fighter" -> { return 1; }
             case "mage", "mag", "magician", "wizard" -> { return 2; }
             case "bow", "bowman", "archer", "bowmen" -> { return 3; }
             case "thief", "sin", "rogue", "assassin" -> { return 4; }
+            case "pirate", "pir", "brawler", "gunslinger", "buccaneer", "corsair" -> { return 5; }
             default -> { return null; }
         }
     }
@@ -834,6 +835,7 @@ public class ArtificialPlayerCommand extends Command {
             case 2 -> "mage";
             case 3 -> "bowman";
             case 4 -> "thief";
+            case 5 -> "pirate";
             default -> "unknown";
         };
     }
@@ -867,7 +869,8 @@ public class ArtificialPlayerCommand extends Command {
         if (params.length < 2) {
             player.yellowMessage("Usage: !bot trainhere <job> [level] [count]");
             player.yellowMessage("  job: name (hermit, nightlord, chiefbandit, shadower, assassin, bandit, "
-                    + "fpwizard, ilwizard, cleric, fpmage, ilmage, priest, bishop) or a job id (e.g. 411).");
+                    + "fpwizard, ilwizard, cleric, fpmage, ilmage, priest, bishop, "
+                    + "brawler, marauder, buccaneer, gunslinger, outlaw, corsair) or a job id (e.g. 411).");
             return;
         }
         Job job = resolveJob(params[1]);
@@ -876,8 +879,8 @@ public class ArtificialPlayerCommand extends Command {
             return;
         }
         int baseClass = job.getJobNiche(); // 1=Warrior 2=Magician 3=Bowman 4=Thief 5=Pirate
-        if (baseClass < 1 || baseClass > 4) {
-            player.yellowMessage(job.name() + " isn't a supported training class (warrior/mage/bow/thief only).");
+        if (baseClass < 1 || baseClass > 5) {
+            player.yellowMessage(job.name() + " isn't a supported training class (warrior/mage/bow/thief/pirate only).");
             return;
         }
         MapleMap map = getMapleMapById(c.getPlayer().getMapId());

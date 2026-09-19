@@ -4,13 +4,19 @@ import org.gms.client.Job;
 import org.gms.constants.skills.Archer;
 import org.gms.constants.skills.Assassin;
 import org.gms.constants.skills.Bandit;
+import org.gms.constants.skills.Brawler;
+import org.gms.constants.skills.Buccaneer;
 import org.gms.constants.skills.Cleric;
+import org.gms.constants.skills.Corsair;
 import org.gms.constants.skills.Crossbowman;
 import org.gms.constants.skills.FPWizard;
 import org.gms.constants.skills.Fighter;
+import org.gms.constants.skills.Gunslinger;
 import org.gms.constants.skills.Hunter;
 import org.gms.constants.skills.ILWizard;
 import org.gms.constants.skills.Magician;
+import org.gms.constants.skills.Marauder;
+import org.gms.constants.skills.Outlaw;
 import org.gms.constants.skills.Page;
 import org.gms.constants.skills.Spearman;
 import org.gms.constants.skills.Warrior;
@@ -83,6 +89,9 @@ public final class BotBuffConfig {
         // Thief branch (+ booster)
         put(Job.ASSASSIN, Assassin.HASTE, Assassin.CLAW_BOOSTER);      // 4101004, 4101003
         put(Job.BANDIT,   Bandit.HASTE, Bandit.DAGGER_BOOSTER);        // 4201003, 4201002
+        // Pirate branch (+ booster; brawler = knuckle, gunslinger = gun)
+        put(Job.BRAWLER,    Brawler.KNUCKLER_BOOSTER);                 // 5101006 - attack speed up
+        put(Job.GUNSLINGER, Gunslinger.GUN_BOOSTER);                   // 5201003
 
         // ---- 3rd job ----
         // Warrior branch
@@ -96,6 +105,9 @@ public final class BotBuffConfig {
         // Thief branch
         put(Job.HERMIT,       Hermit.SHADOW_PARTNER, Hermit.MESO_UP);      // 4111002 (self), 4111001 (party meso)
         put(Job.CHIEFBANDIT,  ChiefBandit.MESO_GUARD);                     // 4211005 - meso shield (self)
+        // Pirate branch
+        put(Job.MARAUDER,    Marauder.TRANSFORMATION);                    // 5111005 - super transform (self)
+        put(Job.OUTLAW,      Outlaw.OCTOPUS);                             // 5211001 - summoned octopus (self)
         // (Ranger/Sniper inherit Soul Arrow; F/P & I/L 3rd inherit Meditation)
 
         // ---- 4th job (Maple Warrior for everyone + each class's signature buff) ----
@@ -109,6 +121,8 @@ public final class BotBuffConfig {
         put(Job.MARKSMAN,    Marksman.MAPLE_WARRIOR, Marksman.SHARP_EYES);  // 3221000 (party), 3221002 (party crit)
         put(Job.NIGHTLORD,   NightLord.MAPLE_WARRIOR, NightLord.SHADOW_STARS); // 4121000 (party), 4121006 (self - infinite stars)
         put(Job.SHADOWER,    Shadower.MAPLE_WARRIOR);                      // 4221000 (party)  [Smoke Screen skipped]
+        put(Job.BUCCANEER,   Buccaneer.MAPLE_WARRIOR, Buccaneer.SPEED_INFUSION); // 5121000 (party), 5121009 (party speed)
+        put(Job.CORSAIR,     Corsair.MAPLE_WARRIOR);                       // 5221000 (party)
     }
 
     private BotBuffConfig() {}

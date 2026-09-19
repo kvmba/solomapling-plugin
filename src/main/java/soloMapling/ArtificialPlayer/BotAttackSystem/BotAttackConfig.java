@@ -6,14 +6,18 @@ import org.gms.constants.skills.Archer;
 import org.gms.constants.skills.Bandit;
 import org.gms.constants.skills.Bishop;
 import org.gms.constants.skills.Bowmaster;
+import org.gms.constants.skills.Brawler;
+import org.gms.constants.skills.Buccaneer;
 import org.gms.constants.skills.ChiefBandit;
 import org.gms.constants.skills.Cleric;
+import org.gms.constants.skills.Corsair;
 import org.gms.constants.skills.Crossbowman;
 import org.gms.constants.skills.Crusader;
 import org.gms.constants.skills.DragonKnight;
 import org.gms.constants.skills.FPArchMage;
 import org.gms.constants.skills.FPMage;
 import org.gms.constants.skills.FPWizard;
+import org.gms.constants.skills.Gunslinger;
 import org.gms.constants.skills.Hermit;
 import org.gms.constants.skills.Hero;
 import org.gms.constants.skills.Hunter;
@@ -21,9 +25,12 @@ import org.gms.constants.skills.ILArchMage;
 import org.gms.constants.skills.ILMage;
 import org.gms.constants.skills.ILWizard;
 import org.gms.constants.skills.Magician;
+import org.gms.constants.skills.Marauder;
 import org.gms.constants.skills.Marksman;
 import org.gms.constants.skills.NightLord;
+import org.gms.constants.skills.Outlaw;
 import org.gms.constants.skills.Paladin;
+import org.gms.constants.skills.Pirate;
 import org.gms.constants.skills.Priest;
 import org.gms.constants.skills.Ranger;
 import org.gms.constants.skills.Rogue;
@@ -53,9 +60,11 @@ import static soloMapling.ArtificialPlayer.BotAttackSystem.BotAttackProfile.rang
  * runtime: while the ultimate (Dragon Roar / Genesis / Blizzard / Meteor Shower) is on its long
  * cooldown, the bot keeps mobbing with the sustained AoE instead of dropping to single-target
  * (BotAttackDriver's AUTO). Weapon only refines the result (projectile, warrior sword/axe &
- * spear/pole-arm forms); the one weapon-driven choice is the 1st-job rogue (claw vs dagger).
- * Beginners (job 0) and 1st-job pirates have no entry and fall through to a plain skill-0 weapon
- * swing (resolve's final fallback). Damage is fixed per line, no stat math.
+ * spear/pole-arm forms); the weapon-driven choices are the 1st-job rogue (claw vs dagger) and
+ * the 1st-job pirate (knuckle vs gun).
+ * Beginners (job 0) have no entry and fall through to a plain skill-0 weapon swing
+ * (resolve's final fallback), rendering the weapon's own melee/ranged default. Damage is
+ * fixed per line, no stat math.
  */
 public final class BotAttackConfig {
 
@@ -70,6 +79,11 @@ public final class BotAttackConfig {
     // 1st-job rogue basics - chosen by weapon, since the Thief job alone is ambiguous.
     private static final BotAttackProfile ROGUE_CLAW = ranged(Rogue.LUCKY_SEVEN, 2);
     private static final BotAttackProfile ROGUE_DAGGER = melee(Rogue.DOUBLE_STAB, 2);
+
+    // 1st-job pirate basics - same weapon-driven fork: a knuckle brawls, a gun shoots. The
+    // advanced lines (510+/520+) are registered outright and never reach this seed.
+    private static final BotAttackProfile PIRATE_KNUCKLE = melee(Pirate.FLASH_FIST, 1);
+    private static final BotAttackProfile PIRATE_GUN = ranged(Pirate.DOUBLE_SHOT, 2);
 
     // Dragon/Dark Knight's main attack (spear or pole-arm form), used as both single and mob swing.
     private static final BotAttackProfile CRUSHER = meleeMultiVar(DragonKnight.SPEAR_CRUSHER, DragonKnight.POLE_ARM_CRUSHER, 3, 3);
@@ -118,6 +132,19 @@ public final class BotAttackConfig {
         put(Job.BANDIT,       melee(Bandit.SAVAGE_BLOW, 6),   null);
         put(Job.CHIEFBANDIT,  null,                           meleeAoe(ChiefBandit.BAND_OF_THIEVES, 1)); // single inherits Bandit's Savage Blow (Assaulter dropped); BoT attackCount=1 (was wrongly 6)
         put(Job.SHADOWER,     melee(Shadower.ASSASSINATE, 3), meleeAoe(Shadower.BOOMERANG_STEP, 2));
+
+        // ===== Pirate - brawler (knuckle, melee) vs gunslinger (gun, ranged) =====
+        // The two lines diverge at 2nd job and never meet again, so both are registered in full.
+        // Weapon only refines the render (knuckle = melee swing, gun = ranged shot with bullets).
+        // 1st job (Pirate 500) is weapon-driven like the 1st-job rogue; see PIRATE_KNUCKLE below.
+        // Brawler line - knuckle melee
+        put(Job.BRAWLER,      melee(Brawler.DOUBLE_UPPERCUT, 2), meleeAoe(Brawler.BACK_SPIN_BLOW, 2));
+        put(Job.MARAUDER,     melee(Marauder.ENERGY_BLAST, 1),   meleeAoe(Marauder.SHOCKWAVE, 1));
+        put(Job.BUCCANEER,    melee(Buccaneer.BARRAGE, 6),       meleeAoe(Buccaneer.DEMOLITION, 6));
+        // Gunslinger line - gun ranged
+        put(Job.GUNSLINGER,   ranged(Gunslinger.INVISIBLE_SHOT, 1), null); // inherits Invisible Shot single
+        put(Job.OUTLAW,       null,                              rangedAoe(Outlaw.BURST_FIRE, 3)); // inherits Invisible Shot single
+        put(Job.CORSAIR,      ranged(Corsair.RAPID_FIRE, 1),     rangedAoe(Corsair.BATTLESHIP_CANNON, 3)); // inherits Burst Fire mob
     }
 
     private BotAttackConfig() {}
@@ -132,7 +159,7 @@ public final class BotAttackConfig {
     private static final double CRIT_BOWMAN  = 0.50;
     private static final double CRIT_WARRIOR = 0.01;
     private static final double CRIT_MAGE    = 0.01;
-    private static final double CRIT_DEFAULT = 0.01; // beginners / pirates / anything unlisted
+    private static final double CRIT_DEFAULT = 0.01; // beginners / unlisted
 
     /* A crit shows ~this multiple of the rolled damage (bigger number -> stronger client knockback). */
     public static final double CRIT_MULTIPLIER = 1.5;
@@ -208,9 +235,14 @@ public final class BotAttackConfig {
             single = (weapon == WeaponType.CLAW) ? ROGUE_CLAW : ROGUE_DAGGER;
         }
 
-        // Beginners (job 0) and any job with no registered attack (e.g. a 1st-job pirate) fall back
-        // to a plain skill-0 weapon swing. This is what lets a sub-level-10 beginner bot fight with
-        // the sword the decorator gives it - the basic attack it would make before any job skills.
+        // 1st-job pirates fork the same way (knuckle = melee, gun = ranged); see PIRATE_KNUCKLE.
+        if (single == null && job.isA(Job.PIRATE)) {
+            single = (weapon == WeaponType.GUN) ? PIRATE_GUN : PIRATE_KNUCKLE;
+        }
+
+        // Beginners (job 0) and any unregistered job fall back to a plain skill-0 weapon swing.
+        // This is what lets a sub-level-10 beginner bot fight with the sword the decorator gives
+        // it - the basic attack it would make before any job skills.
         if (single == null && aoe == null && ultimate == null) {
             single = BotAttackProfile.basicSwing();
         }
