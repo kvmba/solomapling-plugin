@@ -1,12 +1,13 @@
 # Bot 详情窗口数据补充方案（怪物卡 / 勋章收藏 / 想要购买的道具）
 
-> 状态：**规划稿 v3（两轮审查后修正；待用户确认后实施）**
-> v1→v2→v3 的修正见 §10「审查发现」（含多轮过度设计、事实性表述错误、遗漏注入点、流程违规）。
+> 状态：**已实现**（`soloMapling.ArtificialPlayer.BotDetailSystem`；`BotDetailWindow` 门面 +
+> `BotMonsterBook` / `BotMedalBook` / `BotWishList` / `BotDetailRoll` + 单测；GM `!bot detail` 巡检）。
+> 本文件保留为设计档案；实现与规划的差异见文末 §11「实现记录」。
 > 目标：玩家在游戏内打开某个 bot 的**角色详情窗口**时，窗口像真人一样显示：怪物卡收集、勋章（称号）收藏、
 > 心愿单（想要购买的道具）。
 > 约束（用户已确认）：① **出生时预置、零宿主改动**；② 勋章 = **佩戴勋章 + 勋章收藏(29xxx任务)**；
 > ③ **尽量不改宿主 GMS083**。
-> 交付：**逐个处理、逐个复查、逐个提交**。
+> 交付：**逐个处理、逐个复查、逐个提交**（5 个提交，见 §6）。
 
 ---
 
@@ -314,3 +315,28 @@ BotDetailSystem/
 - 关键 API 用 `javap -p` 对**已编译宿主类**复核可见性（如 `baseClassBit` 实为包私有）。
 - 关键运行库事实（反射可写 private int）用最小样例**实测**，不靠推断。
 - 数据源用脚本对**真实 WZ 文件**统计（卡 343 / 勋章任务 28 / 可投 22 / 商品 2010）。
+
+---
+
+## 11. 实现记录
+
+实现与规划的差异 / 落地细节：
+
+1. **包**：`soloMapling.ArtificialPlayer.BotDetailSystem` = `BotDetailWindow`（门面）+ `BotMonsterBook` /
+   `BotMedalBook` / `BotWishList`（三子项）+ `BotDetailRoll`（共享确定性 `mix`/`sample`）。
+2. **注入点合计 9 处**（提交 #1 一次接线完成，后续子项复用同一批注入点，无需再加）：
+   `BotDecorate.setBotVariables` ×3（随机路径、参数路径主路径、beginner 分支）、`BotGeneration.loadPersistentBot` ×1、
+   `EnvironmentManager` ×2、`ArtificialPlayerCommand`（`rerollmedal`/`setlevel`/`setjob`）×3。
+3. **怪物卡（#1）**：只写 3 个私有计数器（反射，`Field` 静态缓存），`cover` 恒 0。`bookLevel` 复刻
+   `MonsterBook.calculateLevel()`。池扫 `Item.wz/Consume/0238.img.xml` = **343** 张（普通 295 / 特殊 48）。
+4. **勋章收藏（#2）**：`Quest.wz/Act.img.xml` 运行时读取实测 = **28** 条映射（脚本 vs 运行时曾出现
+   `29509`/`29580` 一处差异，**以运行时读取为准**）。可投集合复用 `BotMedalPool.eligibleFor`；bot 等级带内 **22** 条可用。
+   写 `getQuestNAdd(...).setStatus(COMPLETED)`。
+5. **心愿单（#3）**：池 = `CashItemFactory.getItems()` 过滤 `isSelling && !isCashPackage`，**按宿主 catalog 的 map
+   身份缓存**（GM 重载会换 map → 自动重建），上限 10。
+6. **发现的真实缺陷（已修）**：共享 `BotDetailRoll.sample` 在 `k<=0` 时返回不可变 `List.of()`，而心愿单调用处对其
+   `Collections.sort` → 等级 10 bot 会抛 `UnsupportedOperationException`。已改为始终返回可变 `ArrayList`（提交 #3）。
+7. **GM 巡检（#4）**：`!bot detail <cid>` 打印窗口三类实际数据（读活引擎态，非预设输入）；`!bot rerolldetail <cid>`。
+8. **测试**：`BotMonsterBookTest`(5) / `BotMedalBookTest`(6) / `BotWishListTest`(5) 全绿；
+   全套 **1151 tests, 0 failures**（提交 #4 前跑）。
+9. **宿主零改动**：`/workspace/GMS083` 工作树干净。
