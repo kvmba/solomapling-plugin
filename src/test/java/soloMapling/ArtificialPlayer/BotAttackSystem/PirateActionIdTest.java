@@ -4,7 +4,6 @@ import org.gms.client.inventory.WeaponType;
 import org.gms.constants.skills.Brawler;
 import org.gms.constants.skills.Buccaneer;
 import org.gms.constants.skills.Corsair;
-import org.gms.constants.skills.Gunslinger;
 import org.gms.constants.skills.Marauder;
 import org.gms.constants.skills.Outlaw;
 import org.gms.constants.skills.Pirate;
@@ -44,7 +43,6 @@ class PirateActionIdTest {
         assertEquals(85,  BotAttackData.actionFor(Buccaneer.DRAGON_STRIKE, null));// dragonstrike
         assertEquals(82,  BotAttackData.actionFor(Buccaneer.ENERGY_ORB, null));   // eorb
         assertEquals(159, BotAttackData.actionFor(Buccaneer.SNATCH, null));       // snatch
-        assertEquals(86,  BotAttackData.actionFor(Gunslinger.INVISIBLE_SHOT, null)); // doublefire
         assertEquals(87,  BotAttackData.actionFor(Outlaw.BURST_FIRE, null));      // triplefire
         assertEquals(95,  BotAttackData.actionFor(Outlaw.FLAME_THROWER, null));   // fireburner
         assertEquals(96,  BotAttackData.actionFor(Outlaw.ICE_SPLITTER, null));    // coolingeffect
@@ -55,9 +53,10 @@ class PirateActionIdTest {
     }
 
     @Test
-    void gunUsesTheShotPoseAsItsWeaponDefault() {
-        // A gun bot with no skill override fires with the "shot" pose, not a melee swing.
-        assertEquals(93, BotAttackData.randomActionFor(WeaponType.GUN));
+    void gunUsesItsOwnFirePoseAsTheWeaponDefault() {
+        // A gun bot fires with "shootF" - the only gun pose on a gun weapon img. "shot"=93 is on
+        // the body but on no weapon img, and a melee swing is not a gun pose at all.
+        assertEquals(27, BotAttackData.randomActionFor(WeaponType.GUN));
     }
 
     @Test
