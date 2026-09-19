@@ -348,13 +348,13 @@ BotDetailSystem/
 - **BUG-A（高）同伴勋章收藏累积**：`BotGeneration.loadPersistentBot` 原用 `apply`（只增不删），
   而同伴会持久化 quests（`saveCharToDB → queststatus`）。同伴升级并重启后，收藏会**不断累积**而非等于
   当前等级的确定集合。已改为 `reroll`（clear+apply），与相邻的 `BotMedal.reroll` 一致。
-  实测佐证：跨等级 12→75 的并集达 21/22，而单等级仅 21。修复见提交 `ab8b52b`。
+  实测佐证：跨等级 12→75 的并集达 21/22，而单等级仅 21。修复见提交 `fix(bots): reroll detail-window data for companions; make wishlist cache atomic`。
 - **BUG-B（低）心愿单缓存双 volatile 竞态**：`cachedSource`/`cachedPool` 两个独立 volatile，并发读者可能
   配到"新 source + 旧 pool"。改为单个不可变 `record CachedPool`，一次 volatile 写发布。
 - **清理**：把 `getMap()==null` 门收敛到门面 `BotDetailWindow`（对齐 `BotMedal`），移除子项内重复检查。
-- **rebase**：工作期间 `optimize/performance` 前进（PQ 动态引擎重构，`82acb5c → 39b0bd6`），且与
-  `BotGeneration`/`EnvironmentManager` 有文件交叠；已 rebase 到现 tip，9 处注入点与全部改动完整保留，
-  重建 + 全套测试（1148）绿。
+- **rebase**：工作期间 `optimize/performance` 两次前进（PQ 动态引擎重构 `82acb5c → 39b0bd6`，随后
+  PQ 招募点覆盖 `39b0bd6 → cc7cdec`）。首次与 `BotGeneration`/`EnvironmentManager` 有文件交叠（已 rebase 保留）；
+  第二次无文件交叠（纯 PQ 路径）。两次 rebase 后 9 处注入点与全部改动完整保留，重建 + 全套测试绿。
 
 ### 11.2 宿主改动（用户放开"尽量不改宿主"后）
 
@@ -366,6 +366,6 @@ BotDetailSystem/
   - 提交：host `c024f682`（分支 `feat/monsterbook-set-aggregates`）。
   - 无 pack/协议变更；纯新增 public 方法 + 等价重构。
 - 插件侧：删除全部 `java.lang.reflect`，改调 `book.setCardCounts(normal, special)`，并删除插件内重复的 `bookLevelFor`
-  公式（逻辑归位宿主）。净减 ~65 行。提交：plugin `4ac3b5a`。
+  公式（逻辑归位宿主）。净减 ~65 行。提交：`refactor(bots): preset monster book via host API, drop reflection`。
 - 为何不选其它方案：`addCard` 需活客户端且会广播；直接加 `setBookLevel` 会绕过计数一致性；`setCardCounts` 一处封住
   "计数 + 等级"不变式，是最小且正确的宿主 API。
