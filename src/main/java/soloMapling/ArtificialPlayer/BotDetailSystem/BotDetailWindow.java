@@ -31,6 +31,7 @@ public final class BotDetailWindow {
         }
         BotMonsterBook.apply(bot);
         BotMedalBook.apply(bot);
+        BotWishList.apply(bot);
     }
 
     /** Re-roll after a level/job override, so the shown data matches the bot's final state. */
@@ -40,6 +41,7 @@ public final class BotDetailWindow {
         }
         BotMonsterBook.clear(bot);
         BotMedalBook.clear(bot);
+        BotWishList.clear(bot);
         apply(bot);
     }
 }

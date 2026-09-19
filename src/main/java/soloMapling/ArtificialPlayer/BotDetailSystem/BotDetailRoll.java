@@ -31,14 +31,14 @@ final class BotDetailRoll {
     /**
      * Pick {@code k} distinct elements from {@code pool} in a stable pseudo-random order.
      * {@code java.util.Random} has a specified LCG, so the same {@code (cid, salt, pool)}
-     * always yields the same pick across JVMs and restarts. Returns at most
-     * {@code min(k, pool.size())} elements; empty when {@code k <= 0} or the pool is empty.
+     * always yields the same pick across JVMs and restarts. Returns a fresh, mutable list of at
+     * most {@code min(k, pool.size())} elements; empty when {@code k <= 0} or the pool is empty.
      */
     static <T> List<T> sample(int cid, int salt, List<T> pool, int k) {
-        if (k <= 0 || pool.isEmpty()) {
-            return List.of();
-        }
         List<T> copy = new ArrayList<>(pool);
+        if (k <= 0 || copy.isEmpty()) {
+            return new ArrayList<>();
+        }
         Collections.shuffle(copy, new Random(mix(cid, salt)));
         return new ArrayList<>(copy.subList(0, Math.min(k, copy.size())));
     }
