@@ -13,6 +13,7 @@ import static soloMapling.ArtificialPlayer.BotDecoratorSystem.JobPathLogic.deter
 import static soloMapling.ArtificialPlayer.BotDecoratorSystem.JobPathLogic.determinePiratePath;
 import static soloMapling.ArtificialPlayer.BotDecoratorSystem.JobPathLogic.determineThiefPath;
 import static soloMapling.ArtificialPlayer.BotDecoratorSystem.JobPathLogic.determineWarriorPath;
+import static soloMapling.itemPool.ItemInformationProviderUtilities.getRandomEquip;
 import static soloMapling.itemPool.ItemInformationProviderUtilities.getRandomEquipForWearing;
 
 public class BotDecorateEquips {
@@ -71,14 +72,23 @@ public class BotDecorateEquips {
     }
 
     private static Integer getCoatId(Character c) {
-        return getRandomEquipForWearing(EquipType.COAT, c);
+        // Pure class lookup - NOT getRandomEquipForWearing. That helper falls back to classless
+        // (reqJob 0) gear when the job has no coat/pants, which made a pirate's coat/pants always
+        // non-null and so short-circuited the overall branch below: a pirate has NO reqJob=16
+        // coat/pants but DOES have reqJob=16 overalls, so it was dressed in the common boxer/skin
+        // while its real pirate overall went unused. Returning null here lets the overall branch win.
+        return getRandomEquip(EquipType.COAT, c);
     }
 
     private static Integer getPantsId(Character c) {
-        return getRandomEquipForWearing(EquipType.PANTS, c);
+        return getRandomEquip(EquipType.PANTS, c);
     }
 
     private static Integer getLongcoatId(Character c) {
+        // Overalls keep the fallback: a class with no overall (most of them) yields null here and
+        // the coat/pants branch is taken, while a class whose ONLY option is an overall (pirate)
+        // gets one. The classless fallback also keeps an outfit on a bot in the odd case both are
+        // empty, so no bot is ever left bare-torso'd.
         return getRandomEquipForWearing(EquipType.LONGCOAT, c);
     }
 
