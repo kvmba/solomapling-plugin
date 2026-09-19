@@ -408,7 +408,15 @@ public class BotGeneration {
         if (ThreadLocalRandom.current().nextBoolean()) {
             long turnDelayMs = ThreadLocalRandom.current().nextLong(1000, 1501);
             if (!BotHelpers.blockingSleep(turnDelayMs)) return;
-            microTurnAroundToLeft(fakechar);
+            // A dynamic-controlled bot owns its own stance; replaying the recorded turn on top
+            // would fight its driver. Flip its facing through the engine instead. Guards the
+            // conversion race too: a bot that enabled GC between here and the spawn still takes
+            // the engine path, never the recorded one.
+            if (soloMapling.ArtificialPlayer.GCMoveSystem.GCMovement.isEnabled(fakechar)) {
+                soloMapling.ArtificialPlayer.GCMoveSystem.GCMovement.turnAround(fakechar);
+            } else {
+                microTurnAroundToLeft(fakechar);
+            }
         }
     }
 

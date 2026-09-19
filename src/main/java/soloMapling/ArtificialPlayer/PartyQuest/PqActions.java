@@ -12,7 +12,7 @@ import soloMapling.ArtificialPlayer.BotAttackSystem.BotAttackDriver;
 import soloMapling.ArtificialPlayer.BotCommandsPack.DropCommands;
 import soloMapling.ArtificialPlayer.BotCommandsPack.SocialCommands;
 import soloMapling.ArtificialPlayer.BotLogic;
-import soloMapling.ArtificialPlayer.BotMovementSystem.MovementCommands;
+import soloMapling.ArtificialPlayer.GCMoveSystem.GCMovement;
 import soloMapling.MapVFX.CustomReactor;
 
 import java.awt.Point;
@@ -93,12 +93,75 @@ public final class PqActions {
         return true;
     }
 
-    /** Walk to a point and let the move settle, so a position check right after sees it. */
+    /**
+     * Walk to a point and block until the bot has arrived, so a position check right after
+     * sees it (and so an item thrown at {@code target} lands where the bot is standing).
+     *
+     * <p>Runs on the dynamic engine ({@link GCMovement}), not the recorded-path engine:
+     * the recordings were captured from a Haste-speed player and replayed at 1:1, so every
+     * quest bot walked ~40% faster than a real one - and only the handful of quests that
+     * happened to have recordings could move at all. The dynamic engine derives the route
+     * from the map's own WZ terrain, so it works on any map and walks at the bot's real
+     * speed stat.
+     *
+     * <p>Blocks the calling (virtual) thread until arrival or a deadline, the same
+     * synchronous contract the old recorded walk had. A bot that cannot path there (no
+     * baked graph yet, an unreachable point) is left where it is and the caller simply
+     * retries on its next tick - the pre-existing behaviour when a recording was missing.
+     */
     public static void walkTo(Character bot, Point target) {
         if (bot == null || target == null) {
             return;
         }
-        MovementCommands.pathFinderBeta(bot, target);
+        java.util.concurrent.CountDownLatch arrived = new java.util.concurrent.CountDownLatch(1);
+        GCMovement.move(bot, target.x, target.y, arrived::countDown);
+        long deadline = System.currentTimeMillis() + WALK_TIMEOUT_MS;
+        try {
+            // Wait on arrival, but also stop as soon as the engine gives the move up (an
+            // unreachable/stalled target that the driver abandons without firing the callback),
+            // so a wedged walk costs a tick or two rather than the whole timeout.
+            while (System.currentTimeMillis() < deadline) {
+                if (arrived.await(50, java.util.concurrent.TimeUnit.MILLISECONDS)) {
+                    return;
+                }
+                if (!GCMovement.isMoving(bot)) {
+                    return;
+                }
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+    }
+
+    /** Upper bound on a single {@link #walkTo} block so a wedged walk cannot hold a tick forever. */
+    private static final long WALK_TIMEOUT_MS = 20_000;
+
+    /**
+     * Walk so the bot ends up standing on the floor <em>under</em> an airborne point.
+     *
+     * <p>Some quest targets are not on the ground - Orbis's cloud reactors float above a
+     * platform and the bot interacts with them from below. The recorded engine had a bespoke
+     * "aerial path" for this; on the dynamic engine the equivalent is to resolve the ground
+     * the terrain puts under that X and walk to it. The caller drives the vertical step
+     * (jump/attack) separately, as it always did.
+     */
+    public static void walkUnder(Character bot, Point aerialTarget) {
+        if (bot == null || aerialTarget == null || bot.getMap() == null) {
+            return;
+        }
+        Point ground = GCMovement.groundPointBelow(bot.getMap(), aerialTarget.x, aerialTarget.y);
+        walkTo(bot, ground != null ? ground : aerialTarget);
+    }
+
+    /** Walk to the position of a portal on the bot's current map. No-op if the portal is unknown. */
+    public static void walkToPortal(Character bot, int portalId) {
+        if (bot == null || bot.getMap() == null) {
+            return;
+        }
+        Portal portal = bot.getMap().getPortal(portalId);
+        if (portal != null) {
+            walkTo(bot, portal.getPosition());
+        }
     }
 
     // =========================================================================
@@ -179,7 +242,7 @@ public final class PqActions {
         if (bot == null || spot == null) {
             return;
         }
-        MovementCommands.pathFinderBeta(bot, spot);
+        walkTo(bot, spot);
         blockingSleep(millis);
     }
 

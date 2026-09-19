@@ -7,6 +7,7 @@ import org.gms.server.maps.MapleMap;
 import org.gms.server.maps.Portal;
 import soloMapling.ArtificialPlayer.BotHelpers;
 import soloMapling.ArtificialPlayer.BotMovementSystem.MovementStructures.MovementRecording;
+import soloMapling.ArtificialPlayer.GCMoveSystem.GCMovement;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -112,6 +113,13 @@ public class WarpCommands {
     // Deliberate synchronous choreography: fake portal lag, then a blocking
     // recording replay. Part of the spawn/warp arrival scripts that hold their thread.
     public static void botEnterPortalDropDown(Character fakechar, int variablePortalLag) {
+        // A bot under dynamic (GCMovement) control owns its own arrival: its driver plays the
+        // map-entry float -> drop from the real terrain the moment the map changes, so replaying
+        // the recorded drop on top of it would send a second, conflicting movement packet. The
+        // recorded drop is only for the recorded-path bots, which have no driver of their own.
+        if (GCMovement.isEnabled(fakechar)) {
+            return;
+        }
         BotHelpers.blockingSleep(variablePortalLag);
         String recName = "portalenterdrop";
 //        List<MovementPacket> mvp = readPacketsFromFile(0, recName);

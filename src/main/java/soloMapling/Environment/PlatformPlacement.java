@@ -5,6 +5,7 @@ import org.gms.server.maps.MapleMap;
 import org.gms.server.maps.Rope;
 import soloMapling.ArtificialPlayer.GCMoveSystem.GCMovement;
 import soloMapling.ArtificialPlayer.BotGeneration;
+import soloMapling.ArtificialPlayer.BotGrindSystem.BotSpotPicker;
 import soloMapling.ArtificialPlayer.BotHelpers;
 import soloMapling.ArtificialPlayer.BotMovementSystem.MovementCommands;
 import soloMapling.server.ExecutorServiceManager;
@@ -362,6 +363,93 @@ public class PlatformPlacement {
 
         debugprint(fmt("Filler bots spawned (locked Y): {}", characterIds.size()));
         return new ArrayList<>(characterIds);
+    }
+
+    /**
+     * Spawn bots spread across a map's walkable ground, using the WZ terrain rather than a
+     * recorded platform file.
+     *
+     * <p>The recording-based spawners ({@link #spawnBotsOnMapOnPlatform}) can only place bots on
+     * maps that shipped a movement-data pack - which, for the party-quest lobbies, is Orbis's
+     * alone. This variant asks the dynamic engine's terrain graph for ground points instead, so
+     * a lobby the bots could never be placed in before can now be filled.
+     *
+     * <p>Anchored on the map's spawn portal for the reachability filter, so no bot is placed on
+     * a ledge it cannot walk to. Falls back to the portal point when the graph is not baked yet
+     * (the picker returns an empty list), so a spawn is never silently dropped.
+     */
+    public static List<Integer> spawnBotsOnMap(int numBots, int mapId) {
+        return spawnBotsOnMap(numBots, mapId, null);
+    }
+
+    public static List<Integer> spawnBotsOnMap(int numBots, int mapId, Point anchor) {
+        MapleMap map = getMapleMapById(mapId);
+        if (map == null || numBots <= 0) {
+            return List.of();
+        }
+        Point from = anchor != null ? anchor : spawnAnchor(map);
+        List<Point> spots = BotSpotPicker.pickGroundSpots(map, from.x, from.y, numBots);
+        if (spots.isEmpty()) {
+            spots = new ArrayList<>(Collections.nCopies(numBots, from));
+        }
+
+        ConcurrentLinkedQueue<Integer> characterIds = new ConcurrentLinkedQueue<>();
+        AtomicInteger failureCount = new AtomicInteger(0);
+        CountDownLatch latch = new CountDownLatch(spots.size());
+        for (Point spawn : spots) {
+            ExecutorServiceManager.runAsync(() -> {
+                try {
+                    Character fakechar = createBotWithRetry(spawn, mapId, 5);
+                    if (fakechar != null) {
+                        characterIds.add(fakechar.getId());
+                    } else {
+                        failureCount.incrementAndGet();
+                    }
+                } catch (Exception e) {
+                    failureCount.incrementAndGet();
+                    debugprint(fmt("Exception creating bot at {}: {}", spawn, e.getMessage()));
+                } finally {
+                    latch.countDown();
+                }
+            });
+        }
+        try {
+            if (!latch.await(120, TimeUnit.SECONDS)) {
+                debugprint(fmt("Timeout waiting for bot spawns on map {}. Completed: {}/{}",
+                        mapId, characterIds.size(), spots.size()));
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+        if (failureCount.get() > 0) {
+            debugprint(fmt("Map spawn on {}: success {}, failed {}",
+                    mapId, characterIds.size(), failureCount.get()));
+        }
+        return new ArrayList<>(characterIds);
+    }
+
+    /** A point to anchor reachability on: the map's first spawn portal, else (0,0). */
+    private static Point spawnAnchor(MapleMap map) {
+        var portal = map.getPortal(0);
+        return portal != null ? portal.getPosition() : new Point(0, 0);
+    }
+
+    /**
+     * Stroll a bot to a random reachable walking point on its current map, on the dynamic engine.
+     *
+     * <p>Recording-free sibling of {@link #botMoveToPlatformAnyUnoccupiedSpot} for maps that have
+     * no platform pack. No-op while a stroll is already in progress, so an FSM that calls this
+     * each idle tick does not thrash the target mid-walk.
+     */
+    public static void botStrollOnMap(Character fakechar) {
+        if (fakechar == null || fakechar.getMap() == null || GCMovement.isMoving(fakechar)) {
+            return;
+        }
+        Point pos = fakechar.getPosition();
+        Point spot = BotSpotPicker.pickGroundSpot(fakechar.getMap(), pos.x, pos.y);
+        if (spot != null) {
+            GCMovement.move(fakechar, spot.x, spot.y);
+        }
     }
 
     private static Point findUnoccupiedPointInRadius(Platform platform, List<Point> occupied, Point center, int radius) {

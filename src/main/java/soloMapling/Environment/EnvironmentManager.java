@@ -48,7 +48,6 @@ import static soloMapling.DebugUtilities.debugprint;
 import static soloMapling.DebugUtilities.fmt;
 import static soloMapling.Environment.PlatformPlacement.createBotWithRetry;
 import static soloMapling.Environment.PlatformPlacement.getAllCharsOnMap;
-import static soloMapling.Environment.PlatformPlacement.getMainPlatformIds;
 import static soloMapling.Environment.PlatformPlacement.spawnBotsOnMapOnPlatform;
 import static soloMapling.Environment.PlatformPlacement.spawnBotsOnMapOnPlatformInRadius;
 import static soloMapling.Environment.PlatformPlacement.spawnFillerBots;
@@ -1121,25 +1120,13 @@ public class EnvironmentManager {
 
     public static void spawnOPQBotsInLobby() {
         int totalBots = scaledAmbient(10 + random().nextInt(6)); // 10-15, scaled
-        List<String> platforms = getMainPlatformIds(OPQ_LOBBY);
 
-        if (platforms.isEmpty()) {
-            debugprint("No platforms found for OPQ lobby map");
-            return;
-        }
+        debugprint(fmt("Spawning {} OPQ bots on the lobby's walkable ground...", totalBots));
 
-        debugprint(fmt("Spawning {} OPQ bots across {} platforms in lobby...", totalBots, platforms.size()));
-
-        List<Integer> allBotIds = new ArrayList<>();
-        int perPlatform = totalBots / platforms.size();
-        int remainder = totalBots % platforms.size();
-
-        for (int i = 0; i < platforms.size(); i++) {
-            int count = perPlatform + (i < remainder ? 1 : 0);
-            if (count <= 0) continue;
-            List<Integer> ids = spawnBotsOnMapOnPlatform(count, OPQ_LOBBY, platforms.get(i));
-            allBotIds.addAll(ids);
-        }
+        // Placed by the map's own WZ terrain rather than its recorded platform pack, matching the
+        // other quest lobbies (PqBotSpawner) - the bots move on the dynamic engine now, which
+        // needs no recordings. Falls back to the map's spawn portal when the graph is not baked.
+        List<Integer> allBotIds = PlatformPlacement.spawnBotsOnMap(totalBots, OPQ_LOBBY);
 
         if (!allBotIds.isEmpty()) {
             // OrbisPQ's own eligibility test (OrbisPQ.js) is level 51-70: a level-50 bot standing

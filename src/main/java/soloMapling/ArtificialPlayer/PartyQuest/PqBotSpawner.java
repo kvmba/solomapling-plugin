@@ -5,11 +5,8 @@ import soloMapling.ArtificialPlayer.BotHelpers;
 import soloMapling.ArtificialPlayer.BotTypeManager;
 import soloMapling.Environment.PlatformPlacement;
 
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Random;
-
-import static soloMapling.Environment.PlatformPlacement.getMainPlatformIds;
 
 /**
  * Puts quest bots where a player can actually recruit them.
@@ -64,11 +61,6 @@ public final class PqBotSpawner {
         if (point == null || type == null) {
             return List.of();
         }
-        List<String> platforms = getMainPlatformIds(point.recruitMap());
-        if (platforms.isEmpty()) {
-            // A map with no walkable platforms is a data gap, not a reason to place bots badly.
-            return List.of();
-        }
 
         // Three times what one player would need. A lobby wants a crowd the way Orbis's does,
         // not exactly enough to start: a handful of bots that matches the party size to the
@@ -81,7 +73,9 @@ public final class PqBotSpawner {
             return List.of();
         }
 
-        List<Integer> all = placeOn(point, platforms, want);
+        // Placed by the map's own WZ terrain, not a recorded platform pack: only Orbis's lobby
+        // ever shipped one, so the other quests' lobbies had no way to place a bot at all.
+        List<Integer> all = PlatformPlacement.spawnBotsOnMap(want, point.recruitMap());
         if (all.isEmpty()) {
             return all;
         }
@@ -97,7 +91,7 @@ public final class PqBotSpawner {
      * Spawn a bot party in every quest's recruit lobby.
      *
      * <p>One call for the whole table, so adding a quest to the plan is a row there rather than
-     * a new spawn method here. A quest whose lobby has no platforms, or whose bot type is
+     * a new spawn method here. A quest whose lobby has no walkable ground, or whose bot type is
      * missing, is skipped rather than placed somewhere it cannot be recruited.
      */
     public static void spawnAllQuestLobbies() {
@@ -136,33 +130,6 @@ public final class PqBotSpawner {
             case "BossRushPQ" -> BotTypeManager.BotType.BOSS_RUSH_PQ_BOT;
             default -> null;
         };
-    }
-
-    /**
-     * Spread the bots over the map's platforms, a few per platform, and return their ids.
-     *
-     * <p>Spread rather than piled in one spot so a recruiting player sees a lobby that looks
-     * like a lobby; the placement helper already avoids overlapping them.
-     */
-    private static List<Integer> placeOn(PqRecruitPoints.Point point, List<String> platforms,
-                                         int count) {
-        List<Integer> ids = new ArrayList<>();
-        // Whole share first, then one each to the leading platforms for the remainder - the
-        // same split the Orbis lobby has always used. Note the share may be zero: a room with
-        // more platforms than bots must leave most of them empty, and forcing a bot onto each
-        // (Math.max(1, ...) here was the earlier mistake) multiplies the count by the number of
-        // platforms instead of placing the number asked for.
-        int perPlatform = count / platforms.size();
-        int remainder = count % platforms.size();
-        for (int i = 0; i < platforms.size(); i++) {
-            int here = perPlatform + (i < remainder ? 1 : 0);
-            if (here <= 0) {
-                continue;
-            }
-            ids.addAll(PlatformPlacement.spawnBotsOnMapOnPlatform(here, point.recruitMap(),
-                    platforms.get(i)));
-        }
-        return ids;
     }
 
     /**

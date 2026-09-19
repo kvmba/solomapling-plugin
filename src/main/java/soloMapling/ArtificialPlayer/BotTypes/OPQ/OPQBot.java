@@ -12,9 +12,9 @@ import soloMapling.ArtificialPlayer.BotGeneration;
 import soloMapling.ArtificialPlayer.BotLogic;
 import soloMapling.ArtificialPlayer.BotMessagingSystem.ChatMessage;
 import soloMapling.ArtificialPlayer.BotMessagingSystem.MessageQueue;
-import soloMapling.ArtificialPlayer.BotMovementSystem.MovementCommands;
 import soloMapling.ArtificialPlayer.BotPartySystem.BotPartyLogic;
 import soloMapling.ArtificialPlayer.BotSM;
+import soloMapling.ArtificialPlayer.GCMoveSystem.GCMovement;
 import soloMapling.ArtificialPlayer.PartyQuest.PqActions;
 import soloMapling.ArtificialPlayer.BotTypes.OPQ.OPQSharedContext.OPQPhase;
 import soloMapling.Environment.BotMessages;
@@ -26,7 +26,6 @@ import soloMapling.server.BotTiming;
 import java.awt.Point;
 import java.util.Collections;
 import java.util.List;
-import java.util.Random;
 import java.util.concurrent.TimeUnit;
 
 import static soloMapling.ArtificialPlayer.BotCommandsPack.WarpCommands.botWarpMapOnPortal;
@@ -82,6 +81,13 @@ public class OPQBot extends BotSM {
         // whatever bot last bound itself - or null - so the altar's spawnNpc would silently
         // do nothing. See BotGeneration.adoptPrivateClient.
         BotGeneration.adoptPrivateClient(character);
+        // Drive this bot with the dynamic (WZ-terrain) engine for its whole life. Two reasons:
+        // the recorded-path engine replayed a Haste-speed player's packets at 1:1, so OPQ bots
+        // walked ~40% too fast; and recordings only ever existed for a handful of maps, so any
+        // quest room without one left the bot unable to move at all. Enable here (before the FSM
+        // and before any arrival warp) so the map-entry choreography already sees it as
+        // dynamic-controlled and skips replaying the recorded drop.
+        GCMovement.enable(character);
         this.orchestrator = OPQOrchestrator.getInstance();
         this.sharedContext = orchestrator.getSharedContext();
         orchestrator.registerBot(this);
@@ -313,11 +319,10 @@ public class OPQBot extends BotSM {
             lastRecruitMessageAt = now;
             debugLogf("Recruit chat sent: \"" + msg + "\"");
 
-            List<String> platforms = PlatformPlacement.getMainPlatformIds(getChr().getMapId());
-            if (!platforms.isEmpty()) {
-                String target = platforms.get(new Random().nextInt(platforms.size()));
-                PlatformPlacement.botMoveToPlatformAnyUnoccupiedSpot(getChr(), target);
-            }
+            // Stroll to a fresh spot on the lobby floor between shouts (dynamic engine - the
+            // lobby moves are no longer replayed from a recording). No-op while a stroll is
+            // already running, so the shout cadence can't thrash the target mid-walk.
+            PlatformPlacement.botStrollOnMap(getChr());
         }
     }
 
@@ -402,7 +407,7 @@ public class OPQBot extends BotSM {
                     "arrived within range of reactor oid=" + reactorOid + " (dx=" + dx + "px)");
             return;
         }
-        MovementCommands.pathFinderBetaAerial(getChr(), reactorPos);
+        PqActions.walkUnder(getChr(), reactorPos);
         waitFor(OPQConstants.NAVIGATE_SETTLE_MS); // let the walk land; range check re-runs next tick
         debugLogf("Stage1Navigate walking: dx=" + dx + " target=" + reactorPos);
     }
@@ -512,7 +517,7 @@ public class OPQBot extends BotSM {
         // Walk to the altar, not to the leader's old spot: the drop has to land inside the
         // altar's trigger box, and the altar sits at x=377 (the old target, x=497, was 20px
         // outside it to the right - which is why the altar never fired).
-        MovementCommands.pathFinderBeta(getChr(), OPQConstants.STAGE_1_DROP_POS);
+        PqActions.walkTo(getChr(), OPQConstants.STAGE_1_DROP_POS);
         waitFor(OPQConstants.NAVIGATE_SETTLE_MS); // settle before DROP_ITEMS ticks
         transitionTo(OPQBotState.STAGE_1_DROP_ITEMS, "return state done.");
     }
@@ -595,8 +600,8 @@ public class OPQBot extends BotSM {
     private void handleStage1Wait() {
         if (sharedContext.isStage1Complete() && orchestrator.isChamberlainSpawned()) {
             OPQOrchestrator.getInstance().followLeaderWarp(getChr(), STAGE_1_COMPLETE_TP);
-            // Walk to Portal
-            MovementCommands.moveToPortal(getChr(), 4);
+            // Walk to the portal on the top platform, then step through it.
+            PqActions.walkToPortal(getChr(), 4);
             transitionTo(OPQBotState.STAGE_1_TRANSITION, "stage1Complete flag flipped by orchestrator");
             return;
         }
@@ -639,7 +644,7 @@ public class OPQBot extends BotSM {
             blockingSleep(1000);
             OPQOrchestrator.getInstance().followLeaderWarp(getChr(), new Point(-260,-32)); // Spawn point for OPQ tower [x=-260,y=-32]
             blockingSleep(1000);
-            MovementCommands.pathFinderBeta(getChr(), new Point(159, -32)); // Walk to Portal [x=159,y=-32]
+            PqActions.walkTo(getChr(), new Point(159, -32)); // Walk to Portal [x=159,y=-32]
             transitionTo(OPQBotState.STAGE_1_TRANSITION_PT_2, "Waiting for leader to enter stage 2");
         }
     }
@@ -975,7 +980,7 @@ public class OPQBot extends BotSM {
                     "arrived at " + ordinal + " box (oid=" + reactorOid + ")");
             return;
         }
-        MovementCommands.pathFinderBetaAerial(getChr(), reactorPos);
+        PqActions.walkUnder(getChr(), reactorPos);
         waitFor(OPQConstants.NAVIGATE_SETTLE_MS); // let the walk land; range check re-runs next tick
         debugLogf("Stage2Navigate walking: dx=" + dx + " target=" + reactorPos);
     }
@@ -987,11 +992,9 @@ public class OPQBot extends BotSM {
             Reactor reactor = getChr().getMap().getReactorByOid(reactorOid);
             if (reactor != null) {
                 boolean boxIsLeft = reactor.getPosition().x < getChr().getPosition().x;
-                if (boxIsLeft && !MovementCommands.facingLeft(getChr())) {
-                    MovementCommands.microTurnAroundToLeft(getChr());
-                } else if (!boxIsLeft && MovementCommands.facingLeft(getChr())) {
-                    MovementCommands.microTurnAroundToRight(getChr());
-                }
+                // The dynamic engine owns the bot's facing (there is no recorded turn to replay),
+                // so ask it to face the box before the swing.
+                GCMovement.face(getChr(), boxIsLeft);
             }
         }
 
@@ -1109,7 +1112,7 @@ public class OPQBot extends BotSM {
         // x∈[-1758,-1666) y∈[-304,-161), and the old target (-1588,-127) was 78px outside it
         // on x. The landing point already accounts for the drop re-seating itself 85px down
         // onto the floor below the box - see OPQConstants.STAGE_2_DROP_POS.
-        MovementCommands.pathFinderBeta(getChr(), OPQConstants.STAGE_2_DROP_POS);
+        PqActions.walkTo(getChr(), OPQConstants.STAGE_2_DROP_POS);
         waitFor(OPQConstants.NAVIGATE_SETTLE_MS); // settle before DROP_ITEMS ticks
         transitionTo(OPQBotState.STAGE_2_DROP_ITEMS,
                 "arrived at music box drop zone");
@@ -1231,11 +1234,7 @@ public class OPQBot extends BotSM {
         MapleMap lobbyMap = mapForBot(getChr(), OPQConstants.OPQ_LOBBY);
         warpBotToLocation(getChr(), new Point(-233, 174), lobbyMap);
         blockingSleep(2000);
-        List<String> platforms = PlatformPlacement.getMainPlatformIds(getChr().getMapId());
-        if (!platforms.isEmpty()) {
-            String target = platforms.get(new Random().nextInt(platforms.size()));
-            PlatformPlacement.botMoveToPlatformAnyUnoccupiedSpot(getChr(), target);
-        }
+        PlatformPlacement.botStrollOnMap(getChr());
 
         transitionTo(OPQBotState.LOOP_CHECK, "exit-lobby complete, warped to recruitment lobby");
     }
@@ -1398,6 +1397,11 @@ public class OPQBot extends BotSM {
     @Override
     public synchronized void stopScheduledTask() {
         orchestrator.unregisterBot(this);
+        // Release the dynamic engine (and the shared movement lock it holds) when this bot is
+        // converted away or stopped. The recency-triggered converter reverses bot types on the
+        // SAME character, so leaving GC control enabled would cost the next owner a redundant
+        // driver and a held lock.
+        GCMovement.disable(getChr());
         super.stopScheduledTask();
     }
 

@@ -6,7 +6,6 @@ import soloMapling.ArtificialPlayer.BotSM;
 import soloMapling.BotLogger;
 import soloMapling.server.SoloMaplingUtilities;
 import soloMapling.ArtificialPlayer.BotCommandsPack.WarpCommands;
-import soloMapling.ArtificialPlayer.BotMovementSystem.MovementCommands;
 
 import java.util.function.BooleanSupplier;
 
@@ -187,7 +186,7 @@ public abstract class PartyQuestBot extends BotSM {
 
     /** Walk to a point, then pause, which is what most stage steps look like. */
     protected void goTo(java.awt.Point spot, long settleMs) {
-        MovementCommands.pathFinderBeta(getChr(), spot);
+        PqActions.walkTo(getChr(), spot);
         if (settleMs > 0) {
             try {
                 Thread.sleep(settleMs);
