@@ -45,9 +45,10 @@ public final class MapMobIndex {
     // medianLevel/mobCount span EVERY mob spawn (incl. exhibit/boss "display" mobs) — the "has mobs at
     // all" view. huntableMedianLevel/huntableCount span only grindable mobs (not boss-flagged, exp>0),
     // which is the count a TRAINING bot must select by. Both are -1 / 0 when the respective set is empty.
+    // town is the map's WZ info/town flag (1 = a town on the game's own world map).
     public record MapMobInfo(int medianLevel, int mobCount, int huntableMedianLevel, int huntableCount,
-                             List<Integer> mobIds, List<SpawnPos> spawnPoints) {
-        static final MapMobInfo NONE = new MapMobInfo(-1, 0, -1, 0, List.of(), List.of());
+                             boolean town, List<Integer> mobIds, List<SpawnPos> spawnPoints) {
+        static final MapMobInfo NONE = new MapMobInfo(-1, 0, -1, 0, false, List.of(), List.of());
     }
 
     // Shared, lazily-created WZ handle. Deliberately NOT a ThreadLocal: bot ticks are dispatched
@@ -92,6 +93,26 @@ public final class MapMobIndex {
         return info(mapId).mobCount();
     }
 
+    // Whether a map is a TOWN for the purposes of the ambient town bots (SocialBot's strolls,
+    // TownWandererBot's map family): a place a stationed/wandering bot may stand or stroll into. Two
+    // things qualify, and either is enough —
+    //   - it has no mobs at all (the classic town interior / connector: shop floors, the Kerning subway
+    //     entrance, the Helios elevator), OR
+    //   - its WZ info carries the town flag (info/town = 1) AND it has nothing to grind (huntableCount 0):
+    //     the game's own "this is a town" marker, with the guard that keeps a real hunting field which
+    //     merely carries the flag out of the town bots' reach.
+    // So the Aquarium zoo (230000003, town=1: caged boss-flagged display animals, exp 0-10, no attack)
+    // reads as the town it is and is strollable, while Herb Town's 251010000 (town=1 but holds live
+    // 4230505/4230506, lv47-48, PADamage 140+) does not — a town bot there would just get eaten. Under
+    // the old "has any mob → not a town" rule BOTH were misread as fields and walled off.
+    // Does NOT use the all-spawns level() (which would call the zoo a level-58 field); grinders are
+    // unaffected because TrainingMapFinder keys off the huntable view, so a no-huntable map is never a
+    // training target.
+    public static boolean isTown(int mapId) {
+        MapMobInfo mob = info(mapId);
+        return mob.mobCount() == 0 || (mob.town() && mob.huntableCount() == 0);
+    }
+
     // Mob ids the map is defined to spawn (from WZ life data), or empty for mobless maps (towns).
     public static List<Integer> mobIds(int mapId) {
         return info(mapId).mobIds();
@@ -119,6 +140,8 @@ public final class MapMobIndex {
                 return MapMobInfo.NONE;
             }
             Map<Integer, Integer> fhGroups = footholdGroups(mapData);
+            Data info = mapData.getChildByPath("info");
+            boolean town = DataTool.getIntConvert("town", info, 0) != 0; // same read as MapFactory.setTown
             List<Integer> levels = new ArrayList<>();
             List<Integer> huntableLevels = new ArrayList<>();
             List<Integer> mobIds = new ArrayList<>();
@@ -160,7 +183,7 @@ public final class MapMobIndex {
             int huntableMedian = huntableLevels.isEmpty()
                     ? -1 : huntableLevels.get(huntableLevels.size() / 2);
             return new MapMobInfo(levels.get(levels.size() / 2), levels.size(),
-                    huntableMedian, huntableLevels.size(), mobIds, positions);
+                    huntableMedian, huntableLevels.size(), town, mobIds, positions);
         } catch (RuntimeException e) {
             return MapMobInfo.NONE;
         }
