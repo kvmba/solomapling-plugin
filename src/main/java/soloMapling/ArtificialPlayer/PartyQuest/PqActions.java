@@ -5,6 +5,7 @@ import org.gms.scripting.event.EventInstanceManager;
 import org.gms.server.maps.MapItem;
 import org.gms.server.maps.MapObject;
 import org.gms.server.maps.MapleMap;
+import org.gms.server.maps.Portal;
 import org.gms.server.life.NPC;
 import org.gms.scripting.npc.NPCScriptManager;
 import soloMapling.ArtificialPlayer.BotAttackSystem.BotAttackDriver;
@@ -292,5 +293,24 @@ public final class PqActions {
             return;
         }
         bot.changeMap(bot.getWarpMap(bot.getMap().getPortal(portalId).getTargetMapId()), portalId);
+    }
+
+    /**
+     * Enter the closest portal to the bot, running the portal's script the way a real client
+     * does. Callers position the bot on the portal first (e.g. with {@link #walkTo}).
+     *
+     * <p>Several quests route rooms through script portals - Orbis's tower rooms are entered by
+     * the {@code in0N} portals, whose scripts warp to the room - so a bot that only walks onto
+     * one never leaves the tower. No-op without a client (script portals resolve their character
+     * through it).
+     */
+    public static void enterPortalHere(Character bot) {
+        if (bot == null || bot.getMap() == null || bot.getClient() == null) {
+            return;
+        }
+        Portal portal = bot.getMap().findClosestPortal(bot.getPosition());
+        if (portal != null) {
+            portal.enterPortal(bot.getClient());
+        }
     }
 }
