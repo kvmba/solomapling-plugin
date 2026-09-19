@@ -7,24 +7,21 @@ import java.util.List;
  * Amoria PQ ("Amorian Challenge") as its own scripts define it.
  *
  * <p>Six stages, and the quest numbers them off the map: the stage NPC computes
- * {@code (mapId - 670010200) / 100 + 1}, so a room tells you its own stage. That is worth
- * reading rather than re-deriving, because two of the stages are combination puzzles whose
- * rules differ from each other in a way a generic "stand on the platform" bot would get
- * wrong.
+ * {@code (mapId - 670010200) / 100 + 1}, so a room tells you its own stage.
  *
- * <p>Stage 2 is the area puzzle again - nine ropes, five people, the combination stored as
- * nine counts in {@code stage2combo}. Stage 3 looks the same but is not: it checks how many
- * of each quest item the party is carrying ({@code 4000000 + i}) against
- * {@code stage3combo}, so standing on the right rope is not enough - the item has to be in
- * the inventory. Stage 3's map has no areas at all, which is the giveaway.
+ * <p>The rope stages are area puzzles: the quest picks a combination over a set of areas and
+ * compares it against where the party stands, so the bot reads the published counts and stands on
+ * a spot. Stage 2 indexes the three areas of its sub-room ({@code 670010300/301/302}); stage 3
+ * indexes the nine ropes on {@code 670010400}.
  *
  * <p>Sources:
  * <ul>
  *   <li>{@code scripts/event/AmoriaPQ.js} - {@code minPlayers 6}, {@code maxPlayers 6},
- *       levels 40+, maps 670010200..670010800</li>
+ *       levels 40+, maps 670010200..670010800, the gender-mask eligibility check</li>
  *   <li>{@code scripts/npc/9201044.js} - Amos, who holds every stage check, the stage
  *       derivation, and both combination generators</li>
- *   <li>{@code wz/Map.wz/Map/Map6/670010400.img.xml} - the nine rope areas</li>
+ *   <li>{@code wz/Map.wz/Map/Map6/670010400.img.xml} - the nine rope areas the combination
+ *       indexes</li>
  * </ul>
  */
 public final class AmoriaPqData {
@@ -55,9 +52,17 @@ public final class AmoriaPqData {
     // =========================================================================
 
     /**
-     * The nine rope areas on 670010400, as the centres a body has to occupy. The combination
-     * is nine counts - {@code generateCombo1} fills it by repeatedly drawing from three
-     * slots - so a spot may want more than one body.
+     * Stage 2's three areas, on the {@code 670010300/301/302} sub-rooms the stage-1 gate opens
+     * onto, as the centres a body has to occupy. {@code generateCombo1} builds its combination by
+     * drawing from only three slots, so stage 2 is effectively a three-area puzzle.
+     */
+    public static final List<Point> STAGE_2_SPOTS = List.of(
+            new Point(-629, -1772), new Point(-45, -1861), new Point(540, -1996));
+
+    /**
+     * Stage 3's nine rope areas on {@code 670010400}, as the centres a body has to occupy.
+     * {@code generateCombo2} names five of these nine, and these centres are exactly the map's
+     * nine {@code area} rectangles.
      */
     public static final List<Point> ROPE_SPOTS = List.of(
             new Point(1465, 48), new Point(1631, 49), new Point(1792, 49),
@@ -70,19 +75,25 @@ public final class AmoriaPqData {
     /** Five bodies have to be on the ropes; the quest checks this before accepting a try. */
     public static final int BODIES_ON_ROPES = 5;
 
-    // =========================================================================
-    // Stage 3 - the same look, a different rule
-    // =========================================================================
+    /** The instance property a rope stage stores its answer in. */
+    public static String comboPropertyFor(int stage) {
+        return switch (stage) {
+            case 2 -> STAGE_2_COMBO;
+            case 3 -> STAGE_3_COMBO;
+            default -> null;
+        };
+    }
 
     /**
-     * The quest items stage 3 counts, one per slot: {@code 4000000 + i}. This stage has no
-     * areas on its map, so it is the items that decide - the party has to be holding the
-     * counts the combination names, slot by slot.
+     * The body spots a rope stage's combination indexes, in the order the counts map to them, or
+     * empty when the stage is not a rope puzzle this bot handles.
      */
-    public static final int STAGE_3_ITEM_BASE = 4000000;
-
-    public static int stageThreeItemFor(int slot) {
-        return STAGE_3_ITEM_BASE + slot;
+    public static List<Point> spotsFor(int stage) {
+        return switch (stage) {
+            case 2 -> STAGE_2_SPOTS;
+            case 3 -> ROPE_SPOTS;
+            default -> List.of();
+        };
     }
 
     // =========================================================================
@@ -110,20 +121,20 @@ public final class AmoriaPqData {
     }
 
     /**
-     * Which rope this body should take, given its rank among the bots.
+     * Which spot this body should take, given its rank among the bots.
      *
      * <p>Counted from the far end so the bots do not crowd the slots the player is likeliest
      * to walk to - the quest counts every body in the instance, the real one included, and
-     * wants exactly five on the ropes.
+     * wants exactly five standing on the areas.
      */
-    public static Point myRope(int[] counts, int bodyIndex) {
-        if (counts == null || bodyIndex < 0) {
+    public static Point mySpot(int[] counts, List<Point> spots, int bodyIndex) {
+        if (counts == null || spots == null || bodyIndex < 0) {
             return null;
         }
         java.util.ArrayList<Point> slots = new java.util.ArrayList<>();
-        for (int i = 0; i < counts.length && i < ROPE_SPOTS.size(); i++) {
+        for (int i = 0; i < counts.length && i < spots.size(); i++) {
             for (int n = 0; n < counts[i]; n++) {
-                slots.add(ROPE_SPOTS.get(i));
+                slots.add(spots.get(i));
             }
         }
         if (bodyIndex >= slots.size()) {

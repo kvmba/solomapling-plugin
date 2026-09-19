@@ -53,10 +53,11 @@ public final class MagatiaPqData {
     // =========================================================================
 
     /**
-     * The answer keys for stage 6, one per position. The quest writes each as
-     * {@code stage6_combN}, so the bot reads the lot rather than guessing a pattern.
+     * The stage-6 combination properties: the quest writes four of them ({@code stage6_comb1..4}),
+     * each a ten-digit string of digits 0-3 naming the correct column per row. The bot reads and
+     * repeats them rather than guessing a pattern.
      */
-    public static final int STAGE_6_SLOTS = 5;
+    public static final int STAGE_6_SLOTS = 4;
 
     public static String stage6Key(int slot) {
         return "stage6_comb" + (slot + 1);
