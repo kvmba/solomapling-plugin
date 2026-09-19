@@ -227,14 +227,18 @@ public final class BotAttackData {
     }
 
     /* Like projectileFor(weapon) but, for a claw bot, returns the level-appropriate star the bot chose
-     * at creation (ThrowingStarSelector), falling back to subi when there is none / the attacker isn't
-     * a registered bot. Bow/gun/dagger are unaffected. */
+     * at creation (ThrowingStarSelector), and for a gun bot the level-appropriate bullet tier
+     * (GunBulletSelector). Both fall back to the plain weapon default when there is no better id.
+     * Bow/dagger are unaffected. */
     public static int projectileFor(WeaponType weaponType, Character bot) {
         if (weaponType == WeaponType.CLAW) {
             int chosen = ThrowingStarSelector.chosenStar(bot);
             if (chosen > 0) {
                 return chosen;
             }
+        }
+        if (weaponType == WeaponType.GUN && bot != null) {
+            return GunBulletSelector.forLevel(bot.getLevel());
         }
         return projectileFor(weaponType);
     }
