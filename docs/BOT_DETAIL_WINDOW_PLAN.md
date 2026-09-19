@@ -5,8 +5,8 @@
 > 本文件保留为设计档案；实现与规划的差异见文末 §11「实现记录」。
 > 目标：玩家在游戏内打开某个 bot 的**角色详情窗口**时，窗口像真人一样显示：怪物卡收集、勋章（称号）收藏、
 > 心愿单（想要购买的道具）。
-> 约束（用户已确认）：① **出生时预置、零宿主改动**；② 勋章 = **佩戴勋章 + 勋章收藏(29xxx任务)**；
-> ③ **尽量不改宿主 GMS083**。
+> 约束（用户已确认）：① **出生时预置**；② 勋章 = **佩戴勋章 + 勋章收藏(29xxx任务)**；
+> ③ 宿主默认不改（**后续用户放开**，故把唯一的运行期反射替换为宿主 public API，见 §11.2）。
 > 交付：**逐个处理、逐个复查、逐个提交**（5 个提交，见 §6）。
 
 ---
@@ -24,7 +24,7 @@
    | 想要购买的道具 | 心愿单 SN 列表（≤10） | `chr.getCashShop().getWishList()` | 继承模板 cid → 空/同质 |
 
 2. **三类都是纯 `Character` 内存引擎态** → 出生时直写即完成，"打开时补充"由"出生时已就位"达成。
-   **无需发包代码、无需改宿主、无需新增事件**。
+   **无需发包代码、无需新增事件**；怪物卡聚合经宿主新增的 `MonsterBook.setCardCounts` 写入（§11.2）。
 
 3. **逐卡列表（`addMonsterBookInfo`）不参与本窗口**：它只出现在 `getCharInfo`（`SET_FIELD`，**仅真玩家登录时发给本人**）
    与 `openCashShop`，而 bot 的 `BotClient.sendPacket` 是 no-op 且无任何路径对其调用 → **bot 的 `MonsterBook.cards` 映射永不被序列化**。
@@ -95,7 +95,7 @@ ambient bot 用 `fmbot` 模板 cid 载入 → 全服共享模板那份。**插�
 
 | # | 事实（证据） | 对方案的影响 |
 |---|---|---|
-| C1 | `MonsterBook` 的 4 个计数器 **private 且无 setter**（`javap -p`）；`addCard(Client,id)` 会 `map.broadcastMessage`+发包，共享 `BotClient.getPlayer()` 常为 null → NPE | **必须反射写计数器**（同 `BotPetFactory` 先例）；不可用 `addCard` |
+| C1 | `MonsterBook` 的计数器原为 **private 且无 setter**；`addCard(Client,id)` 会 `map.broadcastMessage`+发包，共享 `BotClient.getPlayer()` 常为 null → NPE | **宿主新增 public `MonsterBook.setCardCounts(normal,special)`**（本方案附带，唯一宿主改动，已完成 `c024f68`）；插件直接调用，**无反射** |
 | C2 | 封面 `getCardMobId(cover)` 返回 `int`，若 `cover>0` 而 `monstercarddata` 无该行 → **拆箱 NPE，打断该 bot 对所有人的窗口** | **一律 `setBookCover(0)`**（安全，非仅观感） |
 | C3 | `updateQuestStatus` 有副作用（`awardQuestPoint`→`gainFame`、`announceUpdateQuest` **发包**） | 勋章收藏**用 `getQuestNAdd(...).setStatus(COMPLETED)` 绕开**（仅 `quests.put`+字段赋值，无包/fame） |
 | C4 | `Character.getQuests()` 是 Lombok `@Getter` on **final Map**（**public、活引用**） | 加收藏用 `getQuestNAdd`（synchronized，无需反射）；`clear` 用 `getQuests().remove`（**无需反射**，v1 误称需反射） |
@@ -112,7 +112,7 @@ ambient bot 用 `fmbot` 模板 cid 载入 → 全服共享模板那份。**插�
 | WZ 单文件扫描 | `BotMedalPool.load()`（`XMLWZData.parse` + `DataTool`） |
 | WZ 整包读取 | `DataProviderFactory.getDataProvider(WZFiles.QUEST).getData("Act.img")` + `DataTool.getInt` |
 | 确定性 cid 混杂 | `BotMountSystem.BotMount.mix(int cid)` |
-| 反射写字段 | `BotPetSystem.BotPetFactory.createInMemory`（先例） |
+| 集合聚合写入 | 宿主 `MonsterBook.setCardCounts(int,int)`（本方案新增的 public API，取代反射） |
 | 可佩戴勋章集 | `BotMedalPool.eligibleFor(Character)`（public；已封 reqLevel/reqJob/reqStats/reqPop + 合法性） |
 | 佩戴勋章 id | `BotMedal.currentMedalId(Character)`（已有） |
 
@@ -129,12 +129,12 @@ ambient bot 用 `fmbot` 模板 cid 载入 → 全服共享模板那份。**插�
 
 ## 2. 总体设计
 
-新增包 `soloMapling.ArtificialPlayer.BotDetailSystem`（**零改宿主**）：
+新增包 `soloMapling.ArtificialPlayer.BotDetailSystem`（宿主仅新增 1 个 public API，见 §11.2）：
 
 ```
 BotDetailSystem/
 ├─ BotDetailWindow.java   门面：ENABLED + apply(bot) / reroll(bot)
-├─ BotMonsterBook.java    怪物卡计数器（反射写 4 字段；不碰 cards）
+├─ BotMonsterBook.java    怪物卡计数器（调 host `setCardCounts`；不碰 cards）
 ├─ BotMedalBook.java      勋章收藏（Quest.wz 建 29xxx→114 映射；getQuestNAdd 写 COMPLETED）
 └─ BotWishList.java       心愿单（CashItemFactory 池；clearWishList+addToWishList）
 ```
@@ -181,7 +181,7 @@ BotDetailSystem/
   - 按 `mix(cid)` 派生顺序**无重复**取样 `normal` 个普通、`special` 个特殊；
   - `bookLevel` **精确复刻宿主 `calculateLevel()`**：`lv=0,e=1; do{lv++; e+=lv*10;}while(normal+special>=e);`（0 张时 =1）；
   - 返回 `{normalCard, specialCard, bookLevel}`（**不含 cards 映射**）。
-- **`apply(bot)`**：反射对 `bot.getMonsterBook()` 写 `normalCard/specialCard/bookLevel`。
+- **`apply(bot)`**：调 `bot.getMonsterBook().setCardCounts(normal, special)`（宿主 public API，内部重算 bookLevel）。
   **`bot.setBookCover(0)`**（C2 安全）。进程内写、无包、无库写。
 - **`clear(bot)`**：计数器归 0、`bookLevel=1`、`cover=0`（供 `reroll`）。
 - **持久性（关键修正）**：宿主 `MonsterBook.saveCards` **只写 `cards` 映射**，`loadCards` 又**由该映射反推计数器**
@@ -263,7 +263,7 @@ BotDetailSystem/
 | 风险 | 处置 |
 |---|---|
 | 封面 NPE（`getCardMobId` 拆箱） | **`cover=0`**（C2） |
-| 反射写 private 计数器 | `private int` 非 final，`setInt` 可用（已实测）；失败则 no-op（不影响 spawn） |
+| ~~反射写 private 计数器~~ | **已移除**：改用宿主 `MonsterBook.setCardCounts`（`c024f68`）。|
 | 商城未就绪致池空 | 运行期惰性取池、空则 no-op，下次 spawn 自然补 |
 | 同伴 `clear` 误删真实 29xxx 记录 | 低概率（同伴为 bot）；如需可在 `clear` 前只删"本方案投的"（MVP 不做，YAGNI） |
 | `bookLevel` 与宿主口径差异 | 精确复刻 `calculateLevel()` 公式 |
@@ -339,7 +339,7 @@ BotDetailSystem/
 7. **GM 巡检（#4）**：`!bot detail <cid>` 打印窗口三类实际数据（读活引擎态，非预设输入）；`!bot rerolldetail <cid>`。
 8. **测试**：`BotMonsterBookTest`(5) / `BotMedalBookTest`(6) / `BotWishListTest`(5) 全绿；
    全套 **1151 tests, 0 failures**（提交 #4 前跑）。
-9. **宿主零改动**：`/workspace/GMS083` 工作树干净。
+9. **宿主改动**：仅 1 处——`MonsterBook.setCardCounts`（§11.2）；其余宿主工作树不变。
 
 ### 11.1 自审（第二次完整审查）发现并修复的真实缺陷
 
@@ -353,3 +353,17 @@ BotDetailSystem/
 - **rebase**：工作期间 `optimize/performance` 前进（PQ 动态引擎重构，`82acb5c → 39b0bd6`），且与
   `BotGeneration`/`EnvironmentManager` 有文件交叠；已 rebase 到现 tip，9 处注入点与全部改动完整保留，
   重建 + 全套测试（1148）绿。
+
+### 11.2 宿主改动（用户放开"尽量不改宿主"后）
+
+- 动机：本方案唯一的**运行期反射**是 `BotMonsterBook` 写 `MonsterBook` 的三个私有计数器。用户明确要求"去除 runtime 反射"，
+  并放开宿主修改权限。
+- 改动（唯一、最小）：`gms-server/.../client/MonsterBook.java` 新增
+  `public void setCardCounts(int normalCard, int specialCard)`：设置两计数器并用与 `addCard` **完全相同**的曲线重算
+  `bookLevel`。把 `calculateLevel()` 的循环抽成共享的 `private static int levelForTotal(int)`，两条路径同源（无行为变化）。
+  - 提交：host `c024f682`（分支 `feat/monsterbook-set-aggregates`）。
+  - 无 pack/协议变更；纯新增 public 方法 + 等价重构。
+- 插件侧：删除全部 `java.lang.reflect`，改调 `book.setCardCounts(normal, special)`，并删除插件内重复的 `bookLevelFor`
+  公式（逻辑归位宿主）。净减 ~65 行。提交：plugin `4ac3b5a`。
+- 为何不选其它方案：`addCard` 需活客户端且会广播；直接加 `setBookLevel` 会绕过计数一致性；`setCardCounts` 一处封住
+  "计数 + 等级"不变式，是最小且正确的宿主 API。
