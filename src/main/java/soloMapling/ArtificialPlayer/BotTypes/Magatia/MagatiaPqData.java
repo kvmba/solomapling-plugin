@@ -41,9 +41,6 @@ public final class MagatiaPqData {
     public static final int ENTRY_MAP_Z = 926100000;
     public static final int LAST_MAP_Z  = 926100600;
 
-    /** The Alcadno run's entry map. Kept named for callers that need one. */
-    public static final int ENTRY_MAP = ENTRY_MAP_A;
-
     /** The room whose monsters carry the stage-1/2 items (Alcadno range). */
     public static final int MOB_ROOM_1 = 926110100;
     public static final int MOB_ROOM_2 = 926110200;
