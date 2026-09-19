@@ -5,8 +5,8 @@ import java.util.List;
 // Cheap per-map grind measurement, computed once at the first SELECT_SPOT and cached in SpotFinder.
 // The spawn layout is static WZ data, so this is effectively build-once. It is the SINGLE map
 // measurement the grind sub-FSM reads: SELECT_SPOT scores `spots` for a bot (the §4 score + a per-bot
-// reachability filter), and WAIT's relocate patience is regime-adjusted (GrindBrain.waitPatienceMs /
-// unproductiveMs — COMPACT camps through lulls, SPREAD/SPARSE leave a dry spot sooner). The regime label
+// reachability filter), and WAIT's relocate patience is regime-adjusted (CampStrategy's regime-scaled
+// lull window / unproductiveMs — COMPACT camps through lulls, SPREAD/SPARSE leave a dry spot sooner). The regime label
 // only nudges knob DEFAULTS (patience / relocate-eagerness) and debug narration — it NEVER branches the
 // FSM. walkable* is the bbox over the walkable ledges (the grind-relevant "size", not the VR rectangle).
 //
