@@ -117,10 +117,19 @@ public class ItemInformationProviderUtilities {
                         EquipType.DAGGER
                 ));
                 break;
+            case PIRATE:
+                // An unbranched pirate (500) can carry either line's weapon. getJobStyle() only
+                // returns PIRATE for the 500 job, so this covers exactly the pre-branch case.
+                equipTypes.addAll(List.of(
+                        EquipType.KNUCKLER,
+                        EquipType.PISTOL
+                ));
+                break;
             case BRAWLER:
             case GUNSLINGER:
-                // getJobStyle() resolves the pirate line to BRAWLER/GUNSLINGER; Brawler carries a
-                // knuckle, Gunslinger a gun. Both share the pirate reqJob (16). No shield in v83.
+                // getJobStyle() resolves the branched pirate line to BRAWLER/GUNSLINGER; Brawler
+                // carries a knuckle, Gunslinger a gun. Both share the pirate reqJob (16). No shield
+                // in v83.
                 equipTypes.addAll(List.of(
                         EquipType.KNUCKLER,
                         EquipType.PISTOL

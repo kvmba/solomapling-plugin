@@ -4,6 +4,15 @@
 
 ### Fixes
 
+- **Pirate (base class 5) is now a first-class bot job.** Ambient / training bots previously never rolled a pirate (`rollBaseClass` excluded class 5), and a pirate's `getJobStyle()` resolves to `BRAWLER`/`GUNSLINGER` (never `PIRATE`), so any style-keyed lookup silently degraded it to "no job" (reqJob 0). Fixed end to end:
+  - `rollBaseClass` now yields pirates at ~6% (rarest, after thief > mage > warrior > bowman); `selectJobForClass` covers all four tiers (500 / 510,520 / 511,521 / 512,522).
+  - `getReqJobViaJobStyle` maps `BRAWLER`/`GUNSLINGER` → `PIRATE` (reqJob 16), so a pirate can wear its knuckle/gun and pirate armour.
+  - Gear selection equips knuckle (brawler) or gun (gunslinger), branched on the job id (the decorator runs before STR/DEX are aligned).
+  - Bot combat registers both pirate lines (Double Uppercut / Energy Blast / Barrage; Invisible Shot / Burst Fire / Rapid Fire / Battleship Cannon) plus a 1st-job weapon seed (knuckle melee / gun ranged, like the 1st-job rogue).
+  - Bot buffs cover the pirate boosters (2nd), Transformation / Octopus (3rd) and Maple Warrior / Speed Infusion (4th).
+  - `!bot spawn ... pirate` and `!bot trainhere <brawler|...|corsair>` are accepted.
+  - Free-Market pirate shops now stock pirate gear instead of falling back to classless common items.
+  - Note: pirate attack skills render their weapon's default swing/shot rather than a bespoke pose — the client action ids for pirate skills are not in the action enum the plugin draws its overrides from.
 - **Bot fame was the bot's internal character id.** `BotGeneration` set every artificial player's 人气度 to its own cid (`setFame(botId)`, a debug leftover from the upstream port), so all bots showed a five-digit reputation starting at 20000. Fame is now rolled from level and tier instead (see `BotFame`):
   - low-level bots land around **-10..30** (beginners sit in the low single digits)
   - the ceiling grows with level but never exceeds **300**

@@ -101,6 +101,11 @@ public class ArtificialShopGenerator {
             case MAGICIAN -> generateEquipListByJob(tier, ClassStyle.MAGICIAN, hotRoom);
             case BOWMAN -> generateEquipListByJob(tier, ClassStyle.BOWMAN, hotRoom);
             case THIEF -> generateEquipListByJob(tier, ClassStyle.THIEF, hotRoom);
+            // Pirates have no curated ClassStyle yaml, but generateEquipListIIPU (the same
+            // cache-backed generator the other classes append) stocks the pirate reqJob (16) pool
+            // - knuckles, guns and pirate armour - with no new data file. Called 2-arg like the
+            // other classes' append, so items are not force-scrolled.
+            case PIRATE -> generateEquipListIIPU(tier, Job.PIRATE);
             default -> Collections.emptyList();
         };
     }

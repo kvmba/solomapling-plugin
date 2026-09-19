@@ -212,9 +212,7 @@ public class ArtificialFreeMarket {
                 generateShop(merchant, Job.BEGINNER);
             };
             case Pirate -> () -> {
-                debugprint("Generating pirate shop");
-                generateShop(merchant, Job.BEGINNER);
-                // generatePirateEquipShop(merchant);
+                generateShop(merchant, Job.PIRATE);
             };
             case Scroll -> () -> {
                 repeatAction(3, () -> generateSecondaryShop(merchant, Scroll)); // generateScrollShop(newchar, tier));
@@ -283,7 +281,7 @@ public class ArtificialFreeMarket {
         }
     }
 
-    private static final Job[] CLASS_JOBS = {Job.WARRIOR, Job.MAGICIAN, Job.BOWMAN, Job.THIEF, Job.BEGINNER};
+    private static final Job[] CLASS_JOBS = {Job.WARRIOR, Job.MAGICIAN, Job.BOWMAN, Job.THIEF, Job.PIRATE, Job.BEGINNER};
 
     private static void generateBonusEquipsForHotRoom(HiredMerchantArtificial merchant) {
         Job bonusClass = CLASS_JOBS[random.nextInt(CLASS_JOBS.length)];
