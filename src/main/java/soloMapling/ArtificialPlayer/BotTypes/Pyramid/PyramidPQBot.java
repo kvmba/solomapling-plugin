@@ -10,7 +10,7 @@ import soloMapling.ArtificialPlayer.PartyQuest.PqActions;
  *
  * <p>Unlike every other bot here, this one is built around <em>not</em> attacking things. The
  * run lives on a gauge: killing feeds it, missing takes a large bite out of it, and at zero
- * the party fails. The quest marks the monster that costs the miss, so the bot leaves those
+ * the party fails. The quest marks the one monster that costs the miss, so the bot leaves it
  * alone and works the rest - which is a rule about restraint, and the only place in this
  * package where the right move is to hold a swing.
  *
@@ -71,8 +71,8 @@ public class PyramidPQBot extends PartyQuestBot {
     /**
      * Whether everything in reach is safe to attack.
      *
-     * <p>Conservative on purpose: if anything in the room carries the forbidden mark, the bot
-     * stops swinging rather than gambling that the target it picks will be a safe one. A miss
+     * <p>Conservative on purpose: if the forbidden Pharaoh Jr. Yeti is anywhere in the room, the
+     * bot stops swinging rather than gambling that the target it picks will be a safe one. A miss
      * costs the party more than a paused bot does, and the quest's own warning is explicit.
      */
     private boolean hasOnlyKillableMonsters() {
@@ -81,7 +81,7 @@ public class PyramidPQBot extends PartyQuestBot {
             return false;
         }
         for (var mob : mobs) {
-            if (mob.getId() == PyramidPqData.FORBIDDEN_MARK) {
+            if (PyramidPqData.isForbidden(mob.getId())) {
                 return false;
             }
         }

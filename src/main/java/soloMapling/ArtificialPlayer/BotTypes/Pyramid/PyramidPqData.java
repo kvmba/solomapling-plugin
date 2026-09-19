@@ -46,10 +46,23 @@ public final class PyramidPqData {
     public static final String[] MODES = {"EASY", "NORMAL", "HARD", "HELL"};
 
     /**
-     * The monster the quest warns against attacking, which is what costs gauge rather than
-     * adding to it. Duarte names its mark ({@code 04032424}) in the briefing.
+     * The monster the quest warns against attacking - the Pharaoh Jr. Yeti that carries the
+     * "Missed Mark". Duarte names the mark in his briefing as {@code #v04032424#}, which is why
+     * the item id shows up there; the actual forbidden MONSTERS are these two ids. Getting this
+     * wrong (comparing a mob id against the mark's item id) makes the check match nothing, so a
+     * bot would happily kill the one monster that costs the party its gauge.
+     *
+     * <p>9700019 is the decoy in the ordinary bonus rooms; 9700029 is the variant two maps use
+     * ({@code killing_BonusSetting.js}: maps 926010013 and 926010070). Both are named
+     * "Pharaoh Jr. Yeti".
      */
-    public static final int FORBIDDEN_MARK = 4032424;
+    public static final int FORBIDDEN_MOB = 9700019;
+    public static final int FORBIDDEN_MOB_ALT = 9700029;
+
+    /** Whether a monster id is the forbidden Pharaoh Jr. Yeti - the one a bot must not attack. */
+    public static boolean isForbidden(int mobId) {
+        return mobId == FORBIDDEN_MOB || mobId == FORBIDDEN_MOB_ALT;
+    }
 
     /**
      * Whether a map is one of the pyramid's rooms. The engine already knows the bounds, so
