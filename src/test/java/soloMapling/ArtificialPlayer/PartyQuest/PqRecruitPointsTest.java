@@ -2,6 +2,8 @@ package soloMapling.ArtificialPlayer.PartyQuest;
 
 import org.junit.jupiter.api.Test;
 
+import soloMapling.ArtificialPlayer.BotTypes.Magatia.MagatiaPqData;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -25,9 +27,42 @@ class PqRecruitPointsTest {
     void everyQuestWithABotHasARecruitPoint() {
         for (String name : new String[]{
                 "HenesysPQ", "KerningPQ", "LudiPQ", "PiratePQ", "AmoriaPQ",
-                "EllinPQ", "MagatiaPQ", "ZakumPQ", "HorntailPQ", "BossRushPQ", "OrbisPQ"}) {
+                "EllinPQ", "MagatiaPQ", "MagatiaPQ_Z", "ZakumPQ", "HorntailPQ",
+                "BossRushPQ", "OrbisPQ", "Pyramid", "Dojo"}) {
             assertNotNull(PqRecruitPoints.byName(name), name + " has no recruit point");
         }
+    }
+
+    @Test
+    void magatiaRecruitsInBothTowns() {
+        // Alcadno and Zenumist are separate towns with separate lobbies (and separate in-run map
+        // ranges); a run started from one cannot see a bot standing in the other.
+        assertEquals(261000021, PqRecruitPoints.byName("MagatiaPQ").recruitMap());
+        assertEquals(261000011, PqRecruitPoints.byName("MagatiaPQ_Z").recruitMap());
+        // Same party and level rules, because it is the same quest.
+        assertEquals(PqRecruitPoints.byName("MagatiaPQ").minLevel(),
+                PqRecruitPoints.byName("MagatiaPQ_Z").minLevel());
+        assertEquals(PqRecruitPoints.byName("MagatiaPQ").maxPlayers(),
+                PqRecruitPoints.byName("MagatiaPQ_Z").maxPlayers());
+    }
+
+    @Test
+    void pyramidAndDojoRecruitInTheirEntryMaps() {
+        // Duarte's menu map (not the in-run instance map), and the Dojo hall the master stands in.
+        assertEquals(926010000, PqRecruitPoints.byName("Pyramid").recruitMap());
+        assertEquals(925020001, PqRecruitPoints.byName("Dojo").recruitMap());
+    }
+
+    @Test
+    void aMagatiaBotIsRecognisedInEitherVersionsMapRange() {
+        // The two versions run in parallel ranges; a bot that only knew the Alcadno one would
+        // read a Zenumist run as "not in a quest" and never work a stage.
+        assertTrue(MagatiaPqData.isQuestRoom(926110000)); // Alcadno entry
+        assertTrue(MagatiaPqData.isQuestRoom(926110600)); // Alcadno last
+        assertTrue(MagatiaPqData.isQuestRoom(926100000)); // Zenumist entry
+        assertTrue(MagatiaPqData.isQuestRoom(926100600)); // Zenumist last
+        assertFalse(MagatiaPqData.isQuestRoom(926100700)); // exit map, neither range
+        assertFalse(MagatiaPqData.isQuestRoom(261000021)); // a town, not a room
     }
 
     @Test

@@ -16,10 +16,21 @@ import soloMapling.ArtificialPlayer.PartyQuest.PqActions;
  * as its own property, so the bot fetches them instead of trying arrangements. The escort at
  * the end is driven by talking to Yulete and then surviving what follows, and the talking is
  * the leader's - a bot cannot start a conversation that decides the run's outcome.
+ *
+ * <p>Both versions run the same mechanics in parallel map ranges (Alcadno {@code 92611xxxx},
+ * Zenumist {@code 92610xxxx}) and recruit in different towns, so the bot is spawned in and
+ * works out of whichever lobby it was placed in.
  */
 public class MagatiaPQBot extends PartyQuestBot {
 
     private static final int FIGHT_PASSES = 20;
+
+    /**
+     * The town this bot was recruited from, captured at construction (it is built while standing
+     * in its lobby). Returned to when a run ends, so an Alcadno bot goes back to Alcadno and a
+     * Zenumist one to Zenumist rather than both piling into one town.
+     */
+    private final int lobbyMap;
 
     public MagatiaPQBot(Character character) {
         super(character);
@@ -28,6 +39,9 @@ public class MagatiaPQBot extends PartyQuestBot {
         // The stage scripts resolve their speaker through client.getPlayer() when they run,
         // and the escort reads its own properties, so this bot needs its own client.
         BotGeneration.adoptPrivateClient(character);
+        this.lobbyMap = character.getMapId() == MagatiaPqData.RECRUIT_MAP_Z
+                ? MagatiaPqData.RECRUIT_MAP_Z
+                : MagatiaPqData.RECRUIT_MAP_A;
     }
 
     @Override
@@ -46,7 +60,7 @@ public class MagatiaPQBot extends PartyQuestBot {
 
     @Override
     protected int lobbyMapId() {
-        return MagatiaPqData.RECRUIT_MAP_A;
+        return lobbyMap;
     }
 
     @Override

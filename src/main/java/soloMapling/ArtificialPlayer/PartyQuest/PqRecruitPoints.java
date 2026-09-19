@@ -63,16 +63,30 @@ public final class PqRecruitPoints {
      * bots cannot disagree about where a quest recruits.
      */
     public static final List<Point> ALL = List.of(
-            new Point("HenesysPQ",   100000200,  10, 255, 3, 6),
-            new Point("KerningPQ",   103000000,  21,  30, 3, 4),
-            new Point("LudiPQ",      221024500,  35,  50, 5, 6),
-            new Point("PiratePQ",    251010404,  55, 100, 3, 6),
-            new Point("AmoriaPQ",    670010100,  40, 255, 6, 6),
-            new Point("EllinPQ",     300030100,  44,  55, 4, 6),
-            new Point("MagatiaPQ",   261000021,  71,  85, 4, 4),
-            new Point("ZakumPQ",     211042300,  50, 255, 1, 6),
-            new Point("HorntailPQ",  240050000, 120, 255, 6, 6),
-            new Point("BossRushPQ",  970030000,   1, 255, 1, 6));
+            new Point("HenesysPQ",    100000200,  10, 255, 3, 6),
+            new Point("KerningPQ",    103000000,  21,  30, 3, 4),
+            new Point("LudiPQ",       221024500,  35,  50, 5, 6),
+            new Point("PiratePQ",     251010404,  55, 100, 3, 6),
+            new Point("AmoriaPQ",     670010100,  40, 255, 6, 6),
+            new Point("EllinPQ",      300030100,  44,  55, 4, 6),
+            // Magatia runs two parallel versions that recruit in different towns: Alcadno and
+            // Zenumist. Same mechanics, same bot, different lobby and map range, so both towns
+            // need a row or the Zenumist one stands empty.
+            new Point("MagatiaPQ",    261000021,  71,  85, 4, 4),
+            new Point("MagatiaPQ_Z",  261000011,  71,  85, 4, 4),
+            new Point("ZakumPQ",      211042300,  50, 255, 1, 6),
+            new Point("HorntailPQ",   240050000, 120, 255, 6, 6),
+            new Point("BossRushPQ",   970030000,   1, 255, 1, 6),
+            // Duarte's menu map (the Pyramid Dunes), where Nett's Pyramid is applied for. The
+            // party version needs two members standing here, so a bot has to be one of them.
+            // Level band 40-60 is Duarte's own; the spawn's low-third draw leaves bots 40-49.
+            new Point("Pyramid",      926010000,  40,  60, 2, 6),
+            // Mu Lung Dojo's hall, where the master takes a party. Its rule is a 30-LEVEL SPREAD,
+            // not an absolute band, so the numbers here only bound the spawn: the low-third draw
+            // keeps the bots within ten levels of each other, and a player within the spread can
+            // take them. (A player far outside the bots' levels simply cannot use them - the
+            // master refuses a too-broad party - which is the quest's own rule, not a bot fault.)
+            new Point("Dojo",         925020001,  25,  55, 2, 5));
 
     /**
      * The Orbis point, kept apart because its bot predates this table and is spawned by its own

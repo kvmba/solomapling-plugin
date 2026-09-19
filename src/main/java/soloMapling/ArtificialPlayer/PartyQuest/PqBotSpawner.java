@@ -124,10 +124,14 @@ public final class PqBotSpawner {
             case "PiratePQ" -> BotTypeManager.BotType.PIRATE_PQ_BOT;
             case "AmoriaPQ" -> BotTypeManager.BotType.AMORIA_PQ_BOT;
             case "EllinPQ" -> BotTypeManager.BotType.ELLIN_PQ_BOT;
-            case "MagatiaPQ" -> BotTypeManager.BotType.MAGATIA_PQ_BOT;
+            // Both Magatia versions are played by the same bot; the town it was spawned in decides
+            // which lobby it returns to, so the Z row just needs the same type.
+            case "MagatiaPQ", "MagatiaPQ_Z" -> BotTypeManager.BotType.MAGATIA_PQ_BOT;
             case "ZakumPQ" -> BotTypeManager.BotType.ZAKUM_PQ_BOT;
             case "HorntailPQ" -> BotTypeManager.BotType.HORNTAIL_PQ_BOT;
             case "BossRushPQ" -> BotTypeManager.BotType.BOSS_RUSH_PQ_BOT;
+            case "Pyramid" -> BotTypeManager.BotType.PYRAMID_PQ_BOT;
+            case "Dojo" -> BotTypeManager.BotType.DOJO_PQ_BOT;
             default -> null;
         };
     }

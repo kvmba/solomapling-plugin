@@ -240,6 +240,24 @@ feat(pq): <PQ 名> — bot 可陪玩全流程
 | G 类 | Mu Lung Dojo（组队） | ✅ 已实现 |
 | H 类 | Guild Quest | 未实现（需同公会） |
 
+### 大厅自动投放覆盖（启动即放置）
+
+服务器第 7 波（`late_arrivals`，默认开启）会自动把 bot 放进各副本的招募大厅，玩家走到入口即可招募：
+
+| 投放方式 | 副本 / 大厅 |
+|---|---|
+| `PqBotSpawner.spawnAllQuestLobbies` | HenesysPQ(100000200)、KerningPQ(103000000)、LudiPQ(221024500)、PiratePQ(251010404)、AmoriaPQ(670010100)、EllinPQ(300030100)、**MagatiaPQ Alcadno(261000021)**、**MagatiaPQ Zenumist(261000011)**、ZakumPQ(211042300)、HorntailPQ(240050000)、BossRushPQ(970030000)、**Pyramid(926010000, Duarte 菜单图)**、**Dojo(925020001, 武陵道场大厅)** |
+| `EnvironmentManager.spawnOPQBotsInLobby` | OrbisPQ(200080101) |
+
+**未自动投放（语义不同，只提供 GM 命令）**：
+
+| 副本 | 为何不能只靠“投放” | 入口 |
+|---|---|---|
+| Monster Carnival (CPQ) | **对抗型**：两名队长各带一队互相挑战（`startCPQ(challenger, field)`），bot 得当“第二队队长”，不是被招募的队友 | `980000000/980030000` |
+| Ariant Coliseum | **Expedition**：`createExpedition(ARIANT)` + `exped.addMember`，不是 Party 邀请 | `980010100` 系列 |
+
+这两类的“陪玩”需要**对手队/远征队**机制，不是把 bot 摆在大厅就能成立，故未投放（`!bot cpqbot` / `!bot arpqbot` 仍可手动生成，用于单队测试）。
+
 ### 已验证 / 未验证
 
 | 项 | 状态 |

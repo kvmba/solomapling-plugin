@@ -30,6 +30,13 @@ public final class PyramidPqData {
     /** Duarte, who starts the challenge. */
     public static final int DUARTE = 2103013;
 
+    /**
+     * The map a party is applied for in - Duarte's menu map, the "Pyramid Dunes". Not the
+     * {@code NETTS_PYRAMID} instance map (926010001), which is inside the run: a bot has to stand
+     * here to be one of the two members the party version demands.
+     */
+    public static final int LOBBY_MAP = 926010000;
+
     /** The quest's own bar, straight from Duarte's refusals. */
     public static final int MIN_PARTY = 2;
     public static final int MIN_LEVEL = 40;

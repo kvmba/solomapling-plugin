@@ -48,7 +48,10 @@ public class PyramidPQBot extends PartyQuestBot {
 
     @Override
     protected int lobbyMapId() {
-        return org.gms.constants.id.MapId.NETTS_PYRAMID;
+        // Duarte's menu map (the Pyramid Dunes), which is where a party is applied for and where
+        // the bots stand. Not NETTS_PYRAMID (926010001): that is inside the run, so returning a
+        // finished bot there would leave it stranded where nobody recruits.
+        return PyramidPqData.LOBBY_MAP;
     }
 
     @Override
