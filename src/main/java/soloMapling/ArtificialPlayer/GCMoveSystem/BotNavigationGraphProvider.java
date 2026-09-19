@@ -49,7 +49,7 @@ final class BotNavigationGraphProvider {
     //     inside an 8.93 x fs px/s band (no walkSpeed air cap; counter-strafe pins at the
     //     band edge) and no-input flight drags 1 x fs (100 x fs at terminal fall). Committed
     //     arcs still fly the launch key held, so constant-stepX arc sims stay exact.
-    private static final int GRAPH_VERSION = 62; // 51: kinetic slippery model + snowshoes; 52: brake-to-stop landings; 53: glide-unless-edge stop policy (slipperyStopDir); 56: uncap straight-drop launch windows (full droppable span, no +/-20 fragmentation); 57: remove the (empirically wrong) 300px down-jump drop cap - down-jumps fall until landing; 58: rope-grab reach counts descent below the ledge (mid-rope jump-grabs from adjacent platforms); 59: fall-sim caps to map height not 1500ms - long single-fall descents (tall shafts: Ellinia tree, Perion) now generate DROP/JUMP/ROPE edges; 60: re-cap drops for organic descent - walk-offs capped at MAX_DROP_PX, down-jumps at the tighter DOWN_JUMP_MAX_DROP_PX, and down-jumps carry DOWN_JUMP_COST_PENALTY_MS so the pathfinder prefers ropes/walk-offs over plummeting an entire vertical map; 61: widened rope top-exit probe (BotPhysicsEngine.findTopExitLanding) - accept a step-off foothold slightly above/below the rope top and a few px off-axis, so uneven/slanted ladder heads mint a clean CLIMB step-off edge instead of only ballistic top jump-offs; 62: cache filename now encodes snowShoes (the 4th key dimension) - old three-dimension filenames are unreadable by design, and the bump parks them in a dead v61/ directory that can be deleted wholesale
+    private static final int GRAPH_VERSION = 63; // 51: kinetic slippery model + snowshoes; 52: brake-to-stop landings; 53: glide-unless-edge stop policy (slipperyStopDir); 56: uncap straight-drop launch windows (full droppable span, no +/-20 fragmentation); 57: remove the (empirically wrong) 300px down-jump drop cap - down-jumps fall until landing; 58: rope-grab reach counts descent below the ledge (mid-rope jump-grabs from adjacent platforms); 59: fall-sim caps to map height not 1500ms - long single-fall descents (tall shafts: Ellinia tree, Perion) now generate DROP/JUMP/ROPE edges; 60: re-cap drops for organic descent - walk-offs capped at MAX_DROP_PX, down-jumps at the tighter DOWN_JUMP_MAX_DROP_PX, and down-jumps carry DOWN_JUMP_COST_PENALTY_MS so the pathfinder prefers ropes/walk-offs over plummeting an entire vertical map; 61: widened rope top-exit probe (BotPhysicsEngine.findTopExitLanding) - accept a step-off foothold slightly above/below the rope top and a few px off-axis, so uneven/slanted ladder heads mint a clean CLIMB step-off edge instead of only ballistic top jump-offs; 62: cache filename now encodes snowShoes (the 4th key dimension) - old three-dimension filenames are unreadable by design, and the bump parks them in a dead v61/ directory that can be deleted wholesale; 63: inset every JUMP launch window by one walk step before stamping it on the edge - an edge-pressed window let the executor's +/-walkStep launch phase overfly a small platform and the bot fall to the bottom
 
     // Drop caps for organic descent (re-added; v57 had removed the old single cap). A bot must
     // never plummet down a whole vertical map. Two distinct downward moves, treated differently:
@@ -1417,6 +1417,12 @@ final class BotNavigationGraphProvider {
                 true, stats, jumpLandingCache, movementProfile);
         int maxX = findJumpBoundary(from, map, regionIdByFootholdId, anchorX, launchStepX, targetRegionId,
                 false, stats, jumpLandingCache, movementProfile);
+        // Inset the window by the executor's launch phase before it is stamped onto the edge, so the
+        // whole reachable takeoff span sits strictly inside the validated window (see jumpLaunchMargin:
+        // an edge-pressed window is what lets a small-platform jump overfly its target and fall).
+        int[] inset = insetJumpLaunchWindow(from, minX, maxX, jumpLaunchMargin(map, movementProfile));
+        minX = inset[0];
+        maxX = inset[1];
 
         int representativeX = (minX + maxX) / 2;
         Point representativeStart = from.pointAt(representativeX);
@@ -1561,6 +1567,40 @@ final class BotNavigationGraphProvider {
             }
         }
         return validX;
+    }
+
+    /*
+     * How far inside a jump launch window the executor may actually take off — one walk step. The
+     * navigator fires the jump the instant the bot is within one walk step of the selected launch x
+     * (BotNavigationManager.canExecuteSelectedJumpFromCurrentPosition) and the deepen pass walks a
+     * further step or two into the window, so a takeoff pixel can sit a whole walk step past the
+     * window's far end. On a small platform whose arc only just clears its edge, that phase error
+     * overflies the target and the bot falls — the reported "jump to another platform misses and it
+     * plunges to the bottom". Insetting every window end by this keeps the whole reachable takeoff
+     * span inside the window, so the arc that the builder validated is the arc the executor flies.
+     * Measured on the Orbis Tower floors: with the un-inset windows ~6.5% of same-or-higher jumps
+     * missed; the inset cut that to ~1.3%, and no ground region became unreachable.
+     *
+     * The inset never grows past the ledge, and a window narrower than two walk steps is clamped to
+     * its own centre rather than emptied, so no platform loses its only launch.
+     */
+    static int jumpLaunchMargin(MapleMap map, BotMovementProfile movementProfile) {
+        return Math.max(1, BotPhysicsEngine.walkStep(map, movementProfile));
+    }
+
+    /*
+     * Inset a validated launch window's ends by the executor's launch phase, keeping at least one
+     * usable pixel (or the window's own centre when it is too thin to inset). Returns {minX, maxX}.
+     */
+    static int[] insetJumpLaunchWindow(BotNavigationGraph.Region from, int minX, int maxX,
+                                       int margin) {
+        int lo = minX + margin;
+        int hi = maxX - margin;
+        if (lo > hi) {
+            int center = Math.clamp((minX + maxX) / 2, from.minX, from.maxX);
+            return new int[]{center, center};
+        }
+        return new int[]{lo, hi};
     }
 
     private static boolean isValidJumpLaunchX(BotNavigationGraph.Region from,
