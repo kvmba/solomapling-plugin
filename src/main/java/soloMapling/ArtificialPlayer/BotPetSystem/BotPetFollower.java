@@ -525,17 +525,18 @@ public final class BotPetFollower {
             AirStep step = simulateAirStep(map, p, ax, ay, dt);
             nx = step.point().x;
             ny = step.point().y;
+            boolean airLeft = facesLeftOnMotion(step.ax(), left);
             if (step.landed() != null) {
                 vyAir.remove(id);
                 ax = 0;
                 ay = 0;
                 fhVal = step.landed().getId(); // landed: the real foothold id (fh rule)
-                stance = left ? PET_STAND_LEFT : PET_STAND_RIGHT;
+                stance = airLeft ? PET_STAND_LEFT : PET_STAND_RIGHT;
             } else {
                 ax = step.ax();
                 ay = step.ay();
                 fhVal = 0; // mid-air: no foothold — fh must be 0 (fh rule)
-                stance = (left ? 1 : 0) | PET_JUMP_RIGHT;
+                stance = (airLeft ? 1 : 0) | PET_JUMP_RIGHT;
             }
             velX.put(id, ax);
             fallVy.put(id, ay);
@@ -623,9 +624,11 @@ public final class BotPetFollower {
             ay = -jump.jumpSpeedPxs();
             velX.put(id, ax);
             fallVy.put(id, ay);
-            // fh 0: the hop launches airborne — no foothold (fh rule).
+            // fh 0: the hop launches airborne — no foothold (fh rule). The JUMP pose faces the hop's
+            // own direction (ax), not the pet's previous facing, so a hop that reverses the pet (the
+            // owner moved to its other side) never launches under an opposite pose.
             applyAndBroadcast(chr, pet, index, p, (int) Math.round(ax), (int) Math.round(ay), 0,
-                    (left ? 1 : 0) | PET_JUMP_RIGHT, config, observed);
+                    (facesLeftOnMotion(ax, left) ? 1 : 0) | PET_JUMP_RIGHT, config, observed);
             return;
         }
 
@@ -673,7 +676,11 @@ public final class BotPetFollower {
         // Owner on the pet's own walk surface only (ownerOnSameSurface note above): an owner lower on
         // the pet's own swim-map slope must not make the pet drop off it — the pet sticks to the
         // slope, and a genuine edge still falls via walk.lostGround() below.
-        boolean ownerBelowAndNotWalkingDown = !ownerOnSameSurface && ownerBelow && walk.point().y <= p.y;
+        // And only from REST (see {@link #dropsToOwnerBelow}): while the pet is still walking toward a
+        // horizontal target on its own platform, its non-zero exit speed is progress on THAT surface
+        // — not the stall of a ledge the owner left.
+        boolean ownerBelowAndNotWalkingDown =
+                dropsToOwnerBelow(ownerOnSameSurface, ownerBelow, walk.point().y <= p.y, vx);
         if (walk.lostGround() || ownerBelowAndNotWalkingDown) {
             // A pet that has to go DOWN leaves with a short upward launch rather than the old
             // zero-velocity drop, so its descent is a real arc (a hop, then a fall) instead of the
@@ -692,9 +699,14 @@ public final class BotPetFollower {
             AirStep step = simulateAirStep(map, walk.point(), vx, launchVy, dt);
             nx = step.point().x;
             ny = step.point().y;
+            // Face the fall's own direction (step.ax), not the pet's previous facing. A walk-off that
+            // happens on a turn tick (the pet stepped off the edge the way it was already walking)
+            // then falls under the pose matching where it is going, never an opposite one; a drop-hop
+            // from rest has ax ~0, so it keeps the standing facing it already had.
+            boolean fallLeft = facesLeftOnMotion(step.ax(), left);
             if (step.landed() != null) {
                 fhVal = step.landed().getId();
-                stance = left ? PET_STAND_LEFT : PET_STAND_RIGHT;
+                stance = fallLeft ? PET_STAND_LEFT : PET_STAND_RIGHT;
                 vyAir.remove(id);
                 fallVy.put(id, 0.0);
             } else {
@@ -704,7 +716,7 @@ public final class BotPetFollower {
                 vyAir.add(id);
                 fallVy.put(id, step.ay());
                 fhVal = 0;
-                stance = (left ? 1 : 0) | PET_JUMP_RIGHT;
+                stance = (fallLeft ? 1 : 0) | PET_JUMP_RIGHT;
             }
         } else {
             nx = walk.point().x;
@@ -1066,6 +1078,36 @@ public final class BotPetFollower {
     }
 
     /**
+     * Whether the pet should now DROP (hop down) to an owner that has settled on a footing BELOW it
+     * — the pure heart of the "pet follows the owner down a platform" rule. Two ways the pet may
+     * descend: its own walk ran off an edge ({@code walk.lostGround()}, handled separately), or this
+     * — the owner left the pet's ledge and the walk kept it level on that now-empty ledge.
+     *
+     * <p>The catch is that a bare "owner is below and the walk stayed level" test also fires while
+     * the pet is still WALKING toward an in-leash horizontal target on a platform the owner merely
+     * stands below. On a narrow platform the leash is a one-sided <em>inward</em> pull, so the pet
+     * walks BACK toward the receding owner; every such walking tick ends level with where it started,
+     * so the old test dropped it — into a hop under its now-stale (opposite) facing pose, which the
+     * client renders as the pet walking BACKWARD. The fix: only a pet at REST can be understood as
+     * "standing on a ledge its owner abandoned" — a pet still moving has non-zero exit speed and is
+     * making progress on its OWN surface, so it must keep walking (and reach the platform edge, where
+     * {@code walk.lostGround()} handles a genuine drop with the walk's own exit speed and facing).</p>
+     *
+     * <p>Package-private static seam (like {@link #shouldResolveFoothold}) so the rule is covered
+     * without a live map.</p>
+     *
+     * @param ownerOnSameSurface the owner rests on the pet's own walk surface (swim-map slope), so
+     *                           there is no platform to descend to — the pet follows the slope
+     * @param ownerBelow         the owner's footing is a step below the pet's feet
+     * @param walkStayedLevel    the walk did not lower the pet this tick (a down-slope would have)
+     * @param exitVelocityPxs    the walk's exit speed; a moving pet is progressing, not stalled
+     */
+    static boolean dropsToOwnerBelow(boolean ownerOnSameSurface, boolean ownerBelow,
+                                     boolean walkStayedLevel, double exitVelocityPxs) {
+        return !ownerOnSameSurface && ownerBelow && walkStayedLevel && Math.abs(exitVelocityPxs) <= 1.0;
+    }
+
+    /**
      * Pull a step-OUT target back onto the pet's own platform so a small ledge cannot send the pet
      * off the edge (the reported drop-then-pull-back loop). {@link #followTargetX} steps a pet that
      * has been collapsed onto a STANDING owner (the host re-places every pet on the owner at map
@@ -1326,6 +1368,25 @@ public final class BotPetFollower {
      */
     private static boolean isPetFacingLeft(Pet pet) {
         return (pet.getStance() & 1) != 0;
+    }
+
+    /**
+     * The facing a pose must carry for a motion of {@code vx} px/s, falling back to {@code previous}
+     * when the motion is ~0.
+     *
+     * <p>A JUMP/fall/land pose must face the direction the pet is actually moving, never the pet's
+     * facing from the PREVIOUS tick. On a turn tick — the owner has moved to the pet's other side,
+     * and the pet starts the new direction — the pet's stored stance still points the old way, so a
+     * pose stamped from it renders the pet moving one way while facing the other: the reported
+     * "walking backward". Falls/landings with no horizontal motion ({@code vx} ~0, e.g. a drop-hop
+     * straight down) have no direction of their own and keep {@code previous}, which is correct — the
+     * pet is not sliding.</p>
+     */
+    static boolean facesLeftOnMotion(double vx, boolean previousFacingLeft) {
+        if (Math.abs(vx) <= 1.0) {
+            return previousFacingLeft;
+        }
+        return vx < 0.0;
     }
 
     private static void broadcastMove(Character chr, Pet pet, int index, Point pos,
