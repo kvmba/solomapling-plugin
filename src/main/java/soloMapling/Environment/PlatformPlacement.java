@@ -379,15 +379,11 @@ public class PlatformPlacement {
      * (the picker returns an empty list), so a spawn is never silently dropped.
      */
     public static List<Integer> spawnBotsOnMap(int numBots, int mapId) {
-        return spawnBotsOnMap(numBots, mapId, null);
-    }
-
-    public static List<Integer> spawnBotsOnMap(int numBots, int mapId, Point anchor) {
         MapleMap map = getMapleMapById(mapId);
         if (map == null || numBots <= 0) {
             return List.of();
         }
-        Point from = anchor != null ? anchor : spawnAnchor(map);
+        Point from = spawnAnchor(map);
         List<Point> spots = BotSpotPicker.pickGroundSpots(map, from.x, from.y, numBots);
         if (spots.isEmpty()) {
             spots = new ArrayList<>(Collections.nCopies(numBots, from));
