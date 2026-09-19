@@ -5,16 +5,23 @@ import org.gms.client.inventory.WeaponType;
 import org.gms.constants.id.ItemId;
 import org.gms.constants.skills.Bandit;
 import org.gms.constants.skills.Bishop;
+import org.gms.constants.skills.Brawler;
+import org.gms.constants.skills.Buccaneer;
 import org.gms.constants.skills.Cleric;
+import org.gms.constants.skills.Corsair;
 import org.gms.constants.skills.DragonKnight;
 import org.gms.constants.skills.FPArchMage;
 import org.gms.constants.skills.FPMage;
 import org.gms.constants.skills.FPWizard;
+import org.gms.constants.skills.Gunslinger;
 import org.gms.constants.skills.Hermit;
 import org.gms.constants.skills.Hero;
 import org.gms.constants.skills.ILArchMage;
 import org.gms.constants.skills.ILMage;
+import org.gms.constants.skills.Marauder;
+import org.gms.constants.skills.Outlaw;
 import org.gms.constants.skills.Paladin;
+import org.gms.constants.skills.Pirate;
 import org.gms.constants.skills.Priest;
 import org.gms.constants.skills.Rogue;
 import org.gms.constants.skills.Shadower;
@@ -47,6 +54,7 @@ public final class BotAttackData {
     private static final int SWING_P1 = 13, STAB_T1 = 19;                // polearm
     private static final int STAB_O1 = 16, STAB_O2 = 17;                 // 1H stab
     private static final int SHOOT_1 = 22, SHOOT_2 = 23;                 // bow/crossbow draw + fire
+    private static final int SHOT = 93;                                  // "shot" (gun fire, as used by gunslingers)
     private static final int CLAW_1 = 24, CLAW_2 = 25, CLAW_3 = 26;      // claw throw
     private static final int WAND_1 = 28, WAND_2 = 29;                   // wand/staff cast
     // The client maps the direction byte through a FIXED internal enum (the client's
@@ -70,6 +78,29 @@ public final class BotAttackData {
     private static final int GENESIS = 69;                             // "genesis" (Genesis)
     private static final int BLAST = 71;                               // "blast" (Paladin Blast)
 
+    // ----- Pirate poses (canonical v83 enum, from the client's action table) -----
+    private static final int STRAIGHT = 79;                            // "straight" (Flash Fist / basic brawl punch)
+    private static final int SOMERSAULT = 78;                          // "somersault" (Somersault Kick)
+    private static final int DOUBLEFIRE = 86;                          // "doublefire" (Double Shot, 1st-job gun)
+    private static final int TRIPLEFIRE = 87;                          // "triplefire" (Burst Fire / Triple Fire)
+    private static final int BACKSPIN = 81;                            // "backspin" (Backspin Blow)
+    private static final int DOUBLEUPPER = 84;                         // "doubleupper" (Double Uppercut)
+    private static final int SCREW = 83;                               // "screw" (Corkscrew Blow)
+    private static final int EBURSTER = 80;                            // "eburster" (Energy Blast)
+    private static final int EDRAIN = 90;                              // "edrain" (Energy Drain)
+    private static final int SHOCKWAVE_P = 157;                        // "shockwave" (Shockwave)
+    private static final int FIST = 97;                                // "fist" (Barrage)
+    private static final int DEMOLITION_P = 158;                       // "demolition" (Demolition)
+    private static final int DRAGONSTRIKE = 85;                        // "dragonstrike" (Dragon Strike)
+    private static final int EORB = 82;                                // "eorb" (Energy Orb)
+    private static final int SNATCH = 159;                             // "snatch" (Snatch)
+    private static final int FLAMEBURNER = 95;                         // "fireburner" (Flame Thrower)
+    private static final int COOLINGEFFECT = 96;                       // "coolingeffect" (Ice Splitter)
+    private static final int HOMING = 100;                             // "homing" (Homing Beacon)
+    private static final int RAPIDFIRE = 99;                           // "rapidfire" (Rapid Fire)
+    private static final int CANNON = 109;                             // "cannon" (Battleship Cannon)
+    private static final int TORPEDO = 110;                            // "torpedo" (Battleship Torpedo)
+
     private static final int[] DEFAULT_1H_VARIANTS = {STAB_O1, STAB_O2, SWING_O1, SWING_O2, SWING_O3};
     private static final int[] HEAVY_2H_VARIANTS   = {STAB_O1, STAB_O2, SWING_T1, SWING_T2, SWING_T3};
     private static final int[] POLEARM_VARIANTS    = {SWING_P1, STAB_T1};
@@ -79,6 +110,10 @@ public final class BotAttackData {
     // A shared {shoot1, shoot2} pool made each weapon fire the wrong pose ~half the time.
     private static final int[] BOW_VARIANTS        = {SHOOT_1};
     private static final int[] CROSSBOW_VARIANTS   = {SHOOT_2};
+    // A gun fires with the "shot" pose (shootF/shoot6 would draw a bow/crossbow). Every v83
+    // gunslinger/buccaneer attack has an explicit SKILL_ACTION entry, so this only backs a
+    // gun-toting bot's no-skill basic swing.
+    private static final int[] GUN_VARIANTS        = {SHOT};
 
     // Skills whose character keyframe differs from the weapon default, taken from each
     // skill's Skill.wz "action" node. A skill not listed uses its weapon's swing/cast/shoot
@@ -106,8 +141,33 @@ public final class BotAttackData {
             Map.entry(Bishop.ANGEL_RAY,              SHOOT_1),       // 2321007 -> "shoot1" (holy bolt draw, like Holy Arrow)
             Map.entry(Bishop.GENESIS,                GENESIS),       // 2321008 -> "genesis"
             Map.entry(Shadower.ASSASSINATE,          ASSASSINATION), // 4221001 -> "assassination"
-            Map.entry(Shadower.BOOMERANG_STEP,       ALERT_5)        // 4221007 -> "alert5"
+            Map.entry(Shadower.BOOMERANG_STEP,       ALERT_5),       // 4221007 -> "alert5"
             // Big Bang (2121001/2221001) has no action node -> wand default (+ charge int, see magicChargeFor)
+            // ----- Pirate skills (action node read from Skill.wz; canonical v83 pose codes) -----
+            // Brawler / buccaneer line (knuckle, melee)
+            Map.entry(Pirate.FLASH_FIST,             STRAIGHT),        // 5001001 -> "straight"
+            Map.entry(Pirate.SOMERSAULT_KICK,        SOMERSAULT),      // 5001002 -> "somersault"
+            Map.entry(Brawler.BACK_SPIN_BLOW,        BACKSPIN),        // 5101002 -> "backspin"
+            Map.entry(Brawler.DOUBLE_UPPERCUT,       DOUBLEUPPER),     // 5101003 -> "doubleupper"
+            Map.entry(Brawler.CORKSCREW_BLOW,        SCREW),           // 5101004 -> "screw"
+            Map.entry(Marauder.ENERGY_BLAST,         EBURSTER),        // 5111002 -> "eburster"
+            Map.entry(Marauder.ENERGY_DRAIN,         EDRAIN),          // 5111004 -> "edrain"
+            Map.entry(Marauder.SHOCKWAVE,            SHOCKWAVE_P),     // 5111006 -> "shockwave"
+            Map.entry(Buccaneer.BARRAGE,             FIST),            // 5121007 -> "fist"
+            Map.entry(Buccaneer.DEMOLITION,          DEMOLITION_P),    // 5121004 -> "demolition"
+            Map.entry(Buccaneer.DRAGON_STRIKE,       DRAGONSTRIKE),    // 5121001 -> "dragonstrike"
+            Map.entry(Buccaneer.ENERGY_ORB,          EORB),            // 5121002 -> "eorb"
+            Map.entry(Buccaneer.SNATCH,              SNATCH),          // 5121005 -> "snatch"
+            // Gunslinger / corsair line (gun, ranged)
+            Map.entry(Pirate.DOUBLE_SHOT,            DOUBLEFIRE),      // 5001003 -> "doublefire"
+            Map.entry(Gunslinger.INVISIBLE_SHOT,     DOUBLEFIRE),      // 5201001 -> no action node; single gun shot
+            Map.entry(Outlaw.BURST_FIRE,             TRIPLEFIRE),      // 5210000 -> "triplefire" (3-round burst)
+            Map.entry(Outlaw.FLAME_THROWER,          FLAMEBURNER),     // 5211004 -> "fireburner"
+            Map.entry(Outlaw.ICE_SPLITTER,           COOLINGEFFECT),   // 5211005 -> "coolingeffect"
+            Map.entry(Outlaw.HOMING_BEACON,          HOMING),          // 5211006 -> "homing"
+            Map.entry(Corsair.RAPID_FIRE,            RAPIDFIRE),       // 5221004 -> "rapidfire"
+            Map.entry(Corsair.BATTLESHIP_CANNON,     CANNON),          // 5221007 -> "cannon"
+            Map.entry(Corsair.BATTLESHIP_TORPEDO,    TORPEDO)          // 5221008 -> "torpedo"
     );
 
     /* The body action for a skill on a weapon: the skill's own keyframe if it overrides, else the weapon default. */
@@ -206,7 +266,8 @@ public final class BotAttackData {
             case CLAW                                                   -> CLAW_VARIANTS;
             case BOW                                                    -> BOW_VARIANTS;      // shoot1 (bow draw)
             case CROSSBOW                                               -> CROSSBOW_VARIANTS; // shoot2 (crossbow)
-            default                                                     -> DEFAULT_1H_VARIANTS; // 1H/dagger/knuckle/gun/unarmed
+            case GUN                                                    -> GUN_VARIANTS;      // shot (gun fire)
+            default                                                     -> DEFAULT_1H_VARIANTS; // 1H/dagger/knuckle/unarmed
         };
     }
 }
