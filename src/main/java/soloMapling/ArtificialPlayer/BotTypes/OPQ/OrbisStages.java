@@ -269,10 +269,10 @@ public final class OrbisStages {
      */
     public static boolean settlePapaRoom(Character bot) {
         if (PqActions.readEimInt(bot, "statusStg7", -1) != -1) {
-            // The spring has fired (its act() set the flag and dropped the final piece). Grab the
-            // piece it left under the bot before handing back, so the statue base can be finished.
-            PqActions.loot(bot, OrbisPqData.PAPA_SPRING_SPOT, 4_000,
-                    new int[]{OrbisPqData.STATUE_PIECE_8});
+            // The spring has fired: the flag is set and the final piece has dropped. The bot does
+            // NOT pick it up - exactly one drops, and the leader must hold it to open the room's
+            // exit (party3_gardenin warps the team only for a leader carrying 4001055). Grabbing it
+            // would strand the party here.
             return true;
         }
 
@@ -284,9 +284,11 @@ public final class OrbisStages {
         }
 
         // With a trap item, end the room: feed a trap and Papa Pixie appears; his death is what
-        // produces the Root of Life.
-        if (PqActions.countItem(bot, OrbisPqData.PAPA_TRAP_ITEM) > 0) {
-            feedReactor(bot, OrbisPqData.PAPA_TRAP, OrbisPqData.PAPA_TRAP_ITEM);
+        // produces the Root of Life. Only a feed that actually happened ends the tick - if every
+        // trap is already spent the bot must fall through to the fight rather than stall here,
+        // because the throw is synthetic and does not consume the item it holds.
+        if (PqActions.countItem(bot, OrbisPqData.PAPA_TRAP_ITEM) > 0
+                && feedReactor(bot, OrbisPqData.PAPA_TRAP, OrbisPqData.PAPA_TRAP_ITEM)) {
             return false;
         }
 
@@ -334,10 +336,17 @@ public final class OrbisStages {
         return true;
     }
 
-    /** The oid of the first reactor of a data id that is alive and not in its end state. */
+    /**
+     * The oid of the first reactor of a data id that is still armed, or -1 when none is.
+     *
+     * <p>"Armed" is the engine's own test for an item-triggered reactor: {@code getReactorType()
+     * == 100}. Once one has fired it advances past its item state and reads a different type, so
+     * it must be skipped - feeding or hitting a spent one does nothing, and a loop that kept
+     * picking it would never move on.
+     */
     private static int findReactorOid(Character bot, int dataId) {
         return bot.getMap().getAllReactors().stream()
-                .filter(r -> r.getId() == dataId && r.isAlive() && r.getState() < 4)
+                .filter(r -> r.getId() == dataId && r.isAlive() && r.getReactorType() == 100)
                 .mapToInt(r -> r.getObjectId())
                 .findFirst().orElse(-1);
     }
