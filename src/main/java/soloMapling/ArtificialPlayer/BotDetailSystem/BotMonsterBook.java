@@ -8,7 +8,6 @@ import org.gms.provider.wz.XMLWZData;
 import soloMapling.ArtificialPlayer.BotHelpers;
 
 import java.io.FileInputStream;
-import java.lang.reflect.Field;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -20,13 +19,12 @@ import java.util.List;
  * <p>The detail window ({@code PacketCreator.charInfo}) reads exactly four aggregate values -
  * {@code bookLevel / normalCard / specialCard / totalCards} - plus the cover mob id. It never
  * reads the per-card map, and the only packet that serialises the map ({@code addMonsterBookInfo})
- * is sent solely to a real player on login, so a bot's card map is never on the wire. We therefore
- * set only the three private counters via reflection (they are plain non-final ints with no setter;
- * {@code addCard} is unusable because it broadcasts and dereferences a null headless player).
+ * is sent solely to a real player on login, so a bot's card map is never on the wire. The aggregate
+ * is preset through the host's own {@link MonsterBook#setCardCounts(int, int)}, which recomputes
+ * the book level from the counts exactly as a real pickup would.
  *
  * <p>Values are derived from the character id (stable per companion across restarts) and the bot's
- * level, fed through the host's own book-level curve so the shown level matches the card count
- * exactly as the engine would compute it.
+ * level.
  */
 public final class BotMonsterBook {
 
@@ -107,11 +105,11 @@ public final class BotMonsterBook {
         if (book == null) {
             return;
         }
-        if (writeCounters(book, normal, special, bookLevelFor(normal + special))) {
-            // Cover stays 0: getCardMobId(cover) unboxes, and an unbacked cover id would NPE the
-            // detail packet for every viewer. The bot never sets one.
-            bot.setBookCover(0);
-        }
+        // The host recomputes the book level from the counts (same curve as a real pickup).
+        book.setCardCounts(normal, special);
+        // Cover stays 0: getCardMobId(cover) unboxes, and an unbacked cover id would NPE the
+        // detail packet for every viewer. The bot never sets one.
+        bot.setBookCover(0);
     }
 
     /** Reset the aggregates (used before a re-roll). */
@@ -121,7 +119,7 @@ public final class BotMonsterBook {
         }
         MonsterBook book = bot.getMonsterBook();
         if (book != null) {
-            writeCounters(book, 0, 0, 1);
+            book.setCardCounts(0, 0);
         }
         bot.setBookCover(0);
     }
@@ -140,52 +138,5 @@ public final class BotMonsterBook {
         int base = min + (int) Math.round(t * span);
         int jitter = span > 0 ? Math.floorMod(BotDetailRoll.mix(cid, SALT + jitterSalt), 3) - 1 : 0;
         return Math.max(0, Math.min(max, base + jitter));
-    }
-
-    /**
-     * The book level the host would compute for {@code totalCards}, replayed from
-     * {@code MonsterBook.calculateLevel()}: {@code level=0, exp=1; do { level++; exp += level*10; }
-     * while (totalCards >= exp)}. Pure.
-     */
-    static int bookLevelFor(int totalCards) {
-        int level = 0;
-        int expToNextLevel = 1;
-        do {
-            level++;
-            expToNextLevel += level * 10;
-        } while (totalCards >= expToNextLevel);
-        return level;
-    }
-
-    // ── reflection onto the private counters ────────────────────────────────
-
-    private static final Field NORMAL_CARD = field("normalCard");
-    private static final Field SPECIAL_CARD = field("specialCard");
-    private static final Field BOOK_LEVEL = field("bookLevel");
-
-    private static Field field(String name) {
-        try {
-            Field f = MonsterBook.class.getDeclaredField(name);
-            f.setAccessible(true);
-            return f;
-        } catch (ReflectiveOperationException e) {
-            System.err.println("[BotMonsterBook] cannot access MonsterBook." + name + ": " + e);
-            return null;
-        }
-    }
-
-    private static boolean writeCounters(MonsterBook book, int normal, int special, int level) {
-        if (NORMAL_CARD == null || SPECIAL_CARD == null || BOOK_LEVEL == null) {
-            return false;
-        }
-        try {
-            NORMAL_CARD.setInt(book, normal);
-            SPECIAL_CARD.setInt(book, special);
-            BOOK_LEVEL.setInt(book, level);
-            return true;
-        } catch (ReflectiveOperationException e) {
-            System.err.println("[BotMonsterBook] failed to write counters: " + e);
-            return false;
-        }
     }
 }

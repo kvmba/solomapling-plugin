@@ -55,20 +55,4 @@ class BotMonsterBookTest {
                     BotMonsterBook.pickCount(cid, 50, NORMAL_MIN, NORMAL_MAX, 0));
         }
     }
-
-    @Test
-    void bookLevelReplaysTheHostFormula() {
-        // MonsterBook.calculateLevel(): level starts 0/exp 1; each step exp += level*10.
-        // exp after each level: lv1=11, lv2=31, lv3=61, lv4=101, lv5=151.
-        assertEquals(1, BotMonsterBook.bookLevelFor(0));
-        assertEquals(1, BotMonsterBook.bookLevelFor(10));
-        assertEquals(2, BotMonsterBook.bookLevelFor(11));
-        assertEquals(2, BotMonsterBook.bookLevelFor(30));
-        assertEquals(3, BotMonsterBook.bookLevelFor(31));
-        assertEquals(3, BotMonsterBook.bookLevelFor(60));
-        assertEquals(4, BotMonsterBook.bookLevelFor(61));
-        assertEquals(4, BotMonsterBook.bookLevelFor(100));
-        assertEquals(5, BotMonsterBook.bookLevelFor(101));
-        assertEquals(6, BotMonsterBook.bookLevelFor(151));
-    }
 }
