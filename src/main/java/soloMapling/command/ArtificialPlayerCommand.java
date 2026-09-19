@@ -495,6 +495,17 @@ public class ArtificialPlayerCommand extends Command {
                         + ") title -> " + (rerolled == 0 ? "none"
                         : rerolled + " " + convertItemIdToName(rerolled)));
                 break;
+            case "detail":
+                // Show what this bot's character-info window (CUIUserInfo) will contain.
+                player.yellowMessage("-- " + fakechar.getName() + " (cid " + fakechar.getId()
+                        + ", lv" + fakechar.getLevel() + ") detail window --");
+                player.yellowMessage(BotDetailWindow.describe(fakechar));
+                break;
+            case "rerolldetail":
+                BotDetailWindow.reroll(fakechar);
+                player.yellowMessage("Re-rolled " + fakechar.getName() + " detail-window data.");
+                player.yellowMessage(BotDetailWindow.describe(fakechar));
+                break;
             case "mount": {
                 boolean ok = soloMapling.ArtificialPlayer.BotMountSystem.BotMount.forceMount(fakechar);
                 soloMapling.ArtificialPlayer.BotSM bot =
@@ -1122,6 +1133,8 @@ public class ArtificialPlayerCommand extends Command {
         player.yellowMessage("!bot givemedal <cid> [itemid]    - give a title (random legal, or force an id)");
         player.yellowMessage("!bot removemedal <cid>           - remove bot's title");
         player.yellowMessage("!bot rerollmedal <cid>           - re-roll bot's title");
+        player.yellowMessage("!bot detail <cid>                - show bot's detail-window data (monster book / medals / wishlist)");
+        player.yellowMessage("!bot rerolldetail <cid>          - re-roll bot's detail-window data");
         player.yellowMessage("!bot mount <cid>                 - force-mount bot (lv70+ mobile bot; shop stall owners cannot mount)");
         player.yellowMessage("!bot dismount <cid>              - force-dismount bot");
         player.yellowMessage("!bot equip <cid> <itemid>        - equip item on bot");
