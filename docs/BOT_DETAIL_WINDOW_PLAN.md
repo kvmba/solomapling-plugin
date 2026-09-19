@@ -340,3 +340,16 @@ BotDetailSystem/
 8. **测试**：`BotMonsterBookTest`(5) / `BotMedalBookTest`(6) / `BotWishListTest`(5) 全绿；
    全套 **1151 tests, 0 failures**（提交 #4 前跑）。
 9. **宿主零改动**：`/workspace/GMS083` 工作树干净。
+
+### 11.1 自审（第二次完整审查）发现并修复的真实缺陷
+
+- **BUG-A（高）同伴勋章收藏累积**：`BotGeneration.loadPersistentBot` 原用 `apply`（只增不删），
+  而同伴会持久化 quests（`saveCharToDB → queststatus`）。同伴升级并重启后，收藏会**不断累积**而非等于
+  当前等级的确定集合。已改为 `reroll`（clear+apply），与相邻的 `BotMedal.reroll` 一致。
+  实测佐证：跨等级 12→75 的并集达 21/22，而单等级仅 21。修复见提交 `ab8b52b`。
+- **BUG-B（低）心愿单缓存双 volatile 竞态**：`cachedSource`/`cachedPool` 两个独立 volatile，并发读者可能
+  配到"新 source + 旧 pool"。改为单个不可变 `record CachedPool`，一次 volatile 写发布。
+- **清理**：把 `getMap()==null` 门收敛到门面 `BotDetailWindow`（对齐 `BotMedal`），移除子项内重复检查。
+- **rebase**：工作期间 `optimize/performance` 前进（PQ 动态引擎重构，`82acb5c → 39b0bd6`），且与
+  `BotGeneration`/`EnvironmentManager` 有文件交叠；已 rebase 到现 tip，9 处注入点与全部改动完整保留，
+  重建 + 全套测试（1148）绿。
