@@ -45,11 +45,16 @@ final class ClimbRecovery {
     void handleClimb(Character chr) {
         Point pos = chr.getPosition();
         int y = (pos != null) ? pos.y : 0;
-        if (GCMovement.isNavigatingClimb(chr)) {
-            climbStallSinceMs = 0L; // deliberate traversal — let the driver finish it
-            lastClimbY = y;
-            return;
-        }
+        // A deliberate nav climb (isNavigatingClimb) is left alone ONLY while it actually advances. The
+        // old unconditional exemption reset the stall clock on every sample for any bot holding a
+        // committed climb edge, so a wedge there hung forever: a rope-top stall (physics clamps to
+        // firstClimbableY when no landing resolves), or a mid-rope wriggle that rocks one climb step
+        // up and down without net progress. GrindBrain skips the strategy layer while climbing, so the
+        // combat heartbeat freezes and the macro watchdog eventually bails the whole map — the bot
+        // hangs on the rope and later vanishes from it. Requiring real vertical progress restores the
+        // escape hatch: CLIMB_PROGRESS_EPS (6px) sits just ABOVE one climb step (~5px), so a
+        // single-step wriggle reads as a stall while any genuine multi-step climb (>= a few px per
+        // 250ms sweep) still counts as progress.
         if (climbStallSinceMs == 0L || Math.abs(y - lastClimbY) >= CLIMB_PROGRESS_EPS) {
             climbStallSinceMs = now(); // making progress (or first sample) — let the climb continue
             lastClimbY = y;
