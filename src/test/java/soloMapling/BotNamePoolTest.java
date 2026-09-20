@@ -127,4 +127,33 @@ class BotNamePoolTest {
         assertEquals(BotNamePool.NEUTRAL, BotNamePool.categoryOf("GuildMaster"));
         assertEquals(BotNamePool.NEUTRAL, BotNamePool.categoryOf("Evilcookie33"));
     }
+
+    // The pool's own shorthand (dk = Dark Knight, nl = Night Lord) and the "knight"/"darknight"/
+    // "dragonknite" spellings it actually ships must not fall through to neutral.
+    @Test
+    void englishKnightAndShorthandVariantsClassify() {
+        assertEquals(BotNamePool.WARRIOR, BotNamePool.categoryOf("HolyKnight7"));
+        assertEquals(BotNamePool.WARRIOR, BotNamePool.categoryOf("BobaKnight"));
+        assertEquals(BotNamePool.WARRIOR, BotNamePool.categoryOf("Darknight099"));
+        assertEquals(BotNamePool.WARRIOR, BotNamePool.categoryOf("DragonKnite"));
+        assertEquals(BotNamePool.WARRIOR, BotNamePool.categoryOf("DkMaster99"));
+        assertEquals(BotNamePool.WARRIOR, BotNamePool.categoryOf("SriLankanDK"));
+        assertEquals(BotNamePool.THIEF, BotNamePool.categoryOf("NLGodly"));
+        assertEquals(BotNamePool.THIEF, BotNamePool.categoryOf("RushNL"));
+    }
+
+    // Turkish default locale folds 'I' to a dotless 'ı'; the tokenizer must be locale-independent,
+    // or every English token with an I would stop matching. Verified by forcing tr-TR.
+    @Test
+    void englishMatchingIsLocaleIndependent() {
+        java.util.Locale previous = java.util.Locale.getDefault();
+        try {
+            java.util.Locale.setDefault(new java.util.Locale("tr", "TR"));
+            assertEquals(BotNamePool.WARRIOR, BotNamePool.categoryOf("DashWarrior"));
+            assertEquals(BotNamePool.THIEF, BotNamePool.categoryOf("xSneakyThief"));
+            assertEquals(BotNamePool.WARRIOR, BotNamePool.categoryOf("MilkKnight"));
+        } finally {
+            java.util.Locale.setDefault(previous);
+        }
+    }
 }

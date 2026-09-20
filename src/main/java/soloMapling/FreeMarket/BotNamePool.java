@@ -1,6 +1,7 @@
 package soloMapling.FreeMarket;
 
 import java.util.List;
+import java.util.Locale;
 import java.util.regex.Pattern;
 
 /**
@@ -52,17 +53,19 @@ public final class BotNamePool {
 
     // English job words (lower case). Matched on token boundaries, so the multi-word classes are
     // listed as their joined form (bowmaster, nightlord, ...) and recognised from an adjacent pair
-    // of tokens ("BowMaster" -> bow + master).
+    // of tokens ("BowMaster" -> bow + master). "dk" / "nl" are the pool's own abbreviations for
+    // Dark Knight / Night Lord and appear as tokens only in those senses.
     private static final String[] WARRIOR_WORDS_EN =
-            {"warrior", "fighter", "spearman", "crusader", "hero", "paladin", "page",
-                    "darkknight", "dragonknight", "whiteknight"};
+            {"warrior", "fighter", "spearman", "crusader", "hero", "paladin", "page", "knight",
+                    "darknight", "darkknight", "dragonknight", "dragonknite", "whiteknight", "dk"};
     private static final String[] MAGICIAN_WORDS_EN =
             {"magician", "mage", "wizard", "cleric", "priest", "bishop", "archmage"};
     private static final String[] BOWMAN_WORDS_EN =
             {"bowmaster", "crossbowman", "crossbow", "bowman", "archer", "hunter", "ranger",
                     "sniper", "marksman", "bow"};
     private static final String[] THIEF_WORDS_EN =
-            {"chiefbandit", "nightlord", "shadower", "assassin", "bandit", "thief", "hermit", "sin"};
+            {"chiefbandit", "nightlord", "shadower", "assassin", "bandit", "thief", "hermit", "sin",
+                    "nl"};
     private static final String[] PIRATE_WORDS_EN =
             {"gunslinger", "buccaneer", "brawler", "marauder", "corsair", "outlaw", "pirate"};
 
@@ -128,7 +131,9 @@ public final class BotNamePool {
                 }
                 var matcher = TOKEN.matcher(name.substring(start, i));
                 while (matcher.find()) {
-                    tokens.add(matcher.group().toLowerCase());
+                    // Locale.ROOT: a Turkish default locale folds 'I' to a dotless 'ı', which would
+                    // stop every token containing an I from matching its word.
+                    tokens.add(matcher.group().toLowerCase(Locale.ROOT));
                 }
             } else {
                 i++;

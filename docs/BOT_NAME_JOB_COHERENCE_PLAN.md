@@ -108,15 +108,19 @@
 
 | 职业类别 | 英文词（整词或相邻词对，长词优先） |
 |---|---|
-| warrior | warrior fighter spearman crusader hero paladin page darkknight dragonknight whiteknight |
+| warrior | warrior fighter spearman crusader hero paladin page knight darknight darkknight dragonknight dragonknite whiteknight dk |
 | magician | magician mage wizard cleric priest bishop archmage |
 | bowman | bowmaster crossbowman crossbow bowman archer hunter ranger sniper marksman bow |
-| thief | chiefbandit nightlord shadower assassin bandit thief hermit sin |
+| thief | chiefbandit nightlord shadower assassin bandit thief hermit sin nl |
 | pirate | gunslinger buccaneer brawler marauder corsair outlaw pirate |
 
 匹配方式：把名字按 camelCase/数字边界切成 token（`xBowMaster07` → x, Bow, Master, 07），
 职业词须命中**某个 token**或**相邻两 token 拼接**（`bow`+`master`=bowmaster）。这样
 `sin`⊂`Since2005`、`mage`⊂`image`、`hero`⊂`zeroherozx`、`bow`⊂`RiceBowl` 都不会误判。
+`dk`（Dark Knight）与 `nl`（Night Lord）是池内自带的职业缩写，仅在该语义下独立成 token。
+
+切词用 `toLowerCase(Locale.ROOT)`：土耳其语默认区域会把 `I` 折叠成无点 `ı`，使含 `I` 的 token
+匹配不上（仓库同类匹配代码一律用 `Locale.ROOT`，见 `SocialIntent` / `CompanionCareerBuild`）。
 
 ### 3.2 抽名 API
 
@@ -250,9 +254,19 @@ getRandomCharacterIGN(int category)   // category: 0=中立, 1..5=v83 职业类�
 - **伴生体**：为消除"预测职业类别"与"实际职业"因两次随机种子而不一致的竞态，intake 改为
   **先取自种子 → 推导职业类别 → 显式把同一种子传给 provision**（`CompanionProvisioningService.nextPersonaSeed()`）。
   顺带修掉了原先"名字与种子由两个独立随机流决定、互不相关"的默认行为。
-- **测试**：`BotNamePoolTest`（分类边界/映射/新手带/强制职业）、`BotIgnWordListTest`（职业类别词池内非空 +
+- **测试**：`BotNamePoolTest`（分类边界/映射/新手带/强制职业/英文映射/多词类/子串防误判/locale）、`BotIgnWordListTest`（职业类别词池内非空 +
   地名归中立）、`BotNamePoolConcurrencyTest.categoryDrawsNeverContradictTheCategory`（并发下不冲突 + 混合抽取仍唯一）、
   `CompanionIntakeServiceTest`（适配 `NameSource.next(int)`）。
+
+- **复查发现并修复（英文池两处）**：
+  1. **`toLowerCase()` 未指定 Locale**（真实缺陷）：初版 `tokenize` 用无参 `toLowerCase()`，依赖 JVM 默认区域。
+     在土耳其语区域（`tr-TR`）`"...I..."` 的 `I` 折叠为无点 `ı`，使所有含 `I` 的英文 token 匹配失败，
+     整层英文过滤静默失效。改为 `toLowerCase(Locale.ROOT)`，与仓库既有匹配代码（`SocialIntent`、
+     `CompanionCareerBuild` 等 10 处）一致，并加 `englishMatchingIsLocaleIndependent` 测试锁定。
+  2. **词表漏判**：英文池里 `knight`/`darknight`/`dragonknite`（拼写变体）以及池内自带的缩写
+     `dk`（Dark Knight）、`nl`（Night Lord）未被识别，这些名字会残留错配（`HolyKnight7`、`BobaKnight`、
+     `Darknight099`、`NLGodly`…）。补入词表后英文命中由 106 升至 122。已核对 `dk`/`nl` 在池内仅作职业
+     缩写出现，无误判风险；加 `englishKnightAndShorthandVariantsClassify` 测试锁定。
 
 - **已知边界（可接受）**：某职业类别的"可选项"（中立 + 本职业类别）会比整池更早耗尽——因为中立名被所有职业类别共用。
   当某职业类别在整池被抽空前先耗尽可选项时，`FMShopDescGen` 只能重建整池，导致在池尾（实测 ~9998/10000）
