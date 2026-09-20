@@ -119,7 +119,7 @@ public final class BotChatter {
             return false;
         }
 
-        List<String> exchange = pickExchange();
+        List<String> exchange = pickExchange(me.getMapId());
         if (exchange == null || exchange.size() < 2) {
             return false;
         }
@@ -145,10 +145,19 @@ public final class BotChatter {
         return n;
     }
 
-    // A random ordered exchange from TownChatterDialogue.yaml, falling back to the hardcoded exchange when
-    // the file is empty/unparseable so chatter never goes fully silent.
-    private static List<String> pickExchange() {
-        List<String> ex = TownChatterLines.randomExchange();
+    // A random ordered exchange from TownChatterDialogue.yaml: the town section on ordinary maps, the
+    // vehicle section while a participant is aboard a vehicle (deck/cabin/car), so a crossing doesn't
+    // play a town line and a town doesn't play a crossing line. Falls back to the other section — then
+    // to the hardcoded exchange — so chatter never goes fully silent on a thin/absent section.
+    private static List<String> pickExchange(int mapId) {
+        boolean aboard = GCTransit.isVehicleMap(mapId);
+        List<String> ex = aboard
+                ? TownChatterLines.randomVehicleExchange()
+                : TownChatterLines.randomExchange();
+        if (ex == null || ex.size() < 2) {
+            // the wanted section is empty — try the other one before the hardcoded fallback
+            ex = aboard ? TownChatterLines.randomExchange() : TownChatterLines.randomVehicleExchange();
+        }
         return (ex != null && ex.size() >= 2) ? ex : FALLBACK_EXCHANGE;
     }
 

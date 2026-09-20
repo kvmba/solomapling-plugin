@@ -279,7 +279,8 @@ public class EnvironmentCommand extends Command {
         switch (action) {
             case "reload" -> {
                 int n = TownChatterLines.reload().size();
-                p.dropMessage(6, "chatter: reloaded TownChatterDialogue.yaml - " + n + " exchanges");
+                p.dropMessage(6, "chatter: reloaded TownChatterDialogue.yaml - " + n + " town + "
+                        + TownChatterLines.vehicleExchanges().size() + " vehicle exchanges");
             }
             case "fire" -> {
                 MapleMap map = p.getMap();
@@ -300,7 +301,8 @@ public class EnvironmentCommand extends Command {
                 p.dropMessage(6, String.format("chatter: chance=%.2f radius=%dpx maxMs=%d cooldown=%d..%dms",
                         BotChatter.CHATTER_CHANCE, BotChatter.CHATTER_RADIUS, BotChatter.MAX_CHATTER_MS,
                         BotChatter.CHATTER_COOLDOWN_MIN_MS, BotChatter.CHATTER_COOLDOWN_MAX_MS));
-                p.dropMessage(6, "chatter: " + TownChatterLines.exchanges().size() + " exchanges loaded, "
+                p.dropMessage(6, "chatter: " + TownChatterLines.exchanges().size() + " town / "
+                        + TownChatterLines.vehicleExchanges().size() + " vehicle exchanges loaded, "
                         + BotChatter.engagedCount() + " bot(s) mid-chat now");
                 p.dropMessage(6, "chatter: reload | fire (force chats on this map)");
             }

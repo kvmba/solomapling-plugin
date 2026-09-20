@@ -121,6 +121,39 @@ class TransitChatterTest {
                         + ") or the last lines are unreachable");
     }
 
+    @Test
+    void theNamesNoVehicleInTheWaitLine() {
+        // ride_wait is the GENERIC waiting set: one pool serves waiting at every boat / train / plane
+        // / subway / genie counter, and those counters live in ordinary towns too (e.g. Kerning City's
+        // air ticket counter). A line naming a specific vehicle ("is the boat here yet", "train or
+        // bus") therefore reads wrong for every other ride and, worse, off a town street — the
+        // "bot on a town street asking if the boat is here" report. The scene-specific pool belongs in
+        // the per-vehicle onboard_* sets, not here. Pin ride_wait to transport-agnostic wording.
+        // ASCII nouns are matched on word boundaries so a harmless word can't trip it ("training" vs
+        // "train", "island" vs "land"); CJK has no word boundaries, so those are plain substrings.
+        java.util.regex.Pattern ascii = java.util.regex.Pattern.compile(
+                "\\b(boat|ship|ferry|sail|deck|cabin|dock|harbor|pier|"
+                        + "train|railway|carriage|bus|subway|metro|platform|"
+                        + "plane|flight|airplane|aircraft|pilot|captain|crew|runway|takeoff|land)s?\\b",
+                java.util.regex.Pattern.CASE_INSENSITIVE);
+        String[] cjk = {"船", "舟", "艇", "渡", "港", "码头", "候船", "甲板", "船舱", "靠岸", "登船", "舷",
+                "火车", "列车", "车厢", "铁轨", "大巴", "公交", "地铁", "站台", "飞机", "航班", "登机",
+                "电梯", "船票", "船长", "机组"};
+        for (String tag : new String[]{"en-US", "zh-CN"}) {
+            SoloMaplingLanguageConfig.setLanguageTag(tag);
+            for (int i = 0; i < LINES_PER_SET; i++) {
+                String line = BotMessages.get("transit.ride_wait." + i);
+                boolean asciiHit = ascii.matcher(line).find();
+                assertFalse(asciiHit,
+                        tag + " transit.ride_wait." + i + " names a vehicle: " + line);
+                for (String noun : cjk) {
+                    assertFalse(line.contains(noun),
+                            tag + " transit.ride_wait." + i + " names a vehicle (" + noun + "): " + line);
+                }
+            }
+        }
+    }
+
     private static boolean linesOverlap(String a, String b) {
         for (int i = 0; i < LINES_PER_SET; i++) {
             for (int j = 0; j < LINES_PER_SET; j++) {
