@@ -224,7 +224,6 @@ class BotMovementState {
     int lastBroadcastVelY = 0;
     int lastBroadcastStance = 0;
     int lastBroadcastFh = 0;
-    int lastGroundFhId = 0;
 
     BotMovementState(Character bot, Character owner) {
         this.bot = bot;

@@ -1049,14 +1049,24 @@ class BotMovementManager {
         sendMovementPacket(bot, snapshot, fhId);
     }
 
-    // Real clients report the foothold ID they're standing on in every move packet.
-    // While airborne they keep sending the last-known ground fh, so cache it on the entry.
+    // The fh (foothold id) a real client puts on the wire depends on the character's POSE:
+    //   • on land  -> the REAL foothold id under the feet (a positive id).
+    //   • mid-air  -> 0. A real jump/fall frame carries fh 0, NOT the last foothold it left.
+    //   • rope/ladder -> a NEGATIVE 1-based rope index (see the encoding note below), NOT a ground id.
+    // Sending a ground id in a non-land pose is what drags the sprite to the wrong place: the client
+    // reads the 16-bit fh and, for a land id, SNAPS the entity onto that foothold's footing and takes
+    // its page as the render layer — so an airborne bot gets yanked back onto whatever is below it (the
+    // reported "jumps off a rope/corner and suddenly renders on the stairs/last layer"), and a roped one
+    // is nailed to the ground.
     //
-    // SHARED RULE with the pet side (BotPetFollower's class-header fh note): send the REAL foothold id
-    // ONLY while standing on land. In every non-land state (rope/ladder, water, mid-air) do NOT send a
-    // ground id — the client snaps the entity onto the named foothold, so a roped one would be dragged
-    // off the rope. The bot encodes its rope state as the negative index below; the pet (no rope-index
-    // encoding — it hangs via the HANG stance) sends 0 instead.
+    // Measured against real player movement captures in this repo
+    // (BotMovementSystem/movementDataPackets/**/*.csv): jump stances 6/7 carry fh 0 in 4174/4174 frames;
+    // walk/stand stances 2/3/4/5 carry a positive id in every frame; ladder/rope stances 14-17 carry the
+    // negative rope index. This method must reproduce that pose->fh mapping.
+    //
+    // SHARED RULE with the pet side (BotPetFollower's class-header fh note): the REAL foothold id only
+    // on land; every non-land state sends 0. The pet has no rope-index encoding — it hangs via the HANG
+    // stance — so it sends 0 on a rope too; the bot must send the rope index instead (below).
     //
     // LADDER/ROPE: while climbing, a real client sends a NEGATIVE fh whose magnitude is the
     // ladder/rope index — the client tests fh & 0x8000 to tell "on a rope" from "on ground",
@@ -1073,21 +1083,41 @@ class BotMovementManager {
     //     idx=1 -> 0xFFFF   -> (int16)-1      -> -(-1)      = 1   correct
     //     idx=1 -> 0x8001   -> (int16)-32767  -> -(-32767)  = 32767   WRONG
     private static int resolveBroadcastFhId(BotMovementState entry, Character bot) {
+        int ropeWireFh = 0;
         Rope climbRope = entry.climbRope;
         if (climbRope != null) {
             int idx = ropeIndex(bot.getMap(), climbRope);
             if (idx > 0) {
                 // Two's complement of the 1-based index: the client negates the value it
                 // reads as a signed short, so this lands back on idx.
-                return (-idx) & 0xFFFF;
+                ropeWireFh = (-idx) & 0xFFFF;
             }
         }
 
-        Foothold fh = BotPhysicsEngine.findGroundFoothold(bot.getMap(), bot.getPosition());
-        if (fh != null) {
-            entry.lastGroundFhId = fh.getId();
+        // Only a land pose pays for the ground lookup; every other pose resolves to 0/rope below.
+        Foothold fh = (entry.climbing || entry.inAir || entry.swimming)
+                ? null
+                : BotPhysicsEngine.findGroundFoothold(bot.getMap(), bot.getPosition());
+        int groundFhId = fh != null ? fh.getId() : 0;
+        return resolveWireFh(entry.climbing, entry.inAir, entry.swimming, ropeWireFh, groundFhId);
+    }
+
+    /**
+     * Pure pose→fh decision for the move-packet wire (the encoding/rule is spelled out in the comment
+     * above). {@code ropeWireFh} is the ALREADY-ENCODED negative rope index (0 when not resolvable);
+     * {@code groundFhId} is the foothold under the feet (0 when none). Land keeps the ground id, a
+     * rope keeps its index, and every other non-land pose yields 0 — never a ground id, which would
+     * snap the sprite onto a foothold and take its render layer. Extracted so the truth table is
+     * unit-testable without a live map (mirrors {@link GCMovement#ropeFh(Character)}'s pure core).
+     */
+    static int resolveWireFh(boolean climbing, boolean inAir, boolean swimming, int ropeWireFh, int groundFhId) {
+        if (ropeWireFh != 0) {
+            return ropeWireFh;
         }
-        return entry.lastGroundFhId;
+        if (climbing || inAir || swimming) {
+            return 0;
+        }
+        return groundFhId;
     }
 
     /**
