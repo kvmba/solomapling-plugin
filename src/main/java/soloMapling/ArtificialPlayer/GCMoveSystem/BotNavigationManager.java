@@ -1445,7 +1445,25 @@ final class BotNavigationManager {
     static boolean isWithinJumpLaunchWindow(BotNavigationGraph graph,
                                             Point botPos,
                                             BotNavigationGraph.Edge edge) {
-        if (botPos == null || edge.type != BotNavigationGraph.EdgeType.JUMP || !edge.containsLaunchX(botPos.x)) {
+        if (botPos == null || edge.type != BotNavigationGraph.EdgeType.JUMP) {
+            return false;
+        }
+        // Membership runs the SAME one-walk-step launch phase the executor fires within
+        // (canExecuteSelectedJumpFromCurrentPosition tolerates |botX - launchX| <= walkStep, and the
+        // graph builder insets the window by that same walk step, jumpLaunchMargin). A zero-tolerance
+        // test instead rejects the bot one pixel short of the window: jump approaches run at stopDist 0
+        // (the release-on-momentum rule is skipped for stopDist 0 — see updateStepX), so the bot
+        // strides full walkStep steps straight across a window the inset collapsed to a single pixel
+        // (insetJumpLaunchWindow), overshoots, the target flips behind it, it walks back, and it paces
+        // left-right in front of the ledge forever without ever taking the jump.
+        //
+        // A window wide enough to inset accepts exactly [launchMinX - walkStep, launchMaxX + walkStep],
+        // i.e. the pre-inset span the builder validated — the arc the builder validated is the arc the
+        // executor flies. A window too thin to inset collapses to its centre (insetJumpLaunchWindow),
+        // so its tolerance can reach a few px past that validated span; the alternative there is a
+        // single-pixel window a walkStep-stepping bot can never hit, which strands it entirely.
+        int tolerance = Math.max(1, BotPhysicsEngine.walkStep(null, graph.movementProfile));
+        if (!edge.containsLaunchX(botPos.x, tolerance)) {
             return false;
         }
 
