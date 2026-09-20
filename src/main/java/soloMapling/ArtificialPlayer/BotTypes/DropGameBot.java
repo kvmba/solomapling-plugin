@@ -163,6 +163,11 @@ public class DropGameBot extends BotSM {
     // =========================================================================
 
     @Override
+    public boolean handlesTrades() {
+        return true; // accepts its game-entry trade through BotTradeQueue (checkForTrades)
+    }
+
+    @Override
     public void updateState() {
         super.updateState();
         if (checkIfNotRunningOrPaused()) {

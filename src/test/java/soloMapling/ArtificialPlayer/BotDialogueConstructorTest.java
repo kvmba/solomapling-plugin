@@ -163,6 +163,36 @@ class BotDialogueConstructorTest {
         }
     }
 
+    /**
+     * The shared {@code TradeDecline} pool (SocialBot pack) is what a NON-trading bot says when a
+     * player invites it to trade: after a beat, it speaks one of these and declines, instead of
+     * leaving the invite window open for ~3 minutes. The brief asked for at least a hundred lines so
+     * bots never sound like a loop; both languages must ship them, and every line must stay short
+     * enough to read in a chat bubble.
+     */
+    @Test
+    void tradeDeclinePoolIsLargeInBothLanguages() {
+        for (String languageTag : Arrays.asList("en-US", "zh-CN")) {
+            SoloMaplingLanguageConfig.setLanguageTag(languageTag);
+            BotDialogueHandler.DialogueConstructor con =
+                    BotDialogueHandler.getDialogueCon("SocialBotDialogue.yaml", "SocialBot", "TradeDecline");
+            assertNotNull(con, languageTag + " SocialBot TradeDecline node missing");
+            List<String> lines = con.getDialogue();
+            assertTrue(lines.size() >= 100,
+                    languageTag + " TradeDecline should carry >= 100 lines, got " + lines.size());
+            java.util.Set<String> seen = new java.util.HashSet<>();
+            for (int i = 0; i < lines.size(); i++) {
+                String line = lines.get(i);
+                assertNotNull(line, languageTag + " TradeDecline line " + i + " is null");
+                assertFalse(line.isBlank(), languageTag + " TradeDecline line " + i + " is blank");
+                assertTrue(seen.add(line), languageTag + " TradeDecline repeats: " + line);
+                assertTrue(line.length() <= 80,
+                        languageTag + " TradeDecline line too long (" + line.length() + "): " + line);
+                assertNotNull(con.getEmoteForIndex(i), languageTag + " TradeDecline line " + i + " has no emote");
+            }
+        }
+    }
+
     private static List<String> shippedPacks() {
         return Arrays.asList(
                 "BlackjackDealerBotDialogue.yaml",

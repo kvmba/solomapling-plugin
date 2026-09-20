@@ -169,6 +169,11 @@ public class ScrollingBot extends BotSM {
     }
 
     @Override
+    public boolean handlesTrades() {
+        return true; // this type runs its own trade FSM and drains BotTradeQueue
+    }
+
+    @Override
     public void updateState() {
         super.updateState();
         if (checkIfNotRunningOrPaused()) {

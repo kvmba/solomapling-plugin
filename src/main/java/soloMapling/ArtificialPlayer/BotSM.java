@@ -10,6 +10,7 @@ import soloMapling.ArtificialPlayer.BotHealthSystem.BotDeath;
 import soloMapling.ArtificialPlayer.BotStatusSystem.BotDebuffState;
 import soloMapling.ArtificialPlayer.BotMessagingSystem.ChatMessage;
 import soloMapling.ArtificialPlayer.BotMessagingSystem.MessageQueue;
+import soloMapling.ArtificialPlayer.BotTradeSystem.BotTradeCommands;
 import soloMapling.ArtificialPlayer.BotTradeSystem.BotTradeHandler;
 import soloMapling.ArtificialPlayer.BotTradeSystem.BotTradeInventory;
 import soloMapling.ArtificialPlayer.BotTradeSystem.BotTradeLogic;
@@ -409,6 +410,77 @@ public abstract class BotSM implements EventSubscriber {
     /** True for bot types that answer a player's social chat directly (Phase D: Training/Follower). */
     public boolean respondsToSocialChat() {
         return false;
+    }
+
+    /**
+     * Whether this bot type runs its own trade FSM and drains {@code BotTradeQueue} from its tick
+     * (a merchant / scroller / drop-game host that accepts and negotiates with a player).
+     *
+     * <p>Default false. A bot that does NOT trade never touches the queue, so a player's invite used
+     * to sit there unanswered until the host's invite coordinator timed it out (~3 minutes) - the
+     * player staring at an open trade window the whole time. The invite bridge answers for these
+     * types instead: a polite, randomly-delayed decline (see {@link #declineTradePolitely}).
+     */
+    public boolean handlesTrades() {
+        return false;
+    }
+
+    // Human-beat delays before a non-trader answers an invite: long enough to read as "noticed it,
+    // thought about it, passed" rather than an instant packet-reflex; short enough that the player
+    // is not left staring at the window.
+    private static final long TRADE_DECLINE_MIN_MS = 2500L;
+    private static final long TRADE_DECLINE_MAX_MS = 6000L;
+    private static final long TRADE_DECLINE_CLOSE_MIN_MS = 800L;
+    private static final long TRADE_DECLINE_CLOSE_MAX_MS = 2000L;
+
+    // One reply per invite burst: a player spamming invites (or several players) gets a single
+    // "not interested", not a stack of declines - and never a decline that closes a DIFFERENT
+    // player's freshly-opened window mid-delay.
+    private final java.util.Set<Integer> tradeDeclineArmed = java.util.concurrent.ConcurrentHashMap.newKeySet();
+
+    /**
+     * Answers a trade invite for a bot type that does NOT trade: waits a human beat, says a line
+     * (this type's own {@code TradeDecline} node, else the shared pool), then declines - closing the
+     * window the host would otherwise leave open for ~3 minutes.
+     *
+     * <p>Runs entirely off the tick ({@link BotTiming}), so a slow reply never stalls the FSM; the
+     * guard entry is released once the decline has actually fired.
+     */
+    public void declineTradePolitely(Character inviter) {
+        final Character chr = getChr();
+        if (chr == null || !tradeDeclineArmed.add(chr.getId())) {
+            return;
+        }
+        BotTiming.afterRandom(TRADE_DECLINE_MIN_MS, TRADE_DECLINE_MAX_MS, () -> {
+            try {
+                String line = tradeDeclineLine(inviter);
+                if (line != null) {
+                    SocialCommands.BotSpeak(chr, line);
+                }
+            } finally {
+                // Schedule the decline no matter how the line went: the guard must be released, and
+                // the player's window must still close, even if speaking threw (e.g. the bot left).
+                BotTiming.afterRandom(TRADE_DECLINE_CLOSE_MIN_MS, TRADE_DECLINE_CLOSE_MAX_MS,
+                        () -> closeTradeDecline(chr));
+            }
+        });
+    }
+
+    private void closeTradeDecline(Character chr) {
+        try {
+            BotTradeCommands.declineTradeInvite(chr);
+        } finally {
+            tradeDeclineArmed.remove(chr.getId());
+        }
+    }
+
+    /** The line a non-trader says when declining a trade: its own pack's node, else the shared pool. */
+    private String tradeDeclineLine(Character player) {
+        String line = BotDialogueHandler.getRandomResolvedLine(dialoguePath, botType, "TradeDecline", getChr(), player);
+        if (line == null) {
+            line = BotDialogueHandler.getRandomResolvedLine(SOCIAL_DIALOGUE_PATH, "SocialBot", "TradeDecline", getChr(), player);
+        }
+        return line;
     }
 
     /**
