@@ -327,6 +327,12 @@ public class FMShopDescGen {
         return topFMClans.get(randomIndex);
     }
 
+    // The name pool, held as one shuffled list. A draw may ask to avoid names that assert a
+    // conflicting job category (see BotNamePool), so the category-aware draw skips names that claim a
+    // different class - it walks the list, takes the first name that is neutral or from the
+    // requested category, and advances the cursor past it. Because a single cursor only moves
+    // forward, a name is handed out at most once per round no matter how many categories draw, which
+    // keeps the "no two bots share a name" property the plain pool had.
     private static List<String> namePool;
     private static int namePoolIndex = 0;
     // Language the pool was built for. Not a hot-reload feature: the language is set once during
@@ -337,13 +343,22 @@ public class FMShopDescGen {
     private static final List<String> assignedCharacterNames = new ArrayList<>();
 
     /**
-     * Draws a unique name from the pool and registers it as a bot character name.
-     * Use this when spawning bot characters.
+     * Draws a unique name that does not contradict {@code category} - either neutral, or a role word
+     * of that same v83 category (see {@link BotNamePool#categoryOfBaseClass}). Use a category of
+     * {@link BotNamePool#NEUTRAL} when the bot's class is unknown.
      */
-    public static synchronized String getRandomCharacterIGN() {
-        String name = getRandomIGN();
+    public static synchronized String getRandomCharacterIGN(int category) {
+        String name = getRandomIGN(category);
         assignedCharacterNames.add(name);
         return name;
+    }
+
+    /**
+     * Draws a unique name for a bot whose class is unknown. Prefer {@link #getRandomCharacterIGN(int)}
+     * so the name matches the job.
+     */
+    public static synchronized String getRandomCharacterIGN() {
+        return getRandomCharacterIGN(BotNamePool.NEUTRAL);
     }
 
     /**
@@ -356,14 +371,15 @@ public class FMShopDescGen {
         if (!assignedCharacterNames.isEmpty() && rand.nextInt(100) < 35) {
             return assignedCharacterNames.get(rand.nextInt(assignedCharacterNames.size()));
         }
-        return getRandomIGN();
+        return getRandomIGN(BotNamePool.NEUTRAL);
     }
 
     /**
-     * Core pool draw — hands out one unique name per call. Reloads and reshuffles
-     * only when the entire pool is exhausted.
+     * Core pool draw - hands out one unique name per call. For a category other than
+     * {@link BotNamePool#NEUTRAL}, returns the first not-yet-drawn name that is neutral or asserts
+     * that category. Reloads and reshuffles only when the whole pool is exhausted.
      */
-    public static synchronized String getRandomIGN() {
+    public static synchronized String getRandomIGN(int category) {
         // Rebuild when the pool is exhausted, and when it was built for a different language -
         // see namePoolLanguage: the pool is never invalidated at runtime otherwise.
         String language = SoloMaplingLanguageConfig.languageTag();
@@ -373,7 +389,44 @@ public class FMShopDescGen {
             namePoolIndex = 0;
             namePoolLanguage = language;
         }
-        return namePool.get(namePoolIndex++);
+        // Unknown class (or a shop owner): any name will do, exactly as before.
+        if (category == BotNamePool.NEUTRAL) {
+            return namePool.get(namePoolIndex++);
+        }
+        String name = takeMatching(category);
+        if (name != null) {
+            return name;
+        }
+        // No name left ahead matches the category: every remaining name belongs to a *different*
+        // category. The category's own+neutral names were all drawn earlier in this sweep (a category
+        // "runs dry" of its accessible names before the whole pool is empty, since the neutral
+        // names it shares are consumed by the other categories too). Reshuffle rather than hand out a
+        // contradiction; this only happens near the tail of a full sweep, so the identity reuse it
+        // costs is the same order as the plain pool's own reshuffle. The head is the last resort for
+        // a pathologically single-category pool that would otherwise never be drawable.
+        namePool = loadAndShuffleNames();
+        namePoolIndex = 0;
+        String retry = takeMatching(category);
+        return retry != null ? retry : namePool.get(namePoolIndex++);
+    }
+
+    /**
+     * Takes the first name at or after the cursor that is neutral or from {@code category}, swaps it
+     * to the cursor and advances past it, leaving the untouched region otherwise intact so no name
+     * is drawn twice within a sweep. Returns {@code null} when none ahead qualifies.
+     */
+    private static String takeMatching(int category) {
+        for (int i = namePoolIndex; i < namePool.size(); i++) {
+            String candidate = namePool.get(i);
+            int declared = BotNamePool.categoryOf(candidate);
+            if (declared == BotNamePool.NEUTRAL || declared == category) {
+                namePool.set(i, namePool.get(namePoolIndex));
+                namePool.set(namePoolIndex, candidate);
+                namePoolIndex++;
+                return candidate;
+            }
+        }
+        return null;
     }
 
     private static List<String> loadAndShuffleNames() {

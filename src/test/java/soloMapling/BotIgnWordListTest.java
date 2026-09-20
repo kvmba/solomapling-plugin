@@ -3,6 +3,7 @@ package soloMapling;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import soloMapling.Environment.PluginResources;
+import soloMapling.FreeMarket.BotNamePool;
 import soloMapling.FreeMarket.FMShopDescGen;
 import soloMapling.Environment.SoloMaplingLanguageConfig;
 
@@ -84,6 +85,39 @@ class BotIgnWordListTest {
         }
         long cjk = drawn.stream().filter(BotIgnWordListTest::containsCjk).count();
         assertEquals(0, cjk, "en-US should not draw Chinese names, got: " + drawn);
+    }
+
+    // The pool is classified by the class word each name carries, so a bot can be named to match
+    // the job it will actually get (see BotNamePool / FMShopDescGen.getRandomCharacterIGN(int)).
+    // These assertions pin the classification against the real list, which is where a bad entry
+    // hides.
+    @Test
+    void everyCategoryWordAppearsInTheList() throws IOException {
+        List<String> names = read(LOCALIZED);
+        // Every role word the classifier knows about must actually classify something, or the word
+        // (or its bucket) is dead: a category that classifies to nothing would own no names.
+        assertClassifiesSome(names, BotNamePool.WARRIOR);
+        assertClassifiesSome(names, BotNamePool.MAGICIAN);
+        assertClassifiesSome(names, BotNamePool.BOWMAN);
+        assertClassifiesSome(names, BotNamePool.THIEF);
+        assertClassifiesSome(names, BotNamePool.PIRATE);
+    }
+
+    // 勇士部落 (Perion) is a town; it must not be classified as a warrior name just because it
+    // contains 勇士. The classifier is the single place this is decided.
+    @Test
+    void placeNameWithAJobWordStaysNeutral() {
+        assertEquals(BotNamePool.NEUTRAL, BotNamePool.categoryOf("勇士部落"));
+        assertEquals(BotNamePool.NEUTRAL, BotNamePool.categoryOf("Noob勇士部落"));
+        assertEquals(BotNamePool.WARRIOR, BotNamePool.categoryOf("勇士"));
+        assertEquals(BotNamePool.MAGICIAN, BotNamePool.categoryOf("大主教躺赢"));
+        assertEquals(BotNamePool.NEUTRAL, BotNamePool.categoryOf("龙神干饭"));
+    }
+
+    private static void assertClassifiesSome(List<String> names, int category) {
+        long hits = names.stream().filter(n -> BotNamePool.categoryOf(n) == category).count();
+        assertTrue(hits > 0,
+                "category " + category + " classifies nothing; a dead category would own no names");
     }
 
     @Test

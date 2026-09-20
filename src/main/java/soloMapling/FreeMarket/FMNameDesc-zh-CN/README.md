@@ -47,6 +47,16 @@ of a name, and it made ~1% of the pool look like a bot farm. 5-character names a
 of the pool (≈6,700) with 4-character at ≈1,900; width distribution lands on 10 and 8 (CJK counts
 as two cells), with a thinner tail at 9/11/12; nothing exceeds 12.
 
+**Job category** — a role word (`圣骑士`, `大主教`, `魔法师`, `弓箭手`, `飞侠`, `海盗` …) claims a
+class, but a bot's name and its class used to be rolled independently, so ~36% of names landed on
+a bot of a different class. `soloMapling.FreeMarket.BotNamePool` now classifies every name by the
+v83 job category its role word asserts and `FMShopDescGen` draws a name that is neutral or matches
+the bot's own category. When editing the list, keep the word table in step:
+
+- the five v83 job categories are warrior / magician / bowman / thief / pirate;
+- `龙神` / `恶魔` / `天使` are **not** v83 classes and stay neutral (they are flavour, not a claim);
+- `勇士` is a warrior word, but `勇士部落` (Perion) is a town and is subtracted explicitly.
+
 **Constraints** — `FMShopDescGen.loadAndShuffleNames()` silently drops any line longer than 12
 characters, and shop titles are laid out by display width:
 

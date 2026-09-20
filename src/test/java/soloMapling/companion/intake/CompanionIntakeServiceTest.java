@@ -72,7 +72,7 @@ class CompanionIntakeServiceTest {
     @Test
     void registersOneCompanionPerIteration() {
         FakeProvisioner provisioner = new FakeProvisioner();
-        CompanionIntakeService intake = service(provisioner, () -> "Wanderer", 10);
+        CompanionIntakeService intake = service(provisioner, category -> "Wanderer", 10);
 
         intake.registerOne();
 
@@ -86,7 +86,7 @@ class CompanionIntakeServiceTest {
         provisioner.rejectName = "First";
         AtomicInteger draw = new AtomicInteger();
         CompanionIntakeService intake = service(provisioner,
-                () -> draw.getAndIncrement() == 0 ? "First" : "Second", 10);
+                category -> draw.getAndIncrement() == 0 ? "First" : "Second", 10);
 
         intake.registerOne();
 
@@ -98,7 +98,7 @@ class CompanionIntakeServiceTest {
     void givesUpAfterRepeatedFailuresAndStillCountsOneInterval() {
         FakeProvisioner provisioner = new FakeProvisioner();
         provisioner.rejectName = "Stuck";
-        CompanionIntakeService intake = service(provisioner, () -> "Stuck", 10);
+        CompanionIntakeService intake = service(provisioner, category -> "Stuck", 10);
 
         intake.registerOne();
 
@@ -111,7 +111,7 @@ class CompanionIntakeServiceTest {
         FakeProvisioner provisioner = new FakeProvisioner();
         AtomicInteger draw = new AtomicInteger();
         CompanionIntakeService intake = service(provisioner,
-                () -> "Bot" + draw.incrementAndGet(), 3);
+                category -> "Bot" + draw.incrementAndGet(), 3);
 
         for (int i = 0; i < 6; i++) {
             intake.registerOne();
@@ -132,7 +132,7 @@ class CompanionIntakeServiceTest {
         soloMapling.companion.CompanionRoster.register(555_002);
         try {
             CompanionIntakeService intake = service(provisioner,
-                    () -> "Bot" + draw.incrementAndGet(), 3);
+                    category -> "Bot" + draw.incrementAndGet(), 3);
 
             for (int i = 0; i < 5; i++) {
                 intake.registerOne();
@@ -151,7 +151,7 @@ class CompanionIntakeServiceTest {
         FakeProvisioner provisioner = new FakeProvisioner();
         AtomicInteger draw = new AtomicInteger();
         CompanionIntakeService intake = service(provisioner,
-                () -> draw.getAndIncrement() == 0 ? "  " : "Real", 10);
+                category -> draw.getAndIncrement() == 0 ? "  " : "Real", 10);
 
         intake.registerOne();
 
@@ -166,7 +166,7 @@ class CompanionIntakeServiceTest {
                 new CompanionProvisioningService(
                         provisioner, new SecureCompanionIdentityGenerator()),
                 new CompanionLifecycleAccess(),
-                () -> "Wanderer",
+                category -> "Wanderer",
                 0L,
                 10,
                 0,

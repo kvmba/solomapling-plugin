@@ -22,6 +22,15 @@ public final class CompanionProvisioningService {
         return provision(characterName, personaSeed, 0);
     }
 
+    /**
+     * Next persona seed the service would use when a caller does not supply one. Exposed so a
+     * caller can predict the class a companion will get (for, e.g., matching its name to that
+     * class) and then pass the same seed back to {@link #provision}.
+     */
+    public long nextPersonaSeed() {
+        return generator.nextPersonaSeed();
+    }
+
     public CompanionProvisionResult provision(
             String characterName,
             String personaSeed,

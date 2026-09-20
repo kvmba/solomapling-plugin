@@ -3,6 +3,7 @@ package soloMapling;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import soloMapling.Environment.SoloMaplingLanguageConfig;
+import soloMapling.FreeMarket.BotNamePool;
 import soloMapling.FreeMarket.FMShopDescGen;
 
 import java.util.List;
@@ -121,5 +122,47 @@ class BotNamePoolConcurrencyTest {
             assertTrue(width >= 8 && width <= 12,
                     "drawn name '" + name + "' has display width " + width);
         }
+    }
+
+    // The whole point of category-aware drawing: a name drawn for one category must never assert a
+    // different category. Drawn under contention, through the real pool, so a race in the cursor
+    // advance (or in a language rebuild) would show up as a mismatched name rather than pass
+    // silently. The mixed categories also pin that the single cursor still hands each name out once.
+    @Test
+    void categoryDrawsNeverContradictTheCategory() throws Exception {
+        SoloMaplingLanguageConfig.setLanguageTag("zh-CN");
+        int threads = 16;
+        int perThread = 40;
+        ExecutorService pool = Executors.newFixedThreadPool(threads);
+        CountDownLatch start = new CountDownLatch(1);
+        java.util.List<String> bad = java.util.Collections.synchronizedList(new java.util.ArrayList<>());
+        Set<String> drawn = ConcurrentHashMap.newKeySet();
+        java.util.concurrent.atomic.AtomicInteger total = new java.util.concurrent.atomic.AtomicInteger();
+        try {
+            for (int i = 0; i < threads; i++) {
+                final int category = (i % 5) + 1; // warrior..pirate
+                pool.submit(() -> {
+                    start.await();
+                    for (int n = 0; n < perThread; n++) {
+                        String name = FMShopDescGen.getRandomCharacterIGN(category);
+                        total.incrementAndGet();
+                        drawn.add(name);
+                        int declared = BotNamePool.categoryOf(name);
+                        if (declared != BotNamePool.NEUTRAL && declared != category) {
+                            bad.add("category " + category + " drew '" + name + "' (declares " + declared + ")");
+                        }
+                    }
+                    return null;
+                });
+            }
+            start.countDown();
+            pool.shutdown();
+            assertTrue(pool.awaitTermination(30, TimeUnit.SECONDS), "draws did not finish");
+        } finally {
+            pool.shutdownNow();
+        }
+        assertTrue(bad.isEmpty(), "category-inconsistent draws: " + bad);
+        // 640 draws against a ~10k pool: the shared cursor must not repeat a name across categories.
+        assertEquals(total.get(), drawn.size(), "a name was handed to more than one draw");
     }
 }

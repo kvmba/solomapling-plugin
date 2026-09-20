@@ -8,6 +8,8 @@ import soloMapling.companion.lifecycle.CompanionLifecycleCoordinator;
 import soloMapling.companion.lifecycle.CompanionLifecycleStatus;
 import soloMapling.companion.provisioning.CompanionProvisionResult;
 import soloMapling.companion.provisioning.CompanionProvisioningService;
+import soloMapling.companion.progression.CompanionCareerBuild;
+import soloMapling.FreeMarket.BotNamePool;
 import soloMapling.server.MethodScheduler;
 
 import java.util.Objects;
@@ -85,10 +87,10 @@ public final class CompanionIntakeService {
         this.baseline = CompanionRoster.characterIds().size();
     }
 
-    /** Draws character names. Separate so a test can hand out fixed names. */
+    /** Draws character names for a given v83 job category (see {@link soloMapling.FreeMarket.BotNamePool}). */
     @FunctionalInterface
     public interface NameSource {
-        String next();
+        String next(int category);
     }
 
     public void start() {
@@ -117,13 +119,19 @@ public final class CompanionIntakeService {
             return;
         }
         for (int attempt = 1; attempt <= NAME_ATTEMPTS; attempt++) {
-            String name = names.next();
+            // Draw the seed first so the name can be matched to the class it will produce: the same
+            // seed is then handed to provisioning explicitly, so the predicted category and the actual
+            // class can never diverge. Read-only with respect to provisioning.
+            long seed = provisioning.nextPersonaSeed();
+            int category = BotNamePool.categoryOfJobId(
+                    CompanionCareerBuild.fromSeed(seed).firstJobId());
+            String name = names.next(category);
             if (name == null || name.isBlank()) {
                 continue;
             }
             try {
                 CompanionProvisionResult result =
-                        provisioning.provision(name, null, worldId, timezone);
+                        provisioning.provision(name, Long.toString(seed), worldId, timezone);
                 registered++;
                 log.info("Companion intake registered cid={} name={} population={}/{}",
                         result.characterId(), result.displayName(),

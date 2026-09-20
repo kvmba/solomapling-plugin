@@ -4,6 +4,11 @@
 
 ### Fixes
 
+- **Bot names no longer contradict their job.** A bot's IGN and its class were two independent rolls, so a third of the zh-CN names — which lean on role words like 圣骑士 / 大主教 / 魔法师 / 弓箭手 — landed on a bot of a different class (`圣骑士肝帝` walking around as a thief). Names are now drawn to match the job they will get:
+  - `BotNamePool` classifies each name by the v83 job category its role word asserts (warrior … pirate), with the flavour words that are not v83 classes (龙神 / 恶魔 / 天使) kept neutral and the town name 勇士部落 subtracted from the warrior word 勇士.
+  - `FMShopDescGen.getRandomCharacterIGN(int category)` returns the first name that is neutral or asserts the bot's own category; the plain `getRandomCharacterIGN()` still works for an unknown class.
+  - The category is resolved once in `BotGeneration.createBotOn` (from the forced job, else the rolled/known base class) and handed to both the name draw and the decoration, so the name is fixed before the job is rolled and the two can never disagree. The no-class spawn path previously let `BotDecorate` roll its own base class; it now reuses that single roll (same default 10..80 band).
+  - Companions are named the same way: intake draws the persona seed first, derives the class from it, and passes the same seed to provisioning, so a companion's IGN matches the career it trains as.
 - **Pirate (base class 5) is now a first-class bot job.** Ambient / training bots previously never rolled a pirate (`rollBaseClass` excluded class 5), and a pirate's `getJobStyle()` resolves to `BRAWLER`/`GUNSLINGER` (never `PIRATE`), so any style-keyed lookup silently degraded it to "no job" (reqJob 0). Fixed end to end:
   - `rollBaseClass` now yields pirates at ~6% (rarest, after thief > mage > warrior > bowman); `selectJobForClass` covers all four tiers (500 / 510,520 / 511,521 / 512,522).
   - `getReqJobViaJobStyle` maps `BRAWLER`/`GUNSLINGER` → `PIRATE` (reqJob 16), so a pirate can wear its knuckle/gun and pirate armour.

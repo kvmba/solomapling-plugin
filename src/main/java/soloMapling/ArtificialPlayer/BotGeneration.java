@@ -33,12 +33,14 @@ import java.util.concurrent.atomic.AtomicInteger;
 import static soloMapling.ArtificialPlayer.BotClientHandler.getBotClient;
 import static soloMapling.ArtificialPlayer.BotCommandsPack.WarpCommands.botEnterPortalDropDown;
 import soloMapling.ArtificialPlayer.BotDecoratorSystem.BotFame;
+import soloMapling.ArtificialPlayer.BotDecoratorSystem.BotDecorate;
 import soloMapling.ArtificialPlayer.BotDetailSystem.BotDetailWindow;
 import soloMapling.ArtificialPlayer.BotMedalSystem.BotMedal;
 import static soloMapling.ArtificialPlayer.BotDecoratorSystem.BotDecorate.setBotVariables;
 import static soloMapling.ArtificialPlayer.BotMovementSystem.MovementCommands.microTurnAroundToLeft;
 import static soloMapling.DebugUtilities.debugprint;
 import static soloMapling.FreeMarket.FMShopDescGen.getRandomCharacterIGN;
+import soloMapling.FreeMarket.BotNamePool;
 import static soloMapling.server.ExecutorServiceManager.runAsync;
 import static soloMapling.server.SoloMaplingUtilities.getChr;
 import static soloMapling.server.SoloMaplingUtilities.channel;
@@ -233,10 +235,21 @@ public class BotGeneration {
 
         int cid = templateCharacterId();
 
+        // Resolve the job category once, up front, so the name and the job agree. The name must be
+        // set before the bot is broadcast onto its map (addBotToServer below), i.e. before
+        // BotDecorate rolls the job - so the base class is decided here and handed to both. The
+        // baseClass<=0 overload used to let BotDecorate roll its own rollBaseClass(); doing it here
+        // instead keeps the name category and the actual job on the same roll. A forced job pins the
+        // category to that job's class; a level band that can produce a beginner (min < 10, which
+        // selectJobForClass turns into the classless job 0) draws a neutral name instead.
+        int effectiveBaseClass = baseClass <= 0 ? BotDecorate.rollBaseClass() : baseClass;
+        int nameMinLevel = baseClass <= 0 ? 10 : minLevel;
+        int nameCategory = BotNamePool.nameCategoryFor(effectiveBaseClass, nameMinLevel, forcedJobId);
+
         Character bot = null;
         bot = Character.loadCharFromDB(cid, BotClientHandler.clientFor(channel), false);
         int botId = SoloMaplingConstants.GameConstants.BOT_BASE_ID + currentBotCount.getAndIncrement();
-        bot = setBotStats(bot, botId); // Bot onDemandBot
+        bot = setBotStats(bot, botId, nameCategory); // Bot onDemandBot
         addBotToServer(bot);
         // Re-resolve the map on the bot's OWN channel. Callers pass a map instance taken from
         // whichever channel they were on (a GM's, or channel 1's), and a map is a per-channel
@@ -252,9 +265,13 @@ public class BotGeneration {
         }
         placeBotOnMap(bot, pos, ownMap);
         // Decorate before the drop-down plays so the bot arrives fully dressed
-        // (decoration is an in-memory cache lookup, takes microseconds).
+        // (decoration is an in-memory cache lookup, takes microseconds). This mirrors the original
+        // branch exactly (baseClass<=0 -> the default 10..80 band), except the no-class path reuses
+        // effectiveBaseClass (already rolled above) instead of letting BotDecorate roll a second
+        // class - so the job matches the name category. A forced job still flows through the
+        // baseClass<=0 branch, where selectJobForClass ignores baseClass and uses the forced id.
         if (baseClass <= 0) {
-            setBotVariables(bot);
+            setBotVariables(bot, effectiveBaseClass, 10, 80, forcedJobId);
         } else {
             setBotVariables(bot, baseClass, minLevel, maxLevel, forcedJobId);
         }
@@ -439,7 +456,7 @@ public class BotGeneration {
         return onDemandBot;
     }
 
-    private static Character setBotStats(Character baseChr, int botId) {
+    private static Character setBotStats(Character baseChr, int botId, int nameCategory) {
         Character onDemandBot = baseChr; // Character.getDefault(c)
         // Keep the channel-specific client loadCharFromDB was given: overwriting it with the
         // channel-1 client would put the bot back on channel 1 (and its ChannelServer, map
@@ -447,7 +464,9 @@ public class BotGeneration {
         if (onDemandBot.getClient() == null) {
             onDemandBot.setClient(getBotClient());
         }
-        onDemandBot.setName(getRandomCharacterIGN());
+        // Name before the job is rolled (BotDecorate runs later, after the bot is on its map), so
+        // the category is passed in from createBotOn rather than read off the - not yet set - job.
+        onDemandBot.setName(getRandomCharacterIGN(nameCategory));
         onDemandBot.setId(botId);
         return onDemandBot;
     }
