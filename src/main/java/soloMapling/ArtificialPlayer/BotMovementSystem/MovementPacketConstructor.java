@@ -1,6 +1,7 @@
 package soloMapling.ArtificialPlayer.BotMovementSystem;
 
 import org.gms.client.Character;
+import org.gms.constants.game.CharacterStance;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
 import org.gms.net.packet.ByteBufInPacket;
@@ -214,9 +215,26 @@ public class MovementPacketConstructor {
             packet.setXpos(newXpos);
             short newYpos = (short) (packet.getYpos() - offsetY);
             packet.setYpos(newYpos);
-            packet.setFh((short) currentFh);
+            // Only a LAND fragment takes the bot's current ground foothold id. A non-land fragment
+            // (a jump/fall, a swim, or a rope) must KEEP the fh the recording carried: a real client
+            // sends 0 mid-air (and the negative rope index on a rope), and overwriting that with a
+            // ground id makes the client snap the sprite onto that foothold's footing and take its
+            // render layer — the same bug the dynamic engine's resolveBroadcastFhId fixes. The
+            // deconstruct step already zeroed fh on the relative/teleport fragments, so preserving
+            // here is a no-op for those and only rescues the cmd-0 airborne frames.
+            if (!isNonLandStance(packet.getNewstate())) {
+                packet.setFh((short) currentFh);
+            }
         }
         return movementList;
+    }
+
+    // A pose that is not standing on solid ground: no foothold to adhere to, so its recorded fh
+    // (0 mid-air, the negative rope index on a rope) must survive an offset reposition.
+    private static boolean isNonLandStance(byte stance) {
+        return CharacterStance.isJumping(stance)
+                || CharacterStance.isSwimming(stance)
+                || CharacterStance.isClimbing(stance);
     }
 
     public static InPacket createArtificialStopPacket(Character fakechar) {
