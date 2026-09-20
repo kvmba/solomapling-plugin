@@ -188,7 +188,7 @@ public final class BotPetFollower {
      *  never offer a floor the launch cannot actually clear (see {@link GCMovement#jumpProfile}). */
     private static final int JUMP_RISE_MARGIN_PX = 8;
     private static final int GROUND_SNAP_PX = 6;            // "standing on the floor" tolerance
-    private static final int LOST_PX = 500;                 // 1-D horizontal gap -> warp to the owner
+    private static final int LOST_PX = 300;                 // 1-D horizontal gap -> warp to the owner
     /** Slack (px) past the map's VR rectangle below/left/right at which a pet is treated as
      *  fallen out of the map and snapped back to the owner. Mirrors the bot driver's own
      *  fall-off-map recovery (see {@link #recoverIfFallenOffMap}). */
