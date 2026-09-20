@@ -47,7 +47,7 @@ class PirateCareerMappingTest {
 
     @Test
     void rollBaseClassEventuallyYieldsPirates() {
-        // Pirates are the rarest roll (~6%); over enough draws they must appear, and never as an
+        // Pirates are a ~12% roll; over enough draws they must appear, and never as an
         // out-of-range class id.
         boolean sawPirate = false;
         for (int i = 0; i < 5000 && !sawPirate; i++) {
