@@ -94,4 +94,37 @@ class BotNamePoolTest {
         assertEquals(BotNamePool.NEUTRAL, BotNamePool.nameCategoryFor(0, 20, 0));
         assertEquals(BotNamePool.NEUTRAL, BotNamePool.nameCategoryFor(6, 20, 0));
     }
+
+    // The English pool is the default language, so it needs the same coverage. Its words match on
+    // token boundaries (see BotNamePool), because a substring match would be wrong for ASCII.
+    @Test
+    void englishClassWordsMapToTheirCategory() {
+        assertEquals(BotNamePool.THIEF, BotNamePool.categoryOf("HermitBoyo"));
+        assertEquals(BotNamePool.MAGICIAN, BotNamePool.categoryOf("BishopGod"));
+        assertEquals(BotNamePool.WARRIOR, BotNamePool.categoryOf("DashWarrior"));
+        assertEquals(BotNamePool.BOWMAN, BotNamePool.categoryOf("Pr0Archer"));
+        assertEquals(BotNamePool.PIRATE, BotNamePool.categoryOf("CorsairLyfe"));
+        assertEquals(BotNamePool.THIEF, BotNamePool.categoryOf("xSneakyThief"));
+    }
+
+    // Multi-word classes are recognised from an adjacent token pair.
+    @Test
+    void englishMultiWordClassesMatchAcrossTokens() {
+        assertEquals(BotNamePool.BOWMAN, BotNamePool.categoryOf("xBowMaster07"));
+        assertEquals(BotNamePool.THIEF, BotNamePool.categoryOf("xNightLord"));
+        assertEquals(BotNamePool.THIEF, BotNamePool.categoryOf("xChiefBandit"));
+        assertEquals(BotNamePool.WARRIOR, BotNamePool.categoryOf("xDarkKnight"));
+        assertEquals(BotNamePool.WARRIOR, BotNamePool.categoryOf("xPaladin07"));
+    }
+
+    // A substring match would misread ordinary words: SIN inside SINCE, MAGE inside IMAGE, HERO
+    // inside ZEROHERO. Token matching keeps them neutral.
+    @Test
+    void englishSubstringsDoNotFalsePositive() {
+        assertEquals(BotNamePool.NEUTRAL, BotNamePool.categoryOf("Since2005"));
+        assertEquals(BotNamePool.NEUTRAL, BotNamePool.categoryOf("zeroherozx"));
+        assertEquals(BotNamePool.NEUTRAL, BotNamePool.categoryOf("RiceBowl"));
+        assertEquals(BotNamePool.NEUTRAL, BotNamePool.categoryOf("GuildMaster"));
+        assertEquals(BotNamePool.NEUTRAL, BotNamePool.categoryOf("Evilcookie33"));
+    }
 }

@@ -35,6 +35,8 @@ class BotIgnWordListTest {
 
     private static final String LOCALIZED =
             "FreeMarket/FMNameDesc-zh-CN/randomRealMaplestoryIGNs.txt";
+    private static final String ENGLISH =
+            "FreeMarket/FMNameDesc/randomRealMaplestoryIGNs.txt";
 
     @AfterEach
     void reset() {
@@ -118,6 +120,18 @@ class BotIgnWordListTest {
         long hits = names.stream().filter(n -> BotNamePool.categoryOf(n) == category).count();
         assertTrue(hits > 0,
                 "category " + category + " classifies nothing; a dead category would own no names");
+    }
+
+    // The English list is the default, so its own class words must classify too. Without this the
+    // English pool (the default language) would ship names with no category filter at all.
+    @Test
+    void englishCategoryWordsAppearInTheEnglishList() throws IOException {
+        List<String> names = read(ENGLISH);
+        assertClassifiesSome(names, BotNamePool.WARRIOR);
+        assertClassifiesSome(names, BotNamePool.MAGICIAN);
+        assertClassifiesSome(names, BotNamePool.BOWMAN);
+        assertClassifiesSome(names, BotNamePool.THIEF);
+        assertClassifiesSome(names, BotNamePool.PIRATE);
     }
 
     @Test

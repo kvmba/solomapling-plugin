@@ -78,8 +78,10 @@
 - `天使/恶魔` 在 v83 无对应职业（v83 无 4 转天使/恶魔），是"外观风味"，不宜当职业断言。
 - 大量条目是 `X的Y` / `X动作Y`：`鲨鱼的骑士`、`搬砖工通宵`、`战神干饭`——判断要认角色词本身。
 
-英文池 1636 条里仅 78 条（4.8%）命中，且多为真实 IGN（`HermitBoyo`、`PriestsHealz`），
-观感不刺眼，**列为低优先级**（同一机制天然覆盖，无需额外适配）。
+英文池是**默认语言**（`SoloMaplingLanguageConfig.DEFAULT = en-US`），1636 条里约 106 条（6.5%）含职业词
+（`HermitBoyo`、`BishopGod`、`DashWarrior`、`xBowMaster07`…）。**必须单独适配**——初版词表为纯中文时，
+`categoryOf` 对任何英文名都返回中立，等于英文（默认）环境下完全没有一致性过滤。英文用"camelCase/数字
+切词 + 整词或相邻词对精确匹配"覆盖（见下）。
 
 ---
 
@@ -101,6 +103,20 @@
 > 与 `BotDecorate.rollBaseClass()` 的 1..5 编号一致，便于与现有 baseClass 贯通。
 > 表放在**内容/池侧**（`FMShopDescGen` 或新 `BotNamePool`），而非 `BotDecorate`，
 > 让 `BotDecorate` 不反向依赖名字池。
+
+**英文词表**（默认语言，必须单独覆盖）。英文用 ASCII 词边界匹配，不用子串：
+
+| 职业类别 | 英文词（整词或相邻词对，长词优先） |
+|---|---|
+| warrior | warrior fighter spearman crusader hero paladin page darkknight dragonknight whiteknight |
+| magician | magician mage wizard cleric priest bishop archmage |
+| bowman | bowmaster crossbowman crossbow bowman archer hunter ranger sniper marksman bow |
+| thief | chiefbandit nightlord shadower assassin bandit thief hermit sin |
+| pirate | gunslinger buccaneer brawler marauder corsair outlaw pirate |
+
+匹配方式：把名字按 camelCase/数字边界切成 token（`xBowMaster07` → x, Bow, Master, 07），
+职业词须命中**某个 token**或**相邻两 token 拼接**（`bow`+`master`=bowmaster）。这样
+`sin`⊂`Since2005`、`mage`⊂`image`、`hero`⊂`zeroherozx`、`bow`⊂`RiceBowl` 都不会误判。
 
 ### 3.2 抽名 API
 
@@ -191,7 +207,7 @@ getRandomCharacterIGN(int category)   // category: 0=中立, 1..5=v83 职业类�
 | 词表误分类（如 `勇士部落` 地名） | 分类用"角色词表 + 长词优先 + 显式例外表"；`勇士部落`/`天使`/`恶魔` 等进中立例外；测试锁定 |
 | 职业类别桶耗尽后重洗导致分布抖动 | 只重洗单桶；中立桶体量最大，先耗尽概率低 |
 | 与现有"顺序不重名"语义冲突 | 分桶后每桶独立 index，仍保证进程内每桶不重名 |
-| 英文池 | 同机制天然覆盖，但词表以中文为主；英文命中率低（4.8%），v1 可只处理中文词表 |
+| 英文池 | **已适配**：英文是默认语言，初版只处理中文等于默认环境无过滤。词表按 ASCII 词边界匹配（见 §3.1），`sin`⊂`Since`、`mage`⊂`image`、`hero`⊂`zeroherozx` 均不误判 |
 | 最小改动原则 | 不改名字合法性校验、不改 shard/选角逻辑，只在"抽名"与"定职"之间加一层一致性 |
 
 ---
@@ -246,6 +262,4 @@ getRandomCharacterIGN(int category)   // category: 0=中立, 1..5=v83 职业类�
 
 ## 10. 后续（未做）
 
-- 英文池（1636 条，仅 4.8% 命中职业词）未单独适配词表；同机制天然覆盖中文词，英文命中大多是
-  真实 IGN，观感不刺眼，暂不处理。
 - 店铺店主名（`getRandomShopOwnerIGN`）无职业语义，保持不受约束（抽 `NEUTRAL`）。
