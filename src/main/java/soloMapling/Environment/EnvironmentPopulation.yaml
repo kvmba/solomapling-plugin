@@ -130,29 +130,30 @@ waves:
       - {map: 220050300, count: 16, level_lo: 70, level_hi: 95}
       - {map: 220020000, count: 16, level_lo: 36, level_hi: 60}
       - {map: 221000000, count: 40, level_lo: 40, level_hi: 54}
-      - {map: 221020000, count: 34, level_lo: 30, level_hi: 47}
+      - {map: 221020000, count: 24, level_lo: 30, level_hi: 47}
       # 玩具塔 1-100 层：此前只有 1 楼(68)和顶楼，中间全空。按间隔选层投放，
       # 让爬塔沿途有人，而不是全挤在两头。
-      - {map: 221020100, count: 8, level_lo: 30, level_hi: 45}   # 玩具塔2层
-      - {map: 221020400, count: 9, level_lo: 30, level_hi: 45}   # 玩具塔5层
-      - {map: 221020600, count: 10, level_lo: 30, level_hi: 45}   # 玩具塔7层
-      - {map: 221020800, count: 7, level_lo: 30, level_hi: 45}   # 玩具塔9层
-      - {map: 221021200, count: 7, level_lo: 30, level_hi: 45}   # 玩具塔22层
-      - {map: 221021400, count: 10, level_lo: 30, level_hi: 45}   # 玩具塔24层
-      - {map: 221021800, count: 8, level_lo: 30, level_hi: 45}   # 玩具塔42层
-      - {map: 221022000, count: 10, level_lo: 30, level_hi: 45}   # 玩具塔44层
-      - {map: 221022300, count: 10, level_lo: 30, level_hi: 45}   # 玩具塔56层
-      - {map: 221022500, count: 10, level_lo: 30, level_hi: 45}   # 玩具塔58层
-      - {map: 221022700, count: 10, level_lo: 30, level_hi: 45}   # 玩具塔60层
-      - {map: 221022900, count: 10, level_lo: 30, level_hi: 45}   # 玩具塔71层
-      - {map: 221023100, count: 10, level_lo: 30, level_hi: 45}   # 玩具塔73层
-      - {map: 221023300, count: 10, level_lo: 30, level_hi: 45}   # 玩具塔75层
-      - {map: 221023500, count: 10, level_lo: 30, level_hi: 45}   # 玩具塔91层
-      - {map: 221023700, count: 9, level_lo: 30, level_hi: 45}   # 玩具塔93层
-      - {map: 221023900, count: 9, level_lo: 30, level_hi: 45}   # 玩具塔95层
-      - {map: 221024100, count: 8, level_lo: 30, level_hi: 45}   # 玩具塔97层
-      - {map: 221024300, count: 8, level_lo: 30, level_hi: 45}   # 玩具塔99层
-      - {map: 221024400, count: 9, level_lo: 30, level_hi: 45}   # 玩具塔100层
+      # 密度整体按 70% 投放（216 -> 152/频道）。
+      - {map: 221020100, count: 6, level_lo: 30, level_hi: 45}   # 玩具塔2层
+      - {map: 221020400, count: 6, level_lo: 30, level_hi: 45}   # 玩具塔5层
+      - {map: 221020600, count: 7, level_lo: 30, level_hi: 45}   # 玩具塔7层
+      - {map: 221020800, count: 5, level_lo: 30, level_hi: 45}   # 玩具塔9层
+      - {map: 221021200, count: 5, level_lo: 30, level_hi: 45}   # 玩具塔22层
+      - {map: 221021400, count: 7, level_lo: 30, level_hi: 45}   # 玩具塔24层
+      - {map: 221021800, count: 6, level_lo: 30, level_hi: 45}   # 玩具塔42层
+      - {map: 221022000, count: 7, level_lo: 30, level_hi: 45}   # 玩具塔44层
+      - {map: 221022300, count: 7, level_lo: 30, level_hi: 45}   # 玩具塔56层
+      - {map: 221022500, count: 7, level_lo: 30, level_hi: 45}   # 玩具塔58层
+      - {map: 221022700, count: 7, level_lo: 30, level_hi: 45}   # 玩具塔60层
+      - {map: 221022900, count: 7, level_lo: 30, level_hi: 45}   # 玩具塔71层
+      - {map: 221023100, count: 7, level_lo: 30, level_hi: 45}   # 玩具塔73层
+      - {map: 221023300, count: 7, level_lo: 30, level_hi: 45}   # 玩具塔75层
+      - {map: 221023500, count: 7, level_lo: 30, level_hi: 45}   # 玩具塔91层
+      - {map: 221023700, count: 6, level_lo: 30, level_hi: 45}   # 玩具塔93层
+      - {map: 221023900, count: 6, level_lo: 30, level_hi: 45}   # 玩具塔95层
+      - {map: 221024100, count: 6, level_lo: 30, level_hi: 45}   # 玩具塔97层
+      - {map: 221024300, count: 6, level_lo: 30, level_hi: 45}   # 玩具塔99层
+      - {map: 221024400, count: 6, level_lo: 30, level_hi: 45}   # 玩具塔100层
       - {map: 222000000, count: 21, level_lo: 30, level_hi: 70}
       - {map: 200000000, count: 32, level_lo: 30, level_hi: 86}
       - {map: 200080100, count: 29, level_lo: 30, level_hi: 60}
