@@ -53,10 +53,11 @@ class PirateActionIdTest {
     }
 
     @Test
-    void gunUsesItsOwnFirePoseAsTheWeaponDefault() {
-        // A gun bot fires with "shootF" - the only gun pose on a gun weapon img. "shot"=93 is on
-        // the body but on no weapon img, and a melee swing is not a gun pose at all.
-        assertEquals(27, BotAttackData.randomActionFor(WeaponType.GUN));
+    void gunUsesTheShotPoseAsItsWeaponDefault() {
+        // A gun bot fires with "shot" (93) - the gunner's own fire pose, which is exactly what the
+        // real client sends in the RANGED_ATTACK direction byte (live v83 capture: a no-skill gun
+        // swing carries 0x5D = 93). shootF (27) is not a gun fire action and renders no shot/bullet.
+        assertEquals(93, BotAttackData.randomActionFor(WeaponType.GUN));
     }
 
     @Test
