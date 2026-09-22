@@ -124,7 +124,7 @@ public final class BotAttack {
                 chr,
                 PacketCreator.rangedAttack(chr, skillId, resolveSkillLevel(skillId), facingMask,
                         /* numAttackedAndDamage */ 0, projectile, emptyTargets,
-                        BotAttackData.DEFAULT_ATTACK_SPEED, bodyActionId, /* display */ 0),
+                        BotAttackData.speedFor(weaponType, BotAttackData.DEFAULT_ATTACK_SPEED), bodyActionId, /* display */ 0),
                 false
         );
     }

@@ -45,8 +45,18 @@ public final class BotAttackData {
     public static final int FACING_RIGHT_MASK = 0x00;
     public static final int FACING_LEFT_MASK  = 0x80;
 
-    /* Default attack speed when the weapon profile is unknown. v83 range is 2-9 (lower = faster). */
+    /* Default attack speed for a cosmetic swing. v83 range is 2-9 (lower = faster). */
     public static final int DEFAULT_ATTACK_SPEED = 4;
+
+    /* A gun (the pirate's bullet) fires at speed 5 - the value a real v83 client puts in the
+     * RANGED_ATTACK speed byte (live capture). Every other weapon keeps the profile default. */
+    private static final int GUN_ATTACK_SPEED = 5;
+
+    /* The speed byte for a weapon: a gun overrides to GUN_ATTACK_SPEED, everything else uses the
+     * caller's default (profile speed, or DEFAULT_ATTACK_SPEED for a cosmetic swing). */
+    public static int speedFor(WeaponType weaponType, int fallback) {
+        return weaponType == WeaponType.GUN ? GUN_ATTACK_SPEED : fallback;
+    }
 
     private static final int SWING_O1 = 5, SWING_O2 = 6, SWING_O3 = 7;   // 1H swing
     private static final int SWING_T1 = 9, SWING_T2 = 10, SWING_T3 = 11; // 2H swing

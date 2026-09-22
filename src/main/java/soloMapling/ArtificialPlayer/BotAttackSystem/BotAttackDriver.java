@@ -293,7 +293,8 @@ public final class BotAttackDriver {
             case CLOSE  -> BotAttackEffects.meleeStrike(bot, hits, skillId, profile.skillLevel,
                     bodyActionId, facingMask, profile.speed, profile.hitDelayMs);
             case RANGED -> BotAttackEffects.rangedStrike(bot, hits, skillId, profile.skillLevel,
-                    BotAttackData.projectileFor(weapon, bot), bodyActionId, facingMask, profile.speed, profile.hitDelayMs);
+                    BotAttackData.projectileFor(weapon, bot), bodyActionId, facingMask,
+                    BotAttackData.speedFor(weapon, profile.speed), profile.hitDelayMs);
             case MAGIC  -> BotAttackEffects.magicStrike(bot, hits, skillId, profile.skillLevel,
                     bodyActionId, facingMask, profile.speed, profile.hitDelayMs);
         };
