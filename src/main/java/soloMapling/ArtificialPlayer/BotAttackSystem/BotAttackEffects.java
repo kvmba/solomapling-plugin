@@ -165,6 +165,9 @@ public final class BotAttackEffects {
      * (viewers play the real pose and see the numbers) and the damage then lands through the same
      * kill/EXP/loot path every other bot hit uses.
      *
+     * The packet names the charge skill, as a real client's touch does - the host's own refresh guard
+     * only ever sees Energy Charge on this path because the client attributes the strike to it.
+     *
      * The pose is the brawler's own strike keyframe (Energy Blast's "eburster", the pirate line's
      * punch) with the bot's facing, matching how BotAttackDriver renders every other bot swing.
      * Returns true when the hit killed the mob.
@@ -173,6 +176,9 @@ public final class BotAttackEffects {
         if (bot == null || bot.getMap() == null || mob == null || !mob.isAlive() || damage <= 0) {
             return false;
         }
+        // Level 0 (the skill somehow gone) still yields a well-formed packet: no skill is written.
+        int skillLevel = bot.getSkillLevel(Marauder.ENERGY_CHARGE);
+        int skill = skillLevel > 0 ? Marauder.ENERGY_CHARGE : 0;
         // Energy Blast has its own keyframe ("eburster", the pirate line's punch), so the weapon
         // argument is not consulted for it.
         int bodyActionId = BotAttackData.actionFor(Marauder.ENERGY_BLAST, null);
@@ -180,7 +186,7 @@ public final class BotAttackEffects {
         Map<Integer, List<Integer>> targets = new HashMap<>();
         targets.put(mob.getObjectId(), List.of(damage));
         bot.getMap().broadcastMessage(bot, PacketCreator.energyAttack(bot,
-                /* skill */ 0, /* skilllevel */ 0, facingMask,
+                skill, skillLevel, facingMask,
                 /* numAttackedAndDamage */ (1 << 4) | 1,
                 targets, BotAttackData.DEFAULT_ATTACK_SPEED, bodyActionId, /* display */ 0), false);
         return applyDamageAndLoot(bot, mob, damage, (short) 0);
