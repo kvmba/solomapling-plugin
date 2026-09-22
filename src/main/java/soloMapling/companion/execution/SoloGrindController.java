@@ -274,7 +274,18 @@ public final class SoloGrindController {
                 // a crossing is a trip like any other, and a companion that keeps leaving
                 // never settles anywhere long enough to be found.
                 boolean freeMove = companion.getLevel() >= TrainingRegions.FREE_MOVE_LEVEL;
-                if (freeMove
+                // forcedCrossing: the beginner island's one-way boat, or a continent genuinely outgrown
+                // (nothing left in band). Same statement of the rule as the training bot's — shared so
+                // the two cannot drift apart.
+                boolean outgrown = TrainingMapChooser.forcedCrossing(
+                        companion.getMapId(), companion.getLevel());
+                if (!freeMove && !outgrown) {
+                    // Migration offered a harder continent this companion qualifies for, but it has
+                    // NOT outgrown where it stands — a climb is owed only when nothing in band is
+                    // left. (Without this the level-only bar test jumped every companion whose level
+                    // cleared a higher continent off a continent that still had mobs for it.)
+                    relocatedUntilMs = now + RETRY_MS; // no ground outgrown — ask again later
+                } else if (freeMove
                         && ThreadLocalRandom.current().nextDouble()
                                 >= TrainingRegions.OPTIONAL_MOVE_CHANCE) {
                     relocatedUntilMs = now + RETRY_MS; // not this time — ask again later

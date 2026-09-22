@@ -576,16 +576,25 @@ public class TrainingBot extends BotSM implements GrindTickRegistry.Participant 
         if (now() <= movedUntilMs) {
             return false;
         }
-        boolean optional = chr.getLevel() >= TrainingRegions.FREE_MOVE_LEVEL;
         int dest = TrainingRegions.migrationTarget(homeMapId, chr.getLevel());
-        if (dest <= 0) {
-            // Nothing to outgrow into, so the only move left is going somewhere else anyway.
-            optional = true;
-            if (rng.nextDouble() < TrainingRegions.OPTIONAL_MOVE_CHANCE) {
-                dest = TrainingRegions.returnTarget(homeMapId, chr.getLevel());
+        if (dest > 0) {
+            if (chr.getLevel() >= TrainingRegions.FREE_MOVE_LEVEL) {
+                // A free mover may go anywhere, so a move is optional — roll the dice.
+                if (rng.nextDouble() >= TrainingRegions.OPTIONAL_MOVE_CHANCE) {
+                    dest = 0; // this continent still has mobs worth the bot's time — staying put
+                }
+            } else if (!TrainingMapChooser.forcedCrossing(homeMapId, chr.getLevel())) {
+                // migrationTarget answers "is there a harder continent I qualify for", which is NOT
+                // "have I outgrown this one": it fires the moment a harder continent's bar is cleared,
+                // however much this continent still has to offer. The old level-only test made exactly
+                // that error, and it drained the low-bar continents (Ludibrium's EDF among them) into
+                // one higher-bar funnel. forcedCrossing is owed only for a genuine outgrowing — or the
+                // beginner island's one-way exit, which it treats as its own case.
+                dest = 0;
             }
-        } else if (optional && rng.nextDouble() >= TrainingRegions.OPTIONAL_MOVE_CHANCE) {
-            dest = 0; // this continent still has mobs worth the bot's time — staying put
+        } else if (rng.nextDouble() < TrainingRegions.OPTIONAL_MOVE_CHANCE) {
+            // Nothing to outgrow into, so the only move left is going somewhere else anyway.
+            dest = TrainingRegions.returnTarget(homeMapId, chr.getLevel());
         }
         if (dest <= 0 || dest == homeMapId) {
             return false;

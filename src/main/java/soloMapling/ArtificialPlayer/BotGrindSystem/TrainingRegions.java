@@ -79,6 +79,20 @@ public final class TrainingRegions {
     private static final int BEGINNER_MIGRATE_LEVEL = 8;
     /** Victoria Island's town — where the boat from the beginner island lands. */
     private static final int VICTORIA_ISLAND_START = 100_000_000;
+
+    /**
+     * Whether {@code mapId} is on the beginner island (彩虹岛) — every map below Victoria's range.
+     *
+     * <p>The island's only migration is the one-way boat out of Southperry at
+     * {@link #BEGINNER_MIGRATE_LEVEL}: it is an EXIT a bot must take, not an outgrown continent. A
+     * caller deciding whether a move is a forced CLIMB (owed only when nothing is left in band) must
+     * treat the island's exit differently — the island does hold level-appropriate mobs, so a
+     * content-based test would strand every bot there forever.</p>
+     */
+    public static boolean isBeginnerIsland(int mapId) {
+        return mapId < VICTORIA_ISLAND_START;
+    }
+
     /**
      * From this level the ladder stops being a ladder: a bot picks ANY continent it qualifies for,
      * not just a harder one. 120 is fourth job — past it a player goes where they like, and a bot

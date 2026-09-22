@@ -126,6 +126,64 @@ public final class TrainingMapChooser {
         return null; // not reached — the loop always returns on its last attempt
     }
 
+    // ── Continental migration support ──
+
+    // Whether a level-appropriate hunting ground is reachable around `fromMapId` right now — the same
+    // two-sided band and level-scaled radius DECIDE uses (and the deep-hub downward floor), and NO
+    // occupancy reservation (asking must not disturb the slot registry). This is the "has this bot
+    // outgrown its continent?" probe a migration needs, because a continent's entry BAR cannot answer
+    // it: the bar is the level a bot must reach to COME HERE, not a statement that everything here still
+    // fits the level it has since reached. Ludibrium's bar is 30, but it holds fields for a 40-54 cohort
+    // — so a 40-54 bot there has not outgrown it, however many harder continents its level cleared.
+    //
+    // It must band-check the finder's RESULT, not merely ask whether the result is empty:
+    // findTrainingMaps falls back to the closest-level maps when nothing is in band, so a non-empty list
+    // only means "some mob map is reachable", which is true almost everywhere. The finder returns the
+    // in-band maps when any exist and only the out-of-band fallback otherwise, so a band test separates
+    // the two — using emptiness would read every bot as "still has targets" and switch the climb off.
+    public static boolean hasInBandTarget(int fromMapId, int level) {
+        int minMob = minMobFor(level);
+        int maxMob = level + LEVEL_BAND;
+        // Mirror DECIDE's downward-only floor: a "pro" hub whose cohort only trains DEEPER must not read
+        // a trivial up-map as "still has something".
+        DeepHub.Info hub = DeepHub.of(fromMapId);
+        if (hub != null && hub.downwardOnly()) {
+            minMob = Math.max(minMob, level - DOWNWARD_HUB_LOWER_SPAN);
+        }
+        boolean includeOrigin = MapMobIndex.level(fromMapId) >= 0;
+        for (TrainingMap m : TrainingMapFinder.findTrainingMaps(
+                fromMapId, level, minMob, maxMob, hopsForLevel(level), Set.of(), includeOrigin)) {
+            if (m.mobLevel() >= minMob && m.mobLevel() <= maxMob) {
+                return true; // an in-band map survived admission
+            }
+        }
+        return false;
+    }
+
+    // The climb rule, pure so it can be reasoned about (and pinned) without a live world: a bot is
+    // FORCED off its continent only when it has genuinely outgrown it (nothing left in band) and is
+    // still below the free-move level. Qualifying to move is not the same as having to.
+    public static boolean mustLeaveContinent(int level, boolean continentStillHasTargets) {
+        return level < TrainingRegions.FREE_MOVE_LEVEL && !continentStillHasTargets;
+    }
+
+    // Whether a below-free-move bot MUST cross right now. The two call sites (the training bot and the
+    // companion) share this one statement of the rule so they cannot drift apart — an inverted guard in
+    // only one of them is exactly the kind of silent divergence this removes.
+    //
+    // Two cases force a crossing, and they are DIFFERENT:
+    //   - the beginner island's one-way boat — an EXIT a bot must take, never a climb to gate on
+    //     content (the island holds snails and such, so a content test would strand every bot there);
+    //   - a real continent genuinely outgrown (nothing left in band to fight).
+    // Everything else is optional: a free mover rolls the dice, and a bot with something left to fight
+    // stays put.
+    public static boolean forcedCrossing(int homeMapId, int level) {
+        if (TrainingRegions.isBeginnerIsland(homeMapId)) {
+            return true; // the one-way boat off 彩虹岛 — an exit, not an outgrown continent
+        }
+        return mustLeaveContinent(level, hasInBandTarget(homeMapId, level));
+    }
+
     // ── Occupancy registry ──
 
     public static void reserve(int mapId) {
