@@ -137,7 +137,9 @@ final class BotContactDamage {
                     BotDebuffApplier.consider(bot, mob);
                     // A charged brawler (Energy Charge) retaliates on contact: the mob takes a real
                     // hit. The zone is the same one that just touched the bot, so no second scan.
-                    BotEnergyCharge.tryBodyHit(bot, mob);
+                    if (BotEnergyCharge.claimRetaliationBeat(bot)) {
+                        BotEnergyCharge.strike(bot, mob);
+                    }
                     applyMobHit(entry, bot, mob);
                     return;
                 }
@@ -153,11 +155,13 @@ final class BotContactDamage {
      * The hurt i-frame tick: the bot takes no damage and re-rolls no debuff, but a charged brawler
      * (Energy Charge) can still land its touch retaliation - the real client keeps sending
      * TOUCH_MONSTER_ATTACK on the skill's own interval regardless of the player's brief invulnerability.
-     * The scan is the same nearby-mob query as the normal path, entered only when the retaliation is
-     * actually due, so every other bot pays nothing for this.
+     * The beat is claimed before the scan, so it runs at most once per retaliation interval (never per
+     * 50 ms tick) and every other bot pays nothing for this.
      */
     private static void retaliateWhileInvulnerable(BotMovementState entry, Character bot) {
-        if (!BotEnergyCharge.wantsContactRetaliation(bot)) {
+        // Claim first: the beat is stamped on the attempt, so the scan below runs at most once per
+        // retaliation interval even when nothing is actually in touch.
+        if (!BotEnergyCharge.claimRetaliationBeat(bot)) {
             return;
         }
         Rectangle query = new Rectangle(getBotTouchBounds(entry, bot));
@@ -167,7 +171,7 @@ final class BotContactDamage {
             if (!isHostileLivingMonster(mob) || !isMobTouchingBot(entry, bot, mob)) {
                 continue;
             }
-            BotEnergyCharge.tryBodyHit(bot, mob);
+            BotEnergyCharge.strike(bot, mob);
             return; // one retaliation per beat, on the first mob in touch
         }
     }

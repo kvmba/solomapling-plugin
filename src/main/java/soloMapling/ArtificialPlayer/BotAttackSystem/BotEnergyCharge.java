@@ -113,42 +113,45 @@ public final class BotEnergyCharge {
     }
 
     /*
-     * A charged brawler's touch retaliation: the mob in contact with the bot takes a real hit, which
-     * can kill it and drop its loot like any other bot hit. Called only from the contact-damage tick,
-     * which has already established the overlap - so the gates here are the charge and the skill's
-     * own attack interval. Returns true when the hit killed the mob.
+     * Claim this bot's next touch-retaliation beat: charged, off the skill's attack interval, and not
+     * pinned by a debuff. The interval is stamped here - on the ATTEMPT, not on a landed hit - exactly
+     * like a real client, which fires on the charged skill's fixed cadence while it holds the touch.
+     * That also bounds the work: the contact tick scans for a retaliation at most once per interval
+     * instead of once per 50 ms tick.
      */
-    public static boolean tryBodyHit(Character bot, Monster mob) {
-        if (!wantsContactRetaliation(bot) || mob == null || bot.getMap() == null) {
-            return false;
-        }
-        nextRetaliationByBot.put(bot.getId(), System.currentTimeMillis() + RETALIATION_COOLDOWN_MS);
-        int damage = BotDamageModel.rollLine(bot.getJob().getJobTier(), bot.getLevel(), 1);
-        return BotAttackEffects.bodyStrike(bot, mob, damage);
-    }
-
-    /*
-     * Whether this bot would retaliate right now: a charged brawler off its attack interval. The
-     * contact tick asks this before scanning while the bot is in its hurt i-frames, so every other
-     * bot keeps the old "no scan, no work" early return.
-     */
-    public static boolean wantsContactRetaliation(Character bot) {
+    public static boolean claimRetaliationBeat(Character bot) {
         if (bot == null || bot.getJob() == null) {
             return false;
         }
         if (!isEnergyChargeJob(bot.getJob().getId()) || !isCharged(bot.getEnergyBar())) {
             return false;
         }
-        // Cheapest gate first: this runs on every hurt i-frame tick, so the status lookup below is
-        // reached at most once per retaliation interval, not four times a second.
-        if (System.currentTimeMillis() < nextRetaliationByBot.getOrDefault(bot.getId(), 0L)) {
+        long now = System.currentTimeMillis();
+        if (now < nextRetaliationByBot.getOrDefault(bot.getId(), 0L)) {
             return false;
         }
         // The attack layer's own rule, applied here too: a bot pinned by STUN/SEDUCE or sealed cannot
         // strike back. The movement layer still lets a frozen bot be touched (and hurt), so this is the
         // only place that keeps a stunned brawler from retaliating.
         BotDebuffState status = BotDebuffState.of(bot);
-        return status == null || !status.blocksAttack();
+        if (status != null && status.blocksAttack()) {
+            return false;
+        }
+        nextRetaliationByBot.put(bot.getId(), now + RETALIATION_COOLDOWN_MS);
+        return true;
+    }
+
+    /*
+     * Land the claimed retaliation on one mob: a real hit that can kill it and drop its loot like any
+     * other bot hit. Ungated - the caller has already claimed the beat via
+     * {@link #claimRetaliationBeat(Character)}.
+     */
+    public static boolean strike(Character bot, Monster mob) {
+        if (bot == null || bot.getMap() == null || mob == null) {
+            return false;
+        }
+        int damage = BotDamageModel.rollLine(bot.getJob().getJobTier(), bot.getLevel(), 1);
+        return BotAttackEffects.bodyStrike(bot, mob, damage);
     }
 
     /** Release a despawned bot's charge bookkeeping (mirrors the other per-bot clearBot hooks). */
