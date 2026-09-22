@@ -11,7 +11,7 @@
   - The category is resolved once in `BotGeneration.createBotOn` (from the forced job, else the rolled/known base class) and handed to both the name draw and the decoration, so the name is fixed before the job is rolled and the two can never disagree. The no-class spawn path previously let `BotDecorate` roll its own base class; it now reuses that single roll (same default 10..80 band).
   - Companions are named the same way: intake draws the persona seed first, derives the class from it, and passes the same seed to provisioning, so a companion's IGN matches the career it trains as.
 - **Pirate (base class 5) is now a first-class bot job.** Ambient / training bots previously never rolled a pirate (`rollBaseClass` excluded class 5), and a pirate's `getJobStyle()` resolves to `BRAWLER`/`GUNSLINGER` (never `PIRATE`), so any style-keyed lookup silently degraded it to "no job" (reqJob 0). Fixed end to end:
-  - `rollBaseClass` now yields pirates at ~12% (after thief > mage > warrior > bowman); `selectJobForClass` covers all four tiers (500 / 510,520 / 511,521 / 512,522).
+  - `rollBaseClass` now yields pirates at ~10% (after thief > mage > warrior > bowman); `selectJobForClass` covers all four tiers (500 / 510,520 / 511,521 / 512,522).
   - `getReqJobViaJobStyle` maps `BRAWLER`/`GUNSLINGER` → `PIRATE` (reqJob 16), so a pirate can wear its knuckle/gun and pirate armour.
   - Gear selection equips knuckle (brawler) or gun (gunslinger), branched on the job id (the decorator runs before STR/DEX are aligned).
   - Bot combat registers both pirate lines (Double Uppercut / Energy Blast / Barrage; Invisible Shot / Burst Fire / Rapid Fire / Battleship Cannon) plus a 1st-job weapon seed (knuckle melee / gun ranged, like the 1st-job rogue).

@@ -45,7 +45,7 @@
 |---|---|---|
 | 普通 ambient bot | `BotDecorate.setBotVariables(bot)` | `BotDecorate.java:315`，`selectJobByLevel(level)` → `selectJobForClass(rollBaseClass(), level)` |
 | 带 baseClass 的 cohort | `BotDecorate.setBotVariables(bot, baseClass, min, max, forcedJobId)` | `BotDecorate.java:368`，`forcedJobId>0` 钉死；否则 `selectJobForClass(baseClass, level)` |
-| baseClass 掷骰 | `BotDecorate.rollBaseClass()` | `BotDecorate.java:144`：飞侠28% 法师22% 战士21% 弓手17% 海盗12% |
+| baseClass 掷骰 | `BotDecorate.rollBaseClass()` | `BotDecorate.java:144`：飞侠28% 法师23% 战士21% 弓手18% 海盗10% |
 | 伴生体 | `CompanionCareerBuild.fromSeed(personaSeed)` | 独立于名字；`HostRuntimeCompanionProvisioner.java:88` 写入 `career_build` |
 
 ### 1.3 名字 = X，职业 = Y，随机错配

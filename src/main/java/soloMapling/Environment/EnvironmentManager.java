@@ -408,7 +408,7 @@ public class EnvironmentManager {
         List<Integer> ids = new ArrayList<>();
         for (int i = 0; i < n; i++) {
             Point spawnAt = i < spots.size() ? spots.get(i) : anchor;
-            int baseClass = BotDecorate.rollBaseClass(); // weighted 1..5 (Thief-heavy, Pirate ~12%)
+            int baseClass = BotDecorate.rollBaseClass(); // weighted 1..5 (Thief-heavy, Pirate ~10%)
             try {
                 // On this channel specifically: every channel gets a full cohort, so the spawn
                 // is pinned to the channel the caller is filling.
@@ -493,7 +493,7 @@ public class EnvironmentManager {
         List<Integer> ids = new ArrayList<>();
         for (int i = 0; i < n; i++) {
             Point spawnAt = i < spots.size() ? spots.get(i) : anchor;
-            int baseClass = BotDecorate.rollBaseClass(); // weighted 1..5 (Pirate ~12%), gear/job set together
+            int baseClass = BotDecorate.rollBaseClass(); // weighted 1..5 (Pirate ~10%), gear/job set together
             try {
                 int botId = BotGeneration.createBot(spawnAt, map, baseClass, loLevel, hiLevel);
                 if (botId > 0) {
