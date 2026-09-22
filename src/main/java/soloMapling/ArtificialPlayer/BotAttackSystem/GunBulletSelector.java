@@ -33,13 +33,14 @@ public final class GunBulletSelector {
     private static final int SHINY_AT   = 125;
     private static final int ETERNAL_AT = 150;
 
-    /** The bullet tier a bot of this level fires: plain below 50, then +1 tier every 25 levels. */
+    // TEMP DEBUG: pin every gun bot to one fixed bullet so a live test can tell whether the
+    // client renders the projectile at all (independent of the level ladder). Change this one id
+    // to try another tier: 子弹=2330000 手枪弹=2330001 铜头子弹=2330002 银子弹=2330003
+    // 高爆弹=2330004 穿甲弹=2330005.
+    private static final int DEBUG_BULLET = BULLET; // 2330000 子弹
+
+    /** TEMP DEBUG: always the pinned bullet (level ladder disabled). */
     public static int forLevel(int level) {
-        if (level >= ETERNAL_AT) return ETERNAL_BULLET;
-        if (level >= SHINY_AT)   return SHINY_BULLET;
-        if (level >= VITAL_AT)   return VITAL_BULLET;
-        if (level >= MIGHTY_AT)  return MIGHTY_BULLET;
-        if (level >= SPLIT_AT)   return SPLIT_BULLET;
-        return BULLET;
+        return DEBUG_BULLET;
     }
 }
