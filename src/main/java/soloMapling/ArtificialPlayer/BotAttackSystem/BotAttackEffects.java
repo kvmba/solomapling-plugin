@@ -149,7 +149,26 @@ public final class BotAttackEffects {
                 anyKilled = true;
             }
         }
+        // A landed swing charges a brawler's energy bar (the host adds 102 per mob hit in its own
+        // handler). No-op for every other job, so the ordinary bot pays one job check per strike.
+        BotEnergyCharge.onAttackLanded(bot, hits.size());
         return anyKilled;
+    }
+
+    /*
+     * The retaliation half of Energy Charge: a charged brawler's touch damages the mob in contact
+     * with it. The host's touch attack carries no attack packet of its own - the client predicts the
+     * numbers locally and only the server-side damage lands - so this mirrors the host's own
+     * touch-damage skill (Aran's Body Pressure, AbstractDealDamageHandler): broadcast the mob's
+     * damage number, then apply it through the same kill/loot path every other bot hit uses.
+     * Returns true when the hit killed the mob.
+     */
+    public static boolean bodyStrike(Character bot, Monster mob, int damage) {
+        if (bot == null || bot.getMap() == null || mob == null || !mob.isAlive() || damage <= 0) {
+            return false;
+        }
+        bot.getMap().broadcastMessage(PacketCreator.damageMonster(mob.getObjectId(), damage));
+        return applyDamageAndLoot(bot, mob, damage, (short) 0);
     }
 
     /* Apply HP damage; on death, credit EXP + the death broadcast (no vanilla drops) and spawn our own loot. */

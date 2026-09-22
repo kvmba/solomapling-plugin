@@ -535,6 +535,7 @@ public class BotGeneration {
         BotRecruitManager.clearHandoffs(fakechar.getId());
         BotBuffDriver.clearBot(fakechar.getId());   // Phase 3a: release buff recast timers
         BotBuffRequestHandler.clearBot(fakechar.getId());   // release chat-buff-request cooldown
+        soloMapling.ArtificialPlayer.BotAttackSystem.BotEnergyCharge.clearBot(fakechar.getId()); // release energy-charge state
         soloMapling.ArtificialPlayer.BotStatusSystem.BotDebuffApplier.clearBot(fakechar.getId()); // release debuff cooldowns
         soloMapling.ArtificialPlayer.BotMountSystem.BotMount.forget(fakechar.getId()); // release mount cooldown state
     }

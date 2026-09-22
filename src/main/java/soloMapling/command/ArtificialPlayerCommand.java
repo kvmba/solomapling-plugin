@@ -11,6 +11,7 @@ import soloMapling.ArtificialPlayer.BotAttackSystem.BotAttackDriver;
 import soloMapling.ArtificialPlayer.BotAttackSystem.BotBuffConfig;
 import soloMapling.ArtificialPlayer.BotAttackSystem.BotBuffDriver;
 import soloMapling.ArtificialPlayer.BotAttackSystem.BotBuffEffects;
+import soloMapling.ArtificialPlayer.BotAttackSystem.BotEnergyCharge;
 import soloMapling.ArtificialPlayer.BotCommandsPack.MegaphoneCommands;
 import soloMapling.ArtificialPlayer.BotDecoratorSystem.BotDecorateBody;
 import soloMapling.ArtificialPlayer.BotDecoratorSystem.BotDecorateEquips;
@@ -231,6 +232,28 @@ public class ArtificialPlayerCommand extends Command {
             }
             case "attackult": { // force the throttled full-map ultimate (or report the bot has none)
                 reportAttack(fakechar, BotAttackDriver.forceUltimate(fakechar), "attackult");
+                break;
+            }
+            case "energy": { // inspect a brawler bot's 能量获得 (Energy Charge) bar
+                player.yellowMessage("energy " + BotEnergyCharge.describe(fakechar));
+                break;
+            }
+            case "energycharge": { // fill the bar now, so the charged look/retaliation can be watched
+                BotEnergyCharge.fillForTest(fakechar);
+                player.yellowMessage("energycharge " + BotEnergyCharge.describe(fakechar));
+                if (fakechar.getMapId() != player.getMapId()) {
+                    player.yellowMessage("Note: bot is on map " + fakechar.getMapId() + ", you are on "
+                            + player.getMapId() + " - the charge only shows to players on the bot's map.");
+                }
+                break;
+            }
+            case "energyreset": { // empty the bar (and drop the gauge from every viewer)
+                BotEnergyCharge.resetForTest(fakechar);
+                player.yellowMessage("energyreset " + BotEnergyCharge.describe(fakechar));
+                if (fakechar.getMapId() != player.getMapId()) {
+                    player.yellowMessage("Note: bot is on map " + fakechar.getMapId() + ", you are on "
+                            + player.getMapId() + " - the cancel only shows to players on the bot's map.");
+                }
                 break;
             }
             case "dicebot":
@@ -1125,6 +1148,9 @@ public class ArtificialPlayerCommand extends Command {
         player.yellowMessage("!bot attack <cid>                - force single-target attack");
         player.yellowMessage("!bot attackaoe <cid>             - force sustained AoE attack (or says none)");
         player.yellowMessage("!bot attackult <cid>             - force full-map ultimate (or says none)");
+        player.yellowMessage("!bot energy <cid>                - brawler bot's 能量获得 bar (5110001)");
+        player.yellowMessage("!bot energycharge <cid>          - fill the energy bar now (watch the charged look)");
+        player.yellowMessage("!bot energyreset <cid>           - empty the energy bar");
         player.yellowMessage("-- Appearance --");
         player.yellowMessage("!bot randombody <cid>            - random body decoration");
         player.yellowMessage("!bot randomequips <cid>          - random equip decoration");

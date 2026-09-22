@@ -6,6 +6,7 @@ import org.gms.server.maps.MapObject;
 import org.gms.server.maps.MapObjectType;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import soloMapling.ArtificialPlayer.BotAttackSystem.BotEnergyCharge;
 import soloMapling.ArtificialPlayer.BotHealthSystem.BotDeath;
 import soloMapling.ArtificialPlayer.BotHealthSystem.BotHealthFloor;
 import soloMapling.ArtificialPlayer.BotStatusSystem.BotDebuffApplier;
@@ -110,8 +111,13 @@ final class BotContactDamage {
         }
         Point botPos = bot.getPosition();
         try {
+            // A bot in its hurt i-frames does not take another hit, and does not re-roll a debuff. The
+            // one thing it may still do is a charged touch retaliation (Energy Charge): the real client
+            // keeps sending TOUCH_MONSTER_ATTACK on the skill's own interval while the player is
+            // briefly invulnerable. Every other bot keeps the old early return.
             if (entry.mobHitCooldownMs > 0) {
                 entry.mobHitCooldownMs = BotMovementManager.tickDown(entry.mobHitCooldownMs);
+                retaliateWhileInvulnerable(entry, bot);
                 return;
             }
             Rectangle query = new Rectangle(getBotTouchBounds(entry, bot));
@@ -129,6 +135,9 @@ final class BotContactDamage {
                     // Its WZ skills are rolled here; the bot's headless client can never trigger the
                     // engine's own mob-skill path, so the plugin drives it - see BotDebuffApplier.
                     BotDebuffApplier.consider(bot, mob);
+                    // A charged brawler (Energy Charge) retaliates on contact: the mob takes a real
+                    // hit. The zone is the same one that just touched the bot, so no second scan.
+                    BotEnergyCharge.tryBodyHit(bot, mob);
                     applyMobHit(entry, bot, mob);
                     return;
                 }
@@ -137,6 +146,29 @@ final class BotContactDamage {
                     getBotTouchBounds(entry, bot));
         } finally {
             rememberMobTouchCheck(entry, bot, botPos);
+        }
+    }
+
+    /*
+     * The hurt i-frame tick: the bot takes no damage and re-rolls no debuff, but a charged brawler
+     * (Energy Charge) can still land its touch retaliation - the real client keeps sending
+     * TOUCH_MONSTER_ATTACK on the skill's own interval regardless of the player's brief invulnerability.
+     * The scan is the same nearby-mob query as the normal path, entered only when the retaliation is
+     * actually due, so every other bot pays nothing for this.
+     */
+    private static void retaliateWhileInvulnerable(BotMovementState entry, Character bot) {
+        if (!BotEnergyCharge.wantsContactRetaliation(bot)) {
+            return;
+        }
+        Rectangle query = new Rectangle(getBotTouchBounds(entry, bot));
+        query.grow(MOB_QUERY_MARGIN, MOB_QUERY_MARGIN);
+        for (MapObject obj : bot.getMap().getMapObjectsInRect(query, MONSTER_TYPES)) {
+            Monster mob = (Monster) obj;
+            if (!isHostileLivingMonster(mob) || !isMobTouchingBot(entry, bot, mob)) {
+                continue;
+            }
+            BotEnergyCharge.tryBodyHit(bot, mob);
+            return; // one retaliation per beat, on the first mob in touch
         }
     }
 

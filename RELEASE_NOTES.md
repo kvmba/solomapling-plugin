@@ -42,6 +42,14 @@
 - **SocialBot Hybrid LLM chat:** optional DeepSeek integration for free-form player dialogue during active SocialBot sessions (`solomapling.llm.*`). Menu options, party recruit, and goodbye remain YAML/rule-driven.
 - Uses [simple-openai](https://github.com/sashirestela/simple-openai) (`SimpleOpenAIDeepseek`); client + OkHttp/Jackson shaded into the plugin jar.
 - `DialogueContextResolver.buildSnapshot()` exports live game context into LLM system prompts.
+- **Brawler pirate bots now run 能量获得 (Energy Charge, 5110001) for real.** The skill is entirely client-driven in the host — the bar is charged by the CLOSE_RANGE_ATTACK handler and the retaliation arrives as a `TOUCH_MONSTER_ATTACK` — so a headless bot could never trigger either half. Both are now synthesized in the plugin, reusing the host's own values and packets so onlookers cannot tell (`soloMapling.ArtificialPlayer.BotAttackSystem.BotEnergyCharge`):
+  - Each landed swing adds 102 per mob hit, exactly as `Character.handleEnergyChargeGain` does; the bar arms at 10000 and flips to the host's 15000 full value in the same step, so a bot never rests in an armed-but-idle state.
+  - Reaching full broadcasts the skill's own charge flash plus the foreign `ENERGY_CHARGE` stat (the bar value, clamped to the client's 10000 gauge ceiling, is what draws the gauge over the bot) and arms a self-expiry at the skill's WZ duration, after which the bar empties and the gauge is cancelled from every viewer — the host's own timer does the same two things.
+  - While full, a mob touching the bot takes a real hit (rolled from the bot's tier/level), broadcast as a mob damage number and applied through the same kill/EXP/loot path as every other bot hit — the synthetic counterpart of the touch packet. Cadence is the charged skill's own ~1s attack interval, independent of the bot's hurt i-frames, exactly like a real client.
+  - Only the brawler line holds a charge (Marauder 511 / Buccaneer 512 — the jobs the host's own gate covers); the gun line and Thunder Breakers are untouched.
+  - Runs entirely inside the existing LOD gates: the charge rides the attack path, and the retaliation reuses the contact tick's own nearby-mob scan (an extra scan only when a charged brawler is actually due to retaliate).
+  - New GM commands: `!bot energy <cid>` (inspect the bar), `!bot energycharge <cid>` (fill it now), `!bot energyreset <cid>` (empty it).
+  - The charged value lives on the host's own `Character.energyBar`, so the char-info packet renders the charged look with no extra work. The skill is granted (max level) before the bar can reach full: the host's `reapplyLocalStats` reads this skill's effect whenever the bar is 15000 and would index `effects[-1]` for an unlearned one, so charging is skipped outright if the skill cannot be resolved.
 
 ### Config (`application.yml`)
 
