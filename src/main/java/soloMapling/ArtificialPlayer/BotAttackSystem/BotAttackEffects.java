@@ -8,6 +8,7 @@ import org.gms.client.status.MonsterStatus;
 import org.gms.client.status.MonsterStatusEffect;
 import org.gms.config.GameConfig;
 import org.gms.constants.inventory.ItemConstants;
+import org.gms.constants.skills.Marauder;
 import org.gms.net.packet.Packet;
 import org.gms.net.server.world.World;
 import org.gms.server.ItemInformationProvider;
@@ -156,18 +157,32 @@ public final class BotAttackEffects {
     }
 
     /*
-     * The retaliation half of Energy Charge: a charged brawler's touch damages the mob in contact
-     * with it. The host's touch attack carries no attack packet of its own - the client predicts the
-     * numbers locally and only the server-side damage lands - so this mirrors the host's own
-     * touch-damage skill (Aran's Body Pressure, AbstractDealDamageHandler): broadcast the mob's
-     * damage number, then apply it through the same kill/loot path every other bot hit uses.
+     * The retaliation half of Energy Charge: a charged brawler's touch strikes the mob in contact
+     * with it. That touch is its own attack in the v83 protocol - the client sends it as
+     * TOUCH_MONSTER_ATTACK (0x2F, "能量攻击") and the server answers with ENERGY_ATTACK (0xBD), a
+     * packet that carries the strike pose and its damage lines like the other three attacks. So this
+     * is a full strike rather than a bare HP change: the swing is broadcast on the energy opcode
+     * (viewers play the real pose and see the numbers) and the damage then lands through the same
+     * kill/EXP/loot path every other bot hit uses.
+     *
+     * The pose is the brawler's own strike keyframe (Energy Blast's "eburster", the pirate line's
+     * punch) with the bot's facing, matching how BotAttackDriver renders every other bot swing.
      * Returns true when the hit killed the mob.
      */
     public static boolean bodyStrike(Character bot, Monster mob, int damage) {
         if (bot == null || bot.getMap() == null || mob == null || !mob.isAlive() || damage <= 0) {
             return false;
         }
-        bot.getMap().broadcastMessage(PacketCreator.damageMonster(mob.getObjectId(), damage));
+        // Energy Blast has its own keyframe ("eburster", the pirate line's punch), so the weapon
+        // argument is not consulted for it.
+        int bodyActionId = BotAttackData.actionFor(Marauder.ENERGY_BLAST, null);
+        int facingMask = bot.isFacingLeft() ? BotAttackData.FACING_LEFT_MASK : BotAttackData.FACING_RIGHT_MASK;
+        Map<Integer, List<Integer>> targets = new HashMap<>();
+        targets.put(mob.getObjectId(), List.of(damage));
+        bot.getMap().broadcastMessage(bot, PacketCreator.energyAttack(bot,
+                /* skill */ 0, /* skilllevel */ 0, facingMask,
+                /* numAttackedAndDamage */ (1 << 4) | 1,
+                targets, BotAttackData.DEFAULT_ATTACK_SPEED, bodyActionId, /* display */ 0), false);
         return applyDamageAndLoot(bot, mob, damage, (short) 0);
     }
 
