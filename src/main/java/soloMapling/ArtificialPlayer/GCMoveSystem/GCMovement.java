@@ -64,7 +64,7 @@ public final class GCMovement {
                 st.fhIndex = BotMovementManager.buildFhIndex(bot.getMap());
                 Point cur = bot.getPosition();
                 Point ground = BotPhysicsEngine.findGroundPoint(bot.getMap(), new Point(cur.x, cur.y - 1));
-                BotPhysicsEngine.teleportTo(st, bot, ground != null ? ground : cur);
+                BotPhysicsEngine.teleportTo(st, bot, settledPoint(cur, ground));
                 BotMovementManager.resetEntryStateAfterTeleport(st);
                 BotNavigationGraphProvider.warmGraphAsync(bot.getMap(), st.movementProfile);
             }
@@ -181,8 +181,34 @@ public final class GCMovement {
 
     /* Idle stance + one last frame for a bot that is standing when its session ends. */
     private static void settleGroundedOnDisable(BotMovementState st, Character bot) {
+        // The settle is the LAST thing this bot's movement session does, so it must leave the bot on
+        // real ground, not merely in a standing pose. A session can end while the bot is still above its
+        // floor: the arrival float lifts it PORTAL_FLOAT_HEIGHT_PX up and arms the drop with inAir still
+        // false, and the off-map recovery teleports to the VR-top fallback when nothing is below. Settling
+        // there left the bot in mid-air with the driver stopped and its state removed - nothing left to
+        // drop it: the "bot frozen in the air" report. Re-resolve the floor under it exactly as enable()
+        // does on entry (the shared settledPoint rule), so the two can never drift.
+        MapleMap map = bot.getMap();
+        if (map != null) {
+            Point position = bot.getPosition();
+            Point ground = BotPhysicsEngine.findGroundPoint(map, new Point(position.x, position.y - 1));
+            Point settled = settledPoint(position, ground);
+            if (!settled.equals(position)) {
+                BotPhysicsEngine.teleportTo(st, bot, settled);
+            }
+        }
         BotPhysicsEngine.idleOnGround(st, bot);
         BotMovementManager.broadcastMovement(st);
+    }
+
+    /**
+     * Where a session-final settle should leave the bot: the ground under it when there is any, else
+     * where it already is. Pure so the rule is unit-testable without a map (a real {@code MapleMap}
+     * cannot be constructed in a test - see GroundSwayTest), and so the "never invent a position" half
+     * of it is pinned: a null ground (nothing below) keeps the current point.
+     */
+    static Point settledPoint(Point position, Point ground) {
+        return ground != null ? ground : position;
     }
 
     public static boolean isEnabled(Character bot) {

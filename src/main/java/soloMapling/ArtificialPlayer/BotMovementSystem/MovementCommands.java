@@ -71,6 +71,16 @@ public class MovementCommands {
         return stance == MOVING_RIGHT || stance == MOVING_LEFT;
     }
 
+    /**
+     * Whether a recorded replay that ended on this stance leaves the bot AIRBORNE. Only the jump poses
+     * qualify: a walk end is stopped by {@link #injectArtificialStopPacket} and a stand end needs
+     * nothing. Pure so it is pinned by a unit test without a {@code Character} (the same
+     * cannot-construct-MapleMap constraint the movement tests document).
+     */
+    static boolean endsAirborne(byte stance) {
+        return stance == JUMP_RIGHT || stance == JUMP_LEFT;
+    }
+
     private static boolean isJumping(Character fakechar) {
         byte stance = (byte) fakechar.getStance();
         return stance == JUMP_RIGHT || stance == JUMP_LEFT;
@@ -341,9 +351,60 @@ public class MovementCommands {
     public static boolean executeMovement(Character fakechar, MovementRecording path, MidMovementCheck midCheck) {
         boolean interrupted = BotMoveStreamHelper(path, fakechar, false, null, midCheck);
         if (!interrupted) {
+            // The replay may end on an AIRBORNE frame. A recorded path is routinely a slice of a longer
+            // recording (getPathBetweenTwoPointsInMainArea trims by timestamp), and 244 of the shipped
+            // main-area packets end on a jump stance - so the trimmed slice ends there too. The replay
+            // then leaves the bot mid-air carrying JUMP(6/7), and injectArtificialStopPacket below does
+            // NOT cover it: it only fires for a walking stance, because a walk needs to be stopped while
+            // a jump was thought to be self-resolving. A headless bot has no client gravity sim to
+            // resolve it, so the last broadcast pose is what observers keep rendering - the reported
+            // "bot frozen in the air in the jump pose". Land it first (below), then stop.
+            settleRecordedReplay(fakechar);
             injectArtificialStopPacket(fakechar);
         }
         return interrupted;
+    }
+
+    /**
+     * Puts a bot that finished a recorded replay on real ground, in a standing pose.
+     *
+     * <p>Only does anything for an AIRBORNE end pose: a replay that ends walking or standing is already
+     * handled by {@link #injectArtificialStopPacket} (the walking case) or needs nothing (the standing
+     * case). The bot's own fh drives the decision, so this stays a no-op on every ordinary walk.
+     *
+     * <p>The landing point is resolved with the same indexed lookup the dynamic engine uses, falling back
+     * to the bot's current position when there is nothing below (never invent a position). The final frame
+     * is the shared standing idler, which carries the real foothold id so the client re-anchors the sprite
+     * to the floor it is standing on rather than to the record's last (airborne) coordinates.
+     */
+    private static void settleRecordedReplay(Character fakechar) {
+        if (fakechar == null || fakechar.getMap() == null) {
+            return;
+        }
+        if (!endsAirborne((byte) fakechar.getStance())) {
+            return; // walking/standing ends are the existing paths' job
+        }
+        MapleMap map = fakechar.getMap();
+        Point position = fakechar.getPosition();
+        // The public spatial query (the engine's own indexed lookup) - the movement engine itself is
+        // package-private, and this is exactly the one probe it needs.
+        Point ground = GCMovement.groundPointBelow(map, position.x, position.y - 1);
+        if (ground == null) {
+            // Nothing below at all (a mid-shaft end): there is no floor to land on, and the standing
+            // idler looks the foothold up to stamp the frame - which NPEs on a groundless column. Leave
+            // the replay's own last frame as the honest result rather than crashing the bot's thread.
+            return;
+        }
+        if (!ground.equals(position)) {
+            fakechar.setPosition(ground);
+        }
+        // The POSITION correction always lands (the host reads it to spawn the bot for a joining player),
+        // but the packet is LOD-gated like every other recorded-engine broadcast: nobody can see the map,
+        // so there is nothing to re-anchor, and the first observed tick re-announces the position anyway.
+        // This mirrors BotIdleStandingUpdate's gate.
+        if (!LodCounts.trackerRunning() || LodCounts.isMapActive(fakechar.getMapId())) {
+            BotIdleStandingUpdateForced(fakechar);
+        }
     }
 
     public static void pathFinderBeta(Character fakechar, Point endPt) {

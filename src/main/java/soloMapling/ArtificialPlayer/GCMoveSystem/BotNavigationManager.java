@@ -109,6 +109,13 @@ final class BotNavigationManager {
     static NavigationDirective resolveTarget(BotMovementState entry, Point rawTargetPos, boolean runAiTick) {
         long startedAt = System.nanoTime();
         try {
+            // Decide the transient-hold flag once per navigation tick, before any edge work: the
+            // tryExecuteJump branches that withhold a ready launch re-raise it below. Clearing here
+            // (rather than at each edge swap or dispatch entry) is what keeps it from going stale - a
+            // hold left behind by a jump edge that was later swapped for a WALK/DROP/CLIMB/PORTAL edge
+            // would otherwise suppress the stuck watchdog for the rest of the session, since only the
+            // JUMP path ever visits the raiser.
+            entry.launchReadyAwaiting = false;
             Character bot = entry.bot;
             if (bot.getMap().getFootholds() == null) {
                 entry.graphWarmupFallback = false;
@@ -491,6 +498,12 @@ final class BotNavigationManager {
         // exact graph lands. A brief stall at the launch point meanwhile is acceptable and transient.
         if (BotNavigationGraphProvider.peekGraph(bot.getMap(), entry.movementProfile) != graph) {
             entry.lastEdgeBlockReason = "jump-graph-warmup";
+            // Holding only because the EXACT-profile graph is still baking (the closest-profile edge is
+            // served meanwhile, and its jumps are withheld on purpose). If the bot is already standing in
+            // that edge's launch window this hold can last the whole bake - flag it so the stuck watchdog
+            // sees a wait, not a wedge, and doesn't rescue-hop the bot off the pixel it walked into.
+            entry.launchReadyAwaiting =
+                    canExecuteSelectedJumpFromCurrentPosition(graph, entry, bot.getMap(), bot.getPosition(), edge);
             return null;
         }
         Point botPos = bot.getPosition();
@@ -515,6 +528,9 @@ final class BotNavigationManager {
 
         if (deepenJumpLaunchOneStep(graph, entry, bot.getMap(), edge)) {
             entry.lastEdgeBlockReason = "jump-delay";
+            // Deliberate one-step deepening toward the launch x: the bot is walking INTO the window, not
+            // wedged - suppress the rescue hop.
+            entry.launchReadyAwaiting = true;
             return null; // steering follows the bumped launch X — walk a step deeper first
         }
         // Vertical jumps (launchStepX=0) on slippery ground carry the residual slide into the
@@ -525,6 +541,9 @@ final class BotNavigationManager {
                 && BotPhysicsEngine.slipperyGround(bot.getMap())
                 && BotPhysicsEngine.carriedAirVelX(bot.getMap(), entry) != 0) {
             entry.lastEdgeBlockReason = "jump-slide";
+            // The gate is satisfied (we got past the position test above); we merely wait for the slide to
+            // shed. Same deliberate hold - don't let the watchdog treat it as wedged.
+            entry.launchReadyAwaiting = true;
             return null;
         }
         entry.lastEdgeBlockReason = null;

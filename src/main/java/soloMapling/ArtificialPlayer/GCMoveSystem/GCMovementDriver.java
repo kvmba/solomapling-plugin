@@ -4,12 +4,16 @@ import org.gms.client.Character;
 import org.gms.constants.game.CharacterStance;
 import org.gms.server.maps.Foothold;
 import org.gms.server.maps.MapleMap;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import soloMapling.ArtificialPlayer.BotHealthSystem.BotDeath;
 import soloMapling.ArtificialPlayer.BotMovementSystem.MovementCommands;
 import soloMapling.ArtificialPlayer.BotStatusSystem.BotDebuffState;
 
 import java.awt.Point;
 import java.awt.Rectangle;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ThreadLocalRandom;
@@ -29,6 +33,8 @@ import java.util.concurrent.atomic.AtomicInteger;
 final class GCMovementDriver {
     private GCMovementDriver() {
     }
+
+    private static final Logger log = LoggerFactory.getLogger(GCMovementDriver.class);
 
     private static final int AI_TICK_MS = 100;            // heavy decisions every other tick
     // LOD scheduling cadence for an unobserved bot (no real player on or adjacent to its map): the
@@ -198,9 +204,31 @@ final class GCMovementDriver {
             soloMapling.server.BotPerfStats.MOVEMENT_TICKS.increment();
             tick(entry);
         } catch (Throwable t) {
-            // A thrown exception must not break the self-reschedule chain — swallow so the bot keeps ticking.
+            // A thrown exception must not break the self-reschedule chain - swallow so the bot keeps
+            // ticking. But do NOT swallow it silently: a tick that throws leaves the bot frozen in
+            // whatever pose the aborted tick had already set (a half-applied airborne/rope transition is
+            // the "bot hangs mid-air in the jump pose" report), and with no log there is nothing to
+            // trace. One line per bot per 10s keeps a chronically failing bot cheap; the stack names the
+            // subsystem the first time.
+            int botId = entry.bot != null ? entry.bot.getId() : -1;
+            long now = System.currentTimeMillis();
+            Long last = TICK_FAILURE_LOG_AT.get(botId);
+            if (last == null || now - last >= TICK_FAILURE_LOG_INTERVAL_MS) {
+                // Keep the map bounded: entries outside the interval prune themselves on the next
+                // failure, so a bot that stops failing drops out without needing a teardown hook (the
+                // lazy cleanup BotPlayerReaction uses for its per-player cooldowns).
+                TICK_FAILURE_LOG_AT.entrySet().removeIf(e -> now - e.getValue() >= TICK_FAILURE_LOG_INTERVAL_MS);
+                TICK_FAILURE_LOG_AT.put(botId, now);
+                log.warn("GCMove tick failed for bot {} (map {}); the bot stays in its current movement state",
+                        botId, entry.bot != null ? entry.bot.getMapId() : -1, t);
+            }
         }
     }
+
+    // Per-bot throttle for the tick-failure log above (never a global gate: one broken bot must not hide
+    // another's failure).
+    private static final long TICK_FAILURE_LOG_INTERVAL_MS = 10_000L;
+    private static final Map<Integer, Long> TICK_FAILURE_LOG_AT = new ConcurrentHashMap<>();
 
     private static void tick(BotMovementState entry) {
         Character bot = entry.bot;
@@ -774,8 +802,7 @@ final class GCMovementDriver {
         entry.unstuckCooldownMs = BotMovementManager.tickDown(entry.unstuckCooldownMs);
         tickFrozenAirborneWatchdog(entry);
         tickFallOffMapRecovery(entry); // ours: catch a live plummet the frozen-air watchdog above misses
-        if (entry.inAir || entry.climbing || entry.graphWarmupFallback
-                || (entry.navEdge == null && entry.moveTarget == null)) {
+        if (BotMovementManager.isStuckCheckExempt(entry)) {
             entry.stuckMs = 0;
             entry.stuckCheckX = Integer.MIN_VALUE;
             return;

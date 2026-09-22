@@ -205,6 +205,26 @@ class BotMovementManager {
         entry.navTargetRegionId = -1;
         entry.navPreciseTarget = false;
         entry.navBlockedPosTicks = 0;
+        // No committed edge left to launch: drop the hold so a later unrelated stall is detectable again.
+        entry.launchReadyAwaiting = false;
+    }
+
+    /**
+     * Whether the stuck watchdog must stand down for this bot this tick. A bot in the air, on a rope,
+     * still waiting for its nav graph, or DELIBERATELY holding a launch it has already walked into
+     * ({@link BotMovementState#launchReadyAwaiting}) is not wedged. Rescuing one is what made a bot hop
+     * repeatedly at a ledge's lip instead of taking the jump it was lined up for: {@code tickUnstuck}
+     * fires a random hop AND clears the nav edge, discarding a satisfied launch window - and because the
+     * rescue re-randomises the position, the bot can never stay in the window long enough for the exact
+     * graph to finish baking. It pogoes beside the platform forever.
+     *
+     * <p>Extracted from the watchdog's inline condition so the exempt set is pinned by a unit test rather
+     * than re-stated at the call site (it had already grown two clauses by accretion).
+     */
+    static boolean isStuckCheckExempt(BotMovementState entry) {
+        return entry.inAir || entry.climbing || entry.graphWarmupFallback
+                || entry.launchReadyAwaiting
+                || (entry.navEdge == null && entry.moveTarget == null);
     }
 
     static void tickClimbing(BotMovementState entry, Point targetPos, boolean runAiTick) {
