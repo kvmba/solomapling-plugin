@@ -72,4 +72,34 @@ class BotEnergyChargeTest {
         // AbstractDealDamageHandler, TouchMonsterDamageHandler), so it is a contract, not a tunable.
         assertEquals(15_000, BotEnergyCharge.FULL_ENERGY);
     }
+
+    @Test
+    void aBotBelowTheThirdJobHasNoEnergyCharge() {
+        // Energy Charge is a Marauder (511) skill: the third job is taken at level 70, so anything
+        // below that legitimately holds nothing to grant.
+        assertEquals(0, BotEnergyCharge.skillLevelForBot(0, 40));
+        assertEquals(0, BotEnergyCharge.skillLevelForBot(69, 40));
+    }
+
+    @Test
+    void theGrantedLevelFillsInAtTheHostsOwnSpRate() {
+        // A 3rd job advance hands out 1 SP (Character.changeJob: 511 % 10 != 2), then the server
+        // grants level_up_sp_gain = 3 a level at 1 point per skill level - the same model
+        // CompanionSkillBuilds uses for a brawler build, which puts Energy Charge first and takes it
+        // straight to 40.
+        assertEquals(1, BotEnergyCharge.skillLevelForBot(70, 40));   // the day of advancement
+        assertEquals(4, BotEnergyCharge.skillLevelForBot(71, 40));   // + 3
+        assertEquals(7, BotEnergyCharge.skillLevelForBot(72, 40));
+    }
+
+    @Test
+    void aMaxedSkillStaysInsideTheWzLevelTable() {
+        // 40 is the real WZ ceiling (Skill.wz/511.img.xml: level nodes 1..40), so the granted level
+        // can never index past the effect list.
+        assertEquals(40, BotEnergyCharge.skillLevelForBot(83, 40));
+        assertEquals(40, BotEnergyCharge.skillLevelForBot(120, 40));
+        assertEquals(40, BotEnergyCharge.skillLevelForBot(200, 40));
+        // A maxLevel below the pacing's reach still caps rather than overshoots.
+        assertEquals(20, BotEnergyCharge.skillLevelForBot(120, 20));
+    }
 }

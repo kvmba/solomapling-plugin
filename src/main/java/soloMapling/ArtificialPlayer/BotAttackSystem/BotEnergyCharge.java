@@ -311,24 +311,63 @@ public final class BotEnergyCharge {
 
     /*
      * The bot's Energy Charge skill, granting it first when the bot never learned one. Bots are
-     * synthetic and spend no SP, so this mirrors BotMount.learnRiderSkill. Null when the skill cannot
-     * be resolved OR the grant did not stick (an unreadable Skill.wz, a level clamped away): the
-     * caller must then leave the bar alone, because a bar at FULL with an unlearned skill crashes the
-     * host's own stat recompute (Character.reapplyLocalStats -> Skill.getEffect(0) -> effects[-1]).
+     * synthetic and spend no SP, so this mirrors BotMount.learnRiderSkill - but the granted LEVEL
+     * follows the bot's own level rather than jumping to max (see skillLevelForBot), so a bot that
+     * has just advanced reads like a player who has just advanced: the charged state lasts its
+     * level-appropriate time and carries its level-appropriate bonus.
+     *
+     * Null when the skill cannot be resolved OR the grant did not stick (an unreadable Skill.wz, a
+     * level clamped away): the caller must then leave the bar alone, because a bar at FULL with an
+     * unlearned skill crashes the host's own stat recompute
+     * (Character.reapplyLocalStats -> Skill.getEffect(0) -> effects[-1]).
      */
     private static Skill chargeSkillFor(Character bot) {
         Skill skill = SkillFactory.getSkill(Marauder.ENERGY_CHARGE);
         if (skill == null || skill.getMaxLevel() <= 0) {
             return null;
         }
-        if (bot.getSkillLevel(skill) < 1) {
-            byte level = (byte) skill.getMaxLevel();
-            bot.changeSkillLevel(skill, level, level, -1);
+        int wanted = skillLevelForBot(bot.getLevel(), skill.getMaxLevel());
+        if (wanted < 1) {
+            // Below the third job: nothing to grant, and the bar must not charge (see the note above).
+            // A GM can force a Marauder job onto a low-level bot, so this is a real path, not a
+            // theoretical one.
+            return null;
+        }
+        if (bot.getSkillLevel(skill) < wanted) {
+            bot.changeSkillLevel(skill, (byte) wanted, skill.getMaxLevel(), -1);
             if (bot.getSkillLevel(skill) < 1) {
                 return null; // the grant did not take - never let the bar reach FULL
             }
         }
         return skill;
+    }
+
+    /** The 3rd job an Explorer Marauder/Buccaneer advances into Energy Charge at. */
+    static final int THIRD_JOB_LEVEL = 70;
+
+    /*
+     * Skill points the host hands out per level after a job advance (level_up_sp_gain, 3 by default),
+     * and what a single skill level costs. The bot's granted level follows them so its Energy Charge
+     * fills in at the pace a player's would.
+     */
+    private static final int SP_PER_LEVEL = 3;
+
+    /*
+     * The skill level a bot of this character level would plausibly hold: 1 on the day of the third
+     * job, filling in at the host's own SP rate from there. Energy Charge is the FIRST skill the
+     * CompanionSkillBuilds brawler build spends on and goes straight to 40, so a bot that prioritised
+     * it the same way tops out a little past level 83 - which is why most third- and fourth-job
+     * brawlers read as maxed while a fresh Marauder reads as a level-1 charge.
+     *
+     * This is the ONE place the granted level is decided. Level changes only cosmetics and the
+     * charged state's WZ duration / watk - the charge math itself (a flat +102 a hit) is level-free.
+     */
+    static int skillLevelForBot(int characterLevel, int maxLevel) {
+        if (characterLevel < THIRD_JOB_LEVEL) {
+            return 0; // no Energy Charge before the third job
+        }
+        int level = 1 + (characterLevel - THIRD_JOB_LEVEL) * SP_PER_LEVEL;
+        return Math.max(1, Math.min(maxLevel, level));
     }
 
     private static StatEffect chargeEffect(Character bot, Skill skill) {
