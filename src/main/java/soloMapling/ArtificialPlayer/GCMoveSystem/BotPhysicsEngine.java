@@ -902,7 +902,11 @@ final class BotPhysicsEngine {
     }
 
     static void beginDownJump(BotMovementState entry, Character bot) {
-        if (!canStartDownJump(bot.getMap(), bot.getPosition())) {
+        boolean swim = bot.getMap() != null && bot.getMap().isSwim();
+        // Void guard (land maps): refuse a straight down-jump that has no foothold below - firing it
+        // free-falls out of the map. Swim maps drop into water, which has its own floor clamp.
+        if (!canStartDownJump(bot.getMap(), bot.getPosition())
+                || (!swim && !hasDownJumpLanding(bot.getMap(), bot.getPosition()))) {
             entry.downJumpPending = false;
             entry.downJumpGracePeriodMS = 0L;
             entry.crouching = false;
@@ -942,6 +946,20 @@ final class BotPhysicsEngine {
         }
         launchAirborne(entry, bot, bot.getPosition(), -downJumpForcePerTick(), 0, false);
         entry.downJumpGracePeriodMS = cfg.DOWN_JUMP_GRACE_MS;
+    }
+
+    /*
+     * Execution-time void guard for a straight down-jump. canStartDownJump only checks the takeoff
+     * ledge's forbidFallDown flag, so at a ledge whose column has no ground below it still reports a
+     * legal down-jump - the "drop" then free-falls out of the map (the airborne integrator has no
+     * floor clamp). The graph builder already refuses to bake such an edge
+     * (validateDownJumpLaunchX -> simulateDownJumpLanding != null); this mirrors that gate at
+     * EXECUTION, so a reused/stale DROP edge fired from the landing terrace - the documented
+     * "re-fires from the landing platform where there's no lower foothold" case - cannot launch.
+     * Swim maps drop into water and never call this (they have their own floor clamp).
+     */
+    static boolean hasDownJumpLanding(MapleMap map, Point from) {
+        return simulateDownJumpLanding(map, from) != null;
     }
 
     static void beginTopRopeEntry(BotMovementState entry, Character bot) {
@@ -1147,6 +1165,22 @@ final class BotPhysicsEngine {
         // platform happens to be within MAX_SLOPE_UP above. That is not an uphill slope of the
         // current foothold - the bot should fall, not jump up to the unconnected platform.
         if (step.lostGround()) {
+            // Void guard: a step past a ledge whose column has NO foothold below is not a drop to
+            // the platform beneath - it is a fall out of the map. The airborne integrator has no
+            // floor clamp, so the bot plummets until tickFallOffMapRecovery (which snaps it back
+            // and drops moveTarget - the "walked off the ledge and fell out" glitch). A step that
+            // reaches ANY ground below is a real ledge and is unaffected; only a provably empty
+            // column holds the bot at the current pixel.
+            int walkOffDir = step.stepX() != 0 ? Integer.signum(step.stepX()) : entry.moveDir;
+            if (simulateFallLanding(map, step.point(), walkOffDir) == null) {
+                // Held at the lip: clear the held direction so resolveStance renders a STAND (not a
+                // walking-in-place WALK - moveDir still carries the planned step here), and stop the
+                // broadcast velocity. lostGround=false like the blocked-step path: the bot did not
+                // lose its ground, it simply did not move.
+                entry.moveDir = 0;
+                setMovementVelocity(entry, 0, 0);
+                return new GroundMotion(0, false);
+            }
             beginFall(entry, bot, step.point(), step.stepX());
             return new GroundMotion(step.stepX(), true);
         }

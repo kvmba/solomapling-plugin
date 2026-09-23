@@ -615,6 +615,16 @@ final class BotNavigationManager {
             return null;
         }
 
+        // Void guard: a straight down-jump is only executable where the real physics finds a foothold
+        // below. The graph only baked edges that passed this (validateDownJumpLaunchX), but a reused /
+        // stale edge fired from the landing terrace - the documented "re-fires from the landing
+        // platform where there's no lower foothold, sending the bot out of the map" case - can sit
+        // over an empty column, and canStartDownJump alone does not catch it.
+        if (!BotPhysicsEngine.hasDownJumpLanding(bot.getMap(), botPos)) {
+            entry.lastEdgeBlockReason = "drop-void";
+            return null;
+        }
+
         entry.lastEdgeBlockReason = null;
         setEdgeExecutionTarget(entry, edge);
         BotPhysicsEngine.queueDownJump(entry, bot);

@@ -972,13 +972,26 @@ class BotMovementManager {
     static void tickUnstuck(BotMovementState entry) {
         Character bot = entry.bot;
         int walkStep = BotPhysicsEngine.walkStep(bot.getMap(), entry.movementProfile);
-        switch (ThreadLocalRandom.current().nextInt(2)) {
-            case 0 -> BotPhysicsEngine.beginGroundJump(entry, bot, -walkStep); // jump left
-            default -> BotPhysicsEngine.beginGroundJump(entry, bot, walkStep); // jump right
+        // A random-direction hop is a recovery on solid ground, but at a lip whose outward column has
+        // no ground below it is a fall out of the map. Prefer a direction with a real landing; if
+        // neither has one, stay put rather than launch off the edge.
+        int dir = ThreadLocalRandom.current().nextBoolean() ? -1 : 1;
+        if (!hasJumpLandingAhead(bot, walkStep * dir)) {
+            dir = -dir;
+            if (!hasJumpLandingAhead(bot, walkStep * dir)) {
+                clearNavigationState(entry);
+                entry.unstuckCooldownMs = delayAfterCurrentTick(5000);
+                return;
+            }
         }
+        BotPhysicsEngine.beginGroundJump(entry, bot, walkStep * dir);
         clearNavigationState(entry);
         entry.unstuckCooldownMs = delayAfterCurrentTick(5000);
         broadcastMovement(entry);
+    }
+
+    private static boolean hasJumpLandingAhead(Character bot, int stepX) {
+        return simulateJumpLanding(bot.getMap(), bot.getPosition(), stepX) != null;
     }
 
     static void initiateRopeJump(BotMovementState entry, Character bot, int dx) {
