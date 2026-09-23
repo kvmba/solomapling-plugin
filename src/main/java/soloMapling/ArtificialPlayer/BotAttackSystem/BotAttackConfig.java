@@ -17,7 +17,6 @@ import org.gms.constants.skills.DragonKnight;
 import org.gms.constants.skills.FPArchMage;
 import org.gms.constants.skills.FPMage;
 import org.gms.constants.skills.FPWizard;
-import org.gms.constants.skills.Gunslinger;
 import org.gms.constants.skills.Hermit;
 import org.gms.constants.skills.Hero;
 import org.gms.constants.skills.Hunter;
@@ -141,10 +140,16 @@ public final class BotAttackConfig {
         put(Job.BRAWLER,      melee(Brawler.DOUBLE_UPPERCUT, 2), meleeAoe(Brawler.BACK_SPIN_BLOW, 2));
         put(Job.MARAUDER,     melee(Marauder.ENERGY_BLAST, 1),   meleeAoe(Marauder.SHOCKWAVE, 1));
         put(Job.BUCCANEER,    melee(Buccaneer.BARRAGE, 6),       meleeAoe(Buccaneer.DEMOLITION, 6));
-        // Gunslinger line - gun ranged
-        put(Job.GUNSLINGER,   ranged(Gunslinger.INVISIBLE_SHOT, 1), null); // inherits Invisible Shot single
-        put(Job.OUTLAW,       null,                              rangedAoe(Outlaw.BURST_FIRE, 3)); // inherits Invisible Shot single
-        put(Job.CORSAIR,      ranged(Corsair.RAPID_FIRE, 1),     rangedAoe(Corsair.BATTLESHIP_CANNON, 3)); // inherits Burst Fire mob
+        // Gunslinger line - gun ranged. A gunner only shows a flying bullet when the skill's Skill.wz
+        // entry carries a "ball" node. The line's own single-target attacks - Invisible Shot (5201001,
+        // the literal "invisible" shot) and Rapid Fire (5221004) - ship none, so firing them showed the
+        // pose and damage but no projectile. Every slot here uses a ball-bearing ACTIVE attack instead:
+        // Double Shot / Burst Fire / Battleship Cannon / Battleship Torpedo. Passive & summon skills
+        // (Gun Booster, Wings, Octopus, Gaviota, Battleship, Maple Warrior, Elemental Boost, Wrath of
+        // the Octopi) are never valid: they have no attack and no ball.
+        put(Job.GUNSLINGER,   ranged(Pirate.DOUBLE_SHOT, 2),           null); // Double Shot (ball) inherits as the single
+        put(Job.OUTLAW,       null,                                    rangedAoe(Outlaw.BURST_FIRE, 3)); // inherits Double Shot single
+        put(Job.CORSAIR,      ranged(Corsair.BATTLESHIP_CANNON, 1),    rangedAoe(Corsair.BATTLESHIP_TORPEDO, 3)); // Cannon / Torpedo (ball)
     }
 
     private BotAttackConfig() {}
