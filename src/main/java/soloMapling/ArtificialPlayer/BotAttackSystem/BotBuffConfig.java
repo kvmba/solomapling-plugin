@@ -68,14 +68,13 @@ public final class BotBuffConfig {
         // The host constant Warrior.IRON_BODY reads 1000003, which is not a skill in the v83
         // Skill.wz (it resolves to nothing - and broadcasting it crashes an observing client).
         // 1001003 is Iron Body ("圣甲术"); the host has no constant for it, so it is named here.
-        put(Job.WARRIOR,  IRON_BODY, Warrior.ENDURE);                  // 1001003 - W.Def up; 1000002 恢复术
+        put(Job.WARRIOR,  IRON_BODY);                                  // 1001003 - W.Def up
         put(Job.MAGICIAN, Magician.MAGIC_GUARD, Magician.MAGIC_ARMOR); // 2001002 / 2001003
         put(Job.BOWMAN,   Archer.FOCUS);                               // 3001003 - acc/avoid up
-        // THIEF 1st job: 诅咒术 4001002 lowers a mob's stats (its own aura); Dark Sight is skipped
-        // on purpose (hiding a bot from players defeats the point).
+        // THIEF 1st job: 诅咒术 4001002 lowers a mob's stats (its own cast aura); Dark Sight is
+        // skipped on purpose (hiding a bot from players defeats the point).
         put(Job.THIEF,    Rogue.DISORDER);                             // 4001002 诅咒术
-        // PIRATE 1st job: 疾驰 5001005 (a short speed burst - its own puffy aura).
-        // (Brawler/Gunslinger add their boosters at 2nd job.)
+        // PIRATE 1st job: 疾驰 5001005 (a short speed/jump burst - its own puffy aura).
         put(Job.PIRATE,   Pirate.DASH);                                // 5001005 疾驰
 
         // ---- 2nd job (only what each job ADDS; 1st-job buffs come via lineage) ----
@@ -91,9 +90,9 @@ public final class BotBuffConfig {
         // Bowman branch (+ booster)
         put(Job.HUNTER,      Hunter.SOUL_ARROW, Hunter.BOW_BOOSTER);            // 3101004, 3101002
         put(Job.CROSSBOWMAN, Crossbowman.SOUL_ARROW, Crossbowman.CROSSBOW_BOOSTER); // 3201004, 3201002
-        // Thief branch (+ booster + 恢复术 regen aura)
-        put(Job.ASSASSIN, Assassin.HASTE, Assassin.CLAW_BOOSTER, Assassin.ENDURE);   // 4101004, 4101003, 4100002
-        put(Job.BANDIT,   Bandit.HASTE, Bandit.DAGGER_BOOSTER, Bandit.ENDURE);       // 4201003, 4201002, 4200001
+        // Thief branch (+ booster)
+        put(Job.ASSASSIN, Assassin.HASTE, Assassin.CLAW_BOOSTER);      // 4101004, 4101003
+        put(Job.BANDIT,   Bandit.HASTE, Bandit.DAGGER_BOOSTER);        // 4201003, 4201002
         // Pirate branch (+ booster; brawler = knuckle, gunslinger = gun)
         put(Job.BRAWLER,    Brawler.KNUCKLER_BOOSTER, Brawler.OAK_BARREL); // 5101006 attack speed up, 5101007 橡木伪装
         put(Job.GUNSLINGER, Gunslinger.GUN_BOOSTER, Gunslinger.WINGS);// 5201003, 5201005 轻羽鞋
@@ -103,7 +102,7 @@ public final class BotBuffConfig {
         // Warrior branch
         put(Job.CRUSADER,     Crusader.COMBO);                             // 1111002 - combo (self)
         put(Job.WHITEKNIGHT,  WhiteKnight.SWORD_FIRE_CHARGE);              // 1211003 - elemental charge (self)
-        put(Job.DRAGONKNIGHT, DragonKnight.DRAGON_BLOOD, DarkKnight.HEX_OF_BEHOLDER); // 1311008, 1320009 灵魂祝福
+        put(Job.DRAGONKNIGHT, DragonKnight.DRAGON_BLOOD);                 // 1311008 - atk up (self)
         // Magician branch (F/P and I/L get Spell Booster at 3rd job; Cleric line doesn't)
         put(Job.FP_MAGE,      FPMage.SPELL_BOOSTER);                       // 2111005 - cast speed up
         put(Job.IL_MAGE,      ILMage.SPELL_BOOSTER);                       // 2211005 - cast speed up
@@ -118,20 +117,21 @@ public final class BotBuffConfig {
         // (BotSummonSystem) that spawns/moves/attacks/removes on its own.
 
         // ---- 4th job (Maple Warrior for everyone + each class's signature buff) ----
-        put(Job.HERO,        Hero.MAPLE_WARRIOR, Hero.ENRAGE, Hero.STANCE, Hero.GUARDIAN, Hero.HEROS_WILL);             // 1121000, 1121010, 1121002 稳如泰山, 1120005 守护之神, 1121011 勇士的意志
-        put(Job.PALADIN,     Paladin.MAPLE_WARRIOR, Paladin.SWORD_HOLY_CHARGE, Paladin.STANCE, Paladin.GUARDIAN, Paladin.HEROS_WILL); // 1221000, 1221003, 1221002, 1220006, 1221012
+        put(Job.HERO,        Hero.MAPLE_WARRIOR, Hero.ENRAGE, Hero.STANCE, Hero.HEROS_WILL);             // 1121000, 1121010, 1121002 稳如泰山, 1121011 勇士的意志
+        put(Job.PALADIN,     Paladin.MAPLE_WARRIOR, Paladin.SWORD_HOLY_CHARGE, Paladin.STANCE, Paladin.HEROS_WILL); // 1221000, 1221003, 1221002, 1221012
         put(Job.DARKKNIGHT,  DarkKnight.MAPLE_WARRIOR, DarkKnight.BERSERK, DarkKnight.STANCE, DarkKnight.HEROS_WILL);// 1321000, 1320006, 1321002, 1321010
         put(Job.FP_ARCHMAGE, FPArchMage.MAPLE_WARRIOR, FPArchMage.INFINITY, FPArchMage.MANA_REFLECTION, FPArchMage.HEROS_WILL); // 2121000, 2121004, 2121002, 2121008
         put(Job.IL_ARCHMAGE, ILArchMage.MAPLE_WARRIOR, ILArchMage.INFINITY, ILArchMage.MANA_REFLECTION, ILArchMage.HEROS_WILL); // 2221000, 2221004, 2221002, 2221008
         put(Job.BISHOP,      Bishop.MAPLE_WARRIOR, Bishop.HOLY_SHIELD, Bishop.INFINITY, Bishop.MANA_REFLECTION, Bishop.HEROS_WILL); // 2321000, 2321005, 2321004, 2321002, 2321009
         put(Job.BOWMASTER,   Bowmaster.MAPLE_WARRIOR, Bowmaster.SHARP_EYES, Bowmaster.CONCENTRATE, Bowmaster.HAMSTRING, Bowmaster.HEROS_WILL); // 3121000, 3121002, 3121008, 3121007 击退箭, 3121009
         put(Job.MARKSMAN,    Marksman.MAPLE_WARRIOR, Marksman.SHARP_EYES, Marksman.BLIND, Marksman.HEROS_WILL);  // 3221000, 3221002, 3221006 致盲箭, 3221008
-        put(Job.NIGHTLORD,   NightLord.MAPLE_WARRIOR, NightLord.SHADOW_STARS, NightLord.VENOMOUS_STAR, NightLord.HEROS_WILL); // 4121000, 4121006, 4120005 武器用毒液, 4121009
+        put(Job.NIGHTLORD,   NightLord.MAPLE_WARRIOR, NightLord.SHADOW_STARS, NightLord.HEROS_WILL); // 4121000, 4121006, 4121009
         // Smoke Screen (4221006) is skipped: it is an area field left on the ground, not a self aura.
-        put(Job.SHADOWER,    Shadower.MAPLE_WARRIOR, Shadower.VENOMOUS_STAB, Shadower.HEROS_WILL); // 4221000, 4220005, 4221008
+        put(Job.SHADOWER,    Shadower.MAPLE_WARRIOR, Shadower.HEROS_WILL); // 4221000, 4221008
         // Battle Ship (5221006) is skipped: it is a ride, not a castable aura.
         put(Job.BUCCANEER,   Buccaneer.MAPLE_WARRIOR, Buccaneer.SPEED_INFUSION, Buccaneer.SUPER_TRANSFORMATION, Buccaneer.PIRATES_RAGE); // 5121000, 5121009, 5121003 超级变身, 5121008 勇士的意志
-        put(Job.CORSAIR,     Corsair.MAPLE_WARRIOR, Corsair.HYPNOTIZE, Corsair.HEROS_WILL); // 5221000, 5221009 心灵控制, 5221010
+        // Hypnotize (5221009 心灵控制) is skipped: it targets a MOB, not the bot itself.
+        put(Job.CORSAIR,     Corsair.MAPLE_WARRIOR, Corsair.HEROS_WILL); // 5221000, 5221010
     }
 
     private BotBuffConfig() {}
