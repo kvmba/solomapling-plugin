@@ -52,8 +52,7 @@ public class BotSummonCommand extends Command {
                 }
                 BotSummonSystem.grant(bot);
                 player.dropMessage("granted a summon to " + bot.getName()
-                        + " (tracked=" + soloMapling.ArtificialPlayer.BotSummonSystem.BotSummonSystem.enabled()
-                        + ", job=" + bot.getJob().name() + ")");
+                        + " (job=" + bot.getJob().name() + ")");
             }
             case "clear" -> {
                 Character bot = resolveTarget(player, params);

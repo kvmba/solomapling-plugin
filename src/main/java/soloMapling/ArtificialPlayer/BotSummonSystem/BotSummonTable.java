@@ -82,11 +82,13 @@ public final class BotSummonTable {
         add(Ranger.PUPPET, Move.STATIONARY, false, 0);      // 3111002
         add(Sniper.PUPPET, Move.STATIONARY, false, 0);      // 3211002
 
-        // ---- Magician / Priest (FOLLOW or CIRCLE_FOLLOW, attacking) ----
-        add(Priest.SUMMON_DRAGON, Move.CIRCLE, true, 1);    // 2311006
-        add(Bishop.BAHAMUT, Move.FOLLOW, true, 1);          // 2321003
+        // ---- Magician (FOLLOW / CIRCLE, attacking) ----
         add(FPArchMage.ELQUINES, Move.FOLLOW, true, 1);     // 2121005
         add(ILArchMage.IFRIT, Move.FOLLOW, true, 1);        // 2221005
+
+        // ---- Priest / Bishop (CIRCLE_FOLLOW / FOLLOW, attacking) ----
+        add(Priest.SUMMON_DRAGON, Move.CIRCLE, true, 1);    // 2311006
+        add(Bishop.BAHAMUT, Move.FOLLOW, true, 1);          // 2321003
 
         // ---- Dark Knight (FOLLOW, support only - no attack) ----
         add(DarkKnight.BEHOLDER, Move.FOLLOW, false, 0);    // 1321007
