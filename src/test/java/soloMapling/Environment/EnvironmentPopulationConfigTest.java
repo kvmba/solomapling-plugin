@@ -30,6 +30,10 @@ class EnvironmentPopulationConfigTest {
         assertTrue(plan.training().enabled());
         assertEquals(135, plan.training().cohorts().size());
         assertEquals(1535, plan.trainingCohortTotal());
+        // Roamers are a SEPARATE, parallel wave: adding them must never disturb the pinned training
+        // totals above (the whole point of the parallel list).
+        assertTrue(plan.roamers().enabled());
+        assertEquals(74, plan.roamerCohortTotal());
         assertTrue(plan.essentials().enabled());
         assertEquals("henesys", plan.essentials().fmRegion());
         assertEquals(5, plan.essentials().fmEntrance().m1());

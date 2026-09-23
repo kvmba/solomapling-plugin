@@ -369,6 +369,12 @@ public class ArtificialPlayerCommand extends Command {
                 convertBotType(fakechar, BotTypeManager.BotType.TRAINING_BOT);
                 player.yellowMessage("Bot " + fakechar.getId() + " is now a TrainingBot (town↔grind loop).");
                 break;
+            case "roamerbot":
+            case "roamer":
+                convertBotType(fakechar, BotTypeManager.BotType.ROAMER_BOT);
+                player.yellowMessage("Bot " + fakechar.getId()
+                        + " is now a RoamerBot (hunts low-level maps, roams freely).");
+                break;
             case "breaknow": {
                 BotSM maybeTrainer = CharacterStorage.getBotById(fakechar.getId());
                 if (maybeTrainer instanceof TrainingBot tb) {
@@ -1134,6 +1140,7 @@ public class ArtificialPlayerCommand extends Command {
         player.yellowMessage("!bot convertfmbot <cid>          - convert to FM bot");
         player.yellowMessage("!bot convertscrollbot <cid>      - convert to scroll bot");
         player.yellowMessage("!bot trainbot <cid>              - convert to TrainingBot");
+        player.yellowMessage("!bot roamerbot <cid>             - convert to RoamerBot (hunts low-level maps, roams freely)");
         player.yellowMessage("!bot followbot <cid>             - convert to FollowerBot (follows YOU)");
         player.yellowMessage("!bot breaknow <cid>              - force a grinding TrainingBot's rest break");
         player.yellowMessage("!bot restspot <cid>              - dump ranked rest-spot candidates (why a break spot won)");

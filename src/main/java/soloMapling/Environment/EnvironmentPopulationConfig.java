@@ -96,6 +96,15 @@ public final class EnvironmentPopulationConfig {
     public record WaveTraining(boolean enabled, WarmNav warmNav, List<TrainingCohort> cohorts) {
     }
 
+    /**
+     * Roamer wave: high-level wanderers that hunt low-level monsters and drift the world freely. Its own
+     * list, parallel to {@link WaveTraining}, so the training cohorts (a pinned, reviewed set — see
+     * EnvironmentPopulationConfigTest) are never disturbed by adding roamers, and {@code scale} applies
+     * to both alike. Cohort shape is identical to a training cohort.
+     */
+    public record WaveRoamers(boolean enabled, List<TrainingCohort> cohorts) {
+    }
+
     public record WaveTownPresence(boolean enabled) {
     }
 
@@ -112,6 +121,7 @@ public final class EnvironmentPopulationConfig {
             WaveSpecialty specialty,
             WaveLateArrivals lateArrivals,
             WaveTraining training,
+            WaveRoamers roamers,
             WaveTownPresence townPresence
     ) {
         public int scaled(int n) {
@@ -124,6 +134,14 @@ public final class EnvironmentPopulationConfig {
         public int trainingCohortTotal() {
             int sum = 0;
             for (TrainingCohort c : training.cohorts()) {
+                sum += scaled(c.count());
+            }
+            return sum;
+        }
+
+        public int roamerCohortTotal() {
+            int sum = 0;
+            for (TrainingCohort c : roamers.cohorts()) {
                 sum += scaled(c.count());
             }
             return sum;
@@ -260,6 +278,7 @@ public final class EnvironmentPopulationConfig {
                 parseSpecialty(asMap(waves.get("specialty"))),
                 parseLateArrivals(asMap(waves.get("late_arrivals"))),
                 parseTraining(asMap(waves.get("training"))),
+                parseRoamers(asMap(waves.get("roamer"))),
                 new WaveTownPresence(toBool(asMap(waves.get("town_presence")).get("enabled"), true))
         );
     }
@@ -360,6 +379,29 @@ public final class EnvironmentPopulationConfig {
         return new WaveTraining(toBool(m.get("enabled"), true), warmNav, List.copyOf(cohorts));
     }
 
+    // Roamer cohorts share the training cohort shape; a separate wave so the pinned training list is
+    // untouched by roamer tuning.
+    private static WaveRoamers parseRoamers(Map<String, Object> m) {
+        List<TrainingCohort> cohorts = new ArrayList<>();
+        Object node = m.get("cohorts");
+        if (node instanceof List<?> list) {
+            for (Object o : list) {
+                if (!(o instanceof Map<?, ?> raw)) {
+                    continue;
+                }
+                Map<String, Object> cm = (Map<String, Object>) raw;
+                int mapId = toInt(cm.get("map"), -1);
+                int count = toInt(cm.get("count"), 0);
+                int lo = toInt(cm.get("level_lo"), 1);
+                int hi = toInt(cm.get("level_hi"), lo);
+                if (mapId > 0 && count > 0) {
+                    cohorts.add(new TrainingCohort(mapId, count, lo, hi));
+                }
+            }
+        }
+        return new WaveRoamers(toBool(m.get("enabled"), true), List.copyOf(cohorts));
+    }
+
     private static HenesysBatch parseHenesys(Map<String, Object> m, int dMain, int dMarket, int dPark, int dSocial) {
         return new HenesysBatch(
                 toInt(m.get("main"), dMain),
@@ -446,6 +488,7 @@ public final class EnvironmentPopulationConfig {
                         new MerchantBatch("m5", 2, 2, 1)
                 )),
                 new WaveTraining(true, new WarmNav(100000000, 1), cohorts),
+                new WaveRoamers(true, List.of()),
                 new WaveTownPresence(true)
         );
     }

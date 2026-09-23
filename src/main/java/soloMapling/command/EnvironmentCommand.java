@@ -239,6 +239,8 @@ public class EnvironmentCommand extends Command {
                         + " scale=" + plan.scale()
                         + " trainingScaledTotal=" + plan.trainingCohortTotal()
                         + " cohorts=" + plan.training().cohorts().size()
+                        + " roamerScaledTotal=" + plan.roamerCohortTotal()
+                        + " roamerCohorts=" + plan.roamers().cohorts().size()
                         + " towns=" + towns.size());
             }
             case "show", "status", "help" -> {
@@ -249,9 +251,12 @@ public class EnvironmentCommand extends Command {
                         + " fm=" + plan.fmBuildout().enabled()
                         + " henesys=" + plan.henesysPopulation().enabled()
                         + " training=" + plan.training().enabled()
+                        + " roamer=" + plan.roamers().enabled()
                         + " townPresence=" + plan.townPresence().enabled());
                 p.dropMessage(6, "Training cohorts=" + plan.training().cohorts().size()
                         + " scaledTotal=" + plan.trainingCohortTotal()
+                        + " | Roamer cohorts=" + plan.roamers().cohorts().size()
+                        + " scaledTotal=" + plan.roamerCohortTotal()
                         + " (edit EnvironmentPopulation.yaml; restart or !env load to apply spawn)");
                 if ("help".equals(action)) {
                     p.dropMessage(6, "!env population reload | show");

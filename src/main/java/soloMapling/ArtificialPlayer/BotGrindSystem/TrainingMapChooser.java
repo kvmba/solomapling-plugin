@@ -64,11 +64,33 @@ public final class TrainingMapChooser {
 
     private static final int MAX_REDECIDES = 2;              // capacity-reservation re-rolls before accepting an over-cap map
 
-    // How many training bots currently target each map (world-wide). DECIDE reserves a slot here
+    // ── Roamer mode (the "low-level wanderer" bot) ──
+    // A RoamerBot hunts LOW-level monsters on purpose and roams freely, so its admission band and reach
+    // are the OPPOSITE of a TrainingBot's: no upward comfort band, a hard low ceiling, a bias toward the
+    // LOWEST maps (not the same-level ones), the whole connected landmass always in reach (no level-scaled
+    // radius), and no distance bias (it wanders the map, it does not hug town or push outward).
+    private static final int ROAMER_MAX_MOB_LEVEL = 60;      // never hunts a mob above this — "low-level area"
+    private static final int ROAMER_MOB_DECAY = 20;          // per e-fold preference for the lowest maps (soft, so it spreads)
+    private static final int ROAMER_MOB_FLOOR = 1;           // huntable view floors the median at 1 anyway
+
+    // Which occupancy registry an owner reserves into. TRAINING is the historical behaviour (every
+    // existing caller); ROAMER is a SEPARATE table so a low-level RoamerBot never consumes a slot a
+    // TrainingBot could have used (and vice versa) — the "independent quota" the roamer design asks for.
+    // The physical layer still de-duplicates: SpotFinder/BotSpotClaims cap claims per spot and per map,
+    // so two registries that both think a low map has room cannot actually stack bots on it — an
+    // over-subscribed side simply reads mapSaturated and crowd-bails to the next map.
+    public enum Scope { TRAINING, ROAMER }
+
+    // How many bots of each scope currently target each map (world-wide). DECIDE reserves a slot here
     // BEFORE travelling, so simultaneous deciders see each other and spread across maps.
-    private static final Map<Integer, AtomicInteger> BOTS_PER_MAP = new ConcurrentHashMap<>();
+    private static final Map<Scope, Map<Integer, AtomicInteger>> BOTS_PER_MAP = new ConcurrentHashMap<>();
 
     private TrainingMapChooser() {
+    }
+
+    // Historical entry point: the TrainingBot path, unchanged. Same band, radius, weighting, scope.
+    public static TrainingMap choose(Character chr, int homeMapId, Set<Integer> excluded, Consumer<String> debug) {
+        return choose(chr, homeMapId, excluded, debug, false);
     }
 
     // Pick a level-appropriate, uncrowded map for this bot and RESERVE an occupancy slot on it — the
@@ -77,35 +99,61 @@ public final class TrainingMapChooser {
     // the cohort race: if our atomic increment pushed the map OVER capacity (another bot grabbed the
     // last slot at the same instant), release and re-pick — the bumped count now hard-zeros that map,
     // steering us deeper. Null = nothing reachable with mobs (caller idles in town and retries later).
-    public static TrainingMap choose(Character chr, int homeMapId, Set<Integer> excluded, Consumer<String> debug) {
+    //
+    // `roamer` flips the whole selection to the low-level wanderer profile (see ROAMER_* above) and
+    // switches the occupancy scope to ROAMER. The default overload passes false, so every existing
+    // caller is byte-for-byte the old behaviour.
+    public static TrainingMap choose(Character chr, int homeMapId, Set<Integer> excluded, Consumer<String> debug,
+                                     boolean roamer) {
+        Scope scope = roamer ? Scope.ROAMER : Scope.TRAINING;
         int level = chr.getLevel();
-        int reach = hopsForLevel(level);
+        int reach = roamer ? MAX_HOPS : hopsForLevel(level);
         // Deep-hub grind: a cohort that spawns on a mob-bearing "deep hub" field may grind the hub
         // itself — the map BFS drops its own origin, so admit the current map explicitly when the bot
         // stands on its home hub and that hub has mobs.
         boolean includeOrigin = chr.getMapId() == homeMapId && MapMobIndex.level(homeMapId) >= 0;
         DeepHub.Info hub = DeepHub.of(homeMapId);
-        boolean downwardOnly = hub != null && hub.downwardOnly();
+        boolean downwardOnly = !roamer && hub != null && hub.downwardOnly();
         ThreadLocalRandom rng = ThreadLocalRandom.current();
 
-        // Normal trip: the two-sided band. Rarely, a mid/high bot takes a "chill" trip to an easy
-        // NEAR-TOWN map — a strictly below-comfort band capped near town; nothing to chill at -> retry
-        // as a normal trip. Downward-only pros never chill (a chill is an up-trip by construction).
-        boolean chill = !downwardOnly && level >= CHILL_MIN_LEVEL && rng.nextDouble() < CHILL_VISIT_CHANCE;
-        int minMob = chill ? Math.max(1, level - LEVEL_BAND - 1 - CHILL_SPREAD) : minMobFor(level);
-        int maxMob = chill ? Math.max(1, level - LEVEL_BAND - 1) : level + LEVEL_BAND;
-        int useReach = chill ? Math.min(reach, CHILL_REACH) : reach;
+        // Roamer: a fixed low band [1, ROAMER_MAX_MOB_LEVEL], the whole landmass in reach, no chill, no
+        // downward-only floor. The band's ceiling — not the bot's level — is what makes it hunt LOW mobs.
+        // The training path below is unchanged from before the scope split (including its chill fallback).
+        boolean chill = false;
+        int minMob;
+        int maxMob;
+        int useReach;
         int hardMinMob = 1;
-        if (downwardOnly) {
-            minMob = Math.max(minMob, level - DOWNWARD_HUB_LOWER_SPAN);
-            hardMinMob = minMob; // the finder's fallback respects this too — a pro is never offered an easy up-map
+        if (roamer) {
+            minMob = ROAMER_MOB_FLOOR;
+            maxMob = ROAMER_MAX_MOB_LEVEL;
+            useReach = MAX_HOPS; // a roamer always sees the whole connected landmass
+        } else {
+            // Normal trip: the two-sided band. Rarely, a mid/high bot takes a "chill" trip to an easy
+            // NEAR-TOWN map — a strictly below-comfort band capped near town; nothing to chill at -> retry
+            // as a normal trip. Downward-only pros never chill (a chill is an up-trip by construction).
+            chill = !downwardOnly && level >= CHILL_MIN_LEVEL && rng.nextDouble() < CHILL_VISIT_CHANCE;
+            minMob = chill ? Math.max(1, level - LEVEL_BAND - 1 - CHILL_SPREAD) : minMobFor(level);
+            maxMob = chill ? Math.max(1, level - LEVEL_BAND - 1) : level + LEVEL_BAND;
+            useReach = chill ? Math.min(reach, CHILL_REACH) : reach;
+            if (downwardOnly) {
+                minMob = Math.max(minMob, level - DOWNWARD_HUB_LOWER_SPAN);
+                hardMinMob = minMob; // the finder's fallback respects this too — a pro is never offered an easy up-map
+            }
         }
 
         for (int attempt = 0; attempt <= MAX_REDECIDES; attempt++) {
             List<TrainingMap> eligible = TrainingMapFinder.findTrainingMaps(
                     chr.getMapId(), level, minMob, maxMob, useReach, excluded, includeOrigin, hardMinMob);
-            if (eligible.isEmpty() && chill) {
-                chill = false;
+            if (roamer) {
+                // The finder falls back to the closest-level maps when nothing is in-band, and for a
+                // roamer "closest to level" means a HIGH map — exactly what it must never hunt. Keep only
+                // the low ones; nothing left means idle in town (and the town beat re-decides).
+                final int ceiling = maxMob; // roamer never reassigns maxMob, so this is the ROAMER_MAX_MOB_LEVEL band cap
+                eligible = new java.util.ArrayList<>(eligible.stream()
+                        .filter(m -> m.mobLevel() <= ceiling).toList());
+            } else if (eligible.isEmpty() && chill) {
+                chill = false; // nothing to chill at -> retry as a normal trip (unchanged training behaviour)
                 minMob = minMobFor(level);
                 maxMob = level + LEVEL_BAND;
                 useReach = reach;
@@ -115,12 +163,12 @@ public final class TrainingMapChooser {
             if (eligible.isEmpty()) {
                 return null; // nothing reachable with mobs (or all on cooldown)
             }
-            TrainingMap candidate = weightedPick(eligible, level, useReach);
-            reserve(candidate.mapId());
-            if (botsOnMap(candidate.mapId()) <= mapCapacity(candidate.mapId()) || attempt == MAX_REDECIDES) {
+            TrainingMap candidate = weightedPick(eligible, level, useReach, roamer);
+            reserve(scope, candidate.mapId());
+            if (botsOnMap(scope, candidate.mapId()) <= mapCapacity(candidate.mapId()) || attempt == MAX_REDECIDES) {
                 return candidate; // within capacity, or out of re-rolls -> accept (saturated region: share)
             }
-            release(candidate.mapId());
+            release(scope, candidate.mapId());
             debug.accept("DECIDE: map " + candidate.mapId() + " over cap, re-picking");
         }
         return null; // not reached — the loop always returns on its last attempt
@@ -185,26 +233,47 @@ public final class TrainingMapChooser {
     }
 
     // ── Occupancy registry ──
+    //
+    // Two separate tables (see Scope). The no-arg forms are the historical TrainingBot/companion API and
+    // always address the TRAINING table, so those callers are unchanged; the roamer addresses ROAMER.
+    // Reserve and release MUST use the same scope for a given map, so a bot records its scope with the
+    // target it reserved (TrainingBot/SoloGrindController pass TRAINING; RoamerBot passes ROAMER).
 
     public static void reserve(int mapId) {
-        BOTS_PER_MAP.computeIfAbsent(mapId, k -> new AtomicInteger()).incrementAndGet();
+        reserve(Scope.TRAINING, mapId);
     }
 
     public static void release(int mapId) {
-        AtomicInteger c = BOTS_PER_MAP.get(mapId);
+        release(Scope.TRAINING, mapId);
+    }
+
+    public static int botsOnMap(int mapId) {
+        return botsOnMap(Scope.TRAINING, mapId);
+    }
+
+    public static void reserve(Scope scope, int mapId) {
+        table(scope).computeIfAbsent(mapId, k -> new AtomicInteger()).incrementAndGet();
+    }
+
+    public static void release(Scope scope, int mapId) {
+        AtomicInteger c = table(scope).get(mapId);
         if (c != null) {
             c.decrementAndGet();
         }
     }
 
-    public static int botsOnMap(int mapId) {
-        AtomicInteger c = BOTS_PER_MAP.get(mapId);
+    public static int botsOnMap(Scope scope, int mapId) {
+        AtomicInteger c = table(scope).get(mapId);
         return c == null ? 0 : Math.max(0, c.get());
+    }
+
+    private static Map<Integer, AtomicInteger> table(Scope scope) {
+        return BOTS_PER_MAP.computeIfAbsent(scope, k -> new ConcurrentHashMap<>());
     }
 
     // Read-only occupancy peek for the !env grindprofile dump (watch distribution live).
     public static int botsTargeting(int mapId) {
-        return botsOnMap(mapId);
+        return botsOnMap(Scope.TRAINING, mapId);
     }
 
     // A map's bot carrying capacity = its claimable-spot count (or the span quota on a ROAM map).
@@ -242,15 +311,21 @@ public final class TrainingMapChooser {
     // its carrying capacity is hard-zeroed so it drops out of contention and selection spills to deeper,
     // less-crowded maps; the rest are weighted by remaining headroom. If every reachable map is full,
     // falls back to a soft divisor so the bot still goes somewhere (and shares) rather than idling.
-    private static TrainingMap weightedPick(List<TrainingMap> maps, int level, int reach) {
+    //
+    // `roamer` swaps fit + distance for the low-level preference: weight by the LOWEST mob level (soft
+    // decay) and no distance bias, and read the ROAMER occupancy table.
+    private static TrainingMap weightedPick(List<TrainingMap> maps, int level, int reach, boolean roamer) {
+        Scope scope = roamer ? Scope.ROAMER : Scope.TRAINING;
         ThreadLocalRandom rng = ThreadLocalRandom.current();
         double[] weights = new double[maps.size()];
         double total = 0;
         for (int i = 0; i < maps.size(); i++) {
             TrainingMap m = maps.get(i);
             int cap = mapCapacity(m.mapId());
-            int n = botsOnMap(m.mapId());
-            double base = levelFitWeight(level, m.mobLevel()) * distanceWeight(level, m.hops(), reach);
+            int n = botsOnMap(scope, m.mapId());
+            double base = roamer
+                    ? roamerFitWeight(m.mobLevel())
+                    : levelFitWeight(level, m.mobLevel()) * distanceWeight(level, m.hops(), reach);
             double w = (n >= cap) ? 0.0 : base * ((cap - n) / (double) cap); // hard cap + headroom weight
             weights[i] = w;
             total += w;
@@ -260,9 +335,10 @@ public final class TrainingMapChooser {
             // spreads onto the least-crowded map instead of idling in town.
             for (int i = 0; i < maps.size(); i++) {
                 TrainingMap m = maps.get(i);
-                double w = levelFitWeight(level, m.mobLevel())
-                        * distanceWeight(level, m.hops(), reach)
-                        / (1.0 + botsOnMap(m.mapId()));
+                double base = roamer
+                        ? roamerFitWeight(m.mobLevel())
+                        : levelFitWeight(level, m.mobLevel()) * distanceWeight(level, m.hops(), reach);
+                double w = base / (1.0 + botsOnMap(scope, m.mapId()));
                 weights[i] = w;
                 total += w;
             }
@@ -289,6 +365,14 @@ public final class TrainingMapChooser {
         }
         int gap = comfortLow - mobLevel; // only bites the fallback edge (below the admitted floor)
         return Math.exp(-gap / (double) LEVEL_FIT_DECAY);
+    }
+
+    // Roamer fit: prefer the LOWEST mob level, decaying softly so the roamer spreads across the low
+    // range instead of every bot converging on the single easiest map. A mob at level 1 is full weight;
+    // level 60 (the ceiling) is e^-3 ≈ 0.05, so it is still possible but rare — a wanderer, not a swarm.
+    private static double roamerFitWeight(int mobLevel) {
+        int gap = Math.max(0, mobLevel - ROAMER_MOB_FLOOR);
+        return Math.exp(-gap / (double) ROAMER_MOB_DECAY);
     }
 
     // The lowest mob level a bot will normally grind: floors at 1 for noobs (level <= LOWER_SPAN + 1) so

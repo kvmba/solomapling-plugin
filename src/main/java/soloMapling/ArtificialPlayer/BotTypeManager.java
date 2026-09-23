@@ -38,6 +38,7 @@ import soloMapling.ArtificialPlayer.BotTypes.SocialBot;
 import soloMapling.ArtificialPlayer.BotTypes.TestAttackBot;
 import soloMapling.ArtificialPlayer.BotTypes.TownWandererBot;
 import soloMapling.ArtificialPlayer.BotTypes.TrainingBot;
+import soloMapling.ArtificialPlayer.BotTypes.RoamerBot;
 import soloMapling.ArtificialPlayer.BotTypes.FollowerBot;
 import soloMapling.ArtificialPlayer.BotTypes.CompanionBot;
 import soloMapling.companion.CompanionRoster;
@@ -282,6 +283,13 @@ public class BotTypeManager {
             @Override
             public void createAndSetBot(Character character) {
                 TrainingBot bot = new TrainingBot(character);
+                CharacterStorage.addActiveBot(character.getId(), bot);
+            }
+        },
+        ROAMER_BOT {
+            @Override
+            public void createAndSetBot(Character character) {
+                RoamerBot bot = new RoamerBot(character);
                 CharacterStorage.addActiveBot(character.getId(), bot);
             }
         },

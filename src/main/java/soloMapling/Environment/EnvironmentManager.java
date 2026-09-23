@@ -328,6 +328,29 @@ public class EnvironmentManager {
             runWave(8, "Training bots", tasks);
         }
 
+        // Roamers: high-level wanderers that hunt LOW-level monsters and drift the world freely. Same
+        // per-channel quota model as the training cohorts (a channel-hopper finds them wherever they land),
+        // but their own wave, own list, and own occupancy scope so they never touch the training quotas.
+        var w8b = pop.roamers();
+        if (w8b.enabled()) {
+            List<Runnable> tasks = new ArrayList<>();
+            int channels = SoloMaplingUtilities.channelCount();
+            for (var cohort : w8b.cohorts()) {
+                int n = pop.scaled(cohort.count());
+                if (n <= 0) {
+                    continue;
+                }
+                int mapId = cohort.mapId();
+                int lo = cohort.levelLo();
+                int hi = cohort.levelHi();
+                for (int ch = 1; ch <= channels; ch++) {
+                    int channel = ch;
+                    tasks.add(() -> spawnRoamerBotsOnChannel(mapId, n, lo, hi, channel));
+                }
+            }
+            runWave(8, "Roamer bots", tasks);
+        }
+
         // Ambient town population from EnvironmentPopulation.yaml waves.town_presence.towns.
         var w9 = pop.townPresence();
         if (w9.enabled()) {
@@ -362,6 +385,24 @@ public class EnvironmentManager {
         Point sp = map.getPortal(0).getPosition();
         int spawned = spawnScatteredTrainingBots(map, sp, n, loLevel, hiLevel, channel).size();
         debugprint(fmt("TrainingBots: {} spawned on map {} ch{} (lv {}..{})",
+                spawned, townMapId, channel, loLevel, hiLevel));
+        return spawned;
+    }
+
+    // Spawn one town's roamer cohort: n low-hunting wanderers on the town's spawn portal, each a random
+    // non-pirate explorer class with a coherent level (lo..hi). Same flow as a training cohort, typed
+    // ROAMER_BOT so it selects low-level maps and reserves the independent roamer occupancy table.
+    private static int spawnRoamerBotsOnChannel(int townMapId, int n, int loLevel, int hiLevel,
+                                                int channel) {
+        MapleMap map = mapOnChannel(townMapId, channel);
+        if (map == null || map.getPortal(0) == null) {
+            debugprint(fmt("RoamerBots: no map / spawn portal for {} on ch{}", townMapId, channel));
+            return 0;
+        }
+        Point sp = map.getPortal(0).getPosition();
+        int spawned = spawnScatteredTrainingBots(map, sp, n, loLevel, hiLevel, channel,
+                BotTypeManager.BotType.ROAMER_BOT).size();
+        debugprint(fmt("RoamerBots: {} spawned on map {} ch{} (lv {}..{})",
                 spawned, townMapId, channel, loLevel, hiLevel));
         return spawned;
     }
@@ -404,6 +445,15 @@ public class EnvironmentManager {
 
     public static List<Integer> spawnScatteredTrainingBots(MapleMap map, Point anchor, int n,
                                                             int loLevel, int hiLevel, int channel) {
+        return spawnScatteredTrainingBots(map, anchor, n, loLevel, hiLevel, channel,
+                BotTypeManager.BotType.TRAINING_BOT);
+    }
+
+    // As above, but with the bot TYPE injected: the roamer wave uses the identical scatter/start flow with
+    // ROAMER_BOT. Every existing caller keeps TRAINING_BOT (the two-arg form delegates here).
+    public static List<Integer> spawnScatteredTrainingBots(MapleMap map, Point anchor, int n,
+                                                            int loLevel, int hiLevel, int channel,
+                                                            BotTypeManager.BotType type) {
         List<Point> spots = BotSpotPicker.pickGroundSpots(map, anchor.x, anchor.y, n);
         List<Integer> ids = new ArrayList<>();
         for (int i = 0; i < n; i++) {
@@ -418,7 +468,7 @@ public class EnvironmentManager {
                     // Start each bot as it lands instead of after the whole cohort: under spawn
                     // throttling a serial cohort loop can run ~100s, and batch-at-the-end would
                     // leave the first bot standing idle for all of it.
-                    setAndStartBots(List.of(botId), BotTypeManager.BotType.TRAINING_BOT);
+                    setAndStartBots(List.of(botId), type);
                     ids.add(botId);
                 }
             } catch (Exception e) {

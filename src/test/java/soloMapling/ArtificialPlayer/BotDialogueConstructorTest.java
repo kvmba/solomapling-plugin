@@ -206,6 +206,7 @@ class BotDialogueConstructorTest {
                 "JQBotDialogue.yaml",
                 "MegaphoneDialogue.yaml",
                 "MerchantBotDialogue.yaml",
+                "RoamerBotDialogue.yaml",
                 "ScrollingBotDialogue.yaml",
                 "ShopOfferDialogue.yaml",
                 "SocialBotDialogue.yaml",

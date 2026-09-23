@@ -1,0 +1,115 @@
+# RoamerBot dialogue — a high-level wanderer that hunts LOW-level monsters and drifts the world freely.
+# The read is a veteran player slumming it in the starter fields: over-geared, under-challenged, and more
+# interested in the walk than the fight. Nodes:
+#   GrindStart   — on engaging a hunting ground
+#   GrindAmbient — idle muttering while it grinds (observed only)
+#   MapTransition— on leaving a field for the next
+# Context tokens ({MAP} {MOB} {REGION} {LEVEL}) are resolved live; a line whose tokens can't resolve falls
+# back to a plain line. v83 client, no emoji. Lowercase, casual is the house style.
+RoamerBot:
+
+  GrindStart:
+    text:
+      - "ah, feels like home"
+      - {line: "{MAP} again, huh", emote: 2}
+      - "back to the easy stuff"
+      - "smells like 2004 in here"
+      - {line: "these {MOB} dont even tickle", emote: 3}
+      - "no pots needed, nice"
+      - "just here for the vibes"
+      - {line: "still {MOB}s around, good", emote: 0}
+      - "taking it easy today"
+      - "one shot, same as always"
+      - "nostalgia trip tbh"
+      - {line: "{MOB} never stood a chance lol", emote: 3}
+      - "i remember grinding here for weeks"
+      - "the music here is unbeatable"
+      - "slumming it, dont mind me"
+      - {line: "lol these {MOB} are tiny", emote: 6}
+      - "old stomping grounds"
+      - "easy exp is still exp"
+      - {line: "havent seen {MAP} in ages", emote: 2}
+      - "here we go again"
+      - "some things never change"
+      - {line: "cute little {MOB}s", emote: 2}
+      - "just passing through"
+      - "taking the scenic route"
+      - "harder maps are overrated"
+      - {line: "the {DROP} here sells okay tho", emote: 0}
+      - "free kills, no effort"
+      - "i could do this blindfolded"
+      - "smol mobs, big mood"
+      - "yeah ill be here a while"
+      - {line: "{MAP} never gets old", emote: 2}
+      - "nothing beats the starter fields"
+      - {line: "even {MOB} deserve a good seeing-off", emote: 5}
+      - "ok, quick warmup"
+      - "wrong map? nah, right map"
+      - {line: "these {MOB} are basically decoration", emote: 6}
+      - "might as well, while im here"
+      - "quiet little corner of the world"
+      - {line: "respawns are slow but who cares", emote: 0}
+      - "just wandering"
+      - {line: "somebody's gotta clear these {MOB}", emote: 3}
+      - "here for the nostalgia, staying for the vibes"
+
+  GrindAmbient:
+    text:
+      - {line: "these {MOB} are too easy, kinda relaxing", emote: 2}
+      - "one day ill go to the real maps. today is not that day"
+      - {line: "the {DROP} from these things is basically junk lol", emote: 4}
+      - "i could one-shot the whole map, where are they all"
+      - {line: "lowkey {MAP} is my favorite place", emote: 2}
+      - "no one here to ks me, perfect"
+      - "slow mobs, slow life"
+      - {line: "bet these {MOB} remember me", emote: 6}
+      - "grinding with 0 stress today"
+      - "hmm what should i do after this"
+      - {line: "maybe ill just keep wandering", emote: 0}
+      - "this is basically a walk, not training"
+      - {line: "{MOB} down, next one please", emote: 3}
+      - "i fight way harder stuff than this, promise"
+      - "back when this was scary lol"
+      - {line: "the drops are nostalgic at least", emote: 0}
+      - "taking my time, nowhere to be"
+      - "should i actually go grind off-brands? nah"
+      - {line: "{MAP} ambience hits different", emote: 2}
+      - "one more lap then i move on... probably"
+      - "these mobs practically farm themselves"
+      - {line: "still satisfying to see {MOB} fall", emote: 3}
+      - "i wonder who else is online"
+      - "smol grind, big peace"
+      - {line: "back to basics, feels right", emote: 2}
+      - "no party needed, just me n the {MOB}"
+      - "cant believe i used to die to these"
+      - "lol my damage is overkill here"
+      - {line: "the music in {MAP}, chefs kiss", emote: 6}
+      - "just vibing, dont judge"
+      - "easy life"
+      - "mmm free exp"
+      - {line: "wonder if {DROP} is worth anything nowadays", emote: 0}
+      - "ok this is actually pretty chill"
+      - "maybe ill wander somewhere else after"
+
+  MapTransition:
+    text:
+      - "alright, this spot's done, on to the next"
+      - {line: "seen enough of {MOB}, time to wander", emote: 0}
+      - "moving on, plenty of easy maps left"
+      - "bored, next field"
+      - "ok where to next"
+      - "let me see what else is around"
+      - "this place got old fast"
+      - {line: "time to find a new {MAP}", emote: 2}
+      - "wandering off again"
+      - "something else, anything else"
+      - "gonna stroll somewhere new"
+      - "cleared this one, moving along"
+      - {line: "these {MOB} know me too well now", emote: 6}
+      - "new map, same plan"
+      - "off i go"
+      - "geez finally, next"
+      - "ok map, you've been great, bye"
+      - "wonder where the wind takes me"
+      - "let me go bug a different mob"
+      - "enough {MOB} for one day"
