@@ -686,17 +686,50 @@ final class GCMovementDriver {
         }
         Point botPos = entry.bot.getPosition();
         int arrivalDist = entry.moveTargetPrecise ? 8 : BotMovementManager.cfg.STOP_DIST;
-        if (Math.abs(botPos.x - entry.moveTarget.x) <= arrivalDist
-                && Math.abs(botPos.y - entry.moveTarget.y) <= arrivalDist) {
-            entry.moveTarget = null;
-            entry.moveTargetPrecise = false;
-            // Drop any committed nav edge too. Arriving is the end of the trip, and a leftover
-            // edge keeps hasGoal true on the next tick, so the bot never takes the idle branch -
-            // and that branch is what clears the walk stance. Without this a bot that stops can
-            // stand still forever still rendering the walk animation.
-            BotMovementManager.clearNavigationState(entry);
-            GCMovement.fireArrival(entry);
+        if (!reachedMoveTarget(entry.climbing, entry.inAir, entry.swimming, botPos, entry.moveTarget, arrivalDist)) {
+            return;
         }
+        entry.moveTarget = null;
+        entry.moveTargetPrecise = false;
+        // Drop any committed nav edge too. Arriving is the end of the trip, and a leftover
+        // edge keeps hasGoal true on the next tick, so the bot never takes the idle branch -
+        // and that branch is what clears the walk stance. Without this a bot that stops can
+        // stand still forever still rendering the walk animation.
+        BotMovementManager.clearNavigationState(entry);
+        GCMovement.fireArrival(entry);
+    }
+
+    /*
+     * Whether a bot may be considered to have reached the move target. Pure, so the rule is pinned by a
+     * unit test rather than re-derived at the call site.
+     *
+     * A bot that is still CLIMBING or mid-AIR has not "arrived" even if it is standing on the target's
+     * pixels. Both phases pin or sweep the bot across the target early:
+     *
+     *  - Climbing pins X to the rope's column while Y is still making its way up, so the box test below
+     *    reads a mid-climb position as arrival the moment the bot comes within STOP_DIST (30px) of a
+     *    target near the rope head.
+     *  - A jump sweeps the bot through the whole vertical band of a same-column target and can be within
+     *    STOP_DIST on both axes mid-arc without ever landing on it.
+     *
+     * On map 221000200 (地球防御本部/机库), a tall shaft that stacks many short ladders, this fired
+     * constantly: of 250 random routes, 18 ended with the bot frozen 400-2900 ticks, 107 of the clears
+     * were mid-jump and 18 mid-climb (an instrumented run). Clearing the target there left a frozen bot
+     * ~27px below the ledge - the "bot sticks at the top of the ladder, flickering climb/stand" report.
+     * It is not stuck; it believed it had already arrived.
+     *
+     * Swimming is deliberately EXEMPT: a swim-mode bot runs with {@code inAir} set for the whole session
+     * (applySwimMotion sets swimming+inAir together) and its position is the real integrated position, so
+     * gating on airborne would strand every swim bot. It arrives on a normal grounded tick once it makes
+     * landfall (swimming cleared). The gate is entirely transient: physics clears climbing/inAir within a
+     * few ticks, and the next eligible tick resolves the arrival.
+     */
+    static boolean reachedMoveTarget(boolean climbing, boolean inAir, boolean swimming, Point botPos, Point target, int arrivalDist) {
+        if (climbing || (inAir && !swimming)) {
+            return false;
+        }
+        return Math.abs(botPos.x - target.x) <= arrivalDist
+                && Math.abs(botPos.y - target.y) <= arrivalDist;
     }
 
     private static boolean consumeAiTick(BotMovementState entry) {
