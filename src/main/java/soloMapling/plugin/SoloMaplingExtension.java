@@ -152,6 +152,7 @@ public final class SoloMaplingExtension implements ServerExtension {
         // Host->bot input bridges. Must be live before any player can chat or invite.
         HostGameplayEventBridge.register(runtime);
         PlayerChatBridge.register();
+        BotBuffRequestBridge.register();
         DirectChatBridge.register();
         BotPartyInviteBridge.register(runtime);
         BotTradeInviteBridge.register(runtime);
