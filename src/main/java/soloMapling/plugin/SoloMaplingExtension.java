@@ -181,6 +181,7 @@ public final class SoloMaplingExtension implements ServerExtension {
         bindCommand(runtime, "fmbot", 4, "SoloMapling FM bot commands", new FMBotCommand());
         bindCommand(runtime, "gcmove", 4, "SoloMapling GCMove commands", new GCMoveCommand());
         bindCommand(runtime, "botpet", 4, "SoloMapling bot pet commands", new soloMapling.command.BotPetCommand());
+        bindCommand(runtime, "botsummon", 4, "SoloMapling bot summon commands", new soloMapling.command.BotSummonCommand());
         bindCommand(runtime, "companion", 4,
                 "Persistent companion provisioning and diagnostics",
                 new CompanionCommand(runtime, companionLifecycleAccess));
@@ -343,6 +344,11 @@ public final class SoloMaplingExtension implements ServerExtension {
             log.warn("SoloMapling bot-pet bootstrap failed (feature idle): {}", t.toString());
         }
         try {
+            soloMapling.ArtificialPlayer.BotSummonSystem.BotSummonSystem.bootstrap();
+        } catch (Throwable t) {
+            log.warn("SoloMapling bot-summon bootstrap failed (feature idle): {}", t.toString());
+        }
+        try {
             CompanionRoster.refreshFromDatabase();
         } catch (Throwable t) {
             // Keep legacy ambient bots available when a developer runs the
@@ -392,6 +398,11 @@ public final class SoloMaplingExtension implements ServerExtension {
         log.info("SoloMapling plugin onUnload");
         try {
             soloMapling.ArtificialPlayer.BotPetSystem.BotPetSystem.shutdown();
+        } catch (Throwable ignored) {
+            // best-effort
+        }
+        try {
+            soloMapling.ArtificialPlayer.BotSummonSystem.BotSummonSystem.shutdown();
         } catch (Throwable ignored) {
             // best-effort
         }

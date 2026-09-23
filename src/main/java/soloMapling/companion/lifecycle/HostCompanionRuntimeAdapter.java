@@ -269,6 +269,8 @@ public final class HostCompanionRuntimeAdapter implements CompanionRuntimeAdapte
         // Persistent pets: granted once the companion is live. Idempotent — a
         // companion that already has pets (loaded from its saved state) keeps them.
         soloMapling.ArtificialPlayer.BotPetSystem.BotPetSystem.grant(character);
+        // Summon (job-gated, roll-gated): same point as pets, once the companion is live.
+        soloMapling.ArtificialPlayer.BotSummonSystem.BotSummonSystem.grant(character);
     }
 
     @Override

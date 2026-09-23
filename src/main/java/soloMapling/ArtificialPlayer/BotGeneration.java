@@ -278,6 +278,9 @@ public class BotGeneration {
         // Pets, if the policy grants them. Level/job/gear are settled above, and
         // the bot is already on its map, so the pets can be shown right away.
         soloMapling.ArtificialPlayer.BotPetSystem.BotPetSystem.grant(bot);
+        // Summon, if this job owns one and the roll says so. Same point as pets: level/job/gear
+        // are settled and the bot is on its map, so the entity can be shown right away.
+        soloMapling.ArtificialPlayer.BotSummonSystem.BotSummonSystem.grant(bot);
         // Choreography sleeps ~2.5-6s in total; play it on a virtual thread so
         // mass spawning isn't gated on each bot's arrival animation. Drop-down ->
         // turn-around ordering is preserved because it's one sequential task.
@@ -515,6 +518,9 @@ public class BotGeneration {
         // behind; companions are skipped here (their saved pets persist).
         soloMapling.ArtificialPlayer.BotPetSystem.BotPetSystem.remove(fakechar);
         soloMapling.ArtificialPlayer.BotPetSystem.BotPetSystem.onBotRemoved(fakechar.getId());
+        // Detach the summon before the bot leaves the map: a stationary summon is NOT removed by
+        // the host's own leave-map path, so it must be torn down here or it would linger as a ghost.
+        soloMapling.ArtificialPlayer.BotSummonSystem.BotSummonSystem.remove(fakechar);
         fakechar.getMap().removePlayer(fakechar);
         // Remove from the channel this bot actually lives on. Removing from a fixed channel
         // would leave a ghost entry behind on every other channel once bots are spread out.

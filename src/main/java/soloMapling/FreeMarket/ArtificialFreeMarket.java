@@ -388,6 +388,8 @@ public class ArtificialFreeMarket {
         // A shop keeper does not walk around with a pet. The bot became a shop
         // keeper here (not at spawn), so this is where its pet is taken back.
         soloMapling.ArtificialPlayer.BotPetSystem.BotPetSystem.remove(fakechar);
+        // A shop keeper does not carry a summon either - drop it the same way.
+        soloMapling.ArtificialPlayer.BotSummonSystem.BotSummonSystem.remove(fakechar);
         String desc = "Test";
         Integer shopItemId = getRandomStorePermitId();
         PlayerShop ps = new PlayerShop(fakechar, desc, shopItemId);

@@ -192,6 +192,18 @@ public final class BotAttackEffects {
         return applyDamageAndLoot(bot, mob, damage, (short) 0);
     }
 
+    /*
+     * Public entry for a non-driver bot attack (a summon's periodic strike): apply this damage on
+     * {@code target} through the same kill/EXP/loot path every other bot hit uses. The summon's own
+     * SUMMON_ATTACK packet is broadcast by its caller; this only lands the damage.
+     */
+    public static boolean applyExternalHit(Character bot, Monster target, int damage) {
+        if (bot == null || bot.getMap() == null || target == null || !target.isAlive() || damage <= 0) {
+            return false;
+        }
+        return applyDamageAndLoot(bot, target, damage, (short) 0);
+    }
+
     /* Apply HP damage; on death, credit EXP + the death broadcast (no vanilla drops) and spawn our own loot. */
     private static boolean applyDamageAndLoot(Character bot, Monster target, int damage, short hitDelay) {
         MapleMap map = bot.getMap();
