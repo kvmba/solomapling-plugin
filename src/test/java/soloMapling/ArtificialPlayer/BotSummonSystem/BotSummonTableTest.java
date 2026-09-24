@@ -12,8 +12,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Pins the summon behaviour table: which job owns which summon, and - the rule that must never
- * regress - that the pirate turrets and the archer puppet are classified STATIONARY so the follower
- * never moves them.
+ * regress - that the pirate turrets are classified STATIONARY so the client holds them where they
+ * spawned.
  *
  * <p>Raw job ids are used (not {@code org.gms.client.Job}) so the test loads without a Spring
  * context; the ownership rule ({@link BotSummonTable#summonsForJobId}) mirrors the host's own
@@ -22,26 +22,31 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class BotSummonTableTest {
 
     @Test
-    void turretsAndPuppetsAreStationary() {
-        // A real octopus / battleship turret is a placed cannon, not a pet: the follower must never
-        // reposition it. Same for the archer puppet decoy.
-        for (int skill : List.of(5211001 /* octopus */, 5220002 /* wrath of the octopi */,
-                3111002 /* ranger puppet */, 3211002 /* sniper puppet */)) {
+    void turretsAreStationary() {
+        // A real octopus / battleship turret is a placed cannon, not a pet: the client must hold it.
+        for (int skill : List.of(5211001 /* octopus */, 5220002 /* wrath of the octopi */)) {
             BotSummonTable.Spec spec = BotSummonTable.forSkill(skill);
             assertNotNull(spec, "skill " + skill + " must be a registered summon");
             assertEquals(BotSummonTable.Move.STATIONARY, spec.move(),
                     "skill " + skill + " must be STATIONARY");
             assertTrue(spec.isStationary(), "spec.isStationary() must agree");
-            assertFalse(spec.airborne(), "a stationary summon sits on the ground, never floats");
         }
     }
 
     @Test
-    void turretsAttackButThePuppetDoesNot() {
+    void turretsAttack() {
         assertTrue(BotSummonTable.forSkill(5211001).attacks(), "the octopus fires");
         assertTrue(BotSummonTable.forSkill(5220002).attacks(), "the super octopus fires");
-        assertFalse(BotSummonTable.forSkill(3111002).attacks(), "the puppet only draws aggro");
-        assertFalse(BotSummonTable.forSkill(3211002).attacks(), "the puppet only draws aggro");
+    }
+
+    @Test
+    void puppetIsNotRegisteredAtAll() {
+        // The archer Puppet only pulls mob aggro, which the host gates on the PUPPET buff stat we
+        // never register - so shipping it would be an inert decoration. It must not be a summon.
+        assertFalse(BotSummonTable.isSummonSkill(3111002), "ranger puppet must not be a bot summon");
+        assertFalse(BotSummonTable.isSummonSkill(3211002), "sniper puppet must not be a bot summon");
+        assertNull(BotSummonTable.forSkill(3111002));
+        assertNull(BotSummonTable.forSkill(3211002));
     }
 
     @Test
@@ -85,11 +90,8 @@ class BotSummonTableTest {
     }
 
     @Test
-    void chooserPrefersTheAttackingSummonOverTheDecoy() {
-        // A Ranger (311) owns Silver Hawk (attacking) AND Puppet (decoy): the hawk must win.
-        assertEquals(3111005, BotSummonController.chooseSummon(311),
-                "the hawk must be chosen over the non-attacking puppet");
-        // A Corsair owns only the turret.
+    void chooserPrefersTheAttackingSummon() {
+        // A Corsair owns only attacking turrets, so it picks its own super turret (highest id).
         assertEquals(5220002, BotSummonController.chooseSummon(522));
         // A class with no summon resolves to none.
         assertNull(BotSummonController.chooseSummon(100));

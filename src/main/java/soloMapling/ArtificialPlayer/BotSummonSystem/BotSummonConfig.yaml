@@ -2,28 +2,21 @@
 # Bot Summon tuning. Read once at startup (no hot reload) from this file; a copy
 # under data/solomapling/override/... wins over the packaged one.
 #
-# A bot summon is a real map entity (spawn / move / attack / remove). STATIONARY
-# summons (pirate turrets, archer puppet) are never moved by the follower; only
-# FOLLOW / CIRCLE summons are repositioned near their owner.
+# A bot summon is a real host Summon entity. The server only spawns it and (for an
+# attacking one) fires SUMMON_ATTACK; the CLIENT owns its movement, so there are no
+# follow/offset knobs here. STATIONARY summons (pirate turrets) are sent movementType
+# 0 and the client holds them where they spawned.
 # =============================================================================
 
 enabled: true
 
-# Spawn odds. Only a bot whose job owns a summon (archer hawk, mage elemental,
-# bishop bahamut, pirate turret, dark knight beholder) and is at least min_level
-# rolls for one; a successful roll grants ONE summon.
+# Spawn odds. Only an ambient bot whose job owns a summon (archer hawk, mage
+# elemental, bishop bahamut, pirate turret, dark knight beholder) and is at least
+# min_level rolls for one; a successful roll grants ONE summon. Persistent
+# companions are never granted a summon (see BotSummonController).
 spawn:
   chance: 0.55       # P(a summon appears) when the bot is eligible
   min_level: 70      # below this no summon is granted (matches 3rd-job summons)
-
-# Follow drive for FOLLOW / CIRCLE summons (STATIONARY summons ignore all of this).
-follow:
-  tick_ms: 300       # shared follower tick period
-  offset_x: 55       # FOLLOW summon rests this far in front of the owner's facing
-  offset_y: -12      # ...and this far above the ground
-  circle_radius: 70  # CIRCLE summons orbit the owner on this ring (px)
-  circle_step_deg: 6 # degrees advanced per tick (a slow glide around the owner)
-  warp_distance: 900 # snap to the owner past this distance (owner just teleported)
 
 # Attacking summons (turret / hawk / elemental / dragon / bahamut).
 attack:

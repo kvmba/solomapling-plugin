@@ -269,8 +269,11 @@ public final class HostCompanionRuntimeAdapter implements CompanionRuntimeAdapte
         // Persistent pets: granted once the companion is live. Idempotent — a
         // companion that already has pets (loaded from its saved state) keeps them.
         soloMapling.ArtificialPlayer.BotPetSystem.BotPetSystem.grant(character);
-        // Summon (job-gated, roll-gated): same point as pets, once the companion is live.
-        soloMapling.ArtificialPlayer.BotSummonSystem.BotSummonSystem.grant(character);
+        // NOTE: companions deliberately get NO summon. Granting one must first teach the summon
+        // skill (the host Summon constructor requires a learned level), which registers a skill the
+        // companion's SP build never allocated — and because companions persist their character,
+        // that would permanently inflate getUsedSp()/book SP and corrupt the build across restarts.
+        // Ambient (non-persistent) bots make no such claim, so they keep their summons.
     }
 
     @Override

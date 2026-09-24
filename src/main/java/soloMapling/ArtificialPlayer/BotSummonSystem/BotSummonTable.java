@@ -19,30 +19,36 @@ import java.util.List;
 import java.util.Map;
 
 /*
- * The per-skill behaviour of a bot's summon. A summon is a real map entity (host Summon) with its
- * own lifecycle - spawn, move/follow, attack, remove - so each one needs more than an id: how it
- * moves and whether (and how hard) it hits. This is the single place those choices live, keyed by
- * the summon skill ids each class owns.
+ * The per-skill behaviour of a bot's summon. A summon is a real host Summon entity: the server
+ * spawns it and (for an attacking one) fires SUMMON_ATTACK; the CLIENT owns its movement (the v83
+ * server never drives summon motion - MoveSummonHandler only echoes the client's own packets). So
+ * the only per-skill choices here are (a) whether it is placed stationary - the pirate turrets - and
+ * (b) whether it attacks. Damage is NOT a property here: like every other bot hit it comes from the
+ * bot's job tier + level via BotDamageModel.
  *
- * Movement type mirrors the host's own StatEffect.getSummonMovementType() (the SUMMON / PUPPET
- * statup), so a bot behaves like a real client. STATIONARY summons (the pirate turrets and the
- * archer puppet) MUST NOT be moved by the follower: a real octopus is a placed cannon, not a pet.
- * Damage is NOT a property here - it comes from the bot's job tier + level via BotDamageModel,
- * exactly like every other bot hit.
+ * Movement kind mirrors the host's own StatEffect.getSummonMovementType() (the SUMMON statup) so the
+ * spawn packet carries the same movementType a real client would, and the client animates the
+ * follow/orbit itself. A STATIONARY entry (octopus turret) is sent movementType 0 and the client
+ * holds it where it spawned - which is exactly what a placed cannon should do.
  *
- * No org.gms.client.Job reference: a summon's owning job is the skill id's own job prefix
- * (skillId / 10000), and lineage is derived from job-id hierarchy - so the table is pure data and
- * loads without a Spring context (unit-testable).
+ * Deliberately NOT registered: the archer Puppet (3111002/3211002). Its only function is to pull mob
+ * aggro, and the host gates that on the PUPPET buff stat (Monster.isCharacterPuppetInVicinity reads
+ * getBuffEffect(BuffStat.PUPPET)). We register no buff, so a bot puppet would be an inert decoration
+ * that misleads observers; it is left out rather than shipped broken.
+ *
+ * No org.gms.client.Job reference: a summon's owning job is the skill id's own job prefix and
+ * lineage is derived from job-id hierarchy, so the table is pure data and loads without a Spring
+ * context (unit-testable).
  */
 public final class BotSummonTable {
 
-    /** How a summon is positioned by the follower. STATIONARY is never moved once spawned. */
+    /** How the client should hold the summon. Sent as the spawn packet's movementType. */
     public enum Move {
-        /** Placed where cast (octopus, puppet). Never moved. */
+        /** Placed where cast and held there (octopus turret). movementType 0. */
         STATIONARY,
-        /** Hovers near a fixed offset from the owner (mage / beholder / dragon summons). */
+        /** The client confines it near the owner (mage/beholder/dragon summons). */
         FOLLOW,
-        /** Orbits the owner on a slowly turning ring (archer hawks / eagles). */
+        /** The client orbits it around the owner (archer hawks/eagles). */
         CIRCLE
     }
 
@@ -50,16 +56,11 @@ public final class BotSummonTable {
      * One summon's behaviour.
      *
      * @param skillId     the summon skill (also the Summon's owning key)
-     * @param move        how the follower positions it (STATIONARY = never move)
-     * @param attacks     whether it periodically strikes a nearby mob
+     * @param move        how the client holds it (STATIONARY = sits where spawned)
+     * @param attacks     whether the server periodically makes it strike a nearby mob
      * @param attackLines damage lines per strike (1 for every v83 summon here)
      */
     public record Spec(int skillId, Move move, boolean attacks, int attackLines) {
-        /** A moving summon floats (hawk / phoenix / elquines / beholder / dragon); a stationary one sits on the ground. */
-        public boolean airborne() {
-            return move != Move.STATIONARY;
-        }
-
         public boolean isStationary() {
             return move == Move.STATIONARY;
         }
@@ -73,24 +74,21 @@ public final class BotSummonTable {
     private static final Map<Integer, Spec> BY_SKILL = new LinkedHashMap<>();
 
     static {
-        // ---- Archer (CIRCLE_FOLLOW, attacking) ----
+        // ---- Archer (orbit, attacking) ----
         add(Ranger.SILVER_HAWK, Move.CIRCLE, true, 1);      // 3111005
         add(Sniper.GOLDEN_EAGLE, Move.CIRCLE, true, 1);     // 3211005
         add(Bowmaster.PHOENIX, Move.CIRCLE, true, 1);       // 3121006
         add(Marksman.FROST_PREY, Move.CIRCLE, true, 1);     // 3221005
-        // ---- Archer decoy (STATIONARY, no attack - it exists to draw mob aggro) ----
-        add(Ranger.PUPPET, Move.STATIONARY, false, 0);      // 3111002
-        add(Sniper.PUPPET, Move.STATIONARY, false, 0);      // 3211002
 
-        // ---- Magician (FOLLOW / CIRCLE, attacking) ----
+        // ---- Magician (follow, attacking) ----
         add(FPArchMage.ELQUINES, Move.FOLLOW, true, 1);     // 2121005
         add(ILArchMage.IFRIT, Move.FOLLOW, true, 1);        // 2221005
 
-        // ---- Priest / Bishop (CIRCLE_FOLLOW / FOLLOW, attacking) ----
+        // ---- Priest / Bishop ----
         add(Priest.SUMMON_DRAGON, Move.CIRCLE, true, 1);    // 2311006
         add(Bishop.BAHAMUT, Move.FOLLOW, true, 1);          // 2321003
 
-        // ---- Dark Knight (FOLLOW, support only - no attack) ----
+        // ---- Dark Knight (follow, support only - no attack) ----
         add(DarkKnight.BEHOLDER, Move.FOLLOW, false, 0);    // 1321007
 
         // ---- Pirate turrets (STATIONARY, attacking) ----

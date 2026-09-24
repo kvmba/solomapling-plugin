@@ -1,11 +1,7 @@
 package soloMapling.ArtificialPlayer.BotSummonSystem;
 
 import org.gms.client.Character;
-import org.gms.constants.game.CharacterStance;
-import org.gms.net.opcodes.SendOpcode;
-import org.gms.net.packet.OutPacket;
 import org.gms.server.life.Monster;
-import org.gms.server.maps.Foothold;
 import org.gms.server.maps.MapObject;
 import org.gms.server.maps.MapObjectType;
 import org.gms.server.maps.MapleMap;
@@ -24,37 +20,38 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ScheduledFuture;
-import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
 
 /**
- * Drives every bot's summons: one shared tick that repositions FOLLOW / CIRCLE summons near their
- * owner and lets attacking summons strike nearby mobs. STATIONARY summons (the pirate turrets and
- * the archer puppet) are <b>never moved</b> once spawned - the whole point of a turret is that it
- * sits where it was placed.
+ * Drives every bot's summons. The v83 server never moves a summon itself - a real client animates a
+ * summon's follow/orbit from the spawn packet's movementType, and the host's {@code MoveSummonHandler}
+ * only echoes the client's own MOVE_SUMMON frames. A headless bot has no client, so this class does
+ * the two things the CLIENT used to do that the server must not:
  *
- * <p>All state lives here in the plugin; the host's {@link Summon} entity is only the serialization
- * surface. The bot learns the summon skill's level (the host's Summon constructor requires it) but
- * <b>no buff is ever registered</b>, so the host's own SUMMON/PUPPET buff lifecycle never runs and
- * the summon lifecycle (spawn / map-change re-spawn / teardown) is owned entirely by this class - it
- * can never leave a ghost entity behind.</p>
+ * <ul>
+ *   <li><b>spawn / re-place the entity</b> - at the owner's feet on grant, and re-spawned (a fresh
+ *       entity at a new object id) when the owner warps, so the new map's observers see it appear
+ *       and the old map's see it leave. Stationary turrets are never re-placed while the owner stays,
+ *       so they sit exactly where cast.</li>
+ *   <li><b>attack</b> - an attacking summon picks the nearest mob within range and fires a
+ *       SUMMON_ATTACK (rendered by the client) whose damage lands through the shared bot kill path.</li>
+ * </ul>
  *
- * <p><b>LOD.</b> Movement, attacks and packets are gated on {@link GCMovement#isMapObserved}: while
- * no real player watches the map the tick does nothing but keep the tracked set warm. Spawning is
- * always cheap because {@code MapleMap.spawnSummon} only sends to real observers, and an arriving
- * player is shown the existing entity by the host's own map-placement path.</p>
+ * <p>It deliberately sends NO movement packets: a server-built {@code MOVE_SUMMON} frame would be
+ * consumed as a client-origin movement stream, not authored, so sending one risks a client mis-parse
+ * for no benefit (the client already animates the follow/orbit from the spawn movementType).</p>
+ *
+ * <p>All state lives here in the plugin. The bot learns the summon skill's level (the host
+ * {@link Summon} constructor requires it) but <b>no host buff is ever registered</b>, so the host's
+ * own SUMMON/PUPPET buff lifecycle is never involved; this class owns spawn and teardown outright.</p>
+ *
+ * <p><b>LOD.</b> Attacks are gated on {@link GCMovement#isMapObserved}: while no real player watches
+ * the map nothing is broadcast. Map re-homing is cheap and runs unconditionally so a turret can never
+ * ghost on a map the owner left.</p>
  */
 public final class BotSummonFollower {
 
     private static final Logger log = LoggerFactory.getLogger(BotSummonFollower.class);
-
-    // Spawn-packet moveAction bytes (CSummoned action table): 0 STAND, 1 MOVE, 2 FLY.
-    private static final int ACTION_STAND = 0;
-    private static final int ACTION_MOVE = 1;
-    private static final int ACTION_FLY = 2;
-
-    // v83 MovePath fragment command 0 = normal/absolute movement (matches AbsoluteLifeMovement).
-    private static final int MOVE_CMD_NORMAL = 0;
 
     // botId -> that bot's live summons.
     private static final Map<Integer, List<BotSummon>> TRACKED = new ConcurrentHashMap<>();
@@ -69,7 +66,7 @@ public final class BotSummonFollower {
         if (task != null) {
             return;
         }
-        long period = Math.max(100L, cfg.followTickMs());
+        long period = Math.max(100L, cfg.attackTickMs() / 2); // poll faster than the attack cadence
         task = soloMapling.server.ExecutorServiceManager.getScheduledExecutorService()
                 .scheduleAtFixedRate(BotSummonFollower::tick, period, period, TimeUnit.MILLISECONDS);
         System.out.println("[BotSummonFollower] started, period=" + period + "ms");
@@ -104,9 +101,6 @@ public final class BotSummonFollower {
         BotSummon s = new BotSummon(botId, spec.skillId(), spec);
         s.summon = summon;
         s.map = map;
-        if (spec.move() == BotSummonTable.Move.CIRCLE) {
-            s.angleDeg = ThreadLocalRandom.current().nextDouble() * 360.0;
-        }
         TRACKED.computeIfAbsent(botId, k -> new ArrayList<>()).add(s);
     }
 
@@ -128,7 +122,7 @@ public final class BotSummonFollower {
             removeEntity(bot, s);
         }
         // Drop the entries from the owner's summon map too, so the host's own leave-map path sees an
-        // empty collection (no else-branch removeMapObject on an already-removed object).
+        // empty collection (it removes stationary summons by iterating that map).
         bot.clearSummons();
     }
 
@@ -141,11 +135,10 @@ public final class BotSummonFollower {
         try {
             MapleMap map = s.map;
             if (map != null) {
+                // The host's own leave-map path sends NO remove packet for a summon, so the old
+                // map's observers would keep a ghost. Broadcast the removal, then drop it.
                 map.broadcastMessage(PacketCreator.removeSummon(summon, true), summon.getPosition());
                 map.removeMapObject(summon);
-                if (summon.isPuppet()) {
-                    map.removePlayerPuppet(bot); // undo the aggro the puppet attracted
-                }
             }
             bot.removeVisibleMapObject(summon);
         } catch (Throwable t) {
@@ -186,134 +179,64 @@ public final class BotSummonFollower {
             if (s.summon == null) {
                 continue;
             }
-            // Map-change re-homing is pure cleanup + spawn and MUST run whether or not the map is
-            // observed: a stationary summon is not removed by the host's own leave-map path, so if
-            // we skipped this on an unobserved map the entity would ghost on the old map until a
-            // player walked in. Spawning is cheap (it only sends to real observers).
+            // Re-homing is pure cleanup + spawn and MUST run whether or not the map is observed: a
+            // stationary summon is not removed by the host's own leave-map path, so skipping it on an
+            // unobserved map would ghost the entity on the old map until a player walked in.
             if (s.map != botMap) {
                 handleMapChange(bot, s);
-                continue; // a movement packet would race the fresh spawn
-            }
-            // Movement, attacks and their packets only run on an observed map (the LOD gate).
-            if (!observed) {
                 continue;
             }
-            // A stationary summon (turret / puppet) is never repositioned; only a follow/circle one
-            // glides toward its owner. shouldTickMovement is the single expression of that rule.
-            if (shouldTickMovement(s.isStationary(), observed)) {
-                moveFollow(bot, s, cfg);
-            }
-            if (s.attacks()) {
+            if (s.attacks() && observed) {
                 tryAttack(bot, s, cfg);
             }
         }
     }
 
     /**
-     * The owner warped to another map. Re-home the summon there: drop it off the old map (a
-     * stationary summon is NOT removed by the host's own leave-map path, so this must happen here)
-     * and spawn it fresh at the owner's feet on the new map.
+     * The owner warped to another map. Drop the old entity off the old map and spawn a FRESH one at
+     * the owner's feet on the new map. A new entity is used (new object id) rather than re-placing the
+     * old: the old object id may still be tracked by clients that saw the removal, so reusing it is
+     * the kind of aliasing that can make a stale entity appear in two places.
      */
     private static void handleMapChange(Character bot, BotSummon s) {
-        Summon summon = s.summon;
         MapleMap newMap = bot.getMap();
-        boolean puppet = summon.isPuppet();
         try {
-            if (s.map != null) {
-                // The host's own leave-map path sends NO remove packet for a summon, so the old
-                // map's observers would keep a ghost. Broadcast the removal here, then drop it.
-                s.map.broadcastMessage(PacketCreator.removeSummon(summon, true), summon.getPosition());
-                s.map.removeMapObject(summon);
-                if (puppet) {
-                    s.map.removePlayerPuppet(bot); // drop the old map's puppet aggro
-                }
+            removeEntity(bot, s);
+            Summon fresh = spawnEntity(bot, s.skillId, s.spec, newMap);
+            if (fresh != null) {
+                s.summon = fresh;
+                s.map = newMap;
             }
-            summon.setPosition(new Point(bot.getPosition()));
-            newMap.spawnSummon(summon);
-            if (puppet) {
-                newMap.addPlayerPuppet(bot); // re-attract aggro on the new map
-            }
-            s.map = newMap;
         } catch (Throwable t) {
             log.warn("summon re-home failed cid={} skill={}: {}", bot.getId(), s.skillId, t.toString());
+            s.summon = null;
             s.map = newMap;
         }
     }
 
-    /**
-     * Reposition a FOLLOW / CIRCLE summon at a point derived from the owner. The summon is set to the
-     * target directly (clients interpolate between the positions we send) and the move is broadcast so
-     * observers see it glide; a summon left implausibly far behind (owner just teleported) is snapped
-     * straight to the target instead of creeping across the map.
-     */
-    private static void moveFollow(Character bot, BotSummon s, BotSummonConfig cfg) {
-        Point cur = s.summon.getPosition();
-        Point target = targetFor(bot, s, cfg);
-
-        boolean warped = cur.distance(target) > cfg.warpDistance();
-        if (!warped && cur.distanceSq(target) < 1.0) {
-            return; // already there; nothing worth a packet
+    /** Construct + broadcast a summon entity at the bot's feet. Returns null if it cannot be made. */
+    static Summon spawnEntity(Character bot, int skillId, BotSummonTable.Spec spec, MapleMap map) {
+        org.gms.client.Skill skill = org.gms.client.SkillFactory.getSkill(skillId);
+        if (skill == null || bot.getSkillLevel(skill) < 1) {
+            return null; // not learnable / not learned - constructing would throw or crash observers
         }
-
-        int dx = target.x - cur.x;
-        int dy = target.y - cur.y;
-        long tick = Math.max(1L, cfg.followTickMs());
-        int vx = clampVelocity(dx * 1000L / tick);
-        int vy = clampVelocity(dy * 1000L / tick);
-
-        int fh = 0;
-        int action = ACTION_MOVE;
-        if (!s.spec.airborne()) {
-            Foothold ground = GCMovement.footholdBelow(bot.getMap(), target.x, target.y);
-            if (ground != null) {
-                target = new Point(target.x, ground.calculateFooting(target.x));
-                fh = ground.getId();
-            }
-        } else {
-            action = ACTION_FLY;
-        }
-        if (Math.abs(dx) <= 2 && Math.abs(dy) <= 2) {
-            action = s.spec.airborne() ? ACTION_FLY : ACTION_STAND;
-        }
-
-        Point from = cur;
-        s.summon.setPosition(new Point(target));
-        broadcastMove(bot, s.summon, from, target, vx, vy, fh, action, (int) tick);
+        org.gms.server.maps.SummonMovementType moveType = switch (spec.move()) {
+            case STATIONARY -> org.gms.server.maps.SummonMovementType.STATIONARY;
+            case CIRCLE -> org.gms.server.maps.SummonMovementType.CIRCLE_FOLLOW;
+            case FOLLOW -> org.gms.server.maps.SummonMovementType.FOLLOW;
+        };
+        Point pos = spawnPosition(bot, map);
+        Summon summon = new Summon(bot, skillId, pos, moveType);
+        summon.setStance(0); // nMoveAction STAND; the client animates from there
+        map.spawnSummon(summon);
+        return summon;
     }
 
-    private static int clampVelocity(long v) {
-        return (int) Math.max(-2000, Math.min(2000, v));
-    }
-
-    private static Point targetFor(Character bot, BotSummon s, BotSummonConfig cfg) {
+    private static Point spawnPosition(Character bot, MapleMap map) {
         Point owner = bot.getPosition();
-        if (s.spec.move() == BotSummonTable.Move.CIRCLE) {
-            s.angleDeg += cfg.circleStepDeg();
-            double rad = Math.toRadians(s.angleDeg);
-            return new Point(
-                    owner.x + (int) Math.round(Math.cos(rad) * cfg.circleRadius()),
-                    owner.y + (int) Math.round(Math.sin(rad) * cfg.circleRadius()));
-        }
-        boolean left = CharacterStance.isFacingLeft(bot.getStance());
-        int offX = cfg.followOffsetX();
-        return new Point(owner.x + (left ? -offX : offX), owner.y + cfg.followOffsetY());
-    }
-
-    /** Emit one MOVE_SUMMON carrying a single absolute-move fragment. */
-    private static void broadcastMove(Character bot, Summon summon, Point start, Point dest,
-                                      int vx, int vy, int fh, int moveAction, int durationMs) {
-        OutPacket p = OutPacket.create(SendOpcode.MOVE_SUMMON);
-        p.writeInt(bot.getId());
-        p.writeInt(summon.getObjectId());
-        p.writePos(start);
-        p.writeByte(1);                    // one movement fragment
-        p.writeByte(MOVE_CMD_NORMAL);      // absolute move
-        p.writePos(dest);
-        p.writePos(new Point(vx, vy));     // pixels-per-second wobble
-        p.writeShort(fh);
-        p.writeByte(moveAction);
-        p.writeShort(durationMs);
-        bot.getMap().broadcastMessage(bot, p, summon.getPosition());
+        org.gms.server.maps.Foothold ground = GCMovement.footholdBelow(map, owner.x, owner.y);
+        int y = ground != null ? ground.calculateFooting(owner.x) : owner.y;
+        return new Point(owner.x, y);
     }
 
     private static void tryAttack(Character bot, BotSummon s, BotSummonConfig cfg) {
@@ -361,12 +284,5 @@ public final class BotSummonFollower {
             }
         }
         return nearest;
-    }
-
-    /* Package-visible seam for unit tests. */
-
-    /** A stationary summon is never repositioned; a moving one only moves when the map is observed. */
-    static boolean shouldTickMovement(boolean stationary, boolean observed) {
-        return !stationary && observed;
     }
 }

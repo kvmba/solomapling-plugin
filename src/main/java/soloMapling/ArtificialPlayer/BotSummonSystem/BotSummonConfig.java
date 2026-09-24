@@ -14,6 +14,9 @@ import java.util.Map;
  *
  * <p>Read once at startup; there is no hot reload. A missing or broken file falls back to the
  * defaults, because a bad summon config must not stop the rest of the plugin from coming up.</p>
+ *
+ * <p>Movement is entirely client-side (the v83 server never drives summon motion), so there are no
+ * follow/offset knobs here - only spawn odds and the attack cadence.</p>
  */
 public final class BotSummonConfig {
 
@@ -22,55 +25,30 @@ public final class BotSummonConfig {
 
     // ---- defaults ----
     private static final boolean DEF_ENABLED = true;
-    private static final long DEF_FOLLOW_TICK_MS = 300L;
-    private static final int DEF_FOLLOW_OFFSET_X = 55;
-    private static final int DEF_FOLLOW_OFFSET_Y = -12;
-    private static final int DEF_CIRCLE_RADIUS = 70;
-    private static final double DEF_CIRCLE_STEP_DEG = 6.0;
-    private static final double DEF_WARP_DISTANCE = 900.0;
-
-    private static final long DEF_ATTACK_TICK_MS = 1100L;
-    private static final int DEF_ATTACK_RANGE = 320;
     private static final double DEF_SPAWN_CHANCE = 0.55;
     private static final int DEF_MIN_LEVEL = 70;
+    private static final long DEF_ATTACK_TICK_MS = 1100L;
+    private static final int DEF_ATTACK_RANGE = 320;
 
     private final boolean enabled;
-    private final long followTickMs;
-    private final int followOffsetX;
-    private final int followOffsetY;
-    private final int circleRadius;
-    private final double circleStepDeg;
-    private final double warpDistance;
-    private final long attackTickMs;
-    private final int attackRange;
     private final double spawnChance;
     private final int minLevel;
+    private final long attackTickMs;
+    private final int attackRange;
 
     private BotSummonConfig(Builder b) {
         this.enabled = b.enabled;
-        this.followTickMs = b.followTickMs;
-        this.followOffsetX = b.followOffsetX;
-        this.followOffsetY = b.followOffsetY;
-        this.circleRadius = b.circleRadius;
-        this.circleStepDeg = b.circleStepDeg;
-        this.warpDistance = b.warpDistance;
-        this.attackTickMs = b.attackTickMs;
-        this.attackRange = b.attackRange;
         this.spawnChance = b.spawnChance;
         this.minLevel = b.minLevel;
+        this.attackTickMs = b.attackTickMs;
+        this.attackRange = b.attackRange;
     }
 
     public boolean enabled() { return enabled; }
-    public long followTickMs() { return followTickMs; }
-    public int followOffsetX() { return followOffsetX; }
-    public int followOffsetY() { return followOffsetY; }
-    public int circleRadius() { return circleRadius; }
-    public double circleStepDeg() { return circleStepDeg; }
-    public double warpDistance() { return warpDistance; }
-    public long attackTickMs() { return attackTickMs; }
-    public int attackRange() { return attackRange; }
     public double spawnChance() { return spawnChance; }
     public int minLevel() { return minLevel; }
+    public long attackTickMs() { return attackTickMs; }
+    public int attackRange() { return attackRange; }
 
     /** All defaults, no file. */
     public static BotSummonConfig defaults() {
@@ -112,21 +90,13 @@ public final class BotSummonConfig {
         Builder b = new Builder();
         b.enabled = bool(root.get("enabled"), DEF_ENABLED);
 
-        Map<String, Object> follow = map(root.get("follow"));
-        b.followTickMs = lng(follow.get("tick_ms"), DEF_FOLLOW_TICK_MS);
-        b.followOffsetX = intOf(follow.get("offset_x"), DEF_FOLLOW_OFFSET_X);
-        b.followOffsetY = intOf(follow.get("offset_y"), DEF_FOLLOW_OFFSET_Y);
-        b.circleRadius = intOf(follow.get("circle_radius"), DEF_CIRCLE_RADIUS);
-        b.circleStepDeg = dbl(follow.get("circle_step_deg"), DEF_CIRCLE_STEP_DEG);
-        b.warpDistance = dbl(follow.get("warp_distance"), DEF_WARP_DISTANCE);
+        Map<String, Object> spawn = map(root.get("spawn"));
+        b.spawnChance = dbl(spawn.get("chance"), DEF_SPAWN_CHANCE);
+        b.minLevel = intOf(spawn.get("min_level"), DEF_MIN_LEVEL);
 
         Map<String, Object> attack = map(root.get("attack"));
         b.attackTickMs = lng(attack.get("tick_ms"), DEF_ATTACK_TICK_MS);
         b.attackRange = intOf(attack.get("range"), DEF_ATTACK_RANGE);
-
-        Map<String, Object> spawn = map(root.get("spawn"));
-        b.spawnChance = dbl(spawn.get("chance"), DEF_SPAWN_CHANCE);
-        b.minLevel = intOf(spawn.get("min_level"), DEF_MIN_LEVEL);
         return b.build();
     }
 
@@ -170,16 +140,10 @@ public final class BotSummonConfig {
 
     private static final class Builder {
         boolean enabled = DEF_ENABLED;
-        long followTickMs = DEF_FOLLOW_TICK_MS;
-        int followOffsetX = DEF_FOLLOW_OFFSET_X;
-        int followOffsetY = DEF_FOLLOW_OFFSET_Y;
-        int circleRadius = DEF_CIRCLE_RADIUS;
-        double circleStepDeg = DEF_CIRCLE_STEP_DEG;
-        double warpDistance = DEF_WARP_DISTANCE;
-        long attackTickMs = DEF_ATTACK_TICK_MS;
-        int attackRange = DEF_ATTACK_RANGE;
         double spawnChance = DEF_SPAWN_CHANCE;
         int minLevel = DEF_MIN_LEVEL;
+        long attackTickMs = DEF_ATTACK_TICK_MS;
+        int attackRange = DEF_ATTACK_RANGE;
 
         BotSummonConfig build() {
             return new BotSummonConfig(this);
