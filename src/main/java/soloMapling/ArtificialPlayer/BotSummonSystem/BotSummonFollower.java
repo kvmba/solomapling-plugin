@@ -1,7 +1,9 @@
 package soloMapling.ArtificialPlayer.BotSummonSystem;
 
 import org.gms.client.Character;
+import org.gms.constants.game.CharacterStance;
 import org.gms.server.life.Monster;
+import org.gms.server.maps.Foothold;
 import org.gms.server.maps.MapObject;
 import org.gms.server.maps.MapObjectType;
 import org.gms.server.maps.MapleMap;
@@ -20,41 +22,58 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
 
 /**
- * Drives every bot's summons. The v83 server never moves a summon itself - a real client animates a
- * summon's follow/orbit from the spawn packet's movementType, and the host's {@code MoveSummonHandler}
- * only echoes the client's own MOVE_SUMMON frames. A headless bot has no client, so this class does
- * the two things the CLIENT used to do that the server must not:
+ * Drives every bot's summons: one shared tick that moves FOLLOW / CIRCLE summons the way the owning
+ * client would, and lets attacking summons strike nearby mobs.
  *
- * <ul>
- *   <li><b>spawn / re-place the entity</b> - at the owner's feet on grant, and re-spawned (a fresh
- *       entity at a new object id) when the owner warps, so the new map's observers see it appear
- *       and the old map's see it leave. Stationary turrets are never re-placed while the owner stays,
- *       so they sit exactly where cast.</li>
- *   <li><b>attack</b> - an attacking summon picks the nearest mob within range and fires a
- *       SUMMON_ATTACK (rendered by the client) whose damage lands through the shared bot kill path.</li>
- * </ul>
+ * <p><b>Why the server authors the movement.</b> A client only animates the summon it owns - the
+ * local player's own. A summon belonging to anyone else, a bot's included, is rendered by observers
+ * purely from the {@code MOVE_SUMMON} frames the server relays: for a real player the owner's own
+ * client produces those frames and the host merely echoes them ({@code MoveSummonHandler}), but a
+ * headless bot has no client to produce them, so without this class its summon would stand frozen
+ * at its spawn point while the bot fought across the map. The plugin therefore plays the client's
+ * part: every tick it computes the follow / orbit position and broadcasts a {@code MOVE_SUMMON}
+ * frame carrying the client's own movement-fragment layout - the exact frame the host relays for a
+ * real player, and the same technique the pet system already uses in-game. STATIONARY summons (the
+ * pirate turrets) are never moved and get no movement frames at all: a placed cannon sits where it
+ * was placed.</p>
  *
- * <p>It deliberately sends NO movement packets: a server-built {@code MOVE_SUMMON} frame would be
- * consumed as a client-origin movement stream, not authored, so sending one risks a client mis-parse
- * for no benefit (the client already animates the follow/orbit from the spawn movementType).</p>
+ * <p><b>No host buff.</b> The bot learns the summon skill's level (the host {@link Summon}
+ * constructor requires it) but no host buff is ever registered, so the host's own SUMMON/PUPPET
+ * buff lifecycle is never involved; this class owns spawn, movement and teardown outright.</p>
  *
- * <p>All state lives here in the plugin. The bot learns the summon skill's level (the host
- * {@link Summon} constructor requires it) but <b>no host buff is ever registered</b>, so the host's
- * own SUMMON/PUPPET buff lifecycle is never involved; this class owns spawn and teardown outright.</p>
- *
- * <p><b>LOD.</b> Attacks are gated on {@link GCMovement#isMapObserved}: while no real player watches
- * the map nothing is broadcast. Map re-homing is cheap and runs unconditionally so a turret can never
+ * <p><b>LOD.</b> Movement frames and attacks are gated on {@link GCMovement#isMapObserved}: while
+ * no real player watches the map nothing is sent, and the tick only keeps each summon's position in
+ * memory (cheap arithmetic) so a player arriving sees it where it should be rather than at a stale
+ * spawn point. Map re-homing is cleanup + spawn and runs unconditionally, so a turret can never
  * ghost on a map the owner left.</p>
  */
 public final class BotSummonFollower {
 
     private static final Logger log = LoggerFactory.getLogger(BotSummonFollower.class);
 
+    // CSummoned action bytes carried by the spawn packet's nMoveAction and by every move fragment
+    // (the same-lineage kinoko SummonedActionType: STAND 0, MOVE 1, FLY 2, ...). Every summon the
+    // follower moves is a flyer (hawk / dragon / elemental / bahamut / beholder), so a move frame
+    // carries FLY. Cosmetic only - position travels in the fragment independently of this byte -
+    // and 2 also sits in the "locomotion" range if a client packed the byte as (action << 1 |
+    // facing) like mobs and pets do, so a packing mismatch cannot render an attack pose; if an
+    // in-game check ever shows a wrong animation, this one constant is the thing to change.
+    private static final int ACTION_FLY = 2;
+
     // botId -> that bot's live summons.
     private static final Map<Integer, List<BotSummon>> TRACKED = new ConcurrentHashMap<>();
+
+    // One lock serialises the lifecycle of every bot's summon list: register / despawnAll / stop /
+    // the tick's snapshot and re-home. A summon torn down by the bot's own thread and a summon
+    // re-homed by the tick can therefore never interleave - under the lock, exactly one side wins,
+    // so a re-home can never resurrect an entity the teardown just retired (a ghost). The lock may
+    // span the remove + spawn broadcasts of a single re-home; both are rare lifecycle events and
+    // the sends just queue to sockets, so the hold is brief and bounded.
+    private static final Object LIFECYCLE_LOCK = new Object();
 
     private static volatile BotSummonConfig config = BotSummonConfig.defaults();
     private static ScheduledFuture<?> task;
@@ -66,7 +85,7 @@ public final class BotSummonFollower {
         if (task != null) {
             return;
         }
-        long period = Math.max(100L, cfg.attackTickMs() / 2); // poll faster than the attack cadence
+        long period = Math.max(100L, cfg.moveTickMs());
         task = soloMapling.server.ExecutorServiceManager.getScheduledExecutorService()
                 .scheduleAtFixedRate(BotSummonFollower::tick, period, period, TimeUnit.MILLISECONDS);
         System.out.println("[BotSummonFollower] started, period=" + period + "ms");
@@ -77,17 +96,33 @@ public final class BotSummonFollower {
             task.cancel(false);
             task = null;
         }
-        // Best-effort teardown of anything still tracked, so a reload never leaves ghosts.
-        for (Integer botId : new ArrayList<>(TRACKED.keySet())) {
+        // Best-effort teardown of everything still tracked, so a reload never leaves ghosts. Each
+        // bot's list is retired under the lifecycle lock before its entities are removed: an
+        // in-flight tick that later sees such a summon finds the list gone (the identity check in
+        // tickBot) and does not re-spawn it. A bot that cannot be looked up still gets its entity
+        // removed (removeEntity tolerates a null bot): the entity is plugin-owned and the host
+        // would never have cleaned it up. The drain repeats until the registry is empty, so a
+        // grant racing this teardown is still drained rather than dropped untracked.
+        while (true) {
+            Integer botId = null;
+            List<BotSummon> summons = null;
+            synchronized (LIFECYCLE_LOCK) {
+                for (Integer id : TRACKED.keySet()) {
+                    botId = id;
+                    summons = TRACKED.remove(id);
+                    break;
+                }
+            }
+            if (botId == null) {
+                return; // nothing left tracked
+            }
             Character bot = BotHelpers.getCharFromChannelStorage(botId);
-            List<BotSummon> summons = TRACKED.get(botId);
-            if (bot != null && summons != null) {
+            if (summons != null) {
                 for (BotSummon s : summons) {
                     removeEntity(bot, s);
                 }
             }
         }
-        TRACKED.clear();
     }
 
     /** True when this bot currently has summons tracked. */
@@ -101,7 +136,12 @@ public final class BotSummonFollower {
         BotSummon s = new BotSummon(botId, spec.skillId(), spec);
         s.summon = summon;
         s.map = map;
-        TRACKED.computeIfAbsent(botId, k -> new ArrayList<>()).add(s);
+        if (spec.move() == BotSummonTable.Move.CIRCLE) {
+            s.angleDeg = ThreadLocalRandom.current().nextDouble() * 360.0;
+        }
+        synchronized (LIFECYCLE_LOCK) {
+            TRACKED.computeIfAbsent(botId, k -> new ArrayList<>()).add(s);
+        }
     }
 
     /** Tear every tracked summon down and stop tracking the bot. Safe to call repeatedly. */
@@ -109,7 +149,10 @@ public final class BotSummonFollower {
         if (bot == null) {
             return;
         }
-        List<BotSummon> summons = TRACKED.remove(bot.getId());
+        List<BotSummon> summons;
+        synchronized (LIFECYCLE_LOCK) {
+            summons = TRACKED.remove(bot.getId());
+        }
         if (summons == null) {
             return;
         }
@@ -118,10 +161,12 @@ public final class BotSummonFollower {
         }
         // The bot's own summon map is never populated (we do not call addSummon - the entity is
         // owned here), so the host's leave-map path already sees an empty collection and does
-        // nothing for it. Removing the entities above is the whole teardown.
+        // nothing for it. Removing the entities above is the whole teardown. A tick that had
+        // already snapshotted this list finds TRACKED.get(botId) != summons under the lock and
+        // drops the summon instead of re-homing it, so the two sides cannot both act on it.
     }
 
-    /** Remove a single summon's host entity + packets (never throws). */
+    /** Remove a single summon's host entity + packets (never throws; tolerates a gone bot). */
     private static void removeEntity(Character bot, BotSummon s) {
         Summon summon = s.summon;
         if (summon == null) {
@@ -135,9 +180,11 @@ public final class BotSummonFollower {
                 map.broadcastMessage(PacketCreator.removeSummon(summon, true), summon.getPosition());
                 map.removeMapObject(summon);
             }
-            bot.removeVisibleMapObject(summon);
+            if (bot != null) {
+                bot.removeVisibleMapObject(summon);
+            }
         } catch (Throwable t) {
-            log.warn("summon teardown failed cid={} skill={}: {}", bot.getId(), s.skillId, t.toString());
+            log.warn("summon teardown failed cid={} skill={}: {}", bot == null ? -1 : bot.getId(), s.skillId, t.toString());
         } finally {
             s.summon = null;
         }
@@ -162,25 +209,50 @@ public final class BotSummonFollower {
             return;
         }
         if (bot == null || bot.getMap() == null) {
-            // The bot is gone; the host removed its map objects with it. Drop our state.
-            TRACKED.remove(botId);
+            // The bot is gone from the world. Our entities are NOT in chr.summons (the plugin owns
+            // them directly), so the host's own leave-map path never removed them - tear them down
+            // here rather than leave ghosts on the bot's last map, then drop our state.
+            List<BotSummon> gone;
+            synchronized (LIFECYCLE_LOCK) {
+                gone = TRACKED.remove(botId);
+            }
+            if (gone != null) {
+                for (BotSummon s : gone) {
+                    removeEntity(bot, s); // bot may be null here - removeEntity tolerates it
+                }
+            }
             return;
         }
 
         boolean observed = GCMovement.isMapObserved(bot.getMapId());
         MapleMap botMap = bot.getMap();
-        // Snapshot: a spawn on the bot's lifecycle thread may append to this list concurrently.
-        for (BotSummon s : new ArrayList<>(summons)) {
-            if (s.summon == null) {
-                continue;
-            }
+        // Snapshot: register/despawnAll may touch the list on the bot's own lifecycle thread.
+        List<BotSummon> snapshot;
+        synchronized (LIFECYCLE_LOCK) {
+            snapshot = new ArrayList<>(summons);
+        }
+        for (BotSummon s : snapshot) {
             // Re-homing is pure cleanup + spawn and MUST run whether or not the map is observed: a
             // stationary summon is not removed by the host's own leave-map path, so skipping it on an
-            // unobserved map would ghost the entity on the old map until a player walked in.
-            if (s.map != botMap) {
-                handleMapChange(bot, s);
+            // unobserved map would ghost the entity on the old map until a player walked in. A null
+            // entity (a spawn that failed, e.g. a transient construction error) is retried the same
+            // way instead of being skipped forever.
+            //
+            // The re-home runs under the lifecycle lock: a despawnAll/stop that ran meanwhile has
+            // retired this list (the same lock), and re-homing after that would resurrect an entity
+            // nobody tracks (a ghost). Holding the lock across the check makes exactly one side win -
+            // either the tick re-homes a still-tracked summon, or the teardown tears it down.
+            if (s.summon == null || s.map != botMap) {
+                synchronized (LIFECYCLE_LOCK) {
+                    if (TRACKED.get(botId) == summons) {
+                        handleMapChange(bot, s);
+                    }
+                }
                 continue;
             }
+            // Move BEFORE attacking so a strike uses the frame's fresh position. The turret rule
+            // (a placed cannon is never repositioned, and gets no frame) lives inside moveSummon.
+            moveSummon(bot, s, cfg, observed);
             if (s.attacks() && observed) {
                 tryAttack(bot, s, cfg);
             }
@@ -220,18 +292,102 @@ public final class BotSummonFollower {
             case CIRCLE -> org.gms.server.maps.SummonMovementType.CIRCLE_FOLLOW;
             case FOLLOW -> org.gms.server.maps.SummonMovementType.FOLLOW;
         };
-        Point pos = spawnPosition(bot, map);
+        Point pos = spawnPosition(bot, spec, map);
         Summon summon = new Summon(bot, skillId, pos, moveType);
-        summon.setStance(0); // nMoveAction STAND; the client animates from there
+        summon.setStance(0); // nMoveAction STAND; a moving summon is switched to FLY by its first frame
         map.spawnSummon(summon);
         return summon;
     }
 
-    private static Point spawnPosition(Character bot, MapleMap map) {
+    /** Where the entity appears: at the owner's side for a flyer, on the ground for a turret. */
+    private static Point spawnPosition(Character bot, BotSummonTable.Spec spec, MapleMap map) {
         Point owner = bot.getPosition();
-        org.gms.server.maps.Foothold ground = GCMovement.footholdBelow(map, owner.x, owner.y);
+        if (!spec.isStationary()) {
+            // A flyer materialises at the owner's side; the movement tick glides it to its slot.
+            return new Point(owner.x, owner.y);
+        }
+        Foothold ground = GCMovement.footholdBelow(map, owner.x, owner.y);
         int y = ground != null ? ground.calculateFooting(owner.x) : owner.y;
         return new Point(owner.x, y);
+    }
+
+    /*
+     * One movement step for a FOLLOW / CIRCLE summon. The entity is re-seated at the computed slot
+     * and - only when the map is observed - a MOVE_SUMMON frame carries the step to the clients.
+     * Unobserved, the same arithmetic still runs (no probe, no packet): the entity's position stays
+     * current so a player entering the map sees it at its proper slot instead of a stale spawn point.
+     */
+    private static void moveSummon(Character bot, BotSummon s, BotSummonConfig cfg, boolean observed) {
+        if (!shouldReposition(s.spec.isStationary())) {
+            return; // a placed turret is never repositioned and receives no movement frame
+        }
+        Summon summon = s.summon;
+        if (summon == null) {
+            return; // concurrently torn down by the bot's own lifecycle thread
+        }
+        Point cur = summon.getPosition();
+        Point target = targetFor(bot, s, cfg);
+        long tickMs = Math.max(100L, cfg.moveTickMs());
+        boolean snap = cur.distance(target) > cfg.snapDistance();
+        if (!snap && cur.distanceSq(target) < 1.0) {
+            return; // already at its slot - nothing worth a frame
+        }
+        if (snap) {
+            // The owner just teleported (or the summon fell implausibly far behind): re-seat the
+            // entity at its slot. One same-point frame carries it straight there instead of
+            // streaking it across the map.
+            summon.setPosition(new Point(target));
+            summon.setStance(ACTION_FLY);
+            if (observed) {
+                BotSummonBroadcast.summonMove(bot, summon, target, target, 0, 0, 0, ACTION_FLY, (int) tickMs);
+            }
+            return;
+        }
+        int dx = target.x - cur.x;
+        int dy = target.y - cur.y;
+        int vx = clampVelocity(dx * 1000L / tickMs);
+        int vy = clampVelocity(dy * 1000L / tickMs);
+        summon.setPosition(new Point(target));
+        summon.setStance(ACTION_FLY);
+        if (observed) {
+            BotSummonBroadcast.summonMove(bot, summon, cur, target, vx, vy, 0, ACTION_FLY, (int) tickMs);
+        }
+    }
+
+    /**
+     * Whether the follower may reposition this summon: a STATIONARY turret (the pirate octopus) is
+     * placed where it spawned and never moved, so it must never receive a movement frame either.
+     * Pure, so the rule is pinned by a unit test rather than re-derived at the call site.
+     */
+    static boolean shouldReposition(boolean stationary) {
+        return !stationary;
+    }
+
+    private static int clampVelocity(long v) {
+        return (int) Math.max(-2000, Math.min(2000, v));
+    }
+
+    /** The slot this summon should occupy right now: an orbit point for CIRCLE, a hover for FOLLOW. */
+    private static Point targetFor(Character bot, BotSummon s, BotSummonConfig cfg) {
+        Point owner = bot.getPosition();
+        if (s.spec.move() == BotSummonTable.Move.CIRCLE) {
+            s.angleDeg += cfg.circleStepDeg();
+            return circleTarget(owner.x, owner.y, s.angleDeg, cfg.circleRadius());
+        }
+        boolean facingLeft = CharacterStance.isFacingLeft(bot.getStance());
+        return followTarget(owner.x, owner.y, facingLeft, cfg.followOffsetX(), cfg.followOffsetY());
+    }
+
+    /** Pure seam for tests: the ring point at {@code angleDeg} around (ownerX, ownerY). */
+    static Point circleTarget(int ownerX, int ownerY, double angleDeg, int radius) {
+        double rad = Math.toRadians(angleDeg);
+        return new Point(ownerX + (int) Math.round(Math.cos(rad) * radius),
+                ownerY + (int) Math.round(Math.sin(rad) * radius));
+    }
+
+    /** Pure seam for tests: the FOLLOW slot in front of the owner's facing. */
+    static Point followTarget(int ownerX, int ownerY, boolean facingLeft, int offsetX, int offsetY) {
+        return new Point(ownerX + (facingLeft ? -offsetX : offsetX), ownerY + offsetY);
     }
 
     private static void tryAttack(Character bot, BotSummon s, BotSummonConfig cfg) {
@@ -239,7 +395,11 @@ public final class BotSummonFollower {
         if (now < s.nextAttackAtMs) {
             return;
         }
-        Point from = s.summon.getPosition();
+        Summon summon = s.summon;
+        if (summon == null) {
+            return; // concurrently torn down by the bot's own lifecycle thread
+        }
+        Point from = summon.getPosition();
         Monster target = nearestMob(bot.getMap(), from, cfg.attackRange());
         if (target == null) {
             return;
@@ -251,7 +411,7 @@ public final class BotSummonFollower {
         byte direction = (byte) (target.getPosition().x < from.x ? 1 : 0);
 
         try {
-            BotSummonBroadcast.summonAttack(bot, s.summon, direction, target.getObjectId(), damage);
+            BotSummonBroadcast.summonAttack(bot, summon, direction, target.getObjectId(), damage);
         } catch (Throwable t) {
             log.warn("summon attack broadcast failed cid={}: {}", bot.getId(), t.toString());
         }

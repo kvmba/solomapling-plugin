@@ -32,6 +32,7 @@ public class BotSummonCommand extends Command {
                     + " config.enabled=" + BotSummonSystem.config().enabled()
                     + " spawnChance=" + BotSummonSystem.config().spawnChance()
                     + " minLevel=" + BotSummonSystem.config().minLevel()
+                    + " moveTick=" + BotSummonSystem.config().moveTickMs() + "ms"
                     + " attackTick=" + BotSummonSystem.config().attackTickMs() + "ms");
             case "enable" -> {
                 BotSummonSystem.setEnabled(true);

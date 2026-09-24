@@ -14,9 +14,6 @@ import java.util.Map;
  *
  * <p>Read once at startup; there is no hot reload. A missing or broken file falls back to the
  * defaults, because a bad summon config must not stop the rest of the plugin from coming up.</p>
- *
- * <p>Movement is entirely client-side (the v83 server never drives summon motion), so there are no
- * follow/offset knobs here - only spawn odds and the attack cadence.</p>
  */
 public final class BotSummonConfig {
 
@@ -25,12 +22,24 @@ public final class BotSummonConfig {
 
     // ---- defaults ----
     private static final boolean DEF_ENABLED = true;
+    private static final long DEF_MOVE_TICK_MS = 300L;
+    private static final int DEF_FOLLOW_OFFSET_X = 55;
+    private static final int DEF_FOLLOW_OFFSET_Y = -12;
+    private static final int DEF_CIRCLE_RADIUS = 70;
+    private static final double DEF_CIRCLE_STEP_DEG = 6.0;
+    private static final double DEF_SNAP_DISTANCE = 900.0;
     private static final double DEF_SPAWN_CHANCE = 0.55;
     private static final int DEF_MIN_LEVEL = 70;
     private static final long DEF_ATTACK_TICK_MS = 1100L;
     private static final int DEF_ATTACK_RANGE = 320;
 
     private final boolean enabled;
+    private final long moveTickMs;
+    private final int followOffsetX;
+    private final int followOffsetY;
+    private final int circleRadius;
+    private final double circleStepDeg;
+    private final double snapDistance;
     private final double spawnChance;
     private final int minLevel;
     private final long attackTickMs;
@@ -38,6 +47,12 @@ public final class BotSummonConfig {
 
     private BotSummonConfig(Builder b) {
         this.enabled = b.enabled;
+        this.moveTickMs = b.moveTickMs;
+        this.followOffsetX = b.followOffsetX;
+        this.followOffsetY = b.followOffsetY;
+        this.circleRadius = b.circleRadius;
+        this.circleStepDeg = b.circleStepDeg;
+        this.snapDistance = b.snapDistance;
         this.spawnChance = b.spawnChance;
         this.minLevel = b.minLevel;
         this.attackTickMs = b.attackTickMs;
@@ -45,6 +60,12 @@ public final class BotSummonConfig {
     }
 
     public boolean enabled() { return enabled; }
+    public long moveTickMs() { return moveTickMs; }
+    public int followOffsetX() { return followOffsetX; }
+    public int followOffsetY() { return followOffsetY; }
+    public int circleRadius() { return circleRadius; }
+    public double circleStepDeg() { return circleStepDeg; }
+    public double snapDistance() { return snapDistance; }
     public double spawnChance() { return spawnChance; }
     public int minLevel() { return minLevel; }
     public long attackTickMs() { return attackTickMs; }
@@ -89,6 +110,14 @@ public final class BotSummonConfig {
     private static BotSummonConfig parse(Map<String, Object> root) {
         Builder b = new Builder();
         b.enabled = bool(root.get("enabled"), DEF_ENABLED);
+
+        Map<String, Object> move = map(root.get("move"));
+        b.moveTickMs = lng(move.get("tick_ms"), DEF_MOVE_TICK_MS);
+        b.followOffsetX = intOf(move.get("offset_x"), DEF_FOLLOW_OFFSET_X);
+        b.followOffsetY = intOf(move.get("offset_y"), DEF_FOLLOW_OFFSET_Y);
+        b.circleRadius = intOf(move.get("circle_radius"), DEF_CIRCLE_RADIUS);
+        b.circleStepDeg = dbl(move.get("circle_step_deg"), DEF_CIRCLE_STEP_DEG);
+        b.snapDistance = dbl(move.get("snap_distance"), DEF_SNAP_DISTANCE);
 
         Map<String, Object> spawn = map(root.get("spawn"));
         b.spawnChance = dbl(spawn.get("chance"), DEF_SPAWN_CHANCE);
@@ -140,6 +169,12 @@ public final class BotSummonConfig {
 
     private static final class Builder {
         boolean enabled = DEF_ENABLED;
+        long moveTickMs = DEF_MOVE_TICK_MS;
+        int followOffsetX = DEF_FOLLOW_OFFSET_X;
+        int followOffsetY = DEF_FOLLOW_OFFSET_Y;
+        int circleRadius = DEF_CIRCLE_RADIUS;
+        double circleStepDeg = DEF_CIRCLE_STEP_DEG;
+        double snapDistance = DEF_SNAP_DISTANCE;
         double spawnChance = DEF_SPAWN_CHANCE;
         int minLevel = DEF_MIN_LEVEL;
         long attackTickMs = DEF_ATTACK_TICK_MS;
