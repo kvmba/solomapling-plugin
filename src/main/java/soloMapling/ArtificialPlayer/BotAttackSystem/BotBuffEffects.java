@@ -1,13 +1,21 @@
 package soloMapling.ArtificialPlayer.BotAttackSystem;
 
+import org.gms.client.BuffStat;
 import org.gms.client.Character;
 import org.gms.client.Skill;
 import org.gms.client.SkillFactory;
+import org.gms.constants.skills.Beginner;
+import org.gms.constants.skills.Buccaneer;
+import org.gms.constants.skills.Corsair;
+import org.gms.constants.skills.Noblesse;
+import org.gms.constants.skills.Pirate;
+import org.gms.constants.skills.ThunderBreaker;
 import org.gms.net.server.Server;
 import org.gms.net.server.world.Party;
 import org.gms.server.StatEffect;
 import soloMapling.ArtificialPlayer.BotHelpers;
 import org.gms.util.PacketCreator;
+import org.gms.util.Pair;
 
 import java.awt.Point;
 import java.util.ArrayList;
@@ -77,12 +85,87 @@ public final class BotBuffEffects {
         StatEffect effect = skill.getEffect(skill.getMaxLevel());
         if (effect == null) return 0;
 
-        if (!effect.getStatups().isEmpty()) {
-            bot.getMap().broadcastMessage(bot,
-                    PacketCreator.giveForeignBuff(bot.getId(), effect.getStatups()), false);
-        }
+        broadcastAura(bot, skillId, effect);
 
         return effect.getDuration();
+    }
+
+    /**
+     * Broadcast the bot's persistent aura for {@code skillId} with the layout the v83 client
+     * actually parses for that buff.
+     *
+     * <p><b>Why one layout is not enough.</b> The host's own {@code StatEffect.applyTo} does NOT
+     * send every buff through the generic {@code giveForeignBuff}: three skill families carry
+     * extended foreign frames that the client decodes with extra fields, and using the short
+     * generic frame for them makes the client read past the end of the packet (the crashed
+     * "数据过短" symptom). The host switches on exactly these three:</p>
+     * <ul>
+     *   <li>{@code isDash()} — pirate 疾驰 (5001005 / 15001003 / 1014 / 1001015) →
+     *       {@code giveForeignPirateBuff} (per-stat int + skill id + skip + duration),</li>
+     *   <li>{@code isInfusion()} — 极速领域 (5121009 / 15111005, and 5221010 which the host
+     *       lists under the misleading constant name {@code Corsair.HEROS_WILL}) →
+     *       {@code giveForeignPirateBuff},</li>
+     *   <li>{@code isWkCharge()} — the {@code WK_CHARGE} 元素剑 family (烈焰/寒冰/雷电/圣灵之剑)
+     *       → {@code giveForeignWKChargeEffect}.</li>
+     * </ul>
+     *
+     * <p>Mirroring the host's dispatch here keeps a bot's buff visually identical to a player's.
+     * Everything else keeps the generic frame (the shape the host sends for Maple Warrior,
+     * Stance, Sharp Eyes, ...).</p>
+     */
+    private static void broadcastAura(Character bot, int skillId, StatEffect effect) {
+        broadcastAura(bot, skillId, effect, effect.getDuration());
+    }
+
+    /**
+     * As {@link #broadcastAura(Character, int, StatEffect)} but with the length the caller is
+     * actually applying (a GM-granted buff may be longer than the WZ duration). Only the pirate
+     * frame carries a duration; it is in seconds, as the host's own {@code applyTo} writes it.
+     */
+    private static void broadcastAura(Character bot, int skillId, StatEffect effect, int durationMs) {
+        List<Pair<BuffStat, Integer>> statups = effect.getStatups();
+        if (statups.isEmpty()) {
+            return;
+        }
+        if (isDash(skillId) || isInfusion(skillId)) {
+            int seconds = Math.max(1, durationMs / 1000); // pirate frames carry seconds
+            bot.getMap().broadcastMessage(bot,
+                    PacketCreator.giveForeignPirateBuff(bot.getId(), skillId, seconds, statups), false);
+            return;
+        }
+        if (isWkCharge(statups)) {
+            bot.getMap().broadcastMessage(bot,
+                    PacketCreator.giveForeignWKChargeEffect(bot.getId(), skillId, statups), false);
+            return;
+        }
+        bot.getMap().broadcastMessage(bot,
+                PacketCreator.giveForeignBuff(bot.getId(), statups), false);
+    }
+
+    /** The host's own {@code isDash}: the 疾驰 speed/jump burst. */
+    private static boolean isDash(int skillId) {
+        return skillId == Pirate.DASH || skillId == ThunderBreaker.DASH
+                || skillId == Beginner.SPACE_DASH || skillId == Noblesse.SPACE_DASH;
+    }
+
+    /**
+     * The host's own {@code isInfusion}: 极速领域 (5121009 / 15111005 / 5221010). The host
+     * constant for 5221010 is named {@code Corsair.HEROS_WILL} but the skill itself is 极速领域 -
+     * the id, not the name, is what the client decodes.
+     */
+    private static boolean isInfusion(int skillId) {
+        return skillId == Buccaneer.SPEED_INFUSION || skillId == ThunderBreaker.SPEED_INFUSION
+                || skillId == Corsair.HEROS_WILL;
+    }
+
+    /** The host's own {@code isWkCharge}: any buff whose stat list carries {@code WK_CHARGE}. */
+    private static boolean isWkCharge(List<Pair<BuffStat, Integer>> statups) {
+        for (Pair<BuffStat, Integer> statup : statups) {
+            if (statup.getLeft() == BuffStat.WK_CHARGE) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /* The buff's WZ duration (ms) at max level, or 0 if unresolvable. Cheap memoized lookup. */
@@ -207,8 +290,9 @@ public final class BotBuffEffects {
         long start = Server.getInstance().getCurrentTime();
         target.sendPacket(PacketCreator.giveBuff(effect.getBuffSourceId(), durationMs, effect.getStatups()));
         target.registerEffect(effect, start, start + durationMs, false);
-        target.getMap().broadcastMessage(target,
-                PacketCreator.giveForeignBuff(target.getId(), effect.getStatups()), false);
+        // Same layout dispatch as a bot's own aura: a GM may hand over any skill id
+        // (incl. a dash / infusion / charge), and its observers must get the extended frame.
+        broadcastAura(target, skillId, effect, durationMs);
         showReceivedBuff(target, skillId);
     }
 

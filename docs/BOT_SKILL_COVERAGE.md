@@ -49,6 +49,16 @@ bot 是**装饰性**实体，只呈现「玩家一眼能看出」的技能。因
 
 **渲染说明**：`稳如泰山`/`勇士的意志`/`击退箭`/`致盲箭`/`疾驰`/快速移动类 等在宿主 `StatEffect` 有对应 statup，会广播持久光环；`超级变身`（morph）等少数无 statup 的则只播**施法动画**——这与真实客户端的表现一致（变身是 morph，不在 foreignBuff 里）。
 
+**光环封包必须按技能族分流（重要）**：v83 客户端对 `GIVE_FOREIGN_BUFF` 的解码**并非只有一种**。宿主 `StatEffect.applyTo` 自己就把三个技能族走**扩展帧**，其余才走通用帧：
+
+| 族 | 判据（宿主同名方法） | 技能 | 宿主/插件应发的包 |
+|---|---|---|---|
+| 疾驰 | `isDash()` | 5001005 / 15001003 / 1014 / 1001015 | `giveForeignPirateBuff` |
+| 极速领域 | `isInfusion()` | 5121009 / 15111005 / 5221010（宿主常量误名为 `Corsair.HEROS_WILL`，实为极速领域） | `giveForeignPirateBuff` |
+| 元素剑 | `isWkCharge()`（statup 含 `WK_CHARGE`） | 烈焰/寒冰/雷电/圣灵之剑（1211003/1211004/1211005/1221003 等） | `giveForeignWKChargeEffect` |
+
+用通用短帧顶替扩展帧时，客户端会**读过头**（报「数据过短」并崩溃）——`BotBuffEffects.broadcastAura` 现已按上表分流；`BotBuffEffectsLayoutTest` 把每个技能 id 与宿主 `StatEffect` 的判据逐一对表（宿主源码不在旁边时自动跳过）。
+
 ## 4. 召唤（`BotSummonSystem`）
 
 11 只真实地图实体。**真玩家自己的召唤兽**由该玩家的客户端自行模拟并上行 `MOVE_SUMMON`（宿主 `MoveSummonHandler` 只把它回显广播）；
