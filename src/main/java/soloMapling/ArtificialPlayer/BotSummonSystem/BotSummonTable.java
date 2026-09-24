@@ -19,17 +19,18 @@ import java.util.List;
 import java.util.Map;
 
 /*
- * The per-skill behaviour of a bot's summon. A summon is a real host Summon entity: the server
- * spawns it and (for an attacking one) fires SUMMON_ATTACK; the CLIENT owns its movement (the v83
- * server never drives summon motion - MoveSummonHandler only echoes the client's own packets). So
- * the only per-skill choices here are (a) whether it is placed stationary - the pirate turrets - and
- * (b) whether it attacks. Damage is NOT a property here: like every other bot hit it comes from the
- * bot's job tier + level via BotDamageModel.
+ * The per-skill behaviour of a bot's summon. A summon is a real host Summon entity. A client only
+ * drives the summon it owns (the local player's own); every other summon, a bot's included, is
+ * rendered by observers purely from the MOVE_SUMMON frames the server relays - and a bot has no
+ * client to produce them, so BotSummonFollower authors the movement itself (see that class). So
+ * the only per-skill choices here are (a) how the server positions it - FOLLOW hovers it, CIRCLE
+ * orbits it, STATIONARY places it once - and (b) whether it attacks. Damage is NOT a property
+ * here: like every other bot hit it comes from the bot's job tier + level via BotDamageModel.
  *
- * Movement kind mirrors the host's own StatEffect.getSummonMovementType() (the SUMMON statup) so the
- * spawn packet carries the same movementType a real client would, and the client animates the
- * follow/orbit itself. A STATIONARY entry (octopus turret) is sent movementType 0 and the client
- * holds it where it spawned - which is exactly what a placed cannon should do.
+ * Movement kind mirrors the host's own StatEffect.getSummonMovementType() (the SUMMON statup) so
+ * the spawn packet carries the same movementType a real client would. A STATIONARY entry (octopus
+ * turret) is sent movementType 0 and is never repositioned: a placed cannon sits where it was
+ * placed, which is exactly what that movementType promises.
  *
  * Deliberately NOT registered: the archer Puppet (3111002/3211002). Its only function is to pull mob
  * aggro, and the host gates that on the PUPPET buff stat (Monster.isCharacterPuppetInVicinity reads
@@ -42,13 +43,13 @@ import java.util.Map;
  */
 public final class BotSummonTable {
 
-    /** How the client should hold the summon. Sent as the spawn packet's movementType. */
+    /** How the server holds the summon. Sent as the spawn packet's movementType. */
     public enum Move {
-        /** Placed where cast and held there (octopus turret). movementType 0. */
+        /** Placed where cast and held there (octopus turret). movementType 0, never repositioned. */
         STATIONARY,
-        /** The client confines it near the owner (mage/beholder/dragon summons). */
+        /** Hovers near a fixed offset from the owner (mage/beholder/dragon summons). */
         FOLLOW,
-        /** The client orbits it around the owner (archer hawks/eagles). */
+        /** Orbits the owner on a slow ring (archer hawks/eagles). */
         CIRCLE
     }
 
@@ -56,7 +57,7 @@ public final class BotSummonTable {
      * One summon's behaviour.
      *
      * @param skillId     the summon skill (also the Summon's owning key)
-     * @param move        how the client holds it (STATIONARY = sits where spawned)
+     * @param move        how the server holds it (STATIONARY = sits where spawned)
      * @param attacks     whether the server periodically makes it strike a nearby mob
      * @param attackLines damage lines per strike (1 for every v83 summon here)
      */
