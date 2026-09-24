@@ -38,7 +38,6 @@ import org.gms.constants.skills.Marksman;
 import org.gms.constants.skills.NightLord;
 import org.gms.constants.skills.Shadower;
 import org.gms.constants.skills.Pirate;
-import org.gms.constants.skills.Rogue;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -71,9 +70,9 @@ public final class BotBuffConfig {
         put(Job.WARRIOR,  IRON_BODY);                                  // 1001003 - W.Def up
         put(Job.MAGICIAN, Magician.MAGIC_GUARD, Magician.MAGIC_ARMOR); // 2001002 / 2001003
         put(Job.BOWMAN,   Archer.FOCUS);                               // 3001003 - acc/avoid up
-        // THIEF 1st job: 诅咒术 4001002 lowers a mob's stats (its own cast aura); Dark Sight is
-        // skipped on purpose (hiding a bot from players defeats the point).
-        put(Job.THIEF,    Rogue.DISORDER);                             // 4001002 诅咒术
+        // THIEF 1st job: 诅咒术 (4001002) is a MOB-targeted debuff (the host applies only a monster
+        // status, no self statup), like Hypnotize below - not a self aura, so it is not registered.
+        // Dark Sight is skipped too (hiding a bot from players defeats the point).
         // PIRATE 1st job: 疾驰 5001005 (a short speed/jump burst - its own puffy aura).
         put(Job.PIRATE,   Pirate.DASH);                                // 5001005 疾驰
 

@@ -104,11 +104,6 @@ public final class BotSummonFollower {
         TRACKED.computeIfAbsent(botId, k -> new ArrayList<>()).add(s);
     }
 
-    /** Forget a bot's tracking without touching the host (used when the bot is already gone). */
-    public static void forget(int botId) {
-        TRACKED.remove(botId);
-    }
-
     /** Tear every tracked summon down and stop tracking the bot. Safe to call repeatedly. */
     public static void despawnAll(Character bot) {
         if (bot == null) {
@@ -121,9 +116,9 @@ public final class BotSummonFollower {
         for (BotSummon s : summons) {
             removeEntity(bot, s);
         }
-        // Drop the entries from the owner's summon map too, so the host's own leave-map path sees an
-        // empty collection (it removes stationary summons by iterating that map).
-        bot.clearSummons();
+        // The bot's own summon map is never populated (we do not call addSummon - the entity is
+        // owned here), so the host's leave-map path already sees an empty collection and does
+        // nothing for it. Removing the entities above is the whole teardown.
     }
 
     /** Remove a single summon's host entity + packets (never throws). */

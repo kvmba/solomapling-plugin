@@ -4,9 +4,8 @@ import org.gms.client.Character;
 
 /**
  * Single entry point for the bot-summon feature: load the config, hold the live tuning, and
- * (un)start the follower. Integration points call {@link #grant}, {@link #remove} and
- * {@link #forget}; the extension calls {@link #bootstrap} at server ready and {@link #shutdown}
- * at unload.
+ * (un)start the follower. Integration points call {@link #grant} and {@link #remove}; the extension
+ * calls {@link #bootstrap} at server ready and {@link #shutdown} at unload.
  */
 public final class BotSummonSystem {
 
@@ -69,11 +68,6 @@ public final class BotSummonSystem {
         } catch (Throwable t) {
             System.err.println("[BotSummonSystem] remove failed for " + botId(bot) + ": " + t);
         }
-    }
-
-    /** Drop follower state for a bot that is already gone (despawn path). */
-    public static void forget(int botId) {
-        BotSummonFollower.forget(botId);
     }
 
     private static int botId(Character bot) {
