@@ -615,13 +615,24 @@ final class BotNavigationManager {
             return null;
         }
 
-        // Void guard: a straight down-jump is only executable where the real physics finds a foothold
-        // below. The graph only baked edges that passed this (validateDownJumpLaunchX), but a reused /
-        // stale edge fired from the landing terrace - the documented "re-fires from the landing
-        // platform where there's no lower foothold, sending the bot out of the map" case - can sit
-        // over an empty column, and canStartDownJump alone does not catch it.
-        if (!BotPhysicsEngine.hasDownJumpLanding(bot.getMap(), botPos)) {
+        // Void + target guard for a straight down-jump: simulate the drop from the bot's LIVE
+        // pixel and require it to land inside the edge's target region — not merely "some
+        // foothold exists below". The graph baked this edge only from per-column sims
+        // (validateDownJumpLaunchX), but a reused/stale edge can fire from a landing terrace,
+        // and a live pixel one step outside a validated window can graze a different platform
+        // below (mirrors the JUMP edge's arcLaunchesFrom re-check). Execution-time simulation
+        // uses the same integrator as the flight itself, so a fire that passes this guard is
+        // the fire that lands on the target.
+        BotPhysicsEngine.JumpLanding liveLanding = BotPhysicsEngine.simulateDownJumpLanding(bot.getMap(), botPos);
+        if (liveLanding == null) {
             entry.lastEdgeBlockReason = "drop-void";
+            return null;
+        }
+        int landingRegionId = graph != null
+                ? graph.regionIdByFootholdId.getOrDefault(liveLanding.foothold().getId(), -1)
+                : edge.toRegionId; // no graph geometry to disagree with — keep the old void-guard behaviour
+        if (landingRegionId != edge.toRegionId) {
+            entry.lastEdgeBlockReason = "drop-target";
             return null;
         }
 

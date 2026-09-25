@@ -49,7 +49,7 @@ final class BotNavigationGraphProvider {
     //     inside an 8.93 x fs px/s band (no walkSpeed air cap; counter-strafe pins at the
     //     band edge) and no-input flight drags 1 x fs (100 x fs at terminal fall). Committed
     //     arcs still fly the launch key held, so constant-stepX arc sims stay exact.
-    private static final int GRAPH_VERSION = 63; // 51: kinetic slippery model + snowshoes; 52: brake-to-stop landings; 53: glide-unless-edge stop policy (slipperyStopDir); 56: uncap straight-drop launch windows (full droppable span, no +/-20 fragmentation); 57: remove the (empirically wrong) 300px down-jump drop cap - down-jumps fall until landing; 58: rope-grab reach counts descent below the ledge (mid-rope jump-grabs from adjacent platforms); 59: fall-sim caps to map height not 1500ms - long single-fall descents (tall shafts: Ellinia tree, Perion) now generate DROP/JUMP/ROPE edges; 60: re-cap drops for organic descent - walk-offs capped at MAX_DROP_PX, down-jumps at the tighter DOWN_JUMP_MAX_DROP_PX, and down-jumps carry DOWN_JUMP_COST_PENALTY_MS so the pathfinder prefers ropes/walk-offs over plummeting an entire vertical map; 61: widened rope top-exit probe (BotPhysicsEngine.findTopExitLanding) - accept a step-off foothold slightly above/below the rope top and a few px off-axis, so uneven/slanted ladder heads mint a clean CLIMB step-off edge instead of only ballistic top jump-offs; 62: cache filename now encodes snowShoes (the 4th key dimension) - old three-dimension filenames are unreadable by design, and the bump parks them in a dead v61/ directory that can be deleted wholesale; 63: inset every JUMP launch window by one walk step before stamping it on the edge - an edge-pressed window let the executor's +/-walkStep launch phase overfly a small platform and the bot fall to the bottom
+    private static final int GRAPH_VERSION = 64; // 64: escape-hatch deep-drop edge (a region with no capped descent edge gets one full-descent straight drop to its deepest landing, dead ends like the 玩具塔 floor-1 R5 vanish); 51: kinetic slippery model + snowshoes; 52: brake-to-stop landings; 53: glide-unless-edge stop policy (slipperyStopDir); 56: uncap straight-drop launch windows (full droppable span, no +/-20 fragmentation); 57: remove the (empirically wrong) 300px down-jump drop cap - down-jumps fall until landing; 58: rope-grab reach counts descent below the ledge (mid-rope jump-grabs from adjacent platforms); 59: fall-sim caps to map height not 1500ms - long single-fall descents (tall shafts: Ellinia tree, Perion) now generate DROP/JUMP/ROPE edges; 60: re-cap drops for organic descent - walk-offs capped at MAX_DROP_PX, down-jumps at the tighter DOWN_JUMP_MAX_DROP_PX, and down-jumps carry DOWN_JUMP_COST_PENALTY_MS so the pathfinder prefers ropes/walk-offs over plummeting an entire vertical map; 61: widened rope top-exit probe (BotPhysicsEngine.findTopExitLanding) - accept a step-off foothold slightly above/below the rope top and a few px off-axis, so uneven/slanted ladder heads mint a clean CLIMB step-off edge instead of only ballistic top jump-offs; 62: cache filename now encodes snowShoes (the 4th key dimension) - old three-dimension filenames are unreadable by design, and the bump parks them in a dead v61/ directory that can be deleted wholesale; 63: inset every JUMP launch window by one walk step before stamping it on the edge - an edge-pressed window let the executor's +/-walkStep launch phase overfly a small platform and the bot fall to the bottom
 
     // Drop caps for organic descent (re-added; v57 had removed the old single cap). A bot must
     // never plummet down a whole vertical map. Two distinct downward moves, treated differently:
@@ -1146,6 +1146,12 @@ final class BotNavigationGraphProvider {
         addDirectionalDropEdge(from, map, regionsById, regionIdByFootholdId, -1, outgoing, edgeKeys, movementProfile);
         addDirectionalDropEdge(from, map, regionsById, regionIdByFootholdId, 1, outgoing, edgeKeys, movementProfile);
 
+        // Escape-hatch bookkeeping: record every region a regular (capped) descent edge from
+        // `from` actually reaches. A region that ends up with NO way down at all strands its bot
+        // forever (the map's own geometry promises a floor), so those get the deep-drop edge
+        // below as a last resort.
+        Set<Integer> canReachBelow = new HashSet<>();
+
         for (Point anchor : anchors) {
             if (dropLaunchStep(from, map, anchor, movementProfile) != 0) {
                 continue;
@@ -1169,7 +1175,110 @@ final class BotNavigationGraphProvider {
                     launchWindow.startPoint(), launchWindow.endPoint(),
                     launchWindow.minX(), launchWindow.maxX(),
                     0, 0, launchWindow.landingTimeMs() + DOWN_JUMP_COST_PENALTY_MS, outgoing, edgeKeys);
+            canReachBelow.add(below.id);
         }
+
+        if (canReachBelow.isEmpty()) {
+            addDeepDescentDropEdge(from, map, regionIdByFootholdId, outgoing, edgeKeys, movementProfile);
+        }
+    }
+
+    /*
+     * Escape hatch for dead-end descents: the per-column sims capped at DOWN_JUMP_MAX_DROP_PX
+     * minted no way down from `from`, yet somewhere far below there is a wide landing and — by
+     * the column rule — nothing above it to graze (the 玩具塔 floor 1 "drop off the mid ledge
+     * and fall straight to the bottom" shape). The bot stands on a dead-end region with no edge
+     * out; travel aborts (no-path) and the stuck watchdog teleports it, instead of the one
+     * physics-legal crouch drop that real players make there. Bake exactly one straight-drop
+     * edge to the DEEPEST landing region found across the region: correct by construction (a
+     * real simulated landing, and the target region has no obstacle above by the same column
+     * rule the caps enforce), just expensive (a heavy penalty on top of the full descent) so
+     * the pathfinder only ever picks it when nothing else gets down.
+     *
+     * The launch window is a CONTIGUOUS RUN of columns that all land on that region — never a
+     * padded span around one good column. A straight drop has stepX 0, so the per-column sim IS
+     * the flight prediction (same integrator the executor runs), and the executor's straight-drop
+     * window test has no ±walkStep phase (unlike JUMP): a window of only-good columns is both
+     * always-hittable and always-lands-on-target (a ±step pad would re-introduce exactly the
+     * boundary-column hazard the v63 JUMP window inset removed).
+     */
+    private static void addDeepDescentDropEdge(BotNavigationGraph.Region from,
+                                               MapleMap map,
+                                               Map<Integer, Integer> regionIdByFootholdId,
+                                               Map<Integer, List<BotNavigationGraph.Edge>> outgoing,
+                                               Set<String> edgeKeys,
+                                               BotMovementProfile movementProfile) {
+        // Deepest landing region reachable by a straight drop from this region.
+        int deepestY = Integer.MIN_VALUE;
+        int targetRegionId = -1;
+        for (int x = from.minX; x <= from.maxX; x++) {
+            BotPhysicsEngine.JumpLanding landing = BotPhysicsEngine.simulateDownJumpLanding(map, from.pointAt(x));
+            if (landing == null) {
+                continue;
+            }
+            int regionId = regionIdByFootholdId.getOrDefault(landing.foothold().getId(), -1);
+            if (regionId < 0 || regionId == from.id) {
+                continue;
+            }
+            if (landing.point().y > deepestY) {
+                deepestY = landing.point().y;
+                targetRegionId = regionId;
+            }
+        }
+        if (targetRegionId < 0) {
+            return;
+        }
+
+        // Widest contiguous run of columns whose own drop lands on that region. The landing is
+        // tracked per column: with stepX 0 the landing x equals the launch x, so the edge's
+        // endPoint must come from the same column as its startPoint (they are one trajectory).
+        // Run tracking uses an explicit flag, NOT an int sentinel: map x coordinates are
+        // routinely negative (left half of the map), so -1/"is x negative" collides with real
+        // columns.
+        boolean inRun = false;
+        int runLo = 0;
+        int runHi = 0;
+        Point runLanding = null;
+        int bestLo = 0;
+        int bestHi = -1;
+        Point bestLanding = null;
+        for (int x = from.minX; x <= from.maxX + 1; x++) {
+            boolean onTarget = false;
+            Point landing = null;
+            if (x <= from.maxX) {
+                BotPhysicsEngine.JumpLanding sim = BotPhysicsEngine.simulateDownJumpLanding(map, from.pointAt(x));
+                if (sim != null && regionIdByFootholdId.getOrDefault(sim.foothold().getId(), -1) == targetRegionId) {
+                    onTarget = true;
+                    landing = sim.point();
+                }
+            }
+            if (onTarget) {
+                if (!inRun) {
+                    inRun = true;
+                    runLo = x;
+                }
+                runHi = x;
+                runLanding = landing;
+            } else if (inRun) {
+                if (runHi - runLo > bestHi - bestLo) {
+                    bestLo = runLo;
+                    bestHi = runHi;
+                    bestLanding = runLanding;
+                }
+                inRun = false;
+            }
+        }
+        if (bestLanding == null) {
+            return;
+        }
+
+        int launchX = (bestLo + bestHi) / 2;
+        debugprint("Deep-descent escape edge: map {} region R{} -> R{} launch window [{}..{}] landing {}",
+                map.getId(), from.id, targetRegionId, bestLo, bestHi, bestLanding);
+        addEdge(from.id, targetRegionId, BotNavigationGraph.EdgeType.DROP,
+                from.pointAt(launchX), bestLanding,
+                bestLo, bestHi,
+                0, 0, DOWN_JUMP_COST_PENALTY_MS * 2, outgoing, edgeKeys);
     }
 
     private static void addDirectionalDropEdge(BotNavigationGraph.Region from,
