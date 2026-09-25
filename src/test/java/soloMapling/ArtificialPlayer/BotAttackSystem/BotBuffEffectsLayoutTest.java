@@ -18,18 +18,24 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /**
  * Guards {@link BotBuffEffects}' per-skill foreign-buff layout dispatch.
  *
- * <p>The v83 client does not decode every {@code GIVE_FOREIGN_BUFF} frame the same way: the host's
- * own {@code StatEffect.applyTo} routes three skill families through extended frames the client
- * reads with extra fields — pirate 疾驰 ({@code isDash}), 极速领域 / 船长的勇士的意志
- * ({@code isInfusion}), and the {@code WK_CHARGE} 元素剑 family ({@code isWkCharge}). Sending the
- * short generic frame for those makes the client parse past the packet's end (the reported
- * 「数据过短」 crash), so the plugin must mirror the host's dispatch rather than blanket-send
- * {@code giveForeignBuff}.</p>
+ * <p>The v83 client does not decode every {@code GIVE_FOREIGN_BUFF} frame the same way, and it does
+ * not decode every buff-mask BIT the host emits. Verified against the v83 (BeiDou) client in IDA:
+ * its {@code DecodeStat} switch recognises only 31 fixed mask positions, and the host's
+ * {@code DASH2}/{@code DASH}/{@code SPEED_INFUSION} mask bits land OUTSIDE that set — so routing the
+ * dash / infusion families through the host's {@code giveForeignPirateBuff} leaves the whole pirate
+ * body unparsed (the aura never shows and the mask desynchronises). The plugin therefore remaps
+ * those two families onto the SPEED/JUMP mask positions the v83 client does decode (a 4-byte-int
+ * field each), and keeps the CANCEL mask in {@code BotAuraState} on the same remapped stats.</p>
+ *
+ * <p>The {@code WK_CHARGE} family stays on the host's {@code giveForeignWKChargeEffect} frame: the
+ * charge position is decoded differently from the generic frame too, and keeping the host frame
+ * keeps a bot's charge visually consistent with a real player's.</p>
  *
  * <p>{@code BotBuffEffects} touches {@code Character}/{@code StatEffect}, whose class-init needs a
  * Spring context, so this check reads the source (the same approach {@code BotBuffConfigSourceTest}
  * uses) and pins the mapping itself: every skill id that host {@code StatEffect} special-cases must
- * be named in the dispatch, and the pirate/chrage builders must actually be called.</p>
+ * be named in the dispatch, the remapped stats must be the v83-decodable ones, and the charge
+ * builder must actually be called.</p>
  */
 class BotBuffEffectsLayoutTest {
 
@@ -45,18 +51,31 @@ class BotBuffEffectsLayoutTest {
     @Test
     void everyHostSpecialCasedFamilyIsDispatched() throws IOException {
         String src = code(read(EFFECTS));
-        // The three extended-frame builders the host itself uses.
-        assertTrue(src.contains("PacketCreator.giveForeignPirateBuff("),
-                "the dash/infusion family must go through giveForeignPirateBuff (extended frame)");
+        String aura = code(read(AURA));
+        // The dash/infusion families are REMAPPED onto the v83-decodable SPEED/JUMP positions and
+        // sent through the generic frame — the host's giveForeignPirateBuff frame carries
+        // DASH2/DASH/SPEED_INFUSION mask bits the v83 client has no decode branch for.
+        assertFalse(src.contains("PacketCreator.giveForeignPirateBuff("),
+                "the dash/infusion family must NOT go through giveForeignPirateBuff (its mask bits "
+                        + "are undecodable by the v83 client)");
         assertTrue(src.contains("PacketCreator.giveForeignWKChargeEffect("),
                 "the WK_CHARGE family must go through giveForeignWKChargeEffect (extended frame)");
         assertTrue(src.contains("PacketCreator.giveForeignBuff("),
-                "every other buff keeps the generic frame");
+                "the remapped dash/infusion auras and every other buff go through the generic frame");
+
+        // The remap must land on SPEED/JUMP — the only movement-affecting positions the v83 client
+        // decodes as 4-byte int fields.
+        assertTrue(src.contains("BuffStat.SPEED"), "dash/infusion must remap onto SPEED");
+        assertTrue(src.contains("BuffStat.JUMP"), "dash must remap onto JUMP");
 
         // The dispatch predicates must exist and be used.
         assertTrue(src.contains("isDash("), "isDash must gate the dash family");
         assertTrue(src.contains("isInfusion("), "isInfusion must gate the infusion family");
         assertTrue(src.contains("isWkCharge("), "isWkCharge must gate the charge family");
+
+        // The cancel mask must mirror the remapped show mask, or the client never clears the aura.
+        assertTrue(aura.contains("List.of(BuffStat.SPEED, BuffStat.JUMP)"),
+                "BotAuraState's dash cancel mask must use the same remapped SPEED/JUMP stats");
     }
 
     /**
