@@ -3,6 +3,8 @@ package soloMapling.ArtificialPlayer.BotSummonSystem;
 import org.gms.net.packet.OutPacket;
 import org.junit.jupiter.api.Test;
 
+import java.util.List;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 /**
@@ -39,7 +41,7 @@ class BotSummonAttackPacketTest {
     @Test
     void frameMatchesTheClientLayout() {
         OutPacket p = BotSummonBroadcast.summonAttackPacket(24110, 1000000011, (byte) 1,
-                1000000007, 19762);
+                List.of(new BotSummonBroadcast.Strike(1000000007, 19762)));
         byte[] expected = {
                 (byte) (SUMMON_ATTACK & 0xFF), (byte) ((SUMMON_ATTACK >> 8) & 0xFF),
                 0x2E, 0x5E, 0x00, 0x00,                 // cid = 24110
@@ -51,14 +53,44 @@ class BotSummonAttackPacketTest {
                 0x06,                                   // nHitAction ("who knows")
                 0x32, 0x4D, 0x00, 0x00,                 // damage = 19762
         };
-        assertEquals(expected.length, p.getBytes().length);
+        assertPacketBytes(expected, p);
+    }
+
+    /**
+     * A multi-mob summon (Bahamut carries a WZ mobCount of 3..6) writes one ATTACKINFO per target
+     * under a single count byte - not one frame per mob. The host's PacketCreator.summonAttack does
+     * the same and the client loops nMobCount entries, so a second target must not restart the frame.
+     */
+    @Test
+    void multiMobStrikeAppendsOneAttackInfoPerTarget() {
+        OutPacket p = BotSummonBroadcast.summonAttackPacket(7, 8, (byte) 0,
+                List.of(new BotSummonBroadcast.Strike(100, 500),
+                        new BotSummonBroadcast.Strike(101, 501),
+                        new BotSummonBroadcast.Strike(102, 502)));
+        byte[] expected = {
+                (byte) (SUMMON_ATTACK & 0xFF), (byte) ((SUMMON_ATTACK >> 8) & 0xFF),
+                0x07, 0x00, 0x00, 0x00,                     // cid = 7
+                0x08, 0x00, 0x00, 0x00,                     // summonOid = 8
+                0x00,                                       // nCharLevel
+                0x04,                                       // (right<<7)|attack1
+                0x03,                                       // nMobCount = 3
+                0x64, 0x00, 0x00, 0x00, 0x06, (byte) 0xF4, 0x01, 0x00, 0x00, // oid 100, dmg 500
+                0x65, 0x00, 0x00, 0x00, 0x06, (byte) 0xF5, 0x01, 0x00, 0x00, // oid 101, dmg 501
+                0x66, 0x00, 0x00, 0x00, 0x06, (byte) 0xF6, 0x01, 0x00, 0x00, // oid 102, dmg 502
+        };
+        assertPacketBytes(expected, p);
+    }
+
+    private static void assertPacketBytes(byte[] expected, OutPacket actual) {
+        assertEquals(expected.length, actual.getBytes().length);
         for (int i = 0; i < expected.length; i++) {
-            assertEquals(expected[i], p.getBytes()[i], "byte " + i);
+            assertEquals(expected[i], actual.getBytes()[i], "byte " + i);
         }
     }
 
     private static int actionByte(byte direction) {
-        OutPacket p = BotSummonBroadcast.summonAttackPacket(1, 2, direction, 3, 4);
+        OutPacket p = BotSummonBroadcast.summonAttackPacket(1, 2, direction,
+                List.of(new BotSummonBroadcast.Strike(3, 4)));
         return p.getBytes()[11] & 0xFF; // opcode(2)+cid(4)+oid(4)+level(1) = offset 11
     }
 }

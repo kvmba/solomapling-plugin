@@ -1,7 +1,12 @@
 package soloMapling.ArtificialPlayer.BotSummonSystem;
 
 import org.gms.client.Character;
+import org.gms.client.Skill;
+import org.gms.client.SkillFactory;
+import org.gms.client.status.MonsterStatus;
+import org.gms.client.status.MonsterStatusEffect;
 import org.gms.constants.game.CharacterStance;
+import org.gms.server.StatEffect;
 import org.gms.server.life.Monster;
 import org.gms.server.maps.Foothold;
 import org.gms.server.maps.MapObject;
@@ -18,6 +23,7 @@ import soloMapling.ArtificialPlayer.GCMoveSystem.GCMovement;
 
 import java.awt.Point;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -94,6 +100,14 @@ public final class BotSummonFollower {
     static final int FOLLOW_MAX_PX = 36;
     /** Idle jitter dead zone (px): slot moves inside this are ignored, exactly like the pet's. */
     static final int FOLLOW_DEAD_ZONE_PX = 15;
+
+    /**
+     * How long a summon's monster status lasts (ms) - the flat value the host's
+     * {@code SummonDamageHandler} passes to {@code Monster.applyStatus}, which ignores the skill's
+     * own WZ {@code time} entirely (a 30th-level Silver Hawk's 180s is never read). Mirrored here so
+     * a bot's stun/freeze expires on a real player's clock rather than the summon's lifetime.
+     */
+    static final long SUMMON_DEBUFF_MS = 4000L;
 
     /** A fresh follow distance (px) in [{@code FOLLOW_MIN_PX}, {@code FOLLOW_MAX_PX}]. */
     static int freshFollowDistancePx() {
@@ -489,45 +503,70 @@ public final class BotSummonFollower {
         if (summon == null) {
             return; // concurrently torn down by the bot's own lifecycle thread
         }
+        Skill skill = SkillFactory.getSkill(s.skillId);
+        if (skill == null) {
+            return; // gone from Skill.wz since the grant (a reload swapped the data)
+        }
+        // The bot was granted the skill at its max level (BotSummonController.spawn), and the host
+        // builds its own summon StatEffect from the level the OWNER holds - so this reads the very
+        // same WZ row a real player's summon does: how many mobs one strike reaches (mobCount, e.g.
+        // Bahamut's 3..6) and which monster status the strike carries (the hawks' STUN, Elquines'
+        // and Frost Prey's FREEZE). Nothing about the effect is restated in BotSummonTable.
+        StatEffect effect = skill.getEffect(Math.max(1, bot.getSkillLevel(skill)));
         Point from = summon.getPosition();
-        Monster target = nearestMob(bot.getMap(), from, cfg.attackRange());
-        if (target == null) {
+        List<Monster> targets = nearestMobs(bot.getMap(), from, cfg.attackRange(),
+                Math.max(1, effect.getMobCount()));
+        if (targets.isEmpty()) {
             return;
         }
         s.nextAttackAtMs = now + cfg.attackTickMs();
 
         int tier = bot.getJob() != null ? bot.getJob().getJobTier() : 0;
-        int damage = BotDamageModel.rollLine(tier, bot.getLevel(), Math.max(1, s.spec.attackLines()));
-        byte direction = (byte) (target.getPosition().x < from.x ? 1 : 0);
+        // One direction byte covers the whole frame, so it follows the summon's primary (nearest) target.
+        byte direction = (byte) (targets.get(0).getPosition().x < from.x ? 1 : 0);
+        List<BotSummonBroadcast.Strike> hits = new ArrayList<>(targets.size());
+        for (Monster target : targets) {
+            hits.add(new BotSummonBroadcast.Strike(target.getObjectId(),
+                    BotDamageModel.rollLine(tier, bot.getLevel(), Math.max(1, s.spec.attackLines()))));
+        }
 
         try {
-            BotSummonBroadcast.summonAttack(bot, summon, direction, target.getObjectId(), damage);
+            BotSummonBroadcast.summonAttack(bot, summon, direction, hits);
         } catch (Throwable t) {
             log.warn("summon attack broadcast failed cid={}: {}", bot.getId(), t.toString());
         }
-        // Apply the damage through the shared bot kill/EXP/loot path (its own loot, no vanilla drops).
-        BotAttackEffects.applyExternalHit(bot, target, damage);
+
+        Map<MonsterStatus, Integer> stati = effect.getMonsterStati();
+        for (int i = 0; i < targets.size(); i++) {
+            Monster target = targets.get(i);
+            // Host parity (SummonDamageHandler): the summon's WZ status rides the strike, rolled on
+            // the skill's own `prop` (the hawks' 50%..99%, or a flat 100% for Elquines / Frost Prey),
+            // and lands BEFORE the damage - same order as the host's handler. Monster.applyStatus
+            // refuses an immune/strong/neutral mob (read off its own WZ elemAttr) and refuses every
+            // boss, so no resistance test of our own belongs here.
+            if (!stati.isEmpty() && effect.makeChanceResult()) {
+                target.applyStatus(bot, new MonsterStatusEffect(stati, skill, null, false),
+                        effect.isPoison(), SUMMON_DEBUFF_MS);
+            }
+            // Apply the damage through the shared bot kill/EXP/loot path (its own loot, no vanilla drops).
+            BotAttackEffects.applyExternalHit(bot, target, hits.get(i).damage());
+        }
     }
 
-    /** Closest live mob within {@code range} px of the summon, or null. */
-    private static Monster nearestMob(MapleMap map, Point from, int range) {
+    /** Up to {@code limit} live mobs within {@code range} px of the summon, nearest first. */
+    private static List<Monster> nearestMobs(MapleMap map, Point from, int range, int limit) {
         if (map == null || from == null) {
-            return null;
+            return List.of();
         }
         double rangeSq = (double) range * range;
-        Monster nearest = null;
-        double bestSq = Double.MAX_VALUE;
+        List<Monster> inRange = new ArrayList<>();
         for (MapObject mo : map.getMapObjectsInRange(from, rangeSq, List.of(MapObjectType.MONSTER))) {
             Monster m = (Monster) mo;
-            if (!m.isAlive() || m.getPosition() == null) {
-                continue;
-            }
-            double dsq = from.distanceSq(m.getPosition());
-            if (dsq < bestSq) {
-                bestSq = dsq;
-                nearest = m;
+            if (m.isAlive() && m.getPosition() != null) {
+                inRange.add(m);
             }
         }
-        return nearest;
+        inRange.sort(Comparator.comparingDouble(m -> from.distanceSq(m.getPosition())));
+        return inRange.size() <= limit ? inRange : inRange.subList(0, limit);
     }
 }
