@@ -57,6 +57,7 @@ public class KerningPQBot extends PartyQuestBot {
         super(character);
         dialoguePath = "KerningPQBotDialogue.yaml";
         botType = "KerningPQBot";
+        questName = "KerningPQ";
         // The stage scripts resolve their speaker through client.getPlayer() when they run,
         // so this bot needs a client of its own rather than the shared per-channel one.
         BotGeneration.adoptPrivateClient(character);

@@ -26,6 +26,7 @@ public class BossRushPQBot extends PartyQuestBot {
         super(character);
         dialoguePath = "BossRushPQBotDialogue.yaml";
         botType = "BossRushPQBot";
+        questName = "BossRushPQ";
         // The quest's own scripts resolve their player through client.getPlayer() when they
         // run, so this bot needs a client of its own rather than the shared per-channel one.
         BotGeneration.adoptPrivateClient(character);

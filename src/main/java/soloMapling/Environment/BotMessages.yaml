@@ -307,6 +307,25 @@ opq.recruit.filler.7: "now"
 opq.recruit.filler.8: "ty"
 
 # ---------------------------------------------------------------------------
+# Per-quest recruit names, shared by every quest lobby's recruit chatter.
+# The key suffix is the quest's event name, so PqRecruitMessages can look one
+# up by the same string it already stores for the spawn table.
+# ---------------------------------------------------------------------------
+pq.recruit.name.HenesysPQ:  "HPQ"
+pq.recruit.name.KerningPQ:  "KPQ"
+pq.recruit.name.LudiPQ:     "LPQ"
+pq.recruit.name.PiratePQ:   "PPQ"
+pq.recruit.name.AmoriaPQ:   "APQ"
+pq.recruit.name.EllinPQ:    "EPQ"
+pq.recruit.name.MagatiaPQ:  "MPQ"
+pq.recruit.name.ZakumPQ:    "Zakum PQ"
+pq.recruit.name.HorntailPQ: "HT PQ"
+pq.recruit.name.BossRushPQ: "Boss Rush"
+pq.recruit.name.Pyramid:    "Pyramid"
+pq.recruit.name.Dojo:       "Dojo"
+pq.recruit.name.OrbisPQ:    "OPQ"
+
+# ---------------------------------------------------------------------------
 # Training bot chalkboard (shown while the bot is on a break)
 # ---------------------------------------------------------------------------
 training.break_sign: "brb"

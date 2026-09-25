@@ -26,6 +26,7 @@ public class HorntailPQBot extends PartyQuestBot {
         super(character);
         dialoguePath = "HorntailPQBotDialogue.yaml";
         botType = "HorntailPQBot";
+        questName = "HorntailPQ";
         // The rooms' reactor scripts resolve their player through client.getPlayer() when
         // they run, so this bot needs a client of its own rather than the shared one.
         BotGeneration.adoptPrivateClient(character);

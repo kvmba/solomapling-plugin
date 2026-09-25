@@ -532,7 +532,11 @@ public abstract class BotSM implements EventSubscriber {
         return false;
     }
 
-    private static final String SOCIAL_DIALOGUE_PATH = "SocialBotDialogue.yaml";
+    // The shared pool of social lines every conversational type falls back to when its own pack
+    // has no node for what just happened. Protected so a type whose pack is intentionally thin
+    // (the party-quest bots ship none at all) can answer from the same pool rather than going
+    // silent.
+    protected static final String SOCIAL_DIALOGUE_PATH = "SocialBotDialogue.yaml";
 
     // Per-player cooldown so one player cannot make this bot (and the handful of others near them)
     // answer the same spam line over and over. Cleaned lazily when it grows.

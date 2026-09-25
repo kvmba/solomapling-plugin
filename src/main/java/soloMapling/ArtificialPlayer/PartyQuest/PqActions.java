@@ -376,4 +376,21 @@ public final class PqActions {
             portal.enterPortal(bot.getClient());
         }
     }
+
+    /**
+     * Enter one specific portal, running its script.
+     *
+     * <p>Preferred over {@link #enterPortalHere} wherever the caller already knows which door it
+     * wants: "closest to where the bot is standing" is a guess, and in a quest room the closest
+     * portal is often the spawn point, whose target is the engine's "no map" sentinel. Going
+     * through the portal object (rather than a direct {@code changeMap}) is what keeps the
+     * quest's own gate in play - Kerning's {@code kpq0} refuses to let anyone through before the
+     * stage is clear.
+     */
+    public static void enterPortal(Character bot, Portal portal) {
+        if (bot == null || portal == null || bot.getClient() == null) {
+            return;
+        }
+        portal.enterPortal(bot.getClient());
+    }
 }

@@ -25,6 +25,7 @@ public class ZakumPQBot extends PartyQuestBot {
         super(character);
         dialoguePath = "ZakumPQBotDialogue.yaml";
         botType = "ZakumPQBot";
+        questName = "ZakumPQ";
         // The crates' state changes are read through the reactor API, which resolves its
         // player via client.getPlayer(), so this bot needs a client of its own.
         BotGeneration.adoptPrivateClient(character);

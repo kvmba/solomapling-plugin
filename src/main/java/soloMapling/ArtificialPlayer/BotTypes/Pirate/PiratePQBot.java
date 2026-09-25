@@ -27,6 +27,7 @@ public class PiratePQBot extends PartyQuestBot {
         super(character);
         dialoguePath = "PiratePQBotDialogue.yaml";
         botType = "PiratePQBot";
+        questName = "PiratePQ";
         // The quest's box scripts resolve their player through client.getPlayer() when they
         // run, so this bot needs a client of its own rather than the shared per-channel one.
         BotGeneration.adoptPrivateClient(character);

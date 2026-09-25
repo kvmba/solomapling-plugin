@@ -36,6 +36,7 @@ public class MagatiaPQBot extends PartyQuestBot {
         super(character);
         dialoguePath = "MagatiaPQBotDialogue.yaml";
         botType = "MagatiaPQBot";
+        questName = "MagatiaPQ";
         // The stage scripts resolve their speaker through client.getPlayer() when they run,
         // and the escort reads its own properties, so this bot needs its own client.
         BotGeneration.adoptPrivateClient(character);

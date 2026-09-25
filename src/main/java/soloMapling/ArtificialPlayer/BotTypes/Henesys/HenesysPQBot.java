@@ -30,6 +30,7 @@ public class HenesysPQBot extends PartyQuestBot {
         super(character);
         dialoguePath = "HenesysPQBotDialogue.yaml";
         botType = "HenesysPQBot";
+        questName = "HenesysPQ";
         // The quest's reactors resolve their player through client.getPlayer() when they
         // script, so this bot needs a client of its own for the same reason the Orbis one
         // does - the shared per-channel client would answer with whichever bot bound last.

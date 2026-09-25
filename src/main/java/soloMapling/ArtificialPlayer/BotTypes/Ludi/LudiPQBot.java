@@ -34,6 +34,7 @@ public class LudiPQBot extends PartyQuestBot {
         super(character);
         dialoguePath = "LudiPQBotDialogue.yaml";
         botType = "LudiPQBot";
+        questName = "LudiPQ";
         // The stage scripts resolve their speaker through client.getPlayer() when they run,
         // so this bot needs a client of its own rather than the shared per-channel one.
         BotGeneration.adoptPrivateClient(character);

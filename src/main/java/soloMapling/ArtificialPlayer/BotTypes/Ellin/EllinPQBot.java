@@ -28,6 +28,7 @@ public class EllinPQBot extends PartyQuestBot {
         super(character);
         dialoguePath = "EllinPQBotDialogue.yaml";
         botType = "EllinPQBot";
+        questName = "EllinPQ";
         // The quest's reactor scripts resolve their player through client.getPlayer() when
         // they run, so this bot needs a client of its own rather than the shared one.
         BotGeneration.adoptPrivateClient(character);

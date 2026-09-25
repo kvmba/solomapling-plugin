@@ -27,6 +27,7 @@ public class PyramidPQBot extends PartyQuestBot {
         super(character);
         dialoguePath = "PyramidPQBotDialogue.yaml";
         botType = "PyramidPQBot";
+        questName = "Pyramid";
         // The pyramid's gauge and its spawned monsters resolve their player through
         // client.getPlayer(), so this bot needs a client of its own rather than the shared one.
         BotGeneration.adoptPrivateClient(character);

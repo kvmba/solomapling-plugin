@@ -329,6 +329,25 @@ opq.recruit.filler.7: "马上开"
 opq.recruit.filler.8: "+++"
 
 # ---------------------------------------------------------------------------
+# 各副本的招募名，供全部组队大厅的招募喊话共用。
+# key 后缀就是副本的事件名，与 PqRecruitMessages 的刷怪表用的是同一个字符串。
+# 名字取自服务端脚本里副本自己的显示名（<组队任务：xxx>）。
+# ---------------------------------------------------------------------------
+pq.recruit.name.HenesysPQ:  "迎月花山丘"
+pq.recruit.name.KerningPQ:  "第一伴奏"
+pq.recruit.name.LudiPQ:     "时空裂缝"
+pq.recruit.name.PiratePQ:   "海盗船"
+pq.recruit.name.AmoriaPQ:   "阿莫利亚挑战"
+pq.recruit.name.EllinPQ:    "毒雾森林"
+pq.recruit.name.MagatiaPQ:  "罗密欧与朱丽叶"
+pq.recruit.name.ZakumPQ:    "扎昆战役"
+pq.recruit.name.HorntailPQ: "暴君蛋龙试炼场"
+pq.recruit.name.BossRushPQ: "首领突袭"
+pq.recruit.name.Pyramid:    "金字塔"
+pq.recruit.name.Dojo:       "武陵道场"
+pq.recruit.name.OrbisPQ:    "女神之塔"
+
+# ---------------------------------------------------------------------------
 # Training bot chalkboard (shown while the bot is on a break)
 # ---------------------------------------------------------------------------
 training.break_sign: "马上回来"

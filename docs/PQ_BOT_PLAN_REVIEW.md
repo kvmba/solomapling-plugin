@@ -244,7 +244,11 @@ private void debugLogf(String msg) {
 1. **祭坛/音乐盒的触发面积**：一定是 `reactor.getPosition() + lt/rb`，不是"反应堆脚下的地面"。**落点必须在框内**（KPQ 的 `Rectangle`、Orbis 的两处都是）。
 2. **`warpBotToLocation` 污染 party 快照** → `eligible=[]` → 开不了本。PQ 内一律 `changeMap`。
 3. **`CustomReactor.hitReactor` 不走脚本** → `act()` 不执行 → 反应堆的掉宝/NPC 生成/`statusStg` 全都不会发生。
-4. **bot 不是 EIM 成员**：必须在 `recruitMap` 上、`isLoggedInWorld()` 为真（`markPresentInWorld` 已处理）、且 `eligible` 命中。
+4. **bot 不是 EIM 成员**：必须在 `recruitMap` 上、`eligible` 命中，且**宿主放行**——
+   `registerPlayer` 的 `isLoggedInWorld()` 对模板克隆 bot 恒为 false（`Character.loggedIn`
+   在 `loadCharFromDB(...,false)` 的早退里不会被置位；`markPresentInWorld()` 只管
+   `awayFromWorld`）。已由宿主 `EventInstanceManager` 按 `HostHooks.isArtificial` 放行修复，
+   见 `docs/PARTY_QUEST_ALL_PLAN.md` 第十部分第 3 条。
 5. **bot 当了队长** → KPQ 等 `isEventLeader` 分支全错。
 6. **`changeMap` 里 `getChannelServer().getPlayerStorage().getCharacterById(id) == null` 时会 `client.disconnect(true,false)`**（Character.java:1791）。
    模板 bot **不在 channel storage 的常规索引里**时，这一步会触发**共享 BotClient 的 disconnect** → 掉线/`saveCharToDB`/清缓存。

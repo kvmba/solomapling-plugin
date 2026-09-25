@@ -27,6 +27,7 @@ public class DojoPQBot extends PartyQuestBot {
         super(character);
         dialoguePath = "DojoPQBotDialogue.yaml";
         botType = "DojoPQBot";
+        questName = "Dojo";
         // The tower's spawns and the party warps resolve their player through
         // client.getPlayer(), so this bot needs a client of its own.
         BotGeneration.adoptPrivateClient(character);

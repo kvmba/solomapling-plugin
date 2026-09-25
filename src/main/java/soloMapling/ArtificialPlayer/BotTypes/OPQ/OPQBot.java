@@ -1240,6 +1240,12 @@ public class OPQBot extends BotSM {
     private void handleLoopCheck() {
         debugLogf("handleLoopCheck: inParty=" + isInParty()
                 + " mapId=" + getChr().getMapId());
+        // Back in the lobby after a run (or a failed run). Release the event instance, if we still
+        // hold one: the host now registers this bot like any party member, and a bot that walks
+        // out of the run without unregistering stays in the instance's player list - counted by
+        // getPlayerCount() for the puzzles, and keeping the instance alive long after the party
+        // that started it has finished.
+        releaseEventInstance();
         // Clear ALL per-run scratch so next run starts completely clean.
         sharedContext.clearTaskComplete(getChr().getId());
         sharedContext.putCloudAssignment(getChr().getId(), null);
@@ -1341,6 +1347,21 @@ public class OPQBot extends BotSM {
 
     private boolean isInParty() {
         return getChr().getParty() != null;
+    }
+
+    /**
+     * Leave the event instance this bot is still registered in, if any.
+     *
+     * <p>The quests' own scripts unregister on the way out ({@code playerExit}), but a bot that
+     * reaches the lobby by its own warps never passes through that path. Unregistering here is
+     * what keeps {@code getPlayerCount()} honest for the next run and lets a finished instance
+     * dispose instead of waiting on a participant that has already walked off.
+     */
+    private void releaseEventInstance() {
+        var eim = getChr().getEventInstance();
+        if (eim != null) {
+            eim.unregisterPlayer(getChr());
+        }
     }
 
     private Character getPartyLeader() {

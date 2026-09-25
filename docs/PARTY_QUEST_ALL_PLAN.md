@@ -331,18 +331,24 @@ grep -rn 'setProperty("statusStg1", *1\|setIntProperty("statusStg1", *1' scripts
 
 ## 第十部分 · 完整流程已闭环（可招募 → 可进本 → 可推进）
 
-### 进本链路的四个门槛（全部已核实通过）
+### 进本链路的四个门槛
 
 | # | 门槛 | 位置 | bot 是否满足 |
 |:--:|---|---|:--:|
 | 1 | `recruitMap` 上且等级在区间 | `getEligibleParty` → `ch.getMapId()==recruitMap && minLevel<=lv<=maxLevel` | ✅ `PqRecruitPoints` + `PqBotSpawner` 保证 |
 | 2 | 队伍成员 `isOnline()` | `registerParty` | ✅ `PartyCharacter` 构造即 `online=true`，bot 的 client 从不 disconnect |
-| 3 | `chr.isLoggedInWorld()` | `registerPlayer` | ✅ `BotClient.isLoggedIn()` 恒 true + `markPresentInWorld()` |
+| 3 | `chr.isLoggedInWorld()` | `registerPlayer` | ⚠️ **这里此前判断错了，已修**：`Character.isLoggedIn()` 读的是 `Character.loggedIn` 字段，而模板克隆 bot 走 `loadCharFromDB(cid, client, **false**)`，在 `setLoggedIn(true)` 之前就早退了 → 恒为 **false**。`BotClient.isLoggedIn()` 是 `Client` 的重写，与 `Character.isLoggedIn()` 毫无关系；`markPresentInWorld()` 只清 `awayFromWorld`。**修复**：宿主 `EventInstanceManager` 现在按 `HostHooks.isArtificial` 放行（与 `MapleMap`/`Monster`/`PlayerShop` 同一惯例），`exitPlayer` 对称放行 |
 | 4 | 快照 `mpc.mapid` 不过期 | `changeMapInternal` 里 `mpc.setMapId(to.getId())` | ✅ 走 `changeMap` 即自动刷新 |
 
 > **第 4 条是 REVIEW 里那个"快照污染"问题的根源**：插件自己的 `warpBotToLocation → setMap()`
 > 会绕开 `changeMapInternal`，导致 `mpc.mapid` 陈旧 → `getEligibleParty` 判定失败。
 > 本方案的 `PqActions` 全部走 `changeMap`，因此天然规避。
+>
+> **第 3 条此前标注为"已核实通过"，但核实方式是读注释而非读代码**：`BotClient.isLoggedIn()` 与
+> `Character.isLoggedIn()` 同名不同类，`markPresentInWorld()` 也只管 `awayFromWorld`。
+> 结果是 bot 能被邀请入队、能出现在 `eligible` 里，却永远进不了实例（无 `setEventInstance`、
+> 不触发 `playerEntry` 传送、不计入 `getPlayerCount()`）——所有"数人数"的谜题必然失败。
+> 现在这条规则被抽成纯布尔函数并由 `EventInstanceManagerAdmissionTest` 锁定。
 
 ### 现在玩家能做什么
 
