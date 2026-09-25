@@ -187,7 +187,7 @@ public class HenesysBot extends BotSM {
         boolean moved = false;
         if (rollChanceInverse(5)) {
             String current = getCurrentPlatform(getChr());
-            if (platforms.contains(current)) {
+            if (isOnWanderablePlatform(current, platforms)) {
                 botMoveToPlatformAnyUnoccupiedSpotAware(getChr(), current);
                 moved = true;
             }
@@ -204,6 +204,17 @@ public class HenesysBot extends BotSM {
         }
     }
 
+    /**
+     * Whether {@code current} is one of the map's wanderable platforms. The null case matters:
+     * {@code getCurrentPlatform} returns null when the position resolves to no main platform
+     * (mid-climb, on a connector, off the bounds), and the two list flavours answer it differently —
+     * Pet Park's set is {@code List.of("m1")}, whose ImmutableCollections {@code contains(null)}
+     * throws NPE (List12.indexOf), while every other map's set ({@code getMainPlatformIds}'
+     * ArrayList) answers false. Same false now, on both.
+     */
+    static boolean isOnWanderablePlatform(String current, List<String> platforms) {
+        return current != null && platforms.contains(current);
+    }
 
     private void doRandomEmote() {
         if (rollChanceInverse(10)) {
