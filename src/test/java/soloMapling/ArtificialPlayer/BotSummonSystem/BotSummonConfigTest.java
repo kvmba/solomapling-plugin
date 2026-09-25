@@ -19,11 +19,11 @@ class BotSummonConfigTest {
         assertTrue(c.moveTickMs() > 0);
         assertTrue(c.attackTickMs() > 0);
         assertTrue(c.attackRange() > 0);
-        assertTrue(c.hoverOffsetX() > 0 && c.hoverOffsetY() < 0,
-                "the hover slot sits beside the owner and above it (negative y = up)");
+        assertTrue(c.hoverOffsetY() < 0,
+                "the summon rides above its owner (negative y = up)");
         assertTrue(c.followSpeedX() > 0 && c.followSpeedY() > 0, "the glide must have a bounded speed");
-        assertTrue(c.snapDistance() > Math.hypot(c.hoverOffsetX(), c.hoverOffsetY()),
-                "the re-seat threshold must clear the hover slot");
+        assertTrue(c.snapDistance() > Math.abs(c.hoverOffsetY()),
+                "the re-seat threshold must clear the hover altitude");
     }
 
     @Test
@@ -31,13 +31,13 @@ class BotSummonConfigTest {
         BotSummonConfig c = BotSummonConfig.fromMap(Map.of(
                 "enabled", false,
                 "spawn", Map.of("chance", 0.2, "min_level", 120),
-                "move", Map.of("tick_ms", 500, "offset_x", 80, "bob_x", 20.0),
+                "move", Map.of("tick_ms", 500, "offset_y", -90, "bob_x", 20.0),
                 "attack", Map.of("tick_ms", 700, "range", 400)));
         assertFalse(c.enabled());
         assertEquals(0.2, c.spawnChance(), 1e-9);
         assertEquals(120, c.minLevel());
         assertEquals(500L, c.moveTickMs());
-        assertEquals(80, c.hoverOffsetX());
+        assertEquals(-90, c.hoverOffsetY());
         assertEquals(20.0, c.bobXAmplitude(), 1e-9);
         assertEquals(700L, c.attackTickMs());
         assertEquals(400, c.attackRange());

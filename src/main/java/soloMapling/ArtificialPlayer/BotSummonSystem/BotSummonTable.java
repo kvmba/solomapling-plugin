@@ -24,7 +24,7 @@ import java.util.Map;
  * rendered by observers purely from the MOVE_SUMMON frames the server relays - and a bot has no
  * client to produce them, so BotSummonFollower authors the movement itself (see that class). So
  * the per-skill choices here are (a) the spawn movementType byte - which mirrors the host exactly -
- * and (b) whether it attacks. The ACTUAL movement (a small hover-bob beside the owner) is authored
+ * and (b) whether it attacks. The ACTUAL movement (the pet-style follow behind the owner) is authored
  * by the follower for every non-stationary summon, so the byte no longer selects an orbit vs a
  * hover. Damage is NOT a property
  * here: like every other bot hit it comes from the bot's job tier + level via BotDamageModel.
@@ -54,7 +54,7 @@ public final class BotSummonTable {
      * fallback, so a mismatch is a parity break, not decoration).
      *
      * <p>Note this is the WIRE byte, not the movement the plugin authors: the follower moves every
-     * non-stationary summon with the same small hover-bob beside the owner (see
+     * non-stationary summon with the same pet-style follow behind the owner (see
      * {@link BotSummonFollower}), so {@code FOLLOW} and {@code CIRCLE_FOLLOW} differ only in the byte
      * they send.</p>
      */

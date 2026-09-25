@@ -26,6 +26,13 @@ final class BotSummon {
     /** Random bob phase (radians) so a summon's float is not in lockstep with the owner's others. */
     double phaseRad;
 
+    /**
+     * This summon's stable follow distance (px) - the pet's own comfort ring. Held for the
+     * summon's whole life, never re-rolled, so the follow is a leash and not a chase (the pet
+     * system's rule); only its side of the owner can change.
+     */
+    int followDistancePx;
+
     /** Absolute epoch-ms before which an attacking summon may not strike again. */
     long nextAttackAtMs;
 
