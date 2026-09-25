@@ -2,6 +2,7 @@ package soloMapling.ArtificialPlayer.BotHealthSystem;
 
 import org.gms.client.Character;
 import org.gms.constants.id.MapId;
+import soloMapling.ArtificialPlayer.BotAttackSystem.BotAuraState;
 import soloMapling.ArtificialPlayer.BotCommandsPack.SocialCommands;
 import soloMapling.ArtificialPlayer.BotDialogueHandler;
 import soloMapling.ArtificialPlayer.BotHelpers;
@@ -196,6 +197,10 @@ public final class BotDeath {
         passOutAtMs = now;
         standUpAtMs = now + DOWN_MIN_MS + ThreadLocalRandom.current().nextLong(DOWN_MAX_MS - DOWN_MIN_MS);
         nextGrumbleAtMs = now; // let it complain right away
+        // Death drops every buff, the hides included: without this, a bot that died while 隐身术 /
+        // 橡木桶伪装 was up would stand back up still carrying the immunity until its next swing.
+        // Both death paths (kill() and adoptIfZeroHp) come through here.
+        BotAuraState.cancelHidesForAction(chr);
         down = true;
         stillTheCorpse(chr);
     }

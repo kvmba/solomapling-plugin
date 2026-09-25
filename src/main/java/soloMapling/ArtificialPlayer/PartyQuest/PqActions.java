@@ -9,6 +9,7 @@ import org.gms.server.maps.Portal;
 import org.gms.server.life.NPC;
 import org.gms.scripting.npc.NPCScriptManager;
 import soloMapling.ArtificialPlayer.BotAttackSystem.BotAttackDriver;
+import soloMapling.ArtificialPlayer.BotAttackSystem.BotAuraState;
 import soloMapling.ArtificialPlayer.BotCommandsPack.DropCommands;
 import soloMapling.ArtificialPlayer.BotCommandsPack.SocialCommands;
 import soloMapling.ArtificialPlayer.BotLogic;
@@ -173,6 +174,9 @@ public final class PqActions {
         if (bot == null) {
             return;
         }
+        // Striking a reactor is an attack action (the OPQ path swings first via BotAttack.basicSwing;
+        // the stage scripts hit reactors directly), so it breaks the hide auras the same way.
+        BotAuraState.cancelHidesForAction(bot);
         CustomReactor.hitReactorWithScript(bot.getMap(), reactorOid, bot);
     }
 

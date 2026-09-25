@@ -53,7 +53,7 @@ public final class BotAttack {
     public static void basicSwing(Character chr) {
         if (chr == null) return;
         BotMount.cancelForAction(chr); // an attack is never made from the saddle
-        BotAuraState.cancelDisguiseForAction(chr); // 伪装 (hide morph) breaks on the attack key
+        BotAuraState.cancelHidesForAction(chr); // 伪装/隐身术 break on the attack key
 
         int facingMask = facingLeft(chr) ? BotAttackData.FACING_LEFT_MASK : BotAttackData.FACING_RIGHT_MASK;
         WeaponType weaponType = resolveEquippedWeaponType(chr);
@@ -88,7 +88,7 @@ public final class BotAttack {
         if (chr == null || chr.getMap() == null) return;
         if (skillId <= 0) { basicSwing(chr); return; }
         BotMount.cancelForAction(chr); // an attack is never made from the saddle
-        BotAuraState.cancelDisguiseForAction(chr); // 伪装 (hide morph) breaks on the attack key
+        BotAuraState.cancelHidesForAction(chr); // 伪装/隐身术 break on the attack key
 
         int facingMask = facingLeft(chr) ? BotAttackData.FACING_LEFT_MASK : BotAttackData.FACING_RIGHT_MASK;
         WeaponType weaponType = resolveEquippedWeaponType(chr);
@@ -116,7 +116,7 @@ public final class BotAttack {
     public static void rangedSwing(Character chr, int skillId) {
         if (chr == null || chr.getMap() == null || skillId <= 0) return;
         BotMount.cancelForAction(chr); // an attack is never made from the saddle
-        BotAuraState.cancelDisguiseForAction(chr); // 伪装 (hide morph) breaks on the attack key
+        BotAuraState.cancelHidesForAction(chr); // 伪装/隐身术 break on the attack key
 
         int facingMask = facingLeft(chr) ? BotAttackData.FACING_LEFT_MASK : BotAttackData.FACING_RIGHT_MASK;
         WeaponType weaponType = resolveEquippedWeaponType(chr);
@@ -142,7 +142,7 @@ public final class BotAttack {
     public static void magicSwing(Character chr, int skillId) {
         if (chr == null || chr.getMap() == null || skillId <= 0) return;
         BotMount.cancelForAction(chr); // an attack is never made from the saddle
-        BotAuraState.cancelDisguiseForAction(chr); // 伪装 (hide morph) breaks on the attack key
+        BotAuraState.cancelHidesForAction(chr); // 伪装/隐身术 break on the attack key
 
         int facingMask = facingLeft(chr) ? BotAttackData.FACING_LEFT_MASK : BotAttackData.FACING_RIGHT_MASK;
         WeaponType weaponType = resolveEquippedWeaponType(chr);

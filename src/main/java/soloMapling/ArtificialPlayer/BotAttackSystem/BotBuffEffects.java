@@ -178,6 +178,15 @@ public final class BotBuffEffects {
                     PacketCreator.giveForeignWKChargeEffect(bot.getId(), skillId, statups), false);
             return;
         }
+        if (isDarkSight(skillId)) {
+            // 隐身术 uses the generic frame too, but the host's own isDs() branch normalises the
+            // DARKSIGHT statup to value 0 (StatEffect.applyTo) - mirror that so a bot's hide looks
+            // exactly like a real player's (the semi-transparent shade observers render).
+            bot.getMap().broadcastMessage(bot,
+                    PacketCreator.giveForeignBuff(bot.getId(),
+                            Collections.singletonList(new Pair<>(BuffStat.DARKSIGHT, 0))), false);
+            return;
+        }
         bot.getMap().broadcastMessage(bot,
                 PacketCreator.giveForeignBuff(bot.getId(), statups), false);
     }
@@ -185,6 +194,11 @@ public final class BotBuffEffects {
     /** The host's own {@code isDash}: the 疾驰 speed/jump burst (single source: {@link BotAuraState}). */
     private static boolean isDash(int skillId) {
         return BotAuraState.isDash(skillId);
+    }
+
+    /** The host's own {@code isDs}: the 隐身术 hide (single source: {@link BotAuraState}). */
+    private static boolean isDarkSight(int skillId) {
+        return BotAuraState.isDarkSight(skillId);
     }
 
     /**
