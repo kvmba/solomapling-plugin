@@ -38,6 +38,7 @@ import org.gms.constants.skills.Marksman;
 import org.gms.constants.skills.NightLord;
 import org.gms.constants.skills.Shadower;
 import org.gms.constants.skills.Pirate;
+import org.gms.constants.skills.Rogue;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -72,7 +73,11 @@ public final class BotBuffConfig {
         put(Job.BOWMAN,   Archer.FOCUS);                               // 3001003 - acc/avoid up
         // THIEF 1st job: 诅咒术 (4001002) is a MOB-targeted debuff (the host applies only a monster
         // status, no self statup), like Hypnotize below - not a self aura, so it is not registered.
-        // Dark Sight is skipped too (hiding a bot from players defeats the point).
+        // 隐身术 (4001003) IS registered: unlike GM hide, the v83 client renders it as a
+        // semi-transparent shade that players still see, and it is a state-bound hide aura governed
+        // by BotAuraState - an attack or a mount retires it, and while it holds monsters cannot
+        // touch the bot (the same rules 橡木伪装 follows).
+        put(Job.THIEF,    Rogue.DARK_SIGHT);                           // 4001003 隐身术
         // PIRATE 1st job: 疾驰 5001005 (a short speed/jump burst - its own puffy aura).
         put(Job.PIRATE,   Pirate.DASH);                                // 5001005 疾驰
 

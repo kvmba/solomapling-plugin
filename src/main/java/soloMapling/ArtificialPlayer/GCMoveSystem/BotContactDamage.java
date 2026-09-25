@@ -6,6 +6,7 @@ import org.gms.server.maps.MapObject;
 import org.gms.server.maps.MapObjectType;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import soloMapling.ArtificialPlayer.BotAttackSystem.BotAuraState;
 import soloMapling.ArtificialPlayer.BotAttackSystem.BotEnergyCharge;
 import soloMapling.ArtificialPlayer.BotHealthSystem.BotDeath;
 import soloMapling.ArtificialPlayer.BotHealthSystem.BotHealthFloor;
@@ -111,6 +112,16 @@ final class BotContactDamage {
         }
         Point botPos = bot.getPosition();
         try {
+            // 隐身术 / 橡木桶伪装: while a hide aura is up the bot is invisible to monsters (the
+            // official rule for both skills), so the whole interaction short-circuits - no touch
+            // hit, no mob debuff, no fall damage, and no charged-brawler touch retaliation (a bot
+            // cannot attack from inside a hide). The hurt i-frames keep ageing so the window never
+            // resumes stale after the hide drops, and the finally below keeps the swept box
+            // current so a long hidden stretch cannot leave a stale sweep behind.
+            if (BotAuraState.isMonsterImmune(bot)) {
+                entry.mobHitCooldownMs = BotMovementManager.tickDown(entry.mobHitCooldownMs);
+                return;
+            }
             // A bot in its hurt i-frames does not take another hit, and does not re-roll a debuff. The
             // one thing it may still do is a charged touch retaliation (Energy Charge): the real client
             // keeps sending TOUCH_MONSTER_ATTACK on the skill's own interval while the player is
@@ -310,6 +321,9 @@ final class BotContactDamage {
     static void applyFallDamage(BotMovementState entry, Character bot, float fallDistancePx) {
         if (!GCMovement.isMapObserved(bot.getMapId())) {
             return;
+        }
+        if (BotAuraState.isMonsterImmune(bot)) {
+            return; // a hidden bot (隐身术 / 橡木桶伪装) is untouchable - fall damage included
         }
         if (entry.mobHitCooldownMs > 0) {
             return; // damage invincibility window

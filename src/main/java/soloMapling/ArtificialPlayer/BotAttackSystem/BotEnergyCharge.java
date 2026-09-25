@@ -150,6 +150,11 @@ public final class BotEnergyCharge {
         if (bot == null || bot.getMap() == null || mob == null) {
             return false;
         }
+        // The touch strike is a swing like any other, so it drops the hide auras too. The contact
+        // scan already skips hidden bots entirely, so this can only matter on the narrow
+        // cross-thread edge where a cast landed between the scan and this strike - and it then
+        // keeps the "an attack breaks the hide" rule true at every swing site.
+        BotAuraState.cancelHidesForAction(bot);
         int damage = BotDamageModel.rollLine(bot.getJob().getJobTier(), bot.getLevel(), 1);
         return BotAttackEffects.bodyStrike(bot, mob, damage);
     }
