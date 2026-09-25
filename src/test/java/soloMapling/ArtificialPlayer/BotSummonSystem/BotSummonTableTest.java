@@ -96,6 +96,61 @@ class BotSummonTableTest {
     }
 
     @Test
+    void summonDebuffsComeFromTheHostsOwnSkillTable() throws IOException {
+        // A bot's summon stun/freeze is NOT restated in BotSummonTable - it is read off the host's
+        // StatEffect (the same WZ row a real player's summon uses), so the plugin cannot drift from
+        // the host on WHICH summon debuffs. Pin the host's per-summon entries.
+        Path host = Paths.get("../GMS083/gms-server/src/main/java/org/gms/server/StatEffect.java");
+        if (!Files.isRegularFile(host)) {
+            return; // host checkout not adjacent; nothing to validate against
+        }
+        String src = Files.readString(host, StandardCharsets.UTF_8);
+        String summon = summonBlock(src);
+
+        // Silver Hawk / Golden Eagle: STUN. Elquines / Frost Prey: FREEZE. Those are the only two
+        // v83 summon debuffs, and the plugin must keep riding them rather than hardcoding a status.
+        // Asserted per-case (not "the file mentions STUN somewhere") so dropping a summon's own
+        // entry is caught even while Dragon Roar / Coma keep their own STUN further down.
+        assertTrue(caseBody(summon, "Ranger.SILVER_HAWK").contains("MonsterStatus.STUN"),
+                "the host's Silver Hawk case must still carry a STUN");
+        assertTrue(caseBody(summon, "Sniper.GOLDEN_EAGLE").contains("MonsterStatus.STUN"),
+                "the host's Golden Eagle case must still carry a STUN");
+        assertTrue(caseBody(summon, "FPArchMage.ELQUINES").contains("MonsterStatus.FREEZE"),
+                "the host's Elquines case must still carry a FREEZE");
+        assertTrue(caseBody(summon, "Marksman.FROST_PREY").contains("MonsterStatus.FREEZE"),
+                "the host's Frost Prey case must still carry a FREEZE");
+
+        // The rest of the summon family carries no status at all, so a "debuff every summon" edit
+        // is caught here too.
+        for (String plain : List.of("Bowmaster.PHOENIX", "ILArchMage.IFRIT", "Bishop.BAHAMUT",
+                "Priest.SUMMON_DRAGON", "DarkKnight.BEHOLDER")) {
+            assertFalse(caseBody(summon, plain).contains("MonsterStatus."),
+                    "the host's " + plain + " case must carry NO monster status");
+        }
+    }
+
+    /** The host's SUMMON switch block: from its opening comment to the MONSTER STATUS block after it. */
+    private static String summonBlock(String src) {
+        int from = src.indexOf("// SUMMON\n");
+        assertTrue(from >= 0, "the host must still carry a SUMMON statup block");
+        int to = src.indexOf("MONSTER STATUS", from);
+        return src.substring(from, to > 0 ? to : Math.min(src.length(), from + 2000));
+    }
+
+    /**
+     * The body of one {@code case X:} group inside the host's SUMMON block - from its
+     * {@code case X:} line to the group's closing {@code break;} - so an assertion that X carries a
+     * status cannot be satisfied by some other skill's status elsewhere in the file.
+     */
+    private static String caseBody(String summonBlock, String skillConstant) {
+        int from = summonBlock.indexOf("case " + skillConstant + ":");
+        assertTrue(from >= 0, "the host's SUMMON block must still name " + skillConstant);
+        int to = summonBlock.indexOf("break;", from);
+        assertTrue(to > from, skillConstant + "'s case must still end in a break");
+        return summonBlock.substring(from, to);
+    }
+
+    @Test
     void lineageResolvesToTheAdvancedJobsSummon() {
         // A Bowmaster (312) inherits its branch: it must resolve to Phoenix, not the 2nd-job hawk.
         assertTrue(BotSummonTable.summonsForJobId(312).contains(3121006));

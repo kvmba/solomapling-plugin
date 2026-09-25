@@ -7,6 +7,7 @@ import org.gms.server.maps.Summon;
 import org.gms.server.movement.AbsoluteLifeMovement;
 
 import java.awt.Point;
+import java.util.List;
 
 /**
  * Hands the plugin the two summon frames the host will not build for us.
@@ -52,23 +53,28 @@ final class BotSummonBroadcast {
 
     private BotSummonBroadcast() {}
 
-    static void summonAttack(Character bot, Summon summon, byte direction, int mobOid, int damage) {
+    /** One mob's damage line inside a SUMMON_ATTACK frame. */
+    record Strike(int mobOid, int damage) {}
+
+    static void summonAttack(Character bot, Summon summon, byte direction, List<Strike> hits) {
         bot.getMap().broadcastMessage(bot,
-                summonAttackPacket(bot.getId(), summon.getObjectId(), direction, mobOid, damage),
+                summonAttackPacket(bot.getId(), summon.getObjectId(), direction, hits),
                 summon.getPosition());
     }
 
     /** Pure seam for the byte layout (unit-testable without a live Character/Summon). */
-    static OutPacket summonAttackPacket(int cid, int summonOid, byte direction, int mobOid, int damage) {
+    static OutPacket summonAttackPacket(int cid, int summonOid, byte direction, List<Strike> hits) {
         OutPacket p = OutPacket.create(SendOpcode.SUMMON_ATTACK);
         p.writeInt(cid);                  // dwCharacterID
         p.writeInt(summonOid);            // dwSummonedID
         p.writeByte(0);                   // nCharLevel (host writes 0; client ignores for a bot)
         p.writeByte((direction != 0 ? SUMMON_FACING_LEFT_MASK : 0) | SUMMON_ATTACK1_ACTION); // (bLeft<<7)|action
-        p.writeByte(1);                   // nMobCount
-        p.writeInt(mobOid);               // ATTACKINFO->dwMobID
-        p.writeByte(HIT_ACTION);          // ATTACKINFO->nHitAction
-        p.writeInt(damage);               // ATTACKINFO->aDamage[0]
+        p.writeByte(hits.size());         // nMobCount
+        for (Strike hit : hits) {
+            p.writeInt(hit.mobOid());     // ATTACKINFO->dwMobID
+            p.writeByte(HIT_ACTION);      // ATTACKINFO->nHitAction
+            p.writeInt(hit.damage());     // ATTACKINFO->aDamage[0]
+        }
         return p;
     }
 
