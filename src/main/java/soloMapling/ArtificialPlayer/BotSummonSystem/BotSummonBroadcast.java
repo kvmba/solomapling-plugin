@@ -33,22 +33,43 @@ final class BotSummonBroadcast {
     /** The hit-action byte the host writes for every summon attack entry ("who knows" - host comment). */
     private static final int HIT_ACTION = 6;
 
+    /**
+     * The per-attack "action" byte of SUMMON_ATTACK: NOT a plain 0/1 facing flag. The client
+     * (BeiDou.exe sub_7A6882, verified in IDA) decodes it as {@code facing = byte & 0x80},
+     * {@code action = (byte & 0x7F) - 4} and indexes the summon action-name table at 0xBEC3CC
+     * (decrypted string pool: index 0="attack1", 1="attack2", 2="skill1"...) with that action.
+     * A raw 0/1 byte yields index -4/-3, lands on "stand"/"move", and the Skill.wz lookup for
+     * {@code <summon skill>/stand} finds no attack node -> the client dereferences a null
+     * summon-attack template and crashes ("data error"). A real client always sends
+     * {@code (facing << 7) | action} with action >= 4; ATTACK1 (byte 0x04/0x84) is the summon's
+     * default basic attack node and is what every observing client renders.
+     */
+    private static final int SUMMON_ATTACK1_ACTION = 4;
+    private static final int SUMMON_FACING_LEFT_MASK = 0x80;
+
     /** Fragment command 0 = normal / absolute movement (the shape AbsoluteLifeMovement serialises). */
     private static final int MOVE_CMD_NORMAL = 0;
 
     private BotSummonBroadcast() {}
 
     static void summonAttack(Character bot, Summon summon, byte direction, int mobOid, int damage) {
+        bot.getMap().broadcastMessage(bot,
+                summonAttackPacket(bot.getId(), summon.getObjectId(), direction, mobOid, damage),
+                summon.getPosition());
+    }
+
+    /** Pure seam for the byte layout (unit-testable without a live Character/Summon). */
+    static OutPacket summonAttackPacket(int cid, int summonOid, byte direction, int mobOid, int damage) {
         OutPacket p = OutPacket.create(SendOpcode.SUMMON_ATTACK);
-        p.writeInt(bot.getId());          // dwCharacterID
-        p.writeInt(summon.getObjectId()); // dwSummonedID
+        p.writeInt(cid);                  // dwCharacterID
+        p.writeInt(summonOid);            // dwSummonedID
         p.writeByte(0);                   // nCharLevel (host writes 0; client ignores for a bot)
-        p.writeByte(direction);           // bLeft
+        p.writeByte((direction != 0 ? SUMMON_FACING_LEFT_MASK : 0) | SUMMON_ATTACK1_ACTION); // (bLeft<<7)|action
         p.writeByte(1);                   // nMobCount
         p.writeInt(mobOid);               // ATTACKINFO->dwMobID
         p.writeByte(HIT_ACTION);          // ATTACKINFO->nHitAction
         p.writeInt(damage);               // ATTACKINFO->aDamage[0]
-        bot.getMap().broadcastMessage(bot, p, summon.getPosition());
+        return p;
     }
 
     /*
