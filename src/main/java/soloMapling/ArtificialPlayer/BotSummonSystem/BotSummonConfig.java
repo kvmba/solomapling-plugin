@@ -12,6 +12,10 @@ import java.util.Map;
  * at any {@link PluginResources} resolution root wins over the packaged one, so an operator can
  * retune without a rebuild.
  *
+ * <p>The movement knobs describe the official HOVER: a flying summon floats at a small offset in
+ * front of the owner's facing, with a tiny sine bob, and glides toward that slot at a bounded speed
+ * (never warping). See {@link BotSummonFollower}.</p>
+ *
  * <p>Read once at startup; there is no hot reload. A missing or broken file falls back to the
  * defaults, because a bad summon config must not stop the rest of the plugin from coming up.</p>
  */
@@ -23,10 +27,12 @@ public final class BotSummonConfig {
     // ---- defaults ----
     private static final boolean DEF_ENABLED = true;
     private static final long DEF_MOVE_TICK_MS = 300L;
-    private static final int DEF_FOLLOW_OFFSET_X = 55;
-    private static final int DEF_FOLLOW_OFFSET_Y = -12;
-    private static final int DEF_CIRCLE_RADIUS = 70;
-    private static final double DEF_CIRCLE_STEP_DEG = 6.0;
+    private static final int DEF_HOVER_OFFSET_X = 60;
+    private static final int DEF_HOVER_OFFSET_Y = -65;
+    private static final double DEF_BOB_X = 14.0;
+    private static final double DEF_BOB_Y = 8.0;
+    private static final int DEF_FOLLOW_SPEED_X = 260;
+    private static final int DEF_FOLLOW_SPEED_Y = 300;
     private static final double DEF_SNAP_DISTANCE = 900.0;
     private static final double DEF_SPAWN_CHANCE = 0.55;
     private static final int DEF_MIN_LEVEL = 70;
@@ -35,10 +41,12 @@ public final class BotSummonConfig {
 
     private final boolean enabled;
     private final long moveTickMs;
-    private final int followOffsetX;
-    private final int followOffsetY;
-    private final int circleRadius;
-    private final double circleStepDeg;
+    private final int hoverOffsetX;
+    private final int hoverOffsetY;
+    private final double bobXAmplitude;
+    private final double bobYAmplitude;
+    private final int followSpeedX;
+    private final int followSpeedY;
     private final double snapDistance;
     private final double spawnChance;
     private final int minLevel;
@@ -48,10 +56,12 @@ public final class BotSummonConfig {
     private BotSummonConfig(Builder b) {
         this.enabled = b.enabled;
         this.moveTickMs = b.moveTickMs;
-        this.followOffsetX = b.followOffsetX;
-        this.followOffsetY = b.followOffsetY;
-        this.circleRadius = b.circleRadius;
-        this.circleStepDeg = b.circleStepDeg;
+        this.hoverOffsetX = b.hoverOffsetX;
+        this.hoverOffsetY = b.hoverOffsetY;
+        this.bobXAmplitude = b.bobXAmplitude;
+        this.bobYAmplitude = b.bobYAmplitude;
+        this.followSpeedX = b.followSpeedX;
+        this.followSpeedY = b.followSpeedY;
         this.snapDistance = b.snapDistance;
         this.spawnChance = b.spawnChance;
         this.minLevel = b.minLevel;
@@ -61,10 +71,15 @@ public final class BotSummonConfig {
 
     public boolean enabled() { return enabled; }
     public long moveTickMs() { return moveTickMs; }
-    public int followOffsetX() { return followOffsetX; }
-    public int followOffsetY() { return followOffsetY; }
-    public int circleRadius() { return circleRadius; }
-    public double circleStepDeg() { return circleStepDeg; }
+    /** Hover stand-off (px) in front of the owner's facing. */
+    public int hoverOffsetX() { return hoverOffsetX; }
+    /** Hover height (px) above the owner. */
+    public int hoverOffsetY() { return hoverOffsetY; }
+    public double bobXAmplitude() { return bobXAmplitude; }
+    public double bobYAmplitude() { return bobYAmplitude; }
+    /** Bounded glide speed (px/s) toward the hover slot, x and y. */
+    public int followSpeedX() { return followSpeedX; }
+    public int followSpeedY() { return followSpeedY; }
     public double snapDistance() { return snapDistance; }
     public double spawnChance() { return spawnChance; }
     public int minLevel() { return minLevel; }
@@ -113,10 +128,12 @@ public final class BotSummonConfig {
 
         Map<String, Object> move = map(root.get("move"));
         b.moveTickMs = lng(move.get("tick_ms"), DEF_MOVE_TICK_MS);
-        b.followOffsetX = intOf(move.get("offset_x"), DEF_FOLLOW_OFFSET_X);
-        b.followOffsetY = intOf(move.get("offset_y"), DEF_FOLLOW_OFFSET_Y);
-        b.circleRadius = intOf(move.get("circle_radius"), DEF_CIRCLE_RADIUS);
-        b.circleStepDeg = dbl(move.get("circle_step_deg"), DEF_CIRCLE_STEP_DEG);
+        b.hoverOffsetX = intOf(move.get("offset_x"), DEF_HOVER_OFFSET_X);
+        b.hoverOffsetY = intOf(move.get("offset_y"), DEF_HOVER_OFFSET_Y);
+        b.bobXAmplitude = dbl(move.get("bob_x"), DEF_BOB_X);
+        b.bobYAmplitude = dbl(move.get("bob_y"), DEF_BOB_Y);
+        b.followSpeedX = intOf(move.get("follow_speed_x"), DEF_FOLLOW_SPEED_X);
+        b.followSpeedY = intOf(move.get("follow_speed_y"), DEF_FOLLOW_SPEED_Y);
         b.snapDistance = dbl(move.get("snap_distance"), DEF_SNAP_DISTANCE);
 
         Map<String, Object> spawn = map(root.get("spawn"));
@@ -170,10 +187,12 @@ public final class BotSummonConfig {
     private static final class Builder {
         boolean enabled = DEF_ENABLED;
         long moveTickMs = DEF_MOVE_TICK_MS;
-        int followOffsetX = DEF_FOLLOW_OFFSET_X;
-        int followOffsetY = DEF_FOLLOW_OFFSET_Y;
-        int circleRadius = DEF_CIRCLE_RADIUS;
-        double circleStepDeg = DEF_CIRCLE_STEP_DEG;
+        int hoverOffsetX = DEF_HOVER_OFFSET_X;
+        int hoverOffsetY = DEF_HOVER_OFFSET_Y;
+        double bobXAmplitude = DEF_BOB_X;
+        double bobYAmplitude = DEF_BOB_Y;
+        int followSpeedX = DEF_FOLLOW_SPEED_X;
+        int followSpeedY = DEF_FOLLOW_SPEED_Y;
         double snapDistance = DEF_SNAP_DISTANCE;
         double spawnChance = DEF_SPAWN_CHANCE;
         int minLevel = DEF_MIN_LEVEL;

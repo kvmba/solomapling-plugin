@@ -4,11 +4,8 @@ import org.gms.client.BuffStat;
 import org.gms.client.Character;
 import org.gms.client.Skill;
 import org.gms.client.SkillFactory;
-import org.gms.constants.skills.Beginner;
 import org.gms.constants.skills.Buccaneer;
 import org.gms.constants.skills.Corsair;
-import org.gms.constants.skills.Noblesse;
-import org.gms.constants.skills.Pirate;
 import org.gms.constants.skills.ThunderBreaker;
 import org.gms.net.server.Server;
 import org.gms.net.server.world.Party;
@@ -86,7 +83,25 @@ public final class BotBuffEffects {
         if (effect == null) return 0;
 
         broadcastAura(bot, skillId, effect);
+        // A 疾驰 / 伪装 aura is state-bound: the movement tick retires it once the bot stops walking or
+        // attacks. Let it know the aura is now up (no-op for every other buff).
+        BotAuraState.onAuraShown(bot, skillId);
 
+        return effect.getDuration();
+    }
+
+    /**
+     * Re-show ONLY the persistent aura for {@code skillId} - no cast animation, and no re-registration.
+     * Used when the movement tick re-arms a state-bound aura (疾驰 on the walk's rising edge). Returns
+     * the aura's WZ duration in ms (0 if the skill/effect can't be resolved).
+     */
+    public static int showAura(Character bot, int skillId) {
+        if (bot == null || bot.getMap() == null) return 0;
+        Skill skill = SkillFactory.getSkill(skillId);
+        if (skill == null) return 0;
+        StatEffect effect = skill.getEffect(skill.getMaxLevel());
+        if (effect == null) return 0;
+        broadcastAura(bot, skillId, effect);
         return effect.getDuration();
     }
 
@@ -142,10 +157,9 @@ public final class BotBuffEffects {
                 PacketCreator.giveForeignBuff(bot.getId(), statups), false);
     }
 
-    /** The host's own {@code isDash}: the 疾驰 speed/jump burst. */
+    /** The host's own {@code isDash}: the 疾驰 speed/jump burst (single source: {@link BotAuraState}). */
     private static boolean isDash(int skillId) {
-        return skillId == Pirate.DASH || skillId == ThunderBreaker.DASH
-                || skillId == Beginner.SPACE_DASH || skillId == Noblesse.SPACE_DASH;
+        return BotAuraState.isDash(skillId);
     }
 
     /**

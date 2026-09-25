@@ -26,7 +26,7 @@ import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
 
 /**
- * Drives every bot's summons: one shared tick that moves FOLLOW / CIRCLE summons the way the owning
+ * Drives every bot's summons: one shared tick that moves hovering summons the way the owning
  * client would, and lets attacking summons strike nearby mobs.
  *
  * <p><b>Why the server authors the movement.</b> A client only animates the summon it owns - the
@@ -35,7 +35,7 @@ import java.util.concurrent.TimeUnit;
  * client produces those frames and the host merely echoes them ({@code MoveSummonHandler}), but a
  * headless bot has no client to produce them, so without this class its summon would stand frozen
  * at its spawn point while the bot fought across the map. The plugin therefore plays the client's
- * part: every tick it computes the follow / orbit position and broadcasts a {@code MOVE_SUMMON}
+ * part: every tick it computes the hover slot and broadcasts a {@code MOVE_SUMMON}
  * frame carrying the client's own movement-fragment layout - the exact frame the host relays for a
  * real player, and the same technique the pet system already uses in-game. STATIONARY summons (the
  * pirate turrets) are never moved and get no movement frames at all: a placed cannon sits where it
@@ -136,9 +136,8 @@ public final class BotSummonFollower {
         BotSummon s = new BotSummon(botId, spec.skillId(), spec);
         s.summon = summon;
         s.map = map;
-        if (spec.move() == BotSummonTable.Move.CIRCLE) {
-            s.angleDeg = ThreadLocalRandom.current().nextDouble() * 360.0;
-        }
+        // Random phase so a bot's summons bob out of lockstep with each other.
+        s.phaseRad = ThreadLocalRandom.current().nextDouble() * Math.PI * 2.0;
         synchronized (LIFECYCLE_LOCK) {
             TRACKED.computeIfAbsent(botId, k -> new ArrayList<>()).add(s);
         }
@@ -289,8 +288,8 @@ public final class BotSummonFollower {
         }
         org.gms.server.maps.SummonMovementType moveType = switch (spec.move()) {
             case STATIONARY -> org.gms.server.maps.SummonMovementType.STATIONARY;
-            case CIRCLE -> org.gms.server.maps.SummonMovementType.CIRCLE_FOLLOW;
             case FOLLOW -> org.gms.server.maps.SummonMovementType.FOLLOW;
+            case CIRCLE_FOLLOW -> org.gms.server.maps.SummonMovementType.CIRCLE_FOLLOW;
         };
         Point pos = spawnPosition(bot, spec, map);
         Summon summon = new Summon(bot, skillId, pos, moveType);
@@ -312,10 +311,14 @@ public final class BotSummonFollower {
     }
 
     /*
-     * One movement step for a FOLLOW / CIRCLE summon. The entity is re-seated at the computed slot
-     * and - only when the map is observed - a MOVE_SUMMON frame carries the step to the clients.
-     * Unobserved, the same arithmetic still runs (no probe, no packet): the entity's position stays
-     * current so a player entering the map sees it at its proper slot instead of a stale spawn point.
+     * One movement step for a hovering summon. The entity glides toward its hover slot (a small offset
+     * beside the owner with a tiny sine bob) at a bounded speed - never warping - and - only when the
+     * map is observed - a MOVE_SUMMON frame carries the step to the clients. Unobserved, the same
+     * arithmetic still runs (no probe, no packet): the entity's position stays current so a player
+     * entering the map sees it at its proper slot instead of a stale spawn point.
+     *
+     * <p>This is the official look: a flying summon hovers just beside the owner and floats with a
+     * small bob, exactly like a pet - not a slow wide orbit around the owner.</p>
      */
     private static void moveSummon(Character bot, BotSummon s, BotSummonConfig cfg, boolean observed) {
         if (!shouldReposition(s.spec.isStationary())) {
@@ -326,13 +329,9 @@ public final class BotSummonFollower {
             return; // concurrently torn down by the bot's own lifecycle thread
         }
         Point cur = summon.getPosition();
-        Point target = targetFor(bot, s, cfg);
+        Point target = hoverTargetFor(bot, s, cfg);
         long tickMs = Math.max(100L, cfg.moveTickMs());
-        boolean snap = cur.distance(target) > cfg.snapDistance();
-        if (!snap && cur.distanceSq(target) < 1.0) {
-            return; // already at its slot - nothing worth a frame
-        }
-        if (snap) {
+        if (cur.distance(target) > cfg.snapDistance()) {
             // The owner just teleported (or the summon fell implausibly far behind): re-seat the
             // entity at its slot. One same-point frame carries it straight there instead of
             // streaking it across the map.
@@ -343,14 +342,22 @@ public final class BotSummonFollower {
             }
             return;
         }
-        int dx = target.x - cur.x;
-        int dy = target.y - cur.y;
-        int vx = clampVelocity(dx * 1000L / tickMs);
-        int vy = clampVelocity(dy * 1000L / tickMs);
-        summon.setPosition(new Point(target));
+        // Bounded glide: cap the per-tick travel so the summon eases into its slot instead of
+        // snapping (the bob is only a few px, so most ticks take the full step).
+        int maxDx = (int) Math.max(1, cfg.followSpeedX() * tickMs / 1000L);
+        int maxDy = (int) Math.max(1, cfg.followSpeedY() * tickMs / 1000L);
+        int stepX = clampDelta(target.x - cur.x, maxDx);
+        int stepY = clampDelta(target.y - cur.y, maxDy);
+        if (stepX == 0 && stepY == 0) {
+            return; // already at its slot - nothing worth a frame
+        }
+        Point next = new Point(cur.x + stepX, cur.y + stepY);
+        int vx = (int) (stepX * 1000L / tickMs);
+        int vy = (int) (stepY * 1000L / tickMs);
+        summon.setPosition(next);
         summon.setStance(ACTION_FLY);
         if (observed) {
-            BotSummonBroadcast.summonMove(bot, summon, cur, target, vx, vy, 0, ACTION_FLY, (int) tickMs);
+            BotSummonBroadcast.summonMove(bot, summon, cur, next, vx, vy, 0, ACTION_FLY, (int) tickMs);
         }
     }
 
@@ -363,31 +370,34 @@ public final class BotSummonFollower {
         return !stationary;
     }
 
-    private static int clampVelocity(long v) {
-        return (int) Math.max(-2000, Math.min(2000, v));
+    /** Clamp a signed delta to +/-{@code max} (the per-tick travel cap). */
+    private static int clampDelta(int delta, int max) {
+        return Math.max(-max, Math.min(max, delta));
     }
 
-    /** The slot this summon should occupy right now: an orbit point for CIRCLE, a hover for FOLLOW. */
-    private static Point targetFor(Character bot, BotSummon s, BotSummonConfig cfg) {
+    /** The hover slot this summon should occupy right now (owner-facing offset + sine bob). */
+    private static Point hoverTargetFor(Character bot, BotSummon s, BotSummonConfig cfg) {
         Point owner = bot.getPosition();
-        if (s.spec.move() == BotSummonTable.Move.CIRCLE) {
-            s.angleDeg += cfg.circleStepDeg();
-            return circleTarget(owner.x, owner.y, s.angleDeg, cfg.circleRadius());
-        }
         boolean facingLeft = CharacterStance.isFacingLeft(bot.getStance());
-        return followTarget(owner.x, owner.y, facingLeft, cfg.followOffsetX(), cfg.followOffsetY());
+        double elapsedSec = System.currentTimeMillis() / 1000.0;
+        return hoverTarget(owner.x, owner.y, facingLeft, cfg.hoverOffsetX(), cfg.hoverOffsetY(),
+                s.phaseRad, elapsedSec, cfg.bobXAmplitude(), cfg.bobYAmplitude());
     }
 
-    /** Pure seam for tests: the ring point at {@code angleDeg} around (ownerX, ownerY). */
-    static Point circleTarget(int ownerX, int ownerY, double angleDeg, int radius) {
-        double rad = Math.toRadians(angleDeg);
-        return new Point(ownerX + (int) Math.round(Math.cos(rad) * radius),
-                ownerY + (int) Math.round(Math.sin(rad) * radius));
-    }
-
-    /** Pure seam for tests: the FOLLOW slot in front of the owner's facing. */
-    static Point followTarget(int ownerX, int ownerY, boolean facingLeft, int offsetX, int offsetY) {
-        return new Point(ownerX + (facingLeft ? -offsetX : offsetX), ownerY + offsetY);
+    /**
+     * Pure seam for tests: the hover slot beside the owner - a facing-side offset (x) and a height
+     * (y, NEGATIVE = above, the same convention the config always used) plus a small sine bob
+     * (out of phase per summon, via {@code phaseRad} and wall-clock {@code elapsedSec}) so the float
+     * reads as alive.
+     */
+    static Point hoverTarget(int ownerX, int ownerY, boolean facingLeft, int offsetX, int offsetY,
+                             double phaseRad, double elapsedSec, double bobXAmplitude, double bobYAmplitude) {
+        double bobX = Math.sin(elapsedSec * 2.1 + phaseRad) * bobXAmplitude;
+        double bobY = Math.cos(elapsedSec * 3.3 + phaseRad * 0.5) * bobYAmplitude;
+        int dx = facingLeft ? -offsetX : offsetX;
+        return new Point(
+                ownerX + dx + (int) Math.round(bobX),
+                ownerY + offsetY + (int) Math.round(bobY));
     }
 
     private static void tryAttack(Character bot, BotSummon s, BotSummonConfig cfg) {

@@ -2,6 +2,11 @@ package soloMapling.ArtificialPlayer.BotSummonSystem;
 
 import org.junit.jupiter.api.Test;
 
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -50,15 +55,44 @@ class BotSummonTableTest {
     }
 
     @Test
-    void archerAndMageSummonsFollowAndAttack() {
-        assertTrue(BotSummonTable.forSkill(3111005).attacks() // Silver Hawk
-                && BotSummonTable.forSkill(3111005).move() == BotSummonTable.Move.CIRCLE);
-        assertTrue(BotSummonTable.forSkill(2121005).attacks() // Elquines
-                && BotSummonTable.forSkill(2121005).move() == BotSummonTable.Move.FOLLOW);
-        assertTrue(BotSummonTable.forSkill(2321003).attacks() // Bahamut
-                && BotSummonTable.forSkill(2321003).move() == BotSummonTable.Move.FOLLOW);
-        assertTrue(BotSummonTable.forSkill(1321007).move() == BotSummonTable.Move.FOLLOW
-                && !BotSummonTable.forSkill(1321007).attacks(), "the beholder supports, it does not attack");
+    void archerAndMageSummonsUseTheHostMoveBytes() {
+        // The wire byte must match the host's StatEffect.getSummonMovementType(): archers send
+        // CIRCLE_FOLLOW (3), the mage/beholder/bahamut line sends FOLLOW (1). The plugin authors the
+        // actual hover movement itself, so this only pins the parity byte.
+        assertEquals(BotSummonTable.Move.CIRCLE_FOLLOW, BotSummonTable.forSkill(3111005).move()); // Silver Hawk
+        assertEquals(BotSummonTable.Move.FOLLOW, BotSummonTable.forSkill(2121005).move());         // Elquines
+        assertEquals(BotSummonTable.Move.FOLLOW, BotSummonTable.forSkill(2321003).move());         // Bahamut
+        assertTrue(BotSummonTable.forSkill(3111005).attacks());
+        assertTrue(BotSummonTable.forSkill(2121005).attacks());
+        assertTrue(BotSummonTable.forSkill(2321003).attacks());
+        assertEquals(BotSummonTable.Move.FOLLOW, BotSummonTable.forSkill(1321007).move());         // Beholder
+        assertFalse(BotSummonTable.forSkill(1321007).attacks(), "the beholder supports, it does not attack");
+    }
+
+    @Test
+    void moveByteMatchesTheHostPredicate() throws IOException {
+        // The spawn nMoveAbility byte must stay identical to the host's own dispatch, or a bot's
+        // summon renders with the wrong initial action for an observer. Read both sides from source
+        // (the table cannot be compared to the host enum at runtime without a Spring context).
+        Path host = Paths.get("../GMS083/gms-server/src/main/java/org/gms/server/StatEffect.java");
+        if (!Files.isRegularFile(host)) {
+            return; // host checkout not adjacent; nothing to validate against
+        }
+        String src = Files.readString(host, StandardCharsets.UTF_8);
+        int at = src.indexOf("private SummonMovementType getSummonMovementType()");
+        assertTrue(at >= 0, "the host must still define getSummonMovementType()");
+        // A generous window covering the method (its two return groups + trailing return null).
+        String body = src.substring(at, Math.min(src.length(), at + 2500));
+
+        // Every bird/archer summon the plugin grades must be CIRCLE_FOLLOW in the host...
+        for (String bird : List.of("Ranger.SILVER_HAWK", "Sniper.GOLDEN_EAGLE",
+                "Bowmaster.PHOENIX", "Marksman.FROST_PREY", "Priest.SUMMON_DRAGON", "Outlaw.GAVIOTA")) {
+            assertTrue(body.contains(bird), "host must still special-case " + bird);
+        }
+        assertTrue(body.contains("SummonMovementType.CIRCLE_FOLLOW"),
+                "the host still sends CIRCLE_FOLLOW for the bird family");
+        assertTrue(body.contains("SummonMovementType.FOLLOW"),
+                "the host still sends FOLLOW for the mage/beholder family");
     }
 
     @Test

@@ -540,6 +540,7 @@ public class BotGeneration {
         // static maps forever (and a reused character id could inherit them).
         BotRecruitManager.clearHandoffs(fakechar.getId());
         BotBuffDriver.clearBot(fakechar.getId());   // Phase 3a: release buff recast timers
+        soloMapling.ArtificialPlayer.BotAttackSystem.BotAuraState.clearBot(fakechar.getId()); // release dash/disguise aura state
         BotBuffRequestHandler.clearBot(fakechar.getId());   // release chat-buff-request cooldown
         soloMapling.ArtificialPlayer.BotAttackSystem.BotEnergyCharge.clearBot(fakechar.getId()); // release energy-charge state
         soloMapling.ArtificialPlayer.BotStatusSystem.BotDebuffApplier.clearBot(fakechar.getId()); // release debuff cooldowns

@@ -82,6 +82,12 @@ public final class BotBuffDriver {
 
         int cast = 0;
         for (int skillId : buffIds) {
+            if (BotAuraState.isDash(skillId)) {
+                // 疾驰 is state-bound (only valid while WALKING) and the movement tick shows/cancels it
+                // for the bot, so the periodic sweep must never fire it - a cast from a stand would
+                // otherwise linger until the next movement tick retired it.
+                continue;
+            }
             if (!force && now < timers.getOrDefault(skillId, 0L)) {
                 continue; // not due yet
             }
