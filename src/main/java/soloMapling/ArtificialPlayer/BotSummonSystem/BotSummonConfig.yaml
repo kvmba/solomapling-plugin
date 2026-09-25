@@ -20,13 +20,15 @@ spawn:
   min_level: 70      # below this no summon is granted (matches 3rd-job summons)
 
 # Server-driven movement for hovering summons (STATIONARY summons ignore this).
-# A flying summon floats at a small offset in front of the owner's facing with a
-# tiny sine bob and glides toward that slot at a bounded speed - the official look,
-# the same "small float beside the owner" a pet has.
+# A flying summon follows its owner the way a PET does: it holds a stable ring
+# distance BEHIND the owner (the pet system's own 23..60px comfort ring, per
+# summon, never re-rolled) and only swaps sides when the owner walks past it -
+# so a turn in place never drags it around. The bird rides higher than a pet
+# flies (offset_y below) and carries a tiny sine bob; it glides toward that slot
+# at a bounded speed, never warping. It always FACES the way its owner faces.
 move:
   tick_ms: 300          # frame period: one MOVE_SUMMON per summon per tick
-  offset_x: 60          # hover this far in front of the owner's facing
-  offset_y: -65         # ...and this far above the owner (negative = up)
+  offset_y: -65         # ride this far above the owner (negative = up)
   bob_x: 14             # horizontal bob amplitude (px)
   bob_y: 8              # vertical bob amplitude (px)
   follow_speed_x: 260   # bounded glide speed toward the slot (px/s)

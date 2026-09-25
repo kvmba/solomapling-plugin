@@ -35,7 +35,7 @@ import java.util.concurrent.TimeUnit;
  * client produces those frames and the host merely echoes them ({@code MoveSummonHandler}), but a
  * headless bot has no client to produce them, so without this class its summon would stand frozen
  * at its spawn point while the bot fought across the map. The plugin therefore plays the client's
- * part: every tick it computes the hover slot and broadcasts a {@code MOVE_SUMMON}
+ * part: every tick it computes the follow slot and broadcasts a {@code MOVE_SUMMON}
  * frame carrying the client's own movement-fragment layout - the exact frame the host relays for a
  * real player, and the same technique the pet system already uses in-game. STATIONARY summons (the
  * pirate turrets) are never moved and get no movement frames at all: a placed cannon sits where it
@@ -55,14 +55,50 @@ public final class BotSummonFollower {
 
     private static final Logger log = LoggerFactory.getLogger(BotSummonFollower.class);
 
-    // CSummoned action bytes carried by the spawn packet's nMoveAction and by every move fragment
-    // (the same-lineage kinoko SummonedActionType: STAND 0, MOVE 1, FLY 2, ...). Every summon the
-    // follower moves is a flyer (hawk / dragon / elemental / bahamut / beholder), so a move frame
-    // carries FLY. Cosmetic only - position travels in the fragment independently of this byte -
-    // and 2 also sits in the "locomotion" range if a client packed the byte as (action << 1 |
-    // facing) like mobs and pets do, so a packing mismatch cannot render an attack pose; if an
-    // in-game check ever shows a wrong animation, this one constant is the thing to change.
-    private static final int ACTION_FLY = 2;
+    // CSummoned action bytes carried by the spawn packet's nMoveAction and by every move fragment.
+    // The action table itself is the kinoko SummonedActionType (STAND 0, MOVE 1, FLY 2, ...), but
+    // the BYTE is packed like every other Life's moveAction (kinoko Life.isLeft, the pet frames'
+    // even/odd table): bit 0 = the FACING (0 right, 1 left), the action sits in the high bits. The
+    // v83 client reads this bit to mirror the sprite, so the follower packs
+    // flyAction(facingLeft) = ACTION_FLY_BASE | facing for every summon it moves or spawns; without
+    // it the client renders a plain 2 and the bird faces right forever, whatever the owner does.
+    private static final int ACTION_FLY_BASE = 2;
+    private static final int ACTION_STAND_BASE = 0;
+
+    /** The spawn/move nMoveAction byte for a flyer facing {@code left}: FLY with the facing bit. */
+    static int flyAction(boolean left) {
+        return ACTION_FLY_BASE | (left ? 1 : 0);
+    }
+
+    /**
+     * The spawn nMoveAction byte for a grounded summon facing {@code left}: STAND with the facing
+     * bit (a turret is placed, and a placed cannon should at least look at its owner).
+     */
+    static int standAction(boolean left) {
+        return ACTION_STAND_BASE | (left ? 1 : 0);
+    }
+
+    // ── The follow (the pet's own leash, lifted into the air) ─────────────────
+    // Like BotPetFollower, the summon holds a STABLE follow distance rather than tracking the
+    // owner's facing: it rides BEHIND the owner at the pet's own comfort distance
+    // (FOLLOW_MIN_PX..FOLLOW_MAX_PX), "behind" meaning its own side of the owner, so the owner
+    // walking past its column is what swaps the sides - a turn in place never moves the summon at
+    // all (that was the reported 转身拉扯). Higher than a pet (it flies, the official bird rides
+    // above the owner's head), with the same small sine bob. The values mirror BotPetFollower's
+    // (private there; the two systems are deliberately decoupled), so a summon and a pet trail
+    // their owner the same way.
+
+    /** Follow distance floor (px) - the pet's own comfort ring, held stable per summon. */
+    static final int FOLLOW_MIN_PX = 23;
+    /** Follow distance cap (px) - the pet's own comfort ring, held stable per summon. */
+    static final int FOLLOW_MAX_PX = 60;
+    /** Idle jitter dead zone (px): slot moves inside this are ignored, exactly like the pet's. */
+    static final int FOLLOW_DEAD_ZONE_PX = 15;
+
+    /** A fresh follow distance (px) in [{@code FOLLOW_MIN_PX}, {@code FOLLOW_MAX_PX}]. */
+    static int freshFollowDistancePx() {
+        return FOLLOW_MIN_PX + ThreadLocalRandom.current().nextInt(FOLLOW_MAX_PX - FOLLOW_MIN_PX + 1);
+    }
 
     // botId -> that bot's live summons.
     private static final Map<Integer, List<BotSummon>> TRACKED = new ConcurrentHashMap<>();
@@ -136,8 +172,10 @@ public final class BotSummonFollower {
         BotSummon s = new BotSummon(botId, spec.skillId(), spec);
         s.summon = summon;
         s.map = map;
-        // Random phase so a bot's summons bob out of lockstep with each other.
+        // Random phase so a bot's summons bob out of lockstep with each other, and a random
+        // comfort distance so each holds its own spot on the pet's follow ring.
         s.phaseRad = ThreadLocalRandom.current().nextDouble() * Math.PI * 2.0;
+        s.followDistancePx = freshFollowDistancePx();
         synchronized (LIFECYCLE_LOCK) {
             TRACKED.computeIfAbsent(botId, k -> new ArrayList<>()).add(s);
         }
@@ -291,19 +329,27 @@ public final class BotSummonFollower {
             case FOLLOW -> org.gms.server.maps.SummonMovementType.FOLLOW;
             case CIRCLE_FOLLOW -> org.gms.server.maps.SummonMovementType.CIRCLE_FOLLOW;
         };
+        boolean left = CharacterStance.isFacingLeft(bot.getStance());
         Point pos = spawnPosition(bot, spec, map);
         Summon summon = new Summon(bot, skillId, pos, moveType);
-        summon.setStance(0); // nMoveAction STAND; a moving summon is switched to FLY by its first frame
+        // nMoveAction with the facing bit: the client mirrors the sprite from bit 0, so a bird
+        // spawned beside a left-facing owner must spawn facing left too (it was stamped 0 - right -
+        // regardless of the owner, which is what the "always faces right" report showed).
+        summon.setStance(spec.isStationary() ? standAction(left) : flyAction(left));
         map.spawnSummon(summon);
         return summon;
     }
 
-    /** Where the entity appears: at the owner's side for a flyer, on the ground for a turret. */
+    /** Where the entity appears: trailing the owner for a flyer, on the ground for a turret. */
     private static Point spawnPosition(Character bot, BotSummonTable.Spec spec, MapleMap map) {
         Point owner = bot.getPosition();
         if (!spec.isStationary()) {
-            // A flyer materialises at the owner's side; the movement tick glides it to its slot.
-            return new Point(owner.x, owner.y);
+            // A flyer materialises BEHIND the owner at its follow ring (the same slot the
+            // follower's tick will hold it at), high above as the official bird rides.
+            boolean facingLeft = CharacterStance.isFacingLeft(bot.getStance());
+            int dist = freshFollowDistancePx();
+            int x = facingLeft ? owner.x + dist : owner.x - dist;
+            return new Point(x, owner.y + config.hoverOffsetY());
         }
         Foothold ground = GCMovement.footholdBelow(map, owner.x, owner.y);
         int y = ground != null ? ground.calculateFooting(owner.x) : owner.y;
@@ -311,14 +357,21 @@ public final class BotSummonFollower {
     }
 
     /*
-     * One movement step for a hovering summon. The entity glides toward its hover slot (a small offset
-     * beside the owner with a tiny sine bob) at a bounded speed - never warping - and - only when the
-     * map is observed - a MOVE_SUMMON frame carries the step to the clients. Unobserved, the same
+     * One movement step for a hovering summon. The entity glides toward its follow slot - the pet's
+     * own leash lifted into the air - at a bounded speed, never warping, and - only when the map is
+     * observed - a MOVE_SUMMON frame carries the step to the clients. Unobserved, the same
      * arithmetic still runs (no probe, no packet): the entity's position stays current so a player
      * entering the map sees it at its proper slot instead of a stale spawn point.
      *
-     * <p>This is the official look: a flying summon hovers just beside the owner and floats with a
-     * small bob, exactly like a pet - not a slow wide orbit around the owner.</p>
+     * <p>The follow is the PET's model ({@code BotPetFollower.followTargetX}), not a facing mirror:
+     * the slot sits BEHIND the owner at a stable per-summon distance, and "behind" is defined by the
+     * summon's own side of the owner (the sign of summon.x - owner.x). The owner crossing the
+     * summon's column is what swaps the sides - so a TURN IN PLACE never moves the summon at all
+     * (the swapped-side slot lands inside the pet's own dead zone even when it did), and the summon
+     * only drifts around behind once the owner actually walks past it, gliding at its bounded speed
+     * so the swap reads as the bird wheeling around, never a yank. The facing still matters: the
+     * summon flies the way its OWNER faces (the wire action bit), so it turns when the bot turns
+     * without moving for it.</p>
      */
     private static void moveSummon(Character bot, BotSummon s, BotSummonConfig cfg, boolean observed) {
         if (!shouldReposition(s.spec.isStationary())) {
@@ -329,19 +382,44 @@ public final class BotSummonFollower {
             return; // concurrently torn down by the bot's own lifecycle thread
         }
         Point cur = summon.getPosition();
-        Point target = hoverTargetFor(bot, s, cfg);
+        Point owner = bot.getPosition();
+        boolean facingLeft = CharacterStance.isFacingLeft(bot.getStance());
         long tickMs = Math.max(100L, cfg.moveTickMs());
-        if (cur.distance(target) > cfg.snapDistance()) {
+        double elapsedSec = System.currentTimeMillis() / 1000.0;
+        // The bob-free slot is what the dead zone and the re-seat threshold judge (judging the
+        // bobbed point would ping-pong the summon between the bob's extremes); the bob rides the
+        // glide target, so it shows while the summon is actually moving.
+        Point base = followTarget(owner.x, owner.y, cur.x, s.followDistancePx, cfg.hoverOffsetY(),
+                s.phaseRad, elapsedSec, 0.0, 0.0);
+        if (cur.distance(base) > cfg.snapDistance()) {
             // The owner just teleported (or the summon fell implausibly far behind): re-seat the
             // entity at its slot. One same-point frame carries it straight there instead of
             // streaking it across the map.
-            summon.setPosition(new Point(target));
-            summon.setStance(ACTION_FLY);
+            summon.setPosition(base);
+            summon.setStance(flyAction(facingLeft));
             if (observed) {
-                BotSummonBroadcast.summonMove(bot, summon, target, target, 0, 0, 0, ACTION_FLY, (int) tickMs);
+                BotSummonBroadcast.summonMove(bot, summon, base, base, 0, 0, 0,
+                        flyAction(facingLeft), (int) tickMs);
             }
             return;
         }
+        if (!CharacterStance.isWalking(bot.getStance())
+                && Math.abs(base.x - cur.x) < FOLLOW_DEAD_ZONE_PX
+                && Math.abs(base.y - cur.y) < FOLLOW_DEAD_ZONE_PX) {
+            // Inside the pet's dead zone with the owner not walking: hold position, but keep the
+            // facing fresh - the owner may have turned in place, and the summon must turn with
+            // them WITHOUT moving (that was the reported "转身拉扯").
+            if (CharacterStance.isFacingLeft(summon.getStance()) != facingLeft) {
+                summon.setStance(flyAction(facingLeft));
+                if (observed) {
+                    BotSummonBroadcast.summonMove(bot, summon, cur, cur, 0, 0, 0,
+                            flyAction(facingLeft), (int) tickMs);
+                }
+            }
+            return;
+        }
+        Point target = followTarget(owner.x, owner.y, cur.x, s.followDistancePx, cfg.hoverOffsetY(),
+                s.phaseRad, elapsedSec, cfg.bobXAmplitude(), cfg.bobYAmplitude());
         // Bounded glide: cap the per-tick travel so the summon eases into its slot instead of
         // snapping (the bob is only a few px, so most ticks take the full step).
         int maxDx = (int) Math.max(1, cfg.followSpeedX() * tickMs / 1000L);
@@ -349,15 +427,15 @@ public final class BotSummonFollower {
         int stepX = clampDelta(target.x - cur.x, maxDx);
         int stepY = clampDelta(target.y - cur.y, maxDy);
         if (stepX == 0 && stepY == 0) {
-            return; // already at its slot - nothing worth a frame
+            return; // too far out to be inside the dead zone but capped to no motion this tick
         }
         Point next = new Point(cur.x + stepX, cur.y + stepY);
         int vx = (int) (stepX * 1000L / tickMs);
         int vy = (int) (stepY * 1000L / tickMs);
         summon.setPosition(next);
-        summon.setStance(ACTION_FLY);
+        summon.setStance(flyAction(facingLeft));
         if (observed) {
-            BotSummonBroadcast.summonMove(bot, summon, cur, next, vx, vy, 0, ACTION_FLY, (int) tickMs);
+            BotSummonBroadcast.summonMove(bot, summon, cur, next, vx, vy, 0, flyAction(facingLeft), (int) tickMs);
         }
     }
 
@@ -375,29 +453,31 @@ public final class BotSummonFollower {
         return Math.max(-max, Math.min(max, delta));
     }
 
-    /** The hover slot this summon should occupy right now (owner-facing offset + sine bob). */
-    private static Point hoverTargetFor(Character bot, BotSummon s, BotSummonConfig cfg) {
-        Point owner = bot.getPosition();
-        boolean facingLeft = CharacterStance.isFacingLeft(bot.getStance());
-        double elapsedSec = System.currentTimeMillis() / 1000.0;
-        return hoverTarget(owner.x, owner.y, facingLeft, cfg.hoverOffsetX(), cfg.hoverOffsetY(),
-                s.phaseRad, elapsedSec, cfg.bobXAmplitude(), cfg.bobYAmplitude());
-    }
-
     /**
-     * Pure seam for tests: the hover slot beside the owner - a facing-side offset (x) and a height
-     * (y, NEGATIVE = above, the same convention the config always used) plus a small sine bob
-     * (out of phase per summon, via {@code phaseRad} and wall-clock {@code elapsedSec}) so the float
-     * reads as alive.
+     * Pure seam for tests: the pet's own follow ring, in the air. {@code summonX} is only read for
+     * its SIGN against {@code ownerX} - the summon's own side of the owner, exactly
+     * {@code BotPetFollower.followTargetX}: inside the leash the summon holds where it is (a turn
+     * in place can never move it), outside it is pulled to its own-side ring at the stable
+     * distance, so an owner walking past is what swaps the sides. {@code offsetY} is the height
+     * (NEGATIVE = above, the same convention the config always used); the bob perturbs both axes.
      */
-    static Point hoverTarget(int ownerX, int ownerY, boolean facingLeft, int offsetX, int offsetY,
-                             double phaseRad, double elapsedSec, double bobXAmplitude, double bobYAmplitude) {
+    static Point followTarget(int ownerX, int ownerY, int summonX, int followDistancePx, int offsetY,
+                              double phaseRad, double elapsedSec, double bobXAmplitude, double bobYAmplitude) {
         double bobX = Math.sin(elapsedSec * 2.1 + phaseRad) * bobXAmplitude;
         double bobY = Math.cos(elapsedSec * 3.3 + phaseRad * 0.5) * bobYAmplitude;
-        int dx = facingLeft ? -offsetX : offsetX;
         return new Point(
-                ownerX + dx + (int) Math.round(bobX),
+                followTargetX(ownerX, summonX, followDistancePx) + (int) Math.round(bobX),
                 ownerY + offsetY + (int) Math.round(bobY));
+    }
+
+    /** The pet's own leash rule ({@code BotPetFollower.followTargetX}), verbatim. */
+    static int followTargetX(int ownerX, int summonX, int comfort) {
+        int delta = summonX - ownerX;
+        if (Math.abs(delta) <= comfort) {
+            return summonX; // inside the leash: nothing pulls the summon - it holds where it is
+        }
+        int side = delta > 0 ? 1 : -1; // the summon's own side, so it is never sent past the owner
+        return ownerX + side * comfort;
     }
 
     private static void tryAttack(Character bot, BotSummon s, BotSummonConfig cfg) {
