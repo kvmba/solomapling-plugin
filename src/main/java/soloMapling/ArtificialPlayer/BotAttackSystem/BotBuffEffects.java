@@ -109,24 +109,25 @@ public final class BotBuffEffects {
      * Broadcast the bot's persistent aura for {@code skillId} with the layout the v83 client
      * actually parses for that buff.
      *
-     * <p><b>Why one layout is not enough.</b> The host's own {@code StatEffect.applyTo} does NOT
-     * send every buff through the generic {@code giveForeignBuff}: three skill families carry
-     * extended foreign frames that the client decodes with extra fields, and using the short
-     * generic frame for them makes the client read past the end of the packet (the crashed
-     * "数据过短" symptom). The host switches on exactly these three:</p>
-     * <ul>
-     *   <li>{@code isDash()} — pirate 疾驰 (5001005 / 15001003 / 1014 / 1001015) →
-     *       {@code giveForeignPirateBuff} (per-stat int + skill id + skip + duration),</li>
-     *   <li>{@code isInfusion()} — 极速领域 (5121009 / 15111005, and 5221010 which the host
-     *       lists under the misleading constant name {@code Corsair.HEROS_WILL}) →
-     *       {@code giveForeignPirateBuff},</li>
-     *   <li>{@code isWkCharge()} — the {@code WK_CHARGE} 元素剑 family (烈焰/寒冰/雷电/圣灵之剑)
-     *       → {@code giveForeignWKChargeEffect}.</li>
-     * </ul>
+     * <p><b>Why the dash / infusion families do NOT use the host's pirate frame.</b> The host's
+     * {@code giveForeignPirateBuff} layout was reverse-engineered from a later (v92+) client: its
+     * buff mask sets {@code DASH2}/{@code DASH}/{@code SPEED_INFUSION}, whose bits land on
+     * GIVE_FOREIGN_BUFF mask positions the BeiDou v83 client has NO decode branch for (verified in
+     * IDA: the client's {@code DecodeStat} switch only recognises 31 fixed mask bits, and those
+     * three land outside). A v83 client therefore consumes the header, reads ZERO stat fields, and
+     * leaves the whole pirate body in its receive buffer - the aura silently fails to show, and the
+     * stale bytes desynchronise any strict frame parsing downstream.</p>
      *
-     * <p>Mirroring the host's dispatch here keeps a bot's buff visually identical to a player's.
-     * Everything else keeps the generic frame (the shape the host sends for Maple Warrior,
-     * Stance, Sharp Eyes, ...).</p>
+     * <p>The v83 client does decode the generic {@code giveForeignBuff} frame, and its mask branch
+     * table DOES contain {@code SPEED} and {@code JUMP} (4-byte int fields each). 疾驰 and 极速领域
+     * are movement-speed bursts, so remapping their statups onto {@code SPEED}/{@code JUMP} renders
+     * the same speed/jump aura the v83 client expects, through a layout it fully consumes.</p>
+     *
+     * <p>Everything else keeps the generic frame (the shape the host sends for Maple Warrior,
+     * Stance, Sharp Eyes, ...). The {@code WK_CHARGE} family stays on the host's
+     * {@code giveForeignWKChargeEffect} frame: v83 decodes that charge position differently from
+     * the generic frame too, and the host frame at least keeps charge consistent between a bot and
+     * a real player.</p>
      */
     private static void broadcastAura(Character bot, int skillId, StatEffect effect) {
         broadcastAura(bot, skillId, effect, effect.getDuration());
@@ -134,18 +135,42 @@ public final class BotBuffEffects {
 
     /**
      * As {@link #broadcastAura(Character, int, StatEffect)} but with the length the caller is
-     * actually applying (a GM-granted buff may be longer than the WZ duration). Only the pirate
-     * frame carries a duration; it is in seconds, as the host's own {@code applyTo} writes it.
+     * actually applying (a GM-granted buff may be longer than the WZ duration).
+     *
+     * <p>The length is only consumed by the dash remap path today: the v83 generic frame carries no
+     * duration field, so a remapped aura's real expiry is governed by the caller's re-show cadence.</p>
      */
     private static void broadcastAura(Character bot, int skillId, StatEffect effect, int durationMs) {
         List<Pair<BuffStat, Integer>> statups = effect.getStatups();
         if (statups.isEmpty()) {
             return;
         }
-        if (isDash(skillId) || isInfusion(skillId)) {
-            int seconds = Math.max(1, durationMs / 1000); // pirate frames carry seconds
+        if (isDash(skillId)) {
+            // Remap the pirate burst onto the v83-decodable SPEED/JUMP positions, preserving the
+            // WZ values (statup order in StatEffect is (DASH2=speed, DASH=jump)).
+            List<Pair<BuffStat, Integer>> remapped = new ArrayList<>();
+            for (Pair<BuffStat, Integer> statup : statups) {
+                BuffStat left = statup.getLeft();
+                if (left == BuffStat.DASH2) {
+                    remapped.add(new Pair<>(BuffStat.SPEED, statup.getRight()));
+                } else if (left == BuffStat.DASH) {
+                    remapped.add(new Pair<>(BuffStat.JUMP, statup.getRight()));
+                }
+            }
+            if (!remapped.isEmpty()) {
+                bot.getMap().broadcastMessage(bot,
+                        PacketCreator.giveForeignBuff(bot.getId(), remapped), false);
+            }
+            return;
+        }
+        if (isInfusion(skillId)) {
+            // Same reasoning: 极速领域 is a speed aura; carry its value on the SPEED position.
+            List<Pair<BuffStat, Integer>> remapped = new ArrayList<>();
+            for (Pair<BuffStat, Integer> statup : statups) {
+                remapped.add(new Pair<>(BuffStat.SPEED, statup.getRight()));
+            }
             bot.getMap().broadcastMessage(bot,
-                    PacketCreator.giveForeignPirateBuff(bot.getId(), skillId, seconds, statups), false);
+                    PacketCreator.giveForeignBuff(bot.getId(), remapped), false);
             return;
         }
         if (isWkCharge(statups)) {

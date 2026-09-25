@@ -31,7 +31,10 @@ import java.util.concurrent.ConcurrentHashMap;
  *       instant the stance stops being a walk (Stand / Jump / Swim / Rope / Ladder). The bot's kit is
  *       resolved from its job's buff registry ({@link BotBuffConfig}) once and cached, so a bot with a
  *       疾驰 is recognised even before it ever casts one, and {@link BotBuffDriver} skips 疾驰 in its
- *       periodic sweep so the aura never lingers from a macro cast.</li>
+ *       periodic sweep so the aura never lingers from a macro cast.
+ *       <br>Show/cancel packet note: the show frame carries the burst on the v83-decodable
+ *       SPEED/JUMP mask positions (the host's DASH2/DASH bits are undecodable by a v83 client -
+ *       see {@link BotBuffEffects#broadcastAura}), and this class's cancel mask mirrors that.</li>
  *   <li><b>Pirate 橡木伪装 (OAK_BARREL, 5101007).</b> A hide morph. In the official client the attack
  *       key's handler cancels it before doing anything else ({@code if (IsHideMorphed())
  *       SendSkillCancelRequest(BRAWLER_OAK_BARREL)}), and taking a 骑宠 mount clears it. A bot has no
@@ -50,8 +53,14 @@ import java.util.concurrent.ConcurrentHashMap;
  */
 public final class BotAuraState {
 
-    /** The wire statups of a 疾驰 aura, in the host's own DASH2+DASH order (the cancel mask needs both). */
-    private static final List<BuffStat> DASH_STATS = List.of(BuffStat.DASH2, BuffStat.DASH);
+    /**
+     * The wire statups of a 疾驰 aura's CANCEL frame. This must list exactly the positions the SHOW
+     * frame's mask set: {@link BotBuffEffects} remaps the 疾驰 burst onto the v83-decodable
+     * SPEED/JUMP positions (the host's DASH2/DASH mask bits land on positions the v83 client has no
+     * decode branch for), so the cancel mask has to use the same remapped stats or the client would
+     * never clear the aura.
+     */
+    private static final List<BuffStat> DASH_STATS = List.of(BuffStat.SPEED, BuffStat.JUMP);
     /** The wire statup of any skill morph (MORPH). */
     private static final List<BuffStat> MORPH_STATS = List.of(BuffStat.MORPH);
 
