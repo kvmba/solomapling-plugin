@@ -4,9 +4,9 @@
 #
 # A bot summon is a real host Summon entity. A client animates only the summon it
 # owns (the local player's own), so a bot's summon is moved by the SERVER: this
-# plugin spells out follow/orbit positions and broadcasts MOVE_SUMMON frames the
-# way the client itself would (mirroring the pet system). STATIONARY summons
-# (pirate turrets) are spawned in place and never moved.
+# plugin spells out the hover slot and broadcasts MOVE_SUMMON frames the way the
+# client itself would (mirroring the pet system). STATIONARY summons (pirate
+# turrets) are spawned in place and never moved.
 # =============================================================================
 
 enabled: true
@@ -19,14 +19,19 @@ spawn:
   chance: 0.55       # P(a summon appears) when the bot is eligible
   min_level: 70      # below this no summon is granted (matches 3rd-job summons)
 
-# Server-driven movement for FOLLOW / CIRCLE summons (STATIONARY summons ignore this).
+# Server-driven movement for hovering summons (STATIONARY summons ignore this).
+# A flying summon floats at a small offset in front of the owner's facing with a
+# tiny sine bob and glides toward that slot at a bounded speed - the official look,
+# the same "small float beside the owner" a pet has.
 move:
-  tick_ms: 300        # frame period: one MOVE_SUMMON per summon per tick
-  offset_x: 55        # a FOLLOW summon hovers this far in front of the owner's facing
-  offset_y: -12       # ...and this far above the ground
-  circle_radius: 70   # a CIRCLE summon orbits the owner on this ring (px)
-  circle_step_deg: 6  # degrees advanced per tick (a slow glide around the owner)
-  snap_distance: 900  # owner teleported? place the summon straight at its slot instead of creeping
+  tick_ms: 300          # frame period: one MOVE_SUMMON per summon per tick
+  offset_x: 60          # hover this far in front of the owner's facing
+  offset_y: -65         # ...and this far above the owner (negative = up)
+  bob_x: 14             # horizontal bob amplitude (px)
+  bob_y: 8              # vertical bob amplitude (px)
+  follow_speed_x: 260   # bounded glide speed toward the slot (px/s)
+  follow_speed_y: 300
+  snap_distance: 900    # owner teleported? place the summon straight at its slot instead of creeping
 
 # Attacking summons (turret / hawk / elemental / dragon / bahamut).
 attack:

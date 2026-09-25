@@ -35,6 +35,10 @@ class BotBuffEffectsLayoutTest {
 
     private static final Path EFFECTS = Paths.get(
             "src/main/java/soloMapling/ArtificialPlayer/BotAttackSystem/BotBuffEffects.java");
+    // The dash / disguise skill-id sets live with their cancel rules in BotAuraState (BotBuffEffects
+    // delegates isDash to it), so a host-side id change must be caught across BOTH files.
+    private static final Path AURA = Paths.get(
+            "src/main/java/soloMapling/ArtificialPlayer/BotAttackSystem/BotAuraState.java");
     private static final Path HOST_STATEFFECT = Paths.get(
             "../GMS083/gms-server/src/main/java/org/gms/server/StatEffect.java");
 
@@ -67,7 +71,7 @@ class BotBuffEffectsLayoutTest {
             return; // host checkout not adjacent; nothing to validate against
         }
         String host = Files.readString(HOST_STATEFFECT, StandardCharsets.UTF_8);
-        String plugin = code(read(EFFECTS));
+        String plugin = code(read(EFFECTS)) + "\n" + code(read(AURA));
 
         List<String> missing = new ArrayList<>();
         for (String family : List.of("isDash", "isInfusion")) {
@@ -78,7 +82,7 @@ class BotBuffEffectsLayoutTest {
             }
         }
         assertTrue(missing.isEmpty(),
-                "BotBuffEffects must dispatch every skill the host special-cases: " + missing);
+                "BotBuffEffects/BotAuraState must dispatch every skill the host special-cases: " + missing);
     }
 
     /**

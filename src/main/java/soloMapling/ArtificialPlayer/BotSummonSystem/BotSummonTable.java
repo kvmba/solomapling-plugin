@@ -23,14 +23,18 @@ import java.util.Map;
  * drives the summon it owns (the local player's own); every other summon, a bot's included, is
  * rendered by observers purely from the MOVE_SUMMON frames the server relays - and a bot has no
  * client to produce them, so BotSummonFollower authors the movement itself (see that class). So
- * the only per-skill choices here are (a) how the server positions it - FOLLOW hovers it, CIRCLE
- * orbits it, STATIONARY places it once - and (b) whether it attacks. Damage is NOT a property
+ * the per-skill choices here are (a) the spawn movementType byte - which mirrors the host exactly -
+ * and (b) whether it attacks. The ACTUAL movement (a small hover-bob beside the owner) is authored
+ * by the follower for every non-stationary summon, so the byte no longer selects an orbit vs a
+ * hover. Damage is NOT a property
  * here: like every other bot hit it comes from the bot's job tier + level via BotDamageModel.
  *
  * Movement kind mirrors the host's own StatEffect.getSummonMovementType() (the SUMMON statup) so
  * the spawn packet carries the same movementType a real client would. A STATIONARY entry (octopus
  * turret) is sent movementType 0 and is never repositioned: a placed cannon sits where it was
- * placed, which is exactly what that movementType promises.
+ * placed, which is exactly what that movementType promises. The rest send the host's own byte -
+ * 3 (CIRCLE_FOLLOW) for the archer birds / dragon, 1 (FOLLOW) for the mage elementals / bahamut /
+ * beholder.
  *
  * Deliberately NOT registered: the archer Puppet (3111002/3211002). Its only function is to pull mob
  * aggro, and the host gates that on the PUPPET buff stat (Monster.isCharacterPuppetInVicinity reads
@@ -43,14 +47,24 @@ import java.util.Map;
  */
 public final class BotSummonTable {
 
-    /** How the server holds the summon. Sent as the spawn packet's movementType. */
+    /**
+     * How the server holds the summon. This names the spawn packet's {@code nMoveAbility} byte, and
+     * is kept IDENTICAL to the host's own {@code StatEffect.getSummonMovementType()} so a bot's
+     * summon carries the same byte a real player's would (the client reads it for its initial-action
+     * fallback, so a mismatch is a parity break, not decoration).
+     *
+     * <p>Note this is the WIRE byte, not the movement the plugin authors: the follower moves every
+     * non-stationary summon with the same small hover-bob beside the owner (see
+     * {@link BotSummonFollower}), so {@code FOLLOW} and {@code CIRCLE_FOLLOW} differ only in the byte
+     * they send.</p>
+     */
     public enum Move {
         /** Placed where cast and held there (octopus turret). movementType 0, never repositioned. */
         STATIONARY,
-        /** Hovers near a fixed offset from the owner (mage/beholder/dragon summons). */
+        /** movementType 1 - the host's value for the mage elementals / bahamut / beholder. */
         FOLLOW,
-        /** Orbits the owner on a slow ring (archer hawks/eagles). */
-        CIRCLE
+        /** movementType 3 - the host's value for the archer birds (hawk / eagle / phoenix / dragon). */
+        CIRCLE_FOLLOW
     }
 
     /**
@@ -75,19 +89,19 @@ public final class BotSummonTable {
     private static final Map<Integer, Spec> BY_SKILL = new LinkedHashMap<>();
 
     static {
-        // ---- Archer (orbit, attacking) ----
-        add(Ranger.SILVER_HAWK, Move.CIRCLE, true, 1);      // 3111005
-        add(Sniper.GOLDEN_EAGLE, Move.CIRCLE, true, 1);     // 3211005
-        add(Bowmaster.PHOENIX, Move.CIRCLE, true, 1);       // 3121006
-        add(Marksman.FROST_PREY, Move.CIRCLE, true, 1);     // 3221005
+        // ---- Archer birds (host byte: CIRCLE_FOLLOW) ----
+        add(Ranger.SILVER_HAWK, Move.CIRCLE_FOLLOW, true, 1);   // 3111005
+        add(Sniper.GOLDEN_EAGLE, Move.CIRCLE_FOLLOW, true, 1);  // 3211005
+        add(Bowmaster.PHOENIX, Move.CIRCLE_FOLLOW, true, 1);    // 3121006
+        add(Marksman.FROST_PREY, Move.CIRCLE_FOLLOW, true, 1);  // 3221005
 
-        // ---- Magician (follow, attacking) ----
+        // ---- Magician (host byte: FOLLOW) ----
         add(FPArchMage.ELQUINES, Move.FOLLOW, true, 1);     // 2121005
         add(ILArchMage.IFRIT, Move.FOLLOW, true, 1);        // 2221005
 
         // ---- Priest / Bishop ----
-        add(Priest.SUMMON_DRAGON, Move.CIRCLE, true, 1);    // 2311006
-        add(Bishop.BAHAMUT, Move.FOLLOW, true, 1);          // 2321003
+        add(Priest.SUMMON_DRAGON, Move.CIRCLE_FOLLOW, true, 1); // 2311006 (host byte 3)
+        add(Bishop.BAHAMUT, Move.FOLLOW, true, 1);              // 2321003
 
         // ---- Dark Knight (follow, support only - no attack) ----
         add(DarkKnight.BEHOLDER, Move.FOLLOW, false, 0);    // 1321007

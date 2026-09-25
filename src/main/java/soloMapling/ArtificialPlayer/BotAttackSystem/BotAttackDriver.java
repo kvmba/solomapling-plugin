@@ -288,6 +288,9 @@ public final class BotAttackDriver {
         // broadcasts (after the "would this actually hit?" gates, so a mount only comes
         // off for a real strike, not every targeting tick).
         soloMapling.ArtificialPlayer.BotMountSystem.BotMount.cancelForAction(bot);
+        // 橡木伪装 breaks the moment the attack key is pressed (the client's own rule): cancel the
+        // hide morph here too, alongside the mount.
+        BotAuraState.cancelDisguiseForAction(bot);
 
         boolean killed = switch (profile.route) {
             case CLOSE  -> BotAttackEffects.meleeStrike(bot, hits, skillId, profile.skillLevel,

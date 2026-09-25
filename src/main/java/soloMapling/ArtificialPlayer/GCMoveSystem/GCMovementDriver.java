@@ -203,6 +203,9 @@ final class GCMovementDriver {
         try {
             soloMapling.server.BotPerfStats.MOVEMENT_TICKS.increment();
             tick(entry);
+            // Govern the state-bound auras (疾驰 / 伪装) from the stance this tick just settled. Inside
+            // the try so a failure here can never break the self-reschedule chain.
+            soloMapling.ArtificialPlayer.BotAttackSystem.BotAuraState.tickMovement(entry.bot);
         } catch (Throwable t) {
             // A thrown exception must not break the self-reschedule chain - swallow so the bot keeps
             // ticking. But do NOT swallow it silently: a tick that throws leaves the bot frozen in

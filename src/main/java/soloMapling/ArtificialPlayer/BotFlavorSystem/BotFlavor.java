@@ -4,6 +4,7 @@ import org.gms.client.Character;
 import org.gms.client.inventory.WeaponType;
 import soloMapling.ArtificialPlayer.BotAttackSystem.BotAttackConfig;
 import soloMapling.ArtificialPlayer.BotAttackSystem.BotAttackProfile;
+import soloMapling.ArtificialPlayer.BotAttackSystem.BotAuraState;
 import soloMapling.ArtificialPlayer.BotAttackSystem.BotBuffConfig;
 import soloMapling.ArtificialPlayer.BotAttackSystem.BotBuffEffects;
 import soloMapling.ArtificialPlayer.BotCommandsPack.BotAttack;
@@ -149,11 +150,19 @@ public final class BotFlavor {
     // (beginners / early pirates).
     private static void doBuffFlex(Character chr) {
         List<Integer> buffs = BotBuffConfig.buffsForJob(chr.getJob());
-        if (buffs.isEmpty()) {
+        // 疾驰 is state-bound (only valid while WALKING) and flexed from a stand it would be retired by
+        // the movement tick the moment it showed - so it is not a flexible buff; pick among the rest.
+        List<Integer> flexable = new ArrayList<>();
+        for (int id : buffs) {
+            if (!BotAuraState.isDash(id)) {
+                flexable.add(id);
+            }
+        }
+        if (flexable.isEmpty()) {
             doEmote(chr);
             return;
         }
-        int skillId = buffs.get(ThreadLocalRandom.current().nextInt(buffs.size()));
+        int skillId = flexable.get(ThreadLocalRandom.current().nextInt(flexable.size()));
         BotBuffEffects.showBuff(chr, skillId);
     }
 

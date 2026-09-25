@@ -5,8 +5,8 @@ import org.gms.server.maps.Summon;
 
 /**
  * One live bot summon: the host entity plus the small state the follower tick needs (the behaviour
- * spec, the map the entity currently lives on so an owner warp can be detected, and the orbit angle
- * for a CIRCLE summon).
+ * spec, the map the entity currently lives on so an owner warp can be detected, and the bob phase
+ * that de-syncs a summon's float from its owner's other summons).
  *
  * <p>Mutable on purpose and only ever touched from the single follower tick plus the grant/remove
  * callers on the bot's own lifecycle thread, so no locking is required.</p>
@@ -23,8 +23,8 @@ final class BotSummon {
     /** The map the summon entity is currently placed on (used to notice the owner warped away). */
     MapleMap map;
 
-    /** Current orbit angle (degrees) for a CIRCLE summon; unused by the other move kinds. */
-    double angleDeg;
+    /** Random bob phase (radians) so a summon's float is not in lockstep with the owner's others. */
+    double phaseRad;
 
     /** Absolute epoch-ms before which an attacking summon may not strike again. */
     long nextAttackAtMs;
