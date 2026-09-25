@@ -1420,7 +1420,36 @@ final class BotNavigationManager {
         if (edge.type != BotNavigationGraph.EdgeType.JUMP) {
             return false;
         }
-        return isWithinJumpLaunchWindow(graph, botPos, edge);
+        if (!isWithinJumpLaunchWindow(graph, botPos, edge)) {
+            return false;
+        }
+        return arcLaunchesFrom(botPos, graph, map, edge);
+    }
+
+    /*
+     * The launch window only bounds WHERE the bot may take off — it does not promise the arc from an
+     * arbitrary pixel inside the executor's ±walkStep phase actually CLEARS to the edge's target. On a
+     * small ledge (Eos Tower's stacked mini-platforms) an arc from a pixel even one step outside the
+     * validated span lands back on the source platform: the bot "jumps", comes down where it started,
+     * walks back in, fires from the same spot, and paces forever — the reported "bounces in place at
+     * the ledge and never makes the jump to the platform beside it", until the travel/grind watchdog
+     * warps it away. Re-simulate the real flight from the bot's CURRENT pixel and require it to land
+     * in the edge's target region — the same predicate the graph builder validated each launch pixel
+     * with, so execution can only fire an arc that actually crosses.
+     *
+     * The window membership test keeps the executor's ±walkStep phase; this turns "inside the phase
+     * band" into "inside the band AND the arc crosses". For a window wide enough to inset, the band
+     * equals the validated span and this is redundant; for a window too thin to inset (collapsed to
+     * one pixel) the band reaches past the validated span, and this is what stops the bounce.
+     */
+    private static boolean arcLaunchesFrom(Point botPos, BotNavigationGraph graph, MapleMap map,
+                                           BotNavigationGraph.Edge edge) {
+        if (graph == null || map == null || botPos == null) {
+            return true; // no geometry to disagree with — never strand a bot on a missing map
+        }
+        return BotNavigationGraphProvider.jumpArcReachesTarget(
+                map, botPos, edge.launchStepX, edge.toRegionId,
+                graph.regionIdByFootholdId, graph.movementProfile);
     }
 
     private static boolean canExecuteSelectedJumpFromCurrentPosition(BotNavigationGraph graph,

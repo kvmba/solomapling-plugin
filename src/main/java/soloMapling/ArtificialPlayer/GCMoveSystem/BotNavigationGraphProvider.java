@@ -1622,6 +1622,42 @@ final class BotNavigationGraphProvider {
                 && regionIdByFootholdId.getOrDefault(landing.finalFoothold().getId(), -1) == targetRegionId;
     }
 
+    /*
+     * Does a jump fired from {@code from} with {@code launchStepX} actually land in {@code targetRegionId}?
+     *
+     * The graph builder stamped an edge's launch window by validating each pixel inside it with this
+     * flight sim (isValidJumpLaunchX). Execution, however, fires whenever the bot is within one walk
+     * step of the selected launch x (isWithinJumpLaunchWindow tolerates the ±walkStep launch phase), and
+     * a window too thin to inset collapses to a single pixel (insetJumpLaunchWindow) — so the phase
+     * band can reach past the validated span. On a small ledge that pixel's arc falls back onto the
+     * SOURCE platform, and the bot bounces there forever. The runtime gate re-runs this predicate from
+     * the bot's live pixel, so execution can only launch an arc the builder would have accepted.
+     */
+    static boolean jumpArcReachesTarget(MapleMap map,
+                                        Point from,
+                                        int launchStepX,
+                                        int targetRegionId,
+                                        Map<Integer, Integer> regionIdByFootholdId,
+                                        BotMovementProfile movementProfile) {
+        if (map == null || from == null || regionIdByFootholdId == null) {
+            return true; // no geometry to disagree with — never strand a bot on a missing map
+        }
+        return arcLandsInTargetRegion(
+                BotPhysicsEngine.simulateJumpLanding(map, from, launchStepX, movementProfile),
+                targetRegionId, regionIdByFootholdId);
+    }
+
+    /* The decision half of jumpArcReachesTarget, split out so the accept/reject rule is unit-testable
+     * without a MapleMap (a real one cannot be built in a test — see SwimWallClimbSimulationTest). */
+    static boolean arcLandsInTargetRegion(BotPhysicsEngine.JumpLanding landing,
+                                          int targetRegionId,
+                                          Map<Integer, Integer> regionIdByFootholdId) {
+        if (landing == null || landing.foothold() == null) {
+            return false;
+        }
+        return regionIdByFootholdId.getOrDefault(landing.foothold().getId(), -1) == targetRegionId;
+    }
+
     private static BotPhysicsEngine.JumpLanding validateDownJumpLaunchX(BotNavigationGraph.Region from,
                                                                          MapleMap map,
                                                                          Map<Integer, Integer> regionIdByFootholdId,
