@@ -82,10 +82,19 @@ public final class BotBuffDriver {
 
         int cast = 0;
         for (int skillId : buffIds) {
-            if (BotAuraState.isDash(skillId)) {
+            if (BotAuraState.isDash(skillId) || BotAuraState.isHide(skillId)) {
                 // 疾驰 is state-bound (only valid while WALKING) and the movement tick shows/cancels it
                 // for the bot, so the periodic sweep must never fire it - a cast from a stand would
                 // otherwise linger until the next movement tick retired it.
+                //
+                // The hide family (橡木伪装 / 隐身术) is state-bound the same way and is owned by
+                // BotAuraState: the aura only belongs on the bot while the bot is NOT acting. This
+                // sweep fires while the bot is mid-combat, so a barrel / Dark Sight re-shown here is
+                // immediately torn off by the next swing's cancelHidesForAction - the bot visibly
+                // fights under the disguise. An observed-map arrival also runs this sweep silently
+                // (the "already buffed" re-show), painting the disguise onto a bot that is about to
+                // attack. State-bound auras are never re-cast from here; GM casts via castSkill
+                // still reach them.
                 continue;
             }
             if (!force && now < timers.getOrDefault(skillId, 0L)) {
