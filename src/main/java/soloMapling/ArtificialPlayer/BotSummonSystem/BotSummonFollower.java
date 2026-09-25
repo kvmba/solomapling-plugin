@@ -78,20 +78,20 @@ public final class BotSummonFollower {
         return ACTION_STAND_BASE | (left ? 1 : 0);
     }
 
-    // ── The follow (the pet's own leash, lifted into the air) ─────────────────
+    // ── The follow (a pet-style leash, lifted into the air) ───────────────────
     // Like BotPetFollower, the summon holds a STABLE follow distance rather than tracking the
-    // owner's facing: it rides BEHIND the owner at the pet's own comfort distance
-    // (FOLLOW_MIN_PX..FOLLOW_MAX_PX), "behind" meaning its own side of the owner, so the owner
-    // walking past its column is what swaps the sides - a turn in place never moves the summon at
-    // all (that was the reported 转身拉扯). Higher than a pet (it flies, the official bird rides
-    // above the owner's head), with the same small sine bob. The values mirror BotPetFollower's
-    // (private there; the two systems are deliberately decoupled), so a summon and a pet trail
-    // their owner the same way.
+    // owner's facing: it rides BEHIND the owner on a comfort ring (FOLLOW_MIN_PX..FOLLOW_MAX_PX),
+    // "behind" meaning its own side of the owner, so the owner walking past its column is what
+    // swaps the sides - a turn in place never moves the summon at all (that was the reported
+    // 转身拉扯). The ring is TIGHTER than a pet's ground distance: the bird already rides
+    // offset_y px up, so the pet's 23..60px ring read as floating too far away - the flight ring
+    // keeps it close to the owner's silhouette. Same small sine bob; the two systems stay
+    // deliberately decoupled.
 
-    /** Follow distance floor (px) - the pet's own comfort ring, held stable per summon. */
-    static final int FOLLOW_MIN_PX = 23;
-    /** Follow distance cap (px) - the pet's own comfort ring, held stable per summon. */
-    static final int FOLLOW_MAX_PX = 60;
+    /** Follow distance floor (px) - a tight flight ring, held stable per summon. */
+    static final int FOLLOW_MIN_PX = 16;
+    /** Follow distance cap (px) - a tight flight ring, held stable per summon. */
+    static final int FOLLOW_MAX_PX = 36;
     /** Idle jitter dead zone (px): slot moves inside this are ignored, exactly like the pet's. */
     static final int FOLLOW_DEAD_ZONE_PX = 15;
 

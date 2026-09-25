@@ -104,16 +104,19 @@ class BotSummonMoveRuleTest {
     // ---- the follow ring --------------------------------------------------------------------
 
     @Test
-    void followRingMatchesThePetsComfortDistances() {
+    void followRingIsATightFlightRing() {
         assertTrue(BotSummonFollower.FOLLOW_MIN_PX > 0);
         assertTrue(BotSummonFollower.FOLLOW_MAX_PX >= BotSummonFollower.FOLLOW_MIN_PX);
+        assertTrue(BotSummonFollower.FOLLOW_MAX_PX < 60,
+                "the flight ring must stay TIGHTER than a pet's ground ring - the bird already "
+                        + "rides offset_y px up, and a wide ring read as floating too far away");
         assertTrue(BotSummonFollower.FOLLOW_DEAD_ZONE_PX > 0
                         && BotSummonFollower.FOLLOW_DEAD_ZONE_PX < BotSummonFollower.FOLLOW_MIN_PX,
                 "the dead zone must sit inside the ring so a hold still reads as following");
         for (int i = 0; i < 50; i++) {
             int d = BotSummonFollower.freshFollowDistancePx();
             assertTrue(d >= BotSummonFollower.FOLLOW_MIN_PX && d <= BotSummonFollower.FOLLOW_MAX_PX,
-                    "a fresh follow distance must land on the pet's comfort ring");
+                    "a fresh follow distance must land on the flight ring");
         }
     }
 }
