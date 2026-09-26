@@ -49,7 +49,10 @@ import java.util.concurrent.TimeUnit;
  *
  * <p><b>No host buff.</b> The bot learns the summon skill's level (the host {@link Summon}
  * constructor requires it) but no host buff is ever registered, so the host's own SUMMON/PUPPET
- * buff lifecycle is never involved; this class owns spawn, movement and teardown outright.</p>
+ * buff lifecycle is never involved; this class owns spawn, movement, LIFETIME and teardown
+ * outright - including the player-parity expiry (the skill's own WZ buff time) and the recast
+ * that follows it, which the regrant beat performs the way a player pressing the skill again
+ * would.</p>
  *
  * <p><b>LOD.</b> Movement frames and attacks are gated on {@link GCMovement#isMapObserved}: while
  * no real player watches the map nothing is sent, and the tick only keeps each summon's position in
@@ -125,8 +128,25 @@ public final class BotSummonFollower {
     // the sends just queue to sockets, so the hold is brief and bounded.
     private static final Object LIFECYCLE_LOCK = new Object();
 
+    // skillId -> the skill's WZ buff time in ms (0 = none). Memoized: the same Skill.wz row the
+    // strike cadence and the host's own buff timer read, and like them read once per skill.
+    private static final Map<Integer, Long> BUFF_TIME_BY_SKILL = new ConcurrentHashMap<>();
+
+    // botIds whose summon expired and whose recast is due within the config's refresh window.
+    // A scheduling beat, not a registry: the entry is consumed by the regrant sweep that armed
+    // it, and a bot torn down (despawnAll) is removed so an expired grant can never resurrect
+    // a bot that became an FM keeper mid-window.
+    private static final Map<Integer, Long> REGRANT_DUE_AT = new ConcurrentHashMap<>();
+
     private static volatile BotSummonConfig config = BotSummonConfig.defaults();
     private static ScheduledFuture<?> task;
+    private static ScheduledFuture<?> regrantTask;
+
+    /**
+     * Period (ms) of the dedicated regrant sweep. Faster than the jitter window itself (20s), so
+     * a recast never waits noticeably longer than the window the config promised.
+     */
+    private static final long REGRANT_SWEEP_MS = 2_000L;
 
     private BotSummonFollower() {}
 
@@ -138,6 +158,9 @@ public final class BotSummonFollower {
         long period = Math.max(100L, cfg.moveTickMs());
         task = soloMapling.server.ExecutorServiceManager.getScheduledExecutorService()
                 .scheduleAtFixedRate(BotSummonFollower::tick, period, period, TimeUnit.MILLISECONDS);
+        regrantTask = soloMapling.server.ExecutorServiceManager.getScheduledExecutorService()
+                .scheduleAtFixedRate(() -> regrantIfDue(config),
+                        REGRANT_SWEEP_MS, REGRANT_SWEEP_MS, TimeUnit.MILLISECONDS);
         System.out.println("[BotSummonFollower] started, period=" + period + "ms");
     }
 
@@ -146,6 +169,11 @@ public final class BotSummonFollower {
             task.cancel(false);
             task = null;
         }
+        if (regrantTask != null) {
+            regrantTask.cancel(false);
+            regrantTask = null;
+        }
+        REGRANT_DUE_AT.clear();
         // Best-effort teardown of everything still tracked, so a reload never leaves ghosts. Each
         // bot's list is retired under the lifecycle lock before its entities are removed: an
         // in-flight tick that later sees such a summon finds the list gone (the identity check in
@@ -190,9 +218,39 @@ public final class BotSummonFollower {
         // comfort distance so each holds its own spot on the pet's follow ring.
         s.phaseRad = ThreadLocalRandom.current().nextDouble() * Math.PI * 2.0;
         s.followDistancePx = freshFollowDistancePx();
+        // The player-parity lifetime: a player's summon is its buff, and the buff expires on the
+        // skill's own WZ buff time. The bot's recast after an expiry is spread over a jitter
+        // window (a player mashes the skill again within seconds, not on a stopwatch), so every
+        // bot's clock never reads clockwork. When the WZ row has no readable time the summon
+        // keeps the old rule: no lifetime at all.
+        long buffMs = summonBuffTimeMs(spec.skillId());
+        if (config.lifetimeWz() && buffMs > 0) {
+            long jitter = (long) (ThreadLocalRandom.current().nextDouble()
+                    * Math.max(0L, config.lifetimeRefreshWindowMs()));
+            s.expireAtMs = System.currentTimeMillis() + buffMs + jitter;
+        }
         synchronized (LIFECYCLE_LOCK) {
             TRACKED.computeIfAbsent(botId, k -> new ArrayList<>()).add(s);
         }
+    }
+
+    /**
+     * The summon skill's WZ buff time in ms ({@code StatEffect.getDuration()}), the clock a
+     * real player's summon expires on; 0 when unreadable. Memoized per skill.
+     */
+    private static long summonBuffTimeMs(int skillId) {
+        return BUFF_TIME_BY_SKILL.computeIfAbsent(skillId, id -> {
+            try {
+                org.gms.client.Skill skill = org.gms.client.SkillFactory.getSkill(id);
+                if (skill == null) {
+                    return 0L;
+                }
+                long ms = skill.getEffect(skill.getMaxLevel()).getDuration();
+                return ms > 0 ? ms : 0L;
+            } catch (Throwable t) {
+                return 0L;
+            }
+        });
     }
 
     /** Tear every tracked summon down and stop tracking the bot. Safe to call repeatedly. */
@@ -200,6 +258,7 @@ public final class BotSummonFollower {
         if (bot == null) {
             return;
         }
+        REGRANT_DUE_AT.remove(bot.getId()); // an armed recast must never resurrect a torn-down bot
         List<BotSummon> summons;
         synchronized (LIFECYCLE_LOCK) {
             summons = TRACKED.remove(bot.getId());
@@ -243,6 +302,7 @@ public final class BotSummonFollower {
 
     private static void tick() {
         BotSummonConfig cfg = config;
+        regrantIfDue(cfg);
         for (Integer botId : new ArrayList<>(TRACKED.keySet())) {
             try {
                 tickBot(botId, cfg);
@@ -250,6 +310,37 @@ public final class BotSummonFollower {
                 // Per-bot isolation, mirroring GrindTickRegistry: one bad summon never stops the sweep.
                 log.warn("summon tick failed cid={}: {}", botId, t.toString());
             }
+        }
+    }
+
+    /**
+     * The recast beat: grant a fresh summon to every bot whose previous one expired. Runs at the
+     * head of the tick, before the per-bot sweep. A bot is re-armed only when the grant actually
+     * took - a bot whose roll lost, or whose map went dark, retries on the NEXT sweep instead
+     * (a short, invisible stretch past expiry that reads exactly as a player pausing before
+     * recasting), never an entry that can survive a grant to re-arm forever.
+     */
+    private static void regrantIfDue(BotSummonConfig cfg) {
+        if (REGRANT_DUE_AT.isEmpty()) {
+            return;
+        }
+        long now = System.currentTimeMillis();
+        for (Map.Entry<Integer, Long> e : REGRANT_DUE_AT.entrySet()) {
+            if (e.getValue() > now) {
+                continue; // jitter window not elapsed yet
+            }
+            Character bot = BotHelpers.getCharFromChannelStorage(e.getKey());
+            REGRANT_DUE_AT.remove(e.getKey());
+            if (bot == null || bot.getMap() == null) {
+                continue; // the bot is gone; nothing left to recast for
+            }
+            if (!GCMovement.isMapObserved(bot.getMapId())) {
+                continue; // dark map: nobody can watch the recast, so skip it (grant stays off)
+            }
+            // Deliberately NOT the config-gated BotSummonSystem.grant: the lifetime feature is
+            // what armed this beat, so the owner's toggle decides only NEW bots, and a bot the
+            // spawn roll once denied stays denied.
+            BotSummonController.grantForBot(bot, cfg);
         }
     }
 
@@ -281,6 +372,28 @@ public final class BotSummonFollower {
         List<BotSummon> snapshot;
         synchronized (LIFECYCLE_LOCK) {
             snapshot = new ArrayList<>(summons);
+        }
+        // Player-parity lifetime (an expiry armed by register, not the host buff pipeline this
+        // system deliberately bypasses): when the clock runs out the summon ends the way a
+        // player's does - removal broadcast, no dramatics - and the bot recasts after the
+        // jitter window, which is exactly what a player pressing the skill again looks like.
+        // Dark maps skip the expiry (the removal nobody can see would still ghost observers on
+        // arrival) and torn-down bots never arm (a keeper keeps its summon; despawnAll also
+        // clears any armed entry).
+        if (observed) {
+            for (BotSummon s : snapshot) {
+                if (s.expireAtMs > 0 && now() >= s.expireAtMs) {
+                    synchronized (LIFECYCLE_LOCK) {
+                        if (TRACKED.get(botId) == summons) {
+                            despawnSummons(bot, botId, snapshot);
+                        }
+                    }
+                    REGRANT_DUE_AT.put(botId,
+                            now() + ThreadLocalRandom.current().nextLong(
+                                    Math.max(1L, cfg.lifetimeRefreshWindowMs())));
+                    break; // one beat per bot per tick
+                }
+            }
         }
         for (BotSummon s : snapshot) {
             // Re-homing is pure cleanup + spawn and MUST run whether or not the map is observed: a
@@ -315,6 +428,26 @@ public final class BotSummonFollower {
                 tryAttack(bot, s, cfg);
             }
         }
+    }
+
+    /**
+     * Tear down every summon in {@code summons} and stop tracking the bot - the mechanical half
+     * of {@link #despawnAll}, shared with the tick's expiry path (which must NOT clear a regrant
+     * it is about to arm itself).
+     */
+    private static void despawnSummons(Character bot, int botId, List<BotSummon> summons) {
+        synchronized (LIFECYCLE_LOCK) {
+            if (TRACKED.remove(botId, summons)) {
+                for (BotSummon s : summons) {
+                    removeEntity(bot, s);
+                }
+            }
+        }
+    }
+
+    /** Millis since the epoch - the clock the expiry fields are written and judged on. */
+    private static long now() {
+        return System.currentTimeMillis();
     }
 
     /**

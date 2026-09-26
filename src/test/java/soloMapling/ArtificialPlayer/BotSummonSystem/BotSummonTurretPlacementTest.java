@@ -79,4 +79,38 @@ class BotSummonTurretPlacementTest {
         Field f = BotSummon.class.getDeclaredField("nextRelocateProbeAtMs");
         assertEquals(long.class, f.getType());
     }
+
+    // ---- the player-parity lifetime ----------------------------------------------------------
+
+    @Test
+    void lifetimeDefaultsOnWithAJitteredRecast() {
+        // A summon that outlives everything but its owner is the one thing no player ever sees:
+        // their summon is its buff, and the buff expires. The mirror is on by default, and the
+        // recast carries real jitter (a player mashes the skill again within seconds, not on a
+        // stopwatch - a 0ms window would recast every bot in the world on the same tick).
+        BotSummonConfig cfg = BotSummonConfig.defaults();
+        assertTrue(cfg.lifetimeWz(), "WZ buff-time lifetime must default on");
+        assertTrue(cfg.lifetimeRefreshWindowMs() >= 1000,
+                "the recast jitter window must be wide enough to de-sync bots");
+    }
+
+    @Test
+    void disablingLifetimeMirrorRestoresPermanence() throws Exception {
+        var map = new java.util.HashMap<String, Object>();
+        var lifetime = new java.util.HashMap<String, Object>();
+        lifetime.put("wz_duration", false);
+        map.put("lifetime", lifetime);
+        Method m = BotSummonConfig.class.getDeclaredMethod("fromMap", java.util.Map.class);
+        m.setAccessible(true);
+        BotSummonConfig cfg = (BotSummonConfig) m.invoke(null, map);
+        assertTrue(!cfg.lifetimeWz(), "the old permanent-summon rule must remain reachable");
+    }
+
+    @Test
+    void expiryLivesPerSummonOnTheTickClock() throws Exception {
+        // The expiry is per summon and absolute-epoch (like nextAttackAtMs): written at register,
+        // judged by the tick, never a global timer that survives a reload.
+        Field f = BotSummon.class.getDeclaredField("expireAtMs");
+        assertEquals(long.class, f.getType());
+    }
 }

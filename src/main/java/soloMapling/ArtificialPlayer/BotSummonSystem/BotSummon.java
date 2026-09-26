@@ -43,9 +43,16 @@ final class BotSummon {
      */
     long nextRelocateProbeAtMs;
 
+    /**
+     * Absolute epoch-ms this summon's lifetime ends at, or 0 when it has none (WZ buff time
+     * unreadable, or lifetime mirrors disabled). Written once at register, read per tick - the
+     * same single-writer contract as every other field here.
+     */
+    long expireAtMs;
+
     BotSummon(int botId, int skillId, BotSummonTable.Spec spec) {
         this.botId = botId;
-        this.skillId = skillId;
+        this.skillId = spec.skillId();
         this.spec = spec;
     }
 

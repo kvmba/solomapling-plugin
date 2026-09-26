@@ -57,3 +57,15 @@ place:
   # costs one range query per window, not one per tick.
   relocate_min_mobs: 1
   relocate_after_ms: 10000
+
+# How long a summon lives. A player's summon is the skill's buff: the host timer cancels the
+# SUMMON buffstat when the WZ buff time (octopus lv30: ~240s) runs out and the removal packet is
+# what ends the entity. A bot's summon never registers that buff, so this plugin mirrors the
+# rule itself - the summon expires on the same clock and the bot recasts, like a player does.
+# Recasts are spread over refresh_window_ms (a player mashes the skill again sometime within the
+# next few seconds, not on a stopwatch) and the granted skill level re-derives from the bot's
+# current level, so a summon that comes back grows with its owner exactly as the first one did.
+# The dark map / per-bot isolation rules of every other beat apply here too (see the follower).
+lifetime:
+  wz_duration: true    # false = the old rule: the summon outlives everything but its owner
+  refresh_window_ms: 20000  # recast jitter: the next grant lands within this many ms after expiry

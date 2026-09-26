@@ -64,6 +64,19 @@ public final class BotSummonConfig {
      */
     private static final int DEF_PLACE_RELOCATE_MIN_MOBS = 1;
     private static final long DEF_PLACE_RELOCATE_AFTER_MS = 10_000L;
+    /**
+     * How a summon's lifetime is decided. TRUE = the WZ buff time (a player's cast expires when
+     * the buff runs out, so the bot's does too); FALSE = the old rule (outlives its owner until
+     * the owner itself is torn down).
+     */
+    private static final boolean DEF_LIFETIME_WZ = true;
+    /**
+     * Grace period (ms) added on top of the WZ buff time, so a turret expiring at the same instant
+     * every bot in the world recast would look clockwork. A player recast somewhere inside this
+     * window; the bot's own refresh beat spreads its recast across it (see the follower's
+     * expiry-reschedule note).
+     */
+    private static final long DEF_LIFETIME_REFRESH_WINDOW_MS = 20_000L;
 
     private final boolean enabled;
     private final long moveTickMs;
@@ -81,6 +94,8 @@ public final class BotSummonConfig {
     private final int placeSearchRadius;
     private final int placeRelocateMinMobs;
     private final long placeRelocateAfterMs;
+    private final boolean lifetimeWz;
+    private final long lifetimeRefreshWindowMs;
 
     private BotSummonConfig(Builder b) {
         this.enabled = b.enabled;
@@ -99,6 +114,8 @@ public final class BotSummonConfig {
         this.placeSearchRadius = b.placeSearchRadius;
         this.placeRelocateMinMobs = b.placeRelocateMinMobs;
         this.placeRelocateAfterMs = b.placeRelocateAfterMs;
+        this.lifetimeWz = b.lifetimeWz;
+        this.lifetimeRefreshWindowMs = b.lifetimeRefreshWindowMs;
     }
 
     public boolean enabled() { return enabled; }
@@ -124,6 +141,10 @@ public final class BotSummonConfig {
     public int placeRelocateMinMobs() { return placeRelocateMinMobs; }
     /** Minimum ms between re-seat probes of the same turret. */
     public long placeRelocateAfterMs() { return placeRelocateAfterMs; }
+    /** True when a summon's lifetime is the skill's own WZ buff time. */
+    public boolean lifetimeWz() { return lifetimeWz; }
+    /** Grace window (ms) over which the bot's recast after an expiry is spread. */
+    public long lifetimeRefreshWindowMs() { return lifetimeRefreshWindowMs; }
 
     /** All defaults, no file. */
     public static BotSummonConfig defaults() {
@@ -191,6 +212,10 @@ public final class BotSummonConfig {
         b.placeSearchRadius = intOf(place.get("search_radius"), DEF_PLACE_SEARCH_RADIUS);
         b.placeRelocateMinMobs = intOf(place.get("relocate_min_mobs"), DEF_PLACE_RELOCATE_MIN_MOBS);
         b.placeRelocateAfterMs = lng(place.get("relocate_after_ms"), DEF_PLACE_RELOCATE_AFTER_MS);
+
+        Map<String, Object> lifetime = map(root.get("lifetime"));
+        b.lifetimeWz = bool(lifetime.get("wz_duration"), DEF_LIFETIME_WZ);
+        b.lifetimeRefreshWindowMs = lng(lifetime.get("refresh_window_ms"), DEF_LIFETIME_REFRESH_WINDOW_MS);
         return b.build();
     }
 
@@ -249,6 +274,8 @@ public final class BotSummonConfig {
         int placeSearchRadius = DEF_PLACE_SEARCH_RADIUS;
         int placeRelocateMinMobs = DEF_PLACE_RELOCATE_MIN_MOBS;
         long placeRelocateAfterMs = DEF_PLACE_RELOCATE_AFTER_MS;
+        boolean lifetimeWz = DEF_LIFETIME_WZ;
+        long lifetimeRefreshWindowMs = DEF_LIFETIME_REFRESH_WINDOW_MS;
 
         BotSummonConfig build() {
             return new BotSummonConfig(this);
