@@ -82,9 +82,10 @@ public final class LudiStages {
         // One box per macro tick: the bot walks to the nearest box still standing and breaks
         // it. Eleven boxes is a handful of ticks, which keeps the tower climb visible.
         int box = nearestBoxOid(bot, LudiPqData.BOX_STAGE2);
-        if (box >= 0) {
-            hitReactorAt(bot, box);
-        } else {
+        if (box >= 0 && hitReactorRotate(bot, box, LudiPqData.BOX_STAGE2)) {
+            return;
+        }
+        if (box < 0) {
             // Every box is gone but the stage is not cleared yet (the leader still has to
             // turn the passes in): gather by the stage NPC instead of idling at the spawn.
             PqActions.waitNearStageNpc(bot);
@@ -106,7 +107,7 @@ public final class LudiStages {
     public static void breakCratesAndHunt(Character bot) {
         int crate = nearestBoxOid(bot, LudiPqData.BOX_STAGE3);
         if (crate >= 0) {
-            hitReactorAt(bot, crate);
+            hitReactorRotate(bot, crate, LudiPqData.BOX_STAGE3);
         }
         PqActions.seekAndAttack(bot);
         PqActions.loot(bot, bot.getPosition(), 2_000, new int[]{LudiPqData.PASS});
@@ -162,7 +163,7 @@ public final class LudiStages {
         // happens next tick - one box per tick, which is the honest pace for a sneak.
         int box = nearestBoxOid(bot, LudiPqData.BOX_STAGE5);
         if (box >= 0) {
-            hitReactorAt(bot, box);
+            hitReactorRotate(bot, box, LudiPqData.BOX_STAGE5);
         }
         PqActions.loot(bot, bot.getPosition(), 2_000, new int[]{LudiPqData.PASS});
         PqActions.recoverUngatheredHandoffs(bot, LudiPqData.PASS);
@@ -201,9 +202,21 @@ public final class LudiStages {
 
     /** The nearest alive box of this data id, or -1. */
     private static int nearestBoxOid(Character bot, int dataId) {
+        return nearestBoxOid(bot, dataId, -1);
+    }
+
+    /**
+     * The nearest alive box of this data id except {@code excludeOid}, or -1. The STUCK
+     * caller passes the box it just failed to reach, so the bot rotates to another box
+     * (a different platform, a different edge) instead of replaying the same dead approach.
+     */
+    private static int nearestBoxOid(Character bot, int dataId, int excludeOid) {
         int best = -1;
         double bestSq = Double.MAX_VALUE;
         for (int oid : PqActions.findAllReactorOids(bot, dataId)) {
+            if (oid == excludeOid) {
+                continue;
+            }
             var reactor = bot.getMap().getReactorByOid(oid);
             if (reactor == null || reactor.getPosition() == null) {
                 continue;
@@ -218,17 +231,43 @@ public final class LudiStages {
     }
 
     /**
-     * Strike a box. The walk towards it is fire-and-forget (the movement engine keeps walking
-     * after this tick), and the strike lands immediately - the host's reactor hit has no reach
-     * check, so blocking the macro tick on the walk only adds dead seconds between boxes.
+     * Approach a box and strike it once the bot is standing beside it. The approach is
+     * fire-and-forget across ticks; the strike fires only from the box's own platform, so
+     * the hit never reads as coming through a wall.
      */
     private static void hitReactorAt(Character bot, int oid) {
         var reactor = bot.getMap().getReactorByOid(oid);
         if (reactor == null || reactor.getPosition() == null) {
             return;
         }
-        PqActions.walkUnderNonBlocking(bot, reactor.getPosition());
-        PqActions.hitReactor(bot, oid);
+        if (PqActions.approachUnder(bot, reactor.getPosition()) == PqActions.Approach.IN_POSITION) {
+            PqActions.hitReactor(bot, oid);
+        }
+    }
+
+    /**
+     * Approach-and-strike {@code oid}; on a STUCK approach rotate to the next-nearest box of
+     * the same kind (the failed approach's edge is dead - a different box is a different
+     * edge). Returns true while a box is still being worked, false when none is reachable.
+     */
+    private static boolean hitReactorRotate(Character bot, int firstOid, int dataId) {
+        int oid = firstOid;
+        for (int attempt = 0; attempt < 3 && oid >= 0; attempt++) {
+            var reactor = bot.getMap().getReactorByOid(oid);
+            if (reactor == null || reactor.getPosition() == null) {
+                return false;
+            }
+            PqActions.Approach outcome = PqActions.approachUnder(bot, reactor.getPosition());
+            if (outcome == PqActions.Approach.IN_POSITION) {
+                PqActions.hitReactor(bot, oid);
+                return true;
+            }
+            if (outcome == PqActions.Approach.TRAVELLING) {
+                return true;
+            }
+            oid = nearestBoxOid(bot, dataId, oid); // STUCK: rotate to another box
+        }
+        return false; // every candidate failed this tick; try again next tick
     }
 
     // =========================================================================

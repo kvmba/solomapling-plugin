@@ -160,21 +160,62 @@ public final class PqActions {
         walkTo(bot, ground != null ? ground : aerialTarget);
     }
 
+    /** The approach outcome for a box the bot is walking to. */
+    public enum Approach { IN_POSITION, TRAVELLING, STUCK }
+
+    /** botId -> the floor point the bot has failed to reach, and how many times. */
+    private static final Map<Integer, Point> stuckTargetByBot = new java.util.concurrent.ConcurrentHashMap<>();
+    private static final Map<Integer, Integer> stuckCountByBot = new java.util.concurrent.ConcurrentHashMap<>();
+    /** The driver abandons a no-progress move after this long; two abandon cycles = a dead edge. */
+    private static final int STUCK_RETRIES = 2;
+
     /**
-     * Point the movement engine at the floor under an airborne target and return at once - the
-     * bot keeps walking after this call, and the caller strikes the target in the same tick.
-     * The blocking {@link #walkUnder} is for callers that must BE there before the next line
-     * (dropping a stack); reactor strikes have no reach check and only need the approach in
-     * flight, so blocking on it just parks the macro tick for seconds per box.
+     * Approach the floor under an airborne target: points the movement engine at it and
+     * returns at once. IN_POSITION when the bot is ALREADY on the target's platform (|dx|
+     * and |dy| within the approach box); TRAVELLING while the walk is in flight; STUCK once
+     * the same target has outlived two no-progress abandon cycles - the caller should drop
+     * this target and try another (the engine's planned edge to it is dead, retrying only
+     * replays the failure; a different box is reached by a different edge).
+     *
+     * <p>The caller must only strike the target on IN_POSITION. A reactor hit has no
+     * server-side reach check, so firing it from across the room reads as hitting through
+     * walls; the honest shot needs the bot standing beside it.
      */
-    public static void walkUnderNonBlocking(Character bot, Point aerialTarget) {
+    public static Approach approachUnder(Character bot, Point aerialTarget) {
         if (bot == null || aerialTarget == null || bot.getMap() == null) {
-            return;
+            return Approach.STUCK;
         }
         Point ground = GCMovement.groundPointBelow(bot.getMap(), aerialTarget.x, aerialTarget.y);
         Point to = ground != null ? ground : aerialTarget;
-        GCMovement.move(bot, to.x, to.y);
+        Point pos = bot.getPosition();
+        if (pos != null && Math.abs(pos.x - to.x) <= APPROACH_X && Math.abs(pos.y - to.y) <= APPROACH_Y) {
+            stuckTargetByBot.remove(bot.getId());
+            stuckCountByBot.remove(bot.getId());
+            return Approach.IN_POSITION; // arrived; clear any stale mark
+        }
+        Point failed = stuckTargetByBot.get(bot.getId());
+        if (failed != null && failed.equals(to)) {
+            int attempts = stuckCountByBot.merge(bot.getId(), 1, Integer::sum);
+            if (attempts > STUCK_RETRIES) {
+                return Approach.STUCK; // this edge is dead; make the caller try a different one
+            }
+        } else {
+            stuckTargetByBot.put(bot.getId(), new Point(to));
+            stuckCountByBot.put(bot.getId(), 1);
+        }
+        // Re-issue the move when idle: the driver's own no-progress watchdog abandons a
+        // stalled plan after MOVE_NO_PROGRESS_MS, and this re-issue replans from the bot's
+        // CURRENT pixel - which is also what recovers a bot the executor left on a ledge it
+        // cannot launch from.
+        if (!GCMovement.isMoving(bot)) {
+            GCMovement.move(bot, to.x, to.y);
+        }
+        return Approach.TRAVELLING;
     }
+
+    /** Striking box on the same platform: the approach box around its floor point. */
+    private static final int APPROACH_X = 90;
+    private static final int APPROACH_Y = 70;
 
     /** Walk to the position of a portal on the bot's current map. No-op if the portal is unknown. */
     public static void walkToPortal(Character bot, int portalId) {
