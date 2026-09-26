@@ -131,12 +131,19 @@ public class LudiPQBot extends PartyQuestBot {
         LudiStages.gatherPasses(getChr(), 1);
     }
 
-    /** Which stage a room is, by its position in the quest's map run. */
+    /**
+     * Which stage a room is, by its position in the quest's map run.
+     *
+     * <p>The room ids step by HUNDRED (922010100, 922010200, ... 922010900), so the stage is
+     * the id delta over 100 - the raw delta (the old arithmetic) returned 101 for stage 2 and
+     * fell through the stage switch's default on every room past the first, which is why the
+     * bots did nothing from stage 2 on.
+     */
     private static int stageOf(int mapId) {
         if (mapId < LudiPqData.ENTRY_MAP || mapId > LudiPqData.STAGE_9) {
             return -1;
         }
-        return mapId - LudiPqData.ENTRY_MAP + 1;
+        return (mapId - LudiPqData.ENTRY_MAP) / 100 + 1;
     }
 
     /**
