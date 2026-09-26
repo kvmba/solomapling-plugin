@@ -10,22 +10,22 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * The charge model behind 能量获得 (Energy Charge): the bar math and the job gate. Pure functions, so
  * these run without WZ data, a map, or a live character.
  *
- * <p>The numbers pinned here are the host's own (Character.handleEnergyChargeGain): +102 a hit, armed
- * and flipped to 15000 in the same step, and every charged-state test in the host compares against
- * exactly 15000.
+ * <p>The arm/full values pinned here are the host's own (Character.handleEnergyChargeGain): armed and
+ * flipped to 15000 in the same step, and every charged-state test in the host compares against
+ * exactly 15000. The per-hit rate is OURS - double the host's +102 so a solo bot fills in ~50 hits.
  */
 class BotEnergyChargeTest {
 
     @Test
-    void aHitAddsTheHostsFlatCharge() {
-        assertEquals(102, BotEnergyCharge.gain(0, 1).energy());
-        assertEquals(204, BotEnergyCharge.gain(102, 1).energy());
+    void aHitAddsOurDoubledFlatCharge() {
+        assertEquals(204, BotEnergyCharge.gain(0, 1).energy());
+        assertEquals(408, BotEnergyCharge.gain(204, 1).energy());
     }
 
     @Test
     void anAoeSwingChargesOncePerMobHit() {
         // The host loops handleEnergyChargeGain once per mob the swing hit.
-        assertEquals(306, BotEnergyCharge.gain(0, 3).energy());
+        assertEquals(612, BotEnergyCharge.gain(0, 3).energy());
         assertEquals(BotEnergyCharge.FULL_ENERGY, BotEnergyCharge.gain(9_900, 1).energy());
     }
 
@@ -41,8 +41,24 @@ class BotEnergyChargeTest {
 
     @Test
     void chargingClampsAtTheArmValueUntilTheStepFlipsIt() {
-        // A big AoE cannot over-charge past the 10000 arm point for one mob and land at, say, 10200.
+        // A big AoE cannot over-charge past the 10000 arm point for one mob and land at, say, 10204.
         assertEquals(BotEnergyCharge.FULL_ENERGY, BotEnergyCharge.gain(9_999, 6).energy());
+    }
+
+    @Test
+    void aSoloBotFillsInAboutFiftyHits() {
+        // The tuning contract: the host's 102 a hit filled in ~98 solo hits; ours runs double so a
+        // solo bot is charged on the 50th landed hit.
+        assertFalse(BotEnergyCharge.isCharged(BotEnergyCharge.gain(0, 49).energy()));
+        assertTrue(BotEnergyCharge.isCharged(BotEnergyCharge.gain(0, 50).energy()));
+    }
+
+    @Test
+    void theChargedStateLastsOurFiveMinutes() {
+        // Not the WZ duration (31s/50s): the charged window is ours, long enough for a grinding bot
+        // to actually get a mob inside touch range while it holds the charge.
+        assertEquals(300_000L, BotEnergyCharge.FULL_DURATION_MS);
+        assertEquals(300, BotEnergyCharge.FULL_DURATION_SECONDS);
     }
 
     @Test

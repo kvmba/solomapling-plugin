@@ -5,7 +5,6 @@ import org.gms.client.Character;
 import org.gms.client.Skill;
 import org.gms.client.SkillFactory;
 import org.gms.constants.skills.Marauder;
-import org.gms.server.StatEffect;
 import org.gms.server.life.Monster;
 import org.gms.server.maps.MapleMap;
 import org.gms.util.PacketCreator;
@@ -25,10 +24,11 @@ import java.util.concurrent.ConcurrentHashMap;
  * halves are synthesized here, reusing the host's own packets and values so onlookers cannot tell.
  *
  * Faithful to Character.handleEnergyChargeGain:
- *   - each landed swing adds 102 charge per mob hit; the bar arms at 10000 and flips to the host's
+ *   - each landed swing adds GAIN_PER_HIT charge per mob hit (the host's own rate is 102; ours runs
+ *     double so a solo bot fills in ~50 hits); the bar arms at 10000 and flips to the host's
  *     full value 15000 in the same step (the host runs both blocks in one call),
  *   - reaching full broadcasts the charge (the skill's flash + the foreign ENERGY_CHARGE stat that
- *     draws the gauge over the bot) and arms a self-expiry at the skill's WZ duration,
+ *     draws the gauge over the bot) and arms a self-expiry at our own FULL_DURATION_MS.
  *   - while full, a mob touching the bot takes a real hit (BotAttackEffects.bodyStrike) - the
  *     synthetic counterpart of the touch packet, gated on the same 15000 the host tests.
  *
@@ -44,8 +44,12 @@ import java.util.concurrent.ConcurrentHashMap;
  */
 public final class BotEnergyCharge {
 
-    /** Charge added per landed mob hit (the host's +102 in handleEnergyChargeGain). */
-    static final int GAIN_PER_HIT = 102;
+    /*
+     * Charge added per landed mob hit. The host's own value is +102 (handleEnergyChargeGain, ~98
+     * single-target hits to fill); ours runs DOUBLE that so a solo bot fills in about 50 landed
+     * hits - an AoE swing still charges once per mob hit, so it stays faster.
+     */
+    static final int GAIN_PER_HIT = 204;
 
     /** Bar value at which the charge arms. The arm step itself already flips it to full. */
     static final int ARM_ENERGY = 10_000;
@@ -59,8 +63,21 @@ public final class BotEnergyCharge {
     /** effectId 2 = the "gained the buff" flash the host broadcasts on every charge step. */
     private static final int CHARGE_EFFECT_ID = 2;
 
-    /** Expiry length when the skill's WZ duration cannot be read (the WZ minimum is ~31s). */
-    private static final long FALLBACK_FULL_MS = 30_000L;
+    /*
+     * How long the charged state lasts once the bar flips full. The host lapses at the skill's WZ
+     * duration (31s at level 1, 50s at level 40) - far too short for a grinding bot, which rarely
+     * has a mob inside touch range in the same breath the bar fills. Ours holds the charge for a
+     * fixed five minutes so the touch retaliation actually gets its window.
+     */
+    static final long FULL_DURATION_MS = 300_000L;
+
+    /*
+     * The wire duration the gain broadcasts carry, in seconds. This is the ONLY number the observing
+     * client can see: it draws the gauge's countdown from it, and it has no idea when the bar was
+     * last at 0. It must match FULL_DURATION_MS - a stale 31/50s value would pull the visual gauge
+     * (and the buff icon) while the bot is still charged server-side.
+     */
+    static final int FULL_DURATION_SECONDS = (int) (FULL_DURATION_MS / 1000L);
 
     /*
      * Cadence of the touch retaliation. The real client sends a TOUCH_MONSTER_ATTACK on the charged
@@ -179,7 +196,7 @@ public final class BotEnergyCharge {
     /*
      * GM test hook: drive the bar to full the moment a bot has anything to charge. Backs
      * !bot energycharge <cid>, so the charged look and the touch retaliation can be watched without
-     * waiting out the ~98 hits a real charge takes.
+     * waiting out the ~50 hits our own charge takes.
      */
     public static void fillForTest(Character bot) {
         if (!wantsCharge(bot)) {
@@ -279,25 +296,22 @@ public final class BotEnergyCharge {
         if (map == null) {
             return;
         }
-        StatEffect effect = chargeEffect(bot, skill);
-        int seconds = effect != null && effect.getDuration() > 0 ? effect.getDuration() / 1000 : 1;
         map.broadcastMessage(bot,
                 PacketCreator.showBuffEffect(bot.getId(), skill.getId(), CHARGE_EFFECT_ID), false);
-        map.broadcastMessage(bot, PacketCreator.giveForeignPirateBuff(bot.getId(), skill.getId(), seconds,
+        map.broadcastMessage(bot, PacketCreator.giveForeignPirateBuff(bot.getId(), skill.getId(),
+                FULL_DURATION_SECONDS,
                 Collections.singletonList(new Pair<>(BuffStat.ENERGY_CHARGE, Math.min(energy, ARM_ENERGY)))), false);
     }
 
     /*
-     * The charged state lapses on its own after the skill's WZ duration, emptying the bar and pulling
-     * the gauge from every viewer - the host's own timer does the same two things
-     * (Character.handleEnergyChargeGain).
+     * The charged state lapses on its own after our fixed FULL_DURATION_MS, emptying the bar and
+     * pulling the gauge from every viewer - the host's own timer does the same two things
+     * (Character.handleEnergyChargeGain), only at the WZ duration.
      */
     private static void scheduleFullExpiry(Character bot, Skill skill) {
-        StatEffect effect = chargeEffect(bot, skill);
-        long durationMs = effect != null && effect.getDuration() > 0 ? effect.getDuration() : FALLBACK_FULL_MS;
-        long deadline = System.currentTimeMillis() + durationMs;
+        long deadline = System.currentTimeMillis() + FULL_DURATION_MS;
         fullResetDeadlineByBot.put(bot.getId(), deadline);
-        MethodScheduler.runAfterDelay(() -> expireFull(bot, deadline), durationMs);
+        MethodScheduler.runAfterDelay(() -> expireFull(bot, deadline), FULL_DURATION_MS);
     }
 
     private static void expireFull(Character bot, long deadline) {
@@ -318,8 +332,8 @@ public final class BotEnergyCharge {
      * The bot's Energy Charge skill, granting it first when the bot never learned one. Bots are
      * synthetic and spend no SP, so this mirrors BotMount.learnRiderSkill - but the granted LEVEL
      * follows the bot's own level rather than jumping to max (see skillLevelForBot), so a bot that
-     * has just advanced reads like a player who has just advanced: the charged state lasts its
-     * level-appropriate time and carries its level-appropriate bonus.
+     * has just advanced reads like a player who has just advanced - and carries its
+     * level-appropriate watk bonus.
      *
      * Null when the skill cannot be resolved OR the grant did not stick (an unreadable Skill.wz, a
      * level clamped away): the caller must then leave the bar alone, because a bar at FULL with an
@@ -365,7 +379,7 @@ public final class BotEnergyCharge {
      * brawlers read as maxed while a fresh Marauder reads as a level-1 charge.
      *
      * This is the ONE place the granted level is decided. Level changes only cosmetics and the
-     * charged state's WZ duration / watk - the charge math itself (a flat +102 a hit) is level-free.
+     * charged state's watk - the charge math itself (a flat GAIN_PER_HIT a hit) is level-free.
      */
     static int skillLevelForBot(int characterLevel, int maxLevel) {
         if (characterLevel < THIRD_JOB_LEVEL) {
@@ -373,9 +387,5 @@ public final class BotEnergyCharge {
         }
         int level = 1 + (characterLevel - THIRD_JOB_LEVEL) * SP_PER_LEVEL;
         return Math.max(1, Math.min(maxLevel, level));
-    }
-
-    private static StatEffect chargeEffect(Character bot, Skill skill) {
-        return skill.getEffect(Math.max(1, bot.getSkillLevel(skill)));
     }
 }
