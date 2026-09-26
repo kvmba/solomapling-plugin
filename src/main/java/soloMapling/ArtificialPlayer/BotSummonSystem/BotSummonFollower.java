@@ -301,6 +301,12 @@ public final class BotSummonFollower {
                 }
                 continue;
             }
+            // The bot has levelled since the grant (TrainingBot/RoamerBot accrue EXP silently), so
+            // the summon has fallen behind the character that owns it. Re-grant to the level its
+            // character level has earned - only ever upward, and only the level, so the summon's
+            // WZ row (stun prop / mobCount / attack power) tracks its owner instead of freezing at
+            // whatever level it happened to spawn with. Runs before the strike reads the effect.
+            ensureSkillLevel(bot, s.skillId);
             // Move BEFORE attacking so a strike uses the frame's fresh position. The turret rule
             // (a placed cannon is never repositioned, and gets no frame) lives inside moveSummon.
             moveSummon(bot, s, cfg, observed);
@@ -507,11 +513,15 @@ public final class BotSummonFollower {
         if (skill == null) {
             return; // gone from Skill.wz since the grant (a reload swapped the data)
         }
-        // The bot was granted the skill at its max level (BotSummonController.spawn), and the host
-        // builds its own summon StatEffect from the level the OWNER holds - so this reads the very
-        // same WZ row a real player's summon does: how many mobs one strike reaches (mobCount, e.g.
-        // Bahamut's 3..6) and which monster status the strike carries (the hawks' STUN, Elquines'
-        // and Frost Prey's FREEZE). Nothing about the effect is restated in BotSummonTable.
+        // Read the effect off the bot's CURRENT grant, which ensureSkillLevel keeps at the level its
+        // character level has earned. The Summon entity caches its own skillLevel at construction
+        // (the byte the host's SummonDamageHandler would read for a real player), so reading the
+        // live grant is what lets a bot's summon grow with its owner instead of freezing at its
+        // spawn level - the analogue of a player recasting after a level-up; the entity's own byte
+        // is refreshed whenever the summon is re-homed on a map change. What that level yields is
+        // the whole WZ row a real player's summon uses: how many mobs one strike reaches (mobCount,
+        // e.g. Bahamut's 3..6) and which monster status the strike carries (the hawks' STUN,
+        // Elquines' / Frost Prey's FREEZE).
         StatEffect effect = skill.getEffect(Math.max(1, bot.getSkillLevel(skill)));
         Point from = summon.getPosition();
         List<Monster> targets = nearestMobs(bot.getMap(), from, cfg.attackRange(),
@@ -519,7 +529,10 @@ public final class BotSummonFollower {
         if (targets.isEmpty()) {
             return;
         }
-        s.nextAttackAtMs = now + cfg.attackTickMs();
+        // A real client fires the next attack only once the current swing has played out AND the
+        // recovery pause has passed, so the cadence differs per summon (a 600ms dragon vs a 2280ms
+        // Ifrit). The animation half is cached per skill.
+        s.nextAttackAtMs = now + BotSummonStrikeAnimation.animationMs(s.skillId) + cfg.attackRecoveryMs();
 
         int tier = bot.getJob() != null ? bot.getJob().getJobTier() : 0;
         // One direction byte covers the whole frame, so it follows the summon's primary (nearest) target.
@@ -551,6 +564,29 @@ public final class BotSummonFollower {
             // Apply the damage through the shared bot kill/EXP/loot path (its own loot, no vanilla drops).
             BotAttackEffects.applyExternalHit(bot, target, hits.get(i).damage());
         }
+    }
+
+    /**
+     * Bring the bot's summon skill to the level its character level has earned, and report the level
+     * it now holds (0 when this Skill.wz has no such skill). One application point for the rule in
+     * {@link BotSummonTable#skillLevelForBot}: the spawn path calls it to decide whether a summon may
+     * exist at all, and every tick calls it so a summon granted at level 70 keeps growing as its
+     * owner levels. The host's own {@code changeSkillLevel} is a no-op guard away, so the steady
+     * state costs one comparison - and reading the level back from the Character (rather than
+     * trusting the request) is what makes a refused grant visible to both callers.
+     */
+    static int ensureSkillLevel(Character bot, int skillId) {
+        Skill skill = SkillFactory.getSkill(skillId);
+        if (skill == null) {
+            return 0; // not in this server's Skill.wz - spawnEntity would refuse it too
+        }
+        int held = bot.getSkillLevel(skill);
+        int earned = BotSummonTable.skillLevelForBot(bot.getLevel(), skillId, skill.getMaxLevel());
+        if (earned >= 1 && held != earned) {
+            bot.changeSkillLevel(skill, (byte) earned, skill.getMaxLevel(), -1);
+            held = bot.getSkillLevel(skill); // read back: the host may have clamped the grant away
+        }
+        return held;
     }
 
     /** Up to {@code limit} live mobs within {@code range} px of the summon, nearest first. */

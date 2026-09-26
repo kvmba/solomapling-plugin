@@ -151,6 +151,49 @@ class BotSummonTableTest {
     }
 
     @Test
+    void grantedSkillLevelTracksTheOwnersCharacterLevel() {
+        // A summon must read as a player's summon, not a handout: the skill level drives its whole
+        // WZ row, so a level-70 Ranger's hawk stuns at the level-1 prop (50%) and only a bot that
+        // has kept levelling reaches the maxed 99%. Same SP rate the host hands out (3 a level).
+        assertEquals(0, BotSummonTable.skillLevelForBot(69, 3111005, 30),
+                "a hawk cannot exist before the 2nd job caps out at 70");
+        assertEquals(1, BotSummonTable.skillLevelForBot(70, 3111005, 30),
+                "the day of the advance the summon is level 1");
+        assertEquals(4, BotSummonTable.skillLevelForBot(71, 3111005, 30),
+                "three skill levels per character level, at the host's SP rate");
+        assertEquals(30, BotSummonTable.skillLevelForBot(80, 3111005, 30));
+        assertEquals(30, BotSummonTable.skillLevelForBot(195, 3111005, 30),
+                "clamped at the skill's own max, never beyond");
+    }
+
+    @Test
+    void fourthJobSummonsEnterAtLevel120() {
+        // Bahamut / Elquines are 4th-job skills: a 3rd-job Bishop must not hold one early.
+        assertEquals(0, BotSummonTable.skillLevelForBot(119, 2321003, 30),
+                "Bahamut cannot exist before the 4th job at 120");
+        assertEquals(1, BotSummonTable.skillLevelForBot(120, 2321003, 30));
+        // ...while the 3rd-job summon the same branch already owns is unaffected.
+        assertTrue(BotSummonTable.skillLevelForBot(120, 2311006, 30) > 0,
+                "the priest dragon is a 3rd-job summon and stays available");
+        // Elquines is FPArchMage 2121005 (job prefix 212 -> 4th job).
+        assertTrue(BotSummonTable.isFourthJobSummon(2121005));
+        assertTrue(BotSummonTable.isFourthJobSummon(2321003));
+        assertFalse(BotSummonTable.isFourthJobSummon(3111005), "a Ranger's hawk is a 3rd-job skill");
+        assertFalse(BotSummonTable.isFourthJobSummon(2311006), "the priest dragon is 3rd-job");
+    }
+
+    @Test
+    void everyRegisteredAttackingSummonHasALevelRule() {
+        // Guards the rule/table join: a newly added summon the level formula cannot place (a job
+        // prefix it reads as neither 3rd nor 4th job) would silently never be granted.
+        for (int skill : List.of(3111005, 3211005, 3121006, 3221005, 2121005, 2221005,
+                2311006, 2321003, 5211001, 5220002)) {
+            assertTrue(BotSummonTable.skillLevelForBot(195, skill, 30) > 0,
+                    "skill " + skill + " must be grantable at a high level");
+        }
+    }
+
+    @Test
     void lineageResolvesToTheAdvancedJobsSummon() {
         // A Bowmaster (312) inherits its branch: it must resolve to Phoenix, not the 2nd-job hawk.
         assertTrue(BotSummonTable.summonsForJobId(312).contains(3121006));

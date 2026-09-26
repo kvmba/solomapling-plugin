@@ -33,7 +33,7 @@ public class BotSummonCommand extends Command {
                     + " spawnChance=" + BotSummonSystem.config().spawnChance()
                     + " minLevel=" + BotSummonSystem.config().minLevel()
                     + " moveTick=" + BotSummonSystem.config().moveTickMs() + "ms"
-                    + " attackTick=" + BotSummonSystem.config().attackTickMs() + "ms");
+                    + " attackRecovery=" + BotSummonSystem.config().attackRecoveryMs() + "ms");
             case "enable" -> {
                 BotSummonSystem.setEnabled(true);
                 player.dropMessage("botsummon enabled (new bots may carry a summon)");

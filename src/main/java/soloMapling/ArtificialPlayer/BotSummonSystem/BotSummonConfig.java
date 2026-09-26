@@ -38,7 +38,15 @@ public final class BotSummonConfig {
     private static final double DEF_SNAP_DISTANCE = 900.0;
     private static final double DEF_SPAWN_CHANCE = 0.55;
     private static final int DEF_MIN_LEVEL = 70;
-    private static final long DEF_ATTACK_TICK_MS = 1100L;
+    /**
+     * Floor (ms) on the pause a summon takes AFTER its swing animation finishes, before the next
+     * strike may begin. The full cooldown is the summon's own {@code attack1} length (600..2280ms,
+     * read from Skill.wz) plus this pause, so a strike never overlaps the previous swing and every
+     * summon lands at least this much recovery. Without it the cadence was a bare 1100ms for every
+     * skill, which had a hawk stinging like a metronome and re-rolling its WZ {@code prop} faster
+     * than the bird could animate.
+     */
+    static final long MIN_ATTACK_RECOVERY_MS = 2200L;
     private static final int DEF_ATTACK_RANGE = 320;
 
     private final boolean enabled;
@@ -51,7 +59,7 @@ public final class BotSummonConfig {
     private final double snapDistance;
     private final double spawnChance;
     private final int minLevel;
-    private final long attackTickMs;
+    private final long attackRecoveryMs;
     private final int attackRange;
 
     private BotSummonConfig(Builder b) {
@@ -65,7 +73,7 @@ public final class BotSummonConfig {
         this.snapDistance = b.snapDistance;
         this.spawnChance = b.spawnChance;
         this.minLevel = b.minLevel;
-        this.attackTickMs = b.attackTickMs;
+        this.attackRecoveryMs = b.attackRecoveryMs;
         this.attackRange = b.attackRange;
     }
 
@@ -81,7 +89,8 @@ public final class BotSummonConfig {
     public double snapDistance() { return snapDistance; }
     public double spawnChance() { return spawnChance; }
     public int minLevel() { return minLevel; }
-    public long attackTickMs() { return attackTickMs; }
+    /** The pause (ms) after the summon's swing animation, before it may strike again. */
+    public long attackRecoveryMs() { return attackRecoveryMs; }
     public int attackRange() { return attackRange; }
 
     /** All defaults, no file. */
@@ -138,7 +147,11 @@ public final class BotSummonConfig {
         b.minLevel = intOf(spawn.get("min_level"), DEF_MIN_LEVEL);
 
         Map<String, Object> attack = map(root.get("attack"));
-        b.attackTickMs = lng(attack.get("tick_ms"), DEF_ATTACK_TICK_MS);
+        // Clamped, not just defaulted: the floor is a behavioural rule (a strike never starts on
+        // the heels of the previous swing), so a config that asks for 300ms is raised rather than
+        // honoured. This is the single place the clamp lives.
+        b.attackRecoveryMs = Math.max(MIN_ATTACK_RECOVERY_MS,
+                lng(attack.get("recovery_ms"), MIN_ATTACK_RECOVERY_MS));
         b.attackRange = intOf(attack.get("range"), DEF_ATTACK_RANGE);
         return b.build();
     }
@@ -192,7 +205,7 @@ public final class BotSummonConfig {
         double snapDistance = DEF_SNAP_DISTANCE;
         double spawnChance = DEF_SPAWN_CHANCE;
         int minLevel = DEF_MIN_LEVEL;
-        long attackTickMs = DEF_ATTACK_TICK_MS;
+        long attackRecoveryMs = MIN_ATTACK_RECOVERY_MS;
         int attackRange = DEF_ATTACK_RANGE;
 
         BotSummonConfig build() {

@@ -151,4 +151,40 @@ public final class BotSummonTable {
         return (jobId / 10 == baseBranch && jobId >= baseJobId)
                 || (baseBranch % 10 == 0 && jobId / 100 == baseJobId / 100);
     }
+
+    /** The character level the 2nd job caps out at - the day a 3rd-job summon can be learned. */
+    static final int THIRD_JOB_LEVEL = 70;
+    /** The character level the 3rd job caps out at - the day a 4th-job summon can be learned. */
+    static final int FOURTH_JOB_LEVEL = 120;
+
+    // Skill points a level-up hands out (the host's level_up_sp_gain default) and what one skill
+    // level costs, so a granted summon fills in at the pace a player's own would - the same pair
+    // BotEnergyCharge.skillLevelForBot uses for its third-job skill.
+    private static final int SP_PER_LEVEL = 3;
+
+    /**
+     * The skill level a bot of this character level would plausibly hold, at the host's own SP rate:
+     * 1 on the day its job tier advances, then {@code SP_PER_LEVEL} skill levels per character
+     * level. A 30-level summon therefore tops out at the entry level + 10 - a level-80 Ranger's
+     * hawk and a level-130 Bishop's Bahamut - so a bot reads as a player who has been spending
+     * points on the summon, not one who was handed it complete. Returns 0 when the bot has not
+     * reached the tier that owns the skill.
+     *
+     * <p>This is the ONE place the granted level is decided. It matters beyond cosmetics: the
+     * strike's whole WZ row is read at this level, so a fresh Ranger's hawk stuns at its level-1
+     * {@code prop} (50%) instead of its 30th (99%), and a Bishop's Bahamut reaches its 3-mob
+     * {@code mobCount} before its 6-mob one. Mirrors {@code BotEnergyCharge.skillLevelForBot}.</p>
+     */
+    public static int skillLevelForBot(int characterLevel, int skillId, int maxLevel) {
+        int entry = isFourthJobSummon(skillId) ? FOURTH_JOB_LEVEL : THIRD_JOB_LEVEL;
+        if (characterLevel < entry) {
+            return 0;
+        }
+        return Math.max(1, Math.min(maxLevel, 1 + (characterLevel - entry) * SP_PER_LEVEL));
+    }
+
+    /** The host's own fourth-job test ({@code Skill.isFourthJob}) on the skill's job prefix. */
+    static boolean isFourthJobSummon(int skillId) {
+        return (skillId / 10000) % 10 == 2;
+    }
 }
