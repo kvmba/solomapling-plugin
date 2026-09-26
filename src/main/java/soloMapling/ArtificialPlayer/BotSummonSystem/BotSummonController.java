@@ -1,6 +1,8 @@
 package soloMapling.ArtificialPlayer.BotSummonSystem;
 
 import org.gms.client.Character;
+import org.gms.client.Skill;
+import org.gms.client.SkillFactory;
 import org.gms.server.maps.MapleMap;
 import org.gms.server.maps.Summon;
 import org.slf4j.Logger;
@@ -82,10 +84,21 @@ public final class BotSummonController {
         // ambient bots are synthetic and spend no SP - but at the level the bot's character level
         // plausibly earned, not the skill's max: the summon's whole WZ row (its stun prop, its
         // Bahamut mobCount, its attack power) is read at that level, so a fresh 3rd jobber's hawk
-        // must read like a level-1 hawk, not a maxed one. The same call keeps a live summon growing
-        // as its owner levels (see BotSummonFollower.ensureSkillLevel).
-        if (BotSummonFollower.ensureSkillLevel(bot, skillId) < 1) {
-            return; // the bot has not reached the tier that owns it, or Skill.wz has no such skill
+        // must read like a level-1 hawk, not a maxed one. Zero means the bot's tier has not reached
+        // this summon yet (a GM-forced job on a low-level bot) - there is nothing to spawn.
+        Skill skill = SkillFactory.getSkill(skillId);
+        if (skill == null) {
+            return; // not in this server's Skill.wz (a client crash for observers if we sent it)
+        }
+        int granted = BotSummonTable.skillLevelForBot(bot.getLevel(), skillId, skill.getMaxLevel());
+        if (granted < 1) {
+            return;
+        }
+        if (bot.getSkillLevel(skill) != granted) {
+            bot.changeSkillLevel(skill, (byte) granted, skill.getMaxLevel(), -1);
+        }
+        if (bot.getSkillLevel(skill) < 1) {
+            return; // the host refused the grant; never construct without a level
         }
         try {
             MapleMap map = bot.getMap();
