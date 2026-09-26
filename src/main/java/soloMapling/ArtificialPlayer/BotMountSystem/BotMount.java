@@ -14,6 +14,7 @@ import org.gms.server.StatEffect;
 import org.gms.server.maps.FieldLimit;
 import org.gms.server.maps.MapleMap;
 import org.gms.util.PacketCreator;
+import soloMapling.ArtificialPlayer.BotAttackSystem.BotAuraState;
 import soloMapling.ArtificialPlayer.BotCustomization;
 import soloMapling.ArtificialPlayer.BotSM;
 import soloMapling.ArtificialPlayer.BotMessagingSystem.CharacterStorage;
@@ -355,6 +356,12 @@ public final class BotMount {
         // A body is never on horseback. Cover the armed episode and a bot the host zeroed
         // directly (decHP) that has not been adopted yet.
         if (bot.getHp() <= 0) {
+            return true;
+        }
+        // A 变身 morph / the gunner's 海盗船 owns the body the same way a chair does: while one is
+        // up the mount must stay off, and it returns once the aura expires (BotAuraState swaps the
+        // visuals off on expiry).
+        if (BotAuraState.isMorphed(bot)) {
             return true;
         }
         BotSM owner = CharacterStorage.getBotById(bot.getId());

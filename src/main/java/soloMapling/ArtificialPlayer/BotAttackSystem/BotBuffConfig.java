@@ -135,7 +135,12 @@ public final class BotBuffConfig {
         // Battle Ship (5221006) is skipped: it is a ride, not a castable aura.
         put(Job.BUCCANEER,   Buccaneer.MAPLE_WARRIOR, Buccaneer.SPEED_INFUSION, Buccaneer.SUPER_TRANSFORMATION, Buccaneer.PIRATES_RAGE); // 5121000, 5121009, 5121003 超级变身, 5121008 勇士的意志
         // Hypnotize (5221009 心灵控制) is skipped: it targets a MOB, not the bot itself.
-        put(Job.CORSAIR,     Corsair.MAPLE_WARRIOR, Corsair.HEROS_WILL); // 5221000, 5221010
+        // Battle Ship (5221006 海盗船) IS registered as an aura: it is the gunner's attack enabler -
+        // Battleship Cannon / Torpedo are illegal off the ship, and the ship's pose excludes the
+        // 骑宠 mount and 疾驰 while held. The buff itself is never registered on the bot; BotAuraState
+        // owns the aura's lifecycle (observer frame, expiry, exclusions) and the attack driver gates
+        // the ship-only guns on it (see BotAuraState.isMorphedAs).
+        put(Job.CORSAIR,     Corsair.MAPLE_WARRIOR, Corsair.HEROS_WILL, Corsair.BATTLE_SHIP); // 5221000, 5221010, 5221006
     }
 
     private BotBuffConfig() {}

@@ -178,6 +178,13 @@ public final class BotFlavor {
             return;
         }
         int skillId = profile.skillFor(weapon);
+        // A skill that requires the 变身 morph / 海盗船 may only flex while that aura is up; a
+        // town fidgeter never is, so it falls back to the plain weapon swing like a no-skill job.
+        if (BotAuraState.isAttackEnablerSkill(skillId)
+                && !BotAuraState.isMorphedAs(chr, BotAuraState.enablerSkillFor(chr, skillId))) {
+            BotAttack.basicSwing(chr);
+            return;
+        }
         // Each route has its own packet: melee -> CLOSE_RANGE_ATTACK, ranged -> RANGED_ATTACK (plus a
         // projectile and a trailing int), magic -> MAGIC_ATTACK (plus the charge int). Sending a ranged
         // skill down the melee path crashes viewers, so the route must pick the swing, not a two-way split.
