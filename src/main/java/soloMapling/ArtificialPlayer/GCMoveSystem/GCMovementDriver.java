@@ -6,6 +6,7 @@ import org.gms.server.maps.Foothold;
 import org.gms.server.maps.MapleMap;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import soloMapling.ArtificialPlayer.BotAttackSystem.BotDashBurst;
 import soloMapling.ArtificialPlayer.BotHealthSystem.BotDeath;
 import soloMapling.ArtificialPlayer.BotMovementSystem.MovementCommands;
 import soloMapling.ArtificialPlayer.BotStatusSystem.BotDebuffState;
@@ -257,6 +258,14 @@ final class GCMovementDriver {
         } else {
             entry.debuffMoveScale = 1.0;
         }
+
+        // The pirate 疾驰 burst rolls on a long enough walk and expires like the real timed buff.
+        // Published next to the SLOW scale (the same step-profile channel, in the opposite
+        // direction) so the ground step sees both in one tick. A burst rides through stands,
+        // jumps and ropes until expiry — exactly like the real buff — and the roll fires exactly
+        // once per qualifying long walk (see BotDashBurst).
+        BotDashBurst.tickMovement(bot, bot.getPosition().x, System.currentTimeMillis());
+        entry.dashSpeedBonus = BotDashBurst.isActive(bot) ? BotDashBurst.speedBonus(bot) : 0;
 
         // Pending organic portal/teleport drop: hold standing at the spawn portal (the bot appears
         // up at the portal, above the floor), then release the natural fall once the load beat

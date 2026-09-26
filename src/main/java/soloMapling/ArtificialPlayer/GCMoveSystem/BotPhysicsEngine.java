@@ -867,6 +867,9 @@ final class BotPhysicsEngine {
 
     static void beginGroundJump(BotMovementState entry, Character bot, int airVelX) {
         entry.blockedRopeGrab = null;
+        // A 疾驰 burst rides through a jump exactly like the real timed buff: the launch velocity
+        // derives from the un-burst profile (resolveAirVelocityX / carriedAirVelX clamp), so the
+        // arc stays inside its validated band, and the dash resumes on landing.
         // In swim maps, physics owns horizontal motion — drop any committed
         // airVelX/fixedAirArc the caller passed so swim integrator can steer.
         // Movement layer expresses *intent only* in water.
@@ -1177,9 +1180,17 @@ final class BotPhysicsEngine {
         // A SLOW debuff scales the profile the ground step runs, so the bot walks (and accelerates)
         // slower. The navigation graph cache still keys on the un-scaled profile — only the live step
         // is scaled, so a slowed bot keeps using the same baked edges.
-        BotMovementProfile stepProfile = entry.debuffMoveScale < 1.0
-                ? entry.movementProfile.speedScaled(entry.debuffMoveScale)
-                : entry.movementProfile;
+        // The pirate 疾驰 burst rides the same channel in the opposite direction: its WZ speed bonus
+        // is ADDED to the step profile, so a dashing pirate accelerates to a higher walk cap and the
+        // movement broadcasts carry the higher velocity. The graph key still sees the un-burst
+        // profile — a burst that ends mid-walk simply decelerates back onto the baked edges.
+        BotMovementProfile stepProfile = entry.movementProfile;
+        if (entry.debuffMoveScale < 1.0) {
+            stepProfile = stepProfile.speedScaled(entry.debuffMoveScale);
+        }
+        if (entry.dashSpeedBonus > 0) {
+            stepProfile = stepProfile.withDashSpeedBonus(entry.dashSpeedBonus);
+        }
         GroundStepResult step = simulateGroundMotion(map, currentPos, foothold, desiredDir,
                 new GroundTravelState(entry.physX, entry.hspeed, entry.groundPhysicsCarryMs), stepProfile);
 
