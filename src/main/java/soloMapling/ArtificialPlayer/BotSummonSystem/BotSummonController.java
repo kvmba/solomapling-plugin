@@ -35,6 +35,9 @@ public final class BotSummonController {
         if (bot == null || bot.getMap() == null) {
             return; // mapless bots (console bot) can't host a summon
         }
+        if (config.spawnChance() <= BotSummonConfig.CHANCE_DISABLED) {
+            return; // 0 = the feature is off entirely: no bot ever carries a summon
+        }
         if (BotSummonFollower.isTracked(bot.getId())) {
             return; // already has one (re-grant)
         }
@@ -49,6 +52,38 @@ public final class BotSummonController {
             return;
         }
         spawn(bot, skillId);
+    }
+
+    /**
+     * The lifetime follower's recast: re-summon for a bot whose previous summon expired on the
+     * WZ buff clock. The bot already WON its {@link #grantForBot} roll when the expired summon
+     * was first granted - re-rolling the dice here would turn every lost roll after the first
+     * expiry into a PERMANENTLY summonless bot, the exact opposite of the player behaviour the
+     * lifetime mirror exists for. Everything else stays identical: the idempotence gate (never
+     * double-spawn), the min level, and the level-derivation rule that lets the recast grow with
+     * its owner.
+     *
+     * @return true when a summon is now tracked for this bot (the recast took).
+     */
+    static boolean recastForBot(Character bot, BotSummonConfig config) {
+        if (bot == null || bot.getMap() == null) {
+            return false;
+        }
+        if (config.spawnChance() <= BotSummonConfig.CHANCE_DISABLED) {
+            return false; // the feature is off entirely; this must not resurrect a summon
+        }
+        if (BotSummonFollower.isTracked(bot.getId())) {
+            return true; // a summon exists again (a racing beat won) - the recast is moot
+        }
+        if (bot.getLevel() < config.minLevel()) {
+            return false;
+        }
+        Integer skillId = chooseSummon(bot.getJob() == null ? -1 : bot.getJob().getId());
+        if (skillId == null) {
+            return false;
+        }
+        spawn(bot, skillId);
+        return BotSummonFollower.isTracked(bot.getId());
     }
 
     /**

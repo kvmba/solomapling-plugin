@@ -39,6 +39,13 @@ public final class BotSummonConfig {
     private static final double DEF_SPAWN_CHANCE = 0.55;
     private static final int DEF_MIN_LEVEL = 70;
     /**
+     * {@code spawn.chance: 0} sentinel - the documented way to disable the feature entirely
+     * (neither new bots nor recasts may summon). {@code 0 < chance < 1} is the mixed world:
+     * only the bots that ROLL WIN ever carry one, and those bots keep recasting for life.
+     * There is deliberately no middle state where an existing summon expires into nothing.
+     */
+    public static final double CHANCE_DISABLED = 0.0;
+    /**
      * Floor (ms) on the pause a summon takes AFTER its swing animation finishes, before the next
      * strike may begin. The full cooldown is the summon's own {@code attack1} length (600..2280ms,
      * read from Skill.wz) plus this pause, so a strike never overlaps the previous swing and every

@@ -315,32 +315,44 @@ public final class BotSummonFollower {
 
     /**
      * The recast beat: grant a fresh summon to every bot whose previous one expired. Runs at the
-     * head of the tick, before the per-bot sweep. A bot is re-armed only when the grant actually
-     * took - a bot whose roll lost, or whose map went dark, retries on the NEXT sweep instead
-     * (a short, invisible stretch past expiry that reads exactly as a player pausing before
-     * recasting), never an entry that can survive a grant to re-arm forever.
+     * head of the tick AND on its own short sweep (a recast must never wait a full move tick).
+     *
+     * <p>The entry is a retry lease, not a one-shot: it is only CONSUMED when the recast
+     * provably took (a summon is tracked again) or the bot is provably gone. On a dark map, or
+     * when {@code recastForBot} reports failure (grant suppressed by a concurrent teardown, a
+     * transient spawn failure), the entry is re-armed to the next window instead of being
+     * dropped - the alternative silently turned any failed beat into a PERMANENTLY summonless
+     * bot. The retry stretch past expiry is bounded by the window itself and reads exactly as a
+     * player pausing before recasting.</p>
      */
     private static void regrantIfDue(BotSummonConfig cfg) {
         if (REGRANT_DUE_AT.isEmpty()) {
             return;
         }
-        long now = System.currentTimeMillis();
+        long nowMs = now();
         for (Map.Entry<Integer, Long> e : REGRANT_DUE_AT.entrySet()) {
-            if (e.getValue() > now) {
+            if (e.getValue() > nowMs) {
                 continue; // jitter window not elapsed yet
             }
-            Character bot = BotHelpers.getCharFromChannelStorage(e.getKey());
-            REGRANT_DUE_AT.remove(e.getKey());
+            Integer botId = e.getKey();
+            Character bot = BotHelpers.getCharFromChannelStorage(botId);
             if (bot == null || bot.getMap() == null) {
-                continue; // the bot is gone; nothing left to recast for
+                REGRANT_DUE_AT.remove(botId);
+                continue; // the bot is gone from the world; nothing left to recast for
             }
             if (!GCMovement.isMapObserved(bot.getMapId())) {
-                continue; // dark map: nobody can watch the recast, so skip it (grant stays off)
+                // Dark map: nobody can watch the recast, so try again once the map has players.
+                REGRANT_DUE_AT.put(botId, nowMs + cfg.lifetimeRefreshWindowMs());
+                continue;
             }
             // Deliberately NOT the config-gated BotSummonSystem.grant: the lifetime feature is
             // what armed this beat, so the owner's toggle decides only NEW bots, and a bot the
-            // spawn roll once denied stays denied.
-            BotSummonController.grantForBot(bot, cfg);
+            // spawn roll once won keeps it for life. No re-roll: recastForBot never rolls.
+            if (BotSummonController.recastForBot(bot, cfg)) {
+                REGRANT_DUE_AT.remove(botId);
+            } else {
+                REGRANT_DUE_AT.put(botId, nowMs + cfg.lifetimeRefreshWindowMs());
+            }
         }
     }
 

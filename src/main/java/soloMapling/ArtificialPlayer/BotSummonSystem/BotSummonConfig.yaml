@@ -16,7 +16,9 @@ enabled: true
 # min_level rolls for one; a successful roll grants ONE summon. Persistent
 # companions are never granted a summon (see BotSummonController).
 spawn:
-  chance: 0.55       # P(a summon appears) when the bot is eligible
+  chance: 0.55       # P(a summon appears) when the bot is eligible. 0 = feature off entirely
+                     # (no bot carries one at all); 0 < chance < 1 = only roll winners carry
+                     # one, and every winner recasts for life (see lifetime below).
   min_level: 70      # below this no summon is granted (matches 3rd-job summons)
 
 # Server-driven movement for hovering summons (STATIONARY summons ignore this).
