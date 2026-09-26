@@ -1,5 +1,6 @@
 package soloMapling.ArtificialPlayer.BotAttackSystem;
 
+import org.gms.client.BuffStat;
 import org.gms.client.Character;
 import org.gms.client.Skill;
 import org.gms.client.SkillFactory;
@@ -22,6 +23,12 @@ import java.util.concurrent.ThreadLocalRandom;
  * (20s at max level; GMS083 Skill.wz 5001005: x=30 speed, y=10 jump) and — exactly like the real
  * timed buff — rides through stands, jumps and ropes until it expires. A post-burst cooldown
  * keeps a marathon walker from living in the dash.</p>
+ *
+ * <p><b>The pose gate.</b> 变身 (TRANSFORMATION / SUPER_TRANSFORMATION), the gunner's 海盗船
+ * (BATTLE_SHIP — the host registers it as a MONSTER_RIDING buff) and the 骑宠 mount all own the
+ * body/ride, and the real client refuses the dash key in all three. While any of them holds, the
+ * roll is refused and the accumulating walk dies; a burst granted BEFORE the pose keeps riding
+ * its timer, exactly like a real player's buff would.</p>
  *
  * <p><b>What the burst does to the physics.</b> {@link
  * soloMapling.ArtificialPlayer.GCMoveSystem.BotPhysicsEngine#applyGroundMotion} folds
@@ -73,6 +80,14 @@ public final class BotDashBurst {
         if (BURST_UNTIL.containsKey(id)) {
             return; // already bursting — the buff rides until expiry, no re-rolls mid-burst
         }
+        // The pose gate: 变身 / 海盗船 own the body, a 骑宠 mount owns the ride slot — a real
+        // client refuses the dash key in all three. Existing bursts keep riding (the timed buff
+        // was granted before the pose); only NEW rolls are refused.
+        if (poseRefusesDash(BotAuraState.isMorphed(bot),
+                bot.getBuffedValue(BuffStat.MONSTER_RIDING) != null)) {
+            WALK.remove(id); // a pose change kills the accumulating walk
+            return;
+        }
         int lengthPx = advanceWalk(id, x);
         if (lengthPx >= 0 && walkQualifies(lengthPx, now, NEXT_ROLL_AT.getOrDefault(id, 0L))) {
             WALK.remove(id); // one attempt per qualifying walk — win or lose
@@ -80,6 +95,15 @@ public final class BotDashBurst {
                 startBurst(bot, BotAuraState.dashSkillFor(bot));
             }
         }
+    }
+
+    /**
+     * Pure seam: does the bot's current pose refuse a NEW dash roll? A 变身/海盗船 enabler aura
+     * (morphed) and a 骑宠 mount (the ride slot is taken) both do — the same poses the aura
+     * display already excludes. The caller passes both live predicates.
+     */
+    static boolean poseRefusesDash(boolean morphed, boolean mounted) {
+        return morphed || mounted;
     }
 
     /**

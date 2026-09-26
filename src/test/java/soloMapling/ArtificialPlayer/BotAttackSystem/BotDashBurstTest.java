@@ -76,6 +76,21 @@ class BotDashBurstTest {
         assertEquals(1.0 / 3.0, BotDashBurstRollHolder.ROLL_CHANCE_FOR_TEST, 1e-9);
     }
 
+    @Test
+    void poseGateRefusesNewRollsWhileTransformedOnShipOrMounted() {
+        // 变身 (TRANSFORMATION / SUPER_TRANSFORMATION), the gunner's 海盗船 (the host registers it
+        // as a MONSTER_RIDING buff) and the 骑宠 mount all own the body/ride — the real client
+        // refuses the dash key in all three, so no NEW burst may roll.
+        assertFalse(BotDashBurst.poseRefusesDash(false, false), "plain walking may roll");
+        assertTrue(BotDashBurst.poseRefusesDash(true, false),
+                "a 变身/海盗船 enabler aura (morphed) refuses the roll");
+        assertTrue(BotDashBurst.poseRefusesDash(false, true), "a 骑宠 mount refuses the roll");
+        assertTrue(BotDashBurst.poseRefusesDash(true, true));
+        // The enabler classification the morphed leg rides on is pinned in BotAuraStateTest:
+        // TRANSFORMATION / SUPER_TRANSFORMATION / BATTLE_SHIP are all attack enablers, and the
+        // ship's host-side buff is the MONSTER_RIDING bit this gate checks for the mount leg.
+    }
+
     /** Indirection so the test can read the Pirate constant without a live client. */
     static final class PirateSkillHolder {
         static final int DASH_ID = org.gms.constants.skills.Pirate.DASH;
