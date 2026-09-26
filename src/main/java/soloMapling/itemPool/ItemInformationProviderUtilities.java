@@ -196,6 +196,16 @@ public class ItemInformationProviderUtilities {
     }
 
     /**
+     * Bots at or above this level get a tighter "classic low-id" bias band in
+     * {@link #getRandomEquip}: the 25%-level window already reaches a quarter
+     * of the bot's level backwards, and the default 20% band on top of it used
+     * to concentrate the pick in the oldest quarter of that window (a lv100
+     * bot mostly wearing lv75-85 gear). 10% keeps a bias but centers it on the
+     * level-appropriate half of the window.
+     */
+    private static final int HIGH_LEVEL_BIAS_THRESHOLD = 60;
+
+    /**
      * Picks a random non-cash equip matching the bot's level window, job style and
      * gender, weighted towards lower ids (more classic equips). Pure in-memory
      * lookup against {@link EquipMetadataCache} — no WZ access.
@@ -240,7 +250,10 @@ public class ItemInformationProviderUtilities {
 
         // Cache lists are built in ascending id order, which selectWeightedRandom
         // relies on to bias towards classic (low-id) equips; the filters above
-        // preserve that order.
+        // preserve that order. High-level bots tighten the bias band so the
+        // "classic" tail stops putting a lv100 bot in lv75-85 gear; young bots
+        // keep the wide band - a retro server wants its low-levels in old-school
+        // starter kit.
         List<Integer> validEquips = new ArrayList<>(candidates.size());
         for (EquipMetadataCache.EquipEntry entry : candidates) {
             // Skip omitted items (flag poles / junk that look bad on a bot). Dropping
@@ -249,7 +262,8 @@ public class ItemInformationProviderUtilities {
             if (EquipOmitList.isOmitted(entry.id)) continue;
             validEquips.add(entry.id);
         }
-        return selectWeightedRandom(validEquips);
+        int biasInterval = maxLevel >= HIGH_LEVEL_BIAS_THRESHOLD ? 10 : 20;
+        return selectWeightedRandom(validEquips, biasInterval);
     }
 
     /**

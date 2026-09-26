@@ -2,7 +2,11 @@ package soloMapling.ArtificialPlayer.BotDecoratorSystem;
 
 import org.gms.client.Character;
 import org.gms.client.Job;
+import org.gms.client.inventory.BodyPart;
+import org.gms.client.inventory.Equip;
+import org.gms.client.inventory.Inventory;
 import org.gms.client.inventory.InventoryType;
+import org.gms.client.inventory.Item;
 import org.gms.client.BotTier;
 import soloMapling.ArtificialPlayer.BotDetailSystem.BotDetailWindow;
 import soloMapling.ArtificialPlayer.BotMedalSystem.BotMedal;
@@ -312,6 +316,39 @@ public class BotDecorate {
 
         // Return 0 (male) or 1 (female) with equal probability
         return random.nextInt(2);
+    }
+
+    /**
+     * Re-dress a bot whose level changed after its original decoration pass
+     * (e.g. PQ lobbies overriding levels after spawn): clears every normal
+     * equipment slot, decorates again at the new level, then re-aligns the raw
+     * stats so the host's canWearEquipment filter keeps every piece in the look
+     * packet. Beginners (level &lt; 10) get the curated starter look instead.
+     *
+     * <p>Deliberately skips tier, gender, body, NX, fame and medal: those are
+     * level-independent or already re-rolled by the caller (see
+     * EnvironmentManager.setBotsLevelRange). Only the visible gear and the
+     * stats that gate it are touched.</p>
+     */
+    public static void redressBot(Character bot) {
+        Inventory equipped = bot.getInventory(InventoryType.EQUIPPED);
+        if (equipped != null) {
+            // Exactly the band decoration writes: cap(-1) .. weapon(-11). Medal
+            // (-49), pet gear, mounts and the NX layer (-100..) stay untouched.
+            for (int slot = -BodyPart.WEAPON.getValue();
+                 slot <= -BodyPart.CAP.getValue(); slot++) {
+                Item item = equipped.getItem((short) slot);
+                if (item instanceof Equip) {
+                    equipped.removeSlot((short) slot);
+                }
+            }
+        }
+        if (BeginnerEquip.isBeginner(bot)) {
+            BeginnerEquip.apply(bot);
+        } else {
+            BotDecorateEquips.decorateBotEquips(bot);
+        }
+        BotEquipStats.alignToEquipped(bot);
     }
 
     public static void setBotVariables(Character bot) {

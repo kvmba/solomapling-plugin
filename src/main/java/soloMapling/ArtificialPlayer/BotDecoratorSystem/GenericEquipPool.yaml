@@ -104,6 +104,47 @@ weapons:
   - 1442028
   - 1442029
   - 1442030
+  # Mid/high-level classless additions: without these the weighted pick lets a
+  # level-30+ bot roll a starter weapon most of the time (the pool had a
+  # reqLevel-0 cluster plus a lv50+ tail, with nothing between 10 and 50).
+  # WZ has no classless top/bottom above lv16, so weapons carry the high-level
+  # QuickEquip look together with caps/capes/gloves below.
+  - 1302088
+  - 1302131
+  - 1322003
+  - 1322024
+  - 1322031
+  - 1402010
+  - 1402044
+  - 1422036
+  - 1432046
+  - 1442039
+  - 1442048
+  - 1442050
+  - 1442054
+  - 1442055
+  - 1442061
+  - 1442065
+  - 1302020
+  - 1332021
+  - 1372017
+  - 1322009
+  - 1442025
+  - 1442049
+  - 1302090
+  - 1302091
+  - 1302092
+  - 1302093
+  - 1312014
+  - 1322025
+  - 1322064
+  - 1372031
+  - 1372033
+  - 1442046
+  - 1442056
+  - 1442057
+  - 1442066
+  - 1442068
 
 caps:
   - 1002001
@@ -121,6 +162,22 @@ caps:
   - 1002089
   - 1002090
   - 1002357
+  # High-level classless additions (30-70)
+  - 1002390
+  - 1002430
+  - 1002454
+  - 1002455
+  - 1002675
+  - 1002676
+  - 1002677
+  - 1002723
+  - 1002788
+  - 1002801
+  - 1002856
+  - 1002857
+  - 1002947
+  - 1002948
+  - 1002949
 
 shoes:
   - 1072001
@@ -130,6 +187,8 @@ shoes:
   - 1072056
   - 1072238
   - 1072239
+  # High-level classless additions
+  - 1072344
 
 gloves:
   - 1082002
@@ -140,6 +199,9 @@ gloves:
   - 1082149
   - 1082150
   - 1082223
+  # High-level classless additions
+  - 1082222
+  - 1082246
 
 capes:
   - 1102053
@@ -152,6 +214,21 @@ capes:
   - 1102022
   - 1102023
   - 1102024
+  # High-level classless additions (35-120): capes are the strongest visual
+  # level cue QuickEquip has, since tops/bottoms cap at lv16 in v83
+  - 1102109
+  - 1102147
+  - 1102179
+  - 1102000
+  - 1102011
+  - 1102016
+  - 1102084
+  - 1102026
+  - 1102139
+  - 1102031
+  - 1102046
+  - 1102192
+  - 1102194
 
 # OG text in case claude fucked up
 ## =============================================================================
