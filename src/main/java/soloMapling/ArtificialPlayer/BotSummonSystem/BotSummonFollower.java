@@ -761,7 +761,7 @@ public final class BotSummonFollower {
         }
 
         try {
-            BotSummonBroadcast.summonAttack(bot, summon, direction, hits);
+            BotSummonBroadcast.summonAttack(bot, summon, direction, hits, s.spec.isStationary());
         } catch (Throwable t) {
             log.warn("summon attack broadcast failed cid={}: {}", bot.getId(), t.toString());
         }

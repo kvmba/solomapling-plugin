@@ -44,12 +44,15 @@ final class BotSummonBroadcast {
      * {@code Skill/<job>/<skill>/summon/<name>} WZ lookup, whose cached info carries the per-level
      * {@code ball} node ({@code level/<n>/ball}, fmt 2386) - the projectile sprite an observer draws.
      * <p>
-     * A base-4 byte (0x04/0x84) indexes slot 0 = {@code stand}: the summon plays its STAND pose, the
-     * damage entries still land (parsed independently), but NO attack node and NO ball ever render -
-     * exactly the "hit with damage but no bullet" report. ATTACK1 is slot 4, so the byte must carry
-     * action 8: {@code 0x08} facing right, {@code 0x88} facing left.
+     * <b>Per-move split (verified in-game after the first attempt).</b> The archer birds rendered
+     * their attack poses fine on the OLD base-4 byte, and stopped on 8: the client only applies the
+     * {@code (byte & 0x7F) - 4} table decode to STATIONARY turrets (the octopus), while
+     * CIRCLE_FOLLOW/FOLLOW summons take a different path where the raw 4 IS the attack node id.
+     * So the byte is chosen by the summon's own move: turrets send 8 (slot 4 = attack1 -> ball),
+     * everything else keeps the proven 4.
      */
-    private static final int SUMMON_ATTACK1_ACTION = 8;
+    private static final int TURRET_ATTACK_ACTION = 8;
+    private static final int BIRD_ATTACK_ACTION = 4;
     private static final int SUMMON_FACING_LEFT_MASK = 0x80;
 
     /** Fragment command 0 = normal / absolute movement (the shape AbsoluteLifeMovement serialises). */
@@ -60,19 +63,22 @@ final class BotSummonBroadcast {
     /** One mob's damage line inside a SUMMON_ATTACK frame. */
     record Strike(int mobOid, int damage) {}
 
-    static void summonAttack(Character bot, Summon summon, byte direction, List<Strike> hits) {
+    static void summonAttack(Character bot, Summon summon, byte direction, List<Strike> hits,
+                             boolean stationaryTurret) {
         bot.getMap().broadcastMessage(bot,
-                summonAttackPacket(bot.getId(), summon.getObjectId(), direction, hits),
+                summonAttackPacket(bot.getId(), summon.getObjectId(), direction, hits, stationaryTurret),
                 summon.getPosition());
     }
 
     /** Pure seam for the byte layout (unit-testable without a live Character/Summon). */
-    static OutPacket summonAttackPacket(int cid, int summonOid, byte direction, List<Strike> hits) {
+    static OutPacket summonAttackPacket(int cid, int summonOid, byte direction, List<Strike> hits,
+                                        boolean stationaryTurret) {
+        int action = stationaryTurret ? TURRET_ATTACK_ACTION : BIRD_ATTACK_ACTION;
         OutPacket p = OutPacket.create(SendOpcode.SUMMON_ATTACK);
         p.writeInt(cid);                  // dwCharacterID
         p.writeInt(summonOid);            // dwSummonedID
         p.writeByte(0);                   // nCharLevel (host writes 0; client ignores for a bot)
-        p.writeByte((direction != 0 ? SUMMON_FACING_LEFT_MASK : 0) | SUMMON_ATTACK1_ACTION); // (bLeft<<7)|action
+        p.writeByte((direction != 0 ? SUMMON_FACING_LEFT_MASK : 0) | action); // (bLeft<<7)|action
         p.writeByte(hits.size());         // nMobCount
         for (Strike hit : hits) {
             p.writeInt(hit.mobOid());     // ATTACKINFO->dwMobID
