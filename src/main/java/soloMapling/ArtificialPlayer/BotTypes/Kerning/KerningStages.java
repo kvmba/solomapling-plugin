@@ -48,6 +48,15 @@ public final class KerningStages {
         if (PqActions.readEimString(bot, "1stageclear") != null) {
             return true;
         }
+        // Already holding a pass: stop talking to Cloto. Every further click is graded against
+        // the coupon count again, and a bot that keeps clicking spends the coupons it needs for
+        // the answer (and, once a pass is in hand, keeps re-opening a conversation that can only
+        // repeat itself). Hand the pass over and wait.
+        if (PqActions.countItem(bot, KerningPqData.PASS) > 0) {
+            PqActions.handItemsToLeader(bot, KerningPqData.PASS);
+            PqActions.say(bot, BotMessages.get("pq.kerning.pass_dropped"));
+            return false;
+        }
         int coupons = PqActions.countItem(bot, KerningPqData.COUPON);
         if (coupons > 0) {
             // Holding a question means spending coupons on the answer; holding none means
@@ -62,9 +71,13 @@ public final class KerningStages {
     /**
      * Take Cloto's question and answer it, walking the conversation one click at a time.
      *
-     * <p>The script (9020001) hands a question on the first talk and grades the coupon
-     * count on the next, so the bot re-opens it once with a settle in between. Only done
-     * while the bot actually carries coupons, so an unanswered bot keeps hunting first.
+     * <p>Two clicks in one visit are needed: {@code NPCScriptManager.start} runs the script's
+     * own {@code start()}, which itself calls {@code action(1,0,0)} - so the first talk only
+     * reaches status 0, and the question/answer exchange needs one more.
+     *
+     * <p>Only done while the bot actually carries coupons, so an unanswered bot keeps hunting
+     * first - and never once it holds a pass, because every further click is graded against the
+     * coupon count again and would spend the coupons the answer needs.
      */
     private static void answerCloto(Character bot) {
         if (PqActions.talkingTo(bot, KerningPqData.NPC_CLOTO)) {

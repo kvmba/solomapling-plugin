@@ -275,32 +275,70 @@ public final class LudiStages {
     // =========================================================================
 
     /**
-     * Work up the tower by trying its portals.
+     * Work up the tower by following the one portal row that actually climbs.
      *
-     * <p>The portal row is laid out bottom to top, and stepping into one either lifts the
-     * climber or drops him back where he started - the map data gives every portal the same
-     * target, so there is nothing to read and no way to know in advance. The bot walks the
-     * row and steps into each in turn, which is what a party does, and the map change that
-     * follows tells it whether that worked.
+     * <p>The tower's {@code h0NN} portals all target the tower itself and carry no script, so
+     * every one of them is a same-map hop and none of them is marked as "the way up". The map
+     * data does distinguish them: a portal's {@code tn} is the NAME of the portal it lands on,
+     * and most of them land on {@code st00}, the bottom spawn - those are the decoys that drop
+     * the climber back down. A handful land on another {@code h0NN} that sits ~170px higher,
+     * and those are the ladder.
      *
-     * <p>Progress is judged by height: the tower is one map, so arriving higher up than
-     * before is the only observable that distinguishes a working portal from a dead one.
+     * <p>So the climb is read rather than guessed: take the portal whose target is a rung above
+     * the bot, land, and repeat. Each rung is one macro tick, which is also what keeps a failed
+     * hop cheap - a decoy at worst returns {@code false} and the next tick tries from where the
+     * bot now stands.
      */
     public static boolean climbTower(Character bot, int previousY) {
         int hereY = bot.getPosition().y;
-        for (int portalId = LudiPqData.CLIMB_PORTAL_FIRST;
-             portalId <= LudiPqData.CLIMB_PORTAL_LAST; portalId++) {
-            PqActions.takePortal(bot, portalId);
-            PqActions.holdArea(bot, bot.getPosition(), 600);
-            // A working portal leaves the bot higher than it was (the tower's y decreases as
-            // it goes up); a dead one puts it back at the bottom.
-            if (bot.getPosition().y < hereY) {
-                return true;
+        org.gms.server.maps.Portal rung = nextRungUp(bot, hereY);
+        if (rung == null) {
+            // No rung above us: either the climb is finished (the party may have completed it
+            // while this bot was retrying) or this bot is somehow above the top rung.
+            return stageCleared(bot, 6) || previousY > hereY;
+        }
+        PqActions.enterPortal(bot, rung);
+        PqActions.holdArea(bot, bot.getPosition(), 600);
+        // A working rung leaves the bot higher than it was (the tower's y decreases as it goes
+        // up); a decoy puts it back at the bottom.
+        return bot.getPosition().y < hereY;
+    }
+
+    /**
+     * The tower portal that lands on a rung above {@code fromY}, or null when there is none.
+     *
+     * <p>Only {@code h0NN} portals count, and only those whose {@link
+     * org.gms.server.maps.Portal#getTarget()} names another {@code h0NN} standing higher up -
+     * the rest target {@code st00} and are the decoys. Picking the LOWEST such rung keeps the
+     * climb in order instead of teleporting past rungs the party still has to walk.
+     */
+    private static org.gms.server.maps.Portal nextRungUp(Character bot, int fromY) {
+        var map = bot.getMap();
+        if (map == null) {
+            return null;
+        }
+        org.gms.server.maps.Portal best = null;
+        int bestY = fromY;
+        for (org.gms.server.maps.Portal portal : map.getPortals()) {
+            String name = portal.getName();
+            String target = portal.getTarget();
+            if (name == null || !name.startsWith(LudiPqData.CLIMB_PORTAL_PREFIX)
+                    || target == null || !target.startsWith(LudiPqData.CLIMB_PORTAL_PREFIX)
+                    || target.equals(name)) {
+                continue; // a decoy (lands on st00 / on itself), not a rung
+            }
+            org.gms.server.maps.Portal landing = map.getPortal(target);
+            if (landing == null) {
+                continue;
+            }
+            int landingY = landing.getPosition().y;
+            // Higher up means a smaller y. Take the smallest step that still gains height.
+            if (landingY < fromY && (best == null || landingY > bestY)) {
+                best = portal;
+                bestY = landingY;
             }
         }
-        // Nothing lifted us this pass. The stage flag is the only other thing that can say
-        // the climb is over - the party may have finished it while this bot was retrying.
-        return stageCleared(bot, 6) || previousY > hereY;
+        return best;
     }
 
     // =========================================================================

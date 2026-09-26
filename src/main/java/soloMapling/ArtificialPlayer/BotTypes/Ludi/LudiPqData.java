@@ -167,10 +167,14 @@ public final class LudiPqData {
     // =========================================================================
 
     /**
-     * The tower's hidden portals, bottom row first. One of them is the way up and the rest
-     * drop the climber back down, so a party climbs by trying; the bot can simply walk the
-     * row and step into each in turn.
+     * The tower's climb portals are named {@code h000}..{@code h044}. Every one of them targets
+     * the tower itself and carries no script, so the way up is not marked on the portal - it is
+     * in the {@code tn} (target portal NAME) each one carries: a decoy lands on {@code st00},
+     * the bottom spawn, while a real rung lands on another {@code h0NN} about 170px higher. The
+     * climb is therefore read off the portal names rather than tried one id at a time.
+     *
+     * <p>Sources: {@code wz/Map.wz/Map/Map9/922010600.img.xml} - the 45 {@code h0NN} portals and
+     * their {@code tn} values.
      */
-    public static final int CLIMB_PORTAL_FIRST = 2;  // h000
-    public static final int CLIMB_PORTAL_LAST  = 22; // h020
+    public static final String CLIMB_PORTAL_PREFIX = "h0";
 }
