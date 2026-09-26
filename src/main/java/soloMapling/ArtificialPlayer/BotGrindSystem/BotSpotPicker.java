@@ -74,6 +74,37 @@ public final class BotSpotPicker {
         return groundAt(map, c, x);
     }
 
+    // Pick one organic ground point within maxDistPx of (fromX, fromY) in X, preferring one at least
+    // minDistPx away. An unbounded whole-map pick lands either on the pixel the bot already occupies
+    // (a twitch, not a step) or clear across the map (a trek that keeps the bot in transit for most of
+    // the wait it is meant to be filling). Bounded both ways, the pick is what "stroll" means: a short
+    // walk to another part of the same room. Returns the farthest candidate seen when nothing in range
+    // clears minDistPx - a short ledge still gets a step rather than no move at all - or null when the
+    // map has no reachable ledge in range.
+    public static Point pickGroundSpotNear(MapleMap map, int fromX, int fromY, int minDistPx, int maxDistPx) {
+        List<Candidate> candidates = eligibleLedges(map, fromX, fromY, fromX - maxDistPx, fromX + maxDistPx);
+        if (candidates.isEmpty()) {
+            return null;
+        }
+        Candidate best = null;
+        int bestX = fromX;
+        int bestDist = -1;
+        for (int i = 0; i < SPACING_ATTEMPTS; i++) {
+            Candidate c = pickWeightedByWidth(candidates);
+            int x = randomInSpan(c.lo, c.hi);
+            int dist = Math.abs(x - fromX);
+            if (dist > bestDist) {
+                bestDist = dist;
+                bestX = x;
+                best = c;
+            }
+            if (dist >= minDistPx) {
+                return groundAt(map, c, x);
+            }
+        }
+        return groundAt(map, best, bestX);
+    }
+
     // Whole-map batch with light anti-cluster. Returns up to `count` spots; an empty list means the
     // caller should fall back (e.g. spawn everyone at the portal).
     public static List<Point> pickGroundSpots(MapleMap map, int fromX, int fromY, int count) {
