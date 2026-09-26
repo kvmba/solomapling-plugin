@@ -108,10 +108,7 @@ public final class ShopEquipPool {
                 if (!shopEquipIds.contains(e.id) || e.cash) {
                     continue;
                 }
-                List<EquipMetadataCache.EquipEntry> list = next.get(e.equipType);
-                if (list != null) {
-                    list.add(e);
-                }
+                next.get(e.equipType).add(e);
             }
         }
         for (Map.Entry<EquipType, List<EquipMetadataCache.EquipEntry>> entry : next.entrySet()) {
