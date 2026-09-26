@@ -543,6 +543,8 @@ public class BotGeneration {
         soloMapling.ArtificialPlayer.BotAttackSystem.BotAuraState.clearBot(fakechar.getId()); // release dash/disguise aura state
         BotBuffRequestHandler.clearBot(fakechar.getId());   // release chat-buff-request cooldown
         soloMapling.ArtificialPlayer.BotAttackSystem.BotEnergyCharge.clearBot(fakechar.getId()); // release energy-charge state
+        soloMapling.ArtificialPlayer.BotAttackSystem.BotComboOrb.clearBot(fakechar.getId()); // release combo-orb state
+        soloMapling.ArtificialPlayer.BotAttackSystem.BotFinalAttack.clearBot(fakechar.getId()); // release final-attack cooldown
         soloMapling.ArtificialPlayer.BotStatusSystem.BotDebuffApplier.clearBot(fakechar.getId()); // release debuff cooldowns
         soloMapling.ArtificialPlayer.BotMountSystem.BotMount.forget(fakechar.getId()); // release mount cooldown state
     }
