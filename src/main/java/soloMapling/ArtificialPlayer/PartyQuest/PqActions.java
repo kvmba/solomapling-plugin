@@ -376,6 +376,20 @@ public final class PqActions {
         int tx = mp.x;
         int ty = (ground != null) ? ground.y : mp.y;
 
+        // Some quest rooms seat their prize mob on a ledge the nav graph cannot climb TO (a
+        // pedestal with no upward edges - LPQ's Alishar). Chasing the mob's own platform would
+        // re-issue an unwalkable goal every tick, so aim for the floor UNDER the mob instead:
+        // the bot ends up standing beneath it, which is a real fight position (the boss reach
+        // box is vertically padded) and a far better crowd position than the doorway.
+        if (!GCMovement.canPathTo(bot, tx, ty)) {
+            Point mobFloor = GCMovement.groundPointBelow(bot.getMap(), mp.x, mp.y + 1);
+            if (mobFloor != null && Math.abs(mobFloor.y - ty) > 20
+                    && GCMovement.canPathTo(bot, mp.x, mobFloor.y)) {
+                tx = mp.x;
+                ty = mobFloor.y;
+            }
+        }
+
         // Progress bookkeeping: a chase that moves the bot nowhere for a while is dropped so
         // the next tick seeks something else instead of walking into a wall forever.
         Point anchor = seekAnchorByBot.get(bot.getId());
