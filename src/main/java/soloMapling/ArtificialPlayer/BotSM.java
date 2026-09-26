@@ -52,9 +52,13 @@ public abstract class BotSM implements EventSubscriber {
     }
 
     private final Character character; // Reference to the existing Character object
-    // Level-appropriate throwing star chosen once at creation for claw-thief bots (0 = not a claw
-    // thrower). Cosmetic packet projectile only; lives here so we never touch the Cosmic Character.
-    private final int chosenStarId;
+    // Level-appropriate throwing star for claw-thief bots (0 = not a claw thrower). Cosmetic packet
+    // projectile only; lives here so we never touch the Cosmic Character. Volatile and mutable: a bot
+    // that levels past the rung it was rolled on gets a better star (see starForLevel).
+    private volatile int chosenStarId;
+    // The level the current star was rolled for, so starForLevel can tell a real rung change from an
+    // ordinary level-up inside the same rung.
+    private volatile int chosenStarLevel;
     private boolean running;
     protected BotState state;
     private BotDebugHandler debugger;
@@ -196,6 +200,7 @@ public abstract class BotSM implements EventSubscriber {
         // Roll the throwing star now: the Character is fully decorated by the time a BotSM is built
         // (createBot decorates, setAndStartBots then constructs us), so weapon/level/job are set.
         this.chosenStarId = ThrowingStarSelector.selectFor(chr);
+        this.chosenStarLevel = chr != null ? chr.getLevel() : 0;
         this.death = new BotDeath(chr);
         this.status = new BotDebuffState(chr);
         debugprint(("Bot Initialized: " + this.character.getName() + ", " + this.character.getId()));
@@ -235,9 +240,34 @@ public abstract class BotSM implements EventSubscriber {
         return this.character;
     }
 
-    // The throwing star this claw-thief bot chose at creation, or 0 if it isn't a claw thrower.
+    // The throwing star this claw-thief bot throws, or 0 if it isn't a claw thrower.
     public int getChosenStarId() {
         return this.chosenStarId;
+    }
+
+    // The star this bot throws at the given level, re-rolling only when the level crosses into another
+    // rung of the star ladder. TrainingBot/RoamerBot raise their level long after construction (abstract
+    // EXP, up to 195) and a companion levels by simulated kills, so a star fixed at creation would leave
+    // a level-120 bot throwing subi forever. Within a rung the roll is stable, so the star a viewer sees
+    // does not flicker between attacks.
+    public int starForLevel(int level) {
+        if (chosenStarId == 0) {
+            return 0;
+        }
+        // Volatile pair: the attack path can read it while the owner's tick re-rolls, and a torn read
+        // would show a star belonging to a level the bot isn't. Re-read into locals so the two fields
+        // are judged against each other, never against a half-updated pair.
+        int star = chosenStarId;
+        int rolledAt = chosenStarLevel;
+        if (level == rolledAt
+                || ThrowingStarSelector.rungForLevel(level)
+                == ThrowingStarSelector.rungForLevel(rolledAt)) {
+            return star;
+        }
+        int fresh = ThrowingStarSelector.rollForLevel(level);
+        chosenStarLevel = level;
+        chosenStarId = fresh;
+        return fresh;
     }
 
     public String getBotType() {
