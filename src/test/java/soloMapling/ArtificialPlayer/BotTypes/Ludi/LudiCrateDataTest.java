@@ -94,7 +94,10 @@ class LudiCrateDataTest {
     @Test
     void theCollectionStagesAskForTheCountsTheQuestNames() {
         // These come from the stage NPCs' own dialogue, one per stage, and each is the
-        // number a bot stops gathering at.
+        // number a bot stops gathering at. Stage 1 is one of them: the Red Balloon
+        // (2040036) demands 25 passes from the leader before the lpq0 portal opens, so
+        // treating the entry room as a waiting room stalls the run at its first door.
+        assertEquals(25, LudiPqData.passesWanted(1), "the entry room wants 25 passes");
         assertEquals(15, LudiPqData.passesWanted(2));
         assertEquals(32, LudiPqData.passesWanted(3));
         assertEquals(6, LudiPqData.passesWanted(4));

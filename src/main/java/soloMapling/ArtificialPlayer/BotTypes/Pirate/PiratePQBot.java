@@ -78,6 +78,11 @@ public class PiratePQBot extends PartyQuestBot {
                 PqActions.attack(getChr());
             }
         }
+        // The medal stages' turn-in (NPC 2094002) grades the leader's pockets, so anything
+        // the bot picked up - medals and the like from the run's exclusive set - goes to him.
+        for (int itemId : PiratePqData.QUEST_ITEMS) {
+            PqActions.handItemsToLeader(getChr(), itemId);
+        }
         return false;
     }
 

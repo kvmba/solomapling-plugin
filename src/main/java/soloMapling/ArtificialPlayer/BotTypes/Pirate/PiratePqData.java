@@ -82,4 +82,11 @@ public final class PiratePqData {
             default -> null;
         };
     }
+
+    /**
+     * The run's exclusive items ({@code PiratePQ setEventExclusives}) - the medals the medal
+     * stages want (NPC 2094002 grades the leader's inventory) plus the ship's letters. A bot
+     * that picks any of them up drops them at the leader's feet.
+     */
+    public static final int[] QUEST_ITEMS = {4001117, 4001120, 4001121, 4001122};
 }

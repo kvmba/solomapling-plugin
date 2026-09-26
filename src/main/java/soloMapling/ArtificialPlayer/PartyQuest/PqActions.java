@@ -231,6 +231,45 @@ public final class PqActions {
         DropCommands.botThrowItemQty(bot, itemId, qty, receiver.getPosition());
     }
 
+    /**
+     * Hand this bot's whole stock of an item to the party leader, dropping it at his feet.
+     *
+     * <p>Every stage turn-in in these quests reads the inventory of whoever talks to the
+     * NPC, and only the leader may talk - so a bot that keeps its share starves the turn-in
+     * and the party stalls on the stage. Handing the items over is the only contribution
+     * that counts; the leader picks the drops up and turns them in. Dropping is safe: quest
+     * items in an instance stay visible to the party, and nothing here runs unless there is
+     * something to hand over.
+     *
+     * <p>Passes the actual quantity the bot holds so the drop exactly matches the stock,
+     * and reports what it handed over so the caller can say so once instead of every tick.
+     *
+     * @return how many of the item were handed to the leader (0 when there was nothing)
+     */
+    public static int handItemsToLeader(Character bot, int itemId) {
+        if (bot == null) {
+            return 0;
+        }
+        Character leader = partyLeader(bot);
+        if (leader == null || leader == bot) {
+            return 0;
+        }
+        int qty = countItem(bot, itemId);
+        if (qty <= 0) {
+            return 0;
+        }
+        giveItemTo(bot, leader, itemId, qty);
+        return qty;
+    }
+
+    /** The bot's party leader, or null when the bot has no party (or the leader is offline). */
+    public static Character partyLeader(Character bot) {
+        if (bot == null || bot.getParty() == null || bot.getParty().getLeader() == null) {
+            return null;
+        }
+        return bot.getParty().getLeader().getPlayer();
+    }
+
     // =========================================================================
     // N5 - holding an area
     // =========================================================================

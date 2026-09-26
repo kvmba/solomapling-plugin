@@ -78,6 +78,14 @@ public final class MagatiaPqData {
     public static final String YULETE_TALKED = "yuleteTalked";
     public static final String YULETE_PASSED = "yuletePassed";
 
+    /**
+     * The run's exclusive items ({@code MagatiaPQ_A/_Z setEventExclusives}) - the quest
+     * items the rooms yield and the stage NPCs check for in whoever talks to them. A bot
+     * that picks one up drops it at the leader's feet for the same reason every other
+     * leader-checked turn-in does.
+     */
+    public static final int[] QUEST_ITEMS = {4001130, 4001131, 4001132, 4001133, 4001134, 4001135};
+
     /** Whether the party has done what the escort wants; a fail means the run is over. */
     public static final String ESCORT_FAIL = "escortFail";
 

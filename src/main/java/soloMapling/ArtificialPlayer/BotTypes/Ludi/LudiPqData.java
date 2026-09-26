@@ -58,11 +58,13 @@ public final class LudiPqData {
     public static final int ALISHAR_TROPHY = 4001023;
 
     /**
-     * How many passes each stage asks for. Stages 1 and 6 have their own mechanics and no
-     * pass requirement; stage 5 asks for 24 because its six side rooms each contribute four.
+     * How many passes each stage asks for, straight out of the stage NPC scripts
+     * ({@code 2040036..2040044}). Stage 1 wants 25 like the rest of the collection stages;
+     * stages 6 and 8 have their own mechanics and no pass requirement.
      */
     public static int passesWanted(int stage) {
         return switch (stage) {
+            case 1 -> 25;
             case 2 -> 15;
             case 3 -> 32;
             case 4 -> 6;

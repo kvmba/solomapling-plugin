@@ -34,6 +34,9 @@ public final class EllinPqData {
     /** The room that holds the maze of dead-end portals. */
     public static final int MAZE_MAP = 930000300;
 
+    /** The frog room past the maze, whose guardians are caught rather than killed. */
+    public static final int FROG_ROOM = 930000400;
+
     public static final int MIN_PLAYERS = 4;
     public static final int MAX_PLAYERS = 6;
     public static final int MIN_LEVEL = 44;

@@ -35,10 +35,10 @@ public final class LudiStages {
     /**
      * Fight what is in the room and gather this stage's passes.
      *
-     * <p>The passes are party drops, so they can be handed in by whoever holds enough - but
-     * the stage NPC checks the inventory of the player talking to him, and that is the party
-     * leader. The bot's contribution is therefore the kills and the gathering; whether to
-     * hand over is the player's call, and the bot does not try to make it for him.
+     * <p>The bot attacks, loots its share, and then hands its whole stock of passes to the
+     * party leader by dropping them at his feet: the stage NPC checks the inventory of
+     * whoever talks to him, and that is the leader - a bot that keeps its share starves the
+     * turn-in and the party stalls on the stage.
      */
     public static void gatherPasses(Character bot, int stage) {
         int wanted = LudiPqData.passesWanted(stage);
@@ -47,6 +47,9 @@ public final class LudiStages {
         }
         PqActions.attack(bot);
         PqActions.loot(bot, bot.getPosition(), 2_000, new int[]{LudiPqData.PASS});
+        if (PqActions.handItemsToLeader(bot, LudiPqData.PASS) > 0) {
+            PqActions.say(bot, "PASSES! I have dropped the passes at the leader's feet.");
+        }
     }
 
     // =========================================================================

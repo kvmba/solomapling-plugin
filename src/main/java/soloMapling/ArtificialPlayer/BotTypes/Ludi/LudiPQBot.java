@@ -72,7 +72,7 @@ public class LudiPQBot extends PartyQuestBot {
         }
 
         switch (stage) {
-            case 1 -> { /* the entry room: nothing to do but wait for the leader */ }
+            case 1 -> workEntryRoom();
             case 2, 3, 4, 5, 7 -> LudiStages.gatherPasses(getChr(), stage);
             case 6 -> climb();
             case 8 -> standOnCrates();
@@ -80,6 +80,27 @@ public class LudiPQBot extends PartyQuestBot {
             default -> { /* unreachable */ }
         }
         return false;
+    }
+
+    /**
+     * Work the entry room like any other collection stage.
+     *
+     * <p>Stage 1 is not a waiting room: the Red Balloon (NPC 2040036) hands the door to
+     * stage 2 only to the party leader carrying 25 passes, and until that conversation
+     * happens the lpq0 portal refuses everyone. The bot kills the Ratz, loots the passes it
+     * drops, and drops them at the leader's feet so he can make the turn-in - without that
+     * the run can never leave this room.
+     *
+     * <p>Sources: {@code scripts/npc/2040036.js} (25 x 4001022, leader-only) and
+     * {@code scripts/portal/lpq0.js} (refuses while "1stageclear" is unset).
+     */
+    private void workEntryRoom() {
+        if (announcedStage != 1) {
+            announcedStage = 1;
+            soloMapling.ArtificialPlayer.PartyQuest.PqActions.say(getChr(),
+                    "Stage 1: collect 25 passes for the Red Balloon - the leader turns them in. I am fighting for them.");
+        }
+        LudiStages.gatherPasses(getChr(), 1);
     }
 
     /** Which stage a room is, by its position in the quest's map run. */

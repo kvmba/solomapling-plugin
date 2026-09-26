@@ -117,16 +117,17 @@ public final class HenesysStages {
     /**
      * Keep the monsters off Moon Bunny, and pick up rice cakes as they appear.
      *
-     * <p>The quest counts cakes in its own property and stops the run on its own clock, so
-     * there is nothing to finish here beyond thinning the mobs; Growlie's turn-in needs the
-     * player, because {@code cm.haveItem(4001101, 10)} reads the inventory of whoever talks
-     * to him.
+     * <p>The quest counts cakes in its own property and stops the run on its own clock.
+     * Growlie (NPC 1012114) grades whoever talks to him for 10 cakes - usually the leader -
+     * so a cake in a bot's pocket is a cake the turn-in never sees: the bot loots and then
+     * drops its stock at the leader's feet, the same transfer the other turn-ins need.
      *
      * <p>Returns true once the run has been cleared for the exit.
      */
     public static boolean guardMoonBunny(Character bot) {
         PqActions.attack(bot);
         PqActions.loot(bot, bot.getPosition(), 2_000, new int[]{HenesysPqData.RICE_CAKE});
+        PqActions.handItemsToLeader(bot, HenesysPqData.RICE_CAKE);
         return PqActions.readEimString(bot, "1stageclear") != null
                 || PqActions.readEimInt(bot, "stage", 0) > HenesysPqData.FLOWERS_TO_BLOOM;
     }

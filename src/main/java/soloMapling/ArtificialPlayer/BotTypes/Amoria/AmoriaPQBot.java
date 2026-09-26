@@ -58,8 +58,35 @@ public class AmoriaPQBot extends PartyQuestBot {
         return switch (stage) {
             case 1 -> stageOne();
             case 2, 3 -> ropePuzzle(stage);
-            default -> false; // later stages are fights; the attack path already covers them
+            case 4 -> gatherRoom();
+            // 5 is the survival gate and 6 the lever puzzle - both leader-driven reads.
+            // 7/8 are fights (statue room, Papa Pixie) the attack path already covers;
+            // each is added here so the bot is never a bystander in a fight room.
+            case 5, 6 -> fightRoom();
+            case 7, 8 -> fightRoom();
+            default -> false; // past the run: nothing to add
         };
+    }
+
+    /**
+     * Stage 4 (the walkway's 50-room follow-up) and every fight room share one shape:
+     * attack what is here and sweep what falls.
+     *
+     * <p>Stage 4's own bar is 50 statue pieces in the leader's hands (Amos turns them in),
+     * which the bot feeds the same way the collection stages do - kills, loot, and a drop
+     * of its whole stock at the leader's feet.
+     */
+    private boolean gatherRoom() {
+        PqActions.attack(getChr());
+        PqActions.loot(getChr(), getChr().getPosition(), 2_000, new int[]{AmoriaPqData.STATUE_PIECE});
+        PqActions.handItemsToLeader(getChr(), AmoriaPqData.STATUE_PIECE);
+        return false;
+    }
+
+    /** A fight room the bot can help in without reading anything. */
+    private boolean fightRoom() {
+        PqActions.attack(getChr());
+        return false;
     }
 
     /**
