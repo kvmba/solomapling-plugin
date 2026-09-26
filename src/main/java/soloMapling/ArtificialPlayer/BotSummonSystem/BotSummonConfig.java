@@ -39,6 +39,13 @@ public final class BotSummonConfig {
     private static final double DEF_SPAWN_CHANCE = 0.55;
     private static final int DEF_MIN_LEVEL = 70;
     /**
+     * {@code spawn.chance: 0} sentinel - the documented way to disable the feature entirely
+     * (neither new bots nor recasts may summon). {@code 0 < chance < 1} is the mixed world:
+     * only the bots that ROLL WIN ever carry one, and those bots keep recasting for life.
+     * There is deliberately no middle state where an existing summon expires into nothing.
+     */
+    public static final double CHANCE_DISABLED = 0.0;
+    /**
      * Floor (ms) on the pause a summon takes AFTER its swing animation finishes, before the next
      * strike may begin. The full cooldown is the summon's own {@code attack1} length (600..2280ms,
      * read from Skill.wz) plus this pause, so a strike never overlaps the previous swing and every
@@ -48,6 +55,35 @@ public final class BotSummonConfig {
      */
     static final long MIN_ATTACK_RECOVERY_MS = 2200L;
     private static final int DEF_ATTACK_RANGE = 320;
+    /**
+     * Where a STATIONARY turret is planted. True = at the nearest mob within
+     * {@code place_search_radius} of the owner (at the owner's feet when the map has none - a town
+     * bot's turret stays pure set dressing); false = always at the owner's feet (the old rule).
+     * A turret that never moves is only worth what it fires at, so this defaults on.
+     */
+    private static final boolean DEF_PLACE_AT_MOBS = true;
+    /** How far from the BOT a placement target mob may sit (px). */
+    private static final int DEF_PLACE_SEARCH_RADIUS = 260;
+    /**
+     * A placed turret is re-seated at a live mob near the owner when fewer than this many stay
+     * within its own attack range - probed at most once per {@code relocate_after_ms} so a dry
+     * map costs one cheap query per window, not one per tick.
+     */
+    private static final int DEF_PLACE_RELOCATE_MIN_MOBS = 1;
+    private static final long DEF_PLACE_RELOCATE_AFTER_MS = 10_000L;
+    /**
+     * How a summon's lifetime is decided. TRUE = the WZ buff time (a player's cast expires when
+     * the buff runs out, so the bot's does too); FALSE = the old rule (outlives its owner until
+     * the owner itself is torn down).
+     */
+    private static final boolean DEF_LIFETIME_WZ = true;
+    /**
+     * Grace period (ms) added on top of the WZ buff time, so a turret expiring at the same instant
+     * every bot in the world recast would look clockwork. A player recast somewhere inside this
+     * window; the bot's own refresh beat spreads its recast across it (see the follower's
+     * expiry-reschedule note).
+     */
+    private static final long DEF_LIFETIME_REFRESH_WINDOW_MS = 20_000L;
 
     private final boolean enabled;
     private final long moveTickMs;
@@ -61,6 +97,12 @@ public final class BotSummonConfig {
     private final int minLevel;
     private final long attackRecoveryMs;
     private final int attackRange;
+    private final boolean placeAtMobs;
+    private final int placeSearchRadius;
+    private final int placeRelocateMinMobs;
+    private final long placeRelocateAfterMs;
+    private final boolean lifetimeWz;
+    private final long lifetimeRefreshWindowMs;
 
     private BotSummonConfig(Builder b) {
         this.enabled = b.enabled;
@@ -75,6 +117,12 @@ public final class BotSummonConfig {
         this.minLevel = b.minLevel;
         this.attackRecoveryMs = b.attackRecoveryMs;
         this.attackRange = b.attackRange;
+        this.placeAtMobs = b.placeAtMobs;
+        this.placeSearchRadius = b.placeSearchRadius;
+        this.placeRelocateMinMobs = b.placeRelocateMinMobs;
+        this.placeRelocateAfterMs = b.placeRelocateAfterMs;
+        this.lifetimeWz = b.lifetimeWz;
+        this.lifetimeRefreshWindowMs = b.lifetimeRefreshWindowMs;
     }
 
     public boolean enabled() { return enabled; }
@@ -92,6 +140,18 @@ public final class BotSummonConfig {
     /** The pause (ms) after the summon's swing animation, before it may strike again. */
     public long attackRecoveryMs() { return attackRecoveryMs; }
     public int attackRange() { return attackRange; }
+    /** True when a turret is planted at a nearby mob instead of always at the owner's feet. */
+    public boolean placeAtMobs() { return placeAtMobs; }
+    /** Radius (px) around the owner a placement mob may sit in. */
+    public int placeSearchRadius() { return placeSearchRadius; }
+    /** Mobs that must remain in the turret's own attack range before it re-seats. */
+    public int placeRelocateMinMobs() { return placeRelocateMinMobs; }
+    /** Minimum ms between re-seat probes of the same turret. */
+    public long placeRelocateAfterMs() { return placeRelocateAfterMs; }
+    /** True when a summon's lifetime is the skill's own WZ buff time. */
+    public boolean lifetimeWz() { return lifetimeWz; }
+    /** Grace window (ms) over which the bot's recast after an expiry is spread. */
+    public long lifetimeRefreshWindowMs() { return lifetimeRefreshWindowMs; }
 
     /** All defaults, no file. */
     public static BotSummonConfig defaults() {
@@ -153,6 +213,16 @@ public final class BotSummonConfig {
         b.attackRecoveryMs = Math.max(MIN_ATTACK_RECOVERY_MS,
                 lng(attack.get("recovery_ms"), MIN_ATTACK_RECOVERY_MS));
         b.attackRange = intOf(attack.get("range"), DEF_ATTACK_RANGE);
+
+        Map<String, Object> place = map(root.get("place"));
+        b.placeAtMobs = bool(place.get("at_mobs"), DEF_PLACE_AT_MOBS);
+        b.placeSearchRadius = intOf(place.get("search_radius"), DEF_PLACE_SEARCH_RADIUS);
+        b.placeRelocateMinMobs = intOf(place.get("relocate_min_mobs"), DEF_PLACE_RELOCATE_MIN_MOBS);
+        b.placeRelocateAfterMs = lng(place.get("relocate_after_ms"), DEF_PLACE_RELOCATE_AFTER_MS);
+
+        Map<String, Object> lifetime = map(root.get("lifetime"));
+        b.lifetimeWz = bool(lifetime.get("wz_duration"), DEF_LIFETIME_WZ);
+        b.lifetimeRefreshWindowMs = lng(lifetime.get("refresh_window_ms"), DEF_LIFETIME_REFRESH_WINDOW_MS);
         return b.build();
     }
 
@@ -207,6 +277,12 @@ public final class BotSummonConfig {
         int minLevel = DEF_MIN_LEVEL;
         long attackRecoveryMs = MIN_ATTACK_RECOVERY_MS;
         int attackRange = DEF_ATTACK_RANGE;
+        boolean placeAtMobs = DEF_PLACE_AT_MOBS;
+        int placeSearchRadius = DEF_PLACE_SEARCH_RADIUS;
+        int placeRelocateMinMobs = DEF_PLACE_RELOCATE_MIN_MOBS;
+        long placeRelocateAfterMs = DEF_PLACE_RELOCATE_AFTER_MS;
+        boolean lifetimeWz = DEF_LIFETIME_WZ;
+        long lifetimeRefreshWindowMs = DEF_LIFETIME_REFRESH_WINDOW_MS;
 
         BotSummonConfig build() {
             return new BotSummonConfig(this);

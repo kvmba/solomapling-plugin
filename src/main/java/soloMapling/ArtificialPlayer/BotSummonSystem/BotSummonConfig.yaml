@@ -16,7 +16,9 @@ enabled: true
 # min_level rolls for one; a successful roll grants ONE summon. Persistent
 # companions are never granted a summon (see BotSummonController).
 spawn:
-  chance: 0.55       # P(a summon appears) when the bot is eligible
+  chance: 0.55       # P(a summon appears) when the bot is eligible. 0 = feature off entirely
+                     # (no bot carries one at all); 0 < chance < 1 = only roll winners carry
+                     # one, and every winner recasts for life (see lifetime below).
   min_level: 70      # below this no summon is granted (matches 3rd-job summons)
 
 # Server-driven movement for hovering summons (STATIONARY summons ignore this).
@@ -43,3 +45,29 @@ attack:
   # value here is raised, not honoured.
   recovery_ms: 2200
   range: 320         # it picks the nearest mob within this radius of itself
+
+# Where a STATIONARY turret (the pirate octopus) is planted. A turret never moves, so a turret
+# standing on an empty stretch of a hunting field is a turret that never fires - it is planted at
+# a mob instead. Pure set dressing keeps the old rule: on a mobless map (a town) the turret lands
+# at its owner's feet exactly as before.
+place:
+  at_mobs: true        # plant at a nearby mob; fall back to the owner's feet when none is in radius
+  search_radius: 260   # how far from the BOT the target mob may sit (px)
+  # A placed turret is re-seated at a fresh mob (near the owner, same search radius) once fewer
+  # than relocate_min_mobs stay within its own attack range - the equivalent of a player recasting
+  # their turret at the new pack. The probe runs at most once per relocate_after_ms, so a dry map
+  # costs one range query per window, not one per tick.
+  relocate_min_mobs: 1
+  relocate_after_ms: 10000
+
+# How long a summon lives. A player's summon is the skill's buff: the host timer cancels the
+# SUMMON buffstat when the WZ buff time (octopus lv30: ~240s) runs out and the removal packet is
+# what ends the entity. A bot's summon never registers that buff, so this plugin mirrors the
+# rule itself - the summon expires on the same clock and the bot recasts, like a player does.
+# Recasts are spread over refresh_window_ms (a player mashes the skill again sometime within the
+# next few seconds, not on a stopwatch) and the granted skill level re-derives from the bot's
+# current level, so a summon that comes back grows with its owner exactly as the first one did.
+# The dark map / per-bot isolation rules of every other beat apply here too (see the follower).
+lifetime:
+  wz_duration: true    # false = the old rule: the summon outlives everything but its owner
+  refresh_window_ms: 20000  # recast jitter: the next grant lands within this many ms after expiry

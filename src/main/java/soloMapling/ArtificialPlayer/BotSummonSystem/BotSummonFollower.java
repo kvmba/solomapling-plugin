@@ -49,7 +49,10 @@ import java.util.concurrent.TimeUnit;
  *
  * <p><b>No host buff.</b> The bot learns the summon skill's level (the host {@link Summon}
  * constructor requires it) but no host buff is ever registered, so the host's own SUMMON/PUPPET
- * buff lifecycle is never involved; this class owns spawn, movement and teardown outright.</p>
+ * buff lifecycle is never involved; this class owns spawn, movement, LIFETIME and teardown
+ * outright - including the player-parity expiry (the skill's own WZ buff time) and the recast
+ * that follows it, which the regrant beat performs the way a player pressing the skill again
+ * would.</p>
  *
  * <p><b>LOD.</b> Movement frames and attacks are gated on {@link GCMovement#isMapObserved}: while
  * no real player watches the map nothing is sent, and the tick only keeps each summon's position in
@@ -125,8 +128,25 @@ public final class BotSummonFollower {
     // the sends just queue to sockets, so the hold is brief and bounded.
     private static final Object LIFECYCLE_LOCK = new Object();
 
+    // skillId -> the skill's WZ buff time in ms (0 = none). Memoized: the same Skill.wz row the
+    // strike cadence and the host's own buff timer read, and like them read once per skill.
+    private static final Map<Integer, Long> BUFF_TIME_BY_SKILL = new ConcurrentHashMap<>();
+
+    // botIds whose summon expired and whose recast is due within the config's refresh window.
+    // A scheduling beat, not a registry: the entry is consumed by the regrant sweep that armed
+    // it, and a bot torn down (despawnAll) is removed so an expired grant can never resurrect
+    // a bot that became an FM keeper mid-window.
+    private static final Map<Integer, Long> REGRANT_DUE_AT = new ConcurrentHashMap<>();
+
     private static volatile BotSummonConfig config = BotSummonConfig.defaults();
     private static ScheduledFuture<?> task;
+    private static ScheduledFuture<?> regrantTask;
+
+    /**
+     * Period (ms) of the dedicated regrant sweep. Faster than the jitter window itself (20s), so
+     * a recast never waits noticeably longer than the window the config promised.
+     */
+    private static final long REGRANT_SWEEP_MS = 2_000L;
 
     private BotSummonFollower() {}
 
@@ -138,6 +158,9 @@ public final class BotSummonFollower {
         long period = Math.max(100L, cfg.moveTickMs());
         task = soloMapling.server.ExecutorServiceManager.getScheduledExecutorService()
                 .scheduleAtFixedRate(BotSummonFollower::tick, period, period, TimeUnit.MILLISECONDS);
+        regrantTask = soloMapling.server.ExecutorServiceManager.getScheduledExecutorService()
+                .scheduleAtFixedRate(() -> regrantIfDue(config),
+                        REGRANT_SWEEP_MS, REGRANT_SWEEP_MS, TimeUnit.MILLISECONDS);
         System.out.println("[BotSummonFollower] started, period=" + period + "ms");
     }
 
@@ -146,6 +169,11 @@ public final class BotSummonFollower {
             task.cancel(false);
             task = null;
         }
+        if (regrantTask != null) {
+            regrantTask.cancel(false);
+            regrantTask = null;
+        }
+        REGRANT_DUE_AT.clear();
         // Best-effort teardown of everything still tracked, so a reload never leaves ghosts. Each
         // bot's list is retired under the lifecycle lock before its entities are removed: an
         // in-flight tick that later sees such a summon finds the list gone (the identity check in
@@ -190,9 +218,39 @@ public final class BotSummonFollower {
         // comfort distance so each holds its own spot on the pet's follow ring.
         s.phaseRad = ThreadLocalRandom.current().nextDouble() * Math.PI * 2.0;
         s.followDistancePx = freshFollowDistancePx();
+        // The player-parity lifetime: a player's summon is its buff, and the buff expires on the
+        // skill's own WZ buff time. The bot's recast after an expiry is spread over a jitter
+        // window (a player mashes the skill again within seconds, not on a stopwatch), so every
+        // bot's clock never reads clockwork. When the WZ row has no readable time the summon
+        // keeps the old rule: no lifetime at all.
+        long buffMs = summonBuffTimeMs(spec.skillId());
+        if (config.lifetimeWz() && buffMs > 0) {
+            long jitter = (long) (ThreadLocalRandom.current().nextDouble()
+                    * Math.max(0L, config.lifetimeRefreshWindowMs()));
+            s.expireAtMs = System.currentTimeMillis() + buffMs + jitter;
+        }
         synchronized (LIFECYCLE_LOCK) {
             TRACKED.computeIfAbsent(botId, k -> new ArrayList<>()).add(s);
         }
+    }
+
+    /**
+     * The summon skill's WZ buff time in ms ({@code StatEffect.getDuration()}), the clock a
+     * real player's summon expires on; 0 when unreadable. Memoized per skill.
+     */
+    private static long summonBuffTimeMs(int skillId) {
+        return BUFF_TIME_BY_SKILL.computeIfAbsent(skillId, id -> {
+            try {
+                org.gms.client.Skill skill = org.gms.client.SkillFactory.getSkill(id);
+                if (skill == null) {
+                    return 0L;
+                }
+                long ms = skill.getEffect(skill.getMaxLevel()).getDuration();
+                return ms > 0 ? ms : 0L;
+            } catch (Throwable t) {
+                return 0L;
+            }
+        });
     }
 
     /** Tear every tracked summon down and stop tracking the bot. Safe to call repeatedly. */
@@ -200,6 +258,7 @@ public final class BotSummonFollower {
         if (bot == null) {
             return;
         }
+        REGRANT_DUE_AT.remove(bot.getId()); // an armed recast must never resurrect a torn-down bot
         List<BotSummon> summons;
         synchronized (LIFECYCLE_LOCK) {
             summons = TRACKED.remove(bot.getId());
@@ -243,12 +302,56 @@ public final class BotSummonFollower {
 
     private static void tick() {
         BotSummonConfig cfg = config;
+        regrantIfDue(cfg);
         for (Integer botId : new ArrayList<>(TRACKED.keySet())) {
             try {
                 tickBot(botId, cfg);
             } catch (Throwable t) {
                 // Per-bot isolation, mirroring GrindTickRegistry: one bad summon never stops the sweep.
                 log.warn("summon tick failed cid={}: {}", botId, t.toString());
+            }
+        }
+    }
+
+    /**
+     * The recast beat: grant a fresh summon to every bot whose previous one expired. Runs at the
+     * head of the tick AND on its own short sweep (a recast must never wait a full move tick).
+     *
+     * <p>The entry is a retry lease, not a one-shot: it is only CONSUMED when the recast
+     * provably took (a summon is tracked again) or the bot is provably gone. On a dark map, or
+     * when {@code recastForBot} reports failure (grant suppressed by a concurrent teardown, a
+     * transient spawn failure), the entry is re-armed to the next window instead of being
+     * dropped - the alternative silently turned any failed beat into a PERMANENTLY summonless
+     * bot. The retry stretch past expiry is bounded by the window itself and reads exactly as a
+     * player pausing before recasting.</p>
+     */
+    private static void regrantIfDue(BotSummonConfig cfg) {
+        if (REGRANT_DUE_AT.isEmpty()) {
+            return;
+        }
+        long nowMs = now();
+        for (Map.Entry<Integer, Long> e : REGRANT_DUE_AT.entrySet()) {
+            if (e.getValue() > nowMs) {
+                continue; // jitter window not elapsed yet
+            }
+            Integer botId = e.getKey();
+            Character bot = BotHelpers.getCharFromChannelStorage(botId);
+            if (bot == null || bot.getMap() == null) {
+                REGRANT_DUE_AT.remove(botId);
+                continue; // the bot is gone from the world; nothing left to recast for
+            }
+            if (!GCMovement.isMapObserved(bot.getMapId())) {
+                // Dark map: nobody can watch the recast, so try again once the map has players.
+                REGRANT_DUE_AT.put(botId, nowMs + cfg.lifetimeRefreshWindowMs());
+                continue;
+            }
+            // Deliberately NOT the config-gated BotSummonSystem.grant: the lifetime feature is
+            // what armed this beat, so the owner's toggle decides only NEW bots, and a bot the
+            // spawn roll once won keeps it for life. No re-roll: recastForBot never rolls.
+            if (BotSummonController.recastForBot(bot, cfg)) {
+                REGRANT_DUE_AT.remove(botId);
+            } else {
+                REGRANT_DUE_AT.put(botId, nowMs + cfg.lifetimeRefreshWindowMs());
             }
         }
     }
@@ -282,6 +385,28 @@ public final class BotSummonFollower {
         synchronized (LIFECYCLE_LOCK) {
             snapshot = new ArrayList<>(summons);
         }
+        // Player-parity lifetime (an expiry armed by register, not the host buff pipeline this
+        // system deliberately bypasses): when the clock runs out the summon ends the way a
+        // player's does - removal broadcast, no dramatics - and the bot recasts after the
+        // jitter window, which is exactly what a player pressing the skill again looks like.
+        // Dark maps skip the expiry (the removal nobody can see would still ghost observers on
+        // arrival) and torn-down bots never arm (a keeper keeps its summon; despawnAll also
+        // clears any armed entry).
+        if (observed) {
+            for (BotSummon s : snapshot) {
+                if (s.expireAtMs > 0 && now() >= s.expireAtMs) {
+                    synchronized (LIFECYCLE_LOCK) {
+                        if (TRACKED.get(botId) == summons) {
+                            despawnSummons(bot, botId, snapshot);
+                        }
+                    }
+                    REGRANT_DUE_AT.put(botId,
+                            now() + ThreadLocalRandom.current().nextLong(
+                                    Math.max(1L, cfg.lifetimeRefreshWindowMs())));
+                    break; // one beat per bot per tick
+                }
+            }
+        }
         for (BotSummon s : snapshot) {
             // Re-homing is pure cleanup + spawn and MUST run whether or not the map is observed: a
             // stationary summon is not removed by the host's own leave-map path, so skipping it on an
@@ -304,10 +429,37 @@ public final class BotSummonFollower {
             // Move BEFORE attacking so a strike uses the frame's fresh position. The turret rule
             // (a placed cannon is never repositioned, and gets no frame) lives inside moveSummon.
             moveSummon(bot, s, cfg, observed);
+            if (s.spec.isStationary() && s.attacks() && observed) {
+                // A turret's placement, unlike a flyer's follow, is the whole game: a turret
+                // standing where the pack has wandered away from fires nothing, so a placed one
+                // is re-seated at a fresh mob near the owner. Unobserved maps skip it - the whole
+                // combat view is frozen there anyway.
+                maybeRelocateTurret(bot, s, cfg, botMap, observed);
+            }
             if (s.attacks() && observed) {
                 tryAttack(bot, s, cfg);
             }
         }
+    }
+
+    /**
+     * Tear down every summon in {@code summons} and stop tracking the bot - the mechanical half
+     * of {@link #despawnAll}, shared with the tick's expiry path (which must NOT clear a regrant
+     * it is about to arm itself).
+     */
+    private static void despawnSummons(Character bot, int botId, List<BotSummon> summons) {
+        synchronized (LIFECYCLE_LOCK) {
+            if (TRACKED.remove(botId, summons)) {
+                for (BotSummon s : summons) {
+                    removeEntity(bot, s);
+                }
+            }
+        }
+    }
+
+    /** Millis since the epoch - the clock the expiry fields are written and judged on. */
+    private static long now() {
+        return System.currentTimeMillis();
     }
 
     /**
@@ -344,7 +496,7 @@ public final class BotSummonFollower {
             case CIRCLE_FOLLOW -> org.gms.server.maps.SummonMovementType.CIRCLE_FOLLOW;
         };
         boolean left = CharacterStance.isFacingLeft(bot.getStance());
-        Point pos = spawnPosition(bot, spec, map);
+        Point pos = spawnPosition(bot, spec, map, config);
         Summon summon = new Summon(bot, skillId, pos, moveType);
         // nMoveAction with the facing bit: the client mirrors the sprite from bit 0, so a bird
         // spawned beside a left-facing owner must spawn facing left too (it was stamped 0 - right -
@@ -354,8 +506,16 @@ public final class BotSummonFollower {
         return summon;
     }
 
-    /** Where the entity appears: trailing the owner for a flyer, on the ground for a turret. */
-    private static Point spawnPosition(Character bot, BotSummonTable.Spec spec, MapleMap map) {
+    /**
+     * Where the entity appears: trailing the owner for a flyer, on the ground for a turret. A
+     * turret is planted AT A MOB when one is near its owner ({@code place.at_mobs}): a turret
+     * never moves, so planting one on an empty stretch of a hunting field means it never fires.
+     * The mob's own ground is the spot (the turret is a ground piece); with no mob in radius - a
+     * town, or a bot between packs - the turret falls back to the owner's feet, the pure
+     * set-dressing spawn the towns know.
+     */
+    private static Point spawnPosition(Character bot, BotSummonTable.Spec spec, MapleMap map,
+                                       BotSummonConfig cfg) {
         Point owner = bot.getPosition();
         if (!spec.isStationary()) {
             // A flyer materialises BEHIND the owner at its follow ring (the same slot the
@@ -363,11 +523,73 @@ public final class BotSummonFollower {
             boolean facingLeft = CharacterStance.isFacingLeft(bot.getStance());
             int dist = freshFollowDistancePx();
             int x = facingLeft ? owner.x + dist : owner.x - dist;
-            return new Point(x, owner.y + config.hoverOffsetY());
+            return new Point(x, owner.y + cfg.hoverOffsetY());
         }
-        Foothold ground = GCMovement.footholdBelow(map, owner.x, owner.y);
-        int y = ground != null ? ground.calculateFooting(owner.x) : owner.y;
-        return new Point(owner.x, y);
+        Point at = turretAnchor(bot, owner, map, cfg);
+        Foothold ground = GCMovement.footholdBelow(map, at.x, at.y);
+        int y = ground != null ? ground.calculateFooting(at.x) : at.y;
+        return new Point(at.x, y);
+    }
+
+    /**
+     * The x/y a turret is planted at: the nearest live mob within {@code place.search_radius} of
+     * the owner (its own position, not smoothed - a mob stands on real ground already), or the
+     * owner's position when the radius is dry. Only live mobs count - a dead mob's corpse spot is
+     * exactly the empty stretch this rule exists to avoid.
+     */
+    static Point turretAnchor(Character bot, Point owner, MapleMap map, BotSummonConfig cfg) {
+        if (cfg.placeAtMobs()) {
+            List<Monster> near = nearestMobs(map, owner, cfg.placeSearchRadius(), 1);
+            if (!near.isEmpty()) {
+                return near.get(0).getPosition();
+            }
+        }
+        return owner;
+    }
+
+    /**
+     * A placed turret's relocate beat, run per tick BEFORE the attack. A turret never moves and
+     * never receives a movement frame - re-seating is a placement, not a move: drop the entity
+     * (with its removal broadcast) and spawn a fresh one at a mob near the owner, the exact
+     * discipline a map change already uses (new object id; clients that saw the removal never see
+     * the new id alias the old). When the map holds no mobs within the search radius, or the map
+     * went unobserved, nothing happens - a dry probe costs one range query per throttle window.
+     */
+    private static void maybeRelocateTurret(Character bot, BotSummon s, BotSummonConfig cfg,
+                                            MapleMap botMap, boolean observed) {
+        long now = System.currentTimeMillis();
+        if (now < s.nextRelocateProbeAtMs) {
+            return; // throttle: a dry map must not pay a range query every tick
+        }
+        s.nextRelocateProbeAtMs = now + cfg.placeRelocateAfterMs();
+        Point from = s.summon.getPosition();
+        int mobsInRange = nearestMobs(botMap, from, cfg.attackRange(), Integer.MAX_VALUE).size();
+        if (mobsInRange >= cfg.placeRelocateMinMobs()) {
+            return; // the turret is still earning its keep where it stands
+        }
+        Point anchor = turretAnchor(bot, bot.getPosition(), botMap, cfg);
+        if (anchor == bot.getPosition() && mobsInRange == 0) {
+            return; // no mobs near the owner either (a town, or between packs): stand fast
+        }
+        try {
+            synchronized (LIFECYCLE_LOCK) {
+                // The teardown check from the tick's own re-home: a despawnAll that ran meanwhile
+                // retired this summon - resurrecting it would spawn a ghost nobody tracks.
+                if (TRACKED.get(s.botId) == null || !TRACKED.get(s.botId).contains(s)) {
+                    return;
+                }
+                removeEntity(bot, s);
+                Summon fresh = spawnEntity(bot, s.skillId, s.spec, botMap);
+                if (fresh != null) {
+                    s.summon = fresh;
+                    s.map = botMap;
+                } else {
+                    s.summon = null; // retried by the tick's own re-home path, like a failed spawn
+                }
+            }
+        } catch (Throwable t) {
+            log.warn("turret re-seat failed cid={} skill={}: {}", bot.getId(), s.skillId, t.toString());
+        }
     }
 
     /*
@@ -561,7 +783,11 @@ public final class BotSummonFollower {
         }
     }
 
-    /** Up to {@code limit} live mobs within {@code range} px of the summon, nearest first. */
+    /**
+     * Up to {@code limit} live mobs within {@code range} px of the summon, nearest first.
+     * {@code limit} may be {@code Integer.MAX_VALUE} to mean "all of them" (the relocate probe's
+     * count).
+     */
     private static List<Monster> nearestMobs(MapleMap map, Point from, int range, int limit) {
         if (map == null || from == null) {
             return List.of();
@@ -575,6 +801,9 @@ public final class BotSummonFollower {
             }
         }
         inRange.sort(Comparator.comparingDouble(m -> from.distanceSq(m.getPosition())));
+        if (limit == Integer.MAX_VALUE) {
+            return inRange;
+        }
         return inRange.size() <= limit ? inRange : inRange.subList(0, limit);
     }
 }

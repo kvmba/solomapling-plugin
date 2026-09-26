@@ -36,9 +36,23 @@ final class BotSummon {
     /** Absolute epoch-ms before which an attacking summon may not strike again. */
     long nextAttackAtMs;
 
+    /**
+     * Absolute epoch-ms before which this STATIONARY turret may not be re-seat probed again (the
+     * relocate throttle; unused by flyers). Written only by the follower tick, like everything
+     * else here, so no locking is required.
+     */
+    long nextRelocateProbeAtMs;
+
+    /**
+     * Absolute epoch-ms this summon's lifetime ends at, or 0 when it has none (WZ buff time
+     * unreadable, or lifetime mirrors disabled). Written once at register, read per tick - the
+     * same single-writer contract as every other field here.
+     */
+    long expireAtMs;
+
     BotSummon(int botId, int skillId, BotSummonTable.Spec spec) {
         this.botId = botId;
-        this.skillId = skillId;
+        this.skillId = spec.skillId();
         this.spec = spec;
     }
 
