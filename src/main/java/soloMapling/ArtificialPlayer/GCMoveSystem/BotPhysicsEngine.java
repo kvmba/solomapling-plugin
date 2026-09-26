@@ -89,6 +89,13 @@ final class BotPhysicsEngine {
         public int MAX_SNAP_DROP = 16;
         public int MAX_SLOPE_UP = 26;
         public int DOWN_JUMP_GRACE_MS = 350;
+        // Ours: humanlike pause between two straight down-jumps. A player stands back up out of the
+        // crouch, re-orients and re-presses Down+Alt — about a second before the next down-jump. Without
+        // this beat the engine can re-fire a DROP within a couple of ticks of landing, which on
+        // stacked-shaft maps (玩具塔) reads as one continuous dive floor-to-floor. Only gates
+        // down-jump LAUNCHES (graph DROP edges, warmup-fallback drops, the CROUCH ground action);
+        // ordinary jumps, walk-offs, rope climbs and swim drops are unaffected.
+        public int DOWN_JUMP_CADENCE_MS = 1000;
 
         // Swim physics. Bot ticks at 50ms (TICK_MS); constants are in px/s and
         // px/s² so they're tick-rate independent. Ground-truth sources:
@@ -839,6 +846,17 @@ final class BotPhysicsEngine {
         syncCharacterState(entry);
     }
 
+    /*
+     * Ours: humanlike cadence gate between two straight down-jumps. Armed at every takeoff
+     * (beginDownJump, both land and swim paths) so it always fires exactly once per down-jump.
+     * The engine otherwise re-fires a DROP within a couple of ticks of landing — the tick cadence
+     * has no human pause — which on stacked-shaft maps (玩具塔) dives floor-to-floor visibly faster
+     * than a player pressing Down+Alt can. Gated at the three down-jump entry points only.
+     */
+    static boolean downJumpOnCadenceCooldown(BotMovementState entry) {
+        return entry.downJumpCadenceUntilMs > System.currentTimeMillis();
+    }
+
     static void queueTopRopeEntry(BotMovementState entry, Character bot, Rope rope, int y) {
         idleOnGround(entry, bot);
         entry.ropeEntryPending = true;
@@ -902,6 +920,10 @@ final class BotPhysicsEngine {
     }
 
     static void beginDownJump(BotMovementState entry, Character bot) {
+        // Ours: arm the humanlike cadence beat for the next down-jump BEFORE the guards — a guard
+        // bail-out clears downJumpPending (the bot stays on this platform) and a failed launch is
+        // exactly when a player would also pause before trying again.
+        entry.downJumpCadenceUntilMs = System.currentTimeMillis() + cfg.DOWN_JUMP_CADENCE_MS;
         boolean swim = bot.getMap() != null && bot.getMap().isSwim();
         // Void guard (land maps): refuse a straight down-jump that has no foothold below - firing it
         // free-falls out of the map. Swim maps drop into water, which has its own floor clamp.

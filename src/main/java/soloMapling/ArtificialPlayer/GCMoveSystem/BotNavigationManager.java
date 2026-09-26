@@ -604,6 +604,14 @@ final class BotNavigationManager {
             return null;
         }
 
+        // Ours: humanlike pause between two down-jumps (see BotPhysicsEngine.downJumpOnCadenceCooldown).
+        // Not a "-pos" reason: the bot is not parked against a gate, it is deliberately resting after
+        // the previous down-jump, so the blocked-gate give-up must not retire the edge for it.
+        if (BotPhysicsEngine.downJumpOnCadenceCooldown(entry)) {
+            entry.lastEdgeBlockReason = "drop-cadence";
+            return null;
+        }
+
         if (edge.launchStepX != 0) {
             // Walk-off drops are not an explicit action. Keep steering in the authored direction
             // and let ground physics carry the bot into a fall with preserved momentum.

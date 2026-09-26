@@ -796,6 +796,13 @@ class BotMovementManager {
         };
 
         if (action.type() == ActionType.CROUCH) {
+            // Ours: a CROUCH action is the crouch phase of the next straight down-jump — honor the
+            // humanlike cadence beat (see BotPhysicsEngine.downJumpOnCadenceCooldown) by idling the
+            // beat out instead of re-crouching every tick.
+            if (BotPhysicsEngine.downJumpOnCadenceCooldown(entry)) {
+                applyIdleOrInPlaceMotion(entry, action);
+                return;
+            }
             BotPhysicsEngine.queueDownJump(entry, bot);
             broadcastMovement(entry);
             return;

@@ -211,6 +211,11 @@ final class BotFallbackMovementManager {
         if (entry == null || botPos == null || targetPos == null || rope != null) {
             return false;
         }
+        // Ours: same humanlike pause between down-jumps as the graph DROP executor — the warmup
+        // fallback must not become the fast path that dodges the cadence gate.
+        if (BotPhysicsEngine.downJumpOnCadenceCooldown(entry)) {
+            return false;
+        }
         MapleMap map = entry.bot.getMap();
         if (!shouldConsiderFallbackDrop(entry, map, botPos, targetPos)) {
             return false;
