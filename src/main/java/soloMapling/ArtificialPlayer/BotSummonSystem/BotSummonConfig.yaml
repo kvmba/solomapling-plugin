@@ -37,5 +37,9 @@ move:
 
 # Attacking summons (turret / hawk / elemental / dragon / bahamut).
 attack:
-  tick_ms: 1100      # a summon strikes at most this often
+  # Pause after the summon's swing animation, before it may strike again. The full cooldown is the
+  # summon's own attack1 length (600..2280ms, read from Skill.wz) PLUS this value, so a strike never
+  # overlaps the previous swing. Floored at MIN_ATTACK_RECOVERY_MS = 2200 in the parser - a smaller
+  # value here is raised, not honoured.
+  recovery_ms: 2200
   range: 320         # it picks the nearest mob within this radius of itself

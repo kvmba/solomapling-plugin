@@ -17,7 +17,7 @@ class BotSummonConfigTest {
         assertTrue(c.enabled());
         assertTrue(c.spawnChance() > 0 && c.spawnChance() <= 1);
         assertTrue(c.moveTickMs() > 0);
-        assertTrue(c.attackTickMs() > 0);
+        assertTrue(c.attackRecoveryMs() > 0);
         assertTrue(c.attackRange() > 0);
         assertTrue(c.hoverOffsetY() < 0,
                 "the summon rides above its owner (negative y = up)");
@@ -32,15 +32,30 @@ class BotSummonConfigTest {
                 "enabled", false,
                 "spawn", Map.of("chance", 0.2, "min_level", 120),
                 "move", Map.of("tick_ms", 500, "offset_y", -90, "bob_x", 20.0),
-                "attack", Map.of("tick_ms", 700, "range", 400)));
+                "attack", Map.of("recovery_ms", 5000, "range", 400)));
         assertFalse(c.enabled());
         assertEquals(0.2, c.spawnChance(), 1e-9);
         assertEquals(120, c.minLevel());
         assertEquals(500L, c.moveTickMs());
         assertEquals(-90, c.hoverOffsetY());
         assertEquals(20.0, c.bobXAmplitude(), 1e-9);
-        assertEquals(700L, c.attackTickMs());
+        assertEquals(5000L, c.attackRecoveryMs());
         assertEquals(400, c.attackRange());
+    }
+
+    @Test
+    void recoveryBelowTheFloorIsRaisedNotHonoured() {
+        // The floor is a behavioural rule, not a default: a summon may not start its next strike
+        // until the previous swing has played AND the recovery has passed. A config asking for a
+        // near-instant recovery is clamped up, so a stray yaml edit cannot bring back a metronome.
+        BotSummonConfig c = BotSummonConfig.fromMap(Map.of("attack", Map.of("recovery_ms", 300)));
+        assertEquals(BotSummonConfig.MIN_ATTACK_RECOVERY_MS, c.attackRecoveryMs(),
+                "300ms must be raised to the floor, not honoured");
+        assertEquals(2200L, BotSummonConfig.MIN_ATTACK_RECOVERY_MS,
+                "the floor itself: 2.2s of recovery on top of the swing animation");
+        assertEquals(BotSummonConfig.MIN_ATTACK_RECOVERY_MS,
+                BotSummonConfig.fromMap(Map.of()).attackRecoveryMs(),
+                "the default must sit at the floor too");
     }
 
     @Test

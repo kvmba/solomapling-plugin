@@ -1,8 +1,6 @@
 package soloMapling.ArtificialPlayer.BotSummonSystem;
 
 import org.gms.client.Character;
-import org.gms.client.Skill;
-import org.gms.client.SkillFactory;
 import org.gms.server.maps.MapleMap;
 import org.gms.server.maps.Summon;
 import org.slf4j.Logger;
@@ -80,18 +78,14 @@ public final class BotSummonController {
             return;
         }
         // The host's Summon constructor requires the owner to KNOW the skill (it reads the level for
-        // the spawn packet and throws at level 0). Teach it the same way BotMount.learnRiderSkill
-        // does - ambient bots are synthetic and spend no SP. Clamped to the skill's own max; the
-        // client only needs a valid level to render.
-        Skill skill = SkillFactory.getSkill(skillId);
-        if (skill == null) {
-            return; // not in this server's Skill.wz (a client crash for observers if we sent it)
-        }
-        if (bot.getSkillLevel(skill) < 1) {
-            bot.changeSkillLevel(skill, (byte) skill.getMaxLevel(), skill.getMaxLevel(), -1);
-        }
-        if (bot.getSkillLevel(skill) < 1) {
-            return; // the host refused the grant; never construct without a level
+        // the spawn packet and throws at level 0). Teach it the way BotMount.learnRiderSkill does -
+        // ambient bots are synthetic and spend no SP - but at the level the bot's character level
+        // plausibly earned, not the skill's max: the summon's whole WZ row (its stun prop, its
+        // Bahamut mobCount, its attack power) is read at that level, so a fresh 3rd jobber's hawk
+        // must read like a level-1 hawk, not a maxed one. The same call keeps a live summon growing
+        // as its owner levels (see BotSummonFollower.ensureSkillLevel).
+        if (BotSummonFollower.ensureSkillLevel(bot, skillId) < 1) {
+            return; // the bot has not reached the tier that owns it, or Skill.wz has no such skill
         }
         try {
             MapleMap map = bot.getMap();
