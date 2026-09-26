@@ -41,18 +41,17 @@ final class BotSummonBroadcast {
      * {@code facing = byte & 0x80}, {@code node = table[(byte & 0x7F) - 4]} - a 15-slot name table
      * (base 0xBEC3BC, decrypted from the client's string pool): {@code stand, move, fly, summoned,
      * attack1, attack2, skill1..skill6, hit, die, say}. The node name feeds the
-     * {@code Skill/<job>/<skill>/summon/<name>} WZ lookup, whose cached info carries the per-level
-     * {@code ball} node ({@code level/<n>/ball}, fmt 2386) - the projectile sprite an observer draws.
+     * {@code Skill/<job>/<skill>/summon/<name>} WZ lookup.
      * <p>
-     * <b>Per-move split (verified in-game after the first attempt).</b> The archer birds rendered
-     * their attack poses fine on the OLD base-4 byte, and stopped on 8: the client only applies the
-     * {@code (byte & 0x7F) - 4} table decode to STATIONARY turrets (the octopus), while
-     * CIRCLE_FOLLOW/FOLLOW summons take a different path where the raw 4 IS the attack node id.
-     * So the byte is chosen by the summon's own move: turrets send 8 (slot 4 = attack1 -> ball),
-     * everything else keeps the proven 4.
+     * <b>In-game verified twice, both directions.</b> 4 renders every summon's attack pose
+     * (birds, dragon, bahamut, AND the octopus turret) - the empirical attack1 encoding for this
+     * client build. 8 broke the birds (no attack pose at all) and 8 on the turret removed its pose
+     * too, so the string-pool table mapping does NOT govern this byte the way the decrypt suggested.
+     * 4 stays; the octopus's missing projectile is a separate, still-open defect - the ball node
+     * exists in its WZ (summon/attack1/info/ball + bulletSpeed), so the render gate is elsewhere
+     * (suspect: the per-mob attack-info byte or a CUserRemote ball precondition), not here.
      */
-    private static final int TURRET_ATTACK_ACTION = 8;
-    private static final int BIRD_ATTACK_ACTION = 4;
+    private static final int SUMMON_ATTACK1_ACTION = 4;
     private static final int SUMMON_FACING_LEFT_MASK = 0x80;
 
     /** Fragment command 0 = normal / absolute movement (the shape AbsoluteLifeMovement serialises). */
@@ -63,22 +62,19 @@ final class BotSummonBroadcast {
     /** One mob's damage line inside a SUMMON_ATTACK frame. */
     record Strike(int mobOid, int damage) {}
 
-    static void summonAttack(Character bot, Summon summon, byte direction, List<Strike> hits,
-                             boolean stationaryTurret) {
+    static void summonAttack(Character bot, Summon summon, byte direction, List<Strike> hits) {
         bot.getMap().broadcastMessage(bot,
-                summonAttackPacket(bot.getId(), summon.getObjectId(), direction, hits, stationaryTurret),
+                summonAttackPacket(bot.getId(), summon.getObjectId(), direction, hits),
                 summon.getPosition());
     }
 
     /** Pure seam for the byte layout (unit-testable without a live Character/Summon). */
-    static OutPacket summonAttackPacket(int cid, int summonOid, byte direction, List<Strike> hits,
-                                        boolean stationaryTurret) {
-        int action = stationaryTurret ? TURRET_ATTACK_ACTION : BIRD_ATTACK_ACTION;
+    static OutPacket summonAttackPacket(int cid, int summonOid, byte direction, List<Strike> hits) {
         OutPacket p = OutPacket.create(SendOpcode.SUMMON_ATTACK);
         p.writeInt(cid);                  // dwCharacterID
         p.writeInt(summonOid);            // dwSummonedID
         p.writeByte(0);                   // nCharLevel (host writes 0; client ignores for a bot)
-        p.writeByte((direction != 0 ? SUMMON_FACING_LEFT_MASK : 0) | action); // (bLeft<<7)|action
+        p.writeByte((direction != 0 ? SUMMON_FACING_LEFT_MASK : 0) | SUMMON_ATTACK1_ACTION); // (bLeft<<7)|action
         p.writeByte(hits.size());         // nMobCount
         for (Strike hit : hits) {
             p.writeInt(hit.mobOid());     // ATTACKINFO->dwMobID
