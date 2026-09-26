@@ -85,7 +85,7 @@ public final class BotAttackEffects {
         }
         Packet packet = PacketCreator.closeRangeAttack(bot, skillId, skillLevel, facingMask,
                 numAttackedAndDamage(hits), toTargets(hits, hitDelay), speed, bodyActionId, 0);
-        return broadcastAndApply(bot, packet, hits, hitDelay);
+        return broadcastAndApply(bot, packet, hits, skillId, hitDelay);
     }
 
     /* Ranged version (bow/crossbow/gun/claw): like melee, plus the flying projectile. */
@@ -97,7 +97,7 @@ public final class BotAttackEffects {
         }
         Packet packet = PacketCreator.rangedAttack(bot, skillId, skillLevel, facingMask,
                 numAttackedAndDamage(hits), projectile, toTargets(hits, hitDelay), speed, bodyActionId, 0);
-        return broadcastAndApply(bot, packet, hits, hitDelay);
+        return broadcastAndApply(bot, packet, hits, skillId, hitDelay);
     }
 
     /*
@@ -113,7 +113,7 @@ public final class BotAttackEffects {
         Packet packet = PacketCreator.magicAttack(bot, skillId, skillLevel, facingMask,
                 numAttackedAndDamage(hits), toTargets(hits, hitDelay),
                 BotAttackData.magicChargeFor(skillId), speed, bodyActionId, 0);
-        return broadcastAndApply(bot, packet, hits, hitDelay);
+        return broadcastAndApply(bot, packet, hits, skillId, hitDelay);
     }
 
     private static boolean notReady(Character bot, Map<Monster, List<Integer>> hits) {
@@ -137,7 +137,7 @@ public final class BotAttackEffects {
 
     /* Broadcast once, then apply each mob's summed damage + loot. True if any mob died. */
     private static boolean broadcastAndApply(Character bot, Packet packet,
-                                             Map<Monster, List<Integer>> hits, short hitDelay) {
+                                             Map<Monster, List<Integer>> hits, int skillId, short hitDelay) {
         bot.getMap().broadcastMessage(bot, packet, /* repeatToSource */ false);
         GCMovement.markAlerted(bot); // hold the 5s ALERT pose so the bot's own idle/move broadcasts don't cancel it
         boolean anyKilled = false;
@@ -153,6 +153,10 @@ public final class BotAttackEffects {
         // A landed swing charges a brawler's energy bar (the host adds 102 per mob hit in its own
         // handler). No-op for every other job, so the ordinary bot pays one job check per strike.
         BotEnergyCharge.onAttackLanded(bot, hits.size());
+        // Same idiom for the warrior's 斗气连击 orbs: each landed swing gains one orb until the WZ
+        // cap (a finisher instead consumes the ring), so a comboed bot's orb ring grows and lapses
+        // like a real player's. No-op for every job without the combo buff.
+        BotComboOrb.onAttackLanded(bot, skillId);
         return anyKilled;
     }
 

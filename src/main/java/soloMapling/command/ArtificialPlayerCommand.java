@@ -11,6 +11,7 @@ import soloMapling.ArtificialPlayer.BotAttackSystem.BotAttackDriver;
 import soloMapling.ArtificialPlayer.BotAttackSystem.BotBuffConfig;
 import soloMapling.ArtificialPlayer.BotAttackSystem.BotBuffDriver;
 import soloMapling.ArtificialPlayer.BotAttackSystem.BotBuffEffects;
+import soloMapling.ArtificialPlayer.BotAttackSystem.BotComboOrb;
 import soloMapling.ArtificialPlayer.BotAttackSystem.BotEnergyCharge;
 import soloMapling.ArtificialPlayer.BotCommandsPack.MegaphoneCommands;
 import soloMapling.ArtificialPlayer.BotDecoratorSystem.BotDecorateBody;
@@ -254,6 +255,16 @@ public class ArtificialPlayerCommand extends Command {
                     player.yellowMessage("Note: bot is on map " + fakechar.getMapId() + ", you are on "
                             + player.getMapId() + " - the cancel only shows to players on the bot's map.");
                 }
+                break;
+            }
+            case "combo": { // jump a warrior bot's 斗气连击 ring to full so the growth/reset/lapse can be watched
+                BotComboOrb.fillForTest(fakechar);
+                player.yellowMessage("combo " + BotComboOrb.describe(fakechar));
+                break;
+            }
+            case "comboreset": { // drop the ring back to one orb (and pull the aura from every viewer)
+                BotComboOrb.resetForTest(fakechar);
+                player.yellowMessage("comboreset " + BotComboOrb.describe(fakechar));
                 break;
             }
             case "dicebot":
@@ -1158,6 +1169,8 @@ public class ArtificialPlayerCommand extends Command {
         player.yellowMessage("!bot energy <cid>                - brawler bot's 能量获得 bar (5110001)");
         player.yellowMessage("!bot energycharge <cid>          - fill the energy bar now (watch the charged look)");
         player.yellowMessage("!bot energyreset <cid>           - empty the energy bar");
+        player.yellowMessage("!bot combo <cid>                 - fill a warrior bot's 斗气连击 ring (watch it grow/consume)");
+        player.yellowMessage("!bot comboreset <cid>            - drop the combo ring back to one orb");
         player.yellowMessage("-- Appearance --");
         player.yellowMessage("!bot randombody <cid>            - random body decoration");
         player.yellowMessage("!bot randomequips <cid>          - random equip decoration");

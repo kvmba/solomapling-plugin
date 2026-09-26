@@ -329,6 +329,13 @@ public final class BotAttackDriver {
                     bodyActionId, facingMask, profile.speed, profile.hitDelayMs);
         };
 
+        // The 终极攻击 passive: an occasional extra blow right after the swing. A real client rolls
+        // the chance and renders the follow-up itself; the bot's roll happens here instead. A whiffed
+        // swing (every line a MISS) never triggers it.
+        if (!whiff) {
+            BotFinalAttack.maybeTrigger(bot, weapon, bodyActionId, facingMask, hits);
+        }
+
         nextAttackByBot.put(bot.getId(), now + profile.cooldownMs);
         if (profile == ultimate) { // firing the throttled full-map nuke starts its long cooldown
             nextUltimateByBot.put(bot.getId(), now + FULL_MAP_ULTIMATE_COOLDOWN_MS);
