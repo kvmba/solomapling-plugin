@@ -20,8 +20,9 @@ import java.util.concurrent.ThreadLocalRandom;
  * may roll, exactly one attempt is spent on it, and the roll succeeds with probability
  * {@link #ROLL_CHANCE} — so most short hops stay ordinary, a committed run bursts within seconds,
  * and no two pirates look scripted-identical. The burst then lasts the skill's own WZ duration
- * (20s at max level; GMS083 Skill.wz 5001005: x=30 speed, y=10 jump) and — exactly like the real
- * timed buff — rides through stands, jumps and ropes until it expires. A post-burst cooldown
+ * (20s at max level; GMS083 Skill.wz 5001005: x=30 speed, y=10 jump) and rides through jumps and
+ * ropes until it expires — but the moment the bot STOPS moving on the ground it is released at
+ * once, the same tick (the dash is a moving state, not a stand timer). A post-burst cooldown
  * keeps a marathon walker from living in the dash.</p>
  *
  * <p><b>The pose gate.</b> 变身 (TRANSFORMATION / SUPER_TRANSFORMATION), the gunner's 海盗船
@@ -50,41 +51,70 @@ public final class BotDashBurst {
     /** Cooldown after a burst ends before the same bot may roll again. */
     static final long ROLL_COOLDOWN_MS = 8_000L;
 
+    // Package-private for tests: the lifecycle seams (tickBurst / startBurst) drive these, and
+    // the unit tests seed/inspect them directly since a live Character (and the WZ lookup behind
+    // it) cannot be built in a unit test.
     /** botId -> burst expiry (epoch ms). Present = live; the physics bonus and the aura pose apply. */
-    private static final Map<Integer, Long> BURST_UNTIL = new ConcurrentHashMap<>();
+    static final Map<Integer, Long> BURST_UNTIL = new ConcurrentHashMap<>();
     /** botId -> walk accumulator (origin x + measured direction, 0 until the first displacement). */
-    private static final Map<Integer, Walk> WALK = new ConcurrentHashMap<>();
+    static final Map<Integer, Walk> WALK = new ConcurrentHashMap<>();
     /** botId -> epoch ms at which the bot may roll again (set at burst start + cooldown). */
-    private static final Map<Integer, Long> NEXT_ROLL_AT = new ConcurrentHashMap<>();
+    static final Map<Integer, Long> NEXT_ROLL_AT = new ConcurrentHashMap<>();
     /** botId -> the burst's WZ speed bonus (x, +30 at max level), resolved once per burst. */
-    private static final Map<Integer, Integer> SPEED_BONUS = new ConcurrentHashMap<>();
+    static final Map<Integer, Integer> SPEED_BONUS = new ConcurrentHashMap<>();
 
-    private record Walk(int originX, int dir) {}
+    /** Walk accumulator value: origin x + measured direction (0 until the first displacement). */
+    record Walk(int originX, int dir) {}
 
     private BotDashBurst() {}
 
     /**
      * Tick the burst lifecycle from the movement thread, after the physics tick has settled the
-     * bot's motion: expire a due burst, accumulate the walk, and roll exactly once on a
-     * qualifying one. A bot whose kit carries no 疾驰 costs one cached map read.
+     * bot's motion: expire a due burst, release it the moment the bot stops moving on the ground,
+     * accumulate the walk, and roll exactly once on a qualifying one. A bot whose kit carries no
+     * 疾驰 costs one cached map read.
+     *
+     * @param stopped true when the physics tick settled the bot grounded with no horizontal
+     *        velocity and no move intent (standing still, resting on a rope, frozen). False for a
+     *        ground walk or an airborne arc — those are still "moving" for the dash.
      */
-    public static void tickMovement(Character bot, int x, long now) {
+    public static void tickMovement(Character bot, int x, long now, boolean stopped) {
         if (bot == null || BotAuraState.dashSkillFor(bot) == 0) {
             return;
         }
-        int id = bot.getId();
+        tickBurst(bot.getId(), BotAuraState.dashSkillFor(bot),
+                BotAuraState.isMorphed(bot),
+                bot.getBuffedValue(BuffStat.MONSTER_RIDING) != null,
+                x, now, stopped);
+    }
+
+    /**
+     * The pure state core behind {@link #tickMovement}, keyed on the bot id so tests can drive
+     * the whole lifecycle — stop-release, pose gate, roll — without a live character.
+     */
+    static void tickBurst(int id, int skillId, boolean morphed, boolean mounted,
+                          int x, long now, boolean stopped) {
         Long until = BURST_UNTIL.get(id);
         if (until != null && now >= until) {
-            expire(id, now);
+            release(id, now);
+        }
+        if (stopped) {
+            // The bot stopped moving: the dash ends THIS tick, with the same bookkeeping as an
+            // expiry. The walk accumulator dies too — a standing bot is not accumulating a walk.
+            if (BURST_UNTIL.remove(id) != null) {
+                SPEED_BONUS.remove(id);
+                NEXT_ROLL_AT.put(id, now + ROLL_COOLDOWN_MS);
+            }
+            WALK.remove(id);
+            return;
         }
         if (BURST_UNTIL.containsKey(id)) {
-            return; // already bursting — the buff rides until expiry, no re-rolls mid-burst
+            return; // already bursting — the buff rides until expiry or the stop edge
         }
         // The pose gate: 变身 / 海盗船 own the body, a 骑宠 mount owns the ride slot — a real
-        // client refuses the dash key in all three. Existing bursts keep riding (the timed buff
-        // was granted before the pose); only NEW rolls are refused.
-        if (poseRefusesDash(BotAuraState.isMorphed(bot),
-                bot.getBuffedValue(BuffStat.MONSTER_RIDING) != null)) {
+        // client refuses the dash key in all three. Existing bursts keep riding (above); only
+        // NEW rolls are refused, and the accumulating walk dies with the pose.
+        if (poseRefusesDash(morphed, mounted)) {
             WALK.remove(id); // a pose change kills the accumulating walk
             return;
         }
@@ -92,7 +122,7 @@ public final class BotDashBurst {
         if (lengthPx >= 0 && walkQualifies(lengthPx, now, NEXT_ROLL_AT.getOrDefault(id, 0L))) {
             WALK.remove(id); // one attempt per qualifying walk — win or lose
             if (ThreadLocalRandom.current().nextDouble() < ROLL_CHANCE) {
-                startBurst(bot, BotAuraState.dashSkillFor(bot));
+                startBurst(id, skillId);
             }
         }
     }
@@ -150,7 +180,12 @@ public final class BotDashBurst {
      * ({@link BotAuraState#onAuraShown}) and a successful roll both land here.
      */
     static boolean startBurst(Character bot, int skillId) {
-        if (bot == null || skillId == 0) {
+        return bot != null && startBurst(bot.getId(), skillId);
+    }
+
+    /** The id-keyed core of {@link #startBurst(Character, int)}. */
+    static boolean startBurst(int id, int skillId) {
+        if (skillId == 0) {
             return false;
         }
         Skill skill = SkillFactory.getSkill(skillId);
@@ -163,14 +198,13 @@ public final class BotDashBurst {
         }
         long now = System.currentTimeMillis();
         long duration = Math.max(1_000L, effect.getDuration());
-        int id = bot.getId();
         SPEED_BONUS.put(id, effect.getX());
         BURST_UNTIL.put(id, now + duration);
         NEXT_ROLL_AT.put(id, now + duration + ROLL_COOLDOWN_MS);
         return true;
     }
 
-    private static void expire(int id, long now) {
+    private static void release(int id, long now) {
         BURST_UNTIL.remove(id);
         SPEED_BONUS.remove(id);
         WALK.remove(id); // the walk the burst rode is spent; the next one accumulates afresh

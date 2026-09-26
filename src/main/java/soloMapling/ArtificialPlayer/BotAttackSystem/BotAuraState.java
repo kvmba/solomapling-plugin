@@ -27,10 +27,11 @@ import java.util.concurrent.ConcurrentHashMap;
  *
  * <ul>
  *   <li><b>Pirate 疾驰 (DASH, e.g. 5001005).</b> The speed/jump burst a real pirate double-taps
- *       into on a committed run. The buff itself is a timed one (20s at max level) that rides
- *       through stands, jumps and ropes until it expires, so the aura is the visible side of the
- *       roll-and-lifetime state in {@link BotDashBurst}: the movement tick shows the aura while a
- *       burst is live and cancels it the moment the burst is gone (a mount still owns the pose and
+ *       into on a committed run. The burst lasts its WZ duration (20s at max level) and rides
+ *       through jumps and ropes, but is released the moment the bot STOPS moving on the ground —
+ *       the same tick, so {@link BotDashBurst} is the single lifetime authority. The aura here is
+ *       its visible side: the movement tick shows the aura while a burst is live and cancels it
+ *       the moment the burst is gone (a mount or a live 变身/海盗船 pose still owns the body and
  *       suppresses the display). The bot's kit is resolved from its job's buff registry
  *       ({@link BotBuffConfig}) once and cached, so a bot with a 疾驰 is recognised even before it
  *       ever bursts, and {@link BotBuffDriver} skips 疾驰 in its periodic sweep so the aura never
@@ -308,17 +309,18 @@ public final class BotAuraState {
             }
         }
 
-        // 疾驰: the aura is the visible side of the BotDashBurst buff — a real pirate's 疾驰 is a
-        // timed buff, so the aura shows whenever the burst is live (not mounted — the ride owns
-        // the pose) regardless of stance, and is cancelled the moment the burst is gone. While
-        // bursting it is (re)shown, throttled to the aura's own refresh window; the refresh clock
-        // only advances on an actual show, so a burst that begins while unobserved shows on the
-        // first observed tick. The burst is its own buff with its own statup, so a live 变身 /
-        // 海盗船 does not tear it down (the host's buff slots are independent); starting a NEW
-        // burst while morphed is the move the client refuses, and that gate lives at the roll site
-        // (BotDashBurst.tickMovement).
+        // 疾驰: the aura is the visible side of the BotDashBurst buff — it shows whenever the
+        // burst is live and the bot is not mounted, and is cancelled the moment the burst is
+        // gone (expiry, or the bot STOPPED moving — BotDashBurst releases it on the stop edge,
+        // one tick before this reads it). While bursting it is (re)shown, throttled to the
+        // aura's own refresh window; the refresh clock only advances on an actual show, so a
+        // burst that begins while unobserved shows on the first observed tick. A live 变身 /
+        // 海盗船 never reaches the show branch — its pose gate in BotDashBurst refuses new
+        // rolls, and an enabler granted BEFORE a burst expires by its own clock below without
+        // tearing the burst down (the host's buff slots are independent).
         if (dashSkill != 0) {
-            if (!mounted && BotDashBurst.isActive(bot)) {
+            boolean poseOwned = mounted || isMorphed(bot);
+            if (!poseOwned && BotDashBurst.isActive(bot)) {
                 boolean firstWalk = DASH_UP.add(id);
                 if (observed && (firstWalk || System.currentTimeMillis() >= DASH_RESHOW_AT.getOrDefault(id, 0L))) {
                     int durationMs = BotBuffEffects.showAura(bot, dashSkill);
