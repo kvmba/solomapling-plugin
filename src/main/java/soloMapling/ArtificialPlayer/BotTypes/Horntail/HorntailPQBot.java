@@ -76,6 +76,9 @@ public class HorntailPQBot extends PartyQuestBot {
             PqActions.seekAndAttack(getChr());
             PqActions.loot(getChr(), getChr().getPosition(), 1_200, new int[]{key});
         }
+        // A key the leader missed on the floor despawns with the room's other drops; take it
+        // back and offer it again next tick.
+        PqActions.recoverUngatheredHandoffs(getChr(), key);
         PqActions.handItemsToLeader(getChr(), key);
         return false;
     }

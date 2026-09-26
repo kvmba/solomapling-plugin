@@ -56,6 +56,9 @@ public final class LudiStages {
         // Hand over only what this bot really carried, only when the leader is in the room
         // to receive it (the hand-off drop is addressed to him; with him elsewhere it would
         // sit owned and unlootable on the floor).
+        // The leader's piles despawn if he does not sweep them in time; recover ours and
+        // re-drop them next to him on a later tick.
+        PqActions.recoverUngatheredHandoffs(bot, LudiPqData.PASS);
         Character leader = PqActions.partyLeader(bot);
         if (leader != null && leader != bot && leader.getMapId() == bot.getMapId()
                 && PqActions.handItemsToLeader(bot, LudiPqData.PASS) > 0) {

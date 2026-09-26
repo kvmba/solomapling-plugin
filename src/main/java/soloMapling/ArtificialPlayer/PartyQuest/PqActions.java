@@ -325,9 +325,72 @@ public final class PqActions {
         if (qty <= 0) {
             return 0;
         }
+        // Hand over up close. A pile dropped across the room sits owned by the leader where
+        // nobody but him can pick it, and the host despawns drops nobody picked up - an
+        // unreachable pile is a timed wipe of the bot's whole stock. Walk to him first; the
+        // move is fire-and-forget, so the hand-off just waits for a tick where he is close.
+        if (bot.getPosition() == null || leader.getPosition() == null
+                || bot.getPosition().distanceSq(leader.getPosition()) > HANDOFF_RANGE_SQ) {
+            GCMovement.move(bot, leader.getPosition().x, leader.getPosition().y);
+            return 0;
+        }
         giveItemTo(bot, leader, itemId, qty);
         return qty;
     }
+
+    /** Inside this range a drop at the leader's feet is his to sweep instantly. */
+    private static final double HANDOFF_RANGE_SQ = 400.0 * 400.0;
+
+    /**
+     * Sweep back the hand-off piles this bot dropped that the leader has not picked up yet.
+     *
+     * <p>The host despawns drops after {@code item_expire_time} (3 min by default) whether or
+     * not they are owned, so a leader busy fighting can cost the bot its whole stock. A pile
+     * of ours older than this window is walked back to and picked up - it re-enters the bot's
+     * inventory and the next hand-off attempt drops it again, right at his feet.
+     *
+     * @return how many items were recovered
+     */
+    public static int recoverUngatheredHandoffs(Character bot, int itemId) {
+        if (bot == null || bot.getMap() == null) {
+            return 0;
+        }
+        long now = System.currentTimeMillis();
+        List<MapObject> mine = BotLogic.checkForItemsOnFloor(bot, bot.getPosition(), 9_000, new int[]{itemId});
+        int recovered = 0;
+        for (MapObject obj : mine) {
+            if (!(obj instanceof MapItem drop) || drop.isPickedUp()) {
+                continue;
+            }
+            // Only piles this bot dropped FOR the leader (owner-addressed, permanent owner).
+            if (!drop.isPermanentOwner() || drop.getOwnerId() == bot.getId()) {
+                continue;
+            }
+            Character leader = partyLeader(bot);
+            if (leader == null || drop.getOwnerId() != leader.getId()) {
+                continue;
+            }
+            if (now - drop.getDropTime() < HANDOFF_RECLAIM_AFTER_MS) {
+                continue; // still fresh; give the leader time
+            }
+            // Walk there; the pickup itself is instant from any distance on the bot path.
+            Point at = drop.getPosition();
+            if (at != null) {
+                GCMovement.move(bot, at.x, at.y);
+            }
+            DropCommands.botLootSingleDrop(bot, drop);
+            recovered++;
+            if (recovered >= HANDOFF_RECLAIM_MAX) {
+                break;
+            }
+        }
+        return recovered;
+    }
+
+    /** A hand-off pile older than this is walked back and re-pocketed (see recoverUngatheredHandoffs). */
+    private static final long HANDOFF_RECLAIM_AFTER_MS = 30_000L;
+    /** At most this many piles per tick, to pace the walk. */
+    private static final int HANDOFF_RECLAIM_MAX = 3;
 
     /** The bot's party leader, or null when the bot has no party (or the leader is offline). */
     public static Character partyLeader(Character bot) {
