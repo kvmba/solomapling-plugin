@@ -25,15 +25,16 @@ import java.util.concurrent.ConcurrentHashMap;
  * than simply duration-bound, so a plain "show the aura" broadcast is not enough:
  *
  * <ul>
- *   <li><b>Pirate 疾驰 (DASH, e.g. 5001005).</b> A speed/jump burst the player holds only while
- *       WALKING - the double-tap direction key starts it and it drops the moment the player stops,
- *       jumps, swims or grabs a rope. The plugin's aura packet carries a fixed duration, so without
- *       this it lingered through every stand / jump / swim / climb. The movement tick therefore OWNS
- *       the 疾驰 display: it shows the aura while the bot's wire stance is a walk and cancels it the
- *       instant the stance stops being a walk (Stand / Jump / Swim / Rope / Ladder). The bot's kit is
- *       resolved from its job's buff registry ({@link BotBuffConfig}) once and cached, so a bot with a
- *       疾驰 is recognised even before it ever casts one, and {@link BotBuffDriver} skips 疾驰 in its
- *       periodic sweep so the aura never lingers from a macro cast.</li>
+ *   <li><b>Pirate 疾驰 (DASH, e.g. 5001005).</b> The speed/jump burst a real pirate double-taps
+ *       into on a committed run. The buff itself is a timed one (20s at max level) that rides
+ *       through stands, jumps and ropes until it expires, so the aura is the visible side of the
+ *       roll-and-lifetime state in {@link BotDashBurst}: the movement tick shows the aura while a
+ *       burst is live and cancels it the moment the burst is gone (a mount still owns the pose and
+ *       suppresses the display). The bot's kit is resolved from its job's buff registry
+ *       ({@link BotBuffConfig}) once and cached, so a bot with a 疾驰 is recognised even before it
+ *       ever bursts, and {@link BotBuffDriver} skips 疾驰 in its periodic sweep so the aura never
+ *       lingers from a macro cast (a GM cast via {@link BotBuffEffects} reaches
+ *       {@link BotDashBurst#startBurst} and runs the real burst).</li>
  *   <li><b>Pirate 橡木伪装 (OAK_BARREL, 5101007).</b> A hide morph. In the official client the attack
  *       key's handler cancels it before doing anything else ({@code if (IsHideMorphed())
  *       SendSkillCancelRequest(BRAWLER_OAK_BARREL)}), and taking a 骑宠 mount clears it. A bot has no
@@ -121,9 +122,10 @@ public final class BotAuraState {
     }
 
     /**
-     * The 疾驰 rule, as a pure seam: the aura is only valid while the bot is WALKING on the ground.
-     * The walk stance is exactly the grounded-and-moving pose, so standing (STAND), a jump (JUMP), a
-     * swim (SWIM) or a rope/ladder (ROPE/LADDER) all render a different stance and cancel it.
+     * The walk-stance rule, as a pure seam: the WALK stance is exactly the grounded-and-moving
+     * pose, so standing (STAND), a jump (JUMP), a swim (SWIM) or a rope/ladder (ROPE/LADDER) all
+     * render a different stance. Kept as the classification of "is this stance a walk" — the
+     * 疾驰 aura itself now keys on the BotDashBurst buff window, not the stance.
      */
     static boolean dashHolds(int stance) {
         return CharacterStance.isWalking(stance);
@@ -143,6 +145,8 @@ public final class BotAuraState {
         if (isDash(skillId)) {
             DASH_SKILL.putIfAbsent(id, skillId);
             DASH_UP.add(id);
+            // A GM / party-buff show carries the real burst too, from the caller's thread.
+            BotDashBurst.startBurst(bot, skillId);
         } else if (isDisguise(skillId) || isTransformMorph(skillId)) {
             MORPH_SKILL.put(id, skillId);
         } else if (isDarkSight(skillId)) {
@@ -174,13 +178,14 @@ public final class BotAuraState {
         boolean observed = GCMovement.isMapObserved(bot.getMapId());
         boolean mounted = bot.getBuffedValue(BuffStat.MONSTER_RIDING) != null;
 
-        // 疾驰: valid only while the wire stance is a walk and the bot is not astride a mount (the
-        // ride owns the pose). Any other stance (stand / jump / swim / rope / ladder) cancels it;
-        // while walking it is (re)shown, throttled to the aura's own refresh window. The refresh clock
-        // only advances on an actual show, so a walk that begins while unobserved shows on the first
-        // observed tick.
+        // 疾驰: the aura is the visible side of the BotDashBurst buff — a real pirate's 疾驰 is a
+        // timed buff, so the aura shows whenever the burst is live (not mounted — the ride owns
+        // the pose) regardless of stance, and is cancelled the moment the burst is gone. While
+        // bursting it is (re)shown, throttled to the aura's own refresh window; the refresh clock
+        // only advances on an actual show, so a burst that begins while unobserved shows on the
+        // first observed tick.
         if (dashSkill != 0) {
-            if (!mounted && dashHolds(bot.getStance())) {
+            if (!mounted && BotDashBurst.isActive(bot)) {
                 boolean firstWalk = DASH_UP.add(id);
                 if (observed && (firstWalk || System.currentTimeMillis() >= DASH_RESHOW_AT.getOrDefault(id, 0L))) {
                     int durationMs = BotBuffEffects.showAura(bot, dashSkill);
@@ -240,7 +245,7 @@ public final class BotAuraState {
     }
 
     /** This bot's 疾驰 skill id (0 = none), resolved once from its job's buff registry and cached. */
-    private static int dashSkillFor(Character bot) {
+    static int dashSkillFor(Character bot) {
         Integer cached = DASH_SKILL.get(bot.getId());
         if (cached != null) {
             return cached;
@@ -272,5 +277,6 @@ public final class BotAuraState {
         DASH_RESHOW_AT.remove(botId);
         MORPH_SKILL.remove(botId);
         DARK_SIGHT_UP.remove(botId);
+        BotDashBurst.clearBot(botId);
     }
 }

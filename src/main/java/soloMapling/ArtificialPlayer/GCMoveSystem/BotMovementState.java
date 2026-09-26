@@ -122,6 +122,13 @@ class BotMovementState {
     // bot walks/accelerates slower without touching the graph-key profile (see BotMovementProfile.speedScaled).
     double debuffMoveScale = 1.0;
 
+    // ── Pirate 疾驰 burst state (BotDashBurst) ──
+    // The live burst's WZ speed bonus the ground step folds into the step profile (0 = no burst).
+    // Published by the driver each tick from BotDashBurst (next to the SLOW scale above); read by
+    // applyGroundMotion. The navigation-graph key stays on the un-burst profile, exactly like a
+    // slowed bot — only the live step sees the bonus.
+    int dashSpeedBonus = 0;
+
     // ── Contact-damage state (cosmetic for ambience bots; real HP for rostered companions) ──
     int mobHitCooldownMs = 0;             // i-frame countdown after a contact/fall hit
     Point lastMobTouchCheckPos = null;    // previous-tick foot pos for the swept anti-tunnel AABB

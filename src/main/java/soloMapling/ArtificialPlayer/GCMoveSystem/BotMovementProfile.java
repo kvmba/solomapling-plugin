@@ -241,6 +241,19 @@ record BotMovementProfile(int totalSpeedStat, int totalJumpStat, boolean snowSho
     }
 
     /**
+     * A copy of this profile with the 疾驰 burst's speed bonus added (BotDashBurst, the dash burst
+     * the movement physics folds into the live step — the reverse of the SLOW channel above). The
+     * graph key still rides on the un-burst profile, exactly like a slowed bot: only the live step
+     * sees the bonus. Not bucketed, so a +30 burst on a 105-speed pirate walks 135 for real.
+     */
+    BotMovementProfile withDashSpeedBonus(int speedBonus) {
+        if (speedBonus <= 0) {
+            return this;
+        }
+        return new BotMovementProfile(totalSpeedStat + speedBonus, totalJumpStat, snowShoes);
+    }
+
+    /**
      * A follower's profile: the owner's walk and jump stats each reduced by {@code delta} points,
      * floored at the base stat ({@link #BASE_TOTAL_STAT}) so a pet is a touch slower / lower-jumping
      * than its owner but never worse than an unbuffed character. The pet follower uses this for its
