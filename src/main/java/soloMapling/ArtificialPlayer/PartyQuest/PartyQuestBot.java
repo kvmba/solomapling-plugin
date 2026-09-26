@@ -8,6 +8,7 @@ import soloMapling.ArtificialPlayer.BotDialogueHandler;
 import soloMapling.ArtificialPlayer.BotPartySystem.BotPartyLogic;
 import soloMapling.ArtificialPlayer.BotPartySystem.BotRecruitManager;
 import soloMapling.ArtificialPlayer.BotSM;
+import soloMapling.ArtificialPlayer.BotHealthSystem.BotPotionSim;
 import soloMapling.ArtificialPlayer.GCMoveSystem.GCMovement;
 import soloMapling.BotLogger;
 import soloMapling.Environment.PlatformPlacement;
@@ -54,6 +55,14 @@ public abstract class PartyQuestBot extends BotSM {
 
     /** Lobby pacing: how often the idle shuffle picks a new spot. */
     private static final long LOBBY_STROLL_INTERVAL_MS = 9_000L;
+
+    /**
+     * Simulated potion drinking while the stage fight is going badly. Quest rooms are real
+     * hostile maps: the moment the seek-and-attack chase works, its bots stand in the mob
+     * pack and take real touch damage, and without this they die to the first pack that
+     * notices them (the reported LPQ stage-1 wipe). Same model the grinders run.
+     */
+    private final BotPotionSim potionSim = new BotPotionSim();
 
     protected PartyQuestBot(Character character) {
         super(character);
@@ -143,6 +152,9 @@ public abstract class PartyQuestBot extends BotSM {
         if (followLeaderIntoNextRoom()) {
             return; // moved rooms; work resumes from the new one next tick
         }
+
+        // Survive the fight: sip back whatever the room's mobs took off (no-op while full).
+        potionSim.tick(bot);
 
         if (workStage()) {
             returnToLobby("stage work reports the run is over");
