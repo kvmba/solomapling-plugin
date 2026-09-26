@@ -54,8 +54,8 @@ import java.util.concurrent.ConcurrentHashMap;
  *       is forced to the Battleship (1932000), but the plugin only broadcasts the observer frame
  *       ({@code showMonsterRiding}) - the buff itself is never registered, so the 骑宠 mount system
  *       cannot see it and the bookkeeping here ({@link #isMorphedAs}) is the sole source of truth.
- *       Expiry is the body swap back: no foreign cancel exists to send (the observer frame was a
- *       mount visual, and a real client drops the ship on damage, so silence reads correctly).</li>
+ *       Expiry sends the MONSTER_RIDING-bit foreign-buff cancel so every observer's ship model is
+ *       cleared with the body swap; the 骑宠 mount and 疾驰 are free to return.</li>
  *   <li><b>Thief 隐身术 (DARK_SIGHT, 4001003 / 14001003).</b> The rogue hide: the official client
  *       renders it as a semi-transparent shade that players STILL SEE (unlike GM hide, the sprite
  *       stays on the map), and while it holds the character cannot be attacked by monsters at all.
@@ -83,6 +83,8 @@ public final class BotAuraState {
     private static final List<BuffStat> MORPH_STATS = List.of(BuffStat.MORPH);
     /** The wire statup of a 隐身术 aura's CANCEL frame (the show frame carries the same DARKSIGHT bit). */
     private static final List<BuffStat> DARK_SIGHT_STATS = List.of(BuffStat.DARKSIGHT);
+    /** The cancel mask of a 海盗船 aura (its observer frame is the MONSTER_RIDING mount frame). */
+    private static final List<BuffStat> RIDING_STATS = List.of(BuffStat.MONSTER_RIDING);
 
     /** Fallback re-show cadence for a 疾驰 whose WZ duration is missing (matches BotBuffDriver). */
     private static final long DASH_FALLBACK_REFRESH_MS = 60_000L;
@@ -180,10 +182,16 @@ public final class BotAuraState {
     }
 
     /**
-     * The attack-enabler aura that gates {@code attackSkillId} (Shockwave needs 变身, Demolition /
-     * Dragon Strike need 超级变身, the Battleship guns need the 海盗船; 0 = not enabler-gated). One
-     * place, so a driver fallback and a summons-the-enabler show always agree on which aura a
-     * skill belongs to.
+     * The attack-enabler aura that gates {@code attackSkillId}, or 0 if it is aura-free. The WZ
+     * skill texts name these outright: Shockwave (碎石乱击) "Requires Transformation or Super
+     * Transformation"; Demolition (金手指) / Snatch "Can only be used during Super Transformation";
+     * the ship guns (急速射 5221007 / 重量炮击 5221008) "Can only be used aboard Battleship";
+     * Dragon Strike's (潜龙出渊) dragon-rise pose only exists on the transformed body. Barrage
+     * (光速拳, the single slot) is deliberately NOT gated: its desc carries no transform clause,
+     * the normal body 00002000 ships the {@code fist} keyframe so the swing renders untransformed,
+     * and Super Transformation's 120 s duration / 430 s cooldown would otherwise leave a 4th-job
+     * brawler without a single usable attack for ~72% of the time. One place, so a driver fallback
+     * and any show always agree on which aura a skill belongs to.
      */
     public static int enablerFor(int attackSkillId) {
         return switch (attackSkillId) {
@@ -288,16 +296,17 @@ public final class BotAuraState {
                     cancel(bot, DASH_STATS); // the morph pose forbids 疾驰 - drop it for the morph
                 }
             } else {
-                // Expired: swap the visuals off the way the host does. A 变身 morph's foreign
-                // representation is the MORPH statup, so its cancel is the MORPH-cancel frame. The
-                // 海盗船 registered no foreign buff at all (its model is a map Character tint), so
-                // it expires silently - the body swap IS the expiry, with no packet to mirror.
+                // Expired: swap the visuals off the way the host's own cancel does. A 变身 morph's
+                // foreign representation is the MORPH statup, so its cancel is the MORPH-cancel
+                // frame. The 海盗船 was shown with the MONSTER_RIDING mount frame
+                // (showMonsterRiding), so its expiry needs that bit cleared too or every observer
+                // keeps rendering the ship forever.
                 Integer shown = MORPH_SKILL.get(id);
-                if (shown != null && shown != Corsair.BATTLE_SHIP) {
-                    MORPH_SKILL.remove(id);
+                MORPH_SKILL.remove(id);
+                if (shown != null && shown == Corsair.BATTLE_SHIP) {
+                    cancel(bot, RIDING_STATS);
+                } else if (shown != null) {
                     cancel(bot, MORPH_STATS);
-                } else {
-                    MORPH_SKILL.remove(id);
                 }
             }
         }

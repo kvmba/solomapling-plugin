@@ -73,14 +73,19 @@ public final class BotAttackDriver {
     private static final BotAttackProfile HEAL_PROFILE = BotAttackProfile.magicAoe(Cleric.HEAL, 1);
 
     /*
-     * The skills that REQUIRE the bot's attack-enabler aura to be up: the 变身 morphs gate the
-     * brawler's Shockwave / Demolition (and the Cygnus strider's Dragon Strike / Shark Wave), and the
-     * gunner's 海盗船 gates the Battleship guns. A real client refuses to fire them untransformed, so
-     * the AUTO/AoE slot falls back to the same job's aura-free attack when the aura is down.
-     * (Single source of truth: BotAuraState.isAttackEnablerSkill / enablerSkillFor.)
+     * A slot whose attack skill requires the bot's attack-enabler aura (变身 gates Shockwave /
+     * 碎石乱击, 超级变身 gates 毁灭炮(金手指) / 潜龙出渊, the 海盗船 gates the ship guns; single
+     * source: BotAuraState.enablerFor) resolves to null while that exact aura is down - an
+     * untransformed bot simply does not have the skill right now. Null means "this slot is
+     * unavailable this attempt"; the AUTO fallbacks and the forced-choice existence checks above
+     * turn that into the aura-free attack or an honest miss report.
      */
-    private static boolean requiresMorph(int skillId) {
-        return BotAuraState.isAttackEnablerSkill(skillId);
+    private static BotAttackProfile gateProfile(Character bot, BotAttackProfile profile, WeaponType weapon) {
+        if (profile == null || !BotAuraState.isAttackEnablerSkill(profile.skillFor(weapon))) {
+            return profile;
+        }
+        int enabler = BotAuraState.enablerSkillFor(bot, profile.skillFor(weapon));
+        return (enabler != 0 && BotAuraState.isMorphedAs(bot, enabler)) ? profile : null;
     }
 
     private BotAttackDriver() {}
@@ -184,19 +189,28 @@ public final class BotAttackDriver {
 
         WeaponType weapon = BotAttack.resolveEquippedWeaponType(bot);
         BotAttackConfig.JobAttacks atks = BotAttackConfig.resolve(bot.getJob(), weapon);
-        BotAttackProfile single = atks.single();
-        BotAttackProfile aoe = atks.aoe();
-        BotAttackProfile ultimate = atks.ultimate(); // throttled full-map nuke, or null
+        // Every slot is gated up front, BEFORE the forced-slot existence checks: a skill that
+        // requires the 变身 morph / 海盗船 resolves to null while that exact aura is down (a real
+        // client refuses it untransformed, and a plain 变身 does not license a 超级变身 skill), so
+        // AUTO, `!bot attack` and `!bot attackaoe` all read one consistent picture of "which
+        // attacks does this bot have RIGHT NOW". The forced-choice checks below turn a null slot
+        // into an honest miss report instead of an illegal cast.
+        BotAttackProfile single = gateProfile(bot, atks.single(), weapon);
+        BotAttackProfile aoe = gateProfile(bot, atks.aoe(), weapon);
+        BotAttackProfile ultimate = gateProfile(bot, atks.ultimate(), weapon); // throttled full-map nuke, or null
 
         // Forced slots must exist; AUTO needs at least one configured attack.
         if (choice == Choice.SINGLE && single == null) {
-            return AttackResult.miss(bot.getJob() + " has no single-target attack");
+            return AttackResult.miss(bot.getJob() + " has no single-target attack"
+                    + (atks.single() != null ? " (requires its 变身/海盗船 aura)" : ""));
         }
         if (choice == Choice.AOE && aoe == null) {
-            return AttackResult.miss(bot.getJob() + " has no AoE attack");
+            return AttackResult.miss(bot.getJob() + " has no AoE attack"
+                    + (atks.aoe() != null ? " (requires its 变身/海盗船 aura)" : ""));
         }
         if (choice == Choice.ULTIMATE && ultimate == null) {
-            return AttackResult.miss(bot.getJob() + " has no ultimate attack");
+            return AttackResult.miss(bot.getJob() + " has no ultimate attack"
+                    + (atks.ultimate() != null ? " (requires its 变身/海盗船 aura)" : ""));
         }
         if (single == null && aoe == null && ultimate == null) {
             return AttackResult.miss("no attack for job " + bot.getJob() + " / weapon " + weapon);
@@ -220,11 +234,7 @@ public final class BotAttackDriver {
         if (choice == Choice.SINGLE) {
             profile = single;
         } else if (choice == Choice.AOE) {
-            // The forced-AoE GM probe: an untransformed bot has no morph-gated AoE, so it falls
-            // back to the same job's aura-free attack instead of firing an illegal skill.
-            profile = (aoe != null && requiresMorph(aoe.skillFor(weapon))
-                    && !BotAuraState.isMorphedAs(bot, BotAuraState.enablerSkillFor(bot, aoe.skillFor(weapon))))
-                    ? single : aoe;
+            profile = aoe;
         } else if (choice == Choice.ULTIMATE) {
             profile = ultimate;
         } else if (isClericVsUndead(bot, nearest)) {
@@ -235,18 +245,10 @@ public final class BotAttackDriver {
             // cooldown, otherwise the sustained mob attack (Crusher / Shining Ray / Ice Strike /
             // Explosion). While the ultimate cools, the bot keeps mobbing with the sustained AoE
             // instead of dropping to single-target. Only escalate to an AoE when 2+ mobs are in reach.
+            // (Every slot was already enabler-gated above, so a pack attack requiring 变身/海盗船
+            // only reaches here while that aura is up.)
             boolean ultReady = ultimate != null && now >= nextUltimateByBot.getOrDefault(bot.getId(), 0L);
             BotAttackProfile packAttack = ultReady ? ultimate : aoe;
-            // A skill that requires the 变身 morph / 海盗船 can only fire while that exact aura is
-            // up (a real client refuses it untransformed, and a plain 变身 does not license a
-            // 超级变身 skill); otherwise fall to the same job's aura-free attack, like the forced
-            // AOE fallback above.
-            if (packAttack != null && requiresMorph(packAttack.skillFor(weapon))) {
-                int enabler = BotAuraState.enablerSkillFor(bot, packAttack.skillFor(weapon));
-                if (enabler == 0 || !BotAuraState.isMorphedAs(bot, enabler)) {
-                    packAttack = null;
-                }
-            }
             List<Monster> packInReach = packAttack == null
                     ? List.of()
                     : mobsInReach(bot, packAttack, weapon, facingLeft);
