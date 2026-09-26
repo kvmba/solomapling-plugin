@@ -78,7 +78,7 @@ public class AriantPQBot extends PartyQuestBot {
                 throwElementRock(target);
                 break;
             }
-            PqActions.attack(getChr());
+            PqActions.seekAndAttack(getChr());
         }
         return false;
     }

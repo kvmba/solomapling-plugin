@@ -58,7 +58,7 @@ public class DojoPQBot extends PartyQuestBot {
         // The dojo's rooms are one boss each and the door opens when it is down, so there is
         // nothing to read - just fight while anything is standing.
         for (int pass = 0; pass < FIGHT_PASSES && !map.getMonsters().isEmpty(); pass++) {
-            PqActions.attack(getChr());
+            PqActions.seekAndAttack(getChr());
         }
         return false;
     }

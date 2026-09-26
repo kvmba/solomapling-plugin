@@ -125,7 +125,7 @@ public final class HenesysStages {
      * <p>Returns true once the run has been cleared for the exit.
      */
     public static boolean guardMoonBunny(Character bot) {
-        PqActions.attack(bot);
+        PqActions.seekAndAttack(bot);
         PqActions.loot(bot, bot.getPosition(), 2_000, new int[]{HenesysPqData.RICE_CAKE});
         PqActions.handItemsToLeader(bot, HenesysPqData.RICE_CAKE);
         return PqActions.readEimString(bot, "1stageclear") != null

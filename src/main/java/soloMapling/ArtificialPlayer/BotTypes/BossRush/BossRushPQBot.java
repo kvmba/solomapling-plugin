@@ -64,7 +64,7 @@ public class BossRushPQBot extends PartyQuestBot {
         // Fight what is here. The attack driver picks its own target, so a boss room is the
         // same to this bot as any other room full of monsters.
         for (int pass = 0; pass < FIGHT_PASSES && !map.getMonsters().isEmpty(); pass++) {
-            PqActions.attack(getChr());
+            PqActions.seekAndAttack(getChr());
         }
         return false;
     }

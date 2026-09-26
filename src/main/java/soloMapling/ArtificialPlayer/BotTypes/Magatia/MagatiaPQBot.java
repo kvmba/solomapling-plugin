@@ -108,7 +108,7 @@ public class MagatiaPQBot extends PartyQuestBot {
         var map = getChr().getMap();
         if (!map.getMonsters().isEmpty()) {
             for (int pass = 0; pass < FIGHT_PASSES && !map.getMonsters().isEmpty(); pass++) {
-                PqActions.attack(getChr());
+                PqActions.seekAndAttack(getChr());
             }
         }
         PqActions.loot(getChr(), getChr().getPosition(), 2_000, new int[0]);

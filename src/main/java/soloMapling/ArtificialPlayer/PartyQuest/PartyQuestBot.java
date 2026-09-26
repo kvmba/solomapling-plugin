@@ -71,6 +71,7 @@ public abstract class PartyQuestBot extends BotSM {
         // Release the dynamic engine (and the shared movement lock it holds) when this bot is
         // stopped or converted away, so the next bot type on this character starts clean.
         GCMovement.disable(getChr());
+        PqActions.clearSeekState(getChr().getId());
         super.stopScheduledTask();
     }
 

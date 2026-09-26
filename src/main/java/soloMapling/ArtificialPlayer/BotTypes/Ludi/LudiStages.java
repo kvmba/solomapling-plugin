@@ -45,7 +45,7 @@ public final class LudiStages {
         if (wanted > 0 && PqActions.countItem(bot, LudiPqData.PASS) >= wanted) {
             return; // this bot is carrying its share; more hands are not needed
         }
-        PqActions.attack(bot);
+        PqActions.seekAndAttack(bot);
         PqActions.loot(bot, bot.getPosition(), 2_000, new int[]{LudiPqData.PASS});
         if (PqActions.handItemsToLeader(bot, LudiPqData.PASS) > 0) {
             PqActions.say(bot, "PASSES! I have dropped the passes at the leader's feet.");
@@ -128,6 +128,6 @@ public final class LudiStages {
      * killed him, so the bot only has to add damage.
      */
     public static void fightBoss(Character bot) {
-        PqActions.attack(bot);
+        PqActions.seekAndAttack(bot);
     }
 }

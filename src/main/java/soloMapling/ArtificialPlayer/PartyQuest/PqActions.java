@@ -2,6 +2,7 @@ package soloMapling.ArtificialPlayer.PartyQuest;
 
 import org.gms.client.Character;
 import org.gms.scripting.event.EventInstanceManager;
+import org.gms.server.life.Monster;
 import org.gms.server.maps.MapItem;
 import org.gms.server.maps.MapObject;
 import org.gms.server.maps.MapleMap;
@@ -18,6 +19,7 @@ import soloMapling.MapVFX.CustomReactor;
 
 import java.awt.Point;
 import java.util.List;
+import java.util.Map;
 
 import static soloMapling.ArtificialPlayer.BotHelpers.blockingSleep;
 
@@ -305,6 +307,145 @@ public final class PqActions {
             return;
         }
         BotAttackDriver.botAttack(bot);
+    }
+
+    // Seek-and-attack pacing: a quest bot's macro tick runs every 2-6s, far slower than the grind
+    // ticker's 250ms, so the seek beat is spread over ticks rather than a single call. The sticky
+    // per-bot state below keeps a chase alive across those ticks (RoamStrategy's targetOid pattern,
+    // minus the spot-claim machinery a quest bot does not need).
+    private static final int SEEK_RANGE_X = 900;            // hunt a live mob within this |dx| (cross-ledge)
+    private static final int SEEK_STACK_RANGE_Y = 400;      // vertically layered ledges admit deeper dy
+    private static final int RETARGET_EPS_PX = 16;          // skip re-issuing a move for tiny shifts
+    private static final long RETARGET_TIMEOUT_MS = 4_000;  // give up an unreachable target after this
+    private static final int PROGRESS_EPS_PX = 20;          // movement worth counting as chase progress
+    private static final Map<Integer, Integer> seekTargetByBot = new java.util.concurrent.ConcurrentHashMap<>();
+    private static final Map<Integer, Point> seekAnchorByBot = new java.util.concurrent.ConcurrentHashMap<>();
+    private static final Map<Integer, Long> seekDeadlineByBot = new java.util.concurrent.ConcurrentHashMap<>();
+    private static final Map<Integer, Integer> seekLastXByBot = new java.util.concurrent.ConcurrentHashMap<>();
+
+    /**
+     * Seek a mob and fight it, the way the roaming grind brain does: swing at whatever the
+     * attack driver already reaches, and when nothing is in reach, find the nearest live mob
+     * (across ledges - platforms above, below, ropes between) and walk/jump/climb toward it.
+     * The next tick re-checks: closer now, swing; still far, keep moving.
+     *
+     * <p>This is the half the plain {@link #attack} never had: {@code botAttack} only swings
+     * at mobs inside its reach box, and its nearest-mob scan is same-ledge only, so a quest
+     * bot facing Ratz on a platform overhead stood still forever. Every stage that reads
+     * "kill what is in the room" should call this instead - the swings land, the drops fall,
+     * and the bot is never a bystander in its own room.
+     *
+     * <p>Movement goes through the dynamic engine ({@code GCMovement.move}), which paths
+     * across the map's own terrain: walks, jumps, drops and rope climbs are its edges, so
+     * "climb the rope to the mob's platform" needs nothing from the caller. Unreachable
+     * targets are dropped after a no-progress timeout and re-seeked next tick.
+     */
+    public static void seekAndAttack(Character bot) {
+        if (bot == null || bot.getMap() == null) {
+            return;
+        }
+        Point pos = bot.getPosition();
+        if (pos == null) {
+            return;
+        }
+
+        // 1. Swing at whatever is already in the attack driver's reach.
+        BotAttackDriver.AttackResult r = BotAttackDriver.botAttack(bot);
+        if (r != null && r.hit()) {
+            seekTargetByBot.put(bot.getId(), -1); // landed: drop the chase, re-seek fresh next tick
+            seekLastXByBot.remove(bot.getId());
+            return;
+        }
+
+        // 2. Nothing in reach: pick a chase target (sticky across ticks) and close on it.
+        Monster target = seekTarget(bot, pos);
+        if (target == null) {
+            seekLastXByBot.remove(bot.getId());
+            return; // the room is quiet; hold position this tick
+        }
+
+        // Close on the target: walk to the floor under it (the nav layer jumps/drops/climbs
+        // ropes as its edges need). Ranged/magic reach is respected by the swing above firing
+        // before the walk gets there, so this walk always ends in a landed swing or a timeout.
+        Point mp = target.getPosition();
+        Point ground = GCMovement.groundPointBelow(bot.getMap(), mp.x, mp.y);
+        int tx = mp.x;
+        int ty = (ground != null) ? ground.y : mp.y;
+
+        // Progress bookkeeping: a chase that moves the bot nowhere for a while is dropped so
+        // the next tick seeks something else instead of walking into a wall forever.
+        Point anchor = seekAnchorByBot.get(bot.getId());
+        if (anchor == null || Math.abs(pos.x - anchor.x) > PROGRESS_EPS_PX
+                || Math.abs(pos.y - anchor.y) > PROGRESS_EPS_PX) {
+            seekAnchorByBot.put(bot.getId(), new Point(pos));
+            seekDeadlineByBot.put(bot.getId(), System.currentTimeMillis() + RETARGET_TIMEOUT_MS);
+        } else if (System.currentTimeMillis() > seekDeadlineByBot.getOrDefault(bot.getId(), 0L)) {
+            seekTargetByBot.put(bot.getId(), -1);
+            seekAnchorByBot.remove(bot.getId());
+            seekLastXByBot.remove(bot.getId());
+            return;
+        }
+
+        // Retarget epsilon: re-issuing GCMovement.move for the same X every tick would reset
+        // the walk's progress clock each time, so only a real shift in the goal re-issues it.
+        Integer lastX = seekLastXByBot.get(bot.getId());
+        if (lastX == null || Math.abs(tx - lastX) >= RETARGET_EPS_PX) {
+            GCMovement.move(bot, tx, ty);
+            seekLastXByBot.put(bot.getId(), tx);
+        }
+    }
+
+    /**
+     * The chase target this tick: the sticky one while it stays alive and inside the seek
+     * box, else the nearest live hostile in the box (platforms above/below included - the
+     * nav graph's climb edges make "up the rope to the next platform" a normal approach).
+     */
+    private static Monster seekTarget(Character bot, Point pos) {
+        int sticky = seekTargetByBot.getOrDefault(bot.getId(), -1);
+        if (sticky >= 0) {
+            MapObject mo = bot.getMap().getMapObject(sticky);
+            if (mo instanceof Monster m && isHuntTarget(m, pos)) {
+                return m;
+            }
+        }
+        Monster best = null;
+        double bestSq = Double.MAX_VALUE;
+        for (Monster m : bot.getMap().getAllMonsters()) {
+            if (!isHuntTarget(m, pos)) {
+                continue;
+            }
+            Point mp = m.getPosition();
+            double dsq = pos.distanceSq(mp);
+            if (dsq < bestSq) {
+                bestSq = dsq;
+                best = m;
+            }
+        }
+        seekTargetByBot.put(bot.getId(), best != null ? best.getObjectId() : -1);
+        seekAnchorByBot.remove(bot.getId()); // a fresh target restarts the progress clock
+        seekLastXByBot.remove(bot.getId());
+        return best;
+    }
+
+    /** Release a stopped/despawned quest bot's seek state so the per-bot maps do not grow. */
+    public static void clearSeekState(int botId) {
+        seekTargetByBot.remove(botId);
+        seekAnchorByBot.remove(botId);
+        seekDeadlineByBot.remove(botId);
+        seekLastXByBot.remove(botId);
+    }
+
+    /** Whether this mob is a legitimate chase target from {@code pos}: hostile and in the seek box. */
+    private static boolean isHuntTarget(Monster m, Point pos) {
+        if (m == null || !m.isAlive()) {
+            return false;
+        }
+        if (m.getStats() != null && m.getStats().isFriendly()) {
+            return false; // Moon Bunny and friends are not targets
+        }
+        Point mp = m.getPosition();
+        return mp != null && Math.abs(mp.x - pos.x) <= SEEK_RANGE_X
+                && Math.abs(mp.y - pos.y) <= SEEK_STACK_RANGE_Y;
     }
 
     /** Pick up matching drops near a point. Returns how many items were gathered. */

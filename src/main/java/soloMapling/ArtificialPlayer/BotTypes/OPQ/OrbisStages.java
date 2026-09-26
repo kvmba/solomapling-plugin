@@ -398,7 +398,7 @@ public final class OrbisStages {
             if (!mobsPresent(bot, firstMobId, lastMobId)) {
                 return;
             }
-            PqActions.attack(bot);
+            PqActions.seekAndAttack(bot);
         }
     }
 

@@ -75,7 +75,7 @@ public class PiratePQBot extends PartyQuestBot {
         // Then whatever the room has left standing.
         if (!map.getMonsters().isEmpty()) {
             for (int pass = 0; pass < FIGHT_PASSES && !map.getMonsters().isEmpty(); pass++) {
-                PqActions.attack(getChr());
+                PqActions.seekAndAttack(getChr());
             }
         }
         // The medal stages' turn-in (NPC 2094002) grades the leader's pockets, so anything

@@ -79,7 +79,7 @@ public final class KerningStages {
     }
 
     private static void huntCoupons(Character bot) {
-        PqActions.attack(bot);
+        PqActions.seekAndAttack(bot);
         PqActions.loot(bot, bot.getPosition(), 2_000, new int[]{KerningPqData.COUPON});
     }
 
@@ -152,6 +152,6 @@ public final class KerningStages {
      * passes, so the bot only has to add damage.
      */
     public static void fightBoss(Character bot) {
-        PqActions.attack(bot);
+        PqActions.seekAndAttack(bot);
     }
 }

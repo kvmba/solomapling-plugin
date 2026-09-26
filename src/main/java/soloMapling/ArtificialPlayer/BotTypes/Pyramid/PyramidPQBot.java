@@ -64,7 +64,7 @@ public class PyramidPQBot extends PartyQuestBot {
             if (!hasOnlyKillableMonsters()) {
                 break;
             }
-            PqActions.attack(getChr());
+            PqActions.seekAndAttack(getChr());
         }
         return false;
     }

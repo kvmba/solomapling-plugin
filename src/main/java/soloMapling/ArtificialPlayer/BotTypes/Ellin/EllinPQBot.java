@@ -88,7 +88,7 @@ public class EllinPQBot extends PartyQuestBot {
         // Then whatever is standing in the room.
         if (!map.getMonsters().isEmpty()) {
             for (int pass = 0; pass < FIGHT_PASSES && !map.getMonsters().isEmpty(); pass++) {
-                PqActions.attack(getChr());
+                PqActions.seekAndAttack(getChr());
             }
         }
         return false;

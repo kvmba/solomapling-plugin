@@ -57,7 +57,7 @@ public class HorntailPQBot extends PartyQuestBot {
         if (index < 0) {
             // Past the key rooms: the light/dark choice and the boss are the leader's to make
             // and the attack path's to fight. Keep hitting whatever is here.
-            PqActions.attack(getChr());
+            PqActions.seekAndAttack(getChr());
             return false;
         }
 
@@ -73,7 +73,7 @@ public class HorntailPQBot extends PartyQuestBot {
         // Kill this room's monsters, then sweep for the key. The room holds a pair and only
         // one of them carries it, so the loop is bounded by the fight rather than by a count.
         for (int pass = 0; pass < FIGHT_PASSES && PqActions.countItem(getChr(), key) == 0; pass++) {
-            PqActions.attack(getChr());
+            PqActions.seekAndAttack(getChr());
             PqActions.loot(getChr(), getChr().getPosition(), 1_200, new int[]{key});
         }
         PqActions.handItemsToLeader(getChr(), key);

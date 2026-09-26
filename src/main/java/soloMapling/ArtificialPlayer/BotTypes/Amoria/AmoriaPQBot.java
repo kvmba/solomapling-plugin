@@ -77,7 +77,7 @@ public class AmoriaPQBot extends PartyQuestBot {
      * of its whole stock at the leader's feet.
      */
     private boolean gatherRoom() {
-        PqActions.attack(getChr());
+        PqActions.seekAndAttack(getChr());
         PqActions.loot(getChr(), getChr().getPosition(), 2_000, new int[]{AmoriaPqData.STATUE_PIECE});
         PqActions.handItemsToLeader(getChr(), AmoriaPqData.STATUE_PIECE);
         return false;
@@ -85,7 +85,7 @@ public class AmoriaPQBot extends PartyQuestBot {
 
     /** A fight room the bot can help in without reading anything. */
     private boolean fightRoom() {
-        PqActions.attack(getChr());
+        PqActions.seekAndAttack(getChr());
         return false;
     }
 
@@ -95,7 +95,7 @@ public class AmoriaPQBot extends PartyQuestBot {
      * whoever talks to the NPC.
      */
     private boolean stageOne() {
-        PqActions.attack(getChr());
+        PqActions.seekAndAttack(getChr());
         return false;
     }
 

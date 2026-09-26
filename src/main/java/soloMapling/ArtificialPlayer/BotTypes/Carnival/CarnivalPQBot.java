@@ -76,7 +76,7 @@ public class CarnivalPQBot extends PartyQuestBot {
         // the bot's actual contribution rather than a filler step.
         if (!map.getMonsters().isEmpty()) {
             for (int pass = 0; pass < FIGHT_PASSES && !map.getMonsters().isEmpty(); pass++) {
-                PqActions.attack(getChr());
+                PqActions.seekAndAttack(getChr());
             }
         }
         return false;
