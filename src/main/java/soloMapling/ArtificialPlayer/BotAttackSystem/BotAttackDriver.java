@@ -72,6 +72,17 @@ public final class BotAttackDriver {
     // real damage like any bot magic attack. Heal is not a charge skill, so magicChargeFor(-1) already fits.
     private static final BotAttackProfile HEAL_PROFILE = BotAttackProfile.magicAoe(Cleric.HEAL, 1);
 
+    /*
+     * The skills that REQUIRE the bot's attack-enabler aura to be up: the 变身 morphs gate the
+     * brawler's Shockwave / Demolition (and the Cygnus strider's Dragon Strike / Shark Wave), and the
+     * gunner's 海盗船 gates the Battleship guns. A real client refuses to fire them untransformed, so
+     * the AUTO/AoE slot falls back to the same job's aura-free attack when the aura is down.
+     * (Single source of truth: BotAuraState.isAttackEnablerSkill / enablerSkillFor.)
+     */
+    private static boolean requiresMorph(int skillId) {
+        return BotAuraState.isAttackEnablerSkill(skillId);
+    }
+
     private BotAttackDriver() {}
 
     /* Outcome of an attack attempt, for the GM command to report. */
@@ -209,7 +220,11 @@ public final class BotAttackDriver {
         if (choice == Choice.SINGLE) {
             profile = single;
         } else if (choice == Choice.AOE) {
-            profile = aoe;
+            // The forced-AoE GM probe: an untransformed bot has no morph-gated AoE, so it falls
+            // back to the same job's aura-free attack instead of firing an illegal skill.
+            profile = (aoe != null && requiresMorph(aoe.skillFor(weapon))
+                    && !BotAuraState.isMorphedAs(bot, BotAuraState.enablerSkillFor(bot, aoe.skillFor(weapon))))
+                    ? single : aoe;
         } else if (choice == Choice.ULTIMATE) {
             profile = ultimate;
         } else if (isClericVsUndead(bot, nearest)) {
@@ -222,6 +237,16 @@ public final class BotAttackDriver {
             // instead of dropping to single-target. Only escalate to an AoE when 2+ mobs are in reach.
             boolean ultReady = ultimate != null && now >= nextUltimateByBot.getOrDefault(bot.getId(), 0L);
             BotAttackProfile packAttack = ultReady ? ultimate : aoe;
+            // A skill that requires the 变身 morph / 海盗船 can only fire while that exact aura is
+            // up (a real client refuses it untransformed, and a plain 变身 does not license a
+            // 超级变身 skill); otherwise fall to the same job's aura-free attack, like the forced
+            // AOE fallback above.
+            if (packAttack != null && requiresMorph(packAttack.skillFor(weapon))) {
+                int enabler = BotAuraState.enablerSkillFor(bot, packAttack.skillFor(weapon));
+                if (enabler == 0 || !BotAuraState.isMorphedAs(bot, enabler)) {
+                    packAttack = null;
+                }
+            }
             List<Monster> packInReach = packAttack == null
                     ? List.of()
                     : mobsInReach(bot, packAttack, weapon, facingLeft);

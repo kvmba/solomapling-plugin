@@ -2,10 +2,13 @@ package soloMapling.ArtificialPlayer.BotAttackSystem;
 
 import org.gms.client.BuffStat;
 import org.gms.client.Character;
+import org.gms.client.Mount;
 import org.gms.client.Skill;
 import org.gms.client.SkillFactory;
+import org.gms.constants.id.ItemId;
 import org.gms.constants.skills.Buccaneer;
 import org.gms.constants.skills.Corsair;
+import org.gms.constants.skills.Marauder;
 import org.gms.constants.skills.ThunderBreaker;
 import org.gms.net.server.Server;
 import org.gms.net.server.world.Party;
@@ -138,6 +141,37 @@ public final class BotBuffEffects {
      * frame carries a duration; it is in seconds, as the host's own {@code applyTo} writes it.
      */
     private static void broadcastAura(Character bot, int skillId, StatEffect effect, int durationMs) {
+        // The attack enablers' observer frames are special-cased by the host's own applyTo, so the
+        // plugin mirrors that dispatch instead of the generic path:
+        //
+        // 海盗船 (BATTLE_SHIP, 5221006): the host treats it as a MONSTER_RIDING buff whose
+        // riding item is forced to ItemId.BATTLESHIP (1932000) and broadcasts showMonsterRiding -
+        // the ship model every observer renders. WZ gives the skill no morph node, so there is
+        // nothing in getStatups to send. The Mount object is a passive value holder (item/skill
+        // ids for the packet), never registered as the bot's real mount - the 骑宠 mount system
+        // stays the only owner of that state, and it is forbidden while the ship is up.
+        //
+        // 变身 morphs (TRANSFORMATION / SUPER_TRANSFORMATION, morph 1000 / 1001): the host sends
+        // a single-statup giveForeignBuff whose value is the WZ morph id, +100 for a female
+        // character (getMorph's own gender rule, covering the pirate transforms that start at
+        // 1000). The plugin synthesizes that statup: for these skills the only "statup" is the
+        // morph itself, which is exactly what makes observers render the transformed body.
+        if (skillId == Corsair.BATTLE_SHIP) {
+            Mount ship = new Mount(bot, ItemId.BATTLESHIP, skillId);
+            bot.getMap().broadcastMessage(bot,
+                    PacketCreator.showMonsterRiding(bot.getId(), ship), false);
+            return;
+        }
+        if (BotAuraState.isTransformMorph(skillId)) {
+            int morphId = skillId == Marauder.TRANSFORMATION ? 1000
+                    : skillId == Buccaneer.SUPER_TRANSFORMATION ? 1001
+                    : 1000; // ThunderBreaker.TRANSFORMATION shares the strider transform (1000)
+            int wireMorph = bot.getGender() == 0 ? morphId : morphId + 100;
+            bot.getMap().broadcastMessage(bot,
+                    PacketCreator.giveForeignBuff(bot.getId(), Collections.singletonList(
+                            new Pair<>(BuffStat.MORPH, wireMorph))), false);
+            return;
+        }
         List<Pair<BuffStat, Integer>> statups = effect.getStatups();
         if (statups.isEmpty()) {
             return;

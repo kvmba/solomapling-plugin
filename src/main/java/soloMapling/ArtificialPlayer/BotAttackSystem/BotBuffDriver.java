@@ -97,6 +97,10 @@ public final class BotBuffDriver {
                 // still reach them.
                 continue;
             }
+            // The attack enablers (变身 morphs / 海盗船) ride the normal cadence below: every
+            // actual show re-arms their BotAuraState expiry clock via onAuraShown - the same
+            // "top up the transformation" beat a real player does - and the sweep also serves the
+            // silent on-arrival re-show for them.
             if (!force && now < timers.getOrDefault(skillId, 0L)) {
                 continue; // not due yet
             }

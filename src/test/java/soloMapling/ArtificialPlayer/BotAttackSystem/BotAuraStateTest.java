@@ -2,6 +2,8 @@ package soloMapling.ArtificialPlayer.BotAttackSystem;
 
 import org.gms.constants.game.CharacterStance;
 import org.gms.constants.skills.Brawler;
+import org.gms.constants.skills.Buccaneer;
+import org.gms.constants.skills.Corsair;
 import org.gms.constants.skills.Marauder;
 import org.gms.constants.skills.NightWalker;
 import org.gms.constants.skills.Pirate;
@@ -9,6 +11,7 @@ import org.gms.constants.skills.Rogue;
 import org.gms.constants.skills.ThunderBreaker;
 import org.junit.jupiter.api.Test;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -90,5 +93,35 @@ class BotAuraStateTest {
                 "变身 is attackable - it never hides the bot or drops on an attack");
         assertFalse(BotAuraState.isHide(Pirate.DASH),
                 "疾驰 is stance-bound, not a hide");
+    }
+
+    // ── attack-enabler rules (变身 / 海盗船) ─────────────────────────────────────
+
+    @Test
+    void theAttackEnablerFamilyIsMorphsPlusBattleship() {
+        assertTrue(BotAuraState.isAttackEnabler(Marauder.TRANSFORMATION));
+        assertTrue(BotAuraState.isAttackEnabler(Buccaneer.SUPER_TRANSFORMATION));
+        assertTrue(BotAuraState.isAttackEnabler(ThunderBreaker.TRANSFORMATION));
+        assertTrue(BotAuraState.isAttackEnabler(Corsair.BATTLE_SHIP));
+        assertFalse(BotAuraState.isAttackEnabler(Brawler.OAK_BARREL),
+                "the hide morph owns no attack-enabler pose");
+        assertFalse(BotAuraState.isAttackEnabler(Pirate.DASH));
+    }
+
+    @Test
+    void eachMorphGatedAttackMapsToItsOwnEnabler() {
+        // The mapping a real client enforces: Shockwave needs the 3rd-job 变身, Demolition and
+        // Dragon Strike need the 4th-job 超级变身, the Battleship guns need the 海盗船 itself.
+        assertEquals(Marauder.TRANSFORMATION, BotAuraState.enablerFor(Marauder.SHOCKWAVE));
+        assertEquals(ThunderBreaker.TRANSFORMATION, BotAuraState.enablerFor(ThunderBreaker.SHOCK_WAVE));
+        assertEquals(Buccaneer.SUPER_TRANSFORMATION, BotAuraState.enablerFor(Buccaneer.DEMOLITION));
+        assertEquals(Buccaneer.SUPER_TRANSFORMATION, BotAuraState.enablerFor(Buccaneer.DRAGON_STRIKE));
+        assertEquals(Corsair.BATTLE_SHIP, BotAuraState.enablerFor(Corsair.BATTLESHIP_CANNON));
+        assertEquals(Corsair.BATTLE_SHIP, BotAuraState.enablerFor(Corsair.BATTLESHIP_TORPEDO));
+        // Aura-free attacks map to nothing.
+        assertEquals(0, BotAuraState.enablerFor(Buccaneer.BARRAGE),
+                "Barrage is legal untransformed");
+        assertEquals(0, BotAuraState.enablerFor(Marauder.ENERGY_BLAST));
+        assertEquals(0, BotAuraState.enablerFor(0));
     }
 }

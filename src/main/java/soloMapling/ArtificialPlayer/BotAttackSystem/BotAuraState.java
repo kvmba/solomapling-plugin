@@ -6,6 +6,7 @@ import org.gms.constants.game.CharacterStance;
 import org.gms.constants.skills.Beginner;
 import org.gms.constants.skills.Brawler;
 import org.gms.constants.skills.Buccaneer;
+import org.gms.constants.skills.Corsair;
 import org.gms.constants.skills.Marauder;
 import org.gms.constants.skills.NightWalker;
 import org.gms.constants.skills.Noblesse;
@@ -39,6 +40,22 @@ import java.util.concurrent.ConcurrentHashMap;
  *       SendSkillCancelRequest(BRAWLER_OAK_BARREL)}), and taking a 骑宠 mount clears it. A bot has no
  *       client to run either rule, so {@link #cancelHidesForAction} runs at every swing site and
  *       the movement tick retires it while a mount is up.</li>
+ *   <li><b>Pirate 变身 morphs (TRANSFORMATION 5111005 / SUPER_TRANSFORMATION 5121003 / the Cygnus
+ *       TRANSFORMATION).</b> Attackable attack-enabler morphs: while the morph is up the player may
+ *       use the skills that REQUIRE it (Shockwave / Demolition / Dragon Strike), and the morph's own
+ *       pose forbids everything else that owns the body — a 骑宠 mount and 疾驰. Each actual show
+ *       (the buff sweep's re-cast, a GM cast) arms the expiry clock via {@link #onAuraShown}, and
+ *       {@link #tickMovement} enforces the exclusions while it holds. On expiry the MORPH aura's
+ *       cancel goes out the way the host does it and the mount / 疾驰 are free to return; the attack
+ *       driver gates the morph-gated skills on {@link #isMorphedAs} meanwhile.</li>
+ *   <li><b>Corsair 海盗船 (BATTLE_SHIP, 5221006).</b> The gunner's attack-enabler: Battleship
+ *       Cannon / Torpedo are illegal off the ship, and the ship's pose forbids the 骑宠 mount and
+ *       疾驰 exactly like a morph. The host registers it as a MONSTER_RIDING buff whose riding item
+ *       is forced to the Battleship (1932000), but the plugin only broadcasts the observer frame
+ *       ({@code showMonsterRiding}) - the buff itself is never registered, so the 骑宠 mount system
+ *       cannot see it and the bookkeeping here ({@link #isMorphedAs}) is the sole source of truth.
+ *       Expiry is the body swap back: no foreign cancel exists to send (the observer frame was a
+ *       mount visual, and a real client drops the ship on damage, so silence reads correctly).</li>
  *   <li><b>Thief 隐身术 (DARK_SIGHT, 4001003 / 14001003).</b> The rogue hide: the official client
  *       renders it as a semi-transparent shade that players STILL SEE (unlike GM hide, the sprite
  *       stays on the map), and while it holds the character cannot be attacked by monsters at all.
@@ -82,7 +99,30 @@ public final class BotAuraState {
     /** botIds whose 隐身术 aura is intended to be up (a cancel is only sent on the drop edge). */
     private static final Set<Integer> DARK_SIGHT_UP = ConcurrentHashMap.newKeySet();
 
+    /** Expiry fallback for an attack-enabler aura whose WZ duration is missing (the WZ minimum is ~30s). */
+    private static final long ENABLER_FALLBACK_MS = 80_000L;
+
+    /**
+     * botId -> epoch-ms at which the bot's attack-enabler aura (变身 morph / 海盗船) expires. These
+     * are the auras whose presence GATES attacks (Shockwave / Demolition / the Battleship guns) and
+     * whose pose excludes the 骑宠 mount and 疾驰; see {@link #isMorphed}.
+     */
+    private static final Map<Integer, Long> ATTACK_ENABLER_UNTIL = new ConcurrentHashMap<>();
+
     private BotAuraState() {}
+
+    /**
+     * The enabler aura {@code bot} needs for {@code attackSkillId}, or 0 if that skill has no
+     * enabler. A bot's kit can only carry the enablers of its own lineage, so if the mapped skill
+     * is not in the bot's buff registry the skill is simply not fireable for this bot.
+     */
+    public static int enablerSkillFor(Character bot, int attackSkillId) {
+        int wanted = enablerFor(attackSkillId);
+        if (wanted == 0 || bot == null) {
+            return 0;
+        }
+        return BotBuffConfig.buffsForJob(bot.getJob()).contains(wanted) ? wanted : 0;
+    }
 
     /** The host's own {@code isDash} set: the 疾驰 speed/jump burst. */
     public static boolean isDash(int skillId) {
@@ -129,6 +169,59 @@ public final class BotAuraState {
         return CharacterStance.isWalking(stance);
     }
 
+    /** The attack-enabler family: the skills whose pose excludes a 骑宠 mount and 疾驰. */
+    public static boolean isAttackEnabler(int skillId) {
+        return isTransformMorph(skillId) || skillId == Corsair.BATTLE_SHIP;
+    }
+
+    /** The attack skills that REQUIRE the attack-enabler aura (the guns, Shockwave, Demolition, ...). */
+    public static boolean isAttackEnablerSkill(int skillId) {
+        return enablerFor(skillId) != 0;
+    }
+
+    /**
+     * The attack-enabler aura that gates {@code attackSkillId} (Shockwave needs 变身, Demolition /
+     * Dragon Strike need 超级变身, the Battleship guns need the 海盗船; 0 = not enabler-gated). One
+     * place, so a driver fallback and a summons-the-enabler show always agree on which aura a
+     * skill belongs to.
+     */
+    public static int enablerFor(int attackSkillId) {
+        return switch (attackSkillId) {
+            case Marauder.SHOCKWAVE -> Marauder.TRANSFORMATION;
+            case ThunderBreaker.SHOCK_WAVE -> ThunderBreaker.TRANSFORMATION;
+            case Buccaneer.DEMOLITION, Buccaneer.DRAGON_STRIKE -> Buccaneer.SUPER_TRANSFORMATION;
+            case Corsair.BATTLESHIP_CANNON, Corsair.BATTLESHIP_TORPEDO -> Corsair.BATTLE_SHIP;
+            default -> 0;
+        };
+    }
+
+    /**
+     * True while the bot's attack-enabler aura (变身 morph, or the gunner's 海盗船) is shown. While
+     * it holds, {@link BotMount} refuses to mount the bot and the movement tick keeps 疾驰 down;
+     * the attack driver only fires the skills that require it once this is true.
+     */
+    public static boolean isMorphed(Character bot) {
+        if (bot == null) {
+            return false;
+        }
+        Long until = ATTACK_ENABLER_UNTIL.get(bot.getId());
+        return until != null && System.currentTimeMillis() < until;
+    }
+
+    /**
+     * True while {@code bot} is morphed AS {@code enablerSkillId} specifically (变身 5111005 vs
+     * 超级变身 5121003 vs 海盗船 5221006 gate different skills). The attack gate: a Demolition is
+     * not covered by a plain 变身 any more than an untransformed swing is.
+     */
+    public static boolean isMorphedAs(Character bot, int enablerSkillId) {
+        if (bot == null || enablerSkillId == 0) {
+            return false;
+        }
+        Long until = ATTACK_ENABLER_UNTIL.get(bot.getId());
+        return until != null && System.currentTimeMillis() < until
+                && MORPH_SKILL.get(bot.getId()) == enablerSkillId;
+    }
+
     /**
      * Record that {@code bot}'s aura for {@code skillId} was just broadcast (a macro cast or a GM /
      * party-buff show). 疾驰 is included so a stray cast from a stand is retired on the next movement
@@ -143,7 +236,16 @@ public final class BotAuraState {
         if (isDash(skillId)) {
             DASH_SKILL.putIfAbsent(id, skillId);
             DASH_UP.add(id);
-        } else if (isDisguise(skillId) || isTransformMorph(skillId)) {
+        } else if (isAttackEnabler(skillId)) {
+            // An attack-enabler morph: note which MORPH visual is up (so an expiry swap can name the
+            // exact cancel frame) and when it expires. A later enabler overwrites the earlier one -
+            // the swap below broadcasts that cancellation - exactly how the client's single MORPH
+            // stat slot behaves.
+            MORPH_SKILL.put(id, skillId);
+            int durationMs = BotBuffEffects.durationOf(skillId);
+            long life = durationMs > 0 ? (long) (durationMs * 0.9) : ENABLER_FALLBACK_MS;
+            ATTACK_ENABLER_UNTIL.put(id, System.currentTimeMillis() + life);
+        } else if (isDisguise(skillId)) {
             MORPH_SKILL.put(id, skillId);
         } else if (isDarkSight(skillId)) {
             DARK_SIGHT_UP.add(id);
@@ -174,13 +276,39 @@ public final class BotAuraState {
         boolean observed = GCMovement.isMapObserved(bot.getMapId());
         boolean mounted = bot.getBuffedValue(BuffStat.MONSTER_RIDING) != null;
 
+        // 变身 / 海盗船: the attack-enabler pose owns the body, so 疾驰 must stay down while it
+        // holds, and its expiry is enforced here (the visuals swap like the client's: the old
+        // morph/ship cancel + the mount is free to return).
+        Long enablerUntil = ATTACK_ENABLER_UNTIL.remove(id);
+        if (enablerUntil != null) {
+            if (System.currentTimeMillis() < enablerUntil) {
+                ATTACK_ENABLER_UNTIL.put(id, enablerUntil); // still up - put it back for the next tick
+                if (DASH_UP.remove(id)) {
+                    DASH_RESHOW_AT.remove(id);
+                    cancel(bot, DASH_STATS); // the morph pose forbids 疾驰 - drop it for the morph
+                }
+            } else {
+                // Expired: swap the visuals off the way the host does. A 变身 morph's foreign
+                // representation is the MORPH statup, so its cancel is the MORPH-cancel frame. The
+                // 海盗船 registered no foreign buff at all (its model is a map Character tint), so
+                // it expires silently - the body swap IS the expiry, with no packet to mirror.
+                Integer shown = MORPH_SKILL.get(id);
+                if (shown != null && shown != Corsair.BATTLE_SHIP) {
+                    MORPH_SKILL.remove(id);
+                    cancel(bot, MORPH_STATS);
+                } else {
+                    MORPH_SKILL.remove(id);
+                }
+            }
+        }
+
         // 疾驰: valid only while the wire stance is a walk and the bot is not astride a mount (the
         // ride owns the pose). Any other stance (stand / jump / swim / rope / ladder) cancels it;
         // while walking it is (re)shown, throttled to the aura's own refresh window. The refresh clock
         // only advances on an actual show, so a walk that begins while unobserved shows on the first
         // observed tick.
         if (dashSkill != 0) {
-            if (!mounted && dashHolds(bot.getStance())) {
+            if (!mounted && dashHolds(bot.getStance()) && !isMorphed(bot)) {
                 boolean firstWalk = DASH_UP.add(id);
                 if (observed && (firstWalk || System.currentTimeMillis() >= DASH_RESHOW_AT.getOrDefault(id, 0L))) {
                     int durationMs = BotBuffEffects.showAura(bot, dashSkill);
@@ -194,6 +322,9 @@ public final class BotAuraState {
         }
 
         // 伪装 / 隐身: a 骑宠 (mount) clears either hide, exactly as dismounting for an action does.
+        // An attack-enabler morph / the Battleship is the same in reverse - the pose owns the body -
+        // but it expires by its own clock above and the mount system never mounts a morphed bot
+        // (BotMount.tick), so no teardown is needed here.
         if (mounted) {
             if (isDisguised(id)) {
                 MORPH_SKILL.remove(id);
@@ -272,5 +403,6 @@ public final class BotAuraState {
         DASH_RESHOW_AT.remove(botId);
         MORPH_SKILL.remove(botId);
         DARK_SIGHT_UP.remove(botId);
+        ATTACK_ENABLER_UNTIL.remove(botId);
     }
 }
