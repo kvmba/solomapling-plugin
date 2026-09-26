@@ -259,12 +259,16 @@ final class GCMovementDriver {
             entry.debuffMoveScale = 1.0;
         }
 
-        // The pirate 疾驰 burst rolls on a long enough walk and expires like the real timed buff.
-        // Published next to the SLOW scale (the same step-profile channel, in the opposite
-        // direction) so the ground step sees both in one tick. A burst rides through stands,
-        // jumps and ropes until expiry — exactly like the real buff — and the roll fires exactly
-        // once per qualifying long walk (see BotDashBurst).
-        BotDashBurst.tickMovement(bot, bot.getPosition().x, System.currentTimeMillis());
+        // The pirate 疾驰 burst rolls on a long enough walk, rides through jumps and ropes, and
+        // is RELEASED the moment the bot stops moving on the ground (grounded, no hspeed, no
+        // intent — the same tick, so the aura and the speed bonus end together). Published next
+        // to the SLOW scale (the same step-profile channel, in the opposite direction) so the
+        // ground step sees both in one tick; the roll fires exactly once per qualifying walk.
+        // The stop edge is read from the PREVIOUS tick's settled physics — the same settled state
+        // the aura tick reads at the end of this tick.
+        boolean dashStopped = !(entry.inAir || entry.climbing)
+                && entry.hspeed == 0.0 && entry.moveDir == 0 && entry.groundBrakeDir == 0;
+        BotDashBurst.tickMovement(bot, bot.getPosition().x, System.currentTimeMillis(), dashStopped);
         entry.dashSpeedBonus = BotDashBurst.isActive(bot) ? BotDashBurst.speedBonus(bot) : 0;
 
         // Pending organic portal/teleport drop: hold standing at the spawn portal (the bot appears
