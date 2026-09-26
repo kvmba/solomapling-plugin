@@ -314,7 +314,11 @@ public final class PqActions {
     // per-bot state below keeps a chase alive across those ticks (RoamStrategy's targetOid pattern,
     // minus the spot-claim machinery a quest bot does not need).
     private static final int SEEK_RANGE_X = 900;            // hunt a live mob within this |dx| (cross-ledge)
-    private static final int SEEK_STACK_RANGE_Y = 400;      // vertically layered ledges admit deeper dy
+    // LPQ stage 1 (922010100) seats its first Ratz 580px above the entry floor over a series of
+    // one-way ledges - a box tuned to the grind maps' floor stacks stops the chase before it starts
+    // and the room reads as quiet forever (the mobs are mobTime=-1 and never close the gap). The
+    // whole tower is ~3000px tall, so a bot standing anywhere in it sees the whole hunt.
+    static final int SEEK_STACK_RANGE_Y = 3_200;    // tall PQ towers are one vertical room
     private static final int RETARGET_EPS_PX = 16;          // skip re-issuing a move for tiny shifts
     private static final long RETARGET_TIMEOUT_MS = 4_000;  // give up an unreachable target after this
     private static final int PROGRESS_EPS_PX = 20;          // movement worth counting as chase progress
