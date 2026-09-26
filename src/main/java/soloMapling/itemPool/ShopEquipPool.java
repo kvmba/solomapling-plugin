@@ -23,10 +23,18 @@ import java.util.concurrent.ThreadLocalRandom;
  *
  * <p><b>One DB read, ever.</b> The shop table is read once into memory, deduped
  * by item id (the same equip is stocked by many NPCs) and kept only for equip
- * id ranges; the host treats every {@code shopitems} row as buyable. Entries
- * are then joined against the in-memory {@link EquipMetadataCache} for
- * reqLevel / reqJob / gender / cash flags. Spawning never touches the DB — a
- * draw is a single indexed list read. A GM reload re-reads the table.</p>
+ * id ranges; entries are joined against the in-memory {@link
+ * EquipMetadataCache} for reqLevel / reqJob / gender / cash flags. Only
+ * <b>regular</b> shops count: the row must join to the {@code shops} table, its
+ * NPC must not be in the 900xxxxx GM band, and the price must be meso-positive
+ * — admin/event shops that hand out endgame gear for 1 meso are exactly the
+ * "precious items on every bot" leak this blocks. Spawning never touches the
+ * DB — a draw is a single indexed list read. A GM reload re-reads the table.</p>
+ *
+ * <p>Draws are probabilistic ({@link #DRAW_CHANCE}): when the shop pool offers
+ * something wearable the caller still rolls, so most bots wear shop-bought
+ * looks while the WZ-wide pool keeps boss drops / quest gear in rotation and
+ * bots from dressing alike.</p>
  *
  * <p>Fails closed but never naked: with no loaded pool (or an empty shop table)
  * draws return null and callers fall back to the WZ-wide pools, exactly as
@@ -34,6 +42,15 @@ import java.util.concurrent.ThreadLocalRandom;
  * path — a missing pool must never turn into a DB query per spawn.</p>
  */
 public final class ShopEquipPool {
+
+    /**
+     * Chance a slot draw comes from the shop pool when it offers something
+     * wearable. Below 1 on purpose: a small pool drawn at 100% makes every bot
+     * dress alike, so the remainder rolls into the WZ-wide pool (drops, quest
+     * rewards, crafted gear) for variety. Single source of truth - the
+     * ItemInformationProviderUtilities hook reads this, QuickEquip estimates it.
+     */
+    public static final double DRAW_CHANCE = 0.40;
 
     private static volatile Map<EquipType, List<EquipMetadataCache.EquipEntry>> byType = Map.of();
     private static volatile int totalEntries;
@@ -153,10 +170,23 @@ public final class ShopEquipPool {
         return fits.get(ThreadLocalRandom.current().nextInt(fits.size()));
     }
 
-    /** The distinct equip-range item ids currently stocked by any NPC shop. */
+    /**
+     * The distinct equip-range item ids currently stocked by any regular NPC
+     * shop. Regular = joined against the {@code shops} table (orphan rows that
+     * no NPC opens are skipped), not a GM/admin shop (NPC id band 900xxxxx,
+     * e.g. the admin Fredrick selling endgame gear for 1 meso), and actually
+     * bought with mesos (price &gt; 0). Events/giveaway shops hand out items for
+     * 0-1 meso, so the price floor also blocks unintended free equip stock.
+     */
     private static Set<Integer> readShopEquipIds() {
         Set<Integer> ids = new LinkedHashSet<>();
-        String sql = "SELECT DISTINCT itemid FROM shopitems";
+        String sql = """
+                SELECT DISTINCT si.itemid
+                  FROM shopitems si
+                  JOIN shops sh ON sh.shopid = si.shopid
+                 WHERE si.price > 0
+                   AND sh.npcid NOT BETWEEN 9000000 AND 9009999
+                """;
         try (Connection con = DatabaseConnection.getConnection();
              PreparedStatement ps = con.prepareStatement(sql);
              ResultSet rs = ps.executeQuery()) {

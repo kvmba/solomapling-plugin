@@ -97,12 +97,13 @@ public class QuickEquip {
 
     private static void equipFromPool(Character bot, String category, int level, int gender,
                                       boolean preferHigh) {
-        // Shop-sold gear first: keep the bot in gear a real player could buy at
-        // this level. Falls back to the curated YAML pool when the shop pool has
-        // nothing for this draw (not loaded / no category match / nothing fits).
+        // Shop-sold gear first, probabilistically (see ShopEquipPool.DRAW_CHANCE):
+        // keep many bots in gear a real player could buy at this level, but let the
+        // curated YAML pool keep rarer looks in rotation. Falls back whenever the
+        // roll misses or the shop pool has nothing for this draw.
         Integer itemId = null;
         EquipType shopType = shopEquipType(category);
-        if (shopType != null && ShopEquipPool.isLoaded()) {
+        if (shopType != null && shopRoll() && ShopEquipPool.isLoaded()) {
             itemId = ShopEquipPool.getRandomEquip(shopType, level, 0, gender);
         }
         if (itemId == null) {
@@ -111,6 +112,11 @@ public class QuickEquip {
         if (itemId != null) {
             BotCustomization.EquipBot(bot, itemId);
         }
+    }
+
+    /** One roll for "should this slot come from shop stock?" — mirrors the main chain. */
+    private static boolean shopRoll() {
+        return ThreadLocalRandom.current().nextDouble() < ShopEquipPool.DRAW_CHANCE;
     }
 
     /**
@@ -131,8 +137,8 @@ public class QuickEquip {
 
     /** @return true if an overall was found and equipped. */
     private static boolean tryOverall(Character bot, int level, int gender, boolean preferHigh) {
-        // Shop-sold overalls first, then the curated YAML pool.
-        Integer id = ShopEquipPool.isLoaded()
+        // Shop-sold overalls first (probabilistic), then the curated YAML pool.
+        Integer id = (shopRoll() && ShopEquipPool.isLoaded())
                 ? ShopEquipPool.getRandomEquip(EquipType.LONGCOAT, level, 0, gender)
                 : null;
         if (id == null) {
@@ -144,12 +150,13 @@ public class QuickEquip {
     }
 
     /**
-     * Both-or-nothing within each pool: shop top+bottom first, YAML top+bottom
-     * second, so a bot never ends up wearing a shirt with no pants.
+     * Both-or-nothing within each pool: shop top+bottom first (one roll for the
+     * pair, so both halves come from the same pool), YAML top+bottom second,
+     * so a bot never ends up wearing a shirt with no pants.
      * @return true if both pieces were found and equipped.
      */
     private static boolean tryTopBottom(Character bot, int level, int gender, boolean preferHigh) {
-        if (ShopEquipPool.isLoaded()) {
+        if (shopRoll() && ShopEquipPool.isLoaded()) {
             Integer shopTop = ShopEquipPool.getRandomEquip(EquipType.COAT, level, 0, gender);
             Integer shopBot = ShopEquipPool.getRandomEquip(EquipType.PANTS, level, 0, gender);
             if (shopTop != null && shopBot != null) {

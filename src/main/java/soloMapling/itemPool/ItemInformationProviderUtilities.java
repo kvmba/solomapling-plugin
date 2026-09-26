@@ -213,11 +213,12 @@ public class ItemInformationProviderUtilities {
      * <p>Returns null if the cache isn't initialized yet (early spawns fall back
      * to QuickEquip / the decoration queue) or if nothing matches.</p>
      *
-     * <p>Shop-sold gear first: when {@link ShopEquipPool} is loaded, a random
-     * equip a real player could simply buy for this level/gender/job is returned
-     * outright; only when the shop pool offers nothing for this draw does the
-     * pick fall through to the WZ-wide weighted pool (drops / quest rewards /
-     * crafted gear).</p>
+     * <p>Shop-sold gear first, probabilistically: when {@link ShopEquipPool} is
+     * loaded, a {@link ShopEquipPool#DRAW_CHANCE} roll decides whether this slot
+     * comes from shop stock (gear a real player could simply buy for this
+     * level/gender/job); a missed roll or an empty-handed shop pool falls
+     * through to the WZ-wide weighted pool (drops / quest rewards / crafted
+     * gear), so shop stock flavours the population without homogenising it.</p>
      */
     public static Integer getRandomEquip(EquipType eqType, int maxLevel, Job jobStyle, int gender) {
         if (!EquipMetadataCache.isInitialized()) {
@@ -228,9 +229,11 @@ public class ItemInformationProviderUtilities {
         int reqJob = getReqJobViaJobStyle(jobStyle);
 
         // Shop-sold gear first: what a player of this build could have bought.
-        Integer shopEquip = ShopEquipPool.getRandomEquip(eqType, maxLevel, reqJob, gender);
-        if (shopEquip != null) {
-            return shopEquip;
+        if (random.nextDouble() < ShopEquipPool.DRAW_CHANCE) {
+            Integer shopEquip = ShopEquipPool.getRandomEquip(eqType, maxLevel, reqJob, gender);
+            if (shopEquip != null) {
+                return shopEquip;
+            }
         }
 
         // Primary window (same as the legacy WZ-scan path):
