@@ -329,6 +329,9 @@ public final class PqActions {
         // nobody but him can pick it, and the host despawns drops nobody picked up - an
         // unreachable pile is a timed wipe of the bot's whole stock. Walk to him first; the
         // move is fire-and-forget, so the hand-off just waits for a tick where he is close.
+        if (leader.getMapId() != bot.getMapId()) {
+            return 0; // nothing to do here; the party's own movement brings them together
+        }
         if (bot.getPosition() == null || leader.getPosition() == null
                 || bot.getPosition().distanceSq(leader.getPosition()) > HANDOFF_RANGE_SQ) {
             GCMovement.move(bot, leader.getPosition().x, leader.getPosition().y);
@@ -678,16 +681,24 @@ public final class PqActions {
      * talk to), so the party reads as ready instead of scattered around the room. Falls back
      * to the exit portal's mouth when the room has no NPC.
      */
+    /** NPC-sight radius SQUARED for the wait spot - getMapObjectsInRange compares distanceSq. */
+    private static final long WAIT_NPC_RANGE_SQ = 25_000_000L; // 5000px squared: any quest room
+
     public static void waitNearStageNpc(Character bot) {
         if (bot == null || bot.getMap() == null) {
             return;
         }
         Point spot = null;
-        for (MapObject obj : bot.getMap().getMapObjectsInRange(bot.getPosition(), 9_000,
+        long bestSq = Long.MAX_VALUE;
+        for (MapObject obj : bot.getMap().getMapObjectsInRange(bot.getPosition(), WAIT_NPC_RANGE_SQ,
                 List.of(org.gms.server.maps.MapObjectType.NPC))) {
-            if (obj instanceof NPC npc) {
-                spot = npc.getPosition();
-                break;
+            if (obj instanceof NPC npc && npc.getPosition() != null) {
+                // The CLOSEST stage NPC, not the first in the map's unordered object table.
+                double dsq = bot.getPosition().distanceSq(npc.getPosition());
+                if (dsq < bestSq) {
+                    bestSq = (long) dsq;
+                    spot = npc.getPosition();
+                }
             }
         }
         if (spot == null) {

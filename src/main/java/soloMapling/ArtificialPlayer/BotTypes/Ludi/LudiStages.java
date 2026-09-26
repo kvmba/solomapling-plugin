@@ -47,23 +47,27 @@ public final class LudiStages {
      * turn-in and the party stalls on the stage.
      */
     public static void gatherPasses(Character bot, int stage) {
-        int wanted = LudiPqData.passesWanted(stage);
-        if (wanted > 0 && PqActions.countItem(bot, LudiPqData.PASS) >= wanted) {
-            return; // this bot is carrying its share; more hands are not needed
-        }
-        PqActions.seekAndAttack(bot);
-        PqActions.loot(bot, bot.getPosition(), 2_000, new int[]{LudiPqData.PASS});
-        // Hand over only what this bot really carried, only when the leader is in the room
-        // to receive it (the hand-off drop is addressed to him; with him elsewhere it would
-        // sit owned and unlootable on the floor).
-        // The leader's piles despawn if he does not sweep them in time; recover ours and
-        // re-drop them next to him on a later tick.
+        // Deliver FIRST: passes parked in a bot's pockets are passes the leader cannot turn
+        // in, and the old "carry your share" early-return left exactly that state standing
+        // still until the turn-in. Recover our stale piles, then hand off up close - walking
+        // to the leader when he is not (the move is fire-and-forget, no flag required).
         PqActions.recoverUngatheredHandoffs(bot, LudiPqData.PASS);
-        Character leader = PqActions.partyLeader(bot);
-        if (leader != null && leader != bot && leader.getMapId() == bot.getMapId()
-                && PqActions.handItemsToLeader(bot, LudiPqData.PASS) > 0) {
+        if (PqActions.handItemsToLeader(bot, LudiPqData.PASS) > 0) {
             PqActions.say(bot, BotMessages.get("pq.passes_dropped"));
         }
+        if (PqActions.countItem(bot, LudiPqData.PASS) > 0) {
+            return; // still carrying: the walk to the leader is in flight, deliver before all else
+        }
+
+        if (bot.getMap().getAllMonsters().stream().noneMatch(m -> m.isAlive())) {
+            // Room quiet, pockets empty: the stage is waiting on the leader's turn-in, so
+            // wait by the stage NPC instead of idling at the last fight spot.
+            PqActions.waitNearStageNpc(bot);
+            return;
+        }
+
+        PqActions.seekAndAttack(bot);
+        PqActions.loot(bot, bot.getPosition(), 2_000, new int[]{LudiPqData.PASS});
     }
 
     // =========================================================================
@@ -131,12 +135,11 @@ public final class LudiStages {
         // Fight the room's box mobs and sweep the passes they drop.
         PqActions.seekAndAttack(bot);
         PqActions.loot(bot, bot.getPosition(), 2_000, new int[]{LudiPqData.PASS});
-        // Hand the passes on at the door mouth (the bot walks to the room's exit portal,
-        // drops everything it carried, and leaves the pile for the leader).
-        Character leader = PqActions.partyLeader(bot);
-        if (leader != null && leader != bot) {
-            handAllAtDoor(bot, leader);
-        }
+        // Hand over up close: a pile left at the door mouth despawns if the leader never
+        // walks there. recoverUngatheredHandoffs + handItemsToLeader keep the stock
+        // circulating until it is actually in his pockets.
+        PqActions.recoverUngatheredHandoffs(bot, LudiPqData.PASS);
+        PqActions.handItemsToLeader(bot, LudiPqData.PASS);
     }
 
     /**
@@ -162,10 +165,8 @@ public final class LudiStages {
             hitReactorAt(bot, box);
         }
         PqActions.loot(bot, bot.getPosition(), 2_000, new int[]{LudiPqData.PASS});
-        Character leader = PqActions.partyLeader(bot);
-        if (leader != null && leader != bot) {
-            handAllAtDoor(bot, leader);
-        }
+        PqActions.recoverUngatheredHandoffs(bot, LudiPqData.PASS);
+        PqActions.handItemsToLeader(bot, LudiPqData.PASS);
     }
 
     /**
@@ -185,28 +186,6 @@ public final class LudiStages {
                 .filter(m -> Math.abs(m.getPosition().x - bot.getPosition().x) <= 900
                         && Math.abs(m.getPosition().y - bot.getPosition().y) <= 3_200)
                 .count();
-    }
-
-    /** Drop the bot's whole pass stock at the room's exit portal mouth, for the leader. */
-    private static void handAllAtDoor(Character bot, Character leader) {
-        int carried = PqActions.countItem(bot, LudiPqData.PASS);
-        if (carried <= 0) {
-            return;
-        }
-        org.gms.server.maps.Portal out = exitPortalOf(bot);
-        if (out == null) {
-            return;
-        }
-        PqActions.walkTo(bot, out.getPosition());
-        if (PqActions.countItem(bot, LudiPqData.PASS) <= 0) {
-            return;
-        }
-        // A direct transfer: real inventory removal + an addressed pile at the leader's feet.
-        BotClientBinding.runWithBoundPlayer(bot, () ->
-                InventoryManipulator.removeById(bot.getClient(),
-                        ItemConstants.getInventoryType(LudiPqData.PASS),
-                        LudiPqData.PASS, carried, true, false));
-        PqActions.giveItemToQuiet(bot, leader, LudiPqData.PASS, carried);
     }
 
     /** The room's exit portal (out00), or null. */
