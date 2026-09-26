@@ -47,7 +47,12 @@ public final class LudiStages {
         }
         PqActions.seekAndAttack(bot);
         PqActions.loot(bot, bot.getPosition(), 2_000, new int[]{LudiPqData.PASS});
-        if (PqActions.handItemsToLeader(bot, LudiPqData.PASS) > 0) {
+        // Hand over only what this bot really carried, only when the leader is in the room
+        // to receive it (the hand-off drop is addressed to him; with him elsewhere it would
+        // sit owned and unlootable on the floor).
+        Character leader = PqActions.partyLeader(bot);
+        if (leader != null && leader != bot && leader.getMapId() == bot.getMapId()
+                && PqActions.handItemsToLeader(bot, LudiPqData.PASS) > 0) {
             PqActions.say(bot, "PASSES! I have dropped the passes at the leader's feet.");
         }
     }

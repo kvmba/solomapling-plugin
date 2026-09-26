@@ -8,8 +8,11 @@ import org.gms.server.maps.MapObject;
 import org.gms.server.maps.MapleMap;
 import org.gms.server.maps.Portal;
 import org.gms.server.life.NPC;
+import org.gms.constants.inventory.ItemConstants;
+import org.gms.client.inventory.manipulator.InventoryManipulator;
 import org.gms.scripting.npc.NPCScriptManager;
 import soloMapling.ArtificialPlayer.BotAttackSystem.BotAttackDriver;
+import soloMapling.ArtificialPlayer.BotClientBinding;
 import soloMapling.ArtificialPlayer.BotAttackSystem.BotAuraState;
 import soloMapling.ArtificialPlayer.BotCommandsPack.DropCommands;
 import soloMapling.ArtificialPlayer.BotCommandsPack.SocialCommands;
@@ -225,12 +228,29 @@ public final class PqActions {
      * to the NPC. When the bot is the one holding the quest items, the player cannot turn
      * them in, so the bot has to give them up - and there is no trade helper here, so the
      * drop is the transfer.
+     *
+     * <p>The transfer is real: the stack is removed from the bot's inventory before the
+     * drop spawns, so a bot can never hand on more than it actually carried. The drop is
+     * also permanently owned by the receiver, so the other bots' floor sweeps (which
+     * otherwise read every pass on the ground as loot, the leader's pile included) cannot
+     * turn the hand-off into a pass ping-pong across the room.
      */
     public static void giveItemTo(Character bot, Character receiver, int itemId, int qty) {
         if (bot == null || receiver == null || qty <= 0) {
             return;
         }
-        DropCommands.botThrowItemQty(bot, itemId, qty, receiver.getPosition());
+        if (bot.getMapId() != receiver.getMapId()) {
+            return; // nowhere to drop it; the hand-off waits for a shared map
+        }
+        int carried = countItem(bot, itemId);
+        if (carried <= 0) {
+            return;
+        }
+        int handed = Math.min(qty, carried);
+        BotClientBinding.runWithBoundPlayer(bot, () ->
+                InventoryManipulator.removeById(bot.getClient(),
+                        ItemConstants.getInventoryType(itemId), itemId, handed, true, false));
+        DropCommands.botThrowToOwnerItemQty(bot, itemId, handed, receiver);
     }
 
     /**

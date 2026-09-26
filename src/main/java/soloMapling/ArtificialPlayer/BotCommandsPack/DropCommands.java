@@ -308,6 +308,9 @@ public class DropCommands {
         if (mapItem.getOwnerId() == fakechar.getId()) {
             return true; // the bot's own drop
         }
+        if (mapItem.isPermanentOwner()) {
+            return false; // somebody's addressed hand-off (a PQ leader's pile) - not floor loot
+        }
         return mapItem.getDropType() == 2
                 || System.currentTimeMillis() - mapItem.getDropTime() >= FFA_OWNER_PROTECT_MS;
     }
