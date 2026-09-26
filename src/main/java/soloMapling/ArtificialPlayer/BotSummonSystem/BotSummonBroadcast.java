@@ -36,16 +36,20 @@ final class BotSummonBroadcast {
 
     /**
      * The per-attack "action" byte of SUMMON_ATTACK: NOT a plain 0/1 facing flag. The client
-     * (BeiDou.exe sub_7A6882, verified in IDA) decodes it as {@code facing = byte & 0x80},
-     * {@code action = (byte & 0x7F) - 4} and indexes the summon action-name table at 0xBEC3CC
-     * (decrypted string pool: index 0="attack1", 1="attack2", 2="skill1"...) with that action.
-     * A raw 0/1 byte yields index -4/-3, lands on "stand"/"move", and the Skill.wz lookup for
-     * {@code <summon skill>/stand} finds no attack node -> the client dereferences a null
-     * summon-attack template and crashes ("data error"). A real client always sends
-     * {@code (facing << 7) | action} with action >= 4; ATTACK1 (byte 0x04/0x84) is the summon's
-     * default basic attack node and is what every observing client renders.
+     * (BeiDou.exe sub_7A6882, verified in IDA) reads the relayed bytes as
+     * {@code [oid][level][action][count][oid,hitByte,damage]...} and decodes the action byte as
+     * {@code facing = byte & 0x80}, {@code node = table[(byte & 0x7F) - 4]} - a 15-slot name table
+     * (base 0xBEC3BC, decrypted from the client's string pool): {@code stand, move, fly, summoned,
+     * attack1, attack2, skill1..skill6, hit, die, say}. The node name feeds the
+     * {@code Skill/<job>/<skill>/summon/<name>} WZ lookup, whose cached info carries the per-level
+     * {@code ball} node ({@code level/<n>/ball}, fmt 2386) - the projectile sprite an observer draws.
+     * <p>
+     * A base-4 byte (0x04/0x84) indexes slot 0 = {@code stand}: the summon plays its STAND pose, the
+     * damage entries still land (parsed independently), but NO attack node and NO ball ever render -
+     * exactly the "hit with damage but no bullet" report. ATTACK1 is slot 4, so the byte must carry
+     * action 8: {@code 0x08} facing right, {@code 0x88} facing left.
      */
-    private static final int SUMMON_ATTACK1_ACTION = 4;
+    private static final int SUMMON_ATTACK1_ACTION = 8;
     private static final int SUMMON_FACING_LEFT_MASK = 0x80;
 
     /** Fragment command 0 = normal / absolute movement (the shape AbsoluteLifeMovement serialises). */
