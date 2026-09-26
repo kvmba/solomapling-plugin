@@ -63,7 +63,11 @@ public class HorntailPQBot extends PartyQuestBot {
 
         int key = HorntailPqData.keyForRoom(index);
         if (PqActions.countItem(getChr(), key) > 0) {
-            return false; // this room's key is in hand; the leader walks the party on
+            // The key is in hand - hand it on: Aura checks the inventory of whoever talks
+            // to him (the leader) and wants all five at once, so a bot holding its room's
+            // key starves the turn-in and the run stalls at the last door.
+            PqActions.handItemsToLeader(getChr(), key);
+            return false; // the leader walks the party on once all five reach him
         }
 
         // Kill this room's monsters, then sweep for the key. The room holds a pair and only
@@ -72,6 +76,7 @@ public class HorntailPQBot extends PartyQuestBot {
             PqActions.attack(getChr());
             PqActions.loot(getChr(), getChr().getPosition(), 1_200, new int[]{key});
         }
+        PqActions.handItemsToLeader(getChr(), key);
         return false;
     }
 }

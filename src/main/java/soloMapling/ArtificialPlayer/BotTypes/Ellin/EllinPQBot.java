@@ -21,8 +21,11 @@ public class EllinPQBot extends PartyQuestBot {
 
     private static final int FIGHT_PASSES = 20;
 
-    /** Where the bot has already been in the maze, so a dead-end portal is not re-tried. */
-    private int lastMazeMap = -1;
+    /** The NPC standing in the maze whose talk warps the team out of it. */
+    private static final int MAZE_NPC = 2133001;
+
+    /** The last map the bot asked the maze NPC from, so the ask fires once per visit. */
+    private int mazeExitAsked = -1;
 
     public EllinPQBot(Character character) {
         super(character);
@@ -58,6 +61,21 @@ public class EllinPQBot extends PartyQuestBot {
         int mapId = getChr().getMapId();
         var map = getChr().getMap();
 
+        // The maze's own door out: the NPC at the maze's centre warps the whole team to the
+        // frog room when anyone talks to him - that is the only way past 930000300, whose
+        // script portals all lead back into the maze itself. The bot asks once per visit;
+        // the actual warp carries whoever is in the maze, the leader included.
+        if (mapId == EllinPqData.MAZE_MAP) {
+            askMazeExit();
+        }
+
+        // The frog room wants the Poison Golem's guards CAUGHT, not killed (NPC 2133001
+        // hands out purifiers and grades 20 Monster Marbles), and a dead frog never drops
+        // one - so the bot adds no swings there at all.
+        if (mapId == EllinPqData.FROG_ROOM) {
+            return false;
+        }
+
         // The spine blocks the way until it is broken, in the room that has it.
         int spine = PqActions.findReactorOid(getChr(), EllinPqData.SPINE_REACTOR);
         if (spine >= 0) {
@@ -73,24 +91,21 @@ public class EllinPQBot extends PartyQuestBot {
                 PqActions.attack(getChr());
             }
         }
-
-        // The maze sends travellers back more often than forward, so a step through it is
-        // only progress if the map actually changed.
-        if (mapId == EllinPqData.MAZE_MAP) {
-            int before = mapId;
-            PqActions.takePortal(getChr(), 1);
-            PqActions.holdArea(getChr(), getChr().getPosition(), 400);
-            lastMazeMap = getChr().getMapId();
-            if (getChr().getMapId() == before) {
-                // That portal was a dead end; the next tick tries the following one.
-                return false;
-            }
-        }
         return false;
     }
 
-    /** Which room the bot last reached through the maze, for a caller wanting to log it. */
-    public int lastMazeMap() {
-        return lastMazeMap;
+    /**
+     * Ask the maze's NPC (2133001) to open the way out, once per maze visit.
+     *
+     * <p>The script warps the whole team to the frog room on the confirmation click, so the
+     * bot's talk is not self-serving - it is the door. Clicks are paced by the engine's own
+     * 500ms throttle inside {@code PqActions.talkTo}.
+     */
+    private void askMazeExit() {
+        if (mazeExitAsked == getChr().getMapId() && PqActions.inInstance(getChr())) {
+            return; // already asked on this visit; the warp either happened or is pending
+        }
+        mazeExitAsked = getChr().getMapId();
+        PqActions.talkTo(getChr(), MAZE_NPC, 0);
     }
 }

@@ -66,6 +66,9 @@ public class ZakumPQBot extends PartyQuestBot {
         // Whatever fell out is the point of the room.
         PqActions.loot(getChr(), getChr().getPosition(), 2_000,
                 new int[]{ZakumPqData.FIRE_ORE, ZakumPqData.FIRE_ORE_REFINED});
+        // The ore is handed to Aura by the leader, so the bot's copy has to reach him: drop
+        // it at his feet, the same transfer every leader-checked turn-in needs.
+        PqActions.handItemsToLeader(getChr(), ZakumPqData.FIRE_ORE);
         return false;
     }
 

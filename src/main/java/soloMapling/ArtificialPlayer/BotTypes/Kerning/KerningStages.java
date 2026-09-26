@@ -6,6 +6,8 @@ import soloMapling.ArtificialPlayer.PartyQuest.PqActions;
 import java.awt.Point;
 import java.util.List;
 
+import static soloMapling.ArtificialPlayer.BotHelpers.blockingSleep;
+
 /**
  * What a bot does in each Kerning PQ stage.
  *
@@ -32,10 +34,12 @@ public final class KerningStages {
     /**
      * Gather coupons and answer Cloto if the bot is one of the question-holders.
      *
-     * <p>The answer is a count, and the only feedback the quest gives is whether it matched,
-     * so the bot counts its own coupons against the published table. It leaves the pass it
-     * earns in its own inventory: the leader is the one who turns passes in, and handing a
-     * pass over is a trade the bot cannot do on its own.
+     * <p>Stage 1 is the ladder every later stage stands on, and only the members can climb
+     * it: Cloto hands a question to each member who talks to her and gives a pass only to
+     * the member whose coupon count matches it - the leader gets told "tell your party
+     * members to solve the questions", and the leader's own talk can only hand in the
+     * passes. So the bot asks for a question, counts its coupons against the table, and,
+     * on the pass, drops it at the leader's feet - he is the one Cloto counts them for.
      *
      * @return true when the leader has the passes he needs, which is the stage's real bar
      */
@@ -45,12 +49,33 @@ public final class KerningStages {
         }
         int coupons = PqActions.countItem(bot, KerningPqData.COUPON);
         if (coupons > 0) {
-            // Enough is the only thing that matters; the excess does not help and holding it
-            // makes the count check harder to reason about.
+            // Holding a question means spending coupons on the answer; holding none means
+            // the bot is either unanswered or already passed - the conversation tells which.
+            answerCloto(bot);
             return false;
         }
         huntCoupons(bot);
         return false;
+    }
+
+    /**
+     * Take Cloto's question and answer it, walking the conversation one click at a time.
+     *
+     * <p>The script (9020001) hands a question on the first talk and grades the coupon
+     * count on the next, so the bot re-opens it once with a settle in between. Only done
+     * while the bot actually carries coupons, so an unanswered bot keeps hunting first.
+     */
+    private static void answerCloto(Character bot) {
+        if (PqActions.talkingTo(bot, KerningPqData.NPC_CLOTO)) {
+            return; // a prompt is already open; let it finish before re-clicking
+        }
+        PqActions.talkTo(bot, KerningPqData.NPC_CLOTO, 0);
+        blockingSleep(1_000);
+        PqActions.talkTo(bot, KerningPqData.NPC_CLOTO, 0);
+        if (PqActions.countItem(bot, KerningPqData.PASS) > 0) {
+            PqActions.handItemsToLeader(bot, KerningPqData.PASS);
+            PqActions.say(bot, "I answered Cloto's question - dropped my pass at the leader's feet.");
+        }
     }
 
     private static void huntCoupons(Character bot) {

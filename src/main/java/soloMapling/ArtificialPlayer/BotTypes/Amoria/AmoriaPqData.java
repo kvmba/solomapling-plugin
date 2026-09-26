@@ -75,6 +75,13 @@ public final class AmoriaPqData {
     /** Five bodies have to be on the ropes; the quest checks this before accepting a try. */
     public static final int BODIES_ON_ROPES = 5;
 
+    /**
+     * What stage 4's collection room asks for: 50 of the 4031597 pieces, in the leader's
+     * inventory when he talks to Amos (NPC 9201045, the stage-4 branch).
+     */
+    public static final int STATUE_PIECE = 4031597;
+    public static final int STATUE_PIECES_WANTED = 50;
+
     /** The instance property a rope stage stores its answer in. */
     public static String comboPropertyFor(int stage) {
         return switch (stage) {
