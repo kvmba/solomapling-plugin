@@ -5,6 +5,7 @@ import org.gms.constants.game.CharacterStance;
 import org.gms.server.maps.Foothold;
 import org.gms.server.maps.MapleMap;
 import org.gms.server.maps.Rope;
+import soloMapling.ArtificialPlayer.BotAttackSystem.BotDashBurst;
 import soloMapling.ArtificialPlayer.BotMovementSystem.MovementCommands;
 
 import java.awt.Point;
@@ -152,6 +153,14 @@ public final class GCMovement {
 
     /* Shared tail of .disable(): stop the driver and release the lock the old engine needs. */
     private static void finishDisable(BotMovementState st, Character bot) {
+        // 会话终点 = 下一 tick 不会再来。若 burst 仍在窗口期,这里补跑本该由下一 tick 执行的
+        // 停止边沿:BotDashBurst 先释放 burst,随后的光环 tick 才会走取消分支广播
+        // cancelForeignBuff。缺了这两行,move->disable 型 bot(到达回调内即 disable 交还会话:
+        // GachaBot / SocialBot / FollowerBot 等)停下后疾驰光环滞留,直到下次 enable 的首个
+        // tick、换图或 despawn 才消失 —— 停止移动未取消疾驰的报告。
+        // finishDeferredDisable(空中延迟交接)也收敛到这里;对无疾驰 bot 是一次缓存查询即早退。
+        BotDashBurst.tickMovement(bot, bot.getPosition().x, System.currentTimeMillis(), true);
+        soloMapling.ArtificialPlayer.BotAttackSystem.BotAuraState.tickMovement(bot);
         GCMovementDriver.stop(st);
         MovementCommands.releaseMovementLock(bot);
     }
