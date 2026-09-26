@@ -2,6 +2,7 @@ package soloMapling.ArtificialPlayer.BotTypes.Kerning;
 
 import org.gms.client.Character;
 import soloMapling.ArtificialPlayer.PartyQuest.PqActions;
+import soloMapling.Environment.BotMessages;
 
 import java.awt.Point;
 import java.util.List;
@@ -74,7 +75,7 @@ public final class KerningStages {
         PqActions.talkTo(bot, KerningPqData.NPC_CLOTO, 0);
         if (PqActions.countItem(bot, KerningPqData.PASS) > 0) {
             PqActions.handItemsToLeader(bot, KerningPqData.PASS);
-            PqActions.say(bot, "I answered Cloto's question - dropped my pass at the leader's feet.");
+            PqActions.say(bot, BotMessages.get("pq.kerning.pass_dropped"));
         }
     }
 

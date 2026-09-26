@@ -2,8 +2,10 @@ package soloMapling.ArtificialPlayer.BotTypes.Ludi;
 
 import org.gms.client.Character;
 import soloMapling.ArtificialPlayer.BotGeneration;
+import soloMapling.Environment.BotMessages;
 import soloMapling.ArtificialPlayer.BotMessagingSystem.CharacterStorage;
 import soloMapling.ArtificialPlayer.PartyQuest.PartyQuestBot;
+import soloMapling.ArtificialPlayer.PartyQuest.PqActions;
 
 /**
  * Plays Ludi PQ ("Dimensional Schism") with a real player leading.
@@ -79,8 +81,10 @@ public class LudiPQBot extends PartyQuestBot {
             return false;
         }
         if (LudiStages.stageCleared(getChr(), stage)) {
-            // The portal to the next stage is open; walking it is the leader's business, and
-            // the map change re-homes this bot when it follows.
+            // Stage work is done: stand by the room's stage NPC instead of idling wherever
+            // the last fight ended. Walking the portal is the leader's business, and the map
+            // change re-homes this bot when it follows.
+            PqActions.waitNearStageNpc(getChr());
             return stage >= 9;
         }
 
@@ -122,7 +126,7 @@ public class LudiPQBot extends PartyQuestBot {
         if (announcedStage != 1) {
             announcedStage = 1;
             soloMapling.ArtificialPlayer.PartyQuest.PqActions.say(getChr(),
-                    "Stage 1: collect 25 passes for the Red Balloon - the leader turns them in. I am fighting for them.");
+                    BotMessages.get("pq.ludi.stage1"));
         }
         LudiStages.gatherPasses(getChr(), 1);
     }
@@ -168,7 +172,7 @@ public class LudiPQBot extends PartyQuestBot {
         if (announcedStage != 8) {
             announcedStage = 8;
             soloMapling.ArtificialPlayer.PartyQuest.PqActions.say(getChr(),
-                    "Stage 8: " + wanted + " crates need someone - I am on one, please take another.");
+                    BotMessages.get("pq.ludi.stage8", wanted));
         }
     }
 

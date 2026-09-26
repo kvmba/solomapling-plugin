@@ -1374,3 +1374,10 @@ transit.onboard_plane.96: "grab a taxi"
 transit.onboard_plane.97: "what a smooth flight"
 transit.onboard_plane.98: "see you on the return"
 transit.onboard_plane.99: "till next time"
+
+# --- PQ stage chatter (PartyQuestBot family) ---
+pq.passes_dropped: "Passes are at the leader's feet!"
+pq.stage_plan: "Stage {0}: {1}"
+pq.kerning.pass_dropped: "Answered Cloto - my pass is at the leader's feet."
+pq.ludi.stage1: "Stage 1: 25 passes for the Red Balloon. The leader turns them in - I am fighting for them."
+pq.ludi.stage8: "Stage 8: {0} crates need a body - I am on one, take another!"

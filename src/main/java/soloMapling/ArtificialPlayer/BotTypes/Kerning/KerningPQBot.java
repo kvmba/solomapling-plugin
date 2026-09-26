@@ -5,6 +5,7 @@ import soloMapling.ArtificialPlayer.BotGeneration;
 import soloMapling.ArtificialPlayer.BotMessagingSystem.CharacterStorage;
 import soloMapling.ArtificialPlayer.PartyQuest.PartyQuestBot;
 import soloMapling.ArtificialPlayer.PartyQuest.PqActions;
+import soloMapling.Environment.BotMessages;
 
 /**
  * Plays Kerning PQ ("First Time Together") with a real player leading.
@@ -136,6 +137,6 @@ public class KerningPQBot extends PartyQuestBot {
             return;
         }
         announcedStage = stage;
-        PqActions.say(getChr(), "Stage " + stage + ": " + plan);
+        PqActions.say(getChr(), BotMessages.get("pq.stage_plan", stage, plan));
     }
 }

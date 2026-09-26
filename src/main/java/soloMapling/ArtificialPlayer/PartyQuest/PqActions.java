@@ -594,6 +594,40 @@ public final class PqActions {
     // misc
     // =========================================================================
 
+    /**
+     * A stage's work is done: go stand by the room's stage NPC (the one the leader has to
+     * talk to), so the party reads as ready instead of scattered around the room. Falls back
+     * to the exit portal's mouth when the room has no NPC.
+     */
+    public static void waitNearStageNpc(Character bot) {
+        if (bot == null || bot.getMap() == null) {
+            return;
+        }
+        Point spot = null;
+        for (MapObject obj : bot.getMap().getMapObjectsInRange(bot.getPosition(), 9_000,
+                List.of(org.gms.server.maps.MapObjectType.NPC))) {
+            if (obj instanceof NPC npc) {
+                spot = npc.getPosition();
+                break;
+            }
+        }
+        if (spot == null) {
+            for (Portal portal : bot.getMap().getPortals()) {
+                if ("next00".equals(portal.getName())) {
+                    spot = portal.getPosition();
+                    break;
+                }
+            }
+        }
+        if (spot != null) {
+            Point ground = GCMovement.groundPointBelow(bot.getMap(), spot.x, spot.y);
+            if (ground != null) {
+                spot = ground;
+            }
+            walkTo(bot, spot);
+        }
+    }
+
     /** Say something as the bot. */
     public static void say(Character bot, String message) {
         if (bot != null) {

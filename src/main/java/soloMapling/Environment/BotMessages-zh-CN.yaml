@@ -1396,3 +1396,10 @@ transit.onboard_plane.96: "这趟飞得真稳"
 transit.onboard_plane.97: "回程见"
 transit.onboard_plane.98: "下次再会"
 transit.onboard_plane.99: "系好安全带"
+
+# --- PQ 阶段台词（组队任务bot家族）---
+pq.passes_dropped: "通行证丢在队长脚边了！"
+pq.stage_plan: "第{0}阶段：{1}"
+pq.kerning.pass_dropped: "我答完克洛托的问题了——通行证丢在队长脚边。"
+pq.ludi.stage1: "第1阶段：集25张通行证给红气球，队长负责上交——我去打怪了。"
+pq.ludi.stage8: "第8阶段：还差{0}个箱子要人站——我占了一个，来个人站另一个！"

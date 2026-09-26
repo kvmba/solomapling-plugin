@@ -4,6 +4,7 @@ import org.gms.client.Character;
 import soloMapling.ArtificialPlayer.BotAttackSystem.BotAuraState;
 import org.gms.constants.skills.Rogue;
 import soloMapling.ArtificialPlayer.PartyQuest.PqActions;
+import soloMapling.Environment.BotMessages;
 import soloMapling.ArtificialPlayer.BotClientBinding;
 import org.gms.client.inventory.manipulator.InventoryManipulator;
 import org.gms.constants.inventory.ItemConstants;
@@ -58,7 +59,7 @@ public final class LudiStages {
         Character leader = PqActions.partyLeader(bot);
         if (leader != null && leader != bot && leader.getMapId() == bot.getMapId()
                 && PqActions.handItemsToLeader(bot, LudiPqData.PASS) > 0) {
-            PqActions.say(bot, "PASSES! I have dropped the passes at the leader's feet.");
+            PqActions.say(bot, BotMessages.get("pq.passes_dropped"));
         }
     }
 

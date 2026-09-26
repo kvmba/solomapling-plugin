@@ -4,6 +4,7 @@ import org.gms.client.Character;
 import soloMapling.ArtificialPlayer.BotGeneration;
 import soloMapling.ArtificialPlayer.PartyQuest.PartyQuestBot;
 import soloMapling.ArtificialPlayer.PartyQuest.PqActions;
+import soloMapling.Environment.BotMessages;
 
 /**
  * Plays Magatia PQ ("Romeo and Juliet") with a real player leading.
@@ -100,7 +101,7 @@ public class MagatiaPQBot extends PartyQuestBot {
             }
             plan.append(digits);
         }
-        PqActions.say(getChr(), "Stage 6: " + plan);
+        PqActions.say(getChr(), BotMessages.get("pq.stage_plan", 6, plan));
     }
 
     /** Kill what is here and break what is breakable, which covers the early stages. */
