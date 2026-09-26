@@ -56,8 +56,22 @@ public abstract class PartyQuestBot extends BotSM {
     /** When this bot next strolls; re-armed after each stroll. */
     private long nextLobbyStrollAtMs;
 
-    /** Lobby pacing: how often the idle shuffle picks a new spot. */
-    private static final long LOBBY_STROLL_INTERVAL_MS = 9_000L;
+    /**
+     * Lobby pacing: how often the idle shuffle picks a new spot.
+     *
+     * <p>Deliberately slower than the shout cadence, and slower than it looks like it should be.
+     * The stroll is the visible half of the wait - a bot that re-spots every few seconds reads as
+     * pacing, and a lobby holds several parties' worth of bots at once (see {@code PqBotSpawner}),
+     * so every bot's own cadence is what the room's crowd multiplies into: fifteen bots each
+     * re-spotting every ~13s put a move somewhere in the room every second, which is the "they
+     * never stand still" report. A player assembling a party watches this spot for a minute or
+     * two; a shuffle roughly every half minute, jittered per bot, is the rate that reads as
+     * waiting.
+     */
+    private static final long LOBBY_STROLL_INTERVAL_MS = 25_000L;
+
+    /** Jitter on the stroll cadence so a spawned cohort does not re-spot in lockstep. */
+    private static final long LOBBY_STROLL_JITTER_MS = 10_000L;
 
     /**
      * Simulated potion drinking while the stage fight is going badly. Quest rooms are real
@@ -188,11 +202,16 @@ public abstract class PartyQuestBot extends BotSM {
         // Both beats are deadline-driven (not "last ran at + interval"): the next due time is
         // rolled once when a beat fires, so the jitter is real jitter instead of a fresh roll
         // on every tick, which would fire the moment the interval alone had elapsed.
+        //
+        // The stroll's first beat is armed at the FULL interval (plus jitter) rather than at jitter
+        // alone: rolling the first due time anywhere in [0, interval) puts a freshly spawned
+        // cohort's first moves inside the first second or two of its life, so a lobby being
+        // populated scatters before a player has even had time to read the room.
         if (nextRecruitShoutAtMs == 0L) {
             nextRecruitShoutAtMs = now + jitter(RECRUIT_SHOUT_INTERVAL_MS);
         }
         if (nextLobbyStrollAtMs == 0L) {
-            nextLobbyStrollAtMs = now + jitter(LOBBY_STROLL_INTERVAL_MS);
+            nextLobbyStrollAtMs = now + LOBBY_STROLL_INTERVAL_MS + jitter(LOBBY_STROLL_JITTER_MS);
         }
         // A bot that is already in a party stops advertising itself: the wait between "invited"
         // and "the leader starts the run" is short, and shouting into the lobby for a group it is
@@ -204,7 +223,7 @@ public abstract class PartyQuestBot extends BotSM {
             }
         }
         if (now >= nextLobbyStrollAtMs) {
-            nextLobbyStrollAtMs = now + LOBBY_STROLL_INTERVAL_MS + jitter(RECRUIT_SHOUT_JITTER_MS);
+            nextLobbyStrollAtMs = now + LOBBY_STROLL_INTERVAL_MS + jitter(LOBBY_STROLL_JITTER_MS);
             // The dynamic engine owns the walk; a no-op while one is already in progress, so
             // this can be called every tick without thrashing the target.
             PlatformPlacement.botStrollOnMap(bot);

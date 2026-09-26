@@ -47,6 +47,14 @@ public class PlatformPlacement {
     // (buffer beyond the recorded min/max X values).
     private static final int X_TOLERANCE = 20;
 
+    // A stroll is a step to another part of the same room, so the target is bounded on both sides:
+    // nearer than STROLL_MIN_PX and the move is a twitch on the spot (the bot appears to shuffle its
+    // feet without going anywhere), farther than STROLL_MAX_PX and it is a trek that eats the whole
+    // wait it is meant to be filling - and the next cadence beat fires while it is still walking.
+    // The range matches the roam's own step (BotWanderSystem.MIN_STROLL = 60) at the near end.
+    private static final int STROLL_MIN_PX = 60;
+    private static final int STROLL_MAX_PX = 420;
+
     private static final Random random = new Random();
 
     // A spawned bot must stand on the floor, not perched on a rope/ladder. The Free Market
@@ -442,7 +450,8 @@ public class PlatformPlacement {
             return;
         }
         Point pos = fakechar.getPosition();
-        Point spot = BotSpotPicker.pickGroundSpot(fakechar.getMap(), pos.x, pos.y);
+        Point spot = BotSpotPicker.pickGroundSpotNear(fakechar.getMap(), pos.x, pos.y,
+                STROLL_MIN_PX, STROLL_MAX_PX);
         if (spot != null) {
             GCMovement.move(fakechar, spot.x, spot.y);
         }
