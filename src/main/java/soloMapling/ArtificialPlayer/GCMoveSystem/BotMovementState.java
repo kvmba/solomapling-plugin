@@ -90,6 +90,10 @@ class BotMovementState {
     // ── Down-jump / rope entry ──
     boolean downJumpPending = false;
     long downJumpGracePeriodMS = 0;
+    // Ours: earliest wall-clock time the next straight down-jump may launch (humanlike cadence beat).
+    // Armed by BotPhysicsEngine.beginDownJump at takeoff, consumed by the three down-jump entry points
+    // (tryExecuteDrop / shouldUseDownJump / CROUCH) and never reset elsewhere, so it always fires once.
+    long downJumpCadenceUntilMs = 0L;
     boolean ropeEntryPending = false;
     Rope ropeEntryRope = null;
     int ropeEntryY = 0;
