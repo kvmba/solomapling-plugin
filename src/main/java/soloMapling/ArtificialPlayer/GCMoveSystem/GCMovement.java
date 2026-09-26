@@ -942,6 +942,32 @@ public final class GCMovement {
         return new Ledge(r.id, r.minX, r.maxX, c.x, c.y);
     }
 
+    /* Whether the baked nav graph can currently path from the bot's position to (x, y). A graph
+     * still warming answers "yes" so callers run their ordinary behaviour; only a real baked
+     * graph with no edge chain to the target reports false - the PQ chase uses this to detect
+     * prize mobs parked on ledges no edge climbs to, and aim for the floor under them instead.
+     * (The graph provider and MovementPlan are package-private; this is their public seam.) */
+    public static boolean canPathTo(Character bot, int x, int y) {
+        var map = bot == null ? null : bot.getMap();
+        if (map == null || bot.getPosition() == null) {
+            return true;
+        }
+        BotNavigationGraph graph =
+                BotNavigationGraphProvider.peekBestGraph(map, BotMovementProfile.fromCharacter(bot));
+        if (graph == null) {
+            return true;
+        }
+        // Same platform = a plain walk, no edge chain needed - and MovementPlan.inMap answers
+        // null for exactly that case (nothing to plan), so it must be checked for itself or
+        // every same-platform target would read as unreachable.
+        int from = graph.findRegionId(map, bot.getPosition());
+        int to = graph.findRegionId(map, new Point(x, y));
+        if (from >= 0 && from == to) {
+            return true;
+        }
+        return MovementPlan.inMap(graph, map, bot.getPosition(), new Point(x, y)) != null;
+    }
+
     /* Snap an arbitrary (possibly airborne) point down to the foothold it rests over, or null if there's
      * no floor below it. Lets a bot aim a move at a jumping/airborne mob's actual platform instead of its
      * raw y, so the pathfinder doesn't take a long detour to reach a mob that's really right in front. */

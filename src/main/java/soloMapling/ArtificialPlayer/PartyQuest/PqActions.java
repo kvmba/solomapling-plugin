@@ -314,7 +314,11 @@ public final class PqActions {
     // per-bot state below keeps a chase alive across those ticks (RoamStrategy's targetOid pattern,
     // minus the spot-claim machinery a quest bot does not need).
     private static final int SEEK_RANGE_X = 900;            // hunt a live mob within this |dx| (cross-ledge)
-    private static final int SEEK_STACK_RANGE_Y = 400;      // vertically layered ledges admit deeper dy
+    // LPQ stage 1 (922010100) seats its first Ratz 580px above the entry floor over a series of
+    // one-way ledges - a box tuned to the grind maps' floor stacks stops the chase before it starts
+    // and the room reads as quiet forever (the mobs are mobTime=-1 and never close the gap). The
+    // whole tower is ~3000px tall, so a bot standing anywhere in it sees the whole hunt.
+    static final int SEEK_STACK_RANGE_Y = 3_200;    // tall PQ towers are one vertical room
     private static final int RETARGET_EPS_PX = 16;          // skip re-issuing a move for tiny shifts
     private static final long RETARGET_TIMEOUT_MS = 4_000;  // give up an unreachable target after this
     private static final int PROGRESS_EPS_PX = 20;          // movement worth counting as chase progress
@@ -371,6 +375,20 @@ public final class PqActions {
         Point ground = GCMovement.groundPointBelow(bot.getMap(), mp.x, mp.y);
         int tx = mp.x;
         int ty = (ground != null) ? ground.y : mp.y;
+
+        // Some quest rooms seat their prize mob on a ledge the nav graph cannot climb TO (a
+        // pedestal with no upward edges - LPQ's Alishar). Chasing the mob's own platform would
+        // re-issue an unwalkable goal every tick, so aim for the floor UNDER the mob instead:
+        // the bot ends up standing beneath it, which is a real fight position (the boss reach
+        // box is vertically padded) and a far better crowd position than the doorway.
+        if (!GCMovement.canPathTo(bot, tx, ty)) {
+            Point mobFloor = GCMovement.groundPointBelow(bot.getMap(), mp.x, mp.y + 1);
+            if (mobFloor != null && Math.abs(mobFloor.y - ty) > 20
+                    && GCMovement.canPathTo(bot, mp.x, mobFloor.y)) {
+                tx = mp.x;
+                ty = mobFloor.y;
+            }
+        }
 
         // Progress bookkeeping: a chase that moves the bot nowhere for a while is dropped so
         // the next tick seeks something else instead of walking into a wall forever.
