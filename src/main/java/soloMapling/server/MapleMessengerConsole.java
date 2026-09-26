@@ -7,6 +7,7 @@ import soloMapling.ArtificialPlayer.BotDecoratorSystem.BotDecorateNX;
 import soloMapling.ArtificialPlayer.BotDecoratorSystem.BotDecorationQueue;
 import soloMapling.ArtificialPlayer.BotDecoratorSystem.NXItemPool;
 import soloMapling.itemPool.EquipMetadataCache;
+import soloMapling.itemPool.ShopEquipPool;
 
 import java.util.Arrays;
 import java.util.HashMap;
@@ -190,14 +191,19 @@ public class MapleMessengerConsole {
                 }
                 MapleMessengerCommands.sendColoredConsoleMessage(chr,
                         "EquipMetadataCache: " + total + " equips total, "
-                                + cashTotal + " cash/NX items");
+                                + cashTotal + " cash/NX items"
+                                + " | ShopEquipPool: " + ShopEquipPool.size() + " shop equips"
+                                + (ShopEquipPool.isLoaded() ? "" : " (not loaded)"));
                 break;
             }
             case "reload": {
                 // Force-reload NXItemPool (re-reads YAML + re-populates from cache)
+                // and ShopEquipPool (re-reads the host shop tables from the DB).
                 NXItemPool.forceReload();
+                ShopEquipPool.forceReload();
                 MapleMessengerCommands.sendColoredConsoleMessage(chr,
-                        "NXItemPool reloaded from YAML + cache");
+                        "NXItemPool reloaded from YAML + cache; ShopEquipPool reloaded from shop tables ("
+                                + ShopEquipPool.size() + " equips)");
                 break;
             }
             default:

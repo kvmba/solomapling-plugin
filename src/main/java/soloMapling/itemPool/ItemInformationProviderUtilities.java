@@ -211,7 +211,13 @@ public class ItemInformationProviderUtilities {
      * lookup against {@link EquipMetadataCache} — no WZ access.
      *
      * <p>Returns null if the cache isn't initialized yet (early spawns fall back
-     * to QuickEquip / the decoration queue) or if nothing matches.
+     * to QuickEquip / the decoration queue) or if nothing matches.</p>
+     *
+     * <p>Shop-sold gear first: when {@link ShopEquipPool} is loaded, a random
+     * equip a real player could simply buy for this level/gender/job is returned
+     * outright; only when the shop pool offers nothing for this draw does the
+     * pick fall through to the WZ-wide weighted pool (drops / quest rewards /
+     * crafted gear).</p>
      */
     public static Integer getRandomEquip(EquipType eqType, int maxLevel, Job jobStyle, int gender) {
         if (!EquipMetadataCache.isInitialized()) {
@@ -220,6 +226,12 @@ public class ItemInformationProviderUtilities {
         }
 
         int reqJob = getReqJobViaJobStyle(jobStyle);
+
+        // Shop-sold gear first: what a player of this build could have bought.
+        Integer shopEquip = ShopEquipPool.getRandomEquip(eqType, maxLevel, reqJob, gender);
+        if (shopEquip != null) {
+            return shopEquip;
+        }
 
         // Primary window (same as the legacy WZ-scan path):
         // maxLevel - max(25% of maxLevel, 10) <= reqLevel <= maxLevel

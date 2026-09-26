@@ -1,8 +1,10 @@
 package soloMapling.ArtificialPlayer.BotDecoratorSystem;
 
 import org.gms.client.Character;
+import org.gms.constants.inventory.EquipType;
 import soloMapling.ArtificialPlayer.BotCustomization;
 import org.gms.client.BotTier;
+import soloMapling.itemPool.ShopEquipPool;
 
 import java.util.Map;
 import java.util.concurrent.ThreadLocalRandom;
@@ -95,10 +97,43 @@ public class QuickEquip {
 
     private static void equipFromPool(Character bot, String category, int level, int gender,
                                       boolean preferHigh) {
-        Integer itemId = GenericEquipPool.getRandom(category, level, gender, preferHigh);
+        // Shop-sold gear first: keep the bot in gear a real player could buy at
+        // this level. Falls back to the curated YAML pool when the shop pool has
+        // nothing for this draw (not loaded yet / no category match / nothing fits).
+        Integer itemId = shopEquipForCategory(category, level, gender);
+        if (itemId == null) {
+            itemId = GenericEquipPool.getRandom(category, level, gender, preferHigh);
+        }
         if (itemId != null) {
             BotCustomization.EquipBot(bot, itemId);
         }
+    }
+
+    /**
+     * Maps a QuickEquip category to the EquipType the shop pool stocks, then
+     * draws from it. Weapons here are generic/classless — shop weapons are drawn
+     * for any style, since QuickEquip runs before a bot's stats are aligned.
+     */
+    private static Integer shopEquipForCategory(String category, int level, int gender) {
+        if (!ShopEquipPool.isLoaded()) {
+            return null;
+        }
+        EquipType type = switch (category) {
+            case "tops" -> EquipType.COAT;
+            case "bottoms" -> EquipType.PANTS;
+            case "overalls" -> EquipType.LONGCOAT;
+            case "caps" -> EquipType.CAP;
+            case "shoes" -> EquipType.SHOES;
+            case "gloves" -> EquipType.GLOVES;
+            case "capes" -> EquipType.CAPE;
+            case "weapons" -> EquipType.SWORD;
+            default -> null;
+        };
+        if (type == null) {
+            return null;
+        }
+        // reqJob 0: common gear only, matching the classless YAML pool this replaces.
+        return ShopEquipPool.getRandomEquip(type, level, 0, gender);
     }
 
     /** @return true if an overall was found and equipped. */
