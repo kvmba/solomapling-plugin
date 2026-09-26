@@ -36,6 +36,13 @@ final class BotSummon {
     /** Absolute epoch-ms before which an attacking summon may not strike again. */
     long nextAttackAtMs;
 
+    /**
+     * Absolute epoch-ms before which this STATIONARY turret may not be re-seat probed again (the
+     * relocate throttle; unused by flyers). Written only by the follower tick, like everything
+     * else here, so no locking is required.
+     */
+    long nextRelocateProbeAtMs;
+
     BotSummon(int botId, int skillId, BotSummonTable.Spec spec) {
         this.botId = botId;
         this.skillId = skillId;

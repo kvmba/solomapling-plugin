@@ -43,3 +43,17 @@ attack:
   # value here is raised, not honoured.
   recovery_ms: 2200
   range: 320         # it picks the nearest mob within this radius of itself
+
+# Where a STATIONARY turret (the pirate octopus) is planted. A turret never moves, so a turret
+# standing on an empty stretch of a hunting field is a turret that never fires - it is planted at
+# a mob instead. Pure set dressing keeps the old rule: on a mobless map (a town) the turret lands
+# at its owner's feet exactly as before.
+place:
+  at_mobs: true        # plant at a nearby mob; fall back to the owner's feet when none is in radius
+  search_radius: 260   # how far from the BOT the target mob may sit (px)
+  # A placed turret is re-seated at a fresh mob (near the owner, same search radius) once fewer
+  # than relocate_min_mobs stay within its own attack range - the equivalent of a player recasting
+  # their turret at the new pack. The probe runs at most once per relocate_after_ms, so a dry map
+  # costs one range query per window, not one per tick.
+  relocate_min_mobs: 1
+  relocate_after_ms: 10000

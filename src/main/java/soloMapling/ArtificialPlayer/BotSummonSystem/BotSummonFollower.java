@@ -304,6 +304,13 @@ public final class BotSummonFollower {
             // Move BEFORE attacking so a strike uses the frame's fresh position. The turret rule
             // (a placed cannon is never repositioned, and gets no frame) lives inside moveSummon.
             moveSummon(bot, s, cfg, observed);
+            if (s.spec.isStationary() && s.attacks() && observed) {
+                // A turret's placement, unlike a flyer's follow, is the whole game: a turret
+                // standing where the pack has wandered away from fires nothing, so a placed one
+                // is re-seated at a fresh mob near the owner. Unobserved maps skip it - the whole
+                // combat view is frozen there anyway.
+                maybeRelocateTurret(bot, s, cfg, botMap, observed);
+            }
             if (s.attacks() && observed) {
                 tryAttack(bot, s, cfg);
             }
@@ -344,7 +351,7 @@ public final class BotSummonFollower {
             case CIRCLE_FOLLOW -> org.gms.server.maps.SummonMovementType.CIRCLE_FOLLOW;
         };
         boolean left = CharacterStance.isFacingLeft(bot.getStance());
-        Point pos = spawnPosition(bot, spec, map);
+        Point pos = spawnPosition(bot, spec, map, config);
         Summon summon = new Summon(bot, skillId, pos, moveType);
         // nMoveAction with the facing bit: the client mirrors the sprite from bit 0, so a bird
         // spawned beside a left-facing owner must spawn facing left too (it was stamped 0 - right -
@@ -354,8 +361,16 @@ public final class BotSummonFollower {
         return summon;
     }
 
-    /** Where the entity appears: trailing the owner for a flyer, on the ground for a turret. */
-    private static Point spawnPosition(Character bot, BotSummonTable.Spec spec, MapleMap map) {
+    /**
+     * Where the entity appears: trailing the owner for a flyer, on the ground for a turret. A
+     * turret is planted AT A MOB when one is near its owner ({@code place.at_mobs}): a turret
+     * never moves, so planting one on an empty stretch of a hunting field means it never fires.
+     * The mob's own ground is the spot (the turret is a ground piece); with no mob in radius - a
+     * town, or a bot between packs - the turret falls back to the owner's feet, the pure
+     * set-dressing spawn the towns know.
+     */
+    private static Point spawnPosition(Character bot, BotSummonTable.Spec spec, MapleMap map,
+                                       BotSummonConfig cfg) {
         Point owner = bot.getPosition();
         if (!spec.isStationary()) {
             // A flyer materialises BEHIND the owner at its follow ring (the same slot the
@@ -363,11 +378,73 @@ public final class BotSummonFollower {
             boolean facingLeft = CharacterStance.isFacingLeft(bot.getStance());
             int dist = freshFollowDistancePx();
             int x = facingLeft ? owner.x + dist : owner.x - dist;
-            return new Point(x, owner.y + config.hoverOffsetY());
+            return new Point(x, owner.y + cfg.hoverOffsetY());
         }
-        Foothold ground = GCMovement.footholdBelow(map, owner.x, owner.y);
-        int y = ground != null ? ground.calculateFooting(owner.x) : owner.y;
-        return new Point(owner.x, y);
+        Point at = turretAnchor(bot, owner, map, cfg);
+        Foothold ground = GCMovement.footholdBelow(map, at.x, at.y);
+        int y = ground != null ? ground.calculateFooting(at.x) : at.y;
+        return new Point(at.x, y);
+    }
+
+    /**
+     * The x/y a turret is planted at: the nearest live mob within {@code place.search_radius} of
+     * the owner (its own position, not smoothed - a mob stands on real ground already), or the
+     * owner's position when the radius is dry. Only live mobs count - a dead mob's corpse spot is
+     * exactly the empty stretch this rule exists to avoid.
+     */
+    static Point turretAnchor(Character bot, Point owner, MapleMap map, BotSummonConfig cfg) {
+        if (cfg.placeAtMobs()) {
+            List<Monster> near = nearestMobs(map, owner, cfg.placeSearchRadius(), 1);
+            if (!near.isEmpty()) {
+                return near.get(0).getPosition();
+            }
+        }
+        return owner;
+    }
+
+    /**
+     * A placed turret's relocate beat, run per tick BEFORE the attack. A turret never moves and
+     * never receives a movement frame - re-seating is a placement, not a move: drop the entity
+     * (with its removal broadcast) and spawn a fresh one at a mob near the owner, the exact
+     * discipline a map change already uses (new object id; clients that saw the removal never see
+     * the new id alias the old). When the map holds no mobs within the search radius, or the map
+     * went unobserved, nothing happens - a dry probe costs one range query per throttle window.
+     */
+    private static void maybeRelocateTurret(Character bot, BotSummon s, BotSummonConfig cfg,
+                                            MapleMap botMap, boolean observed) {
+        long now = System.currentTimeMillis();
+        if (now < s.nextRelocateProbeAtMs) {
+            return; // throttle: a dry map must not pay a range query every tick
+        }
+        s.nextRelocateProbeAtMs = now + cfg.placeRelocateAfterMs();
+        Point from = s.summon.getPosition();
+        int mobsInRange = nearestMobs(botMap, from, cfg.attackRange(), Integer.MAX_VALUE).size();
+        if (mobsInRange >= cfg.placeRelocateMinMobs()) {
+            return; // the turret is still earning its keep where it stands
+        }
+        Point anchor = turretAnchor(bot, bot.getPosition(), botMap, cfg);
+        if (anchor == bot.getPosition() && mobsInRange == 0) {
+            return; // no mobs near the owner either (a town, or between packs): stand fast
+        }
+        try {
+            synchronized (LIFECYCLE_LOCK) {
+                // The teardown check from the tick's own re-home: a despawnAll that ran meanwhile
+                // retired this summon - resurrecting it would spawn a ghost nobody tracks.
+                if (TRACKED.get(s.botId) == null || !TRACKED.get(s.botId).contains(s)) {
+                    return;
+                }
+                removeEntity(bot, s);
+                Summon fresh = spawnEntity(bot, s.skillId, s.spec, botMap);
+                if (fresh != null) {
+                    s.summon = fresh;
+                    s.map = botMap;
+                } else {
+                    s.summon = null; // retried by the tick's own re-home path, like a failed spawn
+                }
+            }
+        } catch (Throwable t) {
+            log.warn("turret re-seat failed cid={} skill={}: {}", bot.getId(), s.skillId, t.toString());
+        }
     }
 
     /*
@@ -561,7 +638,11 @@ public final class BotSummonFollower {
         }
     }
 
-    /** Up to {@code limit} live mobs within {@code range} px of the summon, nearest first. */
+    /**
+     * Up to {@code limit} live mobs within {@code range} px of the summon, nearest first.
+     * {@code limit} may be {@code Integer.MAX_VALUE} to mean "all of them" (the relocate probe's
+     * count).
+     */
     private static List<Monster> nearestMobs(MapleMap map, Point from, int range, int limit) {
         if (map == null || from == null) {
             return List.of();
@@ -575,6 +656,9 @@ public final class BotSummonFollower {
             }
         }
         inRange.sort(Comparator.comparingDouble(m -> from.distanceSq(m.getPosition())));
+        if (limit == Integer.MAX_VALUE) {
+            return inRange;
+        }
         return inRange.size() <= limit ? inRange : inRange.subList(0, limit);
     }
 }
