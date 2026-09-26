@@ -9,12 +9,15 @@ import soloMapling.ArtificialPlayer.BotPartySystem.BotPartyLogic;
 import soloMapling.ArtificialPlayer.BotPartySystem.BotRecruitManager;
 import soloMapling.ArtificialPlayer.BotSM;
 import soloMapling.ArtificialPlayer.BotHealthSystem.BotPotionSim;
+import soloMapling.ArtificialPlayer.BotMessagingSystem.ChatMessage;
 import soloMapling.ArtificialPlayer.GCMoveSystem.GCMovement;
 import soloMapling.BotLogger;
 import soloMapling.Environment.PlatformPlacement;
 
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.function.BooleanSupplier;
+
+import static soloMapling.ArtificialPlayer.BotHelpers.isBot;
 
 /**
  * Shared skeleton for a bot that plays a party quest alongside a real party leader.
@@ -260,6 +263,23 @@ public abstract class PartyQuestBot extends BotSM {
     @Override
     public boolean respondsToSocialChat() {
         return getRunning() && awaitingRecruit();
+    }
+
+    /**
+     * A directed line (party / whisper / ...) addressed to this bot. The lobby bots answer the
+     * same social lines they answer over map chat, and on the channel the line arrived on - a
+     * partied player addressing their quest teammate across maps hears the reply on the party
+     * channel instead of nothing. Reuses {@link #respondsToSocialChat()} unchanged, so a bot
+     * mid-run stays silent exactly as it does for same-map chatter; {@link BotSM#respondSocial}
+     * owns the intent match, the per-player cooldown, and the typing beat.
+     */
+    @Override
+    protected void onDirectChat(ChatMessage message) {
+        Character player = message.getSender();
+        if (player == null || isBot(player)) {
+            return;
+        }
+        respondSocial(player, message.getContent(), message.getChatType());
     }
 
     /**

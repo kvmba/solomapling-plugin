@@ -62,6 +62,14 @@ public final class DirectChatBridge implements EventSubscriber {
                 return;
             }
             bot.postDirectChat(new ChatMessage(sender, content, event.getChatType()));
+            // A directed line reaches bots on other maps, where the macro tick is LOD-throttled
+            // (an unobserved grinder drains its inbox on a 36-48s cadence, a grinding
+            // TrainingBot on minutes) - the queued line would sit there for that whole stretch
+            // before anyone read it. Pull the next tick forward so the inbox drains and the
+            // reply goes back within a beat, the same way a map entry nudges a bot awake.
+            // nudgeSoon no-ops itself on a stopped/trading bot, and the drain runs ahead of the
+            // FSM on that tick, so the line is read as soon as the bot can act on it.
+            bot.nudgeSoon(250L);
         } catch (Throwable ignored) {
         }
     }
