@@ -95,11 +95,11 @@ public final class BotSummonFollower {
     // deliberately decoupled.
 
     /** Follow distance floor (px) - a tight flight ring, held stable per summon. */
-    static final int FOLLOW_MIN_PX = 16;
+    static final int FOLLOW_MIN_PX = 10;
     /** Follow distance cap (px) - a tight flight ring, held stable per summon. */
-    static final int FOLLOW_MAX_PX = 36;
+    static final int FOLLOW_MAX_PX = 22;
     /** Idle jitter dead zone (px): slot moves inside this are ignored, exactly like the pet's. */
-    static final int FOLLOW_DEAD_ZONE_PX = 15;
+    static final int FOLLOW_DEAD_ZONE_PX = 8;
 
     /**
      * How long a summon's monster status lasts (ms) - the flat value the host's
