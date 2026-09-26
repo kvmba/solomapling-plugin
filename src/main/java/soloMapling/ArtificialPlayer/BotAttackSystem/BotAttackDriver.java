@@ -7,6 +7,7 @@ import org.gms.client.SkillFactory;
 import org.gms.client.inventory.WeaponType;
 import org.gms.constants.skills.Cleric;
 import org.gms.constants.skills.Hermit;
+import org.gms.constants.skills.Warrior;
 import org.gms.server.StatEffect;
 import org.gms.server.life.Monster;
 import org.gms.server.maps.MapObject;
@@ -258,6 +259,18 @@ public final class BotAttackDriver {
             } else {
                 profile = single != null ? single : (aoe != null ? aoe : ultimate);
             }
+        }
+
+        // 斗气必杀技节流 (Panic / Coma consume the whole orb ring): while the finisher's 60s cadence
+        // runs, swap the plan back to the warrior-lineage base attacks (Power Strike / Slash Blast)
+        // so the ring keeps growing instead of being wiped every few swings - the bank-and-spend
+        // rhythm a real combo player plays at. The base profiles share the finisher's reach box and
+        // cooldown, so only the rendered skill changes. Forced GM choices stay on the finisher.
+        if (choice == Choice.AUTO && !BotComboOrb.finisherReady(bot)
+                && BotComboOrb.isFinisher(profile.skillFor(weapon))) {
+            profile = profile.numAttacked > 1
+                    ? BotAttackProfile.meleeAoe(Warrior.SLASH_BLAST, 1)
+                    : BotAttackProfile.melee(Warrior.POWER_STRIKE, 1);
         }
 
         List<Monster> targets = cap(reachCache != null ? reachCache : mobsInReach(bot, profile, weapon, facingLeft),

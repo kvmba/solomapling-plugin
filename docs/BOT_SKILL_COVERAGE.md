@@ -43,8 +43,8 @@ bot 是**装饰性**实体，只呈现「玩家一眼能看出」的技能。因
 
 斗气 buff 光环本来只是静态值；球环的**动态**在宿主 `CloseRangeDamageHandler` 的攻击管线里（`comboBuff != null` 门槛、每次挥击 +1、`orbcount < X + 1` 封顶、finisher 归 1、到期消失）。bot 不进该管线，故在同一点位（`BotAttackEffects.broadcastAndApply`，与能量获得同址）镜像宿主的可见行为：
 
-- **涨球**：Crusader 谱系（111/112，即 buff 表显示斗气光环的职业）bot 每次落地挥击 +1，封顶为 WZ 的 `getX() + 1`（满级斗气 X=10，环顶 11）；到顶后不再广播（宿主同款）。
-- **消耗**：`GameConstants.isFinisherSkill` 集合（恐慌/气绝 1111003-1111006 + 魂骑士 11111002/11111003）落地时归 1（镜像 `handleOrbconsume`）。注意**狮子吼 1111008 不是 finisher**，不消球。
+- **涨球**：Crusader 谱系（111/112，即 buff 表显示斗气光环的职业）bot 每次落地挥击 +1，封顶按职级取 WZ `X + 1`（Crusader 满级斗气 X=5，环顶 6；4 转英雄按宿主分支读进阶斗气 X=10，环顶 11）；到顶后不再广播（宿主同款）。
+- **消耗（60s 节流）**：`GameConstants.isFinisherSkill` 集合（恐慌/气绝 1111003-1111006 + 魂骑士 11111002/11111003）落地时归 1（镜像 `handleOrbconsume`）。注意**狮子吼 1111008 不是 finisher**，不消球。必杀技本身在 v83 **无冷却**（WZ 无 `cooltime`），但 bot 若按挥击频率连发必杀技，球环会长期清空、毫无"攒斗气"观感——故在出招层加 **60 秒节流**：冷却期内攻击计划回退到战士系基础技（强力打击/群体打击，reach/节奏不变），球环继续生长；冷却到期下一挥自动打出必杀技清环。这是行为层的选择（`FINISHER_COOLDOWN_MS`，`!bot combo` 可查 `finisherCd`），不改动 WZ 数据。
 - **观测**：每步广播通用 `GIVE_FOREIGN_BUFF`，`BuffStat.COMBO` 携带新球数——真玩家的球环更新正是这一帧，**其他玩家的客户端据此绘制头顶球环的增长**；到期/重置广播列表版 `CANCEL_FOREIGN_BUFF`。
 - **到期**：按斗气技能的 WZ 时长自灭，每次挥击重置计时；bot 退场释放状态。
 - GM 测试：`!bot combo <cid>`（直接满环）/ `!bot comboreset <cid>`（拉回 1 球并撤光环）。

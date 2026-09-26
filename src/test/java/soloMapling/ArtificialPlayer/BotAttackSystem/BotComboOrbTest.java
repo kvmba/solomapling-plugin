@@ -39,4 +39,11 @@ class BotComboOrbTest {
         assertFalse(BotComboOrb.isFinisher(Crusader.COMBO));
         assertFalse(BotComboOrb.isFinisher(0));
     }
+
+    @Test
+    void theFinisherCadenceIsSixtySeconds() {
+        // The bank-and-spend rhythm: a finisher consumes the whole ring, so the plugin spaces them
+        // a minute apart - wide enough for a comboed bot to refill the ring several times over.
+        assertEquals(60_000L, BotComboOrb.FINISHER_COOLDOWN_MS);
+    }
 }

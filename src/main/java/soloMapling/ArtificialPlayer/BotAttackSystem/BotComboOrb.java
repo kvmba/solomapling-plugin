@@ -51,6 +51,13 @@ public final class BotComboOrb {
     // task can never lapse a combo it does not own. Released on despawn.
     private static final Map<Integer, Long> lapseDeadlineByBot = new ConcurrentHashMap<>();
 
+    // botId -> epoch-ms before which this bot's finisher (Panic / Coma) may not fire again. The
+    // finisher consumes the whole ring, so without a cadence a grinding bot lands one every few
+    // swings and the ring spends most of its time empty - nothing like a real player, who banks
+    // orbs and drops a finisher occasionally. Released on despawn.
+    static final long FINISHER_COOLDOWN_MS = 60_000L;
+    private static final Map<Integer, Long> nextFinisherByBot = new ConcurrentHashMap<>();
+
     private BotComboOrb() {
     }
 
@@ -72,6 +79,7 @@ public final class BotComboOrb {
         }
         if (isFinisher(skillId)) {
             orbsByBot.put(bot.getId(), MIN_ORBS);
+            nextFinisherByBot.put(bot.getId(), System.currentTimeMillis() + FINISHER_COOLDOWN_MS);
             broadcastOrbs(bot, skill);
             return true;
         }
@@ -91,10 +99,24 @@ public final class BotComboOrb {
         return orbsByBot.getOrDefault(bot.getId(), MIN_ORBS);
     }
 
+    /*
+     * Whether a finisher may fire on this swing (the 60s cadence elapsed). Read-only: the caller
+     * (the attack driver) uses it to hold the finisher profile back and keep building the ring
+     * with the base attacks; the next window is stamped when a finisher actually lands. Non-combo
+     * jobs always answer true - the gate guards the RING, not their attacks.
+     */
+    public static boolean finisherReady(Character bot) {
+        if (bot == null || bot.getJob() == null || !bot.getJob().isA(Job.CRUSADER)) {
+            return true;
+        }
+        return System.currentTimeMillis() >= nextFinisherByBot.getOrDefault(bot.getId(), 0L);
+    }
+
     /** Release a despawned bot's combo bookkeeping (mirrors the other per-bot clearBot hooks). */
     public static void clearBot(int botId) {
         orbsByBot.remove(botId);
         lapseDeadlineByBot.remove(botId);
+        nextFinisherByBot.remove(botId);
     }
 
     /** One-line combo report, for the GM diagnostics behind !bot combo <cid>. */
@@ -102,8 +124,14 @@ public final class BotComboOrb {
         if (bot == null || bot.getJob() == null) {
             return "bot or job is null";
         }
+        boolean combo = bot.getJob().isA(Job.CRUSADER);
+        long cdLeft = 0;
+        if (combo) {
+            cdLeft = Math.max(0, nextFinisherByBot.getOrDefault(bot.getId(), 0L) - System.currentTimeMillis());
+        }
         return bot.getName() + " (job " + bot.getJob().getId() + ") combo=" + orbsFor(bot)
-                + (bot.getJob().isA(Job.CRUSADER) ? "" : " - this job has no combo");
+                + (combo ? " finisherCd=" + (cdLeft / 1000) + "s"
+                         : " - this job has no combo");
     }
 
     /*
