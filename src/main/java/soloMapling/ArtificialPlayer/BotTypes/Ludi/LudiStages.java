@@ -77,6 +77,10 @@ public final class LudiStages {
         int box = nearestBoxOid(bot, LudiPqData.BOX_STAGE2);
         if (box >= 0) {
             hitReactorAt(bot, box);
+        } else {
+            // Every box is gone but the stage is not cleared yet (the leader still has to
+            // turn the passes in): gather by the stage NPC instead of idling at the spawn.
+            PqActions.waitNearStageNpc(bot);
         }
         int bonus = PqActions.findReactorOid(bot, LudiPqData.BOX_STAGE2_BONUS);
         if (bonus >= 0) {
@@ -99,6 +103,12 @@ public final class LudiStages {
         }
         PqActions.seekAndAttack(bot);
         PqActions.loot(bot, bot.getPosition(), 2_000, new int[]{LudiPqData.PASS});
+        // No crates left and nothing alive to fight: the stage is waiting on the leader's
+        // turn-in, so gather by the stage NPC instead of idling at the spawn.
+        if (crate < 0
+                && bot.getMap().getAllMonsters().stream().noneMatch(m -> m.isAlive())) {
+            PqActions.waitNearStageNpc(bot);
+        }
     }
 
     // =========================================================================
@@ -225,13 +235,17 @@ public final class LudiStages {
         return best;
     }
 
-    /** Walk to a box and hit it (the walk first, so the strike is in reach of the script). */
+    /**
+     * Strike a box. The walk towards it is fire-and-forget (the movement engine keeps walking
+     * after this tick), and the strike lands immediately - the host's reactor hit has no reach
+     * check, so blocking the macro tick on the walk only adds dead seconds between boxes.
+     */
     private static void hitReactorAt(Character bot, int oid) {
         var reactor = bot.getMap().getReactorByOid(oid);
         if (reactor == null || reactor.getPosition() == null) {
             return;
         }
-        PqActions.walkUnder(bot, reactor.getPosition());
+        PqActions.walkUnderNonBlocking(bot, reactor.getPosition());
         PqActions.hitReactor(bot, oid);
     }
 

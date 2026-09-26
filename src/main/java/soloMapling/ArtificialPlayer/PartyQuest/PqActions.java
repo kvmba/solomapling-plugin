@@ -160,6 +160,22 @@ public final class PqActions {
         walkTo(bot, ground != null ? ground : aerialTarget);
     }
 
+    /**
+     * Point the movement engine at the floor under an airborne target and return at once - the
+     * bot keeps walking after this call, and the caller strikes the target in the same tick.
+     * The blocking {@link #walkUnder} is for callers that must BE there before the next line
+     * (dropping a stack); reactor strikes have no reach check and only need the approach in
+     * flight, so blocking on it just parks the macro tick for seconds per box.
+     */
+    public static void walkUnderNonBlocking(Character bot, Point aerialTarget) {
+        if (bot == null || aerialTarget == null || bot.getMap() == null) {
+            return;
+        }
+        Point ground = GCMovement.groundPointBelow(bot.getMap(), aerialTarget.x, aerialTarget.y);
+        Point to = ground != null ? ground : aerialTarget;
+        GCMovement.move(bot, to.x, to.y);
+    }
+
     /** Walk to the position of a portal on the bot's current map. No-op if the portal is unknown. */
     public static void walkToPortal(Character bot, int portalId) {
         if (bot == null || bot.getMap() == null) {
