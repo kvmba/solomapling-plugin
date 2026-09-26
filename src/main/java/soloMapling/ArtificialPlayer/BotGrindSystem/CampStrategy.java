@@ -48,6 +48,7 @@ class CampStrategy implements GrindStrategy {
     //    landing hits down there). Escalation ladder: soft walk-home -> hard teleport-home -> relocate. ──
     private static final long OFF_ANCHOR_SOFT_MS = 4_000;     // off the anchor ledge this long -> escalate past the soft walk-home
     private static final long OFF_ANCHOR_TELEPORT_MS = 2_500; // the pathfind-home stalled this long -> hard teleport onto the anchor
+    private static final int OFF_ANCHOR_APPROACH_EPS_PX = 10; // real progress toward the anchor: dist shrank at least this since the last teleport check
     private static final long REANCHOR_WINDOW_MS = 15_000;    // a fresh off-anchor within this of a hard return -> spot is a trap, relocate
 
     // ── Intra-spot spacing (sharers hold personal bands of a wide spot) ──
@@ -85,6 +86,7 @@ class CampStrategy implements GrindStrategy {
     private long offAnchorSinceMs = 0L;      // when the bot first read off the anchor ledge (0 = on it)
     private long hardReturnAt = 0L;          // when the current pathfind-home was issued (0 = none pending)
     private long lastReturnedMs = 0L;        // when we last hard-teleported home (arms the re-anchor window)
+    private int lastAnchorDist = Integer.MAX_VALUE; // anchor distance at the last teleport check (for the approach gate)
 
     // True when the last spot selection found every reachable spot already claimed (the bot is sharing).
     private volatile boolean mapSaturated = false;
@@ -157,6 +159,7 @@ class CampStrategy implements GrindStrategy {
         offAnchorSinceMs = 0L;
         hardReturnAt = 0L;
         lastReturnedMs = 0L;
+        lastAnchorDist = Integer.MAX_VALUE;
     }
 
     @Override
@@ -635,6 +638,7 @@ class CampStrategy implements GrindStrategy {
         if (!offAnchorLedge(chr, s)) {
             offAnchorSinceMs = 0L;
             hardReturnAt = 0L;
+            lastAnchorDist = Integer.MAX_VALUE;
             return false;
         }
         long t = now();
@@ -659,11 +663,25 @@ class CampStrategy implements GrindStrategy {
         if (hardReturnAt == 0L) {
             hardReturnAt = t;
         }
+        Point p = (chr != null) ? chr.getPosition() : null;
+        int anchorDist = (p != null)
+                ? Math.abs(p.x - s.anchor().x) + Math.abs(p.y - s.anchor().y)
+                : Integer.MAX_VALUE;
+        // Progress gate on the teleport: the hard return is granted while the bot is genuinely closing
+        // on the anchor (the L1 pathfind climbs ropes and is slow on tall stacked maps like Time Lane <1>).
+        // A climbing/attack-walk-lock return makes no positional progress for its whole duration, and the
+        // old unconditional timer teleported it mid-climb — the observed "bot teleported up a floor mid-
+        // return". Stall time only accrues while the bot is NOT approaching.
+        if (anchorDist < lastAnchorDist - OFF_ANCHOR_APPROACH_EPS_PX) {
+            lastAnchorDist = anchorDist;
+            hardReturnAt = t; // real approach -> reset the stall clock, keep the L1 pathfind alive
+        }
         if (t - hardReturnAt >= OFF_ANCHOR_TELEPORT_MS) {
             GCMovement.teleportTo(chr, s.anchor().x, s.anchor().y); // snaps to the anchor's ground point
             lastReturnedMs = t;     // arm the re-anchor window
             offAnchorSinceMs = 0L;  // let the teleport land before re-judging
             hardReturnAt = 0L;
+            lastAnchorDist = Integer.MAX_VALUE;
             b.targetOid = -1;
             b.narrate("off anchor -> hard teleport home");
             return true;

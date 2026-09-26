@@ -892,11 +892,13 @@ final class GCMovementDriver {
         }
         entry.airStuckTicks = 0;
         entry.airStuckX = Integer.MIN_VALUE;
-        // Recovery: snap to ground beneath the goal (or current position).
+        // Recovery: snap to ground directly UNDER THE BOT, never under the goal. A goal-anchored
+        // snap on a vertically-stacked map (Time Lane <1>) re-appeared the bot on the GOAL MOB'S
+        // floor one or more platforms up - the observed "bot on a lower floor suddenly fights from
+        // the upper floor" cross-floor teleport. Self-anchored keeps the rescue in the bot's own
+        // column; the brain re-targets on its next tick.
         MapleMap map = entry.bot.getMap();
-        Point goal = entry.moveTarget != null ? entry.moveTarget : entry.navTargetPos;
-        Point base = goal != null ? goal : pos;
-        Point ground = BotPhysicsEngine.findGroundPoint(map, new Point(base.x, base.y - 1));
+        Point ground = BotPhysicsEngine.findGroundPoint(map, new Point(pos.x, pos.y - 1));
         Point dest = (ground != null) ? ground : pos;
         BotPhysicsEngine.teleportTo(entry, entry.bot, dest);
         BotMovementManager.resetEntryStateAfterTeleport(entry);
@@ -916,7 +918,7 @@ final class GCMovementDriver {
     }
 
     // Live fall-off-map recovery: if the bot has left the map's VR bounds by more than a slack margin (fell
-    // below the floor or off the side), snap it back to solid ground under its current goal. Mirrors the
+    // below the floor or off the side), snap it back to solid ground under its own position. Mirrors the
     // frozen-air watchdog's recovery, but keys off "outside the map" instead of "frozen in the air", so it
     // catches an active free-fall. Ours (Fable fluid-combat pass).
     private static void tickFallOffMapRecovery(BotMovementState entry) {
@@ -939,14 +941,17 @@ final class GCMovementDriver {
         if (!belowFloor && !offSides) {
             return;
         }
-        // Snap to ground under the current goal (grind spot / nav target); if there's no goal, drop onto the
-        // first foothold below the VR top at the bot's clamped X.
-        Point goal = entry.moveTarget != null ? entry.moveTarget : entry.navTargetPos;
-        Point base = (goal != null)
-                ? new Point(goal.x, goal.y)
-                : new Point(Math.max(vr.x, Math.min(vr.x + vr.width, pos.x)), vr.y);
-        Point ground = BotPhysicsEngine.findGroundPoint(map, new Point(base.x, base.y - 1));
-        Point dest = (ground != null) ? ground : base;
+        // Snap to ground directly UNDER THE BOT, never under the goal: on a vertically-stacked map
+        // (Time Lane <1>) the goal is routinely a mob on a floor 100-900px up, so a goal-anchored
+        // recovery re-appeared the bot on the MOB'S floor - the observed "bot on a lower platform
+        // suddenly fights from the upper floor". x is clamped into the map (an off-side fall has no
+        // foothold at its raw x); if the column has no floor at all, fall back to the VR-top row.
+        Point clamped = new Point(Math.max(vr.x, Math.min(vr.x + vr.width, pos.x)), pos.y);
+        Point ground = BotPhysicsEngine.findGroundPoint(map, new Point(clamped.x, clamped.y - 1));
+        if (ground == null) {
+            ground = BotPhysicsEngine.findGroundPoint(map, new Point(clamped.x, vr.y - 1));
+        }
+        Point dest = (ground != null) ? ground : new Point(clamped.x, vr.y);
         BotPhysicsEngine.teleportTo(entry, bot, dest);
         BotMovementManager.resetEntryStateAfterTeleport(entry);
         // De-thrash: resetEntryStateAfterTeleport only clears NAV state, leaving moveTarget — so the bot
