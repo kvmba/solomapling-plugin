@@ -42,6 +42,24 @@ public final class LudiPqData {
     public static final int STAGE_8 = 922010800; // the crate combination
     public static final int STAGE_9 = 922010900; // the boss
 
+    /** Stage 4's five door rooms (in01..in05 lead in; each holds box mobs that drop passes). */
+    public static final int STAGE4_ROOM_FIRST = 922010401;
+    public static final int STAGE4_ROOM_LAST  = 922010405;
+    /** Stage 5's six door rooms: four pass boxes each, guarded by invincible Block Golems. */
+    public static final int STAGE5_ROOM_FIRST = 922010501;
+    public static final int STAGE5_ROOM_LAST  = 922010506;
+
+    /** The pass boxes: stage 2's tower, stage 3's mob crates, stage 5's guarded rooms. */
+    public static final int BOX_STAGE2 = 2202003;
+    public static final int BOX_STAGE2_BONUS = 2200002;
+    public static final int BOX_STAGE3 = 2201001;
+    public static final int BOX_STAGE5 = 2202003;
+    /** Stage 5's guard: invincible per WZ (PAD 999) - hide, do not fight it. */
+    public static final int GUARD_MOB = 9300013;
+    /** Stage 4's box mobs - ordinary killables that drop the passes. */
+    public static final int BOX_MOB_FIRST = 9300008;
+    public static final int BOX_MOB_LAST = 9300014;
+
     /** The quest's own limits: 5 to 6 players, levels 35 to 50. */
     public static final int MIN_PLAYERS = 5;
     public static final int MAX_PLAYERS = 6;
@@ -76,6 +94,21 @@ public final class LudiPqData {
 
     /** The mob that drops the passes in every collection stage. */
     public static final int PASS_MOB = 9300005;
+
+    /**
+     * Which stage's door room a map is, by id: 4 for the stage-4 rooms, 5 for stage-5's, else -1.
+     * The rooms' ids sit just past their stage's main map, so stageOf reads them as 302+ - the
+     * bot's workStage checks this first.
+     */
+    public static int roomStage(int mapId) {
+        if (mapId >= STAGE4_ROOM_FIRST && mapId <= STAGE4_ROOM_LAST) {
+            return 4;
+        }
+        if (mapId >= STAGE5_ROOM_FIRST && mapId <= STAGE5_ROOM_LAST) {
+            return 5;
+        }
+        return -1;
+    }
 
     // =========================================================================
     // Stage 8 - the crate combination

@@ -61,6 +61,19 @@ public class LudiPQBot extends PartyQuestBot {
 
     @Override
     protected boolean workStage() {
+        // The door rooms (stages 4 and 5) sit just past their stage's main map, which the
+        // stage arithmetic reads as stage 302+ - route them first, by room id.
+        int roomStage = LudiPqData.roomStage(getChr().getMapId());
+        if (roomStage == 4) {
+            LudiStages.workDoorRooms(getChr(), LudiPqData.STAGE4_ROOM_FIRST,
+                    LudiPqData.STAGE4_ROOM_LAST, 5);
+            return false;
+        }
+        if (roomStage == 5) {
+            LudiStages.sneakDoorRooms(getChr());
+            return false;
+        }
+
         int stage = stageOf(getChr().getMapId());
         if (stage < 0) {
             return false;
@@ -73,7 +86,18 @@ public class LudiPQBot extends PartyQuestBot {
 
         switch (stage) {
             case 1 -> workEntryRoom();
-            case 2, 3, 4, 5, 7 -> LudiStages.gatherPasses(getChr(), stage);
+            case 2 -> LudiStages.breakTowerBoxes(getChr());
+            case 3 -> LudiStages.breakCratesAndHunt(getChr());
+            case 5 -> {
+                // The main room's guards are invincible (PAD 999): stay hidden, stay off
+                // them, and let the room's pass boxes come from the door rooms instead.
+                if (LudiStages.nearbyGuardCount(getChr()) > 0) {
+                    LudiStages.stayHidden(getChr());
+                    return false;
+                }
+                LudiStages.gatherPasses(getChr(), 5);
+            }
+            case 4, 7 -> LudiStages.gatherPasses(getChr(), stage);
             case 6 -> climb();
             case 8 -> standOnCrates();
             case 9 -> LudiStages.fightBoss(getChr());

@@ -7,6 +7,7 @@ import org.gms.server.maps.MapItem;
 import org.gms.server.maps.MapObject;
 import org.gms.server.maps.MapleMap;
 import org.gms.server.maps.Portal;
+import org.gms.server.maps.Reactor;
 import org.gms.server.life.NPC;
 import org.gms.constants.inventory.ItemConstants;
 import org.gms.client.inventory.manipulator.InventoryManipulator;
@@ -185,6 +186,21 @@ public final class PqActions {
         CustomReactor.hitReactorWithScript(bot.getMap(), reactorOid, bot);
     }
 
+    /**
+     * Every alive reactor on the map with this data id, as oids. Quest stages scatter several
+     * boxes of the same id across the room (LPQ stage 2's eleven pass boxes share 2202003), so
+     * the first-oid lookup cannot reach them all.
+     */
+    public static java.util.List<Integer> findAllReactorOids(Character bot, int dataId) {
+        if (bot == null || bot.getMap() == null) {
+            return List.of();
+        }
+        return bot.getMap().getAllReactors().stream()
+                .filter(r -> r.getId() == dataId && r.isAlive())
+                .mapToInt(Reactor::getObjectId)
+                .boxed().toList();
+    }
+
     /** Reactor oid by data id, or -1. Quests name reactors by data id ("stone4" and friends). */
     public static int findReactorOid(Character bot, int dataId) {
         if (bot == null || bot.getMap() == null) {
@@ -251,6 +267,19 @@ public final class PqActions {
                 InventoryManipulator.removeById(bot.getClient(),
                         ItemConstants.getInventoryType(itemId), itemId, handed, true, false));
         DropCommands.botThrowToOwnerItemQty(bot, itemId, handed, receiver);
+    }
+
+    /**
+     * Drop an already-removed-from-inventory stack addressed to {@code receiver}. The caller
+     * has done the real inventory removal (a batched hand-off of a known quantity); this is
+     * only the addressed spawn. A receiver on another map refuses.
+     */
+    public static void giveItemToQuiet(Character bot, Character receiver, int itemId, int qty) {
+        if (bot == null || receiver == null || qty <= 0
+                || bot.getMapId() != receiver.getMapId()) {
+            return;
+        }
+        DropCommands.botThrowToOwnerItemQty(bot, itemId, qty, receiver);
     }
 
     /**
