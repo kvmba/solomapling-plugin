@@ -1195,6 +1195,9 @@ public class EnvironmentManager {
             Character bot = BotHelpers.getCharFromChannelStorage(botId);
             if (bot != null) {
                 bot.setLevel(minLevel + random().nextInt(maxLevel - minLevel + 1));
+                // Gear was rolled at the spawn-band level; re-dress at the level
+                // these bots actually end up at (same reason as PqBotSpawner).
+                BotDecorate.redressBot(bot);
                 // Fame was rolled from the decoration-time level; re-roll it so
                 // the rep matches the level these bots actually end up at.
                 BotFame.apply(bot);

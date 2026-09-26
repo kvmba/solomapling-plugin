@@ -50,6 +50,10 @@ public class QuickEquip {
         int level = bot.getLevel();
         int gender = bot.getGender();
         ThreadLocalRandom rng = ThreadLocalRandom.current();
+        // Level-30+ bots pick from the gear closest to their level (falling back
+        // down the pool only when nothing near exists); younger bots keep the
+        // gentle fashion-decay pick over the starter-heavy low end.
+        boolean preferHigh = level >= 30;
 
         // 1. Clothing (most important) - full base chance.
         // Overalls (sauna robes etc.) are heavily preferred at 75%.
@@ -59,46 +63,47 @@ public class QuickEquip {
         if (rng.nextDouble() < base) {
             boolean wantOverall = rng.nextDouble() < 0.75;
             if (wantOverall) {
-                if (!tryOverall(bot, level, gender)) tryTopBottom(bot, level, gender);
+                if (!tryOverall(bot, level, gender, preferHigh)) tryTopBottom(bot, level, gender, preferHigh);
             } else {
-                if (!tryTopBottom(bot, level, gender)) tryOverall(bot, level, gender);
+                if (!tryTopBottom(bot, level, gender, preferHigh)) tryOverall(bot, level, gender, preferHigh);
             }
         }
 
         // 2. Weapon - 90% of base
         if (rng.nextDouble() < base * 0.90) {
-            equipFromPool(bot, "weapons", level, gender);
+            equipFromPool(bot, "weapons", level, gender, preferHigh);
         }
 
         // 3. Cap - 60% of base
         if (rng.nextDouble() < base * 0.60) {
-            equipFromPool(bot, "caps", level, gender);
+            equipFromPool(bot, "caps", level, gender, preferHigh);
         }
 
         // 4. Shoes - 50% of base
         if (rng.nextDouble() < base * 0.50) {
-            equipFromPool(bot, "shoes", level, gender);
+            equipFromPool(bot, "shoes", level, gender, preferHigh);
         }
 
         // 5. Accessories - 30% of base
         if (rng.nextDouble() < base * 0.30) {
-            equipFromPool(bot, "capes", level, gender);
+            equipFromPool(bot, "capes", level, gender, preferHigh);
         }
         if (rng.nextDouble() < base * 0.30) {
-            equipFromPool(bot, "gloves", level, gender);
+            equipFromPool(bot, "gloves", level, gender, preferHigh);
         }
     }
 
-    private static void equipFromPool(Character bot, String category, int level, int gender) {
-        Integer itemId = GenericEquipPool.getRandom(category, level, gender);
+    private static void equipFromPool(Character bot, String category, int level, int gender,
+                                      boolean preferHigh) {
+        Integer itemId = GenericEquipPool.getRandom(category, level, gender, preferHigh);
         if (itemId != null) {
             BotCustomization.EquipBot(bot, itemId);
         }
     }
 
     /** @return true if an overall was found and equipped. */
-    private static boolean tryOverall(Character bot, int level, int gender) {
-        Integer id = GenericEquipPool.getRandom("overalls", level, gender);
+    private static boolean tryOverall(Character bot, int level, int gender, boolean preferHigh) {
+        Integer id = GenericEquipPool.getRandom("overalls", level, gender, preferHigh);
         if (id == null) return false;
         BotCustomization.EquipBot(bot, id);
         return true;
@@ -109,9 +114,9 @@ public class QuickEquip {
      * never ends up wearing a shirt with no pants.
      * @return true if both pieces were found and equipped.
      */
-    private static boolean tryTopBottom(Character bot, int level, int gender) {
-        Integer topId = GenericEquipPool.getRandom("tops", level, gender);
-        Integer botId = GenericEquipPool.getRandom("bottoms", level, gender);
+    private static boolean tryTopBottom(Character bot, int level, int gender, boolean preferHigh) {
+        Integer topId = GenericEquipPool.getRandom("tops", level, gender, preferHigh);
+        Integer botId = GenericEquipPool.getRandom("bottoms", level, gender, preferHigh);
         if (topId == null || botId == null) return false;
         BotCustomization.EquipBot(bot, topId);
         BotCustomization.EquipBot(bot, botId);

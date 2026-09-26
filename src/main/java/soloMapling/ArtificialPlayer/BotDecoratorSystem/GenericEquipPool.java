@@ -28,6 +28,9 @@ public class GenericEquipPool {
     private static final double LEVEL_DECAY = 0.05;
     // Every eligible item keeps at least this relative weight, so outliers still occur.
     private static final double FASHION_FLOOR = 0.05;
+    // Items within this many levels of the bot count as "near" when a caller asks
+    // to prefer high-level gear (see getRandom's preferHigh overload).
+    private static final int NEAR_BAND = 15;
 
     // Gender constants matching Character.getGender(): 0 = male, 1 = female, 2 = unisex.
     public static final int GENDER_MALE = 0;
@@ -108,6 +111,17 @@ public class GenericEquipPool {
      * @param botGender 0 = male, 1 = female (unisex items always pass).
      */
     public static Integer getRandom(String category, int botLevel, int botGender) {
+        return getRandom(category, botLevel, botGender, false);
+    }
+
+    /**
+     * Same as {@link #getRandom(String, int, int, boolean)} with a preference band:
+     * when {@code preferHigh} is set, items more than 15 levels below the bot are
+     * only eligible if nothing within 15 levels exists in the pool - instead of
+     * decaying to a small "fashion" chance, which let a level-80 bot walk out of
+     * spawn wearing level-10 starter gear most of the time (the pool skews young).
+     */
+    public static Integer getRandom(String category, int botLevel, int botGender, boolean preferHigh) {
         if (!loaded) return null;
         List<PoolItem> list = pools.get(category);
         if (list == null || list.isEmpty()) return null;
@@ -117,11 +131,13 @@ public class GenericEquipPool {
         double[] weights = new double[list.size()];
         double total = 0.0;
         int n = 0;
+        int maxGap = -1;
         for (PoolItem item : list) {
             if (item.minLevel > botLevel) continue; // hard rule: never over-level
             if (item.gender != GENDER_UNISEX && item.gender != botGender) continue; // gender gate
             if (EquipOmitList.isOmitted(item.id)) continue; // central omit list (flag/junk items)
             double gap = botLevel - item.minLevel;
+            maxGap = (int) Math.max(maxGap, gap);
             double w = 1.0 / (1.0 + gap * LEVEL_DECAY);
             if (w < FASHION_FLOOR) w = FASHION_FLOOR;
             eligible.add(item);
@@ -129,6 +145,30 @@ public class GenericEquipPool {
             total += w;
         }
         if (eligible.isEmpty()) return null;
+
+        if (preferHigh && maxGap > NEAR_BAND) {
+            // The pool has nothing near the bot's level: strip the low-end tail
+            // and re-weigh over the closest band instead. Items inside the band
+            // were already weighted, so only the far tail needs removing.
+            List<PoolItem> near = new ArrayList<>(n);
+            double[] nearWeights = new double[n];
+            double nearTotal = 0.0;
+            int m = 0;
+            for (int i = 0; i < n; i++) {
+                PoolItem item = eligible.get(i);
+                if (botLevel - item.minLevel <= NEAR_BAND) {
+                    near.add(item);
+                    nearWeights[m++] = weights[i];
+                    nearTotal += weights[i];
+                }
+            }
+            if (m > 0) {
+                eligible = near;
+                weights = java.util.Arrays.copyOf(nearWeights, m);
+                total = nearTotal;
+                n = m;
+            }
+        }
 
         double roll = ThreadLocalRandom.current().nextDouble() * total;
         double acc = 0.0;

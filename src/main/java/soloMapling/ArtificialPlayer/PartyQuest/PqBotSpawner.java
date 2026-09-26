@@ -1,6 +1,7 @@
 package soloMapling.ArtificialPlayer.PartyQuest;
 
 import org.gms.client.Character;
+import soloMapling.ArtificialPlayer.BotDecoratorSystem.BotDecorate;
 import soloMapling.ArtificialPlayer.BotHelpers;
 import soloMapling.ArtificialPlayer.BotTypeManager;
 import soloMapling.Environment.PlatformPlacement;
@@ -157,6 +158,11 @@ public final class PqBotSpawner {
                 continue;
             }
             bot.setLevel(low + RANDOM.nextInt((high - low) + 1));
+            // The bot was dressed at its spawn-band level (createBotOn runs the
+            // 10..80 default band), so the level just drawn may be far above or
+            // below the gear it is wearing. Re-dress at the final level or the
+            // lobby reads as high-level bots in starter gear.
+            BotDecorate.redressBot(bot);
         }
     }
 }
