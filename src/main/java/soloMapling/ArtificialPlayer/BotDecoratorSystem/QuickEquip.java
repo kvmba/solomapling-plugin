@@ -1,8 +1,10 @@
 package soloMapling.ArtificialPlayer.BotDecoratorSystem;
 
 import org.gms.client.Character;
+import org.gms.constants.inventory.EquipType;
 import soloMapling.ArtificialPlayer.BotCustomization;
 import org.gms.client.BotTier;
+import soloMapling.itemPool.ShopEquipPool;
 
 import java.util.Map;
 import java.util.concurrent.ThreadLocalRandom;
@@ -95,26 +97,67 @@ public class QuickEquip {
 
     private static void equipFromPool(Character bot, String category, int level, int gender,
                                       boolean preferHigh) {
-        Integer itemId = GenericEquipPool.getRandom(category, level, gender, preferHigh);
+        // Shop-sold gear first: keep the bot in gear a real player could buy at
+        // this level. Falls back to the curated YAML pool when the shop pool has
+        // nothing for this draw (not loaded / no category match / nothing fits).
+        Integer itemId = null;
+        EquipType shopType = shopEquipType(category);
+        if (shopType != null && ShopEquipPool.isLoaded()) {
+            itemId = ShopEquipPool.getRandomEquip(shopType, level, 0, gender);
+        }
+        if (itemId == null) {
+            itemId = GenericEquipPool.getRandom(category, level, gender, preferHigh);
+        }
         if (itemId != null) {
             BotCustomization.EquipBot(bot, itemId);
         }
     }
 
+    /**
+     * Maps a QuickEquip category to the EquipType the shop pool stocks.
+     * Weapons here are generic/classless — shop weapons are drawn for any
+     * style, since QuickEquip runs before a bot's stats are aligned.
+     */
+    private static EquipType shopEquipType(String category) {
+        return switch (category) {
+            case "caps" -> EquipType.CAP;
+            case "shoes" -> EquipType.SHOES;
+            case "gloves" -> EquipType.GLOVES;
+            case "capes" -> EquipType.CAPE;
+            case "weapons" -> EquipType.SWORD;
+            default -> null;
+        };
+    }
+
     /** @return true if an overall was found and equipped. */
     private static boolean tryOverall(Character bot, int level, int gender, boolean preferHigh) {
-        Integer id = GenericEquipPool.getRandom("overalls", level, gender, preferHigh);
+        // Shop-sold overalls first, then the curated YAML pool.
+        Integer id = ShopEquipPool.isLoaded()
+                ? ShopEquipPool.getRandomEquip(EquipType.LONGCOAT, level, 0, gender)
+                : null;
+        if (id == null) {
+            id = GenericEquipPool.getRandom("overalls", level, gender, preferHigh);
+        }
         if (id == null) return false;
         BotCustomization.EquipBot(bot, id);
         return true;
     }
 
     /**
-     * Both-or-nothing: only commits if BOTH top and bottom are available, so a bot
-     * never ends up wearing a shirt with no pants.
+     * Both-or-nothing within each pool: shop top+bottom first, YAML top+bottom
+     * second, so a bot never ends up wearing a shirt with no pants.
      * @return true if both pieces were found and equipped.
      */
     private static boolean tryTopBottom(Character bot, int level, int gender, boolean preferHigh) {
+        if (ShopEquipPool.isLoaded()) {
+            Integer shopTop = ShopEquipPool.getRandomEquip(EquipType.COAT, level, 0, gender);
+            Integer shopBot = ShopEquipPool.getRandomEquip(EquipType.PANTS, level, 0, gender);
+            if (shopTop != null && shopBot != null) {
+                BotCustomization.EquipBot(bot, shopTop);
+                BotCustomization.EquipBot(bot, shopBot);
+                return true;
+            }
+        }
         Integer topId = GenericEquipPool.getRandom("tops", level, gender, preferHigh);
         Integer botId = GenericEquipPool.getRandom("bottoms", level, gender, preferHigh);
         if (topId == null || botId == null) return false;
