@@ -262,17 +262,20 @@ waves:
     # 出生点铺在低级/中段打怪大陆的城镇枢纽；靠训练 bot 同一套 WZ 驱动发现（TrainingMapChooser 的
     # roamer 档：固定 [1,60] 怪等级带、全大陆半径、偏向最低级图）自己 fan-out，靠自由迁移跨大陆。
     # 独立占用登记表（Scope.ROAMER），不占 training 的名额。
+    # 数量按实际玩家低级练级热点酌情倾斜：维多利亚岛新手区加得最多（蘑菇/地铁/海滩/树洞/野猪，
+    # 玩家低级阶段几乎全在此），中段热门区（云彩公园/结冰平原/时间隧道/鱼之平原）各 +1，
+    # 边缘文化区（武陵/新叶/上海）玩家偏好较低，维持原密度作点缀。
     cohorts:
-      - {map: 100000000, count: 10, level_lo: 75, level_hi: 160}  # 射手村
-      - {map: 103000000, count: 8,  level_lo: 75, level_hi: 160}  # 废弃都市
-      - {map: 104000000, count: 6,  level_lo: 75, level_hi: 160}  # 明珠港
-      - {map: 101000000, count: 5,  level_lo: 75, level_hi: 160}  # 魔法密林
-      - {map: 102000000, count: 5,  level_lo: 75, level_hi: 160}  # 勇士部落
-      - {map: 200000000, count: 6,  level_lo: 75, level_hi: 160}  # 天空之城
-      - {map: 211000000, count: 6,  level_lo: 75, level_hi: 160}  # 冰峰雪域
-      - {map: 220000000, count: 6,  level_lo: 75, level_hi: 160}  # 玩具城
-      - {map: 221000000, count: 5,  level_lo: 75, level_hi: 160}  # 地球防御本部
-      - {map: 230000000, count: 5,  level_lo: 75, level_hi: 160}  # 水下世界
+      - {map: 100000000, count: 12, level_lo: 75, level_hi: 160}  # 射手村
+      - {map: 103000000, count: 10, level_lo: 75, level_hi: 160}  # 废弃都市
+      - {map: 104000000, count: 8,  level_lo: 75, level_hi: 160}  # 明珠港
+      - {map: 101000000, count: 7,  level_lo: 75, level_hi: 160}  # 魔法密林
+      - {map: 102000000, count: 7,  level_lo: 75, level_hi: 160}  # 勇士部落
+      - {map: 200000000, count: 8,  level_lo: 75, level_hi: 160}  # 天空之城
+      - {map: 211000000, count: 7,  level_lo: 75, level_hi: 160}  # 冰峰雪域
+      - {map: 220000000, count: 7,  level_lo: 75, level_hi: 160}  # 玩具城
+      - {map: 221000000, count: 6,  level_lo: 75, level_hi: 160}  # 地球防御本部
+      - {map: 230000000, count: 6,  level_lo: 75, level_hi: 160}  # 水下世界
       - {map: 250000000, count: 4,  level_lo: 75, level_hi: 160}  # 武陵
       - {map: 600000000, count: 4,  level_lo: 75, level_hi: 160}  # 新叶城
       - {map: 701000000, count: 4,  level_lo: 75, level_hi: 160}  # 上海外滩
