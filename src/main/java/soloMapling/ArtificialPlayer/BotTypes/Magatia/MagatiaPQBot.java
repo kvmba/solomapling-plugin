@@ -111,9 +111,11 @@ public class MagatiaPQBot extends PartyQuestBot {
                 PqActions.seekAndAttack(getChr());
             }
         }
-        PqActions.loot(getChr(), getChr().getPosition(), 2_000, new int[0]);
-        // Whatever quest items the loot sweep picked up (the run's exclusive set: letters,
-        // genes and their kin) belongs with the leader - the stage NPCs grade his pockets.
+        // The loot sweep must NAME the quest items: an empty filter matches nothing, and the
+        // sweep is what fills the bot's inventory for the hand-off below.
+        PqActions.loot(getChr(), getChr().getPosition(), 2_000, MagatiaPqData.QUEST_ITEMS);
+        // Whatever the sweep picked up (the run's exclusive set: letters, genes and their
+        // kin) belongs with the leader - the stage NPCs grade his pockets.
         for (int itemId : MagatiaPqData.QUEST_ITEMS) {
             PqActions.handItemsToLeader(getChr(), itemId);
         }
