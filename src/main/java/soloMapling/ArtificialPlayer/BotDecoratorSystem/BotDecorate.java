@@ -141,16 +141,16 @@ public class BotDecorate {
 
     // Weighted base-class roll. Skewed to match v83 nostalgia: thieves everywhere,
     // mages second, warriors third, bowmen fourth; pirates (a post-v83 addition)
-    // are the rarest at a near-v83 ~10%. Both roll sites (generic decoration +
-    // training-bot spawn) go through here so the population mix stays in sync.
+    // are the rarest. Both roll sites (generic decoration + training-bot spawn)
+    // go through here so the population mix stays in sync.
     // Returns 1=Warrior 2=Magician 3=Bowman 4=Thief 5=Pirate.
     public static int rollBaseClass() {
         int roll = (int) (Math.random() * 100); // 0..99
-        if (roll < 28) return 4;       // THIEF    28%
-        else if (roll < 51) return 2;  // MAGICIAN 23%  (28..50)
-        else if (roll < 72) return 1;  // WARRIOR  21%  (51..71)
-        else if (roll < 90) return 3;  // BOWMAN   18%  (72..89)
-        else return 5;                 // PIRATE   10%  (90..99)
+        if (roll < 26) return 4;       // THIEF    26%
+        else if (roll < 48) return 2;  // MAGICIAN 22%  (26..47)
+        else if (roll < 69) return 1;  // WARRIOR  21%  (48..68)
+        else if (roll < 87) return 3;  // BOWMAN   18%  (69..86)
+        else return 5;                 // PIRATE   13%  (87..99)
     }
 
     // Sub-path rolls, weighted per class. Path indices match the tier switches below
