@@ -10,6 +10,7 @@ import org.gms.constants.skills.Fighter;
 import org.gms.constants.skills.Hunter;
 import org.gms.constants.skills.Page;
 import org.gms.constants.skills.Spearman;
+import soloMapling.ArtificialPlayer.BotStatusSystem.BotDebuffState;
 import org.gms.server.life.Monster;
 import org.gms.server.maps.MapleMap;
 import org.gms.util.PacketCreator;
@@ -63,6 +64,14 @@ public final class BotFinalAttack {
     public static void maybeTrigger(Character bot, WeaponType weapon, int bodyActionId, int facingMask,
                                     Map<Monster, List<Integer>> hits) {
         if (bot == null || bot.getMap() == null || weapon == null || hits == null || hits.isEmpty()) {
+            return;
+        }
+        // A mob debuff that disarms the bot (STUN/SEDUCE/SEAL) also disarms the follow-up: it is a
+        // swing like any other, so it honours the same gate as BotAttackDriver.attack - and the grind
+        // watchdogs' "a frozen bot lands no hits" assumption stays true. Placed before the cooldown
+        // stamp so a disarmed roll does not eat the 1s trigger cooldown either.
+        BotDebuffState status = BotDebuffState.of(bot);
+        if (status != null && status.blocksAttack()) {
             return;
         }
         Skill skill = skillFor(bot, weapon);
