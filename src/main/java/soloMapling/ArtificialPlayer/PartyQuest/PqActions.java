@@ -326,13 +326,20 @@ public final class PqActions {
      * Every alive reactor on the map with this data id, as oids. Quest stages scatter several
      * boxes of the same id across the room (LPQ stage 2's eleven pass boxes share 2202003), so
      * the first-oid lookup cannot reach them all.
+     *
+     * <p>The filter is the engine's own {@code isActive} - alive AND with a further state to
+     * walk - not merely {@code isAlive}: on this host a fully broken box is never removed from
+     * the map (its {@code reactorTime} is negative, so the break path skips destroyReactor) and
+     * stays {@code alive=true} in its terminal state forever. A broken box must not read as a
+     * candidate, or the bot walks back to the shell it just emptied and stands there swinging
+     * at nothing.
      */
     public static java.util.List<Integer> findAllReactorOids(Character bot, int dataId) {
         if (bot == null || bot.getMap() == null) {
             return List.of();
         }
         return bot.getMap().getAllReactors().stream()
-                .filter(r -> r.getId() == dataId && r.isAlive())
+                .filter(r -> r.getId() == dataId && r.isActive())
                 .mapToInt(Reactor::getObjectId)
                 .boxed().toList();
     }
@@ -578,6 +585,11 @@ public final class PqActions {
     private static final int RETARGET_EPS_PX = 16;          // skip re-issuing a move for tiny shifts
     private static final long RETARGET_TIMEOUT_MS = 4_000;  // give up an unreachable target after this
     private static final int PROGRESS_EPS_PX = 20;          // movement worth counting as chase progress
+    /** Swings one seek tick may chain: a burst of 2-3 (driver cooldown gates in between) reads as
+     *  fighting, not the one-swing-then-freeze the single-swing tick produced. */
+    private static final int SWING_BURST = 3;
+    /** Longest in-burst wait on the driver's cooldown (the melee/magic profiles run 720-900ms). */
+    private static final long SWING_BURST_MAX_WAIT_MS = 900;
     private static final Map<Integer, Integer> seekTargetByBot = new java.util.concurrent.ConcurrentHashMap<>();
     private static final Map<Integer, Point> seekAnchorByBot = new java.util.concurrent.ConcurrentHashMap<>();
     private static final Map<Integer, Long> seekDeadlineByBot = new java.util.concurrent.ConcurrentHashMap<>();
@@ -609,12 +621,26 @@ public final class PqActions {
             return;
         }
 
-        // 1. Swing at whatever is already in the attack driver's reach.
-        BotAttackDriver.AttackResult r = BotAttackDriver.botAttack(bot);
-        if (r != null && r.hit()) {
-            seekTargetByBot.put(bot.getId(), -1); // landed: drop the chase, re-seek fresh next tick
-            seekLastXByBot.remove(bot.getId());
-            return;
+        // 1. Swing at whatever is already in the attack driver's reach - as a BURST, not a
+        //    single swing: the driver's own cooldown (720-900ms for the melee/magic profiles)
+        //    is shorter than a macro tick (1.5s+), so one swing per tick read as
+        //    "hit ... stand ... hit". The combo waits out each cooldown (nextAttackEpochMs
+        //    is the driver's own clock) and keeps swinging while the driver still lands.
+        for (int swing = 0; swing < SWING_BURST; swing++) {
+            BotAttackDriver.AttackResult r = BotAttackDriver.botAttack(bot);
+            if (r == null) {
+                return;
+            }
+            if (r.hit()) {
+                seekTargetByBot.put(bot.getId(), -1); // landed: drop the chase, re-seek fresh
+                seekLastXByBot.remove(bot.getId());
+                long wait = BotAttackDriver.nextAttackEpochMs(bot.getId()) - System.currentTimeMillis();
+                if (wait > 0 && wait <= SWING_BURST_MAX_WAIT_MS) {
+                    blockingSleep(wait + 30);
+                }
+                continue;
+            }
+            break; // miss: nothing in reach (or debuffed) - go chase below
         }
 
         // 2. Nothing in reach: pick a chase target (sticky across ticks) and close on it.

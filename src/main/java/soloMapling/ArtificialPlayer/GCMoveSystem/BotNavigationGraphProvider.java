@@ -49,7 +49,7 @@ final class BotNavigationGraphProvider {
     //     inside an 8.93 x fs px/s band (no walkSpeed air cap; counter-strafe pins at the
     //     band edge) and no-input flight drags 1 x fs (100 x fs at terminal fall). Committed
     //     arcs still fly the launch key held, so constant-stepX arc sims stay exact.
-    private static final int GRAPH_VERSION = 64; // 64: escape-hatch deep-drop edge (a region with no capped descent edge gets one full-descent straight drop to its deepest landing, dead ends like the 玩具塔 floor-1 R5 vanish); 51: kinetic slippery model + snowshoes; 52: brake-to-stop landings; 53: glide-unless-edge stop policy (slipperyStopDir); 56: uncap straight-drop launch windows (full droppable span, no +/-20 fragmentation); 57: remove the (empirically wrong) 300px down-jump drop cap - down-jumps fall until landing; 58: rope-grab reach counts descent below the ledge (mid-rope jump-grabs from adjacent platforms); 59: fall-sim caps to map height not 1500ms - long single-fall descents (tall shafts: Ellinia tree, Perion) now generate DROP/JUMP/ROPE edges; 60: re-cap drops for organic descent - walk-offs capped at MAX_DROP_PX, down-jumps at the tighter DOWN_JUMP_MAX_DROP_PX, and down-jumps carry DOWN_JUMP_COST_PENALTY_MS so the pathfinder prefers ropes/walk-offs over plummeting an entire vertical map; 61: widened rope top-exit probe (BotPhysicsEngine.findTopExitLanding) - accept a step-off foothold slightly above/below the rope top and a few px off-axis, so uneven/slanted ladder heads mint a clean CLIMB step-off edge instead of only ballistic top jump-offs; 62: cache filename now encodes snowShoes (the 4th key dimension) - old three-dimension filenames are unreadable by design, and the bump parks them in a dead v61/ directory that can be deleted wholesale; 63: inset every JUMP launch window by one walk step before stamping it on the edge - an edge-pressed window let the executor's +/-walkStep launch phase overfly a small platform and the bot fall to the bottom
+    private static final int GRAPH_VERSION = 65; // 65: dead-region arc prune - DROP/JUMP arcs landing in regions the bot can never leave are cut to a fixpoint (the escape-hatch deep drop must not land the bot in a one-way pit: LPQ stage 3's y-242 pit under a forbidFallDown stage row); 64: escape-hatch deep-drop edge (a region with no capped descent edge gets one full-descent straight drop to its deepest landing, dead ends like the 玩具塔 floor-1 R5 vanish); 51: kinetic slippery model + snowshoes; 52: brake-to-stop landings; 53: glide-unless-edge stop policy (slipperyStopDir); 56: uncap straight-drop launch windows (full droppable span, no +/-20 fragmentation); 57: remove the (empirically wrong) 300px down-jump drop cap - down-jumps fall until landing; 58: rope-grab reach counts descent below the ledge (mid-rope jump-grabs from adjacent platforms); 59: fall-sim caps to map height not 1500ms - long single-fall descents (tall shafts: Ellinia tree, Perion) now generate DROP/JUMP/ROPE edges; 60: re-cap drops for organic descent - walk-offs capped at MAX_DROP_PX, down-jumps at the tighter DOWN_JUMP_MAX_DROP_PX, and down-jumps carry DOWN_JUMP_COST_PENALTY_MS so the pathfinder prefers ropes/walk-offs over plummeting an entire vertical map; 61: widened rope top-exit probe (BotPhysicsEngine.findTopExitLanding) - accept a step-off foothold slightly above/below the rope top and a few px off-axis, so uneven/slanted ladder heads mint a clean CLIMB step-off edge instead of only ballistic top jump-offs; 62: cache filename now encodes snowShoes (the 4th key dimension) - old three-dimension filenames are unreadable by design, and the bump parks them in a dead v61/ directory that can be deleted wholesale; 63: inset every JUMP launch window by one walk step before stamping it on the edge - an edge-pressed window let the executor's +/-walkStep launch phase overfly a small platform and the bot fall to the bottom
 
     // Drop caps for organic descent (re-added; v57 had removed the old single cap). A bot must
     // never plummet down a whole vertical map. Two distinct downward moves, treated differently:
@@ -808,6 +808,9 @@ final class BotNavigationGraphProvider {
             for (Portal portal : map.getPortals()) {
                 addPortalEdges(portal, map, regionsById, regionIdByFootholdId, outgoing, edgeKeys);
             }
+            // A dead-region arc prune rides the portal phase: it must run after EVERY edge phase
+            // (its verdict is global), and its cost is a small O(E) fixpoint sweep.
+            pruneDeadRegionArcEdges(regions, outgoing);
             buildProfile.buildPortalEdgesNs = System.nanoTime() - phaseStartedAt;
 
             BotNavigationGraph graph = new BotNavigationGraph(
@@ -1279,6 +1282,68 @@ final class BotNavigationGraphProvider {
                 from.pointAt(launchX), bestLanding,
                 bestLo, bestHi,
                 0, 0, DOWN_JUMP_COST_PENALTY_MS * 2, outgoing, edgeKeys);
+    }
+
+    /**
+     * Cut every arc (DROP / JUMP) edge whose landing region is a DEAD REGION - one the bot can
+     * never leave. The dead set is computed to a fixpoint: a region is dead when none of its
+     * outgoing edges leads to a live region (or when all it can reach is more death), starting
+     * from "no outgoing edges at all" and widening until stable. The survivors are exactly the
+     * ground the bot can live on - every region that can still walk/climb/portal its way back
+     * to a door.
+     *
+     * <p>This is the constructive guarantee the map's own footprint gives: the bot's flight
+     * arcs are never allowed to land outside the livable set, on ANY map, without a per-map
+     * carve-out. LPQ stage 3's bottom pit (a y 242 floor under a WZ forbidFallDown stage row,
+     * no rope, no portal) loses its one-way drop ticket; the stage-2 tower base keeps its arc
+     * because its ladder chain climbs back out.
+     *
+     * <p>PORTAL edges are exempt in both directions: a portal is the quest's own door, planted
+     * by the event script, and walking through it re-homes the bot regardless of geometry.
+     *
+     * <p>Runs after every edge phase (the verdict is global), on the finished edge set.
+     */
+    private static void pruneDeadRegionArcEdges(List<BotNavigationGraph.Region> regions,
+                                                Map<Integer, List<BotNavigationGraph.Edge>> outgoing) {
+        // Fixpoint: start from the provably dead (no exit at all), then a region dies too
+        // once every arc it could take lands in the dead set. PORTAL exits count as alive.
+        Set<Integer> dead = new java.util.HashSet<>();
+        boolean widened = true;
+        while (widened) {
+            widened = false;
+            for (BotNavigationGraph.Region region : regions) {
+                if (dead.contains(region.id)) {
+                    continue;
+                }
+                List<BotNavigationGraph.Edge> out = outgoing.get(region.id);
+                boolean anyEscape = false;
+                if (out != null) {
+                    for (BotNavigationGraph.Edge edge : out) {
+                        if (edge.type == BotNavigationGraph.EdgeType.PORTAL
+                                || edge.toRegionId == region.id
+                                || !dead.contains(edge.toRegionId)) {
+                            anyEscape = true;
+                            break;
+                        }
+                    }
+                }
+                if (!anyEscape) {
+                    dead.add(region.id);
+                    widened = true;
+                }
+            }
+        }
+        if (dead.isEmpty()) {
+            return;
+        }
+
+        for (List<BotNavigationGraph.Edge> edges : outgoing.values()) {
+            edges.removeIf(e -> e.type != BotNavigationGraph.EdgeType.PORTAL
+                    && e.toRegionId != e.fromRegionId
+                    && dead.contains(e.toRegionId));
+        }
+        debugprint("Dead-region arc prune: map regions with no way out = {} ({} regions dead)",
+                dead, dead.size());
     }
 
     private static void addDirectionalDropEdge(BotNavigationGraph.Region from,
