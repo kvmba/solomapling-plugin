@@ -16,6 +16,7 @@ import org.gms.scripting.npc.NPCScriptManager;
 import soloMapling.ArtificialPlayer.BotAttackSystem.BotAttackDriver;
 import soloMapling.ArtificialPlayer.BotClientBinding;
 import soloMapling.ArtificialPlayer.BotAttackSystem.BotAuraState;
+import soloMapling.ArtificialPlayer.BotCommandsPack.BotAttack;
 import soloMapling.ArtificialPlayer.BotCommandsPack.DropCommands;
 import soloMapling.ArtificialPlayer.BotCommandsPack.SocialCommands;
 import soloMapling.ArtificialPlayer.BotLogic;
@@ -314,6 +315,10 @@ public final class PqActions {
         // Striking a reactor is an attack action (the OPQ path swings first via BotAttack.basicSwing;
         // the stage scripts hit reactors directly), so it breaks the hide auras the same way.
         BotAuraState.cancelHidesForAction(bot);
+        // Play the swing, or the reactor breaks by itself while the bot stands idle - the
+        // player watches boxes pop open with nobody touching them. Same order OPQ uses:
+        // swing first, the engine hit lands under it.
+        BotAttack.basicSwing(bot);
         CustomReactor.hitReactorWithScript(bot.getMap(), reactorOid, bot);
     }
 

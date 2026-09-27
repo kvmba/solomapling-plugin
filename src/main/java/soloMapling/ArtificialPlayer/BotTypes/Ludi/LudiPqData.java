@@ -34,6 +34,8 @@ public final class LudiPqData {
     public static final int RECRUIT_MAP = 221024500; // Ludibrium: where the recruiter stands
     public static final int ENTRY_MAP   = 922010100;
     public static final int STAGE_2 = 922010200;
+    /** The stage-2 trap room: the tower's trap box (2200002) warps the whole party here. */
+    public static final int TRAP_ROOM = 922010201;
     public static final int STAGE_3 = 922010300;
     public static final int STAGE_4 = 922010400;
     public static final int STAGE_5 = 922010500;
@@ -51,7 +53,6 @@ public final class LudiPqData {
 
     /** The pass boxes: stage 2's tower, stage 3's mob crates, stage 5's guarded rooms. */
     public static final int BOX_STAGE2 = 2202003;
-    public static final int BOX_STAGE2_BONUS = 2200002;
     public static final int BOX_STAGE3 = 2201001;
     public static final int BOX_STAGE5 = 2202003;
     /** Stage 5's guard: invincible per WZ (PAD 999) - hide, do not fight it. */

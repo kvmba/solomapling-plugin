@@ -24,8 +24,6 @@ import soloMapling.ArtificialPlayer.PartyQuest.PqActions;
  */
 public class LudiPQBot extends PartyQuestBot {
 
-    private static final long SETTLE_MS = 1_000;
-
     /** The lowest point this bot has reached on the current climb, to judge progress. */
     private int climbFloorY = Integer.MIN_VALUE;
 
@@ -88,15 +86,30 @@ public class LudiPQBot extends PartyQuestBot {
         if (LudiStages.stageCleared(getChr(), stage)) {
             // Stage work is done: stand by the room's stage NPC instead of idling wherever
             // the last fight ended. Walking the portal is the leader's business, and the map
-            // change re-homes this bot when it follows.
+            // change re-homes this bot when it follows. The one exception: a bot still in
+            // the stage-2 trap room - that room has no stage NPC and no next00, so waiting
+            // there is a freeze; it takes its own exit back to the tower.
             sayStageClearOnce(getChr().getMapId());
+            if (getChr().getMapId() == LudiPqData.TRAP_ROOM) {
+                LudiStages.exitTrapRoom(getChr());
+                return false;
+            }
             PqActions.waitNearStageNpc(getChr());
             return stage >= 9;
         }
 
         switch (stage) {
             case 1 -> workEntryRoom();
-            case 2 -> LudiStages.breakTowerBoxes(getChr());
+            case 2 -> {
+                // The trap box warps the whole party into 922010201 - its four boxes carry
+                // four of the stage's fifteen passes, so a bot trapped there works that room
+                // (break, loot, exit back) instead of standing in it.
+                if (getChr().getMapId() == LudiPqData.TRAP_ROOM) {
+                    LudiStages.workTrapRoom(getChr());
+                } else {
+                    LudiStages.breakTowerBoxes(getChr());
+                }
+            }
             case 3 -> LudiStages.breakCratesAndHunt(getChr());
             case 5 -> {
                 // The main room's guards are invincible (PAD 999): stay hidden, stay off
@@ -167,7 +180,6 @@ public class LudiPQBot extends PartyQuestBot {
         if (lifted) {
             climbFloorY = Math.min(climbFloorY, getChr().getPosition().y);
         }
-        sleep(SETTLE_MS);
     }
 
     /**
@@ -209,13 +221,5 @@ public class LudiPQBot extends PartyQuestBot {
             }
         }
         return ahead;
-    }
-
-    private void sleep(long millis) {
-        try {
-            Thread.sleep(millis);
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-        }
     }
 }
