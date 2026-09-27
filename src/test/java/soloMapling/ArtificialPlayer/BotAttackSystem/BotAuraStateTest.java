@@ -108,6 +108,52 @@ class BotAuraStateTest {
         assertFalse(BotAuraState.isAttackEnabler(Pirate.DASH));
     }
 
+    // ── on-arrival replay liveness (isAuraLive's pure core) ──────────────────────
+
+    @Test
+    void replayLivenessRequiresTheClockAndTheSlotForAnEnabler() {
+        // The exact stale-entry case that drew an untransformed bot firing Shockwave at a fresh
+        // observer: the MORPH slot still names the transform but the expiry clock is done.
+        assertFalse(BotAuraState.isAuraLiveGiven(Marauder.TRANSFORMATION,
+                Marauder.TRANSFORMATION, false, false, false, 0),
+                "an expired 变身 must not be replayed as a live aura");
+        // and the mirror case: clock live, slot taken by another enabler (an overwrite) - the
+        // isMorphedAs rule, not just the clock.
+        assertFalse(BotAuraState.isAuraLiveGiven(Marauder.TRANSFORMATION,
+                Buccaneer.SUPER_TRANSFORMATION, true, false, false, 0),
+                "the slot naming a DIFFERENT enabler means this one is gone");
+        assertTrue(BotAuraState.isAuraLiveGiven(Marauder.TRANSFORMATION,
+                Marauder.TRANSFORMATION, true, false, false, 0));
+        assertTrue(BotAuraState.isAuraLiveGiven(Corsair.BATTLE_SHIP,
+                Corsair.BATTLE_SHIP, true, false, false, 0));
+    }
+
+    @Test
+    void replayLivenessForTheStateBoundAuras() {
+        // 伪装 rides the MORPH slot: shown = the slot names it, gone = anything else there.
+        assertTrue(BotAuraState.isAuraLiveGiven(Brawler.OAK_BARREL,
+                Brawler.OAK_BARREL, false, false, false, 0));
+        assertFalse(BotAuraState.isAuraLiveGiven(Brawler.OAK_BARREL,
+                null, false, false, false, 0));
+        assertFalse(BotAuraState.isAuraLiveGiven(Brawler.OAK_BARREL,
+                Marauder.TRANSFORMATION, true, false, false, 0),
+                "a 变身 in the slot means the disguise was overwritten");
+        // 隐身术 rides its own set.
+        assertTrue(BotAuraState.isAuraLiveGiven(Rogue.DARK_SIGHT,
+                null, false, true, false, 0));
+        assertFalse(BotAuraState.isAuraLiveGiven(Rogue.DARK_SIGHT,
+                null, false, false, false, 0));
+        // 疾驰 must match the burst's skill id, not merely be flagged up.
+        assertTrue(BotAuraState.isAuraLiveGiven(Pirate.DASH,
+                null, false, false, true, Pirate.DASH));
+        assertFalse(BotAuraState.isAuraLiveGiven(Pirate.DASH,
+                null, false, false, true, ThunderBreaker.DASH),
+                "a Thunder Breaker's dash id must not render a Pirate dash aura");
+        // Any other id is a plain cosmetic aura - the ledger never retires those.
+        assertTrue(BotAuraState.isAuraLiveGiven(Buccaneer.MAPLE_WARRIOR,
+                null, false, false, false, 0));
+    }
+
     @Test
     void eachMorphGatedAttackMapsToItsOwnEnabler() {
         // The mapping a real client enforces: Shockwave (碎石乱击) needs the 3rd-job 变身,

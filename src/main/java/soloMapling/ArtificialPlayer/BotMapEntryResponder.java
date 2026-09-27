@@ -3,6 +3,8 @@ package soloMapling.ArtificialPlayer;
 import org.gms.client.Character;
 import org.gms.server.maps.MapleMap;
 import org.gms.util.PacketCreator;
+import soloMapling.ArtificialPlayer.BotAttackSystem.BotAuraState;
+import soloMapling.ArtificialPlayer.BotAttackSystem.BotBuffEffects;
 import soloMapling.ArtificialPlayer.BotMessagingSystem.CharacterStorage;
 import soloMapling.ArtificialPlayer.GCMoveSystem.GCMovement;
 import soloMapling.server.BotTiming;
@@ -109,6 +111,44 @@ public final class BotMapEntryResponder implements EventSubscriber {
         });
     }
 
+    /**
+     * Replays every bot's still-shown cosmetic auras to the entering player - the plugin's
+     * stand-in for the host's per-observer spawn semantics ({@code writeForeignBuffs} rebuilds a
+     * real player's MORPH / DARKSIGHT / COMBO / SOULARROW / dash / MONSTER_RIDING look inside
+     * every spawn packet; a bot's aura is a one-shot map broadcast, so a viewer who arrives after
+     * it simply never sees it). The replay is unicast, once per entering player, so observers
+     * already on the map are never re-sent an aura they are rendering.
+     *
+     * <p>Like the HP push this is deferred into the 150-700ms jitter window: on login the client
+     * drops eager field packets sent around the spawn burst, and the MAP_ENTERED event itself
+     * fires from {@code addPlayer} BEFORE {@code sendObjectPlacement} has even run - an eager
+     * replay would arrive before the bot's spawn packet, be dropped, and the auras would be lost
+     * until the next periodic re-show.</p>
+     *
+     * <p>This is what closes the "bot 未变身却在放 Shockwave / 舰炮" mismatch for a fresh
+     * observer: the transform look now reaches them, while the attack gate in
+     * {@code BotAuraState} keeps enforcing the same window it always did.</p>
+     */
+    private void replayAurasSoon(MapleMap map, Character entering) {
+        if (entering == null) {
+            return;
+        }
+        BotTiming.afterRandom(NUDGE_MIN_MS, NUDGE_MAX_MS, () -> {
+            try {
+                if (entering.getMap() == null || entering.getMapId() != map.getId()) {
+                    return; // the player already left before the replay was due
+                }
+                for (Character chr : map.getAllPlayers()) { // snapshot copy - safe off-thread
+                    if (chr == null || !isBot(chr)) {
+                        continue;
+                    }
+                    BotBuffEffects.replayAurasTo(entering, chr, BotAuraState.visibleAurasFor(chr));
+                }
+            } catch (Throwable ignored) {
+            }
+        });
+    }
+
     private void nudgeBotsOnMap(MapleMap map, Character entering) {
         try {
             for (Character chr : map.getAllPlayers()) { // snapshot copy - safe to iterate off-thread
@@ -117,6 +157,7 @@ public final class BotMapEntryResponder implements EventSubscriber {
                 }
             }
             pushPartyHpSoon(map, entering);
+            replayAurasSoon(map, entering);
         } catch (Throwable ignored) {
         }
     }

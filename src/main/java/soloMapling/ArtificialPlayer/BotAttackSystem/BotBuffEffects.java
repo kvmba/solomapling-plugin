@@ -8,8 +8,10 @@ import org.gms.client.SkillFactory;
 import org.gms.constants.id.ItemId;
 import org.gms.constants.skills.Buccaneer;
 import org.gms.constants.skills.Corsair;
+import org.gms.constants.skills.Crusader;
 import org.gms.constants.skills.Marauder;
 import org.gms.constants.skills.ThunderBreaker;
+import org.gms.net.packet.Packet;
 import org.gms.net.server.Server;
 import org.gms.net.server.world.Party;
 import org.gms.server.StatEffect;
@@ -141,6 +143,15 @@ public final class BotBuffEffects {
      * frame carries a duration; it is in seconds, as the host's own {@code applyTo} writes it.
      */
     private static void broadcastAura(Character bot, int skillId, StatEffect effect, int durationMs) {
+        bot.getMap().broadcastMessage(bot, auraPacket(bot, skillId, effect, durationMs), false);
+    }
+
+    /**
+     * Build the aura packet for {@code skillId} without sending it. The layouts are exactly the
+     * ones {@link #broadcastAura} broadcasts - extracted so an aura can be replayed at ONE
+     * observer instead of the whole map without a second copy of the per-family frame dispatch.
+     */
+    private static Packet auraPacket(Character bot, int skillId, StatEffect effect, int durationMs) {
         // The attack enablers' observer frames are special-cased by the host's own applyTo, so the
         // plugin mirrors that dispatch instead of the generic path:
         //
@@ -158,46 +169,93 @@ public final class BotBuffEffects {
         // morph itself, which is exactly what makes observers render the transformed body.
         if (skillId == Corsair.BATTLE_SHIP) {
             Mount ship = new Mount(bot, ItemId.BATTLESHIP, skillId);
-            bot.getMap().broadcastMessage(bot,
-                    PacketCreator.showMonsterRiding(bot.getId(), ship), false);
-            return;
+            return PacketCreator.showMonsterRiding(bot.getId(), ship);
         }
         if (BotAuraState.isTransformMorph(skillId)) {
             int morphId = skillId == Marauder.TRANSFORMATION ? 1000
                     : skillId == Buccaneer.SUPER_TRANSFORMATION ? 1001
                     : 1000; // ThunderBreaker.TRANSFORMATION shares the strider transform (1000)
             int wireMorph = bot.getGender() == 0 ? morphId : morphId + 100;
-            bot.getMap().broadcastMessage(bot,
-                    PacketCreator.giveForeignBuff(bot.getId(), Collections.singletonList(
-                            new Pair<>(BuffStat.MORPH, wireMorph))), false);
-            return;
+            return PacketCreator.giveForeignBuff(bot.getId(), Collections.singletonList(
+                    new Pair<>(BuffStat.MORPH, wireMorph)));
         }
         List<Pair<BuffStat, Integer>> statups = effect.getStatups();
         if (statups.isEmpty()) {
-            return;
+            return null;
         }
         if (isDash(skillId) || isInfusion(skillId)) {
             int seconds = Math.max(1, durationMs / 1000); // pirate frames carry seconds
-            bot.getMap().broadcastMessage(bot,
-                    PacketCreator.giveForeignPirateBuff(bot.getId(), skillId, seconds, statups), false);
-            return;
+            return PacketCreator.giveForeignPirateBuff(bot.getId(), skillId, seconds, statups);
         }
         if (isWkCharge(statups)) {
-            bot.getMap().broadcastMessage(bot,
-                    PacketCreator.giveForeignWKChargeEffect(bot.getId(), skillId, statups), false);
-            return;
+            return PacketCreator.giveForeignWKChargeEffect(bot.getId(), skillId, statups);
         }
         if (isDarkSight(skillId)) {
             // 隐身术 uses the generic frame too, but the host's own isDs() branch normalises the
             // DARKSIGHT statup to value 0 (StatEffect.applyTo) - mirror that so a bot's hide looks
             // exactly like a real player's (the semi-transparent shade observers render).
-            bot.getMap().broadcastMessage(bot,
-                    PacketCreator.giveForeignBuff(bot.getId(),
-                            Collections.singletonList(new Pair<>(BuffStat.DARKSIGHT, 0))), false);
+            return PacketCreator.giveForeignBuff(bot.getId(),
+                    Collections.singletonList(new Pair<>(BuffStat.DARKSIGHT, 0)));
+        }
+        return PacketCreator.giveForeignBuff(bot.getId(), statups);
+    }
+
+    /**
+     * Replay this bot's still-shown auras to {@code observer} - the on-arrival patch-up for a
+     * player who entered (or re-entered) the map after the auras went up. This is the plugin's
+     * stand-in for the host's own per-observer spawn semantics: {@code writeForeignBuffs} reads
+     * the character's buff registry to embed MORPH / DARKSIGHT / COMBO / SOULARROW / the dash
+     * bits / MONSTER_RIDING in EVERY {@code spawnPlayerMapObject}, so a real player's looks are
+     * rebuilt from scratch for each new viewer. A bot registers no buff, so the replay sources
+     * the same list from {@link BotAuraState#visibleAurasFor}.
+     *
+     * <p>Deliberately ONE replay per entering player, unicast - NOT a map-wide re-broadcast, which
+     * would re-send every aura to observers already rendering it (a visible double-cast flash)
+     * and, for the pirate frames, reset the durations those observers are counting down. This is
+     * the exact gap the "未变身 bot 却在放 Shockwave / 舰炮" report pointed at: the fresh observer
+     * sees an untransformed bot whose aura clock is still live.</p>
+     *
+     * <p>Every candidate is liveness-checked at send time against the host's client state: an
+     * unresolvable skill / effect, empty statups, or (for the state-bound auras) an entry the
+     * aura's own state disagrees with is skipped, never replayed as a phantom. Note this can only
+     * patch the LOOK - it must not re-arm {@link BotAuraState} expiry clocks ({@code onAuraShown}
+     * is NOT called here; the state-bound ticks stay the single lifetime authority).</p>
+     *
+     * @param auras the candidate ids from {@link BotAuraState#visibleAurasFor}; sent in order.
+     */
+    public static void replayAurasTo(Character observer, Character bot, List<Integer> auras) {
+        if (observer == null || bot == null || auras == null || auras.isEmpty()
+                || observer.getMap() == null || bot.getMap() == null
+                || observer.getMapId() != bot.getMapId()) {
             return;
         }
-        bot.getMap().broadcastMessage(bot,
-                PacketCreator.giveForeignBuff(bot.getId(), statups), false);
+        for (int skillId : auras) {
+            // The combo ring carries the LIVE orb count on the wire (the count is what draws the
+            // ring), so it never goes through the generic packet builder - BotComboOrb owns the
+            // liveness check AND the value.
+            if (skillId == Crusader.COMBO) {
+                BotComboOrb.replayTo(observer, bot);
+                continue;
+            }
+            // Liveness at send time: the state-bound structures may have dropped an entry between
+            // the snapshot above and this send (an expiry on the movement tick, a hide torn off by
+            // a swing). A dropped entry must not render.
+            if (!BotAuraState.isAuraLive(bot, skillId)) {
+                continue;
+            }
+            Skill skill = SkillFactory.getSkill(skillId);
+            if (skill == null) {
+                continue;
+            }
+            StatEffect effect = skill.getEffect(skill.getMaxLevel());
+            if (effect == null) {
+                continue;
+            }
+            Packet packet = auraPacket(bot, skillId, effect, effect.getDuration());
+            if (packet != null) {
+                observer.sendPacket(packet);
+            }
+        }
     }
 
     /** The host's own {@code isDash}: the 疾驰 speed/jump burst (single source: {@link BotAuraState}). */

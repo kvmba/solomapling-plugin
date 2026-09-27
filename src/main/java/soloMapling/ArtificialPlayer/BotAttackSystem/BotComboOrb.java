@@ -99,6 +99,29 @@ public final class BotComboOrb {
         return orbsByBot.getOrDefault(bot.getId(), MIN_ORBS);
     }
 
+    /**
+     * Whether this bot is currently rendering a combo ring for onlookers: a crusader-lineage job
+     * on a map whose orb counter has been started (every {@code broadcastOrbs} re-arms it). The
+     * on-arrival aura replay consults this - the host's spawn packet embeds the same stat
+     * ({@code writeForeignBuffs} reads {@code BuffStat.COMBO} with the live count).
+     */
+    static boolean ringShown(Character bot) {
+        return wantsCombo(bot) && orbsByBot.containsKey(bot.getId());
+    }
+
+    /**
+     * Unicast the CURRENT ring to one observer (the on-arrival aura replay). The wire value is the
+     * live orb count, not the WZ statup - {@code auraPacket} must not touch this id, the ring's
+     * whole point is that the count grows swing by swing.
+     */
+    static void replayTo(Character observer, Character bot) {
+        if (observer == null || !ringShown(bot)) {
+            return;
+        }
+        observer.sendPacket(PacketCreator.giveForeignBuff(bot.getId(),
+                Collections.singletonList(new Pair<>(BuffStat.COMBO, orbsFor(bot)))));
+    }
+
     /*
      * Whether a finisher may fire on this swing (the 60s cadence elapsed). Read-only: the caller
      * (the attack driver) uses it to hold the finisher profile back and keep building the ring

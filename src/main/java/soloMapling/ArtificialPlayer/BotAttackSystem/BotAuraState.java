@@ -7,6 +7,7 @@ import org.gms.constants.skills.Beginner;
 import org.gms.constants.skills.Brawler;
 import org.gms.constants.skills.Buccaneer;
 import org.gms.constants.skills.Corsair;
+import org.gms.constants.skills.Crusader;
 import org.gms.constants.skills.Marauder;
 import org.gms.constants.skills.NightWalker;
 import org.gms.constants.skills.Noblesse;
@@ -16,6 +17,7 @@ import org.gms.constants.skills.ThunderBreaker;
 import org.gms.util.PacketCreator;
 import soloMapling.ArtificialPlayer.GCMoveSystem.GCMovement;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -102,6 +104,20 @@ public final class BotAuraState {
     private static final Map<Integer, Integer> MORPH_SKILL = new ConcurrentHashMap<>();
     /** botIds whose 隐身术 aura is intended to be up (a cancel is only sent on the drop edge). */
     private static final Set<Integer> DARK_SIGHT_UP = ConcurrentHashMap.newKeySet();
+
+    /**
+     * botId -> every plain cosmetic aura currently shown (the non-state-bound buffs whose foreign
+     * frame rides {@code giveForeignBuff}: Maple Warrior, Stance, Sharp Eyes, ...). The hide /
+     * dash / attack-enabler auras are state-bound and live in their own structures above, and the
+     * combo orb ring keeps its own count in {@link BotComboOrb}. This is the "which visuals are on
+     * this bot" ledger the on-arrival replay consults - the host answers the same question per
+     * observer by re-reading the buff registry inside every spawn packet ({@code
+     * writeForeignBuffs}); a bot registers nothing there, so the ledger stands in for it. ADD-only
+     * (the set dedupes re-shows): the generic foreign frame carries no duration, so a client
+     * renders such an aura until a matching cancelForeignBuff - which the plugin never sends for
+     * these - so an entry, once shown, is what every observer present keeps rendering.
+     */
+    private static final Map<Integer, Set<Integer>> SHOWN_AURAS = new ConcurrentHashMap<>();
 
     /** Expiry fallback for an attack-enabler aura whose WZ duration is missing (the WZ minimum is ~30s). */
     private static final long ENABLER_FALLBACK_MS = 80_000L;
@@ -262,6 +278,14 @@ public final class BotAuraState {
             MORPH_SKILL.put(id, skillId);
         } else if (isDarkSight(skillId)) {
             DARK_SIGHT_UP.add(id);
+        } else {
+            // A plain cosmetic aura (Maple Warrior, Stance, Sharp Eyes, ...). The generic
+            // giveForeignBuff frame carries no duration, so the client renders such an aura until a
+            // matching cancelForeignBuff arrives - and the plugin never sends one for these (no
+            // cancel site outside the state-bound frames), it only re-shows them on the buff
+            // cadence. The ledger therefore mirrors what an observer is actually rendering: ADD on
+            // each show (a re-show re-adds the same id - the set dedupes), nothing is ever retired.
+            SHOWN_AURAS.computeIfAbsent(id, k -> ConcurrentHashMap.newKeySet()).add(skillId);
         }
     }
 
@@ -404,8 +428,102 @@ public final class BotAuraState {
         return shown != null && shown == Brawler.OAK_BARREL;
     }
 
+    /**
+     * Whether {@code skillId}'s aura is still actually shown on {@code bot} - the liveness check
+     * the on-arrival replay runs at send time. A snapshot taken when the entering player's replay
+     * was scheduled can go stale before the send (an attack-enabler expiring on a movement tick, a
+     * hide torn off by a swing), and replaying a stale entry would draw a phantom aura nobody
+     * else sees. The state-bound auras are checked against their own structures; any other id
+     * counts as live (the ledger never retires plain auras - see {@link #onAuraShown}).
+     */
+    public static boolean isAuraLive(Character bot, int skillId) {
+        if (bot == null) {
+            return false;
+        }
+        int id = bot.getId();
+        Integer morphShown = MORPH_SKILL.get(id);
+        Long until = ATTACK_ENABLER_UNTIL.get(id);
+        boolean enablerClockLive = until != null && System.currentTimeMillis() < until;
+        return isAuraLiveGiven(skillId, morphShown, enablerClockLive,
+                DARK_SIGHT_UP.contains(id), DASH_UP.contains(id), DASH_SKILL.getOrDefault(id, 0));
+    }
+
+    /**
+     * Pure form of {@link #isAuraLive}, so the replay's liveness rules are testable without a
+     * character: {@code morphShown} is the MORPH slot's occupant (null = empty),
+     * {@code enablerClockLive} whether the attack-enabler expiry clock still holds, the rest the
+     * hide / dash bookkeeping. The dispatch mirrors what each family's own tick enforces.
+     */
+    static boolean isAuraLiveGiven(int skillId, Integer morphShown, boolean enablerClockLive,
+                                   boolean darkSightUp, boolean dashUp, int dashSkill) {
+        if (isDarkSight(skillId)) {
+            return darkSightUp;
+        }
+        if (isAttackEnabler(skillId)) {
+            // the expiry clock AND the slot still naming this exact enabler (isMorphedAs's rule)
+            return enablerClockLive && morphShown != null && morphShown == skillId;
+        }
+        if (skillId == Brawler.OAK_BARREL) {
+            // the disguise rides the MORPH slot and is only torn off by an attack / a mount
+            return morphShown != null && morphShown == Brawler.OAK_BARREL;
+        }
+        if (isDash(skillId)) {
+            return dashUp && dashSkill == skillId;
+        }
+        return true;
+    }
+
     private static void cancel(Character bot, List<BuffStat> statups) {
         bot.getMap().broadcastMessage(bot, PacketCreator.cancelForeignBuff(bot.getId(), statups), false);
+    }
+
+    /**
+     * The aura ids an arriving observer must be shown so this bot looks to them exactly as it
+     * looks to everyone already watching: the state-bound auras that are actually up right now
+     * (the attack-enabler 变身/海盗船 by its clock, the hides, the walking 疾驰) plus every plain
+     * cosmetic aura in the ledger. The host answers this per observer by re-reading the character's
+     * buff registry inside each spawn packet ({@code writeForeignBuffs} - MORPH / DARKSIGHT / COMBO
+     * / SOULARROW / the dash bits / MONSTER_RIDING all ride SPAWN_PLAYER); a bot registers no buff,
+     * so this snapshot is the plugin's stand-in for that read.
+     *
+     * <p>Every entry is liveness-checked against the host client at send time (the map call in
+     * {@link BotBuffEffects#replayAurasTo}), so a stale entry degrades to a skipped replay, never
+     * a phantom aura. Order is irrelevant - each id renders as an independent aura.</p>
+     *
+     * @return a fresh mutable list, possibly empty; never null. The single-target 变身 gating the
+     *         attack skills and the 海盗船 are the ids that keep the "transformed but firing
+     *         Shockwave / Battleship Cannon" mismatch from re-appearing on a fresh observer.
+     */
+    public static List<Integer> visibleAurasFor(Character bot) {
+        List<Integer> result = new ArrayList<>();
+        if (bot == null) {
+            return result;
+        }
+        int id = bot.getId();
+        Integer morph = MORPH_SKILL.get(id);
+        if (morph != null) {
+            result.add(morph); // 变身 / 海盗船 / 伪装 - liveness checked at send time
+        }
+        Set<Integer> plain = SHOWN_AURAS.get(id);
+        if (plain != null && !plain.isEmpty()) {
+            result.addAll(plain);
+        }
+        // The combo orb ring: its wire value is the live count, not the WZ statup, so the id rides
+        // the list only as a marker - the replay's send branch for it goes through BotComboOrb
+        // (liveness + the current count), never the generic packet builder.
+        if (BotComboOrb.ringShown(bot)) {
+            result.add(Crusader.COMBO);
+        }
+        if (DARK_SIGHT_UP.contains(id)) {
+            result.add(Rogue.DARK_SIGHT);
+        }
+        if (DASH_UP.contains(id)) {
+            Integer dashSkill = DASH_SKILL.get(id);
+            if (dashSkill != null && dashSkill != 0) {
+                result.add(dashSkill);
+            }
+        }
+        return result;
     }
 
     /** Release a despawned bot's aura bookkeeping so the maps don't grow unbounded. */
@@ -415,6 +533,7 @@ public final class BotAuraState {
         DASH_RESHOW_AT.remove(botId);
         MORPH_SKILL.remove(botId);
         DARK_SIGHT_UP.remove(botId);
+        SHOWN_AURAS.remove(botId);
         ATTACK_ENABLER_UNTIL.remove(botId);
         BotDashBurst.clearBot(botId);
     }
