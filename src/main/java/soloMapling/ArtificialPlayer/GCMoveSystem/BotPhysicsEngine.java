@@ -21,7 +21,6 @@ final class BotPhysicsEngine {
     // speed (11 at El Nath fs=0.2); 240 covers any fs >= ~0.01 with margin.
     private static final int POST_LANDING_BRAKE_TICK_CAP = 240;
     private static final int REGION_STITCH_GAP_PX = 2;
-    private static final int SYNTHETIC_MAP_BOUND_SIZE = 1 << 18;
     // Max horizontal gap between adjacent foothold endpoints that the bot can walk across.
     // Shared with BotNavigationGraphProvider so walk-edge generation and physics agree.
     static final int WALK_GAP_PX = 12;
@@ -2522,40 +2521,40 @@ final class BotPhysicsEngine {
                 progress);
     }
 
+    /*
+     * The bot's flight bound is the STANDABLE foothold AABB — the same boundary the real client
+     * walks: a player can only ever be where standable footholds exist, so the out-of-foothold
+     * margin many maps leave between their last platform and the VR wall (Eos Tower 920010100:
+     * VR right edge 359, standable extent 220, wall column 320 — a 39px full-height gap) must be
+     * unreachable, or a jump that crosses the platform edge enters a column with no foothold at
+     * any height and free-falls forever. Standable excludes wall columns (x1==x2): the tower's
+     * tree bounds reach x=320 but nothing can be stood on there — clamping to the tree bounds
+     * would strand the bot ON the wall column. The VR rect is only the fallback for trees
+     * without usable x bounds; "synthetic" VR is no longer special-cased — the foothold bound is
+     * correct for those too (the old code's max()/min() made REAL maps the buggy case: the
+     * boundary was pushed PAST the foothold wall into the void). The standable extent is cached
+     * on the per-tree collision index.
+     */
     private static int effectiveLeftBoundaryX(MapleMap map, Rectangle area) {
         if (!hasUsableFootholdXBounds(map)) {
             return area.x;
         }
-        int footholdMinX = map.getFootholds().getMinDropX();
-        // Synthetic (absurdly large) bounds: tighten inward to the foothold extent.
-        if (isSyntheticMapArea(area)) {
-            return footholdMinX;
-        }
-        // Real bounds: never let a walkable foothold pixel sit outside the side-collision
-        // wall. A foothold tip that overhangs area.x (e.g. map 261020500 fh#12 left tip at
-        // x=-712 while area.x=-711) would otherwise be a trap: a bot pushed onto that pixel
-        // is past mapSideBoundaryCollision's guard and falls into the floor-less void.
-        return Math.min(area.x, footholdMinX);
+        return collisionIndex(map).standableMinX();
     }
 
     private static int effectiveRightBoundaryX(MapleMap map, Rectangle area) {
         if (!hasUsableFootholdXBounds(map)) {
             return area.x + area.width;
         }
-        int footholdMaxX = map.getFootholds().getMaxDropX();
-        if (isSyntheticMapArea(area)) {
-            return footholdMaxX;
-        }
-        return Math.max(area.x + area.width, footholdMaxX);
-    }
-
-    private static boolean isSyntheticMapArea(Rectangle area) {
-        return area.width >= SYNTHETIC_MAP_BOUND_SIZE && area.height >= SYNTHETIC_MAP_BOUND_SIZE;
+        return collisionIndex(map).standableMaxX();
     }
 
     private static boolean hasUsableFootholdXBounds(MapleMap map) {
-        return map.getFootholds() != null
-                && map.getFootholds().getMinDropX() < map.getFootholds().getMaxDropX();
+        if (map.getFootholds() == null) {
+            return false;
+        }
+        FootholdCollisionIndex index = collisionIndex(map);
+        return index != UNINDEXABLE && index.standableMinX() < index.standableMaxX();
     }
 
     /*
@@ -2572,7 +2571,9 @@ final class BotPhysicsEngine {
     private record FootholdCollisionIndex(java.util.List<Foothold> collidableWalls,
                                           java.util.List<Foothold> collidableFromBelow,
                                           int bucketMinX,
-                                          Foothold[][] groundBuckets) {
+                                          Foothold[][] groundBuckets,
+                                          int standableMinX,
+                                          int standableMaxX) {
         Foothold[] groundBucketAt(int x) {
             int b = (x - bucketMinX) >> GROUND_BUCKET_SHIFT;
             return b < 0 || b >= groundBuckets.length ? NO_FOOTHOLDS : groundBuckets[b];
@@ -2586,7 +2587,7 @@ final class BotPhysicsEngine {
     // foothold lists) — callers fall back to the original tree/map query so stubbed seams keep
     // working exactly as before.
     private static final FootholdCollisionIndex UNINDEXABLE = new FootholdCollisionIndex(
-            java.util.List.of(), java.util.List.of(), 0, new Foothold[0][]);
+            java.util.List.of(), java.util.List.of(), 0, new Foothold[0][], 0, 0);
 
     private static FootholdCollisionIndex collisionIndex(MapleMap map) {
         org.gms.server.maps.FootholdTree tree = map != null ? map.getFootholds() : null;
@@ -2610,6 +2611,10 @@ final class BotPhysicsEngine {
             java.util.List<Foothold> fromBelow = new java.util.ArrayList<>();
             int minX = Integer.MAX_VALUE;
             int maxX = Integer.MIN_VALUE;
+            // Standable (non-wall) extent — the real client's flight/walk bound. Wall columns
+            // (x1==x2) hang off platforms without offering a foothold, so they are excluded.
+            int groundMinX = Integer.MAX_VALUE;
+            int groundMaxX = Integer.MIN_VALUE;
             for (Foothold fh : all) {
                 if (fh.isWall()) {
                     if (Foothold.isCollidableWall(fh, byId)) {
@@ -2620,6 +2625,10 @@ final class BotPhysicsEngine {
                 ground.add(fh);
                 minX = Math.min(minX, Math.min(fh.getX1(), fh.getX2()));
                 maxX = Math.max(maxX, Math.max(fh.getX1(), fh.getX2()));
+                if (fh.getX1() != fh.getX2()) {
+                    groundMinX = Math.min(groundMinX, Math.min(fh.getX1(), fh.getX2()));
+                    groundMaxX = Math.max(groundMaxX, Math.max(fh.getX1(), fh.getX2()));
+                }
                 if (fromBelowIds.contains(fh.getId())) {
                     fromBelow.add(fh);
                 }
@@ -2629,6 +2638,8 @@ final class BotPhysicsEngine {
             if (ground.isEmpty()) {
                 buckets = new Foothold[0][];
                 minX = 0;
+                groundMinX = 0;
+                groundMaxX = 0;
             } else {
                 int bucketCount = ((maxX - minX) >> GROUND_BUCKET_SHIFT) + 1;
                 java.util.List<java.util.List<Foothold>> building = new java.util.ArrayList<>(bucketCount);
@@ -2665,7 +2676,7 @@ final class BotPhysicsEngine {
                 }
             }
             return new FootholdCollisionIndex(java.util.List.copyOf(walls), java.util.List.copyOf(fromBelow),
-                    minX, buckets);
+                    minX, buckets, groundMinX, groundMaxX);
         });
     }
 
