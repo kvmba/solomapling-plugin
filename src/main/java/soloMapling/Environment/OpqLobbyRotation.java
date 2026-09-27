@@ -2,7 +2,6 @@ package soloMapling.Environment;
 
 import org.gms.client.Character;
 import soloMapling.ArtificialPlayer.BotGeneration;
-import soloMapling.ArtificialPlayer.BotHelpers;
 import soloMapling.ArtificialPlayer.BotMessagingSystem.CharacterStorage;
 import soloMapling.ArtificialPlayer.BotPartySystem.BotPartyQueue;
 import soloMapling.ArtificialPlayer.BotSM;
@@ -27,21 +26,22 @@ import static soloMapling.DebugUtilities.fmt;
  * leaving.
  *
  * <p>Add happens FIRST (an extra body for one interval), then remove: a failed spawn
- * retires nothing and the population is left exactly as it was. Only bots in
- * {@link OPQBot.OPQBotState#RECRUITMENT} with no party and no pending invite are
- * retirement candidates - the check is repeated inside the bot's own teardown call so a
- * player inviting that exact bot in the milliseconds between selection and removal loses
- * nothing more than an invite that expired.</p>
+ * retires nothing and the population is left exactly as it was. A failed removal
+ * re-rolls the counter so the same tick retries removal until it succeeds - the one-bot
+ * shift cannot wedge. Only bots in {@link OPQBot.OPQBotState#RECRUITMENT} with no party
+ * and no pending invite are retirement candidates - the check is repeated inside the
+ * teardown call itself, so a player inviting that exact bot in the milliseconds between
+ * selection and removal loses nothing more than an invite that expired.</p>
  *
  * <p>No observation gating: one character appearing or vanishing between visits is
- * ordinary MapleStory traffic, and the full cast is unrecognizable within an interval
- * count of ROTATE_INTERVAL_MS * 2 (one swap per tick).</p>
+ * ordinary MapleStory traffic, and the full cast is unrecognizable within one full
+ * swap (add tick + remove tick) per bot, i.e. after roughly headcount x 2 intervals.</p>
  */
 public final class OpqLobbyRotation {
 
-    /** One swap (add, then on a later tick remove) every two and a half minutes or so. */
+    /** One swap (add tick, then remove tick) every two and a half minutes. */
     private static final long ROTATE_INTERVAL_MS = 150_000L;
-    /** +/- jitter on the cadence so restarts and long runs do not sync into a metronome. */
+    /** Jitter on the FIRST tick only; the steady cadence itself stays fixed. */
     private static final long JITTER_MS = 60_000L;
 
     private OpqLobbyRotation() {
@@ -91,6 +91,9 @@ public final class OpqLobbyRotation {
         if (created > 0) {
             swaps.incrementAndGet();
             debugprint("OpqLobbyRotation: added 1 recruit bot");
+        } else {
+            // Observable failure path: map missing / graph not baked / channel full.
+            debugprint("OpqLobbyRotation: spawn failed, this interval added nothing");
         }
         // A failed spawn retires nothing (removeOne only runs after a successful add),
         // so the lobby population never shrinks because of a transient failure.
@@ -101,7 +104,10 @@ public final class OpqLobbyRotation {
     private static void removeOne() {
         Character candidate = pickRetireCandidate();
         if (candidate == null) {
-            return; // nothing recruitable standing there (all partied up / map missing)
+            // Nothing recruitable standing there (all partied up / mid-teardown window).
+            // Keep the counter on the remove phase so this tick retries removal.
+            debugprint("OpqLobbyRotation: no idle recruit bot to retire, retrying next interval");
+            return;
         }
         if (retire(candidate)) {
             swaps.incrementAndGet();
