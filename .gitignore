@@ -23,3 +23,6 @@ scripts/bot_config_character_ids.txt
 
 # Runtime log output (log4j2 writes logs/ into the server working dir)
 logs/
+wz
+wz-zh-CN
+cache/
