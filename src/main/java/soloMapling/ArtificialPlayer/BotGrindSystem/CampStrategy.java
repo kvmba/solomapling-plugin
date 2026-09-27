@@ -221,7 +221,8 @@ class CampStrategy implements GrindStrategy {
             b.narrate("FIGHT " + label());
             state = State.FIGHT;
         } else {
-            GCMovement.move(chr, s.anchor().x, s.anchor().y);
+            Point gp = GCMovement.groundPointBelow(chr.getMap(), s.anchor().x, s.anchor().y);
+            GCMovement.move(chr, s.anchor().x, (gp != null) ? gp.y : s.anchor().y);
             b.lastMoveTargetX = s.anchor().x;
             b.narrate("TRAVEL -> " + label());
             state = State.TRAVEL_TO_SPOT;
@@ -312,6 +313,16 @@ class CampStrategy implements GrindStrategy {
             b.narrate("FIGHT " + label());
             state = State.FIGHT;
             return;
+        }
+        // 行走途中的战斗节拍：上拍刚挥完手（attackWalkLock）→ 本拍原地站桩，下拍继续赶路；
+        // 否则走向锚点平台上的活怪脚下（顺手清路的移动轨迹），平台没怪才走锚点本身。
+        if (b.midSwingPlant()) {
+            return; // just swung mid-walk: hold the plant, resume next beat
+        }
+        Point gp = b.travelApproachPoint(chr, s);
+        if (Math.abs(gp.x - b.lastMoveTargetX) >= GrindBrain.ROAM_RETARGET_EPS) {
+            GCMovement.move(chr, gp.x, gp.y);
+            b.lastMoveTargetX = gp.x;
         }
         if (b.madeApproachProgress(chr)) {
             b.markProgress(); // moving toward the spot is not stuck

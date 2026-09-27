@@ -182,7 +182,8 @@ final class StackStrategy implements GrindStrategy {
             b.narrate("FIGHT " + label());
             state = State.FIGHT;
         } else {
-            GCMovement.move(chr, dest.anchor().x, dest.anchor().y);
+            Point gp = GCMovement.groundPointBelow(chr.getMap(), dest.anchor().x, dest.anchor().y);
+            GCMovement.move(chr, dest.anchor().x, (gp != null) ? gp.y : dest.anchor().y);
             b.lastMoveTargetX = dest.anchor().x;
             b.narrate("TRAVEL -> " + label());
             state = State.TRAVEL;
@@ -312,6 +313,15 @@ final class StackStrategy implements GrindStrategy {
             b.narrate("FIGHT " + label());
             state = State.FIGHT;
             return;
+        }
+        // 行走途中：刚挥完手站桩一拍；否则走分配平台的活怪脚下（顺手清路），平台没怪才走锚点。
+        if (b.midSwingPlant()) {
+            return;
+        }
+        Point gp = b.travelApproachPoint(chr, dest);
+        if (Math.abs(gp.x - b.lastMoveTargetX) >= GrindBrain.ROAM_RETARGET_EPS) {
+            GCMovement.move(chr, gp.x, gp.y);
+            b.lastMoveTargetX = gp.x;
         }
         if (b.madeApproachProgress(chr)) {
             b.markProgress();
