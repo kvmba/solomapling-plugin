@@ -255,7 +255,13 @@ public final class PqActions {
             if (ground.equals(stuckTargetByBot.get(bot.getId()))) {
                 int attempts = stuckCountByBot.merge(bot.getId(), 1, Integer::sum);
                 if (attempts > STUCK_RETRIES) {
-                    return Approach.STUCK; // this floor is dead; make the caller try another box
+                    // This floor is dead for THIS round of candidates; drop the record so the
+                    // next tick's retry starts fresh instead of STUCK-ing on sight forever
+                    // (every caller-side rotate candidate can fail - without the reset that
+                    // would strand the bot with no box it may approach, permanently).
+                    stuckTargetByBot.remove(bot.getId());
+                    stuckCountByBot.remove(bot.getId());
+                    return Approach.STUCK; // make the caller try another box
                 }
             } else {
                 stuckTargetByBot.put(bot.getId(), new Point(ground));
@@ -901,10 +907,12 @@ public final class PqActions {
 
     /**
      * A point a body can stand on near {@code anchor}, not one of the {@code taken} spots and
-     * not under a rope/ladder column, or null when the ledge is full.
+     * not under a rope/ladder column, or null when the ledge is full. Scans EVERY ledge on the
+     * anchor's floor (getAllFootholds has no ordering contract) so the CLOSEST ledge always
+     * wins; the extra scan is bounded by the floor's own foothold count.
      */
     private static Point nearbyOpenSpot(MapleMap map, Point anchor, java.util.Set<Point> taken) {
-        Point first = null;
+        Point best = null;
         long bestSq = Long.MAX_VALUE;
         for (Foothold fh : map.getFootholds().getAllFootholds()) {
             if (fh.isForbidFallDown()) {
@@ -922,14 +930,11 @@ public final class PqActions {
                 double dsq = spot.distanceSq(anchor);
                 if (dsq < bestSq) {
                     bestSq = (long) dsq;
-                    first = spot;
+                    best = spot;
                 }
             }
-            if (first != null) {
-                break; // closest ledge first: a far floor under the NPC is not a wait ring
-            }
         }
-        return first;
+        return best;
     }
 
     /** Give up a wait-spot claim when the bot leaves the room or the run ends. */
