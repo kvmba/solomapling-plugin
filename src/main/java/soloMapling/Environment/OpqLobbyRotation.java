@@ -20,10 +20,11 @@ import static soloMapling.DebugUtilities.fmt;
 
 /**
  * Keeps the OPQ recruitment lobby (200080101) from reading as a stage set of the same
- * characters on every visit: every {@link #ROTATE_INTERVAL_MS} (about five minutes,
- * +/- jitter) it adds one fresh recruit bot, and after the next interval it retires one
- * member of the OLD population - add and remove on alternating ticks, so the headcount
- * only ever changes by one and each change reads as one player entering or leaving.
+ * characters on every visit: every {@link #ROTATE_INTERVAL_MS} (about two and a half
+ * minutes, +/- jitter) it adds one fresh recruit bot, and after the next interval it
+ * retires one member of the OLD population - add and remove on alternating ticks, so the
+ * headcount only ever changes by one and each change reads as one player entering or
+ * leaving.
  *
  * <p>Add happens FIRST (an extra body for one interval), then remove: a failed spawn
  * retires nothing and the population is left exactly as it was. Only bots in
@@ -38,8 +39,8 @@ import static soloMapling.DebugUtilities.fmt;
  */
 public final class OpqLobbyRotation {
 
-    /** One swap (add, then on a later tick remove) every five minutes or so. */
-    private static final long ROTATE_INTERVAL_MS = 300_000L;
+    /** One swap (add, then on a later tick remove) every two and a half minutes or so. */
+    private static final long ROTATE_INTERVAL_MS = 150_000L;
     /** +/- jitter on the cadence so restarts and long runs do not sync into a metronome. */
     private static final long JITTER_MS = 60_000L;
 
