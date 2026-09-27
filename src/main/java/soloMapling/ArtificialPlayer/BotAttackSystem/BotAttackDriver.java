@@ -134,6 +134,15 @@ public final class BotAttackDriver {
     }
 
     /*
+     * The epoch-ms before which this bot's swing cooldown still holds (now if it is up). Exposed for
+     * the grind engage beat's swing-first ordering: the beat needs to know whether an attack would
+     * land before spending the beat on a pre-swing adjust. Read-only seam, not a behavior gate.
+     */
+    public static long nextAttackEpochMs(int botId) {
+        return nextAttackByBot.getOrDefault(botId, 0L);
+    }
+
+    /*
      * The bot's effective forward attack reach in px (its single-target profile's reach, else its AoE's).
      * Roaming callers use this to approach only to within striking distance instead of always closing to
      * melee range - so a ranged/magic bot stops and attacks from afar. 0 if it has no configured attack.

@@ -24,13 +24,19 @@ final class EngageBeat {
 
     // ── AoE reposition ──
     private static final int AOE_CLUSTER_PX = 200;           // radius around the bot that counts as one pack for the reposition
-    private static final int AOE_REPOSITION_DEADZONE_PX = 60; // don't re-center for a pack this close to underfoot
+    private static final int AOE_REPOSITION_DEADZONE_PX = 110; // don't re-center for a pack this close to underfoot
     private static final long AOE_REPOSITION_COOLDOWN_MS = 700; // cadence floor so it steps in, not jitters
 
     // ── Ranged kiting (bowmen back off when a mob closes inside the comfort band) ──
     private static final int KITE_MIN_PX = 150;             // a mob nearer than this (|dx|) triggers a step back
     private static final int KITE_STEP_PX = 90;             // how far the bot retreats per kite step
     private static final long KITE_COOLDOWN_MS = 400;       // cadence floor between kite steps
+    // Hysteresis: after a kite step the mob must close all the way back inside the comfort band
+    // before another retreat is allowed. KITE_STEP_PX alone re-triggers on the mob's next 250ms beat
+    // (it is still inside the band we just opened), so a chasing mob pinned an archer in a fireless
+    // step-back loop - the exact "keeps repositioning, never fires" report. The mob's ~250ms move beats
+    // close that gap in under two beats, so the escape stays real while every other beat swings.
+    private static final int KITE_RETRIGGER_MARGIN_PX = 30; // must re-enter KITE_MIN_PX by this much to kite again
 
     // ── Attack tempo (real classes can't walk mid-attack; only jumps/teleports move while attacking) ──
     static final long ATTACK_WALK_LOCK_MS = 500;            // after a swing, hold position this long before walking
@@ -49,7 +55,11 @@ final class EngageBeat {
     private long nextSkillMoveMs = 0L;
     private long nextAoeRepositionMs = 0L;
     private long nextKiteMs = 0L;
+    // Kite hysteresis memory: the |dx| the mob must close back inside before another retreat may
+    // fire. Starts at the band edge itself (a first-ever kite is allowed anywhere inside the band);
+    // each retreat re-arms it at KITE_MIN_PX - KITE_RETRIGGER_MARGIN_PX.
     private long nextTurnBeatOkMs = 0L;
+    private int kiteReenterAtDx = KITE_MIN_PX;
 
     EngageBeat(GrindBrain brain) {
         this.b = brain;
@@ -60,17 +70,37 @@ final class EngageBeat {
         nextAoeRepositionMs = 0L;
         nextKiteMs = 0L;
         nextTurnBeatOkMs = 0L;
+        kiteReenterAtDx = KITE_MIN_PX;
+    }
+
+    /*
+     * True when the attack driver can actually land a swing this beat: its per-swing cooldown has
+     * elapsed. The driver computes its cooldown at swing time (BotAttackDriver.attack), so this
+     * mirrors that window for the pre-swing ordering only - a cosmetically early/late beat is
+     * harmless (the driver re-gates and simply no-ops).
+     */
+    private boolean swingReady(Character chr) {
+        return now() >= BotAttackDriver.nextAttackEpochMs(chr.getId());
     }
 
     // Pre-swing adjustments, in priority order: turn to face, ranged kite-back, AoE re-center.
     // Returns true when the beat was spent moving/turning — the caller swings next tick instead.
+    //
+    // A swing-ready gate sits in front of the whole block: a player whose attack is off cooldown
+    // presses attack NOW and moves between swings. Without the gate, every adjust's trigger
+    // condition (a mob crossing sides, a chasing mob inside the comfort band, a pack centroid
+    // drifting) outranks the swing itself, so a moving mob kept the bot busy repositioning while
+    // its damage window lapsed - the "keeps adjusting, never attacks" report.
     boolean preSwingAdjust(Character chr, Monster t) {
+        if (swingReady(chr)) {
+            return false; // the button is up: swing this beat, adjust in the cooldown gap instead
+        }
         if (needsTurnBeat(chr, t)) {
             doTurnBeat(chr, t); // mob is on our other side -> turn + small step this beat, swing next beat
             return true;
         }
         if (b.style == MovementStyle.RANGED && kiteIfTooClose(chr, t)) {
-            return true; // a mob closed the gap -> step back to keep spacing, then fire next beat from range
+            return true; // a mob closed the gap -> step back firing (kiteIfTooClose swings mid-retreat)
         }
         return aoeRepositionIfWorthwhile(chr); // stepped/blinked into the pack -> swing next beat centred
     }
@@ -257,13 +287,26 @@ final class EngageBeat {
             GCMovement.move(chr, tx, ty);
             b.lastMoveTargetX = tx;
         }
-        b.engaged = false; // we moved -> re-plant next beat before swinging
+        b.engaged = true; // the re-center rides the swing beat - fire now, don't re-plant next tick
+        BotAttackDriver.botAttack(chr); // nuke as the blink lands (a mage blinks into the pack and casts)
         return true;
     }
 
-    // Ranged kiting: when a mob closes inside the comfort band, step back along the leash to re-open the
-    // gap, then fire next beat from range. Conservative (cadence-gated, one step at a time). If the leash
-    // pins the bot against its segment edge it just fires in place instead of moon-walking into a wall.
+    /*
+     * Ranged kiting: when a mob closes inside the comfort band, step back along the leash to re-open
+     * the gap, then fire next beat from range. Conservative (cadence-gated, one step at a time). If the
+     * leash pins the bot against its segment edge it just fires in place instead of moon-walking into
+     * a wall.
+     *
+     * Two swing-priority fixes keep this from the observed "chasing mob pins the archer in a fireless
+     * step-back loop":
+     * - Hysteresis: a fresh step-back opens the gap to ~KITE_MIN_PX+KITE_STEP_PX, but the mob is still
+     *   well inside the band it just closed, so the next beat (after KITE_COOLDOWN_MS) would fire again
+     *   off the unchanged distance. Another retreat must now be earned by the mob re-entering the band
+     *   by KITE_RETRIGGER_MARGIN_PX - the escape stays real, every other beat swings.
+     * - The retreat itself fires the in-reach attack mid-stride (a real player kites shoot-on-move), so
+     *   even the retreat beat contributes damage; the driver's own cooldown gates it.
+     */
     private boolean kiteIfTooClose(Character chr, Monster mob) {
         if (now() < nextKiteMs) {
             return false;
@@ -272,6 +315,10 @@ final class EngageBeat {
         Point mp = (mob != null) ? mob.getPosition() : null;
         if (pos == null || mp == null || Math.abs(pos.x - mp.x) >= KITE_MIN_PX) {
             return false; // comfortable spacing already
+        }
+        int dx = Math.abs(pos.x - mp.x);
+        if (dx > kiteReenterAtDx) {
+            return false; // we already opened this gap; wait for the mob to push back inside (hysteresis)
         }
         int dir = (pos.x >= mp.x) ? 1 : -1; // step further from the mob
         int[] leash = b.effectiveLeash(chr);
@@ -282,17 +329,28 @@ final class EngageBeat {
         Point gp = GCMovement.groundPointBelow(chr.getMap(), tx, pos.y);
         GCMovement.move(chr, tx, (gp != null) ? gp.y : pos.y);
         b.lastMoveTargetX = tx;
-        b.engaged = false;
         nextKiteMs = now() + KITE_COOLDOWN_MS;
+        // Re-arm only after the mob has closed back within KITE_MIN_PX - MARGIN of us.
+        kiteReenterAtDx = KITE_MIN_PX - KITE_RETRIGGER_MARGIN_PX;
+        BotAttackDriver.botAttack(chr); // kites shoot on the move: fire the in-reach swing mid-retreat
         return true;
     }
 
-    // A mob on the bot's OTHER side needs a turn before the swing. Real MapleStory carries you a few px into
-    // the new facing when you turn, so we spend one beat turning (face + a small step) and swing the next
-    // beat, instead of an instant same-pixel flip-and-swing. Applies to every class (melee + ranged).
+    /*
+     * A mob on the bot's OTHER side needs a turn before the swing. Real MapleStory carries you a few px into
+     * the new facing when you turn, so we spend one beat turning (face + a small step) instead of an instant
+     * same-pixel flip-and-swing. Ranged only: a directional ranged body has to visibly face the target before
+     * drawing. Melee skips this beat entirely - the attack packet itself carries the facing byte and
+     * BotAttackDriver.attack re-faces the bot at swing time, so a melee swing over a mob that crossed sides
+     * is already correct without spending a beat, and a swing is a far more human response than a pause.
+     *
+     * The step is part of the swing beat now, not a whole beat: it used to leave engaged=false, so the
+     * caller planted fresh the next beat and the swing landed a full 250ms later - a moving mob kept
+     * re-crossing sides and the turn beat kept outranking the attack (the stiff multi-step approach).
+     */
     private boolean needsTurnBeat(Character chr, Monster t) {
-        if (now() < nextTurnBeatOkMs) {
-            return false; // anti-thrash: don't burn a turn-beat every tick on a mob hovering near our x
+        if (b.style != MovementStyle.RANGED || now() < nextTurnBeatOkMs) {
+            return false; // melee faces through the swing packet; throttle: don't burn a turn-beat every tick
         }
         Point bp = chr.getPosition();
         Point mp = (t != null) ? t.getPosition() : null;
@@ -317,10 +375,11 @@ final class EngageBeat {
         int tx = GrindBrain.clamp(bp.x + dir * step, leash[0], leash[1]);
         Point gp = GCMovement.groundPointBelow(chr.getMap(), tx, bp.y);
         GCMovement.move(chr, tx, (gp != null) ? gp.y : bp.y);
-        b.engaged = false;                // we stepped; re-plant next tick before swinging
         b.lastMoveTargetX = tx;
         nextTurnBeatOkMs = now() + TURN_BEAT_THROTTLE_MS;
         b.markProgress();                 // turning to engage is productive, not stuck
+        b.engaged = true;                 // the turn rides the swing beat - fire now, don't re-plant next tick
+        BotAttackDriver.botAttack(chr);
     }
 
     private static long now() {
