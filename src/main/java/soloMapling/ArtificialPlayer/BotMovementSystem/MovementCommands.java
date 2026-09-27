@@ -13,6 +13,7 @@ import soloMapling.ArtificialPlayer.BotMovementSystem.NavigationSystem.Navigatio
 import soloMapling.ArtificialPlayer.BotMovementSystem.NavigationSystem.PathFinder;
 import soloMapling.ArtificialPlayer.GCMoveSystem.GCMovement;
 import soloMapling.ArtificialPlayer.GCMoveSystem.LodCounts;
+import soloMapling.ArtificialPlayer.BotStatusSystem.BotDebuffState;
 import org.gms.util.PacketCreator;
 import org.gms.exception.EmptyMovementException;
 
@@ -124,6 +125,16 @@ public class MovementCommands {
         for (int i = 0; i < fullRecording.size(); i++) {
             if (isBotMovementInterrupted(fakechar)) {
                 clearBotMovementInterrupt(fakechar);
+                injectArtificialStopPacket(fakechar);
+                return true;
+            }
+
+            // A mob debuff that pins the bot (STUN/SEDUCE) stops the replay too: a frozen bot must not
+            // finish walking a recorded path. Same rule the driver ticks honour (GCMovementDriver /
+            // GrindBrain); the replay engine just had no eyes on the debuff state. First-in-loop so a
+            // debuff that lands mid-replay cuts the rest of the path.
+            BotDebuffState replayStatus = BotDebuffState.of(fakechar);
+            if (replayStatus != null && replayStatus.isFrozen()) {
                 injectArtificialStopPacket(fakechar);
                 return true;
             }
