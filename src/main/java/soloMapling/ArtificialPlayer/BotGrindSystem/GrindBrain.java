@@ -27,6 +27,10 @@ public final class GrindBrain {
     // Long enough to cover a drop's settle, short enough that an unreachable drop (one that fell to a
     // lower floor) cannot keep the bot looting instead of fighting.
     static final long COLLECT_AFTER_KILL_MS = 2_500;
+    // A lull on a dry platform ends as soon as another spot/stack on the map feeds — but only after
+    // this grace beat, so a kill inside our own spot's radius (a mob walking home to us, or a spawn
+    // landing mid-check) isn't read as "empty here, mobs there" the instant the last one died.
+    static final long NEARBY_MOB_GRACE_MS = 1_500;
     private static final double APPROACH_REACH_FRAC = 0.80;  // stop at this fraction of attack reach
     static final int ROAM_RETARGET_EPS = 16;         // skip re-issuing move for tiny shifts
     private static final long TARGET_RETARGET_TIMEOUT = 4_000; // give up walking to an unreachable target/spot after this

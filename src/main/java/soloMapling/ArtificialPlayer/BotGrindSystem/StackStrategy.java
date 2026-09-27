@@ -3,12 +3,14 @@ package soloMapling.ArtificialPlayer.BotGrindSystem;
 import org.gms.client.Character;
 import org.gms.server.life.Monster;
 import org.gms.server.maps.MapObject;
+import org.gms.server.maps.MapleMap;
 import soloMapling.ArtificialPlayer.BotSpotClaims;
 import soloMapling.ArtificialPlayer.GCMoveSystem.GCMovement;
 
 import java.awt.Point;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.ThreadLocalRandom;
 
 // STACK: the vertical "leash tether" grind for maps whose feed lives in vertically layered ledges
@@ -33,6 +35,7 @@ final class StackStrategy implements GrindStrategy {
     private static final double CROWDING_W = 30.0;           // per claimant on a candidate stack (spread the cohort)
     private static final double DISTANCE_W = 0.015;          // per px to the stack (prefer near)
     private static final double FEED_W = 10.0;               // per harvestable spawn in the stack
+    private static final double LIVE_MOB_W = 24.0;           // per live hostile now (the visible-fight term; matches camp's SpotFinder.LIVE_MOB_W)
     private static final double SELECT_JITTER = 12.0;        // decorrelate identical cohorts
 
     enum State { SELECT_STACK, TRAVEL, FIGHT, WAIT, RELOCATE }
@@ -54,6 +57,7 @@ final class StackStrategy implements GrindStrategy {
     // Fresh per WAIT episode: now + a random window (ticker-thread only), so two bots sharing a stack
     // don't relocate off the same dry lull on the same tick.
     private long waitPatienceDeadlineMs = 0L;
+    private long enterWaitMs = 0L;           // when this WAIT episode began (nearby-mob grace anchor)
     private volatile boolean mapSaturated = false;
 
     StackStrategy(GrindBrain brain) {
@@ -106,6 +110,7 @@ final class StackStrategy implements GrindStrategy {
         excludedPrimaryIdx = -1;
         excludedUntilMs = 0L;
         waitPatienceDeadlineMs = 0L;
+        enterWaitMs = 0L;
         mapSaturated = false;
         state = State.SELECT_STACK;
     }
@@ -244,6 +249,7 @@ final class StackStrategy implements GrindStrategy {
     private SpotStack pickBestStack(Character chr, MapGrindProfile p, Point pos) {
         SpotStack best = null;
         double bestScore = -Double.MAX_VALUE;
+        MapleMap map = chr.getMap();
         for (SpotStack st : p.stacks()) {
             if (!GrindStylePolicy.canTraverse(b.style, st)) {
                 continue;
@@ -256,7 +262,15 @@ final class StackStrategy implements GrindStrategy {
             double dist = (pos != null)
                     ? pos.distance(new Point((st.x0() + st.x1()) / 2, (st.topY() + st.bottomY()) / 2))
                     : 0;
-            double score = FEED_W * st.totalFeed()
+            // Live mobs now: after a nearby-mob bail the fight is WHERE THE MOBS ARE - a stack that
+            // currently feeds outranks a bigger empty one (same term and weight as camp's pickBest,
+            // SpotFinder.LIVE_MOB_W), so the relocate walks to the visible fight.
+            double live = 0;
+            for (int idx : st.spotIndices()) {
+                live += SpotFinder.liveHostilesWithin(map, p.spots().get(idx));
+            }
+            double score = LIVE_MOB_W * live
+                    + FEED_W * st.totalFeed()
                     - CROWDING_W * holders
                     - DISTANCE_W * dist
                     + ThreadLocalRandom.current().nextDouble() * SELECT_JITTER;
@@ -351,6 +365,7 @@ final class StackStrategy implements GrindStrategy {
         b.engaged = false;
         waitPatienceDeadlineMs = now() + WAIT_PATIENCE_MIN_MS
                 + (long) (b.rng.nextDouble() * (WAIT_PATIENCE_MAX_MS - WAIT_PATIENCE_MIN_MS));
+        enterWaitMs = now();
         // Spend the lull back on the assigned floor's anchor so layered bots hold visible levels.
         Spot a = assigned;
         Point pos = chr.getPosition();
@@ -385,9 +400,70 @@ final class StackStrategy implements GrindStrategy {
         if (b.loot.tryWalkAndLoot(chr, leash[0], leash[1], Math.max(300, (st.x1() - st.x0()) / 2))) {
             return;
         }
+        // Fresh-kill tidying (same as camp): the drop the last kill left keeps the bot on its floor
+        // through the settle window before it walks off to the next pack.
+        if (b.collectAfterKill(chr, leash[0], leash[1], Math.max(300, (st.x1() - st.x0()) / 2))) {
+            return;
+        }
+        // The camp rule, mirrored: once the grace beat is spent, mobs fighting on ANOTHER stack end
+        // this lull immediately — a player doesn't stand out 20s of no-kills with a live platform in
+        // reach. A whole-map lull keeps the full patience + no-kill floor (a genuine respawn wait).
+        boolean mobsElsewhere = anotherStackHasMobs(chr, st);
+        if (mobsElsewhere && now() - enterWaitMs >= GrindBrain.NEARBY_MOB_GRACE_MS) {
+            toRelocate();
+            return;
+        }
         if (now() >= waitPatienceDeadlineMs && now() - b.lastKillMs >= UNPRODUCTIVE_MS) {
             toRelocate();
         }
+    }
+
+    // True when another traversable, not-yet-full stack on this map currently holds live hostiles —
+    // the "mobs ARE feeding, just not on MY floor" signal that ends a dead-floor lull. Mirrors camp's
+    // anotherSpotHasMobs: reachable-only (region filter), skips full stacks (a queue isn't a fight)
+    // and skips this stack (its own dry tether can't send us to itself). The relocate's exclusion
+    // (excludedPrimaryIdx) stops us bouncing straight back into the same dry tether; pickBest's
+    // live-mob scoring then aims the next claim at the stack that actually feeds.
+    private boolean anotherStackHasMobs(Character chr, SpotStack current) {
+        MapleMap map = chr.getMap();
+        Point pos = chr.getPosition();
+        if (map == null || pos == null) {
+            return false;
+        }
+        MapGrindProfile p = SpotFinder.profileIfBuilt(map.getId());
+        if (p == null) {
+            return false;
+        }
+        Set<Integer> reach = GCMovement.reachableRegions(map, pos.x, pos.y);
+        boolean filter = !reach.isEmpty();
+        for (SpotStack st : p.stacks()) {
+            if (st == current) {
+                continue;
+            }
+            if (!GrindStylePolicy.canTraverse(b.style, st)) {
+                continue;
+            }
+            int primary = primaryIndexOf(p, st);
+            if (primary == excludedPrimaryIdx && now() < excludedUntilMs) {
+                continue; // we just left it — it is dry for us by definition
+            }
+            if (filter && primary >= 0
+                    && p.spots().get(primary).regionId() >= 0
+                    && !reach.contains(p.spots().get(primary).regionId())) {
+                continue; // unreachable island ledge
+            }
+            if (BotSpotClaims.holders(map.getId(), primary)
+                    >= Math.min(st.spotIndices().size(), SpotFinder.SHARE_CAP_MAX)) {
+                continue; // already full
+            }
+            for (int idx : st.spotIndices()) {
+                Spot member = p.spots().get(idx);
+                if (SpotFinder.liveHostilesWithin(map, member) > 0) {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
     private void toRelocate() {

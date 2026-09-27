@@ -81,6 +81,7 @@ class CampStrategy implements GrindStrategy {
     // deadline once at entry — instead of re-rolling each tick — means one episode draws exactly one
     // sample (no per-tick drift) and the compare in doWait is a pure `now() >= deadline`.
     private long waitPatienceDeadlineMs = 0L;
+    private long enterWaitMs = 0L;            // when this WAIT episode began (nearby-mob grace anchor)
 
     // Anchor-proximity watchdog state (ticker-thread only, mirroring the wait deadline).
     private long offAnchorSinceMs = 0L;      // when the bot first read off the anchor ledge (0 = on it)
@@ -143,6 +144,7 @@ class CampStrategy implements GrindStrategy {
         bandFallback = false;
         mapSaturated = false;
         waitPatienceDeadlineMs = 0L;
+        enterWaitMs = 0L;
         resetAnchorWatchdog();
         state = State.SELECT_SPOT;
     }
@@ -382,6 +384,7 @@ class CampStrategy implements GrindStrategy {
         // between chasing a mob and walking to a drop - the sideways shuffle after a kill.
         b.lastMoveTargetX = Integer.MIN_VALUE;
         waitPatienceDeadlineMs = now() + rollWaitPatienceMs(chr);
+        enterWaitMs = now();
         // On a shared spot, spend the lull standing at the personal band's center: sharers on a long
         // platform then hold visibly spaced positions instead of bunching wherever the last kill landed.
         int[] band = personalBand(chr, s);
@@ -428,15 +431,25 @@ class CampStrategy implements GrindStrategy {
         if (b.loot.tryWalkAndLoot(chr, leash[0], leash[1], 2 * s.radius())) {
             return;
         }
-        // Pile cleared and no mob — hold position and wait out the respawn lull (regime-scaled: a sparse
-        // or spread map gives up on a dry spot much sooner than a dense compact one). But a lull only
-        // makes sense while the rest of the map is quiet too: if ANOTHER reachable platform on this map
-        // is holding live mobs, a player would just walk over and keep killing instead of staring at a
-        // dead ledge — so cut the cumulative no-kill wait short and relocate now. The live-mob term in
-        // SpotFinder.pickBest then aims us at the mob-bearing platform. When the whole map is dry this
-        // stays false and the bot still camps the respawn out (map changes are the macro brain's job).
+        // Fresh-kill tidying: inside the collect window the drop the bot just made (settling included)
+        // keeps the bot standing on its spot instead of walking off to the next pack while the loot is
+        // still in the air.
+        if (b.collectAfterKill(chr, leash[0], leash[1], 2 * s.radius())) {
+            return;
+        }
+        // A player who cleared their platform doesn't stand out the respawn timer when mobs are visibly
+        // fighting elsewhere on the map - they walk over and join. The grace beat covers the moment the
+        // last local mob died (a spawn can already be walking back to us); when it is spent and mobs are
+        // feeding elsewhere, relocate NOW instead of waiting out the full lull patience. A whole-map
+        // lull (no mobs anywhere) is a real respawn wait: the regime-scaled patience + no-kill floor
+        // still gate the relocate (the macro brain owns map changes).
+        boolean mobsElsewhere = anotherSpotHasMobs(chr, s);
+        if (mobsElsewhere && now() - enterWaitMs >= GrindBrain.NEARBY_MOB_GRACE_MS) {
+            toRelocate();
+            return;
+        }
         boolean lullOver = now() >= waitPatienceDeadlineMs;
-        if (lullOver && (now() - b.lastKillMs >= unproductiveMs(chr) || anotherSpotHasMobs(chr, s))) {
+        if (lullOver && (now() - b.lastKillMs >= unproductiveMs(chr) || mobsElsewhere)) {
             toRelocate();
         }
     }
