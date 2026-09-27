@@ -363,6 +363,7 @@ public class EnvironmentManager {
 
         BotDecorationQueue.start();
         BotEquipChecker.start();
+        OpqLobbyRotation.start();
 
         double totalSeconds = (System.currentTimeMillis() - startupStart) / 1000.0;
         System.out.println(String.format(
@@ -1171,14 +1172,22 @@ public class EnvironmentManager {
     }
 
     public static void spawnOPQBotsInLobby() {
-        int totalBots = scaledAmbient(10 + random().nextInt(6)); // 10-15, scaled
+        spawnOPQBatch(scaledAmbient(10 + random().nextInt(6)));
+    }
 
-        debugprint(fmt("Spawning {} OPQ bots on the lobby's walkable ground...", totalBots));
-
-        // Placed by the map's own WZ terrain rather than its recorded platform pack, matching the
-        // other quest lobbies (PqBotSpawner) - the bots move on the dynamic engine now, which
-        // needs no recordings. Falls back to the map's spawn portal when the graph is not baked.
-        List<Integer> allBotIds = PlatformPlacement.spawnBotsOnMap(totalBots, OPQ_LOBBY);
+    /**
+     * One OPQ recruit-bot batch: placed by the lobby map's own WZ terrain (matching the other quest
+     * lobbies - the dynamic engine needs no recordings), levelled into OrbisPQ's own 51-70 eligibility
+     * band and started as OPQ bots. Used both by startup's wave 7 and by the lobby rotation.
+     *
+     * @return the ids of the bots that were created and started, empty when the map was missing
+     */
+    public static List<Integer> spawnOPQBatch(int count) {
+        if (count <= 0) {
+            return List.of();
+        }
+        // Falls back to the map's spawn portal when the graph is not baked yet.
+        List<Integer> allBotIds = PlatformPlacement.spawnBotsOnMap(count, OPQ_LOBBY);
 
         if (!allBotIds.isEmpty()) {
             // OrbisPQ's own eligibility test (OrbisPQ.js) is level 51-70: a level-50 bot standing
@@ -1188,6 +1197,7 @@ public class EnvironmentManager {
             setAndStartBots(allBotIds, BotTypeManager.BotType.OPQ_BOT);
             debugprint(fmt("OPQ lobby bots spawned and started: {}", allBotIds.size()));
         }
+        return allBotIds;
     }
 
     public static void setBotsLevelRange(List<Integer> botIds, int minLevel, int maxLevel) {
