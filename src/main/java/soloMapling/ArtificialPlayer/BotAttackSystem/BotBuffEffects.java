@@ -299,6 +299,49 @@ public final class BotBuffEffects {
         return effect != null ? effect.getDuration() : 0;
     }
 
+    /**
+     * As {@link #durationOf(int)}, with the attack-enabler sanity clamp applied for THIS bot -
+     * the overload every cadence (gate clock, recast timer, player grants) must read, so the
+     * aura's lifetime and the clocks that drive it can never disagree.
+     *
+     * <p>Why the clamp exists: the host's {@code StatEffect.loadFromData} multiplies every
+     * SKILL's WZ {@code time} by 1000 (only items are stored in ms), and the 海盗船's WZ value is
+     * 2 100 000 - the ship was written as a mount-class "rest of the session" ride, so the naive
+     * duration is ~24 DAYS. A real Corsair keeps the ship until they choose to dismount or die,
+     * but a bot must cycle it like any other attack-enabler aura (the attack gate and the visual
+     * share the clock), so the aura is capped and scaled by the bot's level.</p>
+     */
+    public static int durationOf(int skillId, Character bot) {
+        int durationMs = durationOf(skillId);
+        if (durationMs > 0 && skillId == Corsair.BATTLE_SHIP) {
+            return shipDurationSecondsFor(bot != null ? bot.getLevel() : 0) * 1000;
+        }
+        return durationMs;
+    }
+
+    /** The 海盗船's capped wire duration, in seconds: 30s at the 120 job advance, 180s at 200. */
+    static final int SHIP_DURATION_MIN_S = 30;
+    static final int SHIP_DURATION_MAX_S = 180;
+    /** The level the 海盗船 becomes a Corsair's (the 4th-job advance) - the scale's floor. */
+    static final int SHIP_DURATION_MIN_LEVEL = 120;
+    /** v83's level cap - the scale's ceiling. */
+    static final int SHIP_DURATION_MAX_LEVEL = 200;
+
+    /**
+     * Pure seam of the 海盗船's level scaling, so the curve is testable without a character:
+     * linear from {@link #SHIP_DURATION_MIN_S} at {@link #SHIP_DURATION_MIN_LEVEL} up to
+     * {@link #SHIP_DURATION_MAX_S} at {@link #SHIP_DURATION_MAX_LEVEL}, clamped on both ends (a
+     * sub-120 level rides the floor - a Corsair bot is never that low, but a GM-spawned test
+     * character may be).
+     */
+    static int shipDurationSecondsFor(int level) {
+        int span = SHIP_DURATION_MAX_LEVEL - SHIP_DURATION_MIN_LEVEL;
+        int scaled = SHIP_DURATION_MIN_S
+                + (int) ((long) (level - SHIP_DURATION_MIN_LEVEL)
+                    * (SHIP_DURATION_MAX_S - SHIP_DURATION_MIN_S) / span);
+        return Math.max(SHIP_DURATION_MIN_S, Math.min(SHIP_DURATION_MAX_S, scaled));
+    }
+
     // Range a party buff reaches around the casting bot (split x/y, since MapleStory
     // maps are wide and short). Members further than this aren't buffed.
     private static final int PARTY_BUFF_RANGE_X = 700;

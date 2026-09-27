@@ -252,8 +252,10 @@ public final class BotBuffRequestHandler {
         }
         for (Grant grant : grants) {
             // Natural buff length: the skill's WZ duration at max level (the same cadence the bot
-            // tops itself up on), not the 10-minute GM-command length.
-            int durationMs = BotBuffEffects.durationOf(grant.skillId());
+            // tops itself up on), not the 10-minute GM-command length. The level-scaled overload:
+            // a granted 海盗船 rides the same clamp as a bot's own aura (its WZ time is a ~24-day
+            // mount-style ride - 24 days on a player would be absurd).
+            int durationMs = BotBuffEffects.durationOf(grant.skillId(), chr);
             if (durationMs <= 0) {
                 continue; // skill has no resolvable duration - skip rather than invent one
             }

@@ -111,7 +111,9 @@ public final class BotBuffDriver {
             // bot's animation and, for party buffs, spreads to nearby party members.
             MethodScheduler.runAfterDelay(() -> BotBuffEffects.castBuff(bot, sid, silent), cast * STAGGER_MS);
 
-            int durationMs = BotBuffEffects.durationOf(sid);
+            // Same overload the gate clock reads: the 海盗船's recast cadence must follow the
+            // level-scaled clamp, not the WZ's ~24-day ride value, or the timers disagree.
+            int durationMs = BotBuffEffects.durationOf(sid, bot);
             long recastAt = durationMs > 0 ? now + (long) (durationMs * 0.9) : now + FALLBACK_RECAST_MS;
             timers.put(sid, recastAt);
             cast++;

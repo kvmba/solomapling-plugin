@@ -274,7 +274,10 @@ public final class BotAuraState {
             // the swap below broadcasts that cancellation - exactly how the client's single MORPH
             // stat slot behaves.
             MORPH_SKILL.put(id, skillId);
-            int durationMs = BotBuffEffects.durationOf(skillId);
+            // The level-scaled durationOf: for the 海盗船 the WZ time is a ~24-day mount-style
+            // ride - the clamp is what makes the ship an attack-enabler aura a bot actually
+            // cycles, instead of a one-cast-per-bot-session pose.
+            int durationMs = BotBuffEffects.durationOf(skillId, bot);
             long life = durationMs > 0 ? (long) (durationMs * 0.9) : ENABLER_FALLBACK_MS;
             ATTACK_ENABLER_UNTIL.put(id, System.currentTimeMillis() + life);
         } else if (isDisguise(skillId)) {

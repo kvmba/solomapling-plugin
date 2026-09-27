@@ -154,6 +154,33 @@ class BotAuraStateTest {
                 null, false, false, false, 0));
     }
 
+    // ── 海盗船 duration clamp (shipDurationSecondsFor's pure curve) ───────────────
+
+    @Test
+    void shipDurationScalesLinearlyBetweenItsClamps() {
+        // The WZ time for 5221006 is 2 100 000 s (a mount-style "rest of the session" ride);
+        // the aura must instead cycle on a level-scaled window: 30s at the 4th-job advance,
+        // 180s at the level cap, linear in between, clamped on both ends.
+        assertEquals(BotBuffEffects.SHIP_DURATION_MIN_S,
+                BotBuffEffects.shipDurationSecondsFor(BotBuffEffects.SHIP_DURATION_MIN_LEVEL));
+        assertEquals(BotBuffEffects.SHIP_DURATION_MAX_S,
+                BotBuffEffects.shipDurationSecondsFor(BotBuffEffects.SHIP_DURATION_MAX_LEVEL));
+        int mid = BotBuffEffects.shipDurationSecondsFor(160);
+        assertTrue(mid > BotBuffEffects.SHIP_DURATION_MIN_S && mid < BotBuffEffects.SHIP_DURATION_MAX_S,
+                "a mid-level Corsair rides a scaled window, got " + mid);
+        // monotonic in level
+        assertTrue(BotBuffEffects.shipDurationSecondsFor(130) < BotBuffEffects.shipDurationSecondsFor(190));
+    }
+
+    @Test
+    void shipDurationClampsOutOfBoundsLevels() {
+        // A GM-spawned test character can be below the job advance; the curve must not run past
+        // either end (and a negative level must not invert the scale).
+        assertEquals(BotBuffEffects.SHIP_DURATION_MIN_S, BotBuffEffects.shipDurationSecondsFor(0));
+        assertEquals(BotBuffEffects.SHIP_DURATION_MIN_S, BotBuffEffects.shipDurationSecondsFor(119));
+        assertEquals(BotBuffEffects.SHIP_DURATION_MAX_S, BotBuffEffects.shipDurationSecondsFor(300));
+    }
+
     @Test
     void eachMorphGatedAttackMapsToItsOwnEnabler() {
         // The mapping a real client enforces: Shockwave (碎石乱击) needs the 3rd-job 变身,
