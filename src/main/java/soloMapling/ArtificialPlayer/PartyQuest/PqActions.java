@@ -344,13 +344,21 @@ public final class PqActions {
                 .boxed().toList();
     }
 
-    /** Reactor oid by data id, or -1. Quests name reactors by data id ("stone4" and friends). */
+    /**
+     * Reactor oid by data id, or -1. Quests name reactors by data id ("stone4" and friends).
+     *
+     * <p>Filtered on the engine's own {@code isActive}, not {@code isAlive}: a fully broken
+     * reactor stays in the map forever on this host (negative reactorTime skips the destroy
+     * path) and keeps {@code isAlive} true in its terminal state. Without the filter the
+     * first-oid lookup re-locks onto the last box the party emptied - Pirate's box loop
+     * struck the shell once, saw it "still alive", and broke every tick.
+     */
     public static int findReactorOid(Character bot, int dataId) {
         if (bot == null || bot.getMap() == null) {
             return -1;
         }
         return bot.getMap().getAllReactors().stream()
-                .filter(r -> r.getId() == dataId)
+                .filter(r -> r.getId() == dataId && r.isActive())
                 .mapToInt(r -> r.getObjectId())
                 .findFirst().orElse(-1);
     }
