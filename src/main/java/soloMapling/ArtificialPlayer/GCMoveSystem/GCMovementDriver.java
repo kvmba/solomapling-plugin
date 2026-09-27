@@ -426,6 +426,18 @@ final class GCMovementDriver {
 
         // Abandon a move target the bot can't make progress toward, so it never tries forever.
         if (giveUpStalledMove(entry)) {
+            // Settle ONLY a genuinely grounded bot. An airborne or climbing bot must just fall
+            // through: idleOnGround clears inAir/climbing WITHOUT starting a fall or moving the
+            // bot, so a climber (or a mid-hop bot) hit by the abandon was left standing in the air
+            // with every recovery net blind - the frozen-air watchdog requires inAir (just cleared)
+            // and the stuck hop is exempted while no moveTarget/navEdge remains. It then hung in
+            // the stand pose until some later command happened to launch it again. Clearing the
+            // target is the whole abandon: inAir/climbing themselves keep hasGoal true below, so
+            // the normal physics either lands the fall or holds the legitimate rope hang on the
+            // next tick.
+            if (entry.inAir || entry.climbing) {
+                return;
+            }
             BotPhysicsEngine.idleOnGround(entry, bot);
             broadcastIfObserved(entry);
             return;
