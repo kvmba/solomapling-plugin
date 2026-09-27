@@ -2625,10 +2625,9 @@ final class BotPhysicsEngine {
                 ground.add(fh);
                 minX = Math.min(minX, Math.min(fh.getX1(), fh.getX2()));
                 maxX = Math.max(maxX, Math.max(fh.getX1(), fh.getX2()));
-                if (fh.getX1() != fh.getX2()) {
-                    groundMinX = Math.min(groundMinX, Math.min(fh.getX1(), fh.getX2()));
-                    groundMaxX = Math.max(groundMaxX, Math.max(fh.getX1(), fh.getX2()));
-                }
+                // Non-wall ⇒ x1 != x2, so this IS the standable extent (walls excluded).
+                groundMinX = Math.min(groundMinX, Math.min(fh.getX1(), fh.getX2()));
+                groundMaxX = Math.max(groundMaxX, Math.max(fh.getX1(), fh.getX2()));
                 if (fromBelowIds.contains(fh.getId())) {
                     fromBelow.add(fh);
                 }
