@@ -62,6 +62,11 @@ public class ZakumPQBot extends PartyQuestBot {
             }
             PqActions.hitReactor(getChr(), oid);
         }
+        if (firstStandingCrate() < 0) {
+            // The room's crates are all broken and the ore is in hand or on the floor:
+            // this room's work is done even though the run goes on until Aura forges.
+            sayStageClearOnce(getChr().getMapId());
+        }
 
         // Whatever fell out is the point of the room.
         PqActions.loot(getChr(), getChr().getPosition(), 2_000,

@@ -56,6 +56,21 @@ public abstract class PartyQuestBot extends BotSM {
     /** When this bot next strolls; re-armed after each stroll. */
     private long nextLobbyStrollAtMs;
 
+    /** Quiet-until between two in-quest lines, so one beat never lands right after another. */
+    private static final long QUEST_CHAT_GAP_MS = 20_000L;
+
+    /** Jitter on the gap so a cohort in one room does not talk over each other in lockstep. */
+    private static final long QUEST_CHAT_GAP_JITTER_MS = 10_000L;
+
+    /** When this bot may say its next line inside the quest; 0 means the first beat is free. */
+    private long nextQuestChatAtMs;
+
+    /** Whether the previous tick saw this bot inside the quest - the run-start edge. */
+    private boolean wasInsideQuest;
+
+    /** The stage or room whose clear already celebrated this run, so one milestone speaks once. */
+    private int celebratedClearKey = Integer.MIN_VALUE;
+
     /**
      * Lobby pacing: how often the idle shuffle picks a new spot.
      *
@@ -153,8 +168,17 @@ public abstract class PartyQuestBot extends BotSM {
         }
 
         if (!isInsideQuest(bot.getMapId())) {
+            // Outside the quest the run's edge flags reset, so a bot that leaves and comes
+            // back gets its run-start line again - and its stage-clear milestones - on the
+            // next run.
+            wasInsideQuest = false;
+            celebratedClearKey = Integer.MIN_VALUE;
             tickLobby(bot);
             return;
+        }
+        if (!wasInsideQuest) {
+            wasInsideQuest = true;
+            noteEnteredQuest();
         }
         if (bot.getParty() == null) {
             returnToLobby("no longer in a party");
@@ -175,7 +199,10 @@ public abstract class PartyQuestBot extends BotSM {
         // Survive the fight: sip back whatever the room's mobs took off (no-op while full).
         potionSim.tick(bot);
 
+        maybeQuestChat(Beat.WORKING);
+
         if (workStage()) {
+            maybeQuestChat(Beat.CLEAR);
             returnToLobby("stage work reports the run is over");
         }
     }
@@ -264,6 +291,113 @@ public abstract class PartyQuestBot extends BotSM {
         String line = PqRecruitMessages.generateRecruitMessage(
                 questName, bot.getLevel(), bot.getJob() == null ? null : bot.getJob().getName());
         SocialCommands.BotSpeak(bot, line);
+    }
+
+    // =========================================================================
+    // In-quest chatter
+    // =========================================================================
+
+    /**
+     * The moments inside a run a bot may break its working silence for. A run's rooms are
+     * real maps full of real players, and a crowd that fights and loots without a word reads
+     * as machinery - the same judgment the lobby's recruit shout already made - but the
+     * opposite failure is a bot that narrates every swing. So each beat fires only through
+     * two gates: a per-beat roll (the beat's own personality - entering is worth a remark,
+     * walking through an opened door only sometimes), and one shared quiet-until (see
+     * {@link #maybeQuestChat}) so no two beats ever land back to back.
+     */
+    enum Beat {
+        /** First tick inside the quest - the run is starting. */
+        START(0.60),
+        /** Mid-stage, while the work is actually going on. */
+        WORKING(0.25),
+        /** The stage's work reported done (this stage, not necessarily the run). */
+        CLEAR(0.70),
+        /** The party is moving to the next room through an opened portal. */
+        DOOR(0.50);
+
+        /** Odds this beat produces a line at all when it fires. */
+        final double chance;
+
+        Beat(double chance) {
+            this.chance = chance;
+        }
+    }
+
+    /**
+     * Maybe say one line for a beat of the run, on the bot's current map.
+     *
+     * <p>Three gates before any packet: the shared quiet-until (armed at
+     * {@code 20s + jitter(10s)} after every line, whichever beat it came from), the beat's
+     * own roll, and {@link GCMovement#isMapObserved} - a broadcast nobody hears is a packet
+     * paid for nothing, the same economy the lobby shout and the speak emote already use.
+     * The gate order matters: the quiet-until is consumed first, so a beat silenced by it
+     * stays silent rather than being deferred into the next one.
+     *
+     * <p>Lines come from the message pack: {@code pq.chat.<questName>.<beat>.<n>} first,
+     * the shared {@code pq.chat.generic.<beat>.<n>} pool otherwise, and a quest with neither
+     * for a beat simply says nothing - which is why a bot that never set {@link #questName}
+     * still works, riding the generic pool.
+     */
+    private void maybeQuestChat(Beat beat) {
+        Character bot = getChr();
+        if (bot == null || bot.getMap() == null) {
+            return;
+        }
+        long now = System.currentTimeMillis();
+        if (now < nextQuestChatAtMs) {
+            return;
+        }
+        nextQuestChatAtMs = now + QUEST_CHAT_GAP_MS + jitter(QUEST_CHAT_GAP_JITTER_MS);
+        if (ThreadLocalRandom.current().nextDouble() >= beat.chance) {
+            return;
+        }
+        if (!GCMovement.isMapObserved(bot.getMapId())) {
+            return;
+        }
+        String line = PqStageChat.line(questName, beat);
+        if (line != null) {
+            SocialCommands.BotSpeak(bot, line);
+        }
+    }
+
+    /**
+     * A subclass's report that the stage it is working is done - the ladder crossed, the
+     * flowers all bloomed, the crates broken - at the moment it happens. The base class
+     * fires {@link Beat#CLEAR} only for a whole run ending; the intermediate moments are
+     * visible only to the quest's own logic, so they are marked here.
+     */
+    /**
+     * A subclass's report that the stage it is working is done - the ladder crossed, the
+     * flowers all bloomed, the crates broken - at the moment it happens. The base class
+     * fires {@link Beat#CLEAR} only for a whole run ending; the intermediate moments are
+     * visible only to the quest's own logic, so they are marked here. One milestone speaks
+     * once per run: the key makes repeated calls no-ops, and leaving the run clears it, so
+     * the next run celebrates again.
+     */
+    protected void sayStageClearOnce(int key) {
+        if (celebratedClearKey == key) {
+            return;
+        }
+        celebratedClearKey = key;
+        maybeQuestChat(Beat.CLEAR);
+    }
+
+    /**
+     * First tick inside the quest: the run is starting. Fired on the false-to-true edge of
+     * {@link #isInsideQuest}, before the stage work, so the line lands while the party is
+     * still gathering itself in the entry room.
+     */
+    private void noteEnteredQuest() {
+        maybeQuestChat(Beat.START);
+    }
+
+    /**
+     * The party is walking into the next room. Spoken just before the portal is entered -
+     * once through, the line would land in the room behind, where the party no longer is.
+     */
+    private void sayDoorLine() {
+        maybeQuestChat(Beat.DOOR);
     }
 
     /**
@@ -395,6 +529,7 @@ public abstract class PartyQuestBot extends BotSM {
         }
         BotLogger.log("PQ bot " + getChr().getName() + " following the leader from "
                 + here + " to " + leaderMap + " through portal " + exit.getName());
+        sayDoorLine();
         PqActions.walkTo(getChr(), exit.getPosition());
         PqActions.enterPortal(getChr(), exit);
         return getChr().getMapId() != here;

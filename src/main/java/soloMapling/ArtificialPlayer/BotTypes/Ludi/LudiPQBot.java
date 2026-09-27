@@ -89,6 +89,7 @@ public class LudiPQBot extends PartyQuestBot {
             // Stage work is done: stand by the room's stage NPC instead of idling wherever
             // the last fight ended. Walking the portal is the leader's business, and the map
             // change re-homes this bot when it follows.
+            sayStageClearOnce(getChr().getMapId());
             PqActions.waitNearStageNpc(getChr());
             return stage >= 9;
         }

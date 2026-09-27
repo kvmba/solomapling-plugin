@@ -93,12 +93,14 @@ public class KerningPQBot extends PartyQuestBot {
         switch (stage) {
             case 1 -> {
                 if (KerningStages.stageCleared(getChr(), 1)) {
+                    sayStageClearOnce(stage);
                     return false; // the portal to stage 2 is open; the leader walks it
                 }
                 KerningStages.workCoupons(getChr());
             }
             case 2, 3, 4 -> {
                 if (KerningStages.stageCleared(getChr(), stage)) {
+                    sayStageClearOnce(stage);
                     return false;
                 }
                 String plan = KerningStages.takeMyPlace(getChr(), stage, botIndex());
