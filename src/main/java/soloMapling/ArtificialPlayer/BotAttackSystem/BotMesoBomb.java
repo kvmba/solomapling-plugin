@@ -37,9 +37,9 @@ import java.util.concurrent.ConcurrentHashMap;
  * plugin owns:
  *
  *   - onAttackLanded (wired into BotAttackEffects.broadcastAndApply, next to the combo orbs):
- *     while a Pickpocket-level roll passes, spawn the bag the host would have spawned - same
- *     per-line chance, same amount formula (damage / 20000 * x, capped at x), dropped with the
- *     bot as owner so it reads as the bot's own money on the floor.
+ *     every landed damage line scatters exactly one bag - no chance roll - with the amount
+ *     following the WZ curve (damage / 20000 * x, clamped to [1, x]), dropped with the bot as
+ *     owner so it reads as the bot's own money on the floor.
  *   - tryDetonate (called from BotAttackDriver's AUTO plan): when enough own bags sit inside the
  *     skill's WZ box, broadcast a real MESO_EXPLOSION close-range packet (the host's own
  *     PacketCreator writes the per-entry bag-count byte for this skill, so observers parse the
@@ -85,7 +85,11 @@ public final class BotMesoBomb {
 
     /*
      * The pickpocket half: called after every landed bot swing with the skill that rendered.
-     * Mirrors the host's drop loop: per damage line, chance = WZ prop, amount = the WZ cap.
+     * Per the rule this loop plays by: EVERY landed damage line scatters exactly one bag - no
+     * chance roll (the host's per-line prop roll is deliberately not mirrored; a six-line swing
+     * must read as six bags, not a maybe). Amount follows the WZ curve instead: per line,
+     * damage / 20000 * x clamped to [1, x], so bag size breathes with the hit while staying
+     * pocket change - the payoff was always the explosion, not the crumbs.
      * Runs on the bot's grind tick (single writer for the register).
      */
     public static void onAttackLanded(Character bot, int skillId, Map<Monster, List<Integer>> hits) {
@@ -117,8 +121,8 @@ public final class BotMesoBomb {
             }
             for (Integer line : hit.getValue()) {
                 int dmg = BotAttackData.decodeDamageLine(line);
-                if (dmg <= 0 || !effect.makeChanceResult()) {
-                    continue; // MISS lines scatter nothing, like the host's roll
+                if (dmg <= 0) {
+                    continue; // MISS lines are not hits - they scatter nothing
                 }
                 int amount = (int) Math.min(Math.max(dmg / 20000.0 * cap, 1), cap);
                 // playerDrop=true keeps the owner lock window (a real bot drop, not a monster
