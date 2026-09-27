@@ -135,13 +135,17 @@ public final class BotSpotPicker {
                 }
             }
         }
-        // A short step on the home ledge still beats a cross-floor hang: prefer it over the farthest
-        // candidate, which may need a rope the stroll will not commit to. bestX can legitimately be
-        // fromX (every sampled cross candidate was rejected), and a zero-distance move would be a
-        // no-op twitch, so fall back to the home ledge's farthest end instead.
+        // A short step on the home ledge still beats a cross-floor hang. best is resolved ON ITS OWN
+        // ledge, never home's band: bestX is drawn from best's span, and re-seating that x on a
+        // different ledge would fall off it (groundPointInRegion then nulls out and the synthetic
+        // centre-Y fallback lands the move off any walkable floor - the same wedge the band was meant
+        // to prevent). bestX == fromX means every sampled candidate was rejected, so the home ledge's
+        // farthest end is the only honest remainder.
+        if (best != null) {
+            return groundAt(map, best, bestX);
+        }
         if (home != null) {
-            int x = bestX != fromX ? bestX : clampSpan(home, fromX);
-            return groundAt(map, home, x);
+            return groundAt(map, home, clampSpan(home, fromX));
         }
         return null;
     }
