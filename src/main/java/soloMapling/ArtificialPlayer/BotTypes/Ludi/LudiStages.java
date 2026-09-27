@@ -14,6 +14,8 @@ import java.awt.Point;
 import java.util.List;
 import java.util.Map;
 
+import static soloMapling.ArtificialPlayer.BotHelpers.blockingSleep;
+
 /**
  * What a bot does in each Ludi PQ stage.
  *
@@ -32,15 +34,24 @@ public final class LudiStages {
     }
 
     /**
-     * botId -> the stage-2 box this bot is working (x = reactor oid, y = box y). Claims are
-     * best-effort anti-queue bookkeeping, not a lock: two bots may still briefly walk the
-     * same box, and the first strike wins.
+     * The stage-2 box this bot is working: the map instance's identity (the tower and its
+     * trap room are sibling maps whose reactor oids collide - a claim carried across a trap
+     * warp would shadow an unrelated box on the other side), the reactor oid, and the box y.
+     * Claims are best-effort anti-queue bookkeeping, not a lock: two bots may still briefly
+     * walk the same box, and the first strike wins.
      */
-    private static final Map<Integer, Point> TOWER_BOX_CLAIMS = new java.util.concurrent.ConcurrentHashMap<>();
+    private record BoxClaim(int mapInstance, int oid, int y) {}
+
+    private static final Map<Integer, BoxClaim> TOWER_BOX_CLAIMS = new java.util.concurrent.ConcurrentHashMap<>();
 
     /** A stage is done when the quest says so; these are its own per-stage flags. */
     public static boolean stageCleared(Character bot, int stage) {
         return PqActions.readEimString(bot, stage + "stageclear") != null;
+    }
+
+    /** The map instance a stage-2 claim belongs to: two concurrent runs must not collide. */
+    private static int mapInstanceOf(Character bot) {
+        return System.identityHashCode(bot.getMap());
     }
 
     // =========================================================================
@@ -85,8 +96,13 @@ public final class LudiStages {
 
     /**
      * Break every pass box on the stage-2 tower. The room's eleven boxes (2202003) are the
-     * only pass source - there are no mobs to hunt here - so the stage is a climb past each
-     * box, breaking it on the way. The bonus box (2200002) is free mesos on the way out.
+     * party's only pass source in this room - there are no mobs to hunt here - so the stage
+     * is a climb past each box, breaking it on the way.
+     *
+     * <p>The room's twelfth box, the trap (2200002), is left strictly alone: its script
+     * warps the whole party into the trap room (922010201), where four more of the fifteen
+     * passes wait behind {@link #workTrapRoom}. A bot that pops it "for free mesos" drags
+     * the run sideways instead.
      *
      * <p>The tower is one vertical room: its boxes hang on floors between the spawn at the
      * top (y -2521) and the ground floor at the bottom (y +129), and the floors between them
@@ -97,21 +113,72 @@ public final class LudiStages {
      * boxes; a bot that despawns releases its share).
      */
     public static void breakTowerBoxes(Character bot) {
-        // One box per macro tick: the bot walks to the nearest box still standing and breaks
-        // it. Eleven boxes is a handful of ticks, which keeps the tower climb visible.
+        // Deliver FIRST (a bot that pockets passes starves the leader's turn-in), then work
+        // one box per tick: approach it and strike it all the way to broken in the same
+        // breath, then sweep what it dropped.
+        PqActions.recoverUngatheredHandoffs(bot, LudiPqData.PASS);
+        PqActions.handItemsToLeader(bot, LudiPqData.PASS);
+
         int box = nearestOwnedBoxOid(bot, LudiPqData.BOX_STAGE2);
         if (box >= 0 && hitReactorDescendRotate(bot, box, LudiPqData.BOX_STAGE2)) {
+            PqActions.loot(bot, bot.getPosition(), 2_000, new int[]{LudiPqData.PASS});
             return;
         }
         // Boxes all gone (the leader still has to turn the passes in), or a box stood but
         // every approach failed this tick: either way park by the stage NPC instead of
         // idling at the spawn - or piling onto the NPC pixel with the rest of the party.
         PqActions.spreadNearStageNpc(bot);
-        int bonus = PqActions.findReactorOid(bot, LudiPqData.BOX_STAGE2_BONUS);
-        if (bonus >= 0) {
-            hitReactorAt(bot, bonus);
-        }
+        PqActions.loot(bot, bot.getPosition(), 2_000, new int[]{LudiPqData.PASS});
     }
+
+    /**
+     * Work the stage-2 trap room (922010201) - the tower's trap box warps the whole party
+     * here, and this room's four boxes carry four of the stage's fifteen passes: they MUST
+     * be collected or the stage can never clear.
+     *
+     * <p>The beat: hand off, break the boxes (the room is small, no descent needed), loot,
+     * and take the room's own exit back to the tower to rejoin the box work - the exit is a
+     * script-less portal, so entering it warps the bot from wherever it stands. Standing
+     * still here is the one wrong answer: the room has no stage NPC and no mobs, so the old
+     * wait-then-idle fallback froze a trapped bot solid.
+     */
+    public static void workTrapRoom(Character bot) {
+        PqActions.recoverUngatheredHandoffs(bot, LudiPqData.PASS);
+        PqActions.handItemsToLeader(bot, LudiPqData.PASS);
+
+        int box = nearestOwnedBoxOid(bot, LudiPqData.BOX_STAGE2);
+        if (box >= 0 && hitReactorRotate(bot, box, LudiPqData.BOX_STAGE2)) {
+            PqActions.loot(bot, bot.getPosition(), 2_000, new int[]{LudiPqData.PASS});
+            return;
+        }
+        PqActions.loot(bot, bot.getPosition(), 2_000, new int[]{LudiPqData.PASS});
+        // Nothing of ours left standing (a teammate's bot may be mid-box): back to the
+        // tower to work it from there. Our claim releases with the room change.
+        exitTrapRoom(bot);
+    }
+
+    /**
+     * Take the trap room's own exit (out00) back to the stage-2 tower.
+     *
+     * <p>The exit is a script-less portal, so the engine would accept the warp from
+     * anywhere - but the bot walks to it first and only enters up close, so the climb out
+     * reads as climbing instead of a teleport. The walk is re-armed each tick until the bot
+     * is at the door.
+     */
+    static void exitTrapRoom(Character bot) {
+        org.gms.server.maps.Portal exit = exitPortalOf(bot);
+        if (exit == null || exit.getPosition() == null || bot.getPosition() == null) {
+            return;
+        }
+        if (bot.getPosition().distanceSq(exit.getPosition()) > EXIT_WARP_RANGE_SQ) {
+            PqActions.walkTo(bot, exit.getPosition());
+            return; // still climbing; the next tick takes over from wherever we are
+        }
+        PqActions.enterPortal(bot, exit);
+    }
+
+    /** How close the bot must stand to the trap room's exit before it takes it. */
+    private static final double EXIT_WARP_RANGE_SQ = 250.0 * 250.0;
 
     /**
      * The nearest alive box of this data id this bot may work.
@@ -139,12 +206,16 @@ public final class LudiStages {
             return -1; // nothing standing (or nothing left to rotate onto)
         }
 
-        // The nearest box is contested when another live bot on this map already claims it.
-        // Claims are by reactor oid - the map's own identity for a box - so two DIFFERENT
-        // boxes on one floor never contest each other (the old y-only tolerance read them as
-        // one and sent both bots wandering), while two bots on the SAME box always do.
-        for (Map.Entry<Integer, Point> claim : TOWER_BOX_CLAIMS.entrySet()) {
-            if (claim.getKey() == myId || claim.getValue().x != nearest) {
+        // The nearest box is contested when another live bot in THIS map instance already
+        // claims it. Claims are by reactor oid within one instance - the map's own identity
+        // for a box - so two DIFFERENT boxes on one floor never contest each other (the old
+        // y-only tolerance read them as one and sent both bots wandering), while two bots on
+        // the SAME box always do.
+        int here = mapInstanceOf(bot);
+        for (Map.Entry<Integer, BoxClaim> claim : TOWER_BOX_CLAIMS.entrySet()) {
+            if (claim.getKey() == myId
+                    || claim.getValue().mapInstance() != here
+                    || claim.getValue().oid() != nearest) {
                 continue;
             }
             var holderBot = CharacterStorage.getBotById(claim.getKey());
@@ -167,8 +238,9 @@ public final class LudiStages {
                     continue;
                 }
                 boolean taken = false;
-                for (Map.Entry<Integer, Point> other : TOWER_BOX_CLAIMS.entrySet()) {
-                    if (other.getKey() != myId && other.getValue().x == oid) {
+                for (Map.Entry<Integer, BoxClaim> other : TOWER_BOX_CLAIMS.entrySet()) {
+                    if (other.getKey() != myId && other.getValue().mapInstance() == here
+                            && other.getValue().oid() == oid) {
                         var holder = CharacterStorage.getBotById(other.getKey());
                         taken = holder != null && holder.getChr() != null
                                 && holder.getChr().getMapId() == bot.getMapId();
@@ -189,14 +261,14 @@ public final class LudiStages {
                 return -1;
             }
             var bestReactor = bot.getMap().getReactorByOid(best);
-            TOWER_BOX_CLAIMS.put(myId, new Point(best,
+            TOWER_BOX_CLAIMS.put(myId, new BoxClaim(here, best,
                     bestReactor != null && bestReactor.getPosition() != null
                             ? bestReactor.getPosition().y : 0));
             return best;
         }
 
         var reactor = bot.getMap().getReactorByOid(nearest);
-        TOWER_BOX_CLAIMS.put(myId, new Point(nearest,
+        TOWER_BOX_CLAIMS.put(myId, new BoxClaim(here, nearest,
                 reactor != null && reactor.getPosition() != null ? reactor.getPosition().y : 0));
         return nearest;
     }
@@ -351,19 +423,31 @@ public final class LudiStages {
     }
 
     /**
-     * Approach a box and strike it once the bot is standing beside it. The approach is
-     * fire-and-forget across ticks; the strike fires only from the box's own platform, so
-     * the hit never reads as coming through a wall.
+     * Strike a box until it is gone, standing where the approach left us. The tower's pass
+     * box is a multi-state reactor (each hit cracks it further, the last breaks it), and the
+     * trap room's boxes share it - so one swing per macro tick was a full tick per state,
+     * and eleven boxes crawled. The swings land back to back with a short beat between them
+     * so the swing animation still reads. The stop test is the engine's own {@code isActive}
+     * (alive AND a further transition exists): a fully broken box keeps {@code isAlive}
+     * true on this host - it is never removed, just out of transitions - and the break can
+     * take three or four swings, not two.
      */
-    private static void hitReactorAt(Character bot, int oid) {
-        var reactor = bot.getMap().getReactorByOid(oid);
-        if (reactor == null || reactor.getPosition() == null) {
-            return;
-        }
-        if (PqActions.approachUnder(bot, reactor.getPosition()) == PqActions.Approach.IN_POSITION) {
+    private static void breakBoxInPlace(Character bot, int oid) {
+        for (int swings = 0; swings < BOX_SWING_CAP; swings++) {
+            var reactor = bot.getMap().getReactorByOid(oid);
+            if (reactor == null || !reactor.isActive()) {
+                return; // broken (or being reset) - no further transition to walk
+            }
             PqActions.hitReactor(bot, oid);
+            blockingSleep(BOX_SWING_BEAT_MS);
         }
     }
+
+    /** Upper bound on one in-place box combo: a box needs 3-4 swings; more means a bug. */
+    private static final int BOX_SWING_CAP = 6;
+
+    /** The beat between a combo's swings, so the swing animation reads before the next one. */
+    private static final long BOX_SWING_BEAT_MS = 250;
 
     /**
      * Approach-and-strike {@code oid} when the approach can reach it by walking DOWN (a box
@@ -384,7 +468,7 @@ public final class LudiStages {
                 return true;
             }
             if (outcome == PqActions.Approach.IN_POSITION) {
-                PqActions.hitReactor(bot, oid);
+                breakBoxInPlace(bot, oid);
                 return true;
             }
             oid = nearestOwnedBoxOid(bot, dataId, oid); // STUCK: rotate to an unclaimed box
@@ -406,7 +490,7 @@ public final class LudiStages {
             }
             PqActions.Approach outcome = PqActions.approachUnder(bot, reactor.getPosition());
             if (outcome == PqActions.Approach.IN_POSITION) {
-                PqActions.hitReactor(bot, oid);
+                breakBoxInPlace(bot, oid);
                 return true;
             }
             if (outcome == PqActions.Approach.TRAVELLING) {

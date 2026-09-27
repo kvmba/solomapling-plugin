@@ -204,7 +204,14 @@ public abstract class PartyQuestBot extends BotSM {
         if (workStage()) {
             maybeQuestChat(Beat.CLEAR);
             returnToLobby("stage work reports the run is over");
+            return;
         }
+        // A working room keeps a tighter beat: the 2-6s gap between macro ticks reads as the
+        // bot standing dumb between actions ("act, freeze, act"). The nudge only pulls the
+        // NEXT tick forward to ~0.7s, and its own 1.5s debounce makes that the real working
+        // floor - a live bot acts roughly every 1.5s instead of every 2-6s. The lobby branch
+        // above returns before this, so waiting bots keep their calm cadence.
+        nudgeSoon(700);
     }
 
     /**
