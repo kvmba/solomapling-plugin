@@ -123,11 +123,17 @@ public final class PqActions {
         }
         java.util.concurrent.CountDownLatch arrived = new java.util.concurrent.CountDownLatch(1);
         GCMovement.move(bot, target.x, target.y, arrived::countDown);
-        long deadline = System.currentTimeMillis() + WALK_TIMEOUT_MS;
+        // Bounded block: the tick waits for the walk to land, but never longer than one slow
+        // cadence. A bot-only room's ticks are 36-48s apart, and a full-length block there is
+        // what froze pure-bot parties standing still between macro ticks (the LPQ "stand
+        // still, then snap back" report). Past the cap the walk keeps running on its own;
+        // the tick moves on and position checks retry on the next one (the pre-existing
+        // no-pathing behaviour).
+        long deadline = System.currentTimeMillis() + WALK_BLOCK_CAP_MS;
         try {
-            // Wait on arrival, but also stop as soon as the engine gives the move up (an
-            // unreachable/stalled target that the driver abandons without firing the callback),
-            // so a wedged walk costs a tick or two rather than the whole timeout.
+            // Also stop as soon as the engine gives the move up (an unreachable/stalled
+            // target that the driver abandons without firing the callback), so a wedged
+            // walk costs one cap at most rather than the whole timeout.
             while (System.currentTimeMillis() < deadline) {
                 if (arrived.await(50, java.util.concurrent.TimeUnit.MILLISECONDS)) {
                     return;
@@ -141,8 +147,11 @@ public final class PqActions {
         }
     }
 
-    /** Upper bound on a single {@link #walkTo} block so a wedged walk cannot hold a tick forever. */
-    private static final long WALK_TIMEOUT_MS = 20_000;
+    /**
+     * How long a {@link #walkTo} may block its tick. Far above a normal in-room walk (the
+     * arrival callback ends the wait early); far below a wedged walk's own timeout.
+     */
+    private static final long WALK_BLOCK_CAP_MS = 2_000;
 
     /**
      * Walk so the bot ends up standing on the floor <em>under</em> an airborne point.
@@ -525,8 +534,13 @@ public final class PqActions {
             return;
         }
         walkTo(bot, spot);
-        blockingSleep(millis);
+        // Capped at one walk block: a longer hold freezes a busy stage tick for the whole
+        // span, and a bot-only room's 36-48s cadence already spaces its ticks far apart.
+        blockingSleep(Math.min(millis, WALK_BLOCK_CAP_MS));
     }
+
+    /** Inline-pickup cap for a loot sweep (see {@link #loot}): what one tick may pay for. */
+    private static final int LOOT_INLINE_MAX = 5;
 
     // =========================================================================
     // N6 - hunting
@@ -714,8 +728,12 @@ public final class PqActions {
         }
         // Never take a multi-piece stack: the item-triggered reactors read their stack five
         // seconds after it lands and match it by identity, so picking one up cancels it.
+        // At most LOOT_INLINE_MAX pickups run inline (each carries a 100ms stagger): an
+        // overflow pile waits for the next macro tick, far below the drops' own despawn -
+        // a wide sweep can no longer freeze a busy stage tick.
         List<MapObject> lone = found.stream()
                 .filter(o -> !(o instanceof MapItem drop) || drop.getItem().getQuantity() <= 1)
+                .limit(LOOT_INLINE_MAX)
                 .toList();
         if (lone.isEmpty()) {
             return 0;

@@ -38,12 +38,6 @@ public final class LudiStages {
      */
     private static final Map<Integer, Point> TOWER_BOX_CLAIMS = new java.util.concurrent.ConcurrentHashMap<>();
 
-    /**
-     * How far (px) a claimed box's floor may sit from another box's floor and still count as
-     * "the same box" for the anti-queue pick.
-     */
-    private static final int BOX_CLAIM_TOLERANCE_PX = 40;
-
     /** A stage is done when the quest says so; these are its own per-stage flags. */
     public static boolean stageCleared(Character bot, int stage) {
         return PqActions.readEimString(bot, stage + "stageclear") != null;
@@ -109,12 +103,10 @@ public final class LudiStages {
         if (box >= 0 && hitReactorDescendRotate(bot, box, LudiPqData.BOX_STAGE2)) {
             return;
         }
-        if (box < 0) {
-            // Every box is gone but the stage is not cleared yet (the leader still has to
-            // turn the passes in): spread around the stage NPC instead of idling at the
-            // spawn - or piling onto the NPC pixel with the rest of the party.
-            PqActions.spreadNearStageNpc(bot);
-        }
+        // Boxes all gone (the leader still has to turn the passes in), or a box stood but
+        // every approach failed this tick: either way park by the stage NPC instead of
+        // idling at the spawn - or piling onto the NPC pixel with the rest of the party.
+        PqActions.spreadNearStageNpc(bot);
         int bonus = PqActions.findReactorOid(bot, LudiPqData.BOX_STAGE2_BONUS);
         if (bonus >= 0) {
             hitReactorAt(bot, bonus);
@@ -124,32 +116,35 @@ public final class LudiStages {
     /**
      * The nearest alive box of this data id this bot may work.
      *
-     * <p>The first bot in the party keeps the plain nearest pick. Every later bot must
-     * DISTINGUISH its nearest from the ones already claimed - a box exactly as near as
-     * another's claim would rotate onto a claimed box and queue behind it. When the plain
-     * nearest is claimed by a bot that still exists, the caller takes the nearest box that
-     * is farther than that claimed one, so the party spreads down the tower instead of
-     * standing in a queue on one box.
-     *
      * <p>The claims are per bot id and released with the bot (see {@link #releaseTowerBox}),
      * so a mid-run replacement carries no stale share.
      */
     private static int nearestOwnedBoxOid(Character bot, int dataId) {
-        int nearest = nearestBoxOid(bot, dataId);
-        if (nearest < 0) {
-            return -1; // nothing standing
-        }
-        int myId = bot.getId();
-        int floor = bot.getPosition() == null ? 0 : bot.getPosition().y;
-        var reactor = bot.getMap().getReactorByOid(nearest);
-        int nearestY = reactor != null && reactor.getPosition() != null
-                ? reactor.getPosition().y : floor;
+        return nearestOwnedBoxOid(bot, dataId, -1);
+    }
 
-        // The nearest box is contested only when another live bot claims a box within the
-        // approach radius of it.
-        boolean contested = false;
+    /**
+     * {@link #nearestOwnedBoxOid} for the rotate-on-stuck: {@code excludeOid} - the box this
+     * bot just failed to approach - is off the plan, and the bot's claim on it is dropped so
+     * a teammate that CAN reach it takes the box instead of nobody working it.
+     */
+    private static int nearestOwnedBoxOid(Character bot, int dataId, int excludeOid) {
+        int myId = bot.getId();
+        if (excludeOid >= 0) {
+            TOWER_BOX_CLAIMS.remove(myId);
+        }
+        int nearest = nearestBoxOid(bot, dataId, excludeOid);
+        if (nearest < 0) {
+            TOWER_BOX_CLAIMS.remove(myId);
+            return -1; // nothing standing (or nothing left to rotate onto)
+        }
+
+        // The nearest box is contested when another live bot on this map already claims it.
+        // Claims are by reactor oid - the map's own identity for a box - so two DIFFERENT
+        // boxes on one floor never contest each other (the old y-only tolerance read them as
+        // one and sent both bots wandering), while two bots on the SAME box always do.
         for (Map.Entry<Integer, Point> claim : TOWER_BOX_CLAIMS.entrySet()) {
-            if (claim.getKey() == myId) {
+            if (claim.getKey() == myId || claim.getValue().x != nearest) {
                 continue;
             }
             var holderBot = CharacterStorage.getBotById(claim.getKey());
@@ -157,63 +152,53 @@ public final class LudiStages {
                     || holderBot.getChr().getMapId() != bot.getMapId()) {
                 continue; // a despawned / elsewhere holder's claim does not contest this room
             }
-            var claimed = bot.getMap().getReactorByOid(claim.getValue().x);
-            if (claimed != null && claimed.getPosition() != null
-                    && Math.abs(claimed.getPosition().y - nearestY) <= BOX_CLAIM_TOLERANCE_PX) {
-                contested = true;
-                break;
+            // Contested: take the nearest UNCLAIMED box instead, so the party spreads over
+            // the tower rather than queueing behind a teammate. Every standing box claimed
+            // means the stage is fully staffed - return -1 and let the caller park this bot
+            // by the stage NPC until a box (or a holder) disappears.
+            int best = -1;
+            double bestSq = Double.MAX_VALUE;
+            for (int oid : PqActions.findAllReactorOids(bot, dataId)) {
+                if (oid == excludeOid || oid == nearest) {
+                    continue;
+                }
+                var candidate = bot.getMap().getReactorByOid(oid);
+                if (candidate == null || candidate.getPosition() == null) {
+                    continue;
+                }
+                boolean taken = false;
+                for (Map.Entry<Integer, Point> other : TOWER_BOX_CLAIMS.entrySet()) {
+                    if (other.getKey() != myId && other.getValue().x == oid) {
+                        var holder = CharacterStorage.getBotById(other.getKey());
+                        taken = holder != null && holder.getChr() != null
+                                && holder.getChr().getMapId() == bot.getMapId();
+                        break;
+                    }
+                }
+                if (taken) {
+                    continue;
+                }
+                double dsq = bot.getPosition().distanceSq(candidate.getPosition());
+                if (dsq < bestSq) {
+                    bestSq = dsq;
+                    best = oid;
+                }
             }
-        }
-        if (!contested) {
-            TOWER_BOX_CLAIMS.put(myId, new Point(nearest, nearestY));
-            return nearest;
+            if (best < 0) {
+                TOWER_BOX_CLAIMS.remove(myId);
+                return -1;
+            }
+            var bestReactor = bot.getMap().getReactorByOid(best);
+            TOWER_BOX_CLAIMS.put(myId, new Point(best,
+                    bestReactor != null && bestReactor.getPosition() != null
+                            ? bestReactor.getPosition().y : 0));
+            return best;
         }
 
-        // Contested: take the nearest box FARTHER than every claimed one. `none farther`
-        // means the room holds only the claimed box(es) - the caller rotates onto one rather
-        // than stand idle (the plain nearest at that point is the honest pick).
-        double claimedNearestSq = Double.MAX_VALUE;
-        for (Map.Entry<Integer, Point> claim : TOWER_BOX_CLAIMS.entrySet()) {
-            var holder = CharacterStorage.getBotById(claim.getKey());
-            if (claim.getKey() == myId || holder == null
-                    || holder.getChr() == null || holder.getChr().getMapId() != bot.getMapId()) {
-                continue;
-            }
-            var claimed = bot.getMap().getReactorByOid(claim.getValue().x);
-            if (claimed == null || claimed.getPosition() == null) {
-                continue;
-            }
-            double dsq = bot.getPosition().distanceSq(claimed.getPosition());
-            if (dsq < claimedNearestSq) {
-                claimedNearestSq = dsq;
-            }
-        }
-        int best = -1;
-        int bestY = floor;
-        double bestSq = Double.MAX_VALUE;
-        boolean noneFarther = true;
-        for (int oid : PqActions.findAllReactorOids(bot, dataId)) {
-            var candidate = bot.getMap().getReactorByOid(oid);
-            if (candidate == null || candidate.getPosition() == null) {
-                continue;
-            }
-            double dsq = bot.getPosition().distanceSq(candidate.getPosition());
-            if (dsq <= claimedNearestSq) {
-                continue;
-            }
-            noneFarther = false;
-            if (dsq < bestSq) {
-                bestSq = dsq;
-                best = oid;
-                bestY = candidate.getPosition().y;
-            }
-        }
-        if (noneFarther) {
-            TOWER_BOX_CLAIMS.put(myId, new Point(nearest, nearestY));
-            return nearest;
-        }
-        TOWER_BOX_CLAIMS.put(myId, new Point(best, bestY));
-        return best;
+        var reactor = bot.getMap().getReactorByOid(nearest);
+        TOWER_BOX_CLAIMS.put(myId, new Point(nearest,
+                reactor != null && reactor.getPosition() != null ? reactor.getPosition().y : 0));
+        return nearest;
     }
 
     /** Drop this bot's stage-2 tower box claim, so a later bot can take its share. */
@@ -398,7 +383,11 @@ public final class LudiStages {
             if (outcome == PqActions.Approach.TRAVELLING) {
                 return true;
             }
-            oid = nearestBoxOid(bot, dataId, oid); // STUCK: rotate to another box
+            if (outcome == PqActions.Approach.IN_POSITION) {
+                PqActions.hitReactor(bot, oid);
+                return true;
+            }
+            oid = nearestOwnedBoxOid(bot, dataId, oid); // STUCK: rotate to an unclaimed box
         }
         return false; // every candidate failed this tick; try again next tick
     }
