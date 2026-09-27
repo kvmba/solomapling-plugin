@@ -311,12 +311,27 @@ class BotMovementManager {
         broadcastMovement(entry);
     }
 
+    /**
+     * Whether a rope bot with no committed edge should hold position instead of steering.
+     *
+     * <p>Precise climb targets are excluded. A precise anchor routinely sits inside the hold
+     * band while the bot is still a climb step or more away (a climb step is ~5px against
+     * STOP_DIST 30), so holding there left the bot parked off-anchor with the move held open -
+     * until the 2s airborne stall give-up dropped the move, the quest layer re-seeked, and the
+     * same anchor was re-issued: the visible up-down wriggle at rope tops. Releasing the hold
+     * returns control to tickClimbing's directional branch, whose advanceClimb lands within one
+     * step of any in-range anchor (and shouldSnapToClimbTarget settles the sub-step remainder),
+     * so a precise target is always walked TO, never held short of.
+     */
     static boolean shouldHoldClimbIdle(BotMovementState entry, int dy, int dxOwner) {
         if (entry.navEdge != null) {
             return false;
         }
         if (entry.resting) {
             return true; // explicit rope rest hold: hang regardless of the grind guard
+        }
+        if (entry.navPreciseTarget) {
+            return false; // a precise anchor must be reached, not held short of
         }
         return !entry.grinding
                 && Math.abs(dy) < cfg.STOP_DIST
