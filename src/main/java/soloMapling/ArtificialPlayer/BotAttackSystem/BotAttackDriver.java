@@ -131,6 +131,7 @@ public final class BotAttackDriver {
     public static void clearBot(int botId) {
         nextAttackByBot.remove(botId);
         nextUltimateByBot.remove(botId);
+        BotMesoBomb.clearBot(botId); // release the Pickpocket bag register + detonation cooldown
     }
 
     /*
@@ -290,6 +291,17 @@ public final class BotAttackDriver {
         if (targets.isEmpty()) {
             return AttackResult.miss(healUndead ? "no undead in heal range"
                     : reachDiagnostic(bot, profile, weapon, facingLeft));
+        }
+
+        // The 独行客 bank-and-spend beat: enough own Pickpocket bags inside Money Explosion's WZ
+        // box (with a mob in the blast) turns this swing into the bomb. AUTO only - forced GM
+        // choices keep probing the regular slots. On a null result nothing was spent, so the
+        // regular swing below runs as if this call never happened.
+        if (choice == Choice.AUTO) {
+            BotMesoBomb.Blast blast = BotMesoBomb.tryDetonate(bot, facingLeft);
+            if (blast != null) {
+                return AttackResult.hit(targets.get(0).getName(), blast.totalDamage(), blast.killed());
+            }
         }
 
         int facingMask = facingLeft ? BotAttackData.FACING_LEFT_MASK : BotAttackData.FACING_RIGHT_MASK;

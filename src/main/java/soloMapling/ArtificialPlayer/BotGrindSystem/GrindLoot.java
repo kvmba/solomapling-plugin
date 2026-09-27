@@ -4,6 +4,7 @@ import org.gms.client.Character;
 import org.gms.server.maps.MapItem;
 import org.gms.server.maps.MapObject;
 import org.gms.server.maps.MapObjectType;
+import soloMapling.ArtificialPlayer.BotAttackSystem.BotMesoBomb;
 import soloMapling.ArtificialPlayer.BotCommandsPack.DropCommands;
 import soloMapling.ArtificialPlayer.GCMoveSystem.GCMovement;
 
@@ -280,6 +281,9 @@ final class GrindLoot {
             if (!DropCommands.botCanLoot(chr, mi)) {
                 continue;
             }
+            if (BotMesoBomb.isDetonationBag(chr.getId(), mi)) {
+                continue; // the bot's own Pickpocket stash - it blows up, it doesn't get scooped
+            }
             Point ip = mi.getPosition();
             if (ip.x < x0 || ip.x > x1 || Math.abs(ip.y - pos.y) > yLimit) {
                 continue; // outside the leash, or on a stacked ledge above/below (unreachable)
@@ -313,6 +317,9 @@ final class GrindLoot {
             MapItem mi = (MapItem) mo;
             if (!DropCommands.botCanLoot(chr, mi)) {
                 continue;
+            }
+            if (BotMesoBomb.isDetonationBag(chr.getId(), mi)) {
+                continue; // the bot's own Pickpocket stash - it blows up, it doesn't get scooped
             }
             if (!includeUnsettled && now() - mi.getDropTime() < LOOT_SETTLE_MS) {
                 continue; // too fresh — let it land first; the pass-over grabs whatever has settled by then

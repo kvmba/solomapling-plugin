@@ -7,6 +7,7 @@ import org.gms.constants.skills.Bandit;
 import org.gms.constants.skills.Bishop;
 import org.gms.constants.skills.Brawler;
 import org.gms.constants.skills.Buccaneer;
+import org.gms.constants.skills.ChiefBandit;
 import org.gms.constants.skills.Cleric;
 import org.gms.constants.skills.Corsair;
 import org.gms.constants.skills.DragonKnight;
@@ -77,6 +78,7 @@ public final class BotAttackData {
     private static final int MAGIC_1 = 49, MAGIC_2 = 50, MAGIC_3 = 51;  // "magicN" 3rd-job spell casts
     private static final int BURSTER_2 = 54;                            // "burster2" spear thrust combo (Crusher lv16+)
     private static final int AVENGER = 56;                             // "avenger" claw arc throw
+    private static final int PRONE2 = 58;                              // "prone2" Money Explosion pose (pinned between avenger=56 and assassination=59 on the client's action enum)
     // ----- 4th-job skill poses (canonical enum, from the reference map) -----
     private static final int ALERT_5 = 44;                             // "alert5" (Boomerang Step)
     private static final int ASSASSINATION = 59;                       // "assassination" (Assassinate)
@@ -140,6 +142,7 @@ public final class BotAttackData {
             Map.entry(Bandit.SAVAGE_BLOW,            SAVAGE),    // 4201005 -> "savage" (dagger combo, not a normal stab)
             // ----- 3rd-job skills audited 2026-06-22 (action node read from Skill.wz) -----
             Map.entry(Hermit.AVENGER,                AVENGER),   // 4111005 -> "avenger" (claw arc throw)
+            Map.entry(ChiefBandit.MESO_EXPLOSION,    PRONE2),    // 4211006 -> "prone2" (Money Explosion fuse pose)
             Map.entry(FPMage.EXPLOSION,              MAGIC_3),   // 2111002 -> "magic3" (F/P AoE cast)
             Map.entry(ILMage.ICE_STRIKE,             MAGIC_2),   // 2211002 -> "magic2" (I/L AoE cast)
             Map.entry(ILMage.THUNDER_SPEAR,          MAGIC_1),   // 2211003 -> "magic1" (I/L single cast)

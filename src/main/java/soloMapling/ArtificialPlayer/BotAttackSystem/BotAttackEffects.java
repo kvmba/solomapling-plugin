@@ -157,6 +157,9 @@ public final class BotAttackEffects {
         // cap (a finisher instead consumes the ring), so a comboed bot's orb ring grows and lapses
         // like a real player's. No-op for every job without the combo buff.
         BotComboOrb.onAttackLanded(bot, skillId);
+        // The 独行客 pair: with Pickpocket rolled, scatter the meso bags the host's own damage
+        // handler would drop for these lines (BotMesoBomb also owns their later detonation).
+        BotMesoBomb.onAttackLanded(bot, skillId, hits);
         return anyKilled;
     }
 
