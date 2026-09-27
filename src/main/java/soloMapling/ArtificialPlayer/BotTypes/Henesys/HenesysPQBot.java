@@ -63,6 +63,10 @@ public class HenesysPQBot extends PartyQuestBot {
             // The moon message the sixth flower raises is what flips the quest to its second
             // half; read it rather than assuming, in case a drop was refused.
             guarding = HenesysStages.flowersBloomed(getChr()) >= HenesysPqData.FLOWERS_TO_BLOOM;
+            if (guarding) {
+                // The planting half is done: the moon is full and Moon Bunny is cooking.
+                sayStageClearOnce(HenesysPqData.ENTRY_MAP);
+            }
             return false;
         }
         guarding = true;

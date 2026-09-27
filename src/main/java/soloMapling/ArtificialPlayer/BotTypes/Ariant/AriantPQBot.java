@@ -28,6 +28,7 @@ public class AriantPQBot extends PartyQuestBot {
         super(character);
         dialoguePath = "AriantPQBotDialogue.yaml";
         botType = "AriantPQBot";
+        questName = "AriantPQ";
         // The arena awards its score through client.getPlayer() when a catch succeeds, so this
         // bot needs a client of its own rather than the shared per-channel one.
         BotGeneration.adoptPrivateClient(character);
