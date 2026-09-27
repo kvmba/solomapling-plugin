@@ -451,7 +451,16 @@ public class PlatformPlacement {
         }
         Point pos = fakechar.getPosition();
         Point spot = BotSpotPicker.pickGroundSpotNear(fakechar.getMap(), pos.x, pos.y,
-                STROLL_MIN_PX, STROLL_MAX_PX);
+                STROLL_MIN_PX, STROLL_MAX_PX, (regionId, p) -> {
+                    // Accept a candidate only when the nav graph can genuinely path the bot there.
+                    // A X-banded pick can otherwise land one storey up - a rope/jump the stroll never
+                    // commits to - and the move then hangs on an unreachable target: the bot keeps
+                    // isMoving() true and is wedged out of every later stroll.
+                    Integer targetRegion = GCMovement.regionIdAt(fakechar.getMap(), p.x, p.y);
+                    return targetRegion != null && targetRegion >= 0
+                            && targetRegion.equals(regionId)
+                            && GCMovement.canPathTo(fakechar, p.x, p.y);
+                });
         if (spot != null) {
             GCMovement.move(fakechar, spot.x, spot.y);
         }

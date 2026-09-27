@@ -75,17 +75,47 @@ public final class BotSpotPicker {
     }
 
     // Pick one organic ground point within maxDistPx of (fromX, fromY) in X, preferring one at least
-    // minDistPx away. An unbounded whole-map pick lands either on the pixel the bot already occupies
-    // (a twitch, not a step) or clear across the map (a trek that keeps the bot in transit for most of
-    // the wait it is meant to be filling). Bounded both ways, the pick is what "stroll" means: a short
-    // walk to another part of the same room. Returns the farthest candidate seen when nothing in range
-    // clears minDistPx - a short ledge still gets a step rather than no move at all - or null when the
-    // map has no reachable ledge in range.
-    public static Point pickGroundSpotNear(MapleMap map, int fromX, int fromY, int minDistPx, int maxDistPx) {
+    // minDistPx away, that the bot can actually WALK to. An unbounded whole-map pick lands either on
+    // the pixel the bot already occupies (a twitch, not a step) or clear across the map (a trek that
+    // keeps the bot in transit for most of the wait it is meant to be filling). Bounded both ways the
+    // pick is what "stroll" means: a short walk to another part of the same room.
+    //
+    // The walkability test is the part that matters most. A region is the walk-connected union of a
+    // floor band, but reachability across the whole GRAPH (see eligibleLedges -> reachableRegions) says
+    // nothing about the legwork between two floors: a spot 300px away in X but one storey up needs a
+    // rope/jump the stroll never commits to, and a move() aimed there never arrives - the bot hangs on
+    // its moveTarget forever (moveTarget only clears on arrival/abandon), holds isMoving() true, and
+    // every later stroll no-ops. So each candidate is validated against the bot's own floor: prefer the
+    // ledge the caller is standing on, fall back to a candidate the nav graph can genuinely path to,
+    // and - rather than issue a move it cannot complete - give up when neither holds. null means "stay
+    // put", which is always safer than a target the bot will hang on.
+    public static Point pickGroundSpotNear(MapleMap map, int fromX, int fromY, int minDistPx, int maxDistPx,
+                                           java.util.function.BiPredicate<Integer, Point> canWalkTo) {
+        int homeRegion = GCMovement.regionIdAt(map, fromX, fromY);
         List<Candidate> candidates = eligibleLedges(map, fromX, fromY, fromX - maxDistPx, fromX + maxDistPx);
         if (candidates.isEmpty()) {
             return null;
         }
+        // The ledge the bot stands on needs no graph query: any x on it is a plain walk. Sample it
+        // first so a wide floor (the usual lobby case) never pays for a cross-candidate validation.
+        Candidate home = null;
+        for (Candidate c : candidates) {
+            if (c.ledge.regionId() == homeRegion) {
+                home = c;
+                break;
+            }
+        }
+        if (home != null) {
+            for (int i = 0; i < SPACING_ATTEMPTS; i++) {
+                int x = randomInSpan(home.lo, home.hi);
+                if (Math.abs(x - fromX) >= minDistPx) {
+                    return groundAt(map, home, x);
+                }
+            }
+        }
+        // Nothing on the home ledge clears minDistPx (a narrow floor). Other in-band ledges are only
+        // honest options when the graph can path to them; each accepted spot is validated once, so the
+        // retry loop costs at most SPACING_ATTEMPTS graph walks.
         Candidate best = null;
         int bestX = fromX;
         int bestDist = -1;
@@ -93,16 +123,33 @@ public final class BotSpotPicker {
             Candidate c = pickWeightedByWidth(candidates);
             int x = randomInSpan(c.lo, c.hi);
             int dist = Math.abs(x - fromX);
-            if (dist > bestDist) {
-                bestDist = dist;
-                bestX = x;
-                best = c;
+            if (dist <= bestDist) {
+                continue;
             }
-            if (dist >= minDistPx) {
-                return groundAt(map, c, x);
+            if (canWalkTo.test(c.ledge.regionId(), groundAt(map, c, x))) {
+                best = c;
+                bestX = x;
+                bestDist = dist;
+                if (dist >= minDistPx) {
+                    return groundAt(map, c, x);
+                }
             }
         }
-        return groundAt(map, best, bestX);
+        // A short step on the home ledge still beats a cross-floor hang: prefer it over the farthest
+        // candidate, which may need a rope the stroll will not commit to. bestX can legitimately be
+        // fromX (every sampled cross candidate was rejected), and a zero-distance move would be a
+        // no-op twitch, so fall back to the home ledge's farthest end instead.
+        if (home != null) {
+            int x = bestX != fromX ? bestX : clampSpan(home, fromX);
+            return groundAt(map, home, x);
+        }
+        return null;
+    }
+
+    // The farthest end of the ledge from fromX - the fallback for a floor too short to stroll across,
+    // and for a home ledge that could not offer minDistPx on its own samples.
+    private static int clampSpan(Candidate c, int fromX) {
+        return Math.abs(c.hi - fromX) >= Math.abs(c.lo - fromX) ? c.hi : c.lo;
     }
 
     // Whole-map batch with light anti-cluster. Returns up to `count` spots; an empty list means the

@@ -70,6 +70,10 @@ final class GCMovementDriver {
     // so a bot never tries to reach a point forever. The clock resets on any real progress.
     private static final long MOVE_NO_PROGRESS_MS = 8_000;
     private static final int MOVE_PROGRESS_EPS_PX = 16;
+    // The airborne flavour of that window: a jump arcs 3-5 ticks (~250ms), so this is many hops long
+    // (and far above the frozen-air watchdog's 30-tick recovery, which owns the no-motion case) while
+    // still guaranteeing an UNREACHABLE goal is dropped instead of holding isMoving() true forever.
+    private static final long AIR_MOVE_STALL_MS = 2_000;
     // Recompute a bot's movement profile on this cadence so runtime changes (chiefly party Haste —
     // joining/leaving a party with a high-level thief) take effect without needing a map change.
     // refreshMovementProfile no-ops when the bucket is unchanged, so this is ~free for non-party bots.
@@ -535,9 +539,17 @@ final class GCMovementDriver {
      * long legitimate walks are never cut off. Follow/farm without a moveTarget are unaffected.
      */
     private static boolean giveUpStalledMove(BotMovementState entry) {
-        if (entry.moveTarget == null || entry.inAir || entry.climbing) {
+        if (entry.moveTarget == null) {
             return false;
         }
+        // The no-progress clock must apply to an AIRBORNE bot too. The inAir/climbing guard that used
+        // to sit above this was meant to spare a hop from being cut off mid-flight, but it also spared
+        // the move the hop was FOR: a bot whose goal sits on a floor it cannot reach (an X-banded
+        // stroll target one storey up, say) bounces inAir forever without ever getting closer, held
+        // isMoving() true and wedged out of every later command. The exemption is therefore narrowed
+        // to what it was protecting - a jump takes ~3-5 ticks, so the AIRborne stall window is a
+        // multiple of a hop, not the 8s grounded one; any tick that DOES bring the bot measurably
+        // closer to the goal still resets the clock below, so long legitimate arcs are untouched.
         Point bp = entry.bot.getPosition();
         int dist = Math.abs(bp.x - entry.moveTarget.x) + Math.abs(bp.y - entry.moveTarget.y);
         long now = System.currentTimeMillis();
@@ -549,7 +561,8 @@ final class GCMovementDriver {
             entry.moveProgressAtMs = now;
             return false;
         }
-        if (now - entry.moveProgressAtMs <= MOVE_NO_PROGRESS_MS) {
+        long stallMs = (entry.inAir || entry.climbing) ? AIR_MOVE_STALL_MS : MOVE_NO_PROGRESS_MS;
+        if (now - entry.moveProgressAtMs <= stallMs) {
             return false;
         }
         entry.moveTarget = null;
