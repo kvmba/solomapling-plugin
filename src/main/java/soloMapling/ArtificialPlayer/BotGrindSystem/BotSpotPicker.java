@@ -33,6 +33,13 @@ public final class BotSpotPicker {
     // How many spaced-X attempts before we accept an overlap on a crowded ledge.
     private static final int SPACING_ATTEMPTS = 8;
 
+    // Ledges narrower than this never receive a stroll target: a platform under ~4.5 walk steps
+    // cannot absorb the walk-end glide-out, so a stroll there reads as the on-the-spot sway
+    // (narrow-ledge residency still settles any bot that ends up on one - this only keeps the
+    // stroll system from CREATING those trips). Sits below the residency's arrival width so the
+    // two rules hand off: target-picker avoids treads, arrival settles them.
+    private static final int MIN_STROLL_LEDGE_PX = 40;
+
     // Pick one organic ground point anywhere on the map's reachable terrain. fromX/fromY anchor the
     // reachability filter (use the spawn portal) so we never land on a disconnected island ledge.
     // Returns null when the nav graph isn't baked / there's no eligible ledge - caller should fall back.
@@ -95,6 +102,20 @@ public final class BotSpotPicker {
         List<Candidate> candidates = eligibleLedges(map, fromX, fromY, fromX - maxDistPx, fromX + maxDistPx);
         if (candidates.isEmpty()) {
             return null;
+        }
+        // A stroll onto a stair-tread-wide ledge (toy-tower floors) is a twitch that ends in the
+        // walk-end corrector thrashing across a platform narrower than a step. Judge by the LEDGE's own
+        // width, not the band-clipped span (a wide floor's span inside a narrow band is irrelevant to
+        // how settled the bot can be on it). Only when EVERY candidate is a tread does the fallback
+        // keep the old pick (mirrors avoidCrowdedLedges: a degraded pick beats no stroll at all).
+        List<Candidate> walkable = new ArrayList<>();
+        for (Candidate c : candidates) {
+            if (c.ledge.maxX() - c.ledge.minX() >= MIN_STROLL_LEDGE_PX) {
+                walkable.add(c);
+            }
+        }
+        if (!walkable.isEmpty()) {
+            candidates = walkable;
         }
         // The ledge the bot stands on needs no graph query: any x on it is a plain walk. Sample it
         // first so a wide floor (the usual lobby case) never pays for a cross-candidate validation.

@@ -781,6 +781,25 @@ class BotMovementManager {
         if (entry == null || entry.bot == null || botPos == null || targetPos == null) {
             return 0;
         }
+        // Narrow-ledge residency mirror of the driver's arrival rule (GCMovementDriver
+        // .clearReachedMoveTarget, same settledNarrowLedge predicate): on a foothold too narrow to
+        // hold a pixel hunt, once the bot stands on it inside the target's band there is nothing
+        // left to steer toward — release now, and the residency arrival clears the target on the
+        // same tick. Without this the bang-bang corrector keeps firing ±step pulses at a pixel it
+        // can never hold (a WALK step ~7px against a 19px stair tread), which is the toy-tower
+        // stair sway. Only for pure settles: no committed edge (a climb/jump/drop crossing a tread
+        // still owns the bot) and stopDist > 0 (launch-window approaches must KEEP momentum). This
+        // is the production entry — it has the full 2D positions the residency Y gate needs, which
+        // updateStepX (X only, shared with GroundSwayTest's harness) must not guess at.
+        if (stopDist > 0
+                && (entry.navEdge == null || entry.navEdge.type == BotNavigationGraph.EdgeType.WALK)) {
+            Foothold standing = BotPhysicsEngine.findGroundFoothold(entry.bot.getMap(), botPos);
+            if (settledNarrowLedge(standing, targetPos.x, targetPos.y, botPos.y,
+                    BotPhysicsEngine.walkStep(entry.bot.getMap(), entry.movementProfile))) {
+                entry.wasMovingX = false;
+                return 0;
+            }
+        }
         if (entry.graphWarmupFallback) {
             int localStopDist = Math.min(stopDist, 12);
             return updateStepX(entry, entry.bot.getMap(), botPos.x, targetPos.x, localStopDist, localStopDist);
@@ -869,6 +888,34 @@ class BotMovementManager {
 
     static int updateStepX(BotMovementState entry, MapleMap map, int botX, int targetX) {
         return updateStepX(entry, map, botX, targetX, cfg.STOP_DIST, cfg.FOLLOW_DIST);
+    }
+
+    /** Ledges narrower than this are settled by standing on them, not by hunting a pixel. Kept beside the steer rule it gates. */
+    static final int NARROW_LEDGE_PX = 64;
+
+    /**
+     * The one narrow-ledge residency rule both arrival ends share. {@code standing} is the foothold
+     * under the bot's feet (null when the map has no ground under it); the bot is "resident" when
+     * that foothold is narrower than {@link #NARROW_LEDGE_PX} and the target sits on it — its X
+     * within a walk step of the span (the bot cannot be held mid-step) and its Y within
+     * MAX_SLOPE_UP of the bot's feet (the engine's own same-ground snap). The Y gate is what keeps
+     * vertically stacked stair treads distinct: without it, standing on one tread would satisfy a
+     * precise target aimed at the tread below and strand the bot one storey short.
+     * Pure so the driver's arrival check and the steer's release check cannot drift apart.
+     */
+    static boolean settledNarrowLedge(Foothold standing, int targetX, int targetY, int botY, int stepPx) {
+        if (standing == null) {
+            return false;
+        }
+        int lo = Math.min(standing.getX1(), standing.getX2());
+        int hi = Math.max(standing.getX1(), standing.getX2());
+        if (hi - lo >= NARROW_LEDGE_PX) {
+            return false;
+        }
+        if (Math.abs(targetY - botY) > BotPhysicsEngine.cfg.MAX_SLOPE_UP) {
+            return false;
+        }
+        return targetX >= lo - stepPx && targetX <= hi + stepPx;
     }
 
     static int updateStepX(BotMovementState entry, MapleMap map, int botX, int targetX, int stopDist, int followDist) {

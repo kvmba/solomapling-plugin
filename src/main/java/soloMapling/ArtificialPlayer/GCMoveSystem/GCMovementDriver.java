@@ -714,6 +714,26 @@ final class GCMovementDriver {
             return;
         }
         Point botPos = entry.bot.getPosition();
+        // Narrow-ledge residency: a precise target whose foothold is too narrow to hold a pixel hunt
+        // is satisfied by STANDING on that foothold inside the target's band. Pixel-hunting a point on
+        // a platform narrower than a step + its glide-out (a WALK step is ~7px) can only overshoot,
+        // reverse, and overshoot again — the left-right sway the toy-tower stairs platforms produce.
+        // Residency is only an ARRIVAL rule: a committed edge that merely crosses a narrow foothold
+        // (climb / jump / drop) still owns the bot, so the check sits before the box test. The rule
+        // itself (settledNarrowLedge) is shared with the steer's release check in BotMovementManager.
+        if (entry.moveTargetPrecise
+                && (entry.navEdge == null || entry.navEdge.type == BotNavigationGraph.EdgeType.WALK)
+                && !entry.climbing && !entry.inAir) {
+            Foothold standing = BotPhysicsEngine.findGroundFoothold(entry.bot.getMap(), botPos);
+            if (BotMovementManager.settledNarrowLedge(standing, entry.moveTarget.x, entry.moveTarget.y,
+                    botPos.y, BotPhysicsEngine.walkStep(entry.bot.getMap(), entry.movementProfile))) {
+                entry.moveTarget = null;
+                entry.moveTargetPrecise = false;
+                BotMovementManager.clearNavigationState(entry);
+                GCMovement.fireArrival(entry);
+                return;
+            }
+        }
         int arrivalDist = entry.moveTargetPrecise ? 8 : BotMovementManager.cfg.STOP_DIST;
         if (!reachedMoveTarget(entry.climbing, entry.inAir, entry.swimming, botPos, entry.moveTarget, arrivalDist)) {
             return;
