@@ -262,16 +262,17 @@ final class BotFallbackMovementManager {
     }
 
     /* True when a jump launched from anchor can catch some rope ABOVE the anchor: the first leg
-     * of the climb chain. Uses the SAME simulations the rope jump fires at runtime. */
+     * of the climb chain. Verdict comes from the TRAJECTORY simulator only — the same sim the
+     * rope jump fires at runtime. (canReachRopeFromGround is a reach-ratio heuristic that is
+     * deliberately looser than the arc: it passes points whose real jump sails past the ladder,
+     * e.g. x=-45 for the stage-1 overhung ladder whose grab window ends at x=-55. A heuristic
+     * pass here steers the bot NEXT to the window and it grinds one launch short forever.) */
     private static boolean ropeGrabReachableFrom(MapleMap map, Point anchor,
                                                  BotMovementProfile profile) {
         int jumpStep = BotPhysicsEngine.walkStep(map, profile);
         for (Rope rope : map.getRopes()) {
             if (rope.topY() >= anchor.y) {
                 continue; // does not rise above the anchor: not an upward leg
-            }
-            if (BotPhysicsEngine.canReachRopeFromGround(map, anchor, rope, profile)) {
-                return true;
             }
             for (int stepX : new int[]{-jumpStep, 0, jumpStep}) {
                 if (BotPhysicsEngine.simulateGroundJumpRopeGrab(map, anchor, stepX, rope) != null) {
