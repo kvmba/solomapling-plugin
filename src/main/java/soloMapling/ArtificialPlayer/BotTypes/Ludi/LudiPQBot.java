@@ -57,6 +57,11 @@ public class LudiPQBot extends PartyQuestBot {
     }
 
     @Override
+    protected void releaseRoomState() {
+        LudiStages.releaseRoomState(getChr().getId());
+    }
+
+    @Override
     protected int lobbyMapId() {
         return LudiPqData.RECRUIT_MAP;
     }
