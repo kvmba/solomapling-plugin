@@ -78,6 +78,14 @@ public final class GrindBrain {
     long attackWalkLockUntil = 0L;           // hold walking until this time after a swing (bypassed by blink/dash)
     long lastKillMs = 0L;
 
+    // ── Travel-clear beat (途经清怪) ──
+    // One stop-and-swing per map per episode: the first beat a live hostile sits inside the attack
+    // reach box while the bot is moving between spots, it plants, swings once, and resumes. The
+    // map id gate is what keeps a bot walking THROUGH a dense map from clearing every pack it
+    // brushes (a per-swing-cooldown gate alone would turn TRAVEL into a fighting crawl) while the
+    // single en-route hit kills the "walks through mobs without reacting" bot-tell.
+    private int lastSwingMapId = -1;
+
     // ── Combat heartbeat (read by TrainingBot's macro watchdog -> volatile) ──
     private volatile long lastCombatProgressMs = 0L;
     private boolean wasObserved = false;
@@ -110,6 +118,7 @@ public final class GrindBrain {
             targetOid = -1;
             lastMoveTargetX = Integer.MIN_VALUE;
             lastKillMs = now();
+            lastSwingMapId = -1; // fresh episode re-arms the one-stop travel-clear
             lastNarrate = "";
             lastGiveUpNarrateMs = 0L;
             camp.resetEpisodeUnderLock();
@@ -180,10 +189,75 @@ public final class GrindBrain {
             return;
         }
         climb.onGrounded();
+        // 好打的怪横在路上：途经者停下来顺手清掉，而不是贴脸走过。出手冷却未好时不看（散步经
+        // 过不硬打，和玩家走路时手不在攻击键上一样）；FIGHT/WAIT 分支自己有 swing-first 门，
+        // 这里的顺势一挥在驱动层共用同一冷却，不会造成双重出手。
+        Monster interloper = bestInReachInterloper(chr);
+        if (interloper != null) {
+            engageAndSwingShared(chr);
+        }
         GrindStrategy s = strategy;
         if (s != null) {
             s.tick(chr);
         }
+    }
+
+    // A live hostile sitting inside this bot's attack-reach box on its own ledge. Null = nothing
+    // worth a travel-clear this tick. Read-only scan (no facing change, no claim mutation), so it
+    // is safe to run ahead of every strategy tick while the strategies' FIGHT branch stays the
+    // swing authority.
+    private Monster bestInReachInterloper(Character chr) {
+        if (!claimActive) {
+            return null; // believability: only a bot holding a spot/ledge/far-target clears en route
+        }
+        if (BotAttackDriver.nextAttackEpochMs(chr.getId()) > now()) {
+            return null; // swing still cooling — walk on (the driver re-gates at swing time anyway)
+        }
+        int rid = chr.getMapId();
+        if (rid == lastSwingMapId) {
+            return null; // already stopped for a travel-clear on this map this episode — keep walking
+        }
+        int reachX = BotAttackDriver.attackReachX(chr);
+        int reachY = BotAttackDriver.attackReachY(chr);
+        if (reachX <= 0) {
+            return null; // no configured attack (or the aura-gated slot is down right now)
+        }
+        Point pos = chr.getPosition();
+        if (pos == null || chr.getMap() == null) {
+            return null;
+        }
+        Monster best = null;
+        int bestAbsDx = Integer.MAX_VALUE;
+        for (Monster m : chr.getMap().getAllMonsters()) {
+            if (!SpotFinder.isHostile(m)) {
+                continue;
+            }
+            Point mp = m.getPosition();
+            if (mp == null || Math.abs(mp.x - pos.x) > reachX || Math.abs(mp.y - pos.y) > reachY) {
+                continue;
+            }
+            if (GCMovement.onDifferentLedge(chr.getMap(), pos.x, pos.y, mp.x, mp.y)) {
+                continue; // one platform over is someone else's fight, not a roadblock
+            }
+            int absDx = Math.abs(mp.x - pos.x);
+            if (absDx < bestAbsDx) {
+                bestAbsDx = absDx;
+                best = m;
+            }
+        }
+        return best;
+    }
+
+    // Shared settle-and-swing tail for the travel-clear beat: plant, fire the AUTO swing, and
+    // bookkeep the beat (attack walk lock + progress heartbeats).
+    private void engageAndSwingShared(Character chr) {
+        GCMovement.stop(chr);
+        engaged = true;
+        lastMoveTargetX = Integer.MIN_VALUE;
+        lastSwingMapId = chr.getMapId();
+        BotAttackDriver.botAttack(chr); // driver's own cooldown/debuff gates still apply
+        attackWalkLockUntil = now() + EngageBeat.ATTACK_WALK_LOCK_MS;
+        markProgress(); // the en-route clear is productive, not a wedge
     }
 
     // Drop the spot claim + reset combat state when the bot leaves the map / stops.
@@ -197,6 +271,7 @@ public final class GrindBrain {
             targetOid = -1;
             engaged = false;
             lastMoveTargetX = Integer.MIN_VALUE;
+            lastSwingMapId = -1;
         }
     }
 
@@ -269,6 +344,38 @@ public final class GrindBrain {
     }
 
     // ── Shared services (package-visible for the strategies + beats) ──
+
+    // Densest-pack targeting radius for the travel-approach scan (same knob as camp/stack targeting).
+    static final int TRAVEL_CLUSTER_RADIUS_PX = 160;
+
+    /*
+     * The approach destination for a travel beat toward `s`: the spot ledge's live-mob foothold
+     * when the swing is ready and the ledge feeds (fight on arrival — a player walks INTO the pack
+     * they pass, not to an empty anchor pixel), else the anchor's own ground. Pairs with the
+     * travel-clear beat above: that stops for a mob already in reach, this shapes the last stretch
+     * of the walk so arrival converts straight into FIGHT swings. Read-only.
+     */
+    Point travelApproachPoint(Character chr, Spot s) {
+        Point anchor = s.anchor();
+        if (BotAttackDriver.nextAttackEpochMs(chr.getId()) <= now()) {
+            Monster m = SpotFinder.bestClusterHostileInBand(chr.getMap(), anchor, s.radius(),
+                    anchor.x - s.radius(), anchor.x + s.radius(), chr.getPosition(), TRAVEL_CLUSTER_RADIUS_PX);
+            if (m != null) {
+                Point mp = m.getPosition();
+                Point mgp = GCMovement.groundPointBelow(chr.getMap(), mp.x, mp.y);
+                return new Point(mp.x, (mgp != null) ? mgp.y : mp.y);
+            }
+        }
+        Point gp = GCMovement.groundPointBelow(chr.getMap(), anchor.x, anchor.y);
+        return new Point(anchor.x, (gp != null) ? gp.y : anchor.y);
+    }
+
+    // True while a just-fired swing (the shared travel-clear beat, or the walk-out swing FIGHT
+    // leaves behind) holds the bot planted: an attack animation cannot walk mid-swing. The beat is
+    // spent standing; the walk resumes next tick and the claim keeps its regular re-acquire flow.
+    boolean midSwingPlant() {
+        return now() < attackWalkLockUntil;
+    }
 
     void markProgress() {
         lastCombatProgressMs = now();
