@@ -3,6 +3,7 @@ package soloMapling.ArtificialPlayer.PartyQuest;
 import org.gms.client.Character;
 import org.gms.scripting.event.EventInstanceManager;
 import org.gms.server.life.Monster;
+import org.gms.server.maps.Foothold;
 import org.gms.server.maps.MapItem;
 import org.gms.server.maps.MapObject;
 import org.gms.server.maps.MapleMap;
@@ -216,6 +217,70 @@ public final class PqActions {
     /** Striking box on the same platform: the approach box around its floor point. */
     private static final int APPROACH_X = 90;
     private static final int APPROACH_Y = 70;
+
+    /**
+     * Approach the floor under an aerial target when that floor is BELOW the bot, walking
+     * whatever edge chain the map offers (walk-off / down-jump / rope descend).
+     *
+     * <p>{@link #approachUnder} answers IN_POSITION once the bot is within its box of the
+     * target's floor point, which is exactly the box the bot already stands in when it began
+     * ABOVE that floor - so a bot on a platform with its box below at the bottom of a tower
+     * reads as "in position" and stands still, one room short of the fight (the LPQ stage-2
+     * "bots broke the first box and stopped" report: the nearest remaining box hangs 335px
+     * straight down, out of jump reach, over one-way ledges).
+     *
+     * <p>The fix reads the nav graph: when the target floor is lower than the bot, the goal
+     * handed to the driver is the raw aerial point itself (a region the bot is not standing
+     * in), so the planner must produce an edge chain down - and the executor walks it (v59+
+     * graphs mint rope-descend / uncapped down-jump / walk-off edges; GRAPH_VERSION 64's
+     * deep-drop escape hatch covers the tower's last shaft). A graph that cannot (or a point
+     * with no floor under it) falls back to the plain approach. STUCK propagates, so the
+     * rotate-on-stuck callers try a different box instead of replaying a dead edge.
+     */
+    public static Approach descendToFloorAerialTarget(Character bot, Point aerialTarget) {
+        if (bot == null || aerialTarget == null || bot.getMap() == null) {
+            return Approach.STUCK;
+        }
+        Point pos = bot.getPosition();
+        Point ground = GCMovement.groundPointBelow(bot.getMap(), aerialTarget.x, aerialTarget.y);
+        if (!descendNeedsFloor(pos, ground)) {
+            // No floor under the target, or the bot is already level with it: the plain
+            // approach's answer is the right one here.
+            return approachUnder(bot, aerialTarget);
+        }
+        // A healthy descent takes many macro ticks (ropes, drop floors), so the STUCK count
+        // must track "the driver gave up on this floor" - not merely the same target again.
+        // Only an IDLE driver between re-issues means the edge chain is not working.
+        if (!GCMovement.isMoving(bot)) {
+            if (ground.equals(stuckTargetByBot.get(bot.getId()))) {
+                int attempts = stuckCountByBot.merge(bot.getId(), 1, Integer::sum);
+                if (attempts > STUCK_RETRIES) {
+                    // This floor is dead for THIS round of candidates; drop the record so the
+                    // next tick's retry starts fresh instead of STUCK-ing on sight forever
+                    // (every caller-side rotate candidate can fail - without the reset that
+                    // would strand the bot with no box it may approach, permanently).
+                    stuckTargetByBot.remove(bot.getId());
+                    stuckCountByBot.remove(bot.getId());
+                    return Approach.STUCK; // make the caller try another box
+                }
+            } else {
+                stuckTargetByBot.put(bot.getId(), new Point(ground));
+                stuckCountByBot.put(bot.getId(), 1);
+            }
+            GCMovement.move(bot, aerialTarget.x, aerialTarget.y);
+        }
+        return Approach.TRAVELLING;
+    }
+
+    /**
+     * Whether the floor under an aerial target needs a DESCENT to reach: the floor exists and
+     * sits clearly below the bot. Pure so the LPQ tower numbers are unit-testable without a
+     * map ({@code groundUnderTarget} is what {@link GCMovement#groundPointBelow} resolved).
+     */
+    static boolean descendNeedsFloor(Point botPos, Point groundUnderTarget) {
+        return groundUnderTarget != null && botPos != null
+                && groundUnderTarget.y > botPos.y + APPROACH_Y;
+    }
 
     /** Walk to the position of a portal on the bot's current map. No-op if the portal is unknown. */
     public static void walkToPortal(Character bot, int portalId) {
@@ -725,10 +790,24 @@ public final class PqActions {
     /** NPC-sight radius SQUARED for the wait spot - getMapObjectsInRange compares distanceSq. */
     private static final long WAIT_NPC_RANGE_SQ = 25_000_000L; // 5000px squared: any quest room
 
+    /** How far (px) below the NPC a floor may sit and still count as the NPC's wait ring. */
+    private static final int RING_FLOOR_TOLERANCE_PX = 30;
+
+    /** map instance -> the wait spots already claimed (the NPC pixel is the first). */
+    private static final Map<Integer, java.util.Set<Point>> WAIT_SPOT_CLAIMS = new java.util.concurrent.ConcurrentHashMap<>();
+
+    /** botId -> the wait spot this bot currently holds in one of the rings. */
+    private static final Map<Integer, Point> WAIT_CLAIM_BY_BOT = new java.util.concurrent.ConcurrentHashMap<>();
+
     public static void waitNearStageNpc(Character bot) {
         if (bot == null || bot.getMap() == null) {
             return;
         }
+        walkTo(bot, stageNpcSpot(bot));
+    }
+
+    /** The closest stage NPC's spot (the next00 portal's mouth as fallback), or null. */
+    private static Point stageNpcSpot(Character bot) {
         Point spot = null;
         long bestSq = Long.MAX_VALUE;
         for (MapObject obj : bot.getMap().getMapObjectsInRange(bot.getPosition(), WAIT_NPC_RANGE_SQ,
@@ -755,7 +834,117 @@ public final class PqActions {
             if (ground != null) {
                 spot = ground;
             }
-            walkTo(bot, spot);
+        }
+        return spot;
+    }
+
+    /**
+     * Wait NEAR the stage NPC without standing on it, the way a party idles while the leader
+     * turns the passes in.
+     *
+     * <p>{@link #waitNearStageNpc} walks every waiter to the same NPC pixel, so a party of
+     * quest bots plus the leader renders as one body on the NPC (the LPQ stage-1 "bots overlap
+     * the NPC" report). The fix is a shared claim table: the first body to arrive takes the NPC
+     * spot itself, and every later one is pushed out to an unoccupied point on the NPC's own
+     * ledge - a ring of teammates around the NPC rather than a stack. The claims release with
+     * the instance, so a new run starts with a clean ring.
+     */
+    public static void spreadNearStageNpc(Character bot) {
+        if (bot == null || bot.getMap() == null) {
+            return;
+        }
+        Point npc = stageNpcSpot(bot);
+        if (npc == null) {
+            return; // no stage NPC and no next00 to gather by - nothing to spread around
+        }
+        Point target = claimNear(bot, npc);
+        walkTo(bot, target);
+    }
+
+    /**
+     * The wait spot this bot may use for an NPC-centred ring: the NPC pixel itself for the
+     * first claim, otherwise an unoccupied point near the NPC, clear of every earlier claim.
+     * The claim is kept until {@link #releaseWaitClaims} drops it, so re-arming the walk on
+     * later ticks returns to the same spot instead of re-rolling the ring.
+     */
+    private static Point claimNear(Character bot, Point npc) {
+        // Keyed by the MAP INSTANCE's identity, not its id: two concurrent runs of the same
+        // quest hold separate room copies with the same map id, and their parties must not
+        // claim each other's spots.
+        Integer key = System.identityHashCode(bot.getMap());
+        java.util.Set<Point> taken = WAIT_SPOT_CLAIMS.computeIfAbsent(key,
+                k -> java.util.Collections.synchronizedSet(new java.util.HashSet<>()));
+        Point mine = WAIT_CLAIM_BY_BOT.get(bot.getId());
+        if (mine != null) {
+            if (taken.contains(mine)) {
+                return mine; // keep walking to (or hold) the spot we already claimed
+            }
+            WAIT_CLAIM_BY_BOT.remove(bot.getId()); // stale: the ring was reset mid-hold
+        }
+        Point spot;
+        synchronized (taken) {
+            if (taken.isEmpty()) {
+                spot = new Point(npc);
+            } else {
+                Point open = nearbyOpenSpot(bot.getMap(), npc, taken);
+                spot = open != null ? open : npc; // crowded: hold the NPC rather than fight
+            }
+            taken.add(spot);
+        }
+        WAIT_CLAIM_BY_BOT.put(bot.getId(), spot);
+        return spot;
+    }
+
+    /** Whether any rope/ladder's climbing column covers x (a wait spot there renders a standing bot on the rope sprite). */
+    private static boolean ropeColumnAt(MapleMap map, int x) {
+        for (org.gms.server.maps.Rope rope : map.getRopes()) {
+            if (Math.abs(rope.x() - x) <= 18) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * A point a body can stand on near {@code anchor}, not one of the {@code taken} spots and
+     * not under a rope/ladder column, or null when the ledge is full. Scans EVERY ledge on the
+     * anchor's floor (getAllFootholds has no ordering contract) so the CLOSEST ledge always
+     * wins; the extra scan is bounded by the floor's own foothold count.
+     */
+    private static Point nearbyOpenSpot(MapleMap map, Point anchor, java.util.Set<Point> taken) {
+        Point best = null;
+        long bestSq = Long.MAX_VALUE;
+        for (Foothold fh : map.getFootholds().getAllFootholds()) {
+            if (fh.isForbidFallDown()) {
+                continue; // one-way platforms are not wait spots
+            }
+            int y = fh.getY1();
+            if (Math.abs(fh.getY2() - y) > 5 || Math.abs(y - anchor.y) > RING_FLOOR_TOLERANCE_PX) {
+                continue; // sloped, or not on the anchor's floor
+            }
+            for (int x = fh.getX1() + 12; x <= fh.getX2() - 12; x += 24) {
+                Point spot = new Point(x, y);
+                if (taken.contains(spot) || ropeColumnAt(map, x)) {
+                    continue;
+                }
+                double dsq = spot.distanceSq(anchor);
+                if (dsq < bestSq) {
+                    bestSq = (long) dsq;
+                    best = spot;
+                }
+            }
+        }
+        return best;
+    }
+
+    /** Give up a wait-spot claim when the bot leaves the room or the run ends. */
+    public static void releaseWaitClaims(int botId) {
+        Point mine = WAIT_CLAIM_BY_BOT.remove(botId);
+        if (mine == null) {
+            return;
+        }
+        for (java.util.Set<Point> spots : WAIT_SPOT_CLAIMS.values()) {
+            spots.remove(mine);
         }
     }
 

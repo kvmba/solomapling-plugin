@@ -4,6 +4,7 @@ import org.gms.client.Character;
 import soloMapling.ArtificialPlayer.BotAttackSystem.BotAuraState;
 import org.gms.constants.skills.Rogue;
 import soloMapling.ArtificialPlayer.PartyQuest.PqActions;
+import soloMapling.ArtificialPlayer.BotMessagingSystem.CharacterStorage;
 import soloMapling.Environment.BotMessages;
 import soloMapling.ArtificialPlayer.BotClientBinding;
 import org.gms.client.inventory.manipulator.InventoryManipulator;
@@ -11,6 +12,7 @@ import org.gms.constants.inventory.ItemConstants;
 
 import java.awt.Point;
 import java.util.List;
+import java.util.Map;
 
 /**
  * What a bot does in each Ludi PQ stage.
@@ -28,6 +30,19 @@ public final class LudiStages {
 
     private LudiStages() {
     }
+
+    /**
+     * botId -> the stage-2 box this bot is working (x = reactor oid, y = box y). Claims are
+     * best-effort anti-queue bookkeeping, not a lock: two bots may still briefly walk the
+     * same box, and the first strike wins.
+     */
+    private static final Map<Integer, Point> TOWER_BOX_CLAIMS = new java.util.concurrent.ConcurrentHashMap<>();
+
+    /**
+     * How far (px) a claimed box's floor may sit from another box's floor and still count as
+     * "the same box" for the anti-queue pick.
+     */
+    private static final int BOX_CLAIM_TOLERANCE_PX = 40;
 
     /** A stage is done when the quest says so; these are its own per-stage flags. */
     public static boolean stageCleared(Character bot, int stage) {
@@ -61,8 +76,9 @@ public final class LudiStages {
 
         if (bot.getMap().getAllMonsters().stream().noneMatch(m -> m.isAlive())) {
             // Room quiet, pockets empty: the stage is waiting on the leader's turn-in, so
-            // wait by the stage NPC instead of idling at the last fight spot.
-            PqActions.waitNearStageNpc(bot);
+            // spread around the stage NPC instead of idling at the last fight spot - or
+            // piling onto the NPC pixel with the rest of the party.
+            PqActions.spreadNearStageNpc(bot);
             return;
         }
 
@@ -77,23 +93,132 @@ public final class LudiStages {
      * Break every pass box on the stage-2 tower. The room's eleven boxes (2202003) are the
      * only pass source - there are no mobs to hunt here - so the stage is a climb past each
      * box, breaking it on the way. The bonus box (2200002) is free mesos on the way out.
+     *
+     * <p>The tower is one vertical room: its boxes hang on floors between the spawn at the
+     * top (y -2521) and the ground floor at the bottom (y +129), and the floors between them
+     * are reached only by walking off ledges, down-jumping, or grabbing a rope downwards.
+     * The bot descends to whatever floor its current box lives on - and so that several bots
+     * do not queue for the same one box, each bot claims a share of the standing boxes and
+     * works its own share (the claim is by bot id, so a bot that changes floors keeps its
+     * boxes; a bot that despawns releases its share).
      */
     public static void breakTowerBoxes(Character bot) {
         // One box per macro tick: the bot walks to the nearest box still standing and breaks
         // it. Eleven boxes is a handful of ticks, which keeps the tower climb visible.
-        int box = nearestBoxOid(bot, LudiPqData.BOX_STAGE2);
-        if (box >= 0 && hitReactorRotate(bot, box, LudiPqData.BOX_STAGE2)) {
+        int box = nearestOwnedBoxOid(bot, LudiPqData.BOX_STAGE2);
+        if (box >= 0 && hitReactorDescendRotate(bot, box, LudiPqData.BOX_STAGE2)) {
             return;
         }
         if (box < 0) {
             // Every box is gone but the stage is not cleared yet (the leader still has to
-            // turn the passes in): gather by the stage NPC instead of idling at the spawn.
-            PqActions.waitNearStageNpc(bot);
+            // turn the passes in): spread around the stage NPC instead of idling at the
+            // spawn - or piling onto the NPC pixel with the rest of the party.
+            PqActions.spreadNearStageNpc(bot);
         }
         int bonus = PqActions.findReactorOid(bot, LudiPqData.BOX_STAGE2_BONUS);
         if (bonus >= 0) {
             hitReactorAt(bot, bonus);
         }
+    }
+
+    /**
+     * The nearest alive box of this data id this bot may work.
+     *
+     * <p>The first bot in the party keeps the plain nearest pick. Every later bot must
+     * DISTINGUISH its nearest from the ones already claimed - a box exactly as near as
+     * another's claim would rotate onto a claimed box and queue behind it. When the plain
+     * nearest is claimed by a bot that still exists, the caller takes the nearest box that
+     * is farther than that claimed one, so the party spreads down the tower instead of
+     * standing in a queue on one box.
+     *
+     * <p>The claims are per bot id and released with the bot (see {@link #releaseTowerBox}),
+     * so a mid-run replacement carries no stale share.
+     */
+    private static int nearestOwnedBoxOid(Character bot, int dataId) {
+        int nearest = nearestBoxOid(bot, dataId);
+        if (nearest < 0) {
+            return -1; // nothing standing
+        }
+        int myId = bot.getId();
+        int floor = bot.getPosition() == null ? 0 : bot.getPosition().y;
+        var reactor = bot.getMap().getReactorByOid(nearest);
+        int nearestY = reactor != null && reactor.getPosition() != null
+                ? reactor.getPosition().y : floor;
+
+        // The nearest box is contested only when another live bot claims a box within the
+        // approach radius of it.
+        boolean contested = false;
+        for (Map.Entry<Integer, Point> claim : TOWER_BOX_CLAIMS.entrySet()) {
+            if (claim.getKey() == myId) {
+                continue;
+            }
+            var holderBot = CharacterStorage.getBotById(claim.getKey());
+            if (holderBot == null || holderBot.getChr() == null
+                    || holderBot.getChr().getMapId() != bot.getMapId()) {
+                continue; // a despawned / elsewhere holder's claim does not contest this room
+            }
+            var claimed = bot.getMap().getReactorByOid(claim.getValue().x);
+            if (claimed != null && claimed.getPosition() != null
+                    && Math.abs(claimed.getPosition().y - nearestY) <= BOX_CLAIM_TOLERANCE_PX) {
+                contested = true;
+                break;
+            }
+        }
+        if (!contested) {
+            TOWER_BOX_CLAIMS.put(myId, new Point(nearest, nearestY));
+            return nearest;
+        }
+
+        // Contested: take the nearest box FARTHER than every claimed one. `none farther`
+        // means the room holds only the claimed box(es) - the caller rotates onto one rather
+        // than stand idle (the plain nearest at that point is the honest pick).
+        double claimedNearestSq = Double.MAX_VALUE;
+        for (Map.Entry<Integer, Point> claim : TOWER_BOX_CLAIMS.entrySet()) {
+            var holder = CharacterStorage.getBotById(claim.getKey());
+            if (claim.getKey() == myId || holder == null
+                    || holder.getChr() == null || holder.getChr().getMapId() != bot.getMapId()) {
+                continue;
+            }
+            var claimed = bot.getMap().getReactorByOid(claim.getValue().x);
+            if (claimed == null || claimed.getPosition() == null) {
+                continue;
+            }
+            double dsq = bot.getPosition().distanceSq(claimed.getPosition());
+            if (dsq < claimedNearestSq) {
+                claimedNearestSq = dsq;
+            }
+        }
+        int best = -1;
+        int bestY = floor;
+        double bestSq = Double.MAX_VALUE;
+        boolean noneFarther = true;
+        for (int oid : PqActions.findAllReactorOids(bot, dataId)) {
+            var candidate = bot.getMap().getReactorByOid(oid);
+            if (candidate == null || candidate.getPosition() == null) {
+                continue;
+            }
+            double dsq = bot.getPosition().distanceSq(candidate.getPosition());
+            if (dsq <= claimedNearestSq) {
+                continue;
+            }
+            noneFarther = false;
+            if (dsq < bestSq) {
+                bestSq = dsq;
+                best = oid;
+                bestY = candidate.getPosition().y;
+            }
+        }
+        if (noneFarther) {
+            TOWER_BOX_CLAIMS.put(myId, new Point(nearest, nearestY));
+            return nearest;
+        }
+        TOWER_BOX_CLAIMS.put(myId, new Point(best, bestY));
+        return best;
+    }
+
+    /** Drop this bot's stage-2 tower box claim, so a later bot can take its share. */
+    public static void releaseTowerBox(int botId) {
+        TOWER_BOX_CLAIMS.remove(botId);
     }
 
     // =========================================================================
@@ -112,10 +237,10 @@ public final class LudiStages {
         PqActions.seekAndAttack(bot);
         PqActions.loot(bot, bot.getPosition(), 2_000, new int[]{LudiPqData.PASS});
         // No crates left and nothing alive to fight: the stage is waiting on the leader's
-        // turn-in, so gather by the stage NPC instead of idling at the spawn.
+        // turn-in, so spread around the stage NPC instead of idling at the spawn.
         if (crate < 0
                 && bot.getMap().getAllMonsters().stream().noneMatch(m -> m.isAlive())) {
-            PqActions.waitNearStageNpc(bot);
+            PqActions.spreadNearStageNpc(bot);
         }
     }
 
@@ -178,6 +303,16 @@ public final class LudiStages {
         if (!BotAuraState.isMonsterImmune(bot)) {
             soloMapling.ArtificialPlayer.BotAttackSystem.BotBuffEffects.showBuff(bot, Rogue.DARK_SIGHT);
         }
+    }
+
+    /**
+     * Release everything this bot holds inside the Ludi rooms: its stage-2 tower box claim
+     * and its stage-NPC wait-spot claim. Called when the bot leaves the map or the run ends,
+     * so a replacement bot starts with a clean share.
+     */
+    public static void releaseRoomState(int botId) {
+        releaseTowerBox(botId);
+        PqActions.releaseWaitClaims(botId);
     }
 
     /** How many stage-5 guards (9300013) are alive within the seek box. */
@@ -246,9 +381,32 @@ public final class LudiStages {
     }
 
     /**
-     * Approach-and-strike {@code oid}; on a STUCK approach rotate to the next-nearest box of
-     * the same kind (the failed approach's edge is dead - a different box is a different
-     * edge). Returns true while a box is still being worked, false when none is reachable.
+     * Approach-and-strike {@code oid} when the approach can reach it by walking DOWN (a box
+     * on a lower floor of a tower: the bot must take the map's edges to its level); on a
+     * STUCK approach rotate to the next-nearest box of the same kind. Returns true while a
+     * box is still being worked, false when none is reachable.
+     */
+    private static boolean hitReactorDescendRotate(Character bot, int firstOid, int dataId) {
+        int oid = firstOid;
+        for (int attempt = 0; attempt < 3 && oid >= 0; attempt++) {
+            var reactor = bot.getMap().getReactorByOid(oid);
+            if (reactor == null || reactor.getPosition() == null) {
+                return false;
+            }
+            PqActions.Approach outcome =
+                    PqActions.descendToFloorAerialTarget(bot, reactor.getPosition());
+            if (outcome == PqActions.Approach.TRAVELLING) {
+                return true;
+            }
+            oid = nearestBoxOid(bot, dataId, oid); // STUCK: rotate to another box
+        }
+        return false; // every candidate failed this tick; try again next tick
+    }
+
+    /**
+     * Approach-and-strike {@code oid} on the bot's own level (a same-floor walk or jump);
+     * on a STUCK approach rotate to the next-nearest box of the same kind. Returns true
+     * while a box is still being worked, false when none is reachable.
      */
     private static boolean hitReactorRotate(Character bot, int firstOid, int dataId) {
         int oid = firstOid;

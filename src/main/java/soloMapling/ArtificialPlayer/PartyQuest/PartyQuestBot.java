@@ -98,6 +98,7 @@ public abstract class PartyQuestBot extends BotSM {
         // stopped or converted away, so the next bot type on this character starts clean.
         GCMovement.disable(getChr());
         PqActions.clearSeekState(getChr().getId());
+        releaseRoomState(); // a stopped bot holds no wait spots or box claims
         super.stopScheduledTask();
     }
 
@@ -167,6 +168,7 @@ public abstract class PartyQuestBot extends BotSM {
         // contributes nothing and, worse, is still counted by getPlayerCount for the puzzles
         // that care how many people are present.
         if (followLeaderIntoNextRoom()) {
+            releaseRoomState(); // a new room means a new ring around its stage NPC
             return; // moved rooms; work resumes from the new one next tick
         }
 
@@ -176,6 +178,13 @@ public abstract class PartyQuestBot extends BotSM {
         if (workStage()) {
             returnToLobby("stage work reports the run is over");
         }
+    }
+
+    /**
+     * Drop whatever room-scoped state this bot holds (stage-NPC wait spots, box claims).
+     * Quests that keep none override this to a no-op; the Ludi rooms hold both.
+     */
+    protected void releaseRoomState() {
     }
 
     /**
@@ -453,6 +462,7 @@ public abstract class PartyQuestBot extends BotSM {
         if (bot == null) {
             return;
         }
+        releaseRoomState(); // the run is over - give up the room's wait spots and claims
         if (bot.getMapId() == lobbyMapId()) {
             leaveInstance();
             return;
