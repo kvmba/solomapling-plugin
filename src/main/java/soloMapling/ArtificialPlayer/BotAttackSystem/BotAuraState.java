@@ -109,13 +109,16 @@ public final class BotAuraState {
      * botId -> every plain cosmetic aura currently shown (the non-state-bound buffs whose foreign
      * frame rides {@code giveForeignBuff}: Maple Warrior, Stance, Sharp Eyes, ...). The hide /
      * dash / attack-enabler auras are state-bound and live in their own structures above, and the
-     * combo orb ring keeps its own count in {@link BotComboOrb}. This is the "which visuals are on
+     * combo orb ring is owned EXCLUSIVELY by {@link BotComboOrb} - its wire value is the live orb
+     * count, so its id is kept OUT of this ledger and out of every generic packet builder (a
+     * Crusader job's periodic buff sweep does show 1111002, but {@code onAuraShown} routes it to
+     * {@code BotComboOrb.onAttackLanded}'s ring, never here). This is the "which visuals are on
      * this bot" ledger the on-arrival replay consults - the host answers the same question per
      * observer by re-reading the buff registry inside every spawn packet ({@code
-     * writeForeignBuffs}); a bot registers nothing there, so the ledger stands in for it. ADD-only
-     * (the set dedupes re-shows): the generic foreign frame carries no duration, so a client
-     * renders such an aura until a matching cancelForeignBuff - which the plugin never sends for
-     * these - so an entry, once shown, is what every observer present keeps rendering.
+     * writeForeignBuffs}); a bot registers nothing there, so the ledger stands in for it.
+     * ADD-only (the set dedupes re-shows): the generic foreign frame carries no duration, so a
+     * client renders such an aura until a matching cancelForeignBuff - which the plugin never
+     * sends for these - so an entry, once shown, is what every observer present keeps rendering.
      */
     private static final Map<Integer, Set<Integer>> SHOWN_AURAS = new ConcurrentHashMap<>();
 
@@ -278,6 +281,12 @@ public final class BotAuraState {
             MORPH_SKILL.put(id, skillId);
         } else if (isDarkSight(skillId)) {
             DARK_SIGHT_UP.add(id);
+        } else if (skillId == Crusader.COMBO) {
+            // The combo ring is BotComboOrb's exclusive wire format (the live count draws the
+            // ring, not the WZ statup) - the aura this skill shows IS the ring, so it must never
+            // also land in the plain-aura ledger: the replay would send the ring twice, and a
+            // ring that already lapsed would render as a phantom from the ledger entry.
+            // Its look is (re)drawn by onAttackLanded's broadcasts; nothing to record here.
         } else {
             // A plain cosmetic aura (Maple Warrior, Stance, Sharp Eyes, ...). The generic
             // giveForeignBuff frame carries no duration, so the client renders such an aura until a

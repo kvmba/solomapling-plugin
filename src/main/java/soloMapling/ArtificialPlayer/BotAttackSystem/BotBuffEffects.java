@@ -143,7 +143,10 @@ public final class BotBuffEffects {
      * frame carries a duration; it is in seconds, as the host's own {@code applyTo} writes it.
      */
     private static void broadcastAura(Character bot, int skillId, StatEffect effect, int durationMs) {
-        bot.getMap().broadcastMessage(bot, auraPacket(bot, skillId, effect, durationMs), false);
+        Packet packet = auraPacket(bot, skillId, effect, durationMs);
+        if (packet != null) { // empty statups build no packet (pre-refactor behaviour)
+            bot.getMap().broadcastMessage(bot, packet, false);
+        }
     }
 
     /**
