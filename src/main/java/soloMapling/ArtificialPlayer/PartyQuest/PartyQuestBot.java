@@ -14,6 +14,7 @@ import soloMapling.ArtificialPlayer.GCMoveSystem.GCMovement;
 import soloMapling.BotLogger;
 import soloMapling.Environment.PlatformPlacement;
 
+import java.awt.Point;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.function.BooleanSupplier;
 
@@ -199,6 +200,8 @@ public abstract class PartyQuestBot extends BotSM {
         // Survive the fight: sip back whatever the room's mobs took off (no-op while full).
         potionSim.tick(bot);
 
+        recoverStalledClimb(bot);
+
         maybeQuestChat(Beat.WORKING);
 
         if (workStage()) {
@@ -219,6 +222,35 @@ public abstract class PartyQuestBot extends BotSM {
      * Quests that keep none override this to a no-op; the Ludi rooms hold both.
      */
     protected void releaseRoomState() {
+    }
+
+    // Climb-stall recovery (the PQ twin of the grind brain's ClimbRecovery, which a quest
+    // bot does not run): a committed nav climb that stops making real vertical progress is
+    // a wedge (rope-top clamp, mid-rope rock) - the chase silently dies there and the bot
+    // never reaches the mobs it picked. The numbers mirror ClimbRecovery's proven pair:
+    // 6px sits just above one climb step (~5px), so a wriggle reads as a stall while any
+    // genuine multi-tick climb counts as progress.
+    private long climbStallSinceMs = 0L;
+    private int lastClimbY = Integer.MIN_VALUE;
+    private static final long CLIMB_STALL_MS = 2_500;
+    private static final int CLIMB_PROGRESS_EPS_PX = 6;
+
+    private void recoverStalledClimb(Character bot) {
+        if (!GCMovement.isClimbing(bot)) {
+            climbStallSinceMs = 0L;
+            return;
+        }
+        Point pos = bot.getPosition();
+        int y = (pos != null) ? pos.y : 0;
+        if (climbStallSinceMs == 0L || Math.abs(y - lastClimbY) >= CLIMB_PROGRESS_EPS_PX) {
+            climbStallSinceMs = System.currentTimeMillis();
+            lastClimbY = y;
+            return;
+        }
+        if (System.currentTimeMillis() - climbStallSinceMs >= CLIMB_STALL_MS) {
+            climbStallSinceMs = 0L;
+            GCMovement.dismountRope(bot, 0);
+        }
     }
 
     /**

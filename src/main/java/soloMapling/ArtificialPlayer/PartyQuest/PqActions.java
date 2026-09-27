@@ -652,10 +652,16 @@ public final class PqActions {
         }
 
         // 2. Nothing in reach: pick a chase target (sticky across ticks) and close on it.
-        Monster target = seekTarget(bot, pos);
+        //    The chase target must be PATHABLE: on a tower whose climb chain the graph
+        //    cannot plan end-to-end, the nearest mob sits across a missing link and the
+        //    un-pathable chase degrades into walking the bot's own floor under it forever
+        //    (the stage-1 report). Prefer the nearest pathable hostile; only a room where
+        //    NOTHING is pathable keeps the plain nearest (steering is still better than
+        //    standing, and the graph may bake later).
+        Monster target = seekPathableTarget(bot, pos);
         if (target == null) {
             seekLastXByBot.remove(bot.getId());
-            return; // the room is quiet; hold position this tick
+            return; // the room is quiet (or nothing reachable); hold position this tick
         }
 
         // Close on the target: walk to the floor under it (the nav layer jumps/drops/climbs
@@ -704,20 +710,26 @@ public final class PqActions {
     }
 
     /**
-     * The chase target this tick: the sticky one while it stays alive and inside the seek
-     * box, else the nearest live hostile in the box (platforms above/below included - the
-     * nav graph's climb edges make "up the rope to the next platform" a normal approach).
+     * The chase target this tick: the sticky one while it stays alive, inside the seek box,
+     * and PATHABLE (canPathTo from the bot — the sticky check re-plans too, so a mob that
+     * wandered onto an unreachable ledge is released rather than walked into a wall under).
+     * Otherwise the nearest live hostile in the box, pathable candidates first (platforms
+     * above/below included - the nav graph's climb edges make "up the rope to the next
+     * platform" a normal approach).
      */
-    private static Monster seekTarget(Character bot, Point pos) {
+    private static Monster seekPathableTarget(Character bot, Point pos) {
         int sticky = seekTargetByBot.getOrDefault(bot.getId(), -1);
         if (sticky >= 0) {
             MapObject mo = bot.getMap().getMapObject(sticky);
-            if (mo instanceof Monster m && isHuntTarget(m, pos)) {
+            if (mo instanceof Monster m && isHuntTarget(m, pos) && isPathable(bot, m)) {
                 return m;
             }
+            seekTargetByBot.put(bot.getId(), -1); // gone, out of the box, or unreachable
         }
         Monster best = null;
         double bestSq = Double.MAX_VALUE;
+        Monster bestPathable = null;
+        double bestPathableSq = Double.MAX_VALUE;
         for (Monster m : bot.getMap().getAllMonsters()) {
             if (!isHuntTarget(m, pos)) {
                 continue;
@@ -728,11 +740,27 @@ public final class PqActions {
                 bestSq = dsq;
                 best = m;
             }
+            if (dsq < bestPathableSq && isPathable(bot, m)) {
+                bestPathableSq = dsq;
+                bestPathable = m;
+            }
         }
-        seekTargetByBot.put(bot.getId(), best != null ? best.getObjectId() : -1);
+        Monster chosen = bestPathable != null ? bestPathable : best;
+        seekTargetByBot.put(bot.getId(), chosen != null ? chosen.getObjectId() : -1);
         seekAnchorByBot.remove(bot.getId()); // a fresh target restarts the progress clock
         seekLastXByBot.remove(bot.getId());
-        return best;
+        return chosen;
+    }
+
+    /** Whether the bot's graph can plan a route to this mob's floor point (peek, no build). */
+    private static boolean isPathable(Character bot, Monster m) {
+        Point mp = m.getPosition();
+        if (mp == null) {
+            return false;
+        }
+        Point ground = GCMovement.groundPointBelow(bot.getMap(), mp.x, mp.y);
+        int ty = (ground != null) ? ground.y : mp.y;
+        return GCMovement.canPathTo(bot, mp.x, ty);
     }
 
     /** Release a stopped/despawned quest bot's seek state so the per-bot maps do not grow. */
