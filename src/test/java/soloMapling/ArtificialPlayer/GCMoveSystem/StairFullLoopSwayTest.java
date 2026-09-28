@@ -248,6 +248,36 @@ class StairFullLoopSwayTest {
     private int anomalies = 0;
 
     @Test
+    void theSnapRuleNeverSwallowsATargetBelowTheBotsFeet() {
+        // Direct pin on the direction guard. The state a knockback recovery leaves behind:
+        // grounded on the UPPER overlap surface (fh190 y=351) with the navigation state cleared
+        // (navEdge == null) and a live precise target aimed one walkable-step BELOW at the lower
+        // overlap surface (fh191 y=376). The lower surface has a real route, so the arrival
+        // logic must keep the goal alive (steering/replan owns it) — never declare "arrived"
+        // while the bot stands 25px above the surface it was asked to stand on.
+        BotMovementState st = botAt(840, 351);
+        moveGoal(st, 840, 376);
+        st.navEdge = null; // post-knockback state: nav cleared, moveTarget kept
+        GCMovementDriver.clearReachedMoveTarget(st);
+        assertTrue(st.moveTarget != null,
+                "a target on the surface BELOW the bot's feet was swallowed by the snap rule");
+    }
+
+    @Test
+    void aTargetOnTheLowerOverlapSurfaceEndsOnItsOwnSurface() {
+        // Bot stands on fh190 (y=351); the goal sits on fh191 (y=376) directly beneath the
+        // overlap band. The lower surface has a real route (walk to the ledge end and drop),
+        // so the bot must never satisfy the goal early by standing at ~351: the parked Y must
+        // be on the target's own surface, not one platform above it.
+        BotMovementState st = botAt(860, 351);
+        int[] r = runMove(st, 860, 840, 376);
+        assertTrue(r[3] < TICKS, "never arrived: parked at x=" + r[1] + " y=" + r[2]);
+        assertTrue(Math.abs(r[2] - 376) <= 8,
+                "arrived one platform above the goal (parked y=" + r[2] + ", goal y=376) — "
+                        + "the snap rule swallowed a lower-surface target");
+    }
+
+    @Test
     void aPureSettleOnEveryStairTreadStaysPut() {
         // From the deck above, ask for a stand on each tread; once arrived the bot must not
         // wander — the parked window must stay within the arrival band for the rest of the run.

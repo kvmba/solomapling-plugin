@@ -750,21 +750,25 @@ final class GCMovementDriver {
             // footholds can overlap on the X axis 25px apart vertically (fh190 y=351 over fh191 y=376
             // at x 829-867 there) — walkable-step apart (<= MAX_SLOPE_UP) yet too far to snap down
             // (> MAX_SNAP_DROP), so the bake keeps them SEPARATE regions and no edge links them. A
-            // precise target aimed into the overlap band then hangs a walk-unreachable 25px above (or
-            // on the surface just above) the bot's own platform: |dy| <= 8 never fires, the steer
-            // pulses into the notch, the stuck watchdog hops it out and it walks back — the reported
-            // left-right sway. When NO edge reaches the target (the pure settle this bug happens in),
-            // the target's own ground probe lands within the same-ground band of the surface under the
-            // bot's feet and its X is already inside the arrival radius, the target is
-            // precise-unreachable by construction — satisfy it by X. Committed edges are excluded on
-            // purpose: a leg legitimately crossing the goal's X one platform below would otherwise be
-            // cut short mid-trip. A genuine target one real platform up keeps its own surface Y and
-            // gets a committed edge when one exists; a slope target fails the X test (25px of climb
-            // is >= 21px of run, far past the 8px radius).
+            // precise target aimed into the overlap band then hangs a walk-unreachable 25px above the
+            // surface the bot stands on: |dy| <= 8 never fires, the steer pulses into the notch, the
+            // stuck watchdog hops it out and it walks back — the reported left-right sway. When NO
+            // edge reaches the target (the pure settle this bug happens in — also the state a
+            // knockback's clearActionState leaves behind), the target's own ground probe lands within
+            // the same-ground band of the surface under the bot's feet, the target surface is AT or
+            // ABOVE the bot's feet (a target below has a real route — walk off the ledge and fall —
+            // and must never be swallowed while the bot stands one platform above it), and the bot's
+            // X is already inside the arrival radius, the target is precise-unreachable by
+            // construction — satisfy it by X. Committed edges are excluded on purpose: a leg
+            // legitimately crossing the goal's X one platform below would otherwise be cut short
+            // mid-trip. A genuine target one real platform up keeps its own surface Y and gets a
+            // committed edge when one exists; a slope target fails the X test (25px of climb is >=
+            // 21px of run, far past the 8px radius).
             if (entry.navEdge == null) {
                 Point targetGround = BotPhysicsEngine.findGroundPoint(entry.bot.getMap(),
                         new Point(entry.moveTarget.x, entry.moveTarget.y));
                 if (targetGround != null
+                        && targetGround.y <= botPos.y
                         && Math.abs(targetGround.y - botPos.y) <= BotPhysicsEngine.cfg.MAX_SLOPE_UP
                         && Math.abs(botPos.x - entry.moveTarget.x) <= arrivalDist) {
                     entry.moveTarget = null;
