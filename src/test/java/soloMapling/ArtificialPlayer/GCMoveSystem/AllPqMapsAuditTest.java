@@ -45,6 +45,11 @@ public class AllPqMapsAuditTest {
         setter.invoke(new ServerManager(), ctx);
         GameConfig.add(cfg("server", "update_interval", "100"));
         org.gms.net.server.Server.getInstance();
+        // The audit's input is the baked PQ map list at /tmp/all_pq_maps.txt (a WZ-walk artifact,
+        // not a repo file). Without it every case would just error out, so skip the class on
+        // machines that never baked the list instead of failing them.
+        org.junit.jupiter.api.Assumptions.assumeTrue(Files.exists(Path.of("/tmp/all_pq_maps.txt")),
+                "baked PQ map list /tmp/all_pq_maps.txt not present on this machine");
     }
     static GameConfigDO cfg(String t, String k, String v) {
         GameConfigDO d = new GameConfigDO();

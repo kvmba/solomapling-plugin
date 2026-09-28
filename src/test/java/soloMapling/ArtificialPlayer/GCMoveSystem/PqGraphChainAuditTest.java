@@ -33,6 +33,28 @@ public class PqGraphChainAuditTest {
         setter.invoke(new ServerManager(), ctx);
         GameConfig.add(cfg("server", "update_interval", "100"));
         org.gms.net.server.Server.getInstance();
+        // The plan() cases load PQ stage maps through the production WZ loader, which resolves
+        // the server's wz directory relative to the working directory. On a machine without it
+        // every case would just error "Map data not found", so probe the four maps this class
+        // uses and skip instead of erroring.
+        org.junit.jupiter.api.Assumptions.assumeTrue(mapWzAvailable(),
+                "Map.wz not resolvable from this working directory (audit needs the real WZ)");
+    }
+
+    static boolean mapWzAvailable() {
+        try {
+            org.gms.provider.DataProvider mapSource =
+                    org.gms.provider.DataProviderFactory.getDataProvider(org.gms.provider.wz.WZFiles.MAP);
+            for (int mapId : new int[]{910010000, 920010100, 922010200, 922010700}) {
+                if (mapSource.getData("Map/Map" + (mapId / 100000000) + "/"
+                        + String.format("%09d", mapId) + ".img") == null) {
+                    return false;
+                }
+            }
+            return true;
+        } catch (Throwable unavailable) {
+            return false;
+        }
     }
     static GameConfigDO cfg(String t, String k, String v) {
         GameConfigDO d = new GameConfigDO();
