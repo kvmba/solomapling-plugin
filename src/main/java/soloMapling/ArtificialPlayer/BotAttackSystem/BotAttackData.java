@@ -148,6 +148,8 @@ public final class BotAttackData {
             Map.entry(ILMage.THUNDER_SPEAR,          MAGIC_1),   // 2211003 -> "magic1" (I/L single cast)
             Map.entry(Priest.SHINING_RAY,            MAGIC_2),   // 2311004 -> "magic2" (Priest AoE cast)
             Map.entry(DragonKnight.DRAGON_ROAR,      ALERT_3),   // 1311006 -> "alert3" (roar pose)
+            Map.entry(FPMage.POISON_MIST,            ALERT_3),   // 2111003 -> "alert3" (the mist's roar-like cast, from its Skill.wz action node)
+            Map.entry(Hermit.SHADOW_WEB,             SWING_O1),  // 4111003 -> "swingO1" (the web's claw swing, from its Skill.wz action node)
             Map.entry(DragonKnight.SPEAR_CRUSHER,    BURSTER_2), // 1311001 -> "burster2" (spear thrust combo, lv16+)
             Map.entry(DragonKnight.POLE_ARM_CRUSHER, BURSTER_2), // 1311002 -> "burster2"
             // ----- 4th-job skills audited 2026-06-22c -----

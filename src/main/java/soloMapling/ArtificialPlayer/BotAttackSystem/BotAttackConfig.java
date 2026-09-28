@@ -109,15 +109,17 @@ public final class BotAttackConfig {
         put(Job.IL_MAGE,      magic(ILMage.THUNDER_SPEAR, 1),  magicAoe(ILMage.ICE_STRIKE, 1)); // single = Thunder Spear (lightning), AoE = Ice Strike
         put(Job.PRIEST,       null,                           magicAoe(Priest.SHINING_RAY, 1)); // inherits Holy Arrow single
         // 4th-job mages: the ultimate (Meteor Shower / Blizzard) is a throttled full-map nuke in its own
-        // slot; the aoe slot is left null so it inherits the class's sustained mob spell (Explosion / Ice
-        // Strike), which the bot keeps casting while the ultimate cools. Bishop likewise inherits Priest's
-        // Shining Ray to mob with while Genesis is on cooldown.
+        // slot, and while it cools the bot keeps mobbing with the Fire/Ice Demon (below). Bishop
+        // likewise inherits Priest's Shining Ray to mob with while Genesis is on cooldown.
         // The 4th-job single-target cast (Paralyze / Chain Lightning) renders the wand default
         // cast on purpose: neither skill has a Skill.wz action node, and the client's action
         // enum for those poses cannot be safely derived from the WZ order (the verified anchors
         // drift +4/+6/+7 between weapon classes), so both ride the same default Big Bang rides.
-        put(Job.FP_ARCHMAGE,  magic(FPArchMage.PARALYZE, 1),  null, magicAoe(FPArchMage.METEOR_SHOWER, 1)); // inherits Explosion
-        put(Job.IL_ARCHMAGE,  magic(ILArchMage.CHAIN_LIGHTNING, 1), null, magicAoe(ILArchMage.BLIZZARD, 1));  // inherits Ice Strike
+        // The aoe slot is the Fire/Ice Demon (火凤球/冰凤球) - the sustained 2-3 mob strike the
+        // class mobs with (WZ mobCount 2, 3 at high levels), whose hit rider applies
+        // POISON+FREEZE (BotDemonRider, the host's own getMonsterStati branch).
+        put(Job.FP_ARCHMAGE,  magic(FPArchMage.PARALYZE, 1),  magicAoe(FPArchMage.FIRE_DEMON, 1), magicAoe(FPArchMage.METEOR_SHOWER, 1)); // inherits Explosion
+        put(Job.IL_ARCHMAGE,  magic(ILArchMage.CHAIN_LIGHTNING, 1), magicAoe(ILArchMage.ICE_DEMON, 1), magicAoe(ILArchMage.BLIZZARD, 1)); // inherits Ice Strike
         put(Job.BISHOP,       magic(Bishop.ANGEL_RAY, 1),     null, magicAoe(Bishop.GENESIS, 1));           // inherits Shining Ray
 
         // ===== Bowman (ranged) - weapon picks the projectile (bow->arrow, crossbow->bolt) =====

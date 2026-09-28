@@ -133,6 +133,8 @@ public final class BotAttackDriver {
         nextUltimateByBot.remove(botId);
         BotMesoBomb.clearBot(botId); // release the Pickpocket bag register + detonation cooldown
         BotShadowMeso.clearBot(botId); // release the Shadow Meso throw cooldown
+        BotGroundMists.clearBot(botId); // release the Poison Mist recast timer
+        BotShadowWeb.clearBot(botId); // release the Shadow Web recast timer
     }
 
     /*
@@ -310,6 +312,17 @@ public final class BotAttackDriver {
             if (coins != null) {
                 return AttackResult.hit(targets.get(0).getName(), coins.totalDamage(), coins.killed());
             }
+            // The learned mists: a bot that spent SP on the cloud/web casts it on this beat -
+            // the host's own Mist pipeline (poison scheduler) / the web's monster status. AUTO
+            // only; forced GM choices keep probing the regular slots.
+            BotMesoBomb.Blast mist = BotGroundMists.tryCast(bot, facingLeft);
+            if (mist != null) {
+                return AttackResult.hit(targets.get(0).getName(), mist.totalDamage(), mist.killed());
+            }
+            BotMesoBomb.Blast web = BotShadowWeb.tryCast(bot, facingLeft);
+            if (web != null) {
+                return AttackResult.hit(targets.get(0).getName(), web.totalDamage(), web.killed());
+            }
         }
 
         int facingMask = facingLeft ? BotAttackData.FACING_LEFT_MASK : BotAttackData.FACING_RIGHT_MASK;
@@ -370,6 +383,15 @@ public final class BotAttackDriver {
             case MAGIC  -> BotAttackEffects.magicStrike(bot, hits, skillId, profile.skillLevel,
                     bodyActionId, facingMask, profile.speed, profile.hitDelayMs);
         };
+
+        // The Fire/Ice Demon rider: the host's damage handler rolls the attack effect's own
+        // monster statuses per hit mob after a landed swing (AbstractDealDamageHandler's
+        // getMonsterStati branch - chance roll, then applyStatus with the effect's duration).
+        // Poison + Freeze ride the POISON/ICE_DEMON effect exactly as they do for a player;
+        // bosses are refused by applyStatus's own gate.
+        if (!whiff) {
+            BotDemonRider.apply(bot, skillId, hits);
+        }
 
         // The 终极攻击 passive: an occasional extra blow right after the swing. A real client rolls
         // the chance and renders the follow-up itself; the bot's roll happens here instead. A whiffed
