@@ -100,9 +100,10 @@ public final class BotAttackConfig {
         // 圣域 is the paladin's throttled ultimate, not a sustained AoE: its WZ row carries
         // mobCount 15 and a max-level cooltime of 20s - the same full-map-nuke family as the Dragon
         // Roar / Genesis / Blizzard / Meteor Shower slots, which the driver holds to a separate long
-        // cooldown. Registered ONLY in the ultimate slot (the aoe slot stays null, so the pack
-        // attack inherits the Crusader-line Coma exactly like the Hero's does) - in the aoe slot it
-        // would re-fire every swing cadence while its true cooldown runs.
+        // cooldown. Registered ONLY in the ultimate slot; the aoe slot stays null, so the pack
+        // attack falls back through the lineage to the Warrior-line Slash Blast (the paladin's own
+        // 120/121 ancestors register no AoE). In the aoe slot it would re-fire every swing cadence
+        // while its true cooldown runs.
         put(Job.PALADIN,      melee(Paladin.BLAST, 1),                                     null, meleeAoe(Paladin.HEAVENS_HAMMER, 1));
         // Dark Knight: no new attack - inherits Crusher (single + mob) + Dragon Roar ultimate from Dragon Knight.
 

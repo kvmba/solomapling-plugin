@@ -86,16 +86,18 @@ class BotSignatureSkillFixTest {
     void heavensHammerSitsInTheThrottledUltimateSlot() throws IOException {
         String config = read(SRC.resolve("BotAttackConfig.java"));
         // The paladin line must register 圣域 ONLY in the ultimate slot (which owns the driver's
-        // separate 25s full-map-nuke cooldown, mirroring the Hero line) and leave the aoe slot null
-        // so the pack attack inherits the Crusader-line Coma - registering it as the sustained AoE
-        // re-fired a true-player-20s-cooldown skill every swing cadence.
-        Matcher line = Pattern.compile("put\\(Job\\.PALADIN,(.*)\\);", Pattern.DOTALL).matcher(config);
+        // separate 25s full-map-nuke cooldown) and leave the aoe slot null - the pack attack then
+        // falls back through the lineage to the Warrior-line Slash Blast (the paladin's own 120/121
+        // ancestors register no AoE). Registering 圣域 as the sustained AoE re-fired a
+        // true-player-20s-cooldown skill every swing cadence.
+        Matcher line = Pattern.compile("put\\(Job\\.PALADIN,(.*?)\\);", Pattern.DOTALL).matcher(config);
         assertTrue(line.find(), "the paladin attack line must stay registered");
         String slots = line.group(1);
         long count = java.util.Arrays.stream(slots.split(",\\s*(?=[A-Za-z])"))
                 .filter(s -> s.contains("HEAVENS_HAMMER")).count();
         assertEquals(1, count, "圣域 must appear exactly once - in the ultimate slot");
-        assertTrue(slots.contains("null"), "the paladin aoe slot must stay null (inherits Coma)");
+        assertTrue(slots.contains("null"),
+                "the paladin aoe slot must stay null (falls back to the lineage Slash Blast)");
 
         Path wz = Paths.get("../GMS083/gms-server/wz/Skill.wz");
         if (Files.isDirectory(wz)) {
