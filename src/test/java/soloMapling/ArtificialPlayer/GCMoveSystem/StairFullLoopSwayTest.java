@@ -248,33 +248,38 @@ class StairFullLoopSwayTest {
     private int anomalies = 0;
 
     @Test
-    void theSnapRuleNeverSwallowsATargetBelowTheBotsFeet() {
-        // Direct pin on the direction guard. The state a knockback recovery leaves behind:
-        // grounded on the UPPER overlap surface (fh190 y=351) with the navigation state cleared
-        // (navEdge == null) and a live precise target aimed one walkable-step BELOW at the lower
-        // overlap surface (fh191 y=376). The lower surface has a real route, so the arrival
-        // logic must keep the goal alive (steering/replan owns it) — never declare "arrived"
-        // while the bot stands 25px above the surface it was asked to stand on.
-        BotMovementState st = botAt(840, 351);
-        moveGoal(st, 840, 376);
-        st.navEdge = null; // post-knockback state: nav cleared, moveTarget kept
-        GCMovementDriver.clearReachedMoveTarget(st);
-        assertTrue(st.moveTarget != null,
-                "a target on the surface BELOW the bot's feet was swallowed by the snap rule");
+    void theSnapRuleRequiresTheTargetToProbeOntoTheBotsOwnSurface() {
+        // Direct pin on the same-surface guard, in both overlap directions, from the state a
+        // knockback leaves behind (grounded, navEdge cleared, moveTarget kept). At x=840 the two
+        // overlap surfaces are 25px apart (fh190 y=351 walkway / fh191 y=376 ledge), and the
+        // target's own probe and a probe from the bot's feet resolve to DIFFERENT surfaces in
+        // both directions — so the goal keeps its real route (jump onto the walkway / walk off
+        // the ledge end) and must survive the arrival check untouched.
+        BotMovementState stBotAbove = botAt(840, 351);
+        moveGoal(stBotAbove, 840, 376); // target below the bot
+        stBotAbove.navEdge = null;
+        GCMovementDriver.clearReachedMoveTarget(stBotAbove);
+        assertTrue(stBotAbove.moveTarget != null,
+                "a goal on the NEIGHBOURING surface below the bot was swallowed by the snap rule");
+
+        BotMovementState stBotBelow = botAt(840, 376);
+        moveGoal(stBotBelow, 840, 351); // target above the bot (jumpable walkway)
+        stBotBelow.navEdge = null;
+        GCMovementDriver.clearReachedMoveTarget(stBotBelow);
+        assertTrue(stBotBelow.moveTarget != null,
+                "a goal on the NEIGHBOURING surface above the bot was swallowed by the snap rule");
     }
 
     @Test
-    void aTargetOnTheLowerOverlapSurfaceEndsOnItsOwnSurface() {
-        // Bot stands on fh190 (y=351); the goal sits on fh191 (y=376) directly beneath the
-        // overlap band. The lower surface has a real route (walk to the ledge end and drop),
-        // so the bot must never satisfy the goal early by standing at ~351: the parked Y must
-        // be on the target's own surface, not one platform above it.
-        BotMovementState st = botAt(860, 351);
-        int[] r = runMove(st, 860, 840, 376);
-        assertTrue(r[3] < TICKS, "never arrived: parked at x=" + r[1] + " y=" + r[2]);
-        assertTrue(Math.abs(r[2] - 376) <= 8,
-                "arrived one platform above the goal (parked y=" + r[2] + ", goal y=376) — "
-                        + "the snap rule swallowed a lower-surface target");
+    void theSnapRuleStillFiresOnTheBotsOwnSurface() {
+        // The positive half of the same pin: the sway signature state — bot on fh191 (y=376),
+        // precise goal probing onto the SAME surface at its own X — must still arrive by X.
+        BotMovementState st = botAt(899, 376);
+        moveGoal(st, 900, 351); // WZ-authored target hanging 25px above its own surface (376)
+        st.navEdge = null;
+        GCMovementDriver.clearReachedMoveTarget(st);
+        assertTrue(st.moveTarget == null,
+                "the same-surface snap no longer satisfies a genuine overlap-notch target");
     }
 
     @Test
