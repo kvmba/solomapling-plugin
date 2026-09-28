@@ -721,11 +721,12 @@ final class GCMovementDriver {
         return entry.bot != null && entry.bot.getMap() != null && entry.bot.getMap().isSwim();
     }
 
-    private static void clearReachedMoveTarget(BotMovementState entry) {
+    static void clearReachedMoveTarget(BotMovementState entry) {
         if (entry.moveTarget == null) {
             return;
         }
         Point botPos = entry.bot.getPosition();
+        int arrivalDist = entry.moveTargetPrecise ? 8 : BotMovementManager.cfg.STOP_DIST;
         // Narrow-ledge residency: a precise target whose foothold is too narrow to hold a pixel hunt
         // is satisfied by STANDING on that foothold inside the target's band. Pixel-hunting a point on
         // a platform narrower than a step + its glide-out (a WALK step is ~7px) can only overshoot,
@@ -745,8 +746,35 @@ final class GCMovementDriver {
                 GCMovement.fireArrival(entry);
                 return;
             }
+            // Overlapping-foothold snap (the "时间消失之路<1>" stair-underneath concave notch): two
+            // footholds can overlap on the X axis 25px apart vertically (fh190 y=351 over fh191 y=376
+            // at x 829-867 there) — walkable-step apart (<= MAX_SLOPE_UP) yet too far to snap down
+            // (> MAX_SNAP_DROP), so the bake keeps them SEPARATE regions and no edge links them. A
+            // precise target aimed into the overlap band then hangs a walk-unreachable 25px above (or
+            // on the surface just above) the bot's own platform: |dy| <= 8 never fires, the steer
+            // pulses into the notch, the stuck watchdog hops it out and it walks back — the reported
+            // left-right sway. When NO edge reaches the target (the pure settle this bug happens in),
+            // the target's own ground probe lands within the same-ground band of the surface under the
+            // bot's feet and its X is already inside the arrival radius, the target is
+            // precise-unreachable by construction — satisfy it by X. Committed edges are excluded on
+            // purpose: a leg legitimately crossing the goal's X one platform below would otherwise be
+            // cut short mid-trip. A genuine target one real platform up keeps its own surface Y and
+            // gets a committed edge when one exists; a slope target fails the X test (25px of climb
+            // is >= 21px of run, far past the 8px radius).
+            if (entry.navEdge == null) {
+                Point targetGround = BotPhysicsEngine.findGroundPoint(entry.bot.getMap(),
+                        new Point(entry.moveTarget.x, entry.moveTarget.y));
+                if (targetGround != null
+                        && Math.abs(targetGround.y - botPos.y) <= BotPhysicsEngine.cfg.MAX_SLOPE_UP
+                        && Math.abs(botPos.x - entry.moveTarget.x) <= arrivalDist) {
+                    entry.moveTarget = null;
+                    entry.moveTargetPrecise = false;
+                    BotMovementManager.clearNavigationState(entry);
+                    GCMovement.fireArrival(entry);
+                    return;
+                }
+            }
         }
-        int arrivalDist = entry.moveTargetPrecise ? 8 : BotMovementManager.cfg.STOP_DIST;
         if (!reachedMoveTarget(entry.climbing, entry.inAir, entry.swimming, botPos, entry.moveTarget, arrivalDist)) {
             return;
         }
