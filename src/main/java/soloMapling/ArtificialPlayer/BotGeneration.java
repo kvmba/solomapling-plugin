@@ -545,7 +545,7 @@ public class BotGeneration {
         soloMapling.ArtificialPlayer.BotAttackSystem.BotEnergyCharge.clearBot(fakechar.getId()); // release energy-charge state
         soloMapling.ArtificialPlayer.BotAttackSystem.BotComboOrb.clearBot(fakechar.getId()); // release combo-orb state
         soloMapling.ArtificialPlayer.BotAttackSystem.BotFinalAttack.clearBot(fakechar.getId()); // release final-attack cooldown
-        soloMapling.ArtificialPlayer.BotAttackSystem.BotMesoBomb.clearBot(fakechar.getId()); // release the Pickpocket bag register + detonation cooldown
+        soloMapling.ArtificialPlayer.BotAttackSystem.BotAttackDriver.clearBot(fakechar.getId()); // release swing/ultimate cooldowns + the meso-bomb / shadow-meso / ground-mist / shadow-web timers
         soloMapling.ArtificialPlayer.BotStatusSystem.BotDebuffApplier.clearBot(fakechar.getId()); // release debuff cooldowns
         soloMapling.ArtificialPlayer.BotMountSystem.BotMount.forget(fakechar.getId()); // release mount cooldown state
     }
