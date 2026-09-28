@@ -16,6 +16,7 @@ import org.gms.server.maps.MapObject;
 import org.gms.server.maps.MapObjectType;
 import org.gms.util.PacketCreator;
 import soloMapling.ArtificialPlayer.GCMoveSystem.GCMovement;
+import soloMapling.server.BotTiming;
 
 import java.awt.Point;
 import java.awt.Rectangle;
@@ -26,6 +27,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ThreadLocalRandom;
 
 /*
  * 独行客的攒袋-引爆循环：敛财术掉袋，金钱炸弹吃袋。
@@ -66,15 +68,25 @@ public final class BotMesoBomb {
      */
     private static final int BAG_REGISTER_CAP = 64;
 
+    /**
+     * 同一挥撒出的多袋彼此横向抖开的幅度（px）：每袋落在怪坐标 ± 这么多以内，而不是全部叠在
+     * 同一点。0 号袋（每只怪的第一袋）仍落在怪脚下，后续袋随机偏移 - 消费观感是"一地散钱"。
+     */
+    private static final int BAG_SCATTER_PX = 30;
+    /** 同一挥的多袋逐个延迟落地的间隔（ms）：第 i 袋延迟 i * 这个值 spawn，读作连续多次掉落。 */
+    private static final long BAG_SCATTER_STAGGER_MS = 120L;
+
     /** Attacks that scatter bags, exactly the host's Pickpocket trigger list (plus the no-skill swing). */
     private static final Set<Integer> TRIGGER_SKILLS = Set.of(0, Rogue.DOUBLE_STAB, Bandit.SAVAGE_BLOW,
             ChiefBandit.ASSAULTER, ChiefBandit.BAND_OF_THIEVES, Shadower.ASSASSINATE, Shadower.TAUNT,
             Shadower.BOOMERANG_STEP);
 
     // botId -> floor bags this bot owns and may detonate. Written by the bag-drop hook and the
-    // detonator (both the bot's single grind tick); the outer map is concurrent because clearBot
-    // runs on the bot's lifecycle thread. Bag oids are per-map, so a stale oid after a map change
-    // is harmless: eligibility also re-checks the bag's owner and meso-ness below.
+    // detonator. The per-swing bag drops land on BotTiming's shared pool (staggered spawn), so
+    // writers are no longer the single grind tick - the set itself is synchronized. The outer map
+    // is concurrent because clearBot runs on the bot's lifecycle thread. Bag oids are per-map, so
+    // a stale oid after a map change is harmless: eligibility also re-checks the bag's owner and
+    // meso-ness below.
     private static final Map<Integer, Set<Integer>> BAGS_BY_BOT = new ConcurrentHashMap<>();
     private static final Map<Integer, Long> NEXT_DETONATE_BY_BOT = new ConcurrentHashMap<>();
 
@@ -90,7 +102,13 @@ public final class BotMesoBomb {
      * must read as six bags, not a maybe). Amount follows the WZ curve instead: per line,
      * damage / 20000 * x clamped to [1, x], so bag size breathes with the hit while staying
      * pocket change - the payoff was always the explosion, not the crumbs.
-     * Runs on the bot's grind tick (single writer for the register).
+     *
+     * Each line's bag spawns on its own BotTiming beat, staggered by bag index across the WHOLE
+     * swing (index * BAG_SCATTER_STAGGER_MS, so the rain cascades over every mob hit) with the
+     * landing point jittered within BAG_SCATTER_PX of the mob's position snapshot, so a multi-line
+     * swing reads as a rain of separate bags instead of one stack of overlapping mesos at a single
+     * point. Each beat captures its own Point snapshot up front - the mob keeps moving while the
+     * beats play out.
      */
     public static void onAttackLanded(Character bot, int skillId, Map<Monster, List<Integer>> hits) {
         if (bot == null || bot.getMap() == null || hits == null || hits.isEmpty()) {
@@ -111,47 +129,73 @@ public final class BotMesoBomb {
             return;
         }
         int cap = effect.getX(); // max bag value: 105 at lv1 .. 200 at lv20
-        Set<Integer> register = BAGS_BY_BOT.computeIfAbsent(bot.getId(), k -> newBagRegister());
         MapleMap map = bot.getMap();
-        int scattered = 0;
+        // The register is born HERE, at swing time - not lazily inside the delayed beats: after a
+        // despawn (clearBot released it) a resurrecting computeIfAbsent inside a beat would leak.
+        // The beats only bail out when it is gone.
+        Set<Integer> register = BAGS_BY_BOT.computeIfAbsent(bot.getId(), k -> newBagRegister());
+        int bagIndex = 0; // counts every landed line of the whole swing: the rain cascades across mobs
+        // Scan anchor for the reconciliation below: the bags land beside the MOB, so the sweep is
+        // centred on the swing snapshot, not the bot's live position (it may blink away mid-rain).
+        Point botPosNow = bot.getPosition();
+        Point botPos = (botPosNow != null) ? new Point(botPosNow) : null;
         for (Map.Entry<Monster, List<Integer>> hit : hits.entrySet()) {
-            Point mobPos = hit.getKey().getPosition();
-            if (mobPos == null) {
+            Point hitPos = hit.getKey().getPosition();
+            if (hitPos == null) {
                 continue;
             }
+            Point mobPos = new Point(hitPos); // snapshot: the mob walks on while the beats play out
             for (Integer line : hit.getValue()) {
                 int dmg = BotAttackData.decodeDamageLine(line);
                 if (dmg <= 0) {
                     continue; // MISS lines are not hits - they scatter nothing
                 }
                 int amount = (int) Math.min(Math.max(dmg / 20000.0 * cap, 1), cap);
-                // playerDrop=true keeps the owner lock window (a real bot drop, not a monster
-                // drop) and lets the register demand playerDrop, so regular monster meso from a
-                // bot kill is never mistaken for a bomb bag and stays lootable.
-                map.spawnMesoDrop(amount, mobPos, bot, bot, true, (byte) 0);
-                scattered++;
+                int bagNo = bagIndex++;
+                BotTiming.after(bagNo * BAG_SCATTER_STAGGER_MS, () -> {
+                    if (bot.getMap() != map || bot.getJob() == null
+                            || !bot.getJob().isA(Job.CHIEFBANDIT)) {
+                        return; // the bot left this map (or lost the job) mid-rain
+                    }
+                    if (BAGS_BY_BOT.get(bot.getId()) != register) {
+                        return; // despawned mid-rain: clearBot released/replaced the register
+                    }
+                    // The map's own spawn path snaps the point to ground (calcDropPos) and assigns
+                    // the oid server-side, so reconcile by an ownership scan right after: the map's
+                    // object list is the authoritative register source.
+                    map.spawnMesoDrop(amount, scatterAround(mobPos, bagNo), bot, bot, true, (byte) 0);
+                    registerFloorBags(map, botPos, bot, register);
+                });
             }
-        }
-        if (scattered > 0) {
-            // spawnMesoDrop assigns oids server-side and returns void, so reconcile by an
-            // ownership scan around the bot - the map's object list is the authoritative source.
-            registerFloorBags(bot, register);
         }
     }
 
+    /** Jittered landing spot for bag {@code bagNo} of a swing: bag 0 at the (first) mob's feet, the
+     *  rest scattered randomly within {@link #BAG_SCATTER_PX} of their own mob's snapshot. */
+    private static Point scatterAround(Point mobPos, int bagNo) {
+        if (bagNo == 0) {
+            return mobPos;
+        }
+        ThreadLocalRandom rng = ThreadLocalRandom.current();
+        return new Point(mobPos.x - BAG_SCATTER_PX + rng.nextInt(2 * BAG_SCATTER_PX + 1),
+                mobPos.y);
+    }
+
     /*
-     * Ownership-scan the map around the bot and register the bot's own un-picked meso drops.
-     * Doing the reconciliation here (instead of tracking each spawnMesoDrop return) keeps the
-     * register correct across the map's own spawn path, which returns void.
+     * Ownership-scan the map around the given anchor and register the bot's own un-picked meso
+     * drops. Doing the reconciliation here (instead of tracking each spawnMesoDrop return) keeps
+     * the register correct across the map's own spawn path, which returns void.
      */
-    private static void registerFloorBags(Character bot, Set<Integer> register) {
-        MapleMap map = bot.getMap();
+    private static void registerFloorBags(MapleMap map, Point anchor, Character bot, Set<Integer> register) {
         Point pos = bot.getPosition();
-        if (map == null || pos == null) {
+        // The anchor is the swing-time snapshot (the bags land beside the mob, which may sit far
+        // from wherever the bot has since blinked to); fall back to the live position if it's gone.
+        Point centre = anchor != null ? anchor : pos;
+        if (map == null || centre == null) {
             return;
         }
         double radiusSq = (double) SCAN_RADIUS_PX * SCAN_RADIUS_PX;
-        for (MapObject mo : map.getMapObjectsInRange(pos, radiusSq, List.of(MapObjectType.ITEM))) {
+        for (MapObject mo : map.getMapObjectsInRange(centre, radiusSq, List.of(MapObjectType.ITEM))) {
             MapItem mi = (MapItem) mo;
             if (mi.getMeso() > 0 && mi.isPlayerDrop() && !mi.isPickedUp()
                     && mi.getOwnerId() == bot.getId()) {
@@ -318,13 +362,14 @@ public final class BotMesoBomb {
         NEXT_DETONATE_BY_BOT.remove(botId);
     }
 
-    /** Eldest-evicting register: bounded even for a bot that never blows anything up. */
+    /** Eldest-evicting register: bounded even for a bot that never blows anything up. The set is
+     *  synchronized: the staggered bag beats write it off the grind tick. */
     private static Set<Integer> newBagRegister() {
-        return Collections.newSetFromMap(new LinkedHashMap<>(32, 0.75f) {
+        return Collections.synchronizedSet(Collections.newSetFromMap(new LinkedHashMap<>(32, 0.75f) {
             @Override
             protected boolean removeEldestEntry(Map.Entry<Integer, Boolean> eldest) {
                 return size() > BAG_REGISTER_CAP;
             }
-        });
+        }));
     }
 }
