@@ -67,24 +67,31 @@ public final class LudiStages {
      * turn-in and the party stalls on the stage.
      */
     public static void gatherPasses(Character bot, int stage) {
-        // Deliver FIRST: passes parked in a bot's pockets are passes the leader cannot turn
-        // in, and the old "carry your share" early-return left exactly that state standing
-        // still until the turn-in. Recover our stale piles, then hand off up close - walking
-        // to the leader when he is not (the move is fire-and-forget, no flag required).
+        // Recover our stale hand-off piles (the leader missed them and the despawn clock runs),
+        // then hand off ONLY when the walk is free: the leader is already close. While the room
+        // still has mobs, a far delivery must not steer the fight - the deliver-first walk to a
+        // leader on the far side of the tower yanked the bot off the climb mid-chain every time
+        // it looted a pass (kill mob -> pocket pass -> walk to the leader -> seek again -> climb
+        // -> pocket pass ...), so the bot paced between the leader and the fight and never
+        // finished the climb. Passes pocketed while the fight runs are delivered the moment the
+        // room goes quiet (below), and handed for free whenever the bot happens to be near him.
         PqActions.recoverUngatheredHandoffs(bot, LudiPqData.PASS);
-        if (PqActions.handItemsToLeader(bot, LudiPqData.PASS) > 0) {
+        if (PqActions.leaderNear(bot, PqActions.partyLeader(bot))
+                && PqActions.handItemsToLeader(bot, LudiPqData.PASS) > 0) {
             PqActions.say(bot, BotMessages.get("pq.passes_dropped"));
         }
-        if (PqActions.countItem(bot, LudiPqData.PASS) > 0) {
-            return; // still carrying: the walk to the leader is in flight, deliver before all else
-        }
-
         if (bot.getMap().getAllMonsters().stream().noneMatch(m -> m.isAlive())) {
-            // Room quiet, pockets empty: the stage is waiting on the leader's turn-in, so
-            // spread around the stage NPC instead of idling at the last fight spot - or
-            // piling onto the NPC pixel with the rest of the party.
-            PqActions.spreadNearStageNpc(bot);
-            return;
+            // Room quiet: deliver whatever we carried (walking to the leader now beats holding
+            // the stock - the stage is waiting on his turn-in), then spread around the stage
+            // NPC instead of idling at the last fight spot - or piling onto the NPC pixel.
+            if (PqActions.handItemsToLeader(bot, LudiPqData.PASS) > 0) {
+                PqActions.say(bot, BotMessages.get("pq.passes_dropped"));
+            }
+            if (PqActions.countItem(bot, LudiPqData.PASS) <= 0) {
+                PqActions.spreadNearStageNpc(bot);
+                return;
+            }
+            return; // the delivery walk is in flight; it re-runs this branch next tick
         }
 
         PqActions.seekAndAttack(bot);
@@ -113,11 +120,13 @@ public final class LudiStages {
      * boxes; a bot that despawns releases its share).
      */
     public static void breakTowerBoxes(Character bot) {
-        // Deliver FIRST (a bot that pockets passes starves the leader's turn-in), then work
-        // one box per tick: approach it and strike it all the way to broken in the same
-        // breath, then sweep what it dropped.
+        // Recover stale hand-off piles, then hand off only when the walk is free (the leader
+        // is already close). A far delivery would yank the bot off its box floor mid-descent
+        // every tick it pocketed a pass - the same oscillation gatherPasses fixed.
         PqActions.recoverUngatheredHandoffs(bot, LudiPqData.PASS);
-        PqActions.handItemsToLeader(bot, LudiPqData.PASS);
+        if (PqActions.leaderNear(bot, PqActions.partyLeader(bot))) {
+            PqActions.handItemsToLeader(bot, LudiPqData.PASS);
+        }
 
         int box = nearestOwnedBoxOid(bot, LudiPqData.BOX_STAGE2);
         if (box >= 0 && hitReactorDescendRotate(bot, box, LudiPqData.BOX_STAGE2)) {
@@ -144,7 +153,9 @@ public final class LudiStages {
      */
     public static void workTrapRoom(Character bot) {
         PqActions.recoverUngatheredHandoffs(bot, LudiPqData.PASS);
-        PqActions.handItemsToLeader(bot, LudiPqData.PASS);
+        if (PqActions.leaderNear(bot, PqActions.partyLeader(bot))) {
+            PqActions.handItemsToLeader(bot, LudiPqData.PASS);
+        }
 
         int box = nearestOwnedBoxOid(bot, LudiPqData.BOX_STAGE2);
         if (box >= 0 && hitReactorRotate(bot, box, LudiPqData.BOX_STAGE2)) {
@@ -319,10 +330,13 @@ public final class LudiStages {
         PqActions.seekAndAttack(bot);
         PqActions.loot(bot, bot.getPosition(), 2_000, new int[]{LudiPqData.PASS});
         // Hand over up close: a pile left at the door mouth despawns if the leader never
-        // walks there. recoverUngatheredHandoffs + handItemsToLeader keep the stock
-        // circulating until it is actually in his pockets.
+        // walks there. recoverUngatheredHandoffs keeps the stock circulating; the delivery
+        // itself only fires when the leader is already in range (never steer a door-room
+        // bot out of its room toward a far leader).
         PqActions.recoverUngatheredHandoffs(bot, LudiPqData.PASS);
-        PqActions.handItemsToLeader(bot, LudiPqData.PASS);
+        if (PqActions.leaderNear(bot, PqActions.partyLeader(bot))) {
+            PqActions.handItemsToLeader(bot, LudiPqData.PASS);
+        }
     }
 
     /**
@@ -349,7 +363,9 @@ public final class LudiStages {
         }
         PqActions.loot(bot, bot.getPosition(), 2_000, new int[]{LudiPqData.PASS});
         PqActions.recoverUngatheredHandoffs(bot, LudiPqData.PASS);
-        PqActions.handItemsToLeader(bot, LudiPqData.PASS);
+        if (PqActions.leaderNear(bot, PqActions.partyLeader(bot))) {
+            PqActions.handItemsToLeader(bot, LudiPqData.PASS);
+        }
     }
 
     /**

@@ -467,8 +467,7 @@ public final class PqActions {
         if (leader.getMapId() != bot.getMapId()) {
             return 0; // nothing to do here; the party's own movement brings them together
         }
-        if (bot.getPosition() == null || leader.getPosition() == null
-                || bot.getPosition().distanceSq(leader.getPosition()) > HANDOFF_RANGE_SQ) {
+        if (!leaderNear(bot, leader)) {
             GCMovement.move(bot, leader.getPosition().x, leader.getPosition().y);
             return 0;
         }
@@ -478,6 +477,18 @@ public final class PqActions {
 
     /** Inside this range a drop at the leader's feet is his to sweep instantly. */
     private static final double HANDOFF_RANGE_SQ = 400.0 * 400.0;
+
+    /**
+     * Whether the leader stands within hand-off range right now - the caller's cue to deliver
+     * for free instead of steering a walk toward him (a fight-stage bot keeps its combat post;
+     * the delivery happens when the room quiets or the paths cross).
+     */
+    public static boolean leaderNear(Character bot, Character leader) {
+        return bot != null && leader != null && leader != bot
+                && leader.getMapId() == bot.getMapId()
+                && bot.getPosition() != null && leader.getPosition() != null
+                && bot.getPosition().distanceSq(leader.getPosition()) <= HANDOFF_RANGE_SQ;
+    }
 
     /**
      * Sweep back the hand-off piles this bot dropped that the leader has not picked up yet.

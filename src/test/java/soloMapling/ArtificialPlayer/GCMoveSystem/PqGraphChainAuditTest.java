@@ -83,6 +83,23 @@ public class PqGraphChainAuditTest {
     }
 
     @Test
+    void ludiStage1Tower() {
+        // 922010100: spawn floor (y=130, forbidFallDown) -> rope ladder x=-117 -> exit-platform
+        // row (y=-180) -> rope x=164 -> first Ratz platform (y=-450).
+        plan("LPQ st1 first ratz", 922010100, new Point(0, 130), new Point(88, -450));
+        // Above the first Ratz: one-way hop steps y=-506/-539/-572, then a rope grab at x=165
+        // (bottom y=-622) up to the y=-713 mob platform.
+        plan("LPQ st1 hop steps", 922010100, new Point(88, -450), new Point(136, -572));
+        plan("LPQ st1 rope3 mob row", 922010100, new Point(88, -450), new Point(120, -713));
+        plan("LPQ st1 rope4 row", 922010100, new Point(120, -713), new Point(179, -968));
+        plan("LPQ st1 mid tower", 922010100, new Point(179, -968), new Point(0, -1399));
+        plan("LPQ st1 high mob", 922010100, new Point(0, -1399), new Point(139, -1935));
+        plan("LPQ st1 top row", 922010100, new Point(0, -1399), new Point(70, -3488));
+        // And the way back down to the exit portal row (y=-180, next00 at -38,-180).
+        plan("LPQ st1 back to exit", 922010100, new Point(70, -3488), new Point(-38, -180));
+    }
+
+    @Test
     void ludiStage2TowerBoxes() {
         plan("LPQ st2 box", 922010200, new Point(-177, -2635), new Point(-149, -1425));
         plan("LPQ st2 box", 922010200, new Point(-177, -2635), new Point(194, -591));
