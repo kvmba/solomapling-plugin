@@ -2,6 +2,7 @@ package soloMapling.ArtificialPlayer.BotDecoratorSystem;
 
 import org.gms.client.Character;
 import org.gms.client.inventory.InventoryType;
+import org.gms.client.inventory.Item;
 import org.gms.net.server.Server;
 import soloMapling.server.ExecutorServiceManager;
 
@@ -19,8 +20,18 @@ public class BotEquipChecker {
     private static ScheduledFuture<?> task;
     private static final long INTERVAL_MS = 2 * 60 * 1000;
 
-    private static final short SLOT_TOP = -5;
+    // -5 holds a top (104xxxx) OR an overall (105xxxx) - host BodyPart.LONGCOAT shares
+    // the top's slot value, so the slot alone cannot tell them apart. The old check
+    // demanded BOTH -5 and -6, which flagged every overall wearer as naked: an overall
+    // never fills -6, and the repair (equipTopBottom) cannot put pants on a pirate
+    // (pirates have no coat/pants in WZ, only overalls), so the flag never cleared.
+    private static final short SLOT_TOP_OR_OVERALL = -5;
     private static final short SLOT_PANTS = -6;
+
+    /** v83 overall id band (ItemConstants maps the 105 prefix to BodyPart.LONGCOAT). */
+    private static final int OVERALL_ID_BAND = 105;
+    /** 7-digit item id -> its 3-digit equip prefix (1052095 / 10000 == 105). */
+    private static final int PREFIX_DIVISOR = 10000;
 
     public static void start() {
         if (task != null) return;
@@ -53,7 +64,15 @@ public class BotEquipChecker {
                     + " naked (" + elapsed + "ms)");
 
             if (!naked.isEmpty()) {
-                log("[BotEquipChecker] Found " + naked.size() + " naked bots out of " + totalBots + ", fixing...");
+                StringBuilder sample = new StringBuilder();
+                for (int i = 0; i < naked.size() && i < 10; i++) {
+                    if (i > 0) sample.append(", ");
+                    Character chr = naked.get(i);
+                    sample.append(chr.getName()).append("(job=").append(chr.getJob().name())
+                            .append(" lv=").append(chr.getLevel()).append(")");
+                }
+                log("[BotEquipChecker] Found " + naked.size() + "/" + totalBots + " naked, fixing..."
+                        + " sample: " + sample);
                 final int[] fixedCount = {0};
                 final int[] failedCount = {0};
                 for (Character chr : naked) {
@@ -86,8 +105,21 @@ public class BotEquipChecker {
     }
 
     private static boolean isNaked(Character chr) {
-        boolean hasTop = chr.getInventory(InventoryType.EQUIPPED).getItem(SLOT_TOP) != null;
-        boolean hasPants = chr.getInventory(InventoryType.EQUIPPED).getItem(SLOT_PANTS) != null;
-        return !hasTop || !hasPants;
+        Item topOrOverall = chr.getInventory(InventoryType.EQUIPPED).getItem(SLOT_TOP_OR_OVERALL);
+        if (topOrOverall == null) {
+            return true; // nothing on the torso slot - bare regardless of pants
+        }
+        return isNakedWearing(topOrOverall.getItemId(),
+                chr.getInventory(InventoryType.EQUIPPED).getItem(SLOT_PANTS) != null);
+    }
+
+    /**
+     * Package-visible pure decision given the torso item's id and whether the pants
+     * slot is filled: unit-tested without a Character (host Equip can't be built
+     * outside a booted server).
+     */
+    static boolean isNakedWearing(int topOrOverallItemId, boolean hasPants) {
+        // An overall covers torso and legs together; a top needs pants beside it.
+        return topOrOverallItemId / PREFIX_DIVISOR != OVERALL_ID_BAND && !hasPants;
     }
 }
