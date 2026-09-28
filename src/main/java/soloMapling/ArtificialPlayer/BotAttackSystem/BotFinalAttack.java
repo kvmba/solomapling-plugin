@@ -45,9 +45,11 @@ public final class BotFinalAttack {
     private static final long TRIGGER_COOLDOWN_MS = 1_000L;
     private static final Map<Integer, Long> nextTriggerByBot = new ConcurrentHashMap<>();
 
-    /** The host's trigger chance at max level: bows/crossbows 50%, weapons 40% (Skill.wz prop). */
-    private static final double PROP_MAX = 0.40;
-    private static final double PROP_BOW_MAX = 0.50;
+    /** The WZ prop at max level, x/100 as the host's StatEffect.loadFromData reads it:
+     *  终极剑/斧/棍/矛 (1100002/1100003/1200003/1300003) and 终极弓/弩 (3100001/3200001)
+     *  all carry prop 60 at their top level. */
+    private static final double PROP_MAX = 0.60;
+    private static final double PROP_BOW_MAX = 0.60;
 
     private BotFinalAttack() {
     }

@@ -97,7 +97,13 @@ public final class BotAttackConfig {
         // full-map ultimate. Bots are synthetic/visual, so the multi-target mob cap is a free choice here.
         put(Job.DRAGONKNIGHT, CRUSHER, CRUSHER, meleeAoe(DragonKnight.DRAGON_ROAR, 1));
         put(Job.HERO,         melee(Hero.BRANDISH, 2),                                     null); // inherits Coma
-        put(Job.PALADIN,      melee(Paladin.BLAST, 1),                                     meleeAoe(Paladin.HEAVENS_HAMMER, 1));
+        // 圣域 is the paladin's throttled ultimate, not a sustained AoE: its WZ row carries
+        // mobCount 15 and a max-level cooltime of 20s - the same full-map-nuke family as the Dragon
+        // Roar / Genesis / Blizzard / Meteor Shower slots, which the driver holds to a separate long
+        // cooldown. Registered ONLY in the ultimate slot (the aoe slot stays null, so the pack
+        // attack inherits the Crusader-line Coma exactly like the Hero's does) - in the aoe slot it
+        // would re-fire every swing cadence while its true cooldown runs.
+        put(Job.PALADIN,      melee(Paladin.BLAST, 1),                                     null, meleeAoe(Paladin.HEAVENS_HAMMER, 1));
         // Dark Knight: no new attack - inherits Crusher (single + mob) + Dragon Roar ultimate from Dragon Knight.
 
         // ===== Magician (magic) =====

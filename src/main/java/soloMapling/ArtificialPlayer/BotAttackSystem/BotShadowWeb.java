@@ -65,10 +65,11 @@ public final class BotShadowWeb {
         if (skill == null) {
             return null;
         }
-        int level = bot.getSkillLevel(skill);
-        if (level < 1) {
-            return null; // never cast a web the bot has not learned
-        }
+        // Level derives from the bot's SP budget (BotShadowMeso's rule): learnable the day 3rd job
+        // opens (70), then 3 SP per level. Ambient bots never register skills server-side, so
+        // reading getSkillLevel here (the companion's own proof-of-purchase) would lock every
+        // ambient Hermit out of its signature web - the derivation lets the whole job show it.
+        int level = Math.max(1, Math.min(skill.getMaxLevel(), Math.max(1, (bot.getLevel() - 70) * 3)));
         long now = System.currentTimeMillis();
         Long next = NEXT_WEB_BY_BOT.get(bot.getId());
         if (next != null && now < next) {

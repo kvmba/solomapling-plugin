@@ -1,6 +1,7 @@
 package soloMapling.ArtificialPlayer.BotAttackSystem;
 
 import org.gms.client.Character;
+import org.gms.constants.skills.Crusader;
 import soloMapling.server.MethodScheduler;
 
 import java.util.List;
@@ -82,6 +83,13 @@ public final class BotBuffDriver {
 
         int cast = 0;
         for (int skillId : buffIds) {
+            if (skillId == Crusader.COMBO) {
+                // The combo ring is BotComboOrb's exclusive wire format - its broadcasts carry the
+                // LIVE orb count, while this sweep's generic aura frame would carry the WZ statup,
+                // which the host pins at 1 (StatEffect's COMBO case). Re-showing 斗气集中 here would
+                // slam an observer's ring back to 1 every recast, so the sweep must never touch it.
+                continue;
+            }
             if (BotAuraState.isDash(skillId) || BotAuraState.isHide(skillId)) {
                 // 疾驰 is state-bound (only valid while WALKING) and the movement tick shows/cancels it
                 // for the bot, so the periodic sweep must never fire it - a cast from a stand would
