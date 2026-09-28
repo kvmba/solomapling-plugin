@@ -132,6 +132,7 @@ public final class BotAttackDriver {
         nextAttackByBot.remove(botId);
         nextUltimateByBot.remove(botId);
         BotMesoBomb.clearBot(botId); // release the Pickpocket bag register + detonation cooldown
+        BotShadowMeso.clearBot(botId); // release the Shadow Meso throw cooldown
     }
 
     /*
@@ -301,6 +302,13 @@ public final class BotAttackDriver {
             BotMesoBomb.Blast blast = BotMesoBomb.tryDetonate(bot, facingLeft);
             if (blast != null) {
                 return AttackResult.hit(targets.get(0).getName(), blast.totalDamage(), blast.killed());
+            }
+            // The Hermit's coin throw: money in the wallet and a mob inside the skill's WZ box
+            // turns this swing into Shadow Meso (host-ranged mirrored, projectile 0). AUTO only -
+            // forced GM choices keep probing the regular slots.
+            BotMesoBomb.Blast coins = BotShadowMeso.tryThrow(bot, weapon, facingLeft);
+            if (coins != null) {
+                return AttackResult.hit(targets.get(0).getName(), coins.totalDamage(), coins.killed());
             }
         }
 

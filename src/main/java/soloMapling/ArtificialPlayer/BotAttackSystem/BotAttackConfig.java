@@ -112,8 +112,12 @@ public final class BotAttackConfig {
         // slot; the aoe slot is left null so it inherits the class's sustained mob spell (Explosion / Ice
         // Strike), which the bot keeps casting while the ultimate cools. Bishop likewise inherits Priest's
         // Shining Ray to mob with while Genesis is on cooldown.
-        put(Job.FP_ARCHMAGE,  magic(FPArchMage.BIG_BANG, 1),  null, magicAoe(FPArchMage.METEOR_SHOWER, 1)); // inherits Explosion
-        put(Job.IL_ARCHMAGE,  magic(ILArchMage.BIG_BANG, 1),  null, magicAoe(ILArchMage.BLIZZARD, 1));      // inherits Ice Strike
+        // The 4th-job single-target cast (Paralyze / Chain Lightning) renders the wand default
+        // cast on purpose: neither skill has a Skill.wz action node, and the client's action
+        // enum for those poses cannot be safely derived from the WZ order (the verified anchors
+        // drift +4/+6/+7 between weapon classes), so both ride the same default Big Bang rides.
+        put(Job.FP_ARCHMAGE,  magic(FPArchMage.PARALYZE, 1),  null, magicAoe(FPArchMage.METEOR_SHOWER, 1)); // inherits Explosion
+        put(Job.IL_ARCHMAGE,  magic(ILArchMage.CHAIN_LIGHTNING, 1), null, magicAoe(ILArchMage.BLIZZARD, 1));  // inherits Ice Strike
         put(Job.BISHOP,       magic(Bishop.ANGEL_RAY, 1),     null, magicAoe(Bishop.GENESIS, 1));           // inherits Shining Ray
 
         // ===== Bowman (ranged) - weapon picks the projectile (bow->arrow, crossbow->bolt) =====
@@ -123,7 +127,7 @@ public final class BotAttackConfig {
         put(Job.RANGER,       ranged(Ranger.STRAFE, 4),       rangedAoe(Ranger.ARROW_RAIN, 1));
         put(Job.SNIPER,       ranged(Sniper.STRAFE, 4),       rangedAoe(Sniper.ARROW_ERUPTION, 1));
         put(Job.BOWMASTER,    ranged(Bowmaster.HURRICANE, 1), null); // inherits Arrow Rain
-        put(Job.MARKSMAN,     ranged(Marksman.SNIPE, 1),      null); // inherits Arrow Eruption
+        put(Job.MARKSMAN,     ranged(Marksman.SNIPE, 1),      rangedAoe(Marksman.PIERCING_ARROW, 1)); // single inherits Arrow Eruption; Piercing Arrow is the 4th-job mobbing shot (WZ mobCount 4)
 
         // ===== Thief - claw (stars/ranged) vs dagger (melee); 1st-job rogue seeded in resolve =====
         put(Job.HERMIT,       null,                           rangedAoe(Hermit.AVENGER, 1));        // claw: inherits Lucky Seven
