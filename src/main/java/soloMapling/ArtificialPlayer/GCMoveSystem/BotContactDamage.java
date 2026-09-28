@@ -38,7 +38,8 @@ import java.util.concurrent.ThreadLocalRandom;
 // Scaling: three stacked levers keep this ~free for thousands of bots. (1) The LOD gate - a bot whose
 // map has no real player does one cached boolean check and returns. (2) The 1.5s i-frame window after
 // each hit. (3) A nearby-only mob query (the swept foot-box, grown by a margin) instead of scanning
-// every mob on the map.
+// every mob on the map. On top of that, the last landed hit is registered per bot (one map entry,
+// refreshed in place) for the grind layer's retaliate-when-hit beat (GrindBrain.tryRetaliate).
 //
 // Entry points: tickMobDamage (once per bot per tick, from GCMovementDriver) and applyFallDamage
 // (from BotPhysicsEngine at the landing transition). Everything else is private.
@@ -48,7 +49,35 @@ final class BotContactDamage {
     private static final long DIAGNOSTIC_INTERVAL_MS = 5_000L;
     private static final Map<Integer, Long> NEXT_DIAGNOSTIC_AT = new ConcurrentHashMap<>();
 
+    // Retaliate-when-hit register: the last mob that actually hurt each bot (oid + epoch-ms it goes
+    // stale). Fed by applyMobHit (a landed or lethal hit), read by the grind layer's retaliation
+    // beat, cleared on despawn. One map entry per bot, refreshed in place on repeat hits.
+    private static final Map<Integer, Attacker> LAST_ATTACKER_BY_BOT = new ConcurrentHashMap<>();
+
+    record Attacker(int mobOid, long expiresAtMs) {
+    }
+
     private BotContactDamage() {
+    }
+
+    /* The grind layer's retaliation beat reads this: who last hurt the bot, and until when. */
+    static Attacker lastAttacker(int botId) {
+        Attacker a = LAST_ATTACKER_BY_BOT.get(botId);
+        if (a == null) {
+            return null;
+        }
+        return (System.currentTimeMillis() < a.expiresAtMs) ? a : null;
+    }
+
+    /* Release a despawned bot's attacker register (mirrors the other per-bot clearBot hooks). */
+    public static void clearBot(int botId) {
+        LAST_ATTACKER_BY_BOT.remove(botId);
+    }
+
+    /* Register `mobOid` as the bot's last attacker for the retaliation memory window. */
+    static void registerRetaliation(int botId, int mobOid) {
+        LAST_ATTACKER_BY_BOT.put(botId, new Attacker(mobOid,
+                System.currentTimeMillis() + BotMovementManager.delayAfterCurrentTick(RETALIATION_MEMORY_MS)));
     }
 
     // Knockback / i-frame tunables (OpenStory Player::damage: hspeed +/-1.5, vforce -= 3.5).
@@ -56,6 +85,11 @@ final class BotContactDamage {
     private static final float KNOCKBACK_VFORCE       = 3.5f;
     private static final int   MOB_TOUCH_SWEEP_HEIGHT = 50;   // touch box height above the feet
     private static final int   MOB_HIT_COOLDOWN_MS    = 2500; // i-frames after any hit
+    // How long the last attacker stays a retaliation candidate after the hit that registered it.
+    // A mob drifts ~100-160px/s, so 15s keeps it within about two screens of the touch point - long
+    // enough for the grind tick (250ms) to pick it up through a walk-lock / swing cooldown, short
+    // enough that the bot doesn't hunt a mob that has clearly moved on.
+    private static final int   RETALIATION_MEMORY_MS  = 15_000;
     // getMapObjectsInRect is point-based (mob anchor must be inside the box), so grow the thin
     // foot-box by this much to catch wide mobs whose anchor sits just outside, then precision-check
     // each candidate with the real lower-half hitbox overlap.
@@ -236,6 +270,7 @@ final class BotContactDamage {
                     PacketCreator.damagePlayer(-1, mob.getId(), bot.getId(), resolved.broadcastDamage(),
                             0, kb.direction(), false, 0, false, 0, 0, 0), false);
             entry.mobHitCooldownMs = BotMovementManager.delayAfterCurrentTick(MOB_HIT_COOLDOWN_MS);
+            registerRetaliation(bot.getId(), mob.getObjectId());
             return;
         }
         if (resolved.hpDamage() > 0) {
@@ -250,6 +285,9 @@ final class BotContactDamage {
         }
         applyDamage(entry, bot, resolved.broadcastDamage(), -1, mob.getId(),
                 kb.direction(), kb.airVelX());
+        // Landed hit -> the grind layer may retaliate against this mob (a miss flash doesn't count:
+        // the bot never registered the touch).
+        registerRetaliation(bot.getId(), mob.getObjectId());
     }
 
     /**

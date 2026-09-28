@@ -86,6 +86,14 @@ public final class GrindBrain {
     // single en-route hit kills the "walks through mobs without reacting" bot-tell.
     private int lastSwingMapId = -1;
 
+    // ── Retaliate-when-hit beat (被打反击) ──
+    // The mob oid that last actually hurt this bot (fed by BotContactDamage.applyMobHit) once it is
+    // promoted to a vendetta target. -1 = none. While set and on the map it was registered on, the
+    // retaliate beat owns the tick: walk the attacker down / swing it, then hand the tick back to
+    // the ordinary strategy flow (whatever state the bot was in — TRAVEL resumes, FIGHT re-acquires).
+    private int retaliatingOid = -1;
+    private int retaliatingMapId = -1;
+
     // ── Combat heartbeat (read by TrainingBot's macro watchdog -> volatile) ──
     private volatile long lastCombatProgressMs = 0L;
     private boolean wasObserved = false;
@@ -116,6 +124,8 @@ public final class GrindBrain {
             climb.reset();
             engaged = false;
             targetOid = -1;
+            retaliatingOid = -1; // a fresh episode starts with a clean vendetta slate
+            retaliatingMapId = -1;
             lastMoveTargetX = Integer.MIN_VALUE;
             lastKillMs = now();
             lastSwingMapId = -1; // fresh episode re-arms the one-stop travel-clear
@@ -189,6 +199,12 @@ public final class GrindBrain {
             return;
         }
         climb.onGrounded();
+        // 被打过且没打到过它 -> 立刻转火这个仇家（被打反击）：抢在途经清怪的单次机会之前，
+        // 否则那次顺手一挥（记 lastSwingMapId）会把本次报消灭耗掉，bot 又变回贴脸挨打。
+        // 打到过（kill/hit 复仇）或没打过 -> 走原有逻辑。
+        if (tryRetaliate(chr)) {
+            return;
+        }
         // 好打的怪横在路上：途经者停下来顺手清掉，而不是贴脸走过。出手冷却未好时不看（散步经
         // 过不硬打，和玩家走路时手不在攻击键上一样）；FIGHT/WAIT 分支自己有 swing-first 门，
         // 这里的顺势一挥在驱动层共用同一冷却，不会造成双重出手。
@@ -260,6 +276,90 @@ public final class GrindBrain {
         markProgress(); // the en-route clear is productive, not a wedge
     }
 
+    // ── Retaliate-when-hit beat (被打反击) ──
+
+    /**
+     * The mob that last actually hurt this bot becomes the fight target wherever the bot happens to
+     * be in its grind (TRAVEL_TO_SPOT, a camp band walk, whatever) — a real player turns and kills
+     * the thing that just hit them instead of strolling on through its hits. The bot walks the
+     * attacker down, swings it in range (kite/blink cadences included), and on the kill (or if the
+     * mob despawns / the memory expires / the bot changes maps) hands the tick straight back to the
+     * ordinary strategy flow, so the original plan resumes untouched.
+     *
+     * <p>Deliberately NOT the one-stop travel-clear's {@code lastSwingMapId} gate: being hit is the
+     * mob engaging the bot, so the bot finishing the fight reads as believable, not as a fighting
+     * crawl. The swing itself still goes through the driver's cooldown/debuff gates via the shared
+     * {@link EngageBeat#engageAndSwing}, so a swing that cannot fire is a no-op beat here.</p>
+     *
+     * @return true when this tick was spent retaliating (the caller skips the strategy tick).
+     */
+    private boolean tryRetaliate(Character chr) {
+        int oid = GCMovement.lastAttackerOid(chr);
+        if (oid >= 0 && retaliatingOid != oid) {
+            // Fresh attacker (or a second mob jumped in): promote it. Same oid already tracked
+            // (a 2.5s i-frame gate keeps re-registration sparse) -> keep the current vendetta.
+            retaliatingOid = oid;
+            retaliatingMapId = chr.getMapId();
+            lastMoveTargetX = Integer.MIN_VALUE;
+        }
+        if (retaliatingOid < 0) {
+            return false;
+        }
+        if (retaliatingMapId != chr.getMapId()) {
+            dropRetaliation(chr); // warped off the vendetta map (transit / macro brain): resume the plan
+            return false;
+        }
+        MapObject mo = chr.getMap().getMapObject(retaliatingOid);
+        if (!(mo instanceof Monster m) || !m.isAlive() || !SpotFinder.isHostile(m)) {
+            dropRetaliation(chr); // killed, despawned, or pacified -> back to the ordinary flow
+            return false;
+        }
+        Point mp = m.getPosition();
+        Point pos = chr.getPosition();
+        if (mp == null || pos == null) {
+            return false;
+        }
+        if (inAttackRange(chr, m)) {
+            retaliateSwing(chr, m);
+        } else {
+            if (engage.skillMoveToward(chr, mp.x, mp.y)) {
+                return true; // mage blinked / hermit dashed at the attacker this beat
+            }
+            if (now() < attackWalkLockUntil) {
+                return true; // mid-swing beat: hold the plant, keep the vendetta
+            }
+            if (Math.abs(mp.x - lastMoveTargetX) >= ROAM_RETARGET_EPS) {
+                GCMovement.move(chr, mp.x, mp.y);
+                lastMoveTargetX = mp.x;
+            }
+        }
+        return true;
+    }
+
+    // The vendetta's in-range tail, shared by every style through the ordinary engage beat: the
+    // flourish (jump-attack / kite hop / turn beat) is exactly what an engaged player looks like.
+    // Return-to-plan mirrors the strategies' own post-kill handling: roam-style re-plant (so the
+    // walk to wherever the bot was headed re-issues fresh) and the next mob re-acquired by the
+    // strategy's own acquire path on the next tick.
+    private void retaliateSwing(Character chr, Monster m) {
+        var r = engage.engageAndSwing(chr, m);
+        if (r != null && r.killed()) {
+            dropRetaliation(chr);
+            engaged = false;
+            lastMoveTargetX = Integer.MIN_VALUE;
+        }
+    }
+
+    // End the vendetta and drop the contact register along with it: a killed / despawned / left-behind
+    // attacker must not re-enter through lastAttackerOid on the next tick and restart the pursuit on a
+    // corpse oid (that would idle-flip lastMoveTargetX every beat until the memory window expires).
+    private void dropRetaliation(Character chr) {
+        retaliatingOid = -1;
+        if (chr != null) {
+            GCMovement.forgetLastAttacker(chr);
+        }
+    }
+
     // Drop the spot claim + reset combat state when the bot leaves the map / stops.
     public void release(Character chr) {
         synchronized (claimLock) {
@@ -270,6 +370,7 @@ public final class GrindBrain {
             }
             targetOid = -1;
             engaged = false;
+            retaliatingOid = -1; // off the map / out of the grind: no vendetta survives
             lastMoveTargetX = Integer.MIN_VALUE;
             lastSwingMapId = -1;
         }

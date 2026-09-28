@@ -753,6 +753,29 @@ public final class GCMovement {
         return ObserverTracker.isFull(mapId);
     }
 
+    /* The oid of the mob that last actually hurt this bot (still inside its retaliation memory
+     * window), or -1. Fed by BotContactDamage.applyMobHit; the grind brain's retaliate-when-hit
+     * beat turns it into a fight target. Primitives on purpose - the register itself is internal. */
+    public static int lastAttackerOid(Character bot) {
+        if (bot == null) {
+            return -1;
+        }
+        BotContactDamage.Attacker a = BotContactDamage.lastAttacker(bot.getId());
+        return (a != null) ? a.mobOid() : -1;
+    }
+
+    /* Release a despawned bot's last-attacker register (the per-bot clearBot hook chain). */
+    public static void clearBotContactState(int botId) {
+        BotContactDamage.clearBot(botId);
+    }
+
+    /* Forget a live bot's last attacker once the grind layer has acted on it (vendetta over). */
+    public static void forgetLastAttacker(Character bot) {
+        if (bot != null) {
+            BotContactDamage.clearBot(bot.getId());
+        }
+    }
+
     /*
      * Force mapId to FULL ("observed") immediately for a short window, regardless of the ~1s observer
      * poll - so visible movement / combat / broadcast resume the same tick a real player arrives,
