@@ -18,8 +18,9 @@ final class BotPhysicsEngine {
     private static final double CLIENT_GROUND_STEP_MS = MapleMovement.CLIENT_STEP_MS;
     private static final double CLIENT_GROUND_STEP_S = CLIENT_GROUND_STEP_MS / 1000.0;
     // Brake-to-stop sim bound for slippery landings: stop takes ~2.3/fs ticks from top
-    // speed (11 at El Nath fs=0.2); 240 covers any fs >= ~0.01 with margin.
-    private static final int POST_LANDING_BRAKE_TICK_CAP = 240;
+    // speed (11 at El Nath fs=0.2); 240 covers any fs >= ~0.01 with margin. Also bounds the
+    // steer's glide-out sim (BotMovementManager.simulatedGlideOutStop).
+    static final int POST_LANDING_BRAKE_TICK_CAP = 240;
     private static final int REGION_STITCH_GAP_PX = 2;
     // Max horizontal gap between adjacent foothold endpoints that the bot can walk across.
     // Shared with BotNavigationGraphProvider so walk-edge generation and physics agree.

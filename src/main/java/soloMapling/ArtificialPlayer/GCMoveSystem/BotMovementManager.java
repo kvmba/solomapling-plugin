@@ -934,6 +934,12 @@ class BotMovementManager {
     }
 
     static int updateStepX(BotMovementState entry, MapleMap map, int botX, int targetX, int stopDist, int followDist) {
+        return updateStepX(entry, map, entry.bot != null ? entry.bot.getPosition().y : (int) Math.round(entry.physY),
+                botX, targetX, stopDist, followDist);
+    }
+
+    private static int updateStepX(BotMovementState entry, MapleMap map, int botY, int botX, int targetX,
+                                   int stopDist, int followDist) {
         int stepX = calcStepX(map, entry.movementProfile, botX, targetX, entry.wasMovingX, stopDist, followDist);
         if (stepX == 0) {
             entry.wasMovingX = false;
@@ -953,6 +959,13 @@ class BotMovementManager {
         //   - releasing NOW already lands inside the band (let go and coast in), and
         //   - HOLDING this tick would carry well past the target (don't push into an overshoot).
         // Together they make the bot stop inside its band and stay there.
+        //
+        // Ours (small-platform sway): both projections run the LIVE ground sim forward — the same
+        // simulateGroundMotion the next tick runs — instead of the analytic estimates, which
+        // dropped the foothold's slope and terrain entirely. On sloped/stitched footholds (toy-tower
+        // stair treads, 220070000) the estimate mispredicted at tread boundaries, the bot overshot,
+        // the target flipped behind it, and it paced left-right. The sim is exact by construction;
+        // it is only near the target (<= 4 walk steps), so the cost is a few sim steps per tick.
         //
         // The held trigger's margin is HALF the band (floored at 1), not the whole band. With the
         // whole band (`held > absDx + stopDist`) a WALK edge (stopDist 4) had a dead zone at a
@@ -974,11 +987,27 @@ class BotMovementManager {
         if (stopDist > 0) {
             int dir = Integer.signum(stepX);
             int absDx = Math.abs(targetX - botX);
-            int glide = BotPhysicsEngine.groundStopOutPx(entry.hspeed, entry.movementProfile, map);
-            if (Math.abs(absDx - glide) <= stopDist
-                    || BotPhysicsEngine.groundHeldLandingPx(entry.hspeed, dir, entry.movementProfile, map) > absDx + Math.max(1, stopDist / 2)) {
-                entry.wasMovingX = false;
-                return 0;
+            // Terrain-exact projections need the map. A null map (the GroundSwayTest flat-floor
+            // runtime, which hand-integrates the client step math) falls back to the analytic
+            // estimates — the pre-sway-fix behaviour the flat-floor sweep already pins.
+            if (map != null && absDx <= BotPhysicsEngine.walkStep(map, entry.movementProfile) * 4) {
+                Foothold standing = BotPhysicsEngine.findGroundFoothold(map, new Point(botX, botY));
+                Point botPos = new Point(botX, botY);
+                Point glideOut = (standing != null) ? simulatedGlideOutStop(map, entry, botPos, standing) : null;
+                int glide = (glideOut != null) ? Math.abs(glideOut.x - botX) : 0;
+                int held = simulatedHeldLandingPx(map, entry, botPos, standing, dir);
+                if (Math.abs(absDx - glide) <= stopDist
+                        || held > absDx + Math.max(1, stopDist / 2)) {
+                    entry.wasMovingX = false;
+                    return 0;
+                }
+            } else if (map == null) {
+                int glide = BotPhysicsEngine.groundStopOutPx(entry.hspeed, entry.movementProfile, map);
+                if (Math.abs(absDx - glide) <= stopDist
+                        || BotPhysicsEngine.groundHeldLandingPx(entry.hspeed, dir, entry.movementProfile, map) > absDx + Math.max(1, stopDist / 2)) {
+                    entry.wasMovingX = false;
+                    return 0;
+                }
             }
         }
         // Bang-bang approach on slippery ground: only push toward the target while the bot
@@ -993,6 +1022,39 @@ class BotMovementManager {
         int approachDir = BotPhysicsEngine.slipperyApproachDir(map, entry.movementProfile, entry.hspeed,
                 targetX - botX, launchWindowOvershootSlackPx(entry, botX, targetX));
         return approachDir == Integer.signum(stepX) ? stepX : approachDir;
+    }
+
+    /**
+     * Where the momentum actually puts the bot on THIS terrain, by running the live ground sim
+     * forward with the key released (dir 0) — the same integrator and preview the next tick runs.
+     * Null when the glide-out leaves ground (a lip: not a stopping point). At most
+     * POST_LANDING_BRAKE_TICK_CAP ticks, so a slippery glide is bounded.
+     */
+    private static Point simulatedGlideOutStop(MapleMap map, BotMovementState entry, Point botPos, Foothold foothold) {
+        BotPhysicsEngine.GroundStepResult step = BotPhysicsEngine.simulateGroundMotion(map, botPos, foothold, 0,
+                new BotPhysicsEngine.GroundTravelState(entry.physX, entry.hspeed, entry.groundPhysicsCarryMs),
+                entry.movementProfile);
+        for (int i = 0; i < BotPhysicsEngine.POST_LANDING_BRAKE_TICK_CAP && !step.lostGround(); i++) {
+            if (Math.abs(step.state().hspeed()) == 0.0 && step.stepX() == 0) {
+                return step.point(); // stopped
+            }
+            step = BotPhysicsEngine.simulateGroundMotion(map, step.point(), step.foothold(), 0, step.state(),
+                    entry.movementProfile);
+        }
+        return step.lostGround() ? null : step.point();
+    }
+
+    /**
+     * Where holding {@code dir} one more tick puts the bot's PIXEL — the live sim's step, not an
+     * analytic estimate. The tick integrates {@code TICK_MS} of client ground steps, so this
+     * re-derives the same step count (and the same carry) the physics will.
+     */
+    private static int simulatedHeldLandingPx(MapleMap map, BotMovementState entry, Point botPos,
+                                              Foothold foothold, int dir) {
+        BotPhysicsEngine.GroundStepResult step = BotPhysicsEngine.simulateGroundMotion(map, botPos, foothold, dir,
+                new BotPhysicsEngine.GroundTravelState(entry.physX, entry.hspeed, entry.groundPhysicsCarryMs),
+                entry.movementProfile);
+        return step.lostGround() ? Integer.MAX_VALUE : Math.abs(step.point().x - botPos.x);
     }
 
     /*
@@ -1035,7 +1097,7 @@ class BotMovementManager {
     }
 
     /*
-     * Fires a random recovery action when the bot has been stuck in the same spot.
+     * Fires a recovery action when the bot has been stuck in the same spot.
      * Clears the nav edge so A* replans on the next AI tick.
      */
     static void tickUnstuck(BotMovementState entry) {
@@ -1045,6 +1107,19 @@ class BotMovementManager {
         // no ground below it is a fall out of the map. Prefer a direction with a real landing; if
         // neither has one, stay put rather than launch off the edge.
         int dir = ThreadLocalRandom.current().nextBoolean() ? -1 : 1;
+        // Ours (small-platform sway): with a precise goal, direction matters as much as the landing.
+        // The classic wedge is a sway ON the platform the goal sits on — both directions land fine,
+        // but both land back on the SAME platform, so the hop resets the loop instead of breaking it.
+        // Prefer the direction whose landing foothold is not the one under the bot (a genuine hop
+        // out); fall back to the raw landing check when the bot has no goal (a plain wedge) or no
+        // direction clears the surface.
+        Foothold standing = BotPhysicsEngine.findGroundFoothold(bot.getMap(), bot.getPosition());
+        if (standing != null && entry.moveTarget != null && entry.moveTargetPrecise) {
+            int away = hopDirOffSurface(entry, bot, walkStep, standing);
+            if (away != 0) {
+                dir = away;
+            }
+        }
         if (!hasJumpLandingAhead(bot, walkStep * dir)) {
             dir = -dir;
             if (!hasJumpLandingAhead(bot, walkStep * dir)) {
@@ -1057,6 +1132,23 @@ class BotMovementManager {
         clearNavigationState(entry);
         entry.unstuckCooldownMs = delayAfterCurrentTick(5000);
         broadcastMovement(entry);
+    }
+
+    /**
+     * Which hop direction lands OFF the foothold the bot stands on (its own sim-verified landing,
+     * not the raw walkStep probe), +1 / -1 / 0 = neither. A random tiebreak keeps behaviour
+     * humanlike when both directions escape.
+     */
+    private static int hopDirOffSurface(BotMovementState entry, Character bot, int walkStep, Foothold standing) {
+        BotMovementProfile profile = entry.movementProfile;
+        JumpLanding left = simulateJumpLanding(bot.getMap(), bot.getPosition(), -walkStep, profile);
+        JumpLanding right = simulateJumpLanding(bot.getMap(), bot.getPosition(), walkStep, profile);
+        boolean leftEscapes = left != null && left.foothold() != standing;
+        boolean rightEscapes = right != null && right.foothold() != standing;
+        if (leftEscapes && rightEscapes) {
+            return ThreadLocalRandom.current().nextBoolean() ? -1 : 1;
+        }
+        return leftEscapes ? -1 : rightEscapes ? 1 : 0;
     }
 
     private static boolean hasJumpLandingAhead(Character bot, int stepX) {

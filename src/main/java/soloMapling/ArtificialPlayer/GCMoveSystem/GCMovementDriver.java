@@ -53,6 +53,10 @@ final class GCMovementDriver {
     private static final int COARSE_ARRIVE_PX = 12;
     private static final boolean ENABLE_UNSTUCK = true;
     private static final int AIR_STUCK_RECOVER_TICKS = 30;
+    // Ours: goal-proximity radius (px, per axis) inside which the stuck tally treats "closer to
+    // the goal" as the only progress. A ±15px sway across the goal strides >8px without ever
+    // approaching, so the raw displacement test never fired the rescue inside it.
+    private static final int NEAR_GOAL_PROXIMITY_PX = 48;
     // Ours: live fall-off-map catch. The airborne integrator has no VR-bottom clamp, so a bot that slips
     // through a foothold gap (or off the side) free-falls forever — the frozen-air watchdog only fires once
     // the position STOPS changing, which a live plummet never does. Trigger a snap-back once the bot is this
@@ -958,8 +962,28 @@ final class GCMovementDriver {
             entry.stuckCheckY = botPos.y;
             return;
         }
-        boolean moved = Math.abs(botPos.x - entry.stuckCheckX) > 8
-                || Math.abs(botPos.y - entry.stuckCheckY) > 8;
+        // Ours (small-platform sway): near a PRECISE move target, "moved" must mean CLOSER, not
+        // just displaced. A ±15px oscillation across the goal (the toy-tower / stair-tread sway:
+        // a walk step overshoots the ±8px arrival box, the target flips behind the bot, it walks
+        // back) strides >8px every few ticks, so the raw displacement tally never reached 500ms
+        // and the rescue never fired — the sway ended only at the 8s no-progress give-up. Under
+        // a goal-distance test an oscillation is exactly what it looks like: no net approach for
+        // 0.5s -> tickUnstuck. Far from the goal (or with no goal) the raw test stays: a detour
+        // around a wall legitimately moves without approaching, and punishing it would rescue-hop
+        // bots mid-route.
+        boolean moved;
+        Point anchor = new Point(entry.stuckCheckX, entry.stuckCheckY);
+        if (entry.moveTarget != null && entry.moveTargetPrecise
+                && entry.navEdge == null
+                && Math.abs(entry.moveTarget.x - anchor.x) <= NEAR_GOAL_PROXIMITY_PX
+                && Math.abs(entry.moveTarget.y - anchor.y) <= NEAR_GOAL_PROXIMITY_PX) {
+            int anchorDist = Math.abs(entry.moveTarget.x - anchor.x) + Math.abs(entry.moveTarget.y - anchor.y);
+            int botDist = Math.abs(entry.moveTarget.x - botPos.x) + Math.abs(entry.moveTarget.y - botPos.y);
+            moved = botDist < anchorDist - 8;
+        } else {
+            moved = Math.abs(botPos.x - entry.stuckCheckX) > 8
+                    || Math.abs(botPos.y - entry.stuckCheckY) > 8;
+        }
         if (moved) {
             entry.stuckMs = 0;
             entry.stuckCheckX = botPos.x;
