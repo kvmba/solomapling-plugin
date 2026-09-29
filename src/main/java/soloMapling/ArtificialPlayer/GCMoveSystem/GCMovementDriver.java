@@ -727,6 +727,14 @@ final class GCMovementDriver {
         }
         Point botPos = entry.bot.getPosition();
         int arrivalDist = entry.moveTargetPrecise ? 8 : BotMovementManager.cfg.STOP_DIST;
+        // An arrival means the bot is exactly where its goal wanted it: any "no movement" the
+        // stuck watchdog counted up to this tick predates the arrival and says nothing about a
+        // stall. Reset its window, or the PQ seek loop's re-issued moves (one per macro beat,
+        // each instantly satisfied by the narrow-ledge / overlap / box arrival below) sum 50ms
+        // per beat into a phantom 500ms stall - and tickUnstuck hops the bot OFF the perch it
+        // just climbed to (LPQ stage-1: reach the mob ledge, get watchdog-hopped off, climb
+        // back, forever).
+        resetStuckWindowOnArrival(entry);
         // Narrow-ledge residency: a precise target whose foothold is too narrow to hold a pixel hunt
         // is satisfied by STANDING on that foothold inside the target's band. Pixel-hunting a point on
         // a platform narrower than a step + its glide-out (a WALK step is ~7px) can only overshoot,
@@ -930,6 +938,20 @@ final class GCMovementDriver {
     }
 
     // ── Stuck detection (faithful port; recovery teleport inlined) ──
+    /*
+     * An arrival is the OPPOSITE of a stall: the bot got exactly where it was going. Anything the
+     * no-motion tally accrued while travelling (or across idle beats between macro-tick re-issues)
+     * is stale the instant a target is satisfied - wipe it so the watchdog starts fresh and a
+     * re-issued arrival (the PQ seek loop re-issues its move every beat) never sums into a phantom
+     * 500ms stall that ends in a rescue hop off the perch the bot just reached. Real wedges never
+     * fire an arrival, so a genuinely blocked bot is unaffected.
+     */
+    private static void resetStuckWindowOnArrival(BotMovementState entry) {
+        entry.stuckMs = 0;
+        entry.stuckCheckX = Integer.MIN_VALUE;
+        entry.stuckCheckY = Integer.MIN_VALUE;
+    }
+
     private static void tickStuckDetection(BotMovementState entry) {
         entry.unstuckCooldownMs = BotMovementManager.tickDown(entry.unstuckCooldownMs);
         tickFrozenAirborneWatchdog(entry);

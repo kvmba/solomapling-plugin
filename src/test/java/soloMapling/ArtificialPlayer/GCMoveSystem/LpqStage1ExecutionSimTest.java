@@ -224,6 +224,39 @@ public class LpqStage1ExecutionSimTest {
                 "bot should climb to the y=-713 mob row, ended at " + end);
     }
 
+    /**
+     * REGRESSION (the LPQ stage-1 "小步停顿走路/原地踱步, 上不去高台" report): the PQ macro tick
+     * re-issues the seek move every ~1.5s beat, and each re-issue is instantly satisfied by the
+     * narrow-ledge residency arrival. Before the fix the per-beat 50ms "no motion" tallies
+     * summed into a phantom 500ms stall (idle beats never ran the watchdog, so it never reset)
+     * and tickUnstuck hopped the bot OFF the fh325 perch it had just reached - the observed
+     * reach -> hop-off -> climb back loop. An arrival now resets the stuck window, so the bot
+     * holds the perch across re-issued beats forever. 40 beats x 30 ticks = 60s on the perch.
+     */
+    @Test
+    void simMacroBeatReissuesNeverHopTheBotOffThePerch() {
+        int[][] profiles = {{105, 110}, {120, 115}, {105, 100}, {110, 120}};
+        int[] spawnXs = {30, 60, 88, 120, 136, 160, 200, 240};
+        for (int[] stat : profiles) {
+            BotMovementProfile profile = new BotMovementProfile(stat[0], stat[1]);
+            for (int sx : spawnXs) {
+                Sim sim = sim(profile);
+                sim.pos().set(new Point(sx, -450));
+                BotPhysicsEngine.teleportTo(sim.st(), sim.st().bot, new Point(sx, -450));
+                BotMovementManager.resetEntryStateAfterTeleport(sim.st());
+                for (int burst = 0; burst < 40; burst++) {
+                    move(sim.st(), 136, -572);
+                    tickN(sim, 30, true);
+                }
+                Point end = sim.p();
+                org.junit.jupiter.api.Assertions.assertTrue(
+                        Math.abs(end.x - 136) <= 30 && Math.abs(end.y - -572) <= 30,
+                        "profile " + stat[0] + "/" + stat[1] + " from kill spot x=" + sx
+                                + ": the re-issued seek must hold the fh325 perch, ended at " + end);
+            }
+        }
+    }
+
     /** LPQ-realistic profiles: level 35-50 non-thief (105/110), thief (120/115), low level (105/100). */
     @Test
     void simRealProfilesReachTheFirstRatz() {
