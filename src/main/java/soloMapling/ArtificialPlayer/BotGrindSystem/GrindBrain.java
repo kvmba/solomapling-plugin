@@ -201,7 +201,7 @@ public final class GrindBrain {
         climb.onGrounded();
         // 被打过且没打到过它 -> 立刻转火这个仇家（被打反击）：抢在途经清怪的单次机会之前，
         // 否则那次顺手一挥（记 lastSwingMapId）会把本次报消灭耗掉，bot 又变回贴脸挨打。
-        // 打到过（kill/hit 复仇）或没打过 -> 走原有逻辑。
+        // 复仇结束（击杀/消失/换图）或没打过 -> 走原有逻辑。
         if (tryRetaliate(chr)) {
             return;
         }
@@ -283,8 +283,10 @@ public final class GrindBrain {
      * be in its grind (TRAVEL_TO_SPOT, a camp band walk, whatever) — a real player turns and kills
      * the thing that just hit them instead of strolling on through its hits. The bot walks the
      * attacker down, swings it in range (kite/blink cadences included), and on the kill (or if the
-     * mob despawns / the memory expires / the bot changes maps) hands the tick straight back to the
-     * ordinary strategy flow, so the original plan resumes untouched.
+     * mob despawns or the bot changes maps) hands the tick straight back to the ordinary strategy
+     * flow, so the original plan resumes untouched. The vendetta is STICKY once promoted: the
+     * attacker register's 15s memory expiry only gates re-promotion, it does not end an ongoing
+     * pursuit — a live, hostile attacker is finished even if its register entry has gone stale.
      *
      * <p>Deliberately NOT the one-stop travel-clear's {@code lastSwingMapId} gate: being hit is the
      * mob engaging the bot, so the bot finishing the fight reads as believable, not as a fighting
