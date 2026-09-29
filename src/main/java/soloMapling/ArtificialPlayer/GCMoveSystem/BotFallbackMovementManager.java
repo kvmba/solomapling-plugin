@@ -397,10 +397,20 @@ final class BotFallbackMovementManager {
         }
         // Ground maps need the full landing sim (bounded-drop rule included); in swim maps
         // the bot drops into open water — no landing foothold exists or is required.
-        boolean canDrop = map != null && map.isSwim()
-                ? BotPhysicsEngine.canStartDownJump(map, botPos)
-                : BotPhysicsEngine.simulateDownJumpLanding(map, botPos) != null;
-        if (!canDrop) {
+        if (map != null && map.isSwim()) {
+            return BotPhysicsEngine.canStartDownJump(map, botPos)
+                    && Math.abs(targetPos.x - botPos.x) <= Math.max(BotMovementManager.cfg.FOLLOW_DIST,
+                    BotPhysicsEngine.walkStep(map, entry.movementProfile) * 4);
+        }
+        BotPhysicsEngine.JumpLanding landing = BotPhysicsEngine.simulateDownJumpLanding(map, botPos);
+        if (landing == null) {
+            return false;
+        }
+        // Bounded-drop rule, mirroring the graph builder's DOWN_JUMP_MAX_DROP_PX cap
+        // (validateDownJumpLaunchX): a straight down-jump deeper than the cap lands in a
+        // basin the bot can never jump back out of (base-stat jump apex is 77px) - the
+        // warmup fallback must not dive into LPQ-tower-style dead pits either.
+        if (landing.point().y - botPos.y > BotNavigationGraphProvider.DOWN_JUMP_MAX_DROP_PX) {
             return false;
         }
         return Math.abs(targetPos.x - botPos.x) <= Math.max(BotMovementManager.cfg.FOLLOW_DIST,

@@ -60,7 +60,10 @@ final class BotNavigationGraphProvider {
     //     (DOWN_JUMP_COST_PENALTY_MS) so Dijkstra takes a rope or walk-off whenever one reaches the
     //     same place.
     private static final int MAX_DROP_PX = 300;
-    private static final int DOWN_JUMP_MAX_DROP_PX = 200;
+    // Ours: package-visible so the warmup fallback's down-jump gate (BotFallbackMovementManager)
+    // enforces the SAME bounded-drop rule the graph bakes - a cap the fallback dodging would
+    // let bots dive into unjumpable basins (LPQ-tower dead pits) during warmup.
+    static final int DOWN_JUMP_MAX_DROP_PX = 200;
     private static final int DOWN_JUMP_COST_PENALTY_MS = 2000;
     private static final int ENDPOINT_ANCHOR_SPACING_PX = 10;
     private static final int SAME_SOLID_NEST_GAP_PX = 8;
