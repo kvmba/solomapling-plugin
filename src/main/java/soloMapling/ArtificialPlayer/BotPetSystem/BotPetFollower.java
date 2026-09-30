@@ -60,8 +60,9 @@ import java.util.concurrent.TimeUnit;
  * landing), so a narrow lower ledge is not overshot and the client's fh snap can never pull it onto
  * the owner. (An owner on a forbidFallDown platform is the exception — that surface is never
  * pass-through, so the pet cannot drop and still warps.) A pet left
- * too far behind HORIZONTALLY warps to the owner's side (official behaviour) — a
- * vertical owner move (a jump or a fall) is followed with the pet's own physics instead. It swims
+ * too far behind HORIZONTALLY — or VERTICALLY, in EITHER direction, past {@link #JUMP_REACH_PX} —
+ * warps to the owner's side (official behaviour); within that reach a vertical owner move (a jump
+ * or a fall) is followed with the pet's own physics instead. It swims
  * (SWIM stance 12/13) while its owner swims, or in a water map whenever its own feet find no ground;
  * a rope/ladder owner makes it hang (HANG, 30/31). When the owner steps OFF the rope TOP onto the
  * platform, the pet is re-homed onto the owner's landing that tick ({@link #ownerSteppedOffRopeTop})
@@ -175,7 +176,7 @@ public final class BotPetFollower {
     /** Vertical band (px): the pet holds UP only once it has sunk this far below the target
      *  (mirrors the bot's cfg.SWIM_LEVEL_BAND_PX). */
     private static final int SWIM_LEVEL_BAND_PX = 30;
-    private static final int JUMP_REACH_PX = 160;           // owner above this => warp instead
+    private static final int JUMP_REACH_PX = 160;           // vertical owner gap (either way) => warp
     /** The pet's drop-hop: a short upward launch, applied when the owner has landed BELOW it and the
      *  pet is standing on a ledge its owner has left. Gravity drives the descent, so the rise is
      *  cosmetic — a few px of lift is what makes the descent read as the pet JUMPING down (under its
@@ -517,13 +518,14 @@ public final class BotPetFollower {
         Point owner = chr.getPosition();
 
         // Warp (official: remove -> reposition -> respawn) when left behind: a large
-        // HORIZONTAL lead the walk cannot make up, or an owner settled far ABOVE (a pet
-        // can hop one platform but not a long climb). A jumping owner is ignored (its
-        // higher y is transient). This is an UP-only threshold: an owner BELOW the pet is
-        // never warped — that is the reported "the pet is YANKED down after the bot", and it
-        // is followed with the pet's own drop-hop/physics instead (see the fall branch below).
+        // HORIZONTAL lead the walk cannot make up, or a VERTICAL separation past the jump
+        // reach — in EITHER direction now: an owner far above OR far below warps the pet to
+        // a real footing beside it (unified with the owner-above case; the old owner-below
+        // exemption is gone). A jumping owner is still ignored on the vertical arm (its
+        // higher y is transient); the pet's own drop-hop/physics below still handles the
+        // small separations under this threshold.
         if (Math.abs(p.x - owner.x) > LOST_PX || (!CharacterStance.isJumping(chr.getStance())
-                && owner.y < p.y - JUMP_REACH_PX)) {
+                && Math.abs(owner.y - p.y) > JUMP_REACH_PX)) {
             clearMotion(id);
             WarpLanding land = resolveSafeLanding(map, targetX, owner);
             teleportPet(chr, pet, index, land.pos(), land.fh(),
