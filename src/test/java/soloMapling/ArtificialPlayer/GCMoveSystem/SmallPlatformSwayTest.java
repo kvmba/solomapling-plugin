@@ -167,17 +167,10 @@ class SmallPlatformSwayTest {
         int reversals = 0;
         int lastSign = 0;
         int arrivalTick = -1;
-        int lastStuckCheckY = Integer.MIN_VALUE;
         for (int t = 0; t < TICKS; t++) {
             int prevX = st.bot.getPosition().x;
             productionTick(st, t % 2 == 0);
             Point p = st.bot.getPosition();
-            // Skip the organic entry drop: until the bot first lands near the goal row the
-            // free-fall tick stream hasn't started steering yet (park Y ~29000 = still falling).
-            if (lastStuckCheckY != Integer.MIN_VALUE && p.y > goalY + 400) {
-                continue;
-            }
-            lastStuckCheckY = p.y;
             if (st.moveTarget == null) { // arrived
                 arrivalTick = t;
                 break;
@@ -281,14 +274,16 @@ class SmallPlatformSwayTest {
         FootholdTree tree = new FootholdTree(new Point(-800, -500), new Point(800, 600));
         tree.insert(new Foothold(new Point(1000, 0), new Point(1100, 0), 1)); // the perch
         tree.insert(new Foothold(new Point(1100, 100), new Point(1600, 100), 2)); // lower floor
-        map.setFootholds(tree);        BotMovementState st = botOn(map, 1080, 0);
+        map.setFootholds(tree);
+        BotMovementState st = botOn(map, 1080, 0);
         moveGoal(st, 1050, 0);
         st.stuckCheckX = 1080;
         st.stuckCheckY = 0;
         BotMovementManager.tickUnstuck(st);
-        Point after = st.bot.getPosition();
-        assertTrue(after.x > 1100 || st.inAir,
-                "rescue hop stayed on the perch surface (landed at " + after.x + ")");
+        // beginGroundJump commits the direction into airVelX (+ = right): the escape rule
+        // must have picked the RIGHT hop, the only one whose landing leaves the perch.
+        assertTrue(st.airVelX > 0,
+                "rescue hop took the wrong way (airVelX=" + st.airVelX + " — stays on the perch surface)");
     }
 
     /** A state whose map lookups route to the given synthetic geometry. */
