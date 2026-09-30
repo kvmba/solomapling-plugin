@@ -27,8 +27,6 @@ import soloMapling.ArtificialPlayer.PartyQuest.PqActions;
  */
 public class CarnivalPQBot extends PartyQuestBot {
 
-    private static final int FIGHT_PASSES = 20;
-
     /** Which entry of the arena's summon list to try next, cycled. */
     private int nextSummon;
 
@@ -75,9 +73,7 @@ public class CarnivalPQBot extends PartyQuestBot {
         // Then fight. CP comes from kills, which is what the match is scored on, so this is
         // the bot's actual contribution rather than a filler step.
         if (!map.getMonsters().isEmpty()) {
-            for (int pass = 0; pass < FIGHT_PASSES && !map.getMonsters().isEmpty(); pass++) {
-                PqActions.seekAndAttack(getChr());
-            }
+            PqActions.seekAndAttack(getChr());
         }
         return false;
     }

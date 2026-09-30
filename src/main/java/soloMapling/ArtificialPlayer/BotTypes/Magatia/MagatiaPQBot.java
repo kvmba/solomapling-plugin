@@ -24,8 +24,6 @@ import soloMapling.Environment.BotMessages;
  */
 public class MagatiaPQBot extends PartyQuestBot {
 
-    private static final int FIGHT_PASSES = 20;
-
     /**
      * The town this bot was recruited from, captured at construction (it is built while standing
      * in its lobby). Returned to when a run ends, so an Alcadno bot goes back to Alcadno and a
@@ -108,9 +106,7 @@ public class MagatiaPQBot extends PartyQuestBot {
     private void fightAndBreak() {
         var map = getChr().getMap();
         if (!map.getMonsters().isEmpty()) {
-            for (int pass = 0; pass < FIGHT_PASSES && !map.getMonsters().isEmpty(); pass++) {
-                PqActions.seekAndAttack(getChr());
-            }
+            PqActions.seekAndAttack(getChr());
         }
         // The loot sweep must NAME the quest items: an empty filter matches nothing, and the
         // sweep is what fills the bot's inventory for the hand-off below.

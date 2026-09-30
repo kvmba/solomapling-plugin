@@ -21,9 +21,6 @@ import soloMapling.ArtificialPlayer.PartyQuest.PqActions;
  */
 public class AriantPQBot extends PartyQuestBot {
 
-    /** How many swings to spend before letting the tick end. */
-    private static final int SWING_PASSES = 15;
-
     public AriantPQBot(Character character) {
         super(character);
         dialoguePath = "AriantPQBotDialogue.yaml";
@@ -66,18 +63,13 @@ public class AriantPQBot extends PartyQuestBot {
             return false;
         }
 
-        for (int pass = 0; pass < SWING_PASSES; pass++) {
-            Monster target = bestCatchTarget();
-            if (target == null) {
-                // Nothing is in range yet, or everything nearby is already low enough that
-                // another swing could kill it. Either way, do not swing.
-                break;
-            }
+        Monster target = bestCatchTarget();
+        if (target != null) {
             if (isInCatchRange(target)) {
                 // Worn down to where a catch will be offered: ask for one instead of hitting
                 // again. The handler decides whether it succeeds.
                 throwElementRock(target);
-                break;
+                return false;
             }
             PqActions.seekAndAttack(getChr());
         }

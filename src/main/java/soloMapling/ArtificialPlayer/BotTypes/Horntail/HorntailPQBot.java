@@ -20,8 +20,6 @@ import soloMapling.ArtificialPlayer.PartyQuest.PqActions;
  */
 public class HorntailPQBot extends PartyQuestBot {
 
-    private static final int FIGHT_PASSES = 20;
-
     public HorntailPQBot(Character character) {
         super(character);
         dialoguePath = "HorntailPQBotDialogue.yaml";
@@ -72,7 +70,7 @@ public class HorntailPQBot extends PartyQuestBot {
 
         // Kill this room's monsters, then sweep for the key. The room holds a pair and only
         // one of them carries it, so the loop is bounded by the fight rather than by a count.
-        for (int pass = 0; pass < FIGHT_PASSES && PqActions.countItem(getChr(), key) == 0; pass++) {
+        while (PqActions.countItem(getChr(), key) == 0) {
             PqActions.seekAndAttack(getChr());
             PqActions.loot(getChr(), getChr().getPosition(), 1_200, new int[]{key});
         }

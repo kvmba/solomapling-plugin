@@ -19,9 +19,6 @@ import soloMapling.ArtificialPlayer.PartyQuest.PqActions;
  */
 public class BossRushPQBot extends PartyQuestBot {
 
-    /** How many swing passes to spend on one room before letting the tick end. */
-    private static final int FIGHT_PASSES = 20;
-
     public BossRushPQBot(Character character) {
         super(character);
         dialoguePath = "BossRushPQBotDialogue.yaml";
@@ -63,7 +60,7 @@ public class BossRushPQBot extends PartyQuestBot {
         }
         // Fight what is here. The attack driver picks its own target, so a boss room is the
         // same to this bot as any other room full of monsters.
-        for (int pass = 0; pass < FIGHT_PASSES && !map.getMonsters().isEmpty(); pass++) {
+        if (!map.getMonsters().isEmpty()) {
             PqActions.seekAndAttack(getChr());
         }
         return false;

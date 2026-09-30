@@ -19,8 +19,6 @@ import soloMapling.ArtificialPlayer.PartyQuest.PqActions;
  */
 public class EllinPQBot extends PartyQuestBot {
 
-    private static final int FIGHT_PASSES = 20;
-
     /** The NPC standing in the maze whose talk warps the team out of it. */
     private static final int MAZE_NPC = 2133001;
 
@@ -87,9 +85,7 @@ public class EllinPQBot extends PartyQuestBot {
 
         // Then whatever is standing in the room.
         if (!map.getMonsters().isEmpty()) {
-            for (int pass = 0; pass < FIGHT_PASSES && !map.getMonsters().isEmpty(); pass++) {
-                PqActions.seekAndAttack(getChr());
-            }
+            PqActions.seekAndAttack(getChr());
         }
         return false;
     }

@@ -20,9 +20,6 @@ import soloMapling.ArtificialPlayer.PartyQuest.PqActions;
  */
 public class PiratePQBot extends PartyQuestBot {
 
-    /** How many swings to spend on one room before letting the tick end. */
-    private static final int FIGHT_PASSES = 20;
-
     public PiratePQBot(Character character) {
         super(character);
         dialoguePath = "PiratePQBotDialogue.yaml";
@@ -74,9 +71,7 @@ public class PiratePQBot extends PartyQuestBot {
 
         // Then whatever the room has left standing.
         if (!map.getMonsters().isEmpty()) {
-            for (int pass = 0; pass < FIGHT_PASSES && !map.getMonsters().isEmpty(); pass++) {
-                PqActions.seekAndAttack(getChr());
-            }
+            PqActions.seekAndAttack(getChr());
         }
         // The medal stages' turn-in (NPC 2094002) grades the leader's pockets, so anything
         // the bot picked up - medals and the like from the run's exclusive set - goes to him.

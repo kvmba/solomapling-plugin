@@ -10,6 +10,7 @@ import soloMapling.ArtificialPlayer.BotPartySystem.BotRecruitManager;
 import soloMapling.ArtificialPlayer.BotSM;
 import soloMapling.ArtificialPlayer.BotHealthSystem.BotPotionSim;
 import soloMapling.ArtificialPlayer.BotMessagingSystem.ChatMessage;
+import soloMapling.ArtificialPlayer.BotGrindSystem.GrindTickRegistry;
 import soloMapling.ArtificialPlayer.GCMoveSystem.GCMovement;
 import soloMapling.BotLogger;
 import soloMapling.Environment.PlatformPlacement;
@@ -36,7 +37,7 @@ import static soloMapling.ArtificialPlayer.BotHelpers.isBot;
  * <p>Subclasses must call {@code super(character)} and, if they need their own client for
  * engine callbacks, {@code BotGeneration.adoptPrivateClient} (see the Orbis bot for why).
  */
-public abstract class PartyQuestBot extends BotSM {
+public abstract class PartyQuestBot extends BotSM implements GrindTickRegistry.Participant {
 
     /** The event name this bot plays, used to look up its recruit line ("HenesysPQ", ...). */
     protected String questName;
@@ -106,16 +107,51 @@ public abstract class PartyQuestBot extends BotSM {
         // warp - means the walk helpers in {@link PqActions} have a driver, and the map-entry
         // choreography already sees the bot as dynamic-controlled and skips the recorded drop.
         GCMovement.enable(character);
+        // The fight rides the shared 250ms combat sweep, the same ticker the grind brains use,
+        // for this bot's whole life. {@link #grindTick} gates on "actually inside a quest room
+        // and in a party", so a bot in the lobby, between rooms or waiting for a run pays only
+        // the cheap gate; the registration never has to chase room changes. Unregistration
+        // happens once, at stop, where the other per-bot state is released too.
+        GrindTickRegistry.getInstance().register(this);
     }
 
     @Override
     public synchronized void stopScheduledTask() {
         // Release the dynamic engine (and the shared movement lock it holds) when this bot is
         // stopped or converted away, so the next bot type on this character starts clean.
+        GrindTickRegistry.getInstance().unregister(this);
         GCMovement.disable(getChr());
         PqActions.clearSeekState(getChr().getId());
         releaseRoomState(); // a stopped bot holds no wait spots or box claims
         super.stopScheduledTask();
+    }
+
+    // =========================================================================
+    // Combat sweep (the 250ms beat, shared with the grind bots)
+    // =========================================================================
+
+    /**
+     * One beat of the shared combat ticker: fight the room the bot is standing in.
+     *
+     * <p>Everything else - invites, following the leader, room transitions, chatter, potion
+     * sips - stays on the macro tick in {@link #tickPartyQuest}; this beat only ever does the
+     * one thing the 2-6s macro cadence made the bot look dazed at: swing, and keep closing on
+     * whatever it is fighting, at the cadence combat actually runs at. The gates mirror the
+     * macro tick's own: a bot that is not running, is dead, frozen, outside a quest room or
+     * without a party has no fight to be in - and the shared ticker bypasses BotSM's tick
+     * gate, so a corpse would otherwise keep swinging.
+     */
+    @Override
+    public void grindTick() {
+        Character bot = getChr();
+        if (bot == null || bot.getMap() == null
+                || !getRunning()
+                || death().isDead() || status().isFrozen()
+                || bot.getParty() == null
+                || !isInsideQuest(bot.getMapId())) {
+            return;
+        }
+        PqActions.seekAndAttack(bot);
     }
 
     /** Where the run happens: the map that proves the bot is inside the quest. */
@@ -209,12 +245,6 @@ public abstract class PartyQuestBot extends BotSM {
             returnToLobby("stage work reports the run is over");
             return;
         }
-        // A working room keeps a tighter beat: the 2-6s gap between macro ticks reads as the
-        // bot standing dumb between actions ("act, freeze, act"). The nudge only pulls the
-        // NEXT tick forward to ~0.7s, and its own 1.5s debounce makes that the real working
-        // floor - a live bot acts roughly every 1.5s instead of every 2-6s. The lobby branch
-        // above returns before this, so waiting bots keep their calm cadence.
-        nudgeSoon(700);
     }
 
     /**

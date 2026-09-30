@@ -20,9 +20,6 @@ import soloMapling.ArtificialPlayer.PartyQuest.PqActions;
  */
 public class PyramidPQBot extends PartyQuestBot {
 
-    /** How many swings to spend before letting the tick end. */
-    private static final int FIGHT_PASSES = 15;
-
     public PyramidPQBot(Character character) {
         super(character);
         dialoguePath = "PyramidPQBotDialogue.yaml";
@@ -60,10 +57,7 @@ public class PyramidPQBot extends PartyQuestBot {
         // Attack only if there is something here that is safe to attack. The attack driver
         // picks its own target from what is in reach, so the room is checked first rather
         // than trusting it to avoid the marked monsters.
-        for (int pass = 0; pass < FIGHT_PASSES; pass++) {
-            if (!hasOnlyKillableMonsters()) {
-                break;
-            }
+        if (hasOnlyKillableMonsters()) {
             PqActions.seekAndAttack(getChr());
         }
         return false;

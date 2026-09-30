@@ -21,8 +21,6 @@ import soloMapling.ArtificialPlayer.PartyQuest.PqActions;
  */
 public class DojoPQBot extends PartyQuestBot {
 
-    private static final int FIGHT_PASSES = 20;
-
     public DojoPQBot(Character character) {
         super(character);
         dialoguePath = "DojoPQBotDialogue.yaml";
@@ -57,7 +55,7 @@ public class DojoPQBot extends PartyQuestBot {
         var map = getChr().getMap();
         // The dojo's rooms are one boss each and the door opens when it is down, so there is
         // nothing to read - just fight while anything is standing.
-        for (int pass = 0; pass < FIGHT_PASSES && !map.getMonsters().isEmpty(); pass++) {
+        if (!map.getMonsters().isEmpty()) {
             PqActions.seekAndAttack(getChr());
         }
         return false;

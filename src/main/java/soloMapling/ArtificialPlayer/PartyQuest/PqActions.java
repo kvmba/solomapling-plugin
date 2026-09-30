@@ -149,10 +149,11 @@ public final class PqActions {
     }
 
     /**
-     * How long a {@link #walkTo} may block its tick. Far above a normal in-room walk (the
-     * arrival callback ends the wait early); far below a wedged walk's own timeout.
+     * How long a {@link #walkTo} may block its tick. A normal in-room walk lands well inside
+     * it (the arrival callback ends the wait early); the sweep shares this thread family, so
+     * a wedged walk must cost one short cap rather than a wedged combat beat everywhere.
      */
-    private static final long WALK_BLOCK_CAP_MS = 2_000;
+    private static final long WALK_BLOCK_CAP_MS = 1_200;
 
     /**
      * Walk so the bot ends up standing on the floor <em>under</em> an airborne point.
@@ -591,10 +592,13 @@ public final class PqActions {
         BotAttackDriver.botAttack(bot);
     }
 
-    // Seek-and-attack pacing: a quest bot's macro tick runs every 2-6s, far slower than the grind
-    // ticker's 250ms, so the seek beat is spread over ticks rather than a single call. The sticky
-    // per-bot state below keeps a chase alive across those ticks (RoamStrategy's targetOid pattern,
-    // minus the spot-claim machinery a quest bot does not need).
+    // Seek-and-attack pacing: the fight runs on the shared combat ticker's 250ms beat (the
+    // PartyQuestBot registers itself as a GrindTickRegistry.Participant while inside a quest
+    // room), the same cadence the grind brain fights on. Each beat swings once (the driver's
+    // own cooldown gates what lands) and keeps the sticky chase state below alive across
+    // beats, so closing on a mob and hammering it need no blocking sleeps - the "act, freeze,
+    // act" the macro cadence produced came from waiting out cooldowns inline, and at 4Hz that
+    // wait is simply the next beat.
     private static final int SEEK_RANGE_X = 900;            // hunt a live mob within this |dx| (cross-ledge)
     // LPQ stage 1 (922010100) seats its first Ratz 580px above the entry floor over a series of
     // one-way ledges - a box tuned to the grind maps' floor stacks stops the chase before it starts
@@ -604,11 +608,6 @@ public final class PqActions {
     private static final int RETARGET_EPS_PX = 16;          // skip re-issuing a move for tiny shifts
     private static final long RETARGET_TIMEOUT_MS = 4_000;  // give up an unreachable target after this
     private static final int PROGRESS_EPS_PX = 20;          // movement worth counting as chase progress
-    /** Swings one seek tick may chain: a burst of 2-3 (driver cooldown gates in between) reads as
-     *  fighting, not the one-swing-then-freeze the single-swing tick produced. */
-    private static final int SWING_BURST = 3;
-    /** Longest in-burst wait on the driver's cooldown (the melee/magic profiles run 720-900ms). */
-    private static final long SWING_BURST_MAX_WAIT_MS = 900;
     private static final Map<Integer, Integer> seekTargetByBot = new java.util.concurrent.ConcurrentHashMap<>();
     private static final Map<Integer, Point> seekAnchorByBot = new java.util.concurrent.ConcurrentHashMap<>();
     private static final Map<Integer, Long> seekDeadlineByBot = new java.util.concurrent.ConcurrentHashMap<>();
@@ -618,7 +617,7 @@ public final class PqActions {
      * Seek a mob and fight it, the way the roaming grind brain does: swing at whatever the
      * attack driver already reaches, and when nothing is in reach, find the nearest live mob
      * (across ledges - platforms above, below, ropes between) and walk/jump/climb toward it.
-     * The next tick re-checks: closer now, swing; still far, keep moving.
+     * The next beat re-checks: closer now, swing; still far, keep moving.
      *
      * <p>This is the half the plain {@link #attack} never had: {@code botAttack} only swings
      * at mobs inside its reach box, and its nearest-mob scan is same-ledge only, so a quest
@@ -626,10 +625,14 @@ public final class PqActions {
      * "kill what is in the room" should call this instead - the swings land, the drops fall,
      * and the bot is never a bystander in its own room.
      *
+     * <p>Non-blocking by design: the caller is the shared 250ms combat sweep, and one Thread.sleep
+     * here would hold every registered bot's beat. One swing per call (the driver's cooldown
+     * gates it), then a chase step - the cadence that reads as fighting comes free at 4Hz.
+     *
      * <p>Movement goes through the dynamic engine ({@code GCMovement.move}), which paths
      * across the map's own terrain: walks, jumps, drops and rope climbs are its edges, so
      * "climb the rope to the mob's platform" needs nothing from the caller. Unreachable
-     * targets are dropped after a no-progress timeout and re-seeked next tick.
+     * targets are dropped after a no-progress timeout and re-seeked next beat.
      */
     public static void seekAndAttack(Character bot) {
         if (bot == null || bot.getMap() == null) {
@@ -640,39 +643,22 @@ public final class PqActions {
             return;
         }
 
-        // 1. Swing at whatever is already in the attack driver's reach - as a BURST, not a
-        //    single swing: the driver's own cooldown (720-900ms for the melee/magic profiles)
-        //    is shorter than a macro tick (1.5s+), so one swing per tick read as
-        //    "hit ... stand ... hit". The combo waits out each cooldown (nextAttackEpochMs
-        //    is the driver's own clock) and keeps swinging while the driver still lands.
-        for (int swing = 0; swing < SWING_BURST; swing++) {
-            BotAttackDriver.AttackResult r = BotAttackDriver.botAttack(bot);
-            if (r == null) {
-                return;
-            }
-            if (r.hit()) {
-                seekTargetByBot.put(bot.getId(), -1); // landed: drop the chase, re-seek fresh
-                seekLastXByBot.remove(bot.getId());
-                long wait = BotAttackDriver.nextAttackEpochMs(bot.getId()) - System.currentTimeMillis();
-                if (wait > 0 && wait <= SWING_BURST_MAX_WAIT_MS) {
-                    blockingSleep(wait + 30);
-                }
-                continue;
-            }
-            break; // miss: nothing in reach (or debuffed) - go chase below
-        }
+        // 1. Swing at whatever is already in the attack driver's reach. One swing per beat:
+        //    the driver's own cooldown (720-900ms for the melee/magic profiles) gates what
+        //    lands, and the sweep's next beat is the wait the old burst used to sleep out.
+        BotAttackDriver.botAttack(bot);
 
-        // 2. Nothing in reach: pick a chase target (sticky across ticks) and close on it.
-        //    The chase target must be PATHABLE: on a tower whose climb chain the graph
-        //    cannot plan end-to-end, the nearest mob sits across a missing link and the
-        //    un-pathable chase degrades into walking the bot's own floor under it forever
+        // 2. Nothing landed (nothing in reach, cooldown, or debuffed): keep closing on the
+        //    chase target. The chase target must be PATHABLE: on a tower whose climb chain
+        //    the graph cannot plan end-to-end, the nearest mob sits across a missing link and
+        //    the un-pathable chase degrades into walking the bot's own floor under it forever
         //    (the stage-1 report). Prefer the nearest pathable hostile; only a room where
         //    NOTHING is pathable keeps the plain nearest (steering is still better than
         //    standing, and the graph may bake later).
         Monster target = seekPathableTarget(bot, pos);
         if (target == null) {
             seekLastXByBot.remove(bot.getId());
-            return; // the room is quiet (or nothing reachable); hold position this tick
+            return; // the room is quiet (or nothing reachable); hold position this beat
         }
 
         // Close on the target: walk to the floor under it (the nav layer jumps/drops/climbs
@@ -698,7 +684,7 @@ public final class PqActions {
         }
 
         // Progress bookkeeping: a chase that moves the bot nowhere for a while is dropped so
-        // the next tick seeks something else instead of walking into a wall forever.
+        // the next beat seeks something else instead of walking into a wall forever.
         Point anchor = seekAnchorByBot.get(bot.getId());
         if (anchor == null || Math.abs(pos.x - anchor.x) > PROGRESS_EPS_PX
                 || Math.abs(pos.y - anchor.y) > PROGRESS_EPS_PX) {
@@ -711,7 +697,7 @@ public final class PqActions {
             return;
         }
 
-        // Retarget epsilon: re-issuing GCMovement.move for the same X every tick would reset
+        // Retarget epsilon: re-issuing GCMovement.move for the same X every beat would reset
         // the walk's progress clock each time, so only a real shift in the goal re-issues it.
         Integer lastX = seekLastXByBot.get(bot.getId());
         if (lastX == null || Math.abs(tx - lastX) >= RETARGET_EPS_PX) {
@@ -721,7 +707,7 @@ public final class PqActions {
     }
 
     /**
-     * The chase target this tick: the sticky one while it stays alive, inside the seek box,
+     * The chase target this beat: the sticky one while it stays alive, inside the seek box,
      * and PATHABLE (canPathTo from the bot — the sticky check re-plans too, so a mob that
      * wandered onto an unreachable ledge is released rather than walked into a wall under).
      * Otherwise the nearest live hostile in the box, pathable candidates first (platforms
