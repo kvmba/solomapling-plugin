@@ -7,9 +7,13 @@ import org.gms.client.Skill;
 import org.gms.client.SkillFactory;
 import org.gms.constants.id.ItemId;
 import org.gms.constants.skills.Buccaneer;
+import org.gms.constants.skills.Crossbowman;
 import org.gms.constants.skills.Corsair;
 import org.gms.constants.skills.Crusader;
+import org.gms.constants.skills.Hermit;
+import org.gms.constants.skills.Hunter;
 import org.gms.constants.skills.Marauder;
+import org.gms.constants.skills.NightWalker;
 import org.gms.constants.skills.ThunderBreaker;
 import org.gms.net.packet.Packet;
 import org.gms.net.server.Server;
@@ -200,7 +204,30 @@ public final class BotBuffEffects {
             return PacketCreator.giveForeignBuff(bot.getId(),
                     Collections.singletonList(new Pair<>(BuffStat.DARKSIGHT, 0)));
         }
+        if (isSoulArrow(skillId)) {
+            // 灵魂箭 is the same host special case: isSoulArrow() broadcasts the foreign frame with
+            // the statup PINNED to 0 (StatEffect.applyBuffEffect) - the aura is an on/off flag to
+            // observers, never the WZ x. Forwarding the WZ value (1) sends data the client has
+            // never seen from a real cast.
+            return PacketCreator.giveForeignBuff(bot.getId(),
+                    Collections.singletonList(new Pair<>(BuffStat.SOULARROW, 0)));
+        }
+        if (isShadowPartner(skillId)) {
+            // 影子替身 ditto: the host's isShadowPartner() branch pins SHADOWPARTNER to 0.
+            return PacketCreator.giveForeignBuff(bot.getId(),
+                    Collections.singletonList(new Pair<>(BuffStat.SHADOWPARTNER, 0)));
+        }
         return PacketCreator.giveForeignBuff(bot.getId(), statups);
+    }
+
+    /** The host's own isSoulArrow set: 灵魂箭 (Hunter 3101004 / Crossbowman 3201004). */
+    private static boolean isSoulArrow(int skillId) {
+        return skillId == Hunter.SOUL_ARROW || skillId == Crossbowman.SOUL_ARROW;
+    }
+
+    /** The host's own isShadowPartner set: 影子替身 (Hermit 4111002 / NightWalker 4121011). */
+    private static boolean isShadowPartner(int skillId) {
+        return skillId == Hermit.SHADOW_PARTNER || skillId == NightWalker.SHADOW_PARTNER;
     }
 
     /**
