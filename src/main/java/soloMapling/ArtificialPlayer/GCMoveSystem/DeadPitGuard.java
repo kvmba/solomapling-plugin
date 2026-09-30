@@ -52,10 +52,14 @@ final class DeadPitGuard {
     private static final int PORTAL_Y_ABOVE_PX = 80;
     private static final int PORTAL_Y_BELOW_PX = 30;
 
-    /** mapId -> foothold id -> verdict. Footholds are immutable per map load; maps reload rarely. */
-    private static final Map<Integer, Map<Integer, Boolean>> VERDICTS = new ConcurrentHashMap<>();
+    /** tree -> foothold id -> verdict. Keyed by tree identity: a reloaded map gets a fresh
+     *  cache automatically (same shape as BotPhysicsEngine's collision index), and instanced
+     *  copies sharing one tree share their verdicts. */
+    private static final Map<org.gms.server.maps.FootholdTree, Map<Integer, Boolean>> VERDICTS =
+            new java.util.concurrent.ConcurrentHashMap<>();
     /** Guards against re-entrant verdict computation on the same foothold (cycles in the chain). */
-    private static final Map<Integer, Set<Integer>> IN_PROGRESS = new ConcurrentHashMap<>();
+    private static final Map<org.gms.server.maps.FootholdTree, Set<Integer>> IN_PROGRESS =
+            new java.util.concurrent.ConcurrentHashMap<>();
 
     /*
      * Whether a bot landing at {@code landing} (a simulated jump/drop/walk-off landing, or the
@@ -75,15 +79,15 @@ final class DeadPitGuard {
     }
 
     static boolean isLivableSurface(MapleMap map, Foothold foothold, BotMovementProfile profile) {
-        if (map == null || foothold == null) {
+        if (map == null || foothold == null || map.getFootholds() == null) {
             return true;
         }
-        Map<Integer, Boolean> verdicts = VERDICTS.computeIfAbsent(map.getId(), k -> new ConcurrentHashMap<>());
+        Map<Integer, Boolean> verdicts = VERDICTS.computeIfAbsent(map.getFootholds(), k -> new ConcurrentHashMap<>());
         Boolean cached = verdicts.get(foothold.getId());
         if (cached != null) {
             return cached;
         }
-        Set<Integer> inProgress = IN_PROGRESS.computeIfAbsent(map.getId(), k -> ConcurrentHashMap.newKeySet());
+        Set<Integer> inProgress = IN_PROGRESS.computeIfAbsent(map.getFootholds(), k -> ConcurrentHashMap.newKeySet());
         if (!inProgress.add(foothold.getId())) {
             return true; // chain cycle: an ancestor call is still deciding - treat as reachable
         }
@@ -96,8 +100,18 @@ final class DeadPitGuard {
         }
     }
 
+    /*
+     * A surface's effective Y: its LOWEST point. For horizontal footholds this is the surface
+     * itself; for slopes it reads the bottom end, which biases every verdict toward "dead" -
+     * the safe direction (over-calling dead merely loses an optional descent, under-calling it
+     * drops a bot into a trap).
+     */
+    private static int surfaceY(Foothold foothold) {
+        return Math.max(foothold.getY1(), foothold.getY2());
+    }
+
     private static boolean hasEscape(MapleMap map, Foothold foothold, BotMovementProfile profile) {
-        int floorY = foothold.getY1();
+        int floorY = surfaceY(foothold);
         int loX = Math.min(foothold.getX1(), foothold.getX2());
         int hiX = Math.max(foothold.getX1(), foothold.getX2());
         int apex = (int) Math.ceil(BotPhysicsEngine.calculateMaxJumpHeight(profile)) + REACH_MARGIN_PX;
@@ -124,7 +138,7 @@ final class DeadPitGuard {
             if (foothold.isWall()) {
                 continue;
             }
-            topmost = Math.min(topmost, foothold.getY1());
+            topmost = Math.min(topmost, surfaceY(foothold));
         }
         return topmost;
     }
@@ -173,14 +187,14 @@ final class DeadPitGuard {
         if (!visited.add(foothold.getId())) {
             return false;
         }
-        int floorY = foothold.getY1();
+        int floorY = surfaceY(foothold);
         int loX = Math.min(foothold.getX1(), foothold.getX2());
         int hiX = Math.max(foothold.getX1(), foothold.getX2());
         for (Foothold higher : walkableFootholds(map)) {
             if (higher.getId() == foothold.getId() || higher.isWall()) {
                 continue;
             }
-            int higherY = higher.getY1();
+            int higherY = surfaceY(higher);
             if (higherY >= floorY - STEP_UP_TOLERANCE_PX || higherY < floorY - apex) {
                 continue; // not above the reach band (beyond trivial step tolerance, within apex)
             }
@@ -204,7 +218,7 @@ final class DeadPitGuard {
             if (neighbour.getId() == foothold.getId() || neighbour.isWall() || visited.contains(neighbour.getId())) {
                 continue;
             }
-            int neighbourY = neighbour.getY1();
+            int neighbourY = surfaceY(neighbour);
             if (neighbourY > floorY + apex || neighbourY < floorY - apex) {
                 continue;
             }
@@ -227,7 +241,7 @@ final class DeadPitGuard {
             if (other.isWall()) {
                 continue;
             }
-            int oY = other.getY1();
+            int oY = surfaceY(other);
             if (oY >= floorY - STEP_UP_TOLERANCE_PX || oY <= targetY) {
                 continue; // not strictly inside the climbed band
             }
@@ -242,7 +256,7 @@ final class DeadPitGuard {
 
     private static List<Foothold> walkableFootholds(MapleMap map) {
         // getAllFootholds() rebuilds a list per call; acceptable here because every caller is
-        // behind the per-foothold verdict cache (computed once per foothold per map load).
+        // behind the per-foothold verdict cache (computed once per foothold per tree).
         return map.getFootholds().getAllFootholds();
     }
 
@@ -255,10 +269,5 @@ final class DeadPitGuard {
 
     private static int overlap(int aLo, int aHi, int bLo, int bHi) {
         return Math.min(aHi, bHi) - Math.max(aLo, bLo);
-    }
-
-    static void invalidate(int mapId) {
-        VERDICTS.remove(mapId);
-        IN_PROGRESS.remove(mapId);
     }
 }
