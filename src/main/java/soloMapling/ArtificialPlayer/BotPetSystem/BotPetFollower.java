@@ -65,8 +65,9 @@ import java.util.concurrent.TimeUnit;
  * (SWIM stance 12/13) while its owner swims, or in a water map whenever its own feet find no ground;
  * a rope/ladder owner makes it hang (HANG, 30/31). When the owner steps OFF the rope TOP onto the
  * platform, the pet is re-homed onto the owner's landing that tick ({@link #ownerSteppedOffRopeTop})
- * instead of free-falling off the now-empty rope column and warping back. On a WATER map's slope it
- * sticks to the slope (no land-style hop/warp/drop, which would bob it up and down). Every warp (too far behind, owner
+ * instead of free-falling off the now-empty rope column and warping back. On a slope it
+ * sticks to the surface (no land-style hop/warp/drop against an owner on the SAME walk-connected
+ * surface, wet or dry — that would bob it up and down or drop it off a staircase). Every warp (too far behind, owner
  * unreachable above, forbidFallDown) lands on a REAL footing via {@link #resolveSafeLanding}, and a
  * pet that leaves the map's VR bounds is snapped back to the owner as a last resort
  * ({@link #recoverIfFallenOffMap}) — so a lost-footing pet can never free-fall off the map.</p>
@@ -568,21 +569,25 @@ public final class BotPetFollower {
         // (Provided by the caller, which already probed it once for the swim decision.)
         boolean ownerBelow = owner.y > p.y + GROUND_STEP_PX;
         // The vertical platform chase (hop up to an owner above / warp down to one below / fall to a
-        // lower ledge) assumes discrete stacked platforms. In a SWIM map on a SLOPE, owner and pet
-        // share ONE surface, and the follower offset (own comfort plus the slot's spread, along the
-        // incline) alone makes |owner.y - pet.y| exceed the step — so the chase fires every tick
-        // against the horizontal settle: the pet hops down-slope then walks back up. That is the
-        // up/down bob reported on underwater slopes. When the owner stands on the pet's own
-        // walk-CONNECTED surface there is no platform to reach: skip the chase and let the walk
-        // below follow the slope. A genuinely higher/lower platform is a different surface, so the
-        // pet still hops/warps/falls to it.
+        // lower ledge) assumes discrete stacked platforms. When owner and pet share ONE continuous
+        // walk surface — a SLOPE, wet or dry — the chase must not fire against the horizontal
+        // settle: on a swim map the follower offset along the incline alone exceeds the step (the
+        // up/down bob reported on underwater slopes), and on a LAND staircase (Toy Tower entrance:
+        // 74px treads, 60px steps) the owner climbing one tread is 60px "above" — past
+        // GROUND_STEP_PX — so the hop branch fired at a tread the pet could simply WALK to, and
+        // the hop ploughed into the next tread's underside (a wall hit, velocities shed), over a
+        // column with no ground under the stairs: the pet fell off the map and was warped back,
+        // every climb. When the owner stands on the pet's own walk-CONNECTED surface there is no
+        // platform to reach: skip the chase and let the walk below follow it. A genuinely
+        // higher/lower platform is a different surface (a different nav region), so the pet still
+        // hops/warps/falls to it.
         //
         // The test is the engine's own nav REGION, not foothold identity: a slope is stitched from many
         // short foothold segments, so the pet and owner routinely rest on two DIFFERENT segments of the
         // same continuous slope and a foothold-identity test misses them — the chase still fired and the
         // pet still bobbed. The engine already models a connected walkable surface as a region (see
         // BotNavigationGraph.Region), so compare that.
-        boolean ownerOnSameSurface = map.isSwim() && standing != null
+        boolean ownerOnSameSurface = standing != null
                 && ownerOnSameWalkSurface(map, standing, owner);
         if (!ownerOnSameSurface && ownerBelow && standing != null && standing.isForbidFallDown()) {
             // A forbidFallDown platform is never pass-through (the engine's own down-jump rule), so
@@ -609,9 +614,9 @@ public final class BotPetFollower {
         // transient. Without this guard the branch fires on every jump — a pet on flat ground
         // finds no floor within a hop, so it is warped up to the owner's mid-air y, then falls,
         // then warps again (a visible flicker) instead of waiting for the owner to land.
-        // Gated to a DIFFERENT footing: in a swim map on the owner's own slope the pet follows the
-        // slope with the walk below instead (see the ownerOnSameSurface note above) — hopping to an
-        // "owner above" on one shared seabed slope is the bob.
+        // Gated to a DIFFERENT footing: on the owner's own walk-connected slope the pet follows it
+        // with the walk below instead (see the ownerOnSameSurface note above) — hopping to an
+        // "owner above" on one shared surface is the underwater bob, or the Toy Tower stair drop.
         boolean ownerAbove = owner.y < p.y - GROUND_STEP_PX;
         if (!ownerOnSameSurface && standing != null && !ownerBelow && ownerAbove
                 && !CharacterStance.isJumping(chr.getStance())) {
@@ -687,8 +692,8 @@ public final class BotPetFollower {
         // by the engine's own snap), so no fall is needed; standing on a ledge the owner has left
         // keeps the pet level, so it must fall — a genuine straight drop, not a downhill glide.
         // Owner on the pet's own walk surface only (ownerOnSameSurface note above): an owner lower on
-        // the pet's own swim-map slope must not make the pet drop off it — the pet sticks to the
-        // slope, and a genuine edge still falls via walk.lostGround() below.
+        // the pet's own walk-connected slope must not make the pet drop off it — the pet sticks to
+        // the surface, and a genuine edge still falls via walk.lostGround() below.
         // And only from REST (see {@link #dropsToOwnerBelow}): while the pet is still walking toward a
         // horizontal target on its own platform, its non-zero exit speed is progress on THAT surface
         // — not the stall of a ledge the owner left.
@@ -815,10 +820,12 @@ public final class BotPetFollower {
      * region ({@link soloMapling.ArtificialPlayer.GCMoveSystem.GCMovement#peekRegionIdOfFoothold}),
      * not foothold identity. A slope is stitched from many short foothold segments, so the pet and a
      * resting owner routinely stand on two DIFFERENT segments of the SAME slope; a foothold-identity
-     * test calls that "a different surface" and lets the vertical chase fire every tick, which is the
-     * up/down bob on an underwater slope (see the note at the call site). A region is the
-     * walk-connected union of its footholds, so it answers the question the chase actually means to
-     * ask. Peek-only (never triggers a graph build).
+     * test calls that "a different surface" and lets the vertical chase fire every tick, which is
+     * the up/down bob on an underwater slope — and, with the region test now applying on LAND too,
+     * the Toy Tower stair drop: a staircase is one walk-connected region of treads and ramps, so an
+     * owner one 60px tread up must be WALKED to, not hopped at (see the note at the call site). A
+     * region is the walk-connected union of its footholds, so it answers the question the chase
+     * actually means to ask. Peek-only (never triggers a graph build).
      *
      * <p>The owner must still be GROUNDED within {@link #GROUND_STEP_PX} to share a surface — the same
      * one ground probe the old foothold test made — so an airborne owner (or one over a gap) is never
@@ -841,7 +848,8 @@ public final class BotPetFollower {
      * surface iff both resolve to a baked nav region and those regions are equal. A slope is many
      * foothold segments but ONE region, so region identity is what tells a shared slope apart from a
      * genuinely different platform — foothold identity is too fine and let the vertical chase fire on
-     * a shared slope (the underwater-slope bob). An unresolved region (unbaked map, or a footing in no
+     * a shared slope (the underwater-slope bob, and the Toy Tower stair drop on a land staircase).
+     * An unresolved region (unbaked map, or a footing in no
      * region, both returned as &lt; 0) yields false, matching the old foothold-identity test for two
      * genuinely different footings.
      */
