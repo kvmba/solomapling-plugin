@@ -27,7 +27,7 @@
 | 增益表演（施法动画 + 光环） | `BotBuffDriver.castSkill(bot, skillId)` | GM 测试入口，绕过周期调度 |
 | 攻击表演（广播攻击包，无需目标） | `BotCommandsPack.BotAttack.skillSwing / rangedSwing / magicSwing(chr, skillId)` | 与真实挥击同包（`CLOSE_RANGE_ATTACK` / `RANGED_ATTACK` / 魔法包），站桩空挥即可被同图玩家看到 |
 | morph 门控（超级变身 / 海盗船） | `BotAuraState.isAttackEnablerSkill(skillId)` + `showBuff` | 门控技表演前先演 enabler 光环即可解锁（与实战同一判定） |
-| 同图气泡（仅气泡、不进聊天框） | `SocialCommands.BotChatbubble(chr, text)` | `getChatText(..., 1)` 纯气泡帧 |
+| 同图气泡（仅气泡、不进聊天框） | `SocialCommands.BotSpeakPlain(chr, text)`（带 map 判空的广播入口） | `getChatText(..., 1)` 纯气泡帧 |
 | 技能中文名 | `String.wz/Skill.img.xml`（经 `DataProviderFactory.getDataProvider(WZFiles.STRING)`） | `BotPlaceNames` 同款读法，宿主 WZ 是中文即为中文；启动懒加载 memoize 成 `skillId → name` |
 | 延时编排 | `MethodScheduler.runAfterDelay(task, delayMs)` | 全插件既有的节拍原语 |
 | 召唤兽生成/驱动 | `BotSummonSystem`（`BotSummonFollower` 服务端代模拟移动/攻击） | 见 §5.3 需要一个小的定制口子 |
@@ -61,7 +61,7 @@ IDLE ──start──▶ SPAWN_JOB ──▶ BUILD_STEPS ──▶ ANNOUNCE(ski
 
 - `SPAWN_JOB`：在 GM 当前位置（同 foothold）`createBot(..., 180, 180, jobId)`，等待 `BotGeneration.SPAWN_CHOREOGRAPHY_MAX_MS`（7s，既有常量）落地站稳。
 - `BUILD_STEPS`：对该 job 一次性展开 §4 的表演序列（增益 → 攻击 → 召唤兽）。
-- `ANNOUNCE`：`BotChatbubble(bot, "接下来表演：<技能中文名>")`，等 3s。
+- `ANNOUNCE`：`BotSpeakPlain(bot, "接下来表演：<技能中文名>")`（广播前显式判 map null），等 3s。
 - `PERFORM`：按技能类别调 §5 的表演函数，等 ~1.2s（动作播放）进下一个。
 - `DESPAWN_JOB`：`removeBotFromServer(bot)`（自动释放召唤兽、`BotBuffDriver.clearBot` 等既有清理随退场路径生效）。
 
