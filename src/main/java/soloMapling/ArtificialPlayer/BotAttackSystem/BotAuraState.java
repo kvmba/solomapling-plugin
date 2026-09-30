@@ -8,12 +8,19 @@ import org.gms.constants.skills.Brawler;
 import org.gms.constants.skills.Buccaneer;
 import org.gms.constants.skills.Corsair;
 import org.gms.constants.skills.Crusader;
+import org.gms.constants.skills.Crossbowman;
+import org.gms.constants.skills.DawnWarrior;
+import org.gms.constants.skills.Hermit;
+import org.gms.constants.skills.Hunter;
 import org.gms.constants.skills.Marauder;
 import org.gms.constants.skills.NightWalker;
 import org.gms.constants.skills.Noblesse;
+import org.gms.constants.skills.Paladin;
 import org.gms.constants.skills.Pirate;
 import org.gms.constants.skills.Rogue;
 import org.gms.constants.skills.ThunderBreaker;
+import org.gms.constants.skills.WhiteKnight;
+import org.gms.constants.skills.WindArcher;
 import org.gms.util.PacketCreator;
 import soloMapling.ArtificialPlayer.GCMoveSystem.GCMovement;
 
@@ -175,6 +182,68 @@ public final class BotAuraState {
     }
 
     /**
+     * The host's own {@code isSoulArrow()} set: 灵魂箭 (Hunter / Crossbowman / Wind Archer).
+     * The host broadcasts this family's foreign frame with the statup PINNED to 0 - a flag, never
+     * the WZ x.
+     */
+    public static boolean isSoulArrow(int skillId) {
+        return skillId == Hunter.SOUL_ARROW || skillId == Crossbowman.SOUL_ARROW
+                || skillId == WindArcher.SOUL_ARROW;
+    }
+
+    /** The host's own {@code isShadowPartner()} set: 影子替身 (Hermit / Night Walker). */
+    public static boolean isShadowPartner(int skillId) {
+        return skillId == Hermit.SHADOW_PARTNER || skillId == NightWalker.SHADOW_PARTNER;
+    }
+
+    /**
+     * The host's own {@code isWw()} set: 风灵漫步 (Wind Archer) - also a pin-0 foreign flag.
+     */
+    public static boolean isWw(int skillId) {
+        return skillId == WindArcher.WIND_WALK;
+    }
+
+    /**
+     * The host's own {@code isInfusion()} id set: 极速领域 (5121009 / 15111005 / 5221010 — the
+     * last one the host names {@code Corsair.HEROS_WILL}).
+     */
+    public static boolean isInfusion(int skillId) {
+        return skillId == Buccaneer.SPEED_INFUSION || skillId == ThunderBreaker.SPEED_INFUSION
+                || skillId == Corsair.HEROS_WILL;
+    }
+
+    /**
+     * The host's {@code WK_CHARGE} family by skill id (the 烈焰/寒冰/雷电/圣灵之剑 charges). The
+     * host's own predicate scans the statup list; by id it is exactly these charges.
+     */
+    public static boolean isWkCharge(int skillId) {
+        return switch (skillId) {
+            case WhiteKnight.BW_FIRE_CHARGE, WhiteKnight.BW_ICE_CHARGE, WhiteKnight.BW_LIT_CHARGE,
+                 WhiteKnight.SWORD_FIRE_CHARGE, WhiteKnight.SWORD_ICE_CHARGE, WhiteKnight.SWORD_LIT_CHARGE,
+                 Paladin.BW_HOLY_CHARGE, Paladin.SWORD_HOLY_CHARGE,
+                 DawnWarrior.SOUL_CHARGE, ThunderBreaker.LIGHTNING_CHARGE -> true;
+            default -> false;
+        };
+    }
+
+    /**
+     * The foreign-aura whitelist, straight from the host's {@code StatEffect.applyBuffEffect}:
+     * the ONLY skill families the host ever answers with a {@code GIVE_FOREIGN_BUFF}. A real
+     * player casting anything OUTSIDE this set produces no foreign frame at all (the switch
+     * leaves {@code mbuff} null), and the client never sees such a buff bit from a legitimate
+     * cast - so broadcasting one for a bot is undefined data. Everything the plugin broadcasts
+     * as a persistent aura must route through this set (the extended frames - pirate
+     * dash/infusion, WK charge, the MONSTER_RIDING mount frame - are inside it; 愤怒 Enrage is
+     * deliberately NOT: the host sends no foreign frame for it either).
+     */
+    public static boolean isForeignAura(int skillId) {
+        return isDash(skillId) || isInfusion(skillId) || isWkCharge(skillId) || isDarkSight(skillId)
+                || isWw(skillId) || isShadowPartner(skillId) || isSoulArrow(skillId)
+                || isTransformMorph(skillId) || skillId == Corsair.BATTLE_SHIP
+                || skillId == Crusader.COMBO;
+    }
+
+    /**
      * The 变身 morph family - ATTACKABLE, so an attack must not cancel them. Mirrors the host's
      * {@code isSkillMorph()} (the explorers the bot registry grades into).
      */
@@ -290,15 +359,21 @@ public final class BotAuraState {
             // also land in the plain-aura ledger: the replay would send the ring twice, and a
             // ring that already lapsed would render as a phantom from the ledger entry.
             // Its look is (re)drawn by onAttackLanded's broadcasts; nothing to record here.
-        } else {
-            // A plain cosmetic aura (Maple Warrior, Stance, Sharp Eyes, ...). The generic
-            // giveForeignBuff frame carries no duration, so the client renders such an aura until a
-            // matching cancelForeignBuff arrives - and the plugin never sends one for these (no
-            // cancel site outside the state-bound frames), it only re-shows them on the buff
-            // cadence. The ledger therefore mirrors what an observer is actually rendering: ADD on
-            // each show (a re-show re-adds the same id - the set dedupes), nothing is ever retired.
+        } else if (isForeignAura(skillId)) {
+            // 灵魂箭 / 影子替身 / 风灵漫步 (and any other generic-frame whitelist family that
+            // has no dedicated ledger above): a plain cosmetic aura. The generic giveForeignBuff
+            // frame carries no duration, so the client renders such an aura until a matching
+            // cancelForeignBuff arrives - and the plugin never sends one for these (no cancel
+            // site outside the state-bound frames), it only re-shows them on the buff cadence.
+            // The ledger therefore mirrors what an observer is actually rendering: ADD on each
+            // show (a re-show re-adds the same id - the set dedupes), nothing is ever retired.
             SHOWN_AURAS.computeIfAbsent(id, k -> ConcurrentHashMap.newKeySet()).add(skillId);
         }
+        // Anything else (the plain numeric buffs - 魔法盾/圣甲术/枫叶勇士/稳如泰山/...): the
+        // host broadcasts NO foreign frame for them (StatEffect.applyBuffEffect leaves mbuff
+        // null), so BotBuffEffects.auraPacket builds none either. Recording one here would put
+        // a frame the client has never legitimately received into the on-arrival replay - the
+        // exact "数据非法" source - so non-whitelist ids are deliberately NOT tracked.
     }
 
     /**

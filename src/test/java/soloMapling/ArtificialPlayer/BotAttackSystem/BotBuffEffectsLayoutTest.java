@@ -12,6 +12,7 @@ import java.util.List;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -50,12 +51,38 @@ class BotBuffEffectsLayoutTest {
         assertTrue(src.contains("PacketCreator.giveForeignWKChargeEffect("),
                 "the WK_CHARGE family must go through giveForeignWKChargeEffect (extended frame)");
         assertTrue(src.contains("PacketCreator.giveForeignBuff("),
-                "every other buff keeps the generic frame");
+                "the whitelisted generic-frame families keep the generic frame");
 
         // The dispatch predicates must exist and be used.
         assertTrue(src.contains("isDash("), "isDash must gate the dash family");
         assertTrue(src.contains("isInfusion("), "isInfusion must gate the infusion family");
         assertTrue(src.contains("isWkCharge("), "isWkCharge must gate the charge family");
+    }
+
+    /**
+     * The generic-forward fallback must be GONE: outside the host's whitelist the host's
+     * {@code applyBuffEffect} leaves {@code mbuff} null and broadcasts nothing, so the plugin's
+     * {@code auraPacket} must return {@code null} too (the observed「数据非法」 came from the old
+     * catch-all forwarding WZ statups the client never legitimately receives). The whitelist
+     * itself lives in {@code BotAuraState.isForeignAura} and the on-arrival ledger consults it.
+     */
+    @Test
+    void genericForwardIsWhitelistOnly() throws IOException {
+        String src = code(read(EFFECTS));
+        String aura = code(read(AURA));
+
+        // The fall-through after the last whitelist branch is a bare null - the old
+        // "return PacketCreator.giveForeignBuff(bot.getId(), statups)" forward is forbidden.
+        int tail = src.lastIndexOf("return null;");
+        assertTrue(tail > src.lastIndexOf("PacketCreator.giveForeignBuff("),
+                "auraPacket must END in 'return null;' - no generic forward past the whitelist");
+        assertFalse(src.contains("return PacketCreator.giveForeignBuff(bot.getId(), statups);"),
+                "the blanket WZ-statup forward must not come back");
+
+        // The replay ledger must consult the same whitelist, so a non-whitelist show can never
+        // be re-sent to a fresh observer either.
+        assertTrue(aura.contains("isForeignAura(") && aura.contains("SHOWN_AURAS"),
+                "BotAuraState must gate the SHOWN_AURAS ledger on isForeignAura");
     }
 
     /**

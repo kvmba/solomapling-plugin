@@ -7,13 +7,9 @@ import org.gms.client.Skill;
 import org.gms.client.SkillFactory;
 import org.gms.constants.id.ItemId;
 import org.gms.constants.skills.Buccaneer;
-import org.gms.constants.skills.Crossbowman;
 import org.gms.constants.skills.Corsair;
 import org.gms.constants.skills.Crusader;
-import org.gms.constants.skills.Hermit;
-import org.gms.constants.skills.Hunter;
 import org.gms.constants.skills.Marauder;
-import org.gms.constants.skills.NightWalker;
 import org.gms.constants.skills.ThunderBreaker;
 import org.gms.net.packet.Packet;
 import org.gms.net.server.Server;
@@ -116,13 +112,13 @@ public final class BotBuffEffects {
 
     /**
      * Broadcast the bot's persistent aura for {@code skillId} with the layout the v83 client
-     * actually parses for that buff.
+     * actually parses for that buff - and ONLY for the buffs the host itself answers with a
+     * foreign frame.
      *
-     * <p><b>Why one layout is not enough.</b> The host's own {@code StatEffect.applyTo} does NOT
-     * send every buff through the generic {@code giveForeignBuff}: three skill families carry
-     * extended foreign frames that the client decodes with extra fields, and using the short
-     * generic frame for them makes the client read past the end of the packet (the crashed
-     * "数据过短" symptom). The host switches on exactly these three:</p>
+     * <p><b>Why one layout is not enough - and why not every buff travels at all.</b> The host's
+     * own {@code StatEffect.applyBuffEffect} sends a {@code GIVE_FOREIGN_BUFF} ONLY for its
+     * whitelisted families. Three of them carry extended frames the client decodes with extra
+     * fields (the crashed "数据过短" symptom when the short generic frame was used instead):</p>
      * <ul>
      *   <li>{@code isDash()} — pirate 疾驰 (5001005 / 15001003 / 1014 / 1001015) →
      *       {@code giveForeignPirateBuff} (per-stat int + skill id + skip + duration),</li>
@@ -133,9 +129,12 @@ public final class BotBuffEffects {
      *       → {@code giveForeignWKChargeEffect}.</li>
      * </ul>
      *
-     * <p>Mirroring the host's dispatch here keeps a bot's buff visually identical to a player's.
-     * Everything else keeps the generic frame (the shape the host sends for Maple Warrior,
-     * Stance, Sharp Eyes, ...).</p>
+     * <p>The remaining whitelist families (变身, 隐身术, 风灵漫步, 灵魂箭, 影子替身, 斗气集中,
+     * 海盗船) travel the generic / mount frames with the host's own value pinning. Every OTHER
+     * buff - the plain numeric statups (魔法盾, 圣甲术, 冥想, 强化全家, 枫叶勇士, 稳如泰山,
+     * 神箭手, 无限, ...) - produces NO foreign frame on the host at all: the client never sees
+     * those bits through a legitimate flow, so the plugin must not broadcast them either
+     * (the observed "数据非法"). Observers of such a cast keep only the cast animation.</p>
      */
     private static void broadcastAura(Character bot, int skillId, StatEffect effect) {
         broadcastAura(bot, skillId, effect, effect.getDuration());
@@ -154,13 +153,14 @@ public final class BotBuffEffects {
     }
 
     /**
-     * Build the aura packet for {@code skillId} without sending it. The layouts are exactly the
+     * Build the aura packet for {@code skillId} without sending it, or {@code null} when the
+     * host itself would broadcast no foreign frame for the skill. The layouts are exactly the
      * ones {@link #broadcastAura} broadcasts - extracted so an aura can be replayed at ONE
      * observer instead of the whole map without a second copy of the per-family frame dispatch.
      */
     private static Packet auraPacket(Character bot, int skillId, StatEffect effect, int durationMs) {
-        // The attack enablers' observer frames are special-cased by the host's own applyTo, so the
-        // plugin mirrors that dispatch instead of the generic path:
+        // The host's own applyBuffEffect answers GIVE_FOREIGN_BUFF ONLY for its whitelisted
+        // families - the switch below mirrors that dispatch, family for family:
         //
         // 海盗船 (BATTLE_SHIP, 5221006): the host treats it as a MONSTER_RIDING buff whose
         // riding item is forced to ItemId.BATTLESHIP (1932000) and broadcasts showMonsterRiding -
@@ -197,18 +197,18 @@ public final class BotBuffEffects {
         if (isWkCharge(statups)) {
             return PacketCreator.giveForeignWKChargeEffect(bot.getId(), skillId, statups);
         }
-        if (isDarkSight(skillId)) {
-            // 隐身术 uses the generic frame too, but the host's own isDs() branch normalises the
-            // DARKSIGHT statup to value 0 (StatEffect.applyTo) - mirror that so a bot's hide looks
-            // exactly like a real player's (the semi-transparent shade observers render).
+        if (isDarkSight(skillId) || isWw(skillId)) {
+            // 隐身术 / 风灵漫步 use the generic frame too, but the host's own isDs()/isWw()
+            // branches normalise the statup to value 0 (StatEffect.applyBuffEffect) - mirror that
+            // so a bot's hide looks exactly like a real player's (the semi-transparent shade).
+            BuffStat flag = isDarkSight(skillId) ? BuffStat.DARKSIGHT : BuffStat.WIND_WALK;
             return PacketCreator.giveForeignBuff(bot.getId(),
-                    Collections.singletonList(new Pair<>(BuffStat.DARKSIGHT, 0)));
+                    Collections.singletonList(new Pair<>(flag, 0)));
         }
         if (isSoulArrow(skillId)) {
-            // 灵魂箭 is the same host special case: isSoulArrow() broadcasts the foreign frame with
-            // the statup PINNED to 0 (StatEffect.applyBuffEffect) - the aura is an on/off flag to
-            // observers, never the WZ x. Forwarding the WZ value (1) sends data the client has
-            // never seen from a real cast.
+            // 灵魂箭 ditto: the host's isSoulArrow() branch pins SOULARROW to 0 - the aura is an
+            // on/off flag to observers, never the WZ x. Forwarding the WZ value (1) sends data
+            // the client has never seen from a real cast.
             return PacketCreator.giveForeignBuff(bot.getId(),
                     Collections.singletonList(new Pair<>(BuffStat.SOULARROW, 0)));
         }
@@ -217,17 +217,29 @@ public final class BotBuffEffects {
             return PacketCreator.giveForeignBuff(bot.getId(),
                     Collections.singletonList(new Pair<>(BuffStat.SHADOWPARTNER, 0)));
         }
-        return PacketCreator.giveForeignBuff(bot.getId(), statups);
+        // EVERYTHING ELSE (魔法盾/魔法装甲/冥想/强化/圣甲术/枫叶勇士/稳如泰山/神箭手/无限/...):
+        // the host's switch leaves mbuff null - a real cast broadcasts NO foreign frame for these,
+        // and the spawn packet's foreign-buff mask has no slot for their stats either. The v83
+        // client therefore never receives these buff bits through a legitimate flow, and parsing
+        // one for a bot is undefined behaviour (the observed "数据非法"). The persistent-aura
+        // broadcast ends here; observers keep only the cast animation, which is exactly what a
+        // real player's cast shows them.
+        return null;
     }
 
-    /** The host's own isSoulArrow set: 灵魂箭 (Hunter 3101004 / Crossbowman 3201004). */
+    /** The host's own isSoulArrow set: 灵魂箭 (Hunter / Crossbowman / Wind Archer). */
     private static boolean isSoulArrow(int skillId) {
-        return skillId == Hunter.SOUL_ARROW || skillId == Crossbowman.SOUL_ARROW;
+        return BotAuraState.isSoulArrow(skillId);
     }
 
-    /** The host's own isShadowPartner set: 影子替身 (Hermit 4111002 / NightWalker 4121011). */
+    /** The host's own isShadowPartner set: 影子替身 (Hermit / Night Walker). */
     private static boolean isShadowPartner(int skillId) {
-        return skillId == Hermit.SHADOW_PARTNER || skillId == NightWalker.SHADOW_PARTNER;
+        return BotAuraState.isShadowPartner(skillId);
+    }
+
+    /** The host's own isWw set: 风灵漫步 (Wind Archer). */
+    private static boolean isWw(int skillId) {
+        return BotAuraState.isWw(skillId);
     }
 
     /**
