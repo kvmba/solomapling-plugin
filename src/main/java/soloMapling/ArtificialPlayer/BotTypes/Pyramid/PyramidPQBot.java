@@ -82,4 +82,10 @@ public class PyramidPQBot extends PartyQuestBot {
         }
         return true;
     }
+
+    /** The combat sweep reads the same conservative gate as the stage work. */
+    @Override
+    protected boolean fightsOnSweep() {
+        return hasOnlyKillableMonsters();
+    }
 }

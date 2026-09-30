@@ -69,8 +69,11 @@ public class HorntailPQBot extends PartyQuestBot {
         }
 
         // Kill this room's monsters, then sweep for the key. The room holds a pair and only
-        // one of them carries it, so the loop is bounded by the fight rather than by a count.
-        while (PqActions.countItem(getChr(), key) == 0) {
+        // one of them carries it, so one seek beat plus a loot sweep per macro tick is the
+        // whole job - the swings land on the shared combat sweep; the loot sweep must stay
+        // on this bounded macro tick or a key that never reaches the inventory (inventory
+        // full, drop uncollected) would spin here forever.
+        if (PqActions.countItem(getChr(), key) == 0) {
             PqActions.seekAndAttack(getChr());
             PqActions.loot(getChr(), getChr().getPosition(), 1_200, new int[]{key});
         }

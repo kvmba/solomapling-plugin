@@ -130,6 +130,21 @@ public class LudiPQBot extends PartyQuestBot {
     }
 
     /**
+     * The combat beat must not swing while stage-5's invincible guards are near: attacking
+     * breaks Dark Sight and the PAD-999 guards one-shot the bot out of it. That covers the
+     * stage-5 main map (guards in reach) and the stage-5 door rooms (the whole sneak is
+     * "hide through the visit") - the same guards' contract the macro tick already honours.
+     */
+    @Override
+    protected boolean fightsOnSweep() {
+        int mapId = getChr().getMapId();
+        if (LudiPqData.roomStage(mapId) == 5) {
+            return false; // door rooms: hide is the mechanic
+        }
+        return !(stageOf(mapId) == 5 && LudiStages.nearbyGuardCount(getChr()) > 0);
+    }
+
+    /**
      * Work the entry room like any other collection stage.
      *
      * <p>Stage 1 is not a waiting room: the Red Balloon (NPC 2040036) hands the door to

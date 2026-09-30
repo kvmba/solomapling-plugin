@@ -82,6 +82,21 @@ public class AriantPQBot extends PartyQuestBot {
     }
 
     /**
+     * The combat sweep may only swing in the arena while the macro tick's own catch contract
+     * holds: rocks in hand and a scorpion worth wearing down still standing. The sweep cannot
+     * pick catch targets, so where the contract is off (no rocks, or only catchable scorpions)
+     * it must not fight at all - a killed scorpion is a catch some party member can never make.
+     */
+    @Override
+    protected boolean fightsOnSweep() {
+        if (!AriantPqData.isArena(getChr().getMapId()) || !hasElementRock()) {
+            return false;
+        }
+        Monster target = bestCatchTarget();
+        return target != null && !isInCatchRange(target);
+    }
+
+    /**
      * Whether a scorpion is low enough for the handler to accept a catch, using the same
      * arithmetic the handler uses so the bot and the server agree at the boundary.
      */

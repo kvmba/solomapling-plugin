@@ -91,6 +91,16 @@ public class EllinPQBot extends PartyQuestBot {
     }
 
     /**
+     * The combat beat must not fight here either: the frog room's guards die to ordinary
+     * swings and have to be purified with the NPC's item instead, so a bot that "helps" by
+     * swinging on the sweep would kill what the party came to catch.
+     */
+    @Override
+    protected boolean fightsOnSweep() {
+        return getChr().getMapId() != EllinPqData.FROG_ROOM;
+    }
+
+    /**
      * Ask the maze's NPC (2133001) to open the way out, once per maze visit.
      *
      * <p>The script warps the whole team to the frog room on the confirmation click, so the

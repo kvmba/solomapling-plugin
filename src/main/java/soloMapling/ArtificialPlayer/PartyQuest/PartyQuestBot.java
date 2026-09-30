@@ -137,21 +137,61 @@ public abstract class PartyQuestBot extends BotSM implements GrindTickRegistry.P
      * sips - stays on the macro tick in {@link #tickPartyQuest}; this beat only ever does the
      * one thing the 2-6s macro cadence made the bot look dazed at: swing, and keep closing on
      * whatever it is fighting, at the cadence combat actually runs at. The gates mirror the
-     * macro tick's own: a bot that is not running, is dead, frozen, outside a quest room or
-     * without a party has no fight to be in - and the shared ticker bypasses BotSM's tick
-     * gate, so a corpse would otherwise keep swinging.
+     * macro tick's own: a bot that is not running, is a corpse (isCorpse, not isDead - a bot
+     * the host zeroed behind the damage layer's back has no episode yet but must still not
+     * swing), frozen, outside a quest room or without a party has no fight to be in.
+     *
+     * <p>Two coordination gates keep the beat from fighting the macro tick:
+     * <ul>
+     *   <li>{@code movementOverride}: while the macro tick has the bot walking somewhere
+     *       (following the leader through a portal, taking a puzzle spot), the beat must not
+     *       re-issue {@code GCMovement.move} at a mob and yank the walk around. It still
+     *       swings - whatever comes into reach on the way is fair - it just does not steer.
+     *       The flag is armed by the walk helpers and cleared by the macro tick once the
+     *       step's own checks have run.</li>
+     *   <li>{@link #fightsOnSweep}: a stage whose contract forbids swinging (the frog room's
+     *       catch-don't-kill mobs, Ludi's invincible guards, the pyramid's marked monsters)
+     *       opts out entirely. Default is to fight.</li>
+     * </ul>
      */
     @Override
     public void grindTick() {
         Character bot = getChr();
         if (bot == null || bot.getMap() == null
                 || !getRunning()
-                || death().isDead() || status().isFrozen()
+                || death().isCorpse() || status().isFrozen()
                 || bot.getParty() == null
+                || movementOverride
+                || !fightsOnSweep()
                 || !isInsideQuest(bot.getMapId())) {
             return;
         }
         PqActions.seekAndAttack(bot);
+    }
+
+    /**
+     * Whether the shared combat beat may fight in the room the bot is standing in. Stages
+     * whose puzzles forbid swinging override this; the common case is to fight.
+     */
+    protected boolean fightsOnSweep() {
+        return true;
+    }
+
+    /**
+     * Set while this bot's macro tick is driving a walk whose arrival the stage work depends
+     * on (portal following, puzzle spots): the combat beat must not re-target the movement
+     * engine mid-walk. Cleared at the top of the next macro tick.
+     */
+    private volatile boolean movementOverride;
+
+    /** Mark that a stage-driven walk is in flight; the combat beat stops steering. */
+    protected final void holdMovementForStageWalk() {
+        movementOverride = true;
+    }
+
+    /** Release the stage-walk hold; called at the top of every macro tick. */
+    private void clearMovementOverride() {
+        movementOverride = false;
     }
 
     /** Where the run happens: the map that proves the bot is inside the quest. */
@@ -198,6 +238,7 @@ public abstract class PartyQuestBot extends BotSM implements GrindTickRegistry.P
         if (bot == null || bot.getMap() == null) {
             return;
         }
+        clearMovementOverride();
 
         // A pending invitation is answered even outside the quest - that is when they arrive.
         if (bot.getParty() == null) {
@@ -599,6 +640,10 @@ public abstract class PartyQuestBot extends BotSM implements GrindTickRegistry.P
         BotLogger.log("PQ bot " + getChr().getName() + " following the leader from "
                 + here + " to " + leaderMap + " through portal " + exit.getName());
         sayDoorLine();
+        // The walk to the door must not be fought over by the combat beat: a mob still in this
+        // room would re-target the movement engine every 250ms and the bot would oscillate
+        // between the door and the mob, never entering. Held until the next macro tick clears it.
+        holdMovementForStageWalk();
         PqActions.walkTo(getChr(), exit.getPosition());
         PqActions.enterPortal(getChr(), exit);
         return getChr().getMapId() != here;
