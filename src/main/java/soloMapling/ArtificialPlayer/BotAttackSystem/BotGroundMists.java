@@ -125,8 +125,10 @@ public final class BotGroundMists {
         // The cloud: the host's own Mist object through the host's own spawnMist - the poison
         // scheduler (2.5s prop rolls, the per-second drain, the expiry broadcast) is the host's
         // from here. Duration is the WZ time of the level held, already in ms (skill times are
-        // stored in seconds and x1000 by loadFromData).
-        bot.getMap().spawnMist(new Mist(box, bot, effect), effect.getDuration(),
+        // stored in seconds and x1000 by loadFromData). The level is forced into the spawn
+        // packet: ambient bots never register skills server-side, so makeSpawnData's own
+        // getSkillLevel read would write level 0 - an illegal WZ row on the viewer's client.
+        bot.getMap().spawnMist(new Mist(box, bot, effect, level), effect.getDuration(),
                 true, false, false);
 
         // Land the cast's damage through the ordinary external-hit path (kill / EXP / loot).
