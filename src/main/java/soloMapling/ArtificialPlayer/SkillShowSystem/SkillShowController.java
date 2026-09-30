@@ -170,20 +170,31 @@ public final class SkillShowController {
 
     // ---- 拍子链 ----
 
+    /*
+     * 拍子链是整场表演的唯一生命线：任何一拍抛出异常，MethodScheduler 的兜底只
+     * 打日志不重排下一拍，链条就永久断死 —— 表演 bot（挂着 morph 光环与召唤兽）
+     * 会滞留地图。所以整拍包在这里兜：出错则干净收场（退场 + 状态归位），而不是
+     * 留下一具再也不会动的站桩尸体。
+     */
     private static synchronized void beat() {
-        switch (phase) {
-            case SPAWN -> beatSpawn();
-            case ARRIVE -> {
-                phase = Phase.STEP;
-                MethodScheduler.runAfterDelay(SkillShowController::beat, 0);
+        try {
+            switch (phase) {
+                case SPAWN -> beatSpawn();
+                case ARRIVE -> {
+                    phase = Phase.STEP;
+                    MethodScheduler.runAfterDelay(SkillShowController::beat, 0);
+                }
+                case STEP -> beatStep();
+                case DESPAWN -> {
+                    removeShowBot();
+                    phase = Phase.SPAWN;
+                    MethodScheduler.runAfterDelay(SkillShowController::beat, INTER_JOB_GAP_MS);
+                }
+                default -> { }
             }
-            case STEP -> beatStep();
-            case DESPAWN -> {
-                removeShowBot();
-                phase = Phase.SPAWN;
-                MethodScheduler.runAfterDelay(SkillShowController::beat, INTER_JOB_GAP_MS);
-            }
-            default -> { }
+        } catch (Throwable t) {
+            BotLogger.log("[skillshow] 拍子异常，中断收场: " + t);
+            stop();
         }
     }
 
@@ -242,7 +253,15 @@ public final class SkillShowController {
             MethodScheduler.runAfterDelay(SkillShowController::beat, 0);
             return;
         }
-        SocialCommands.BotChatbubble(bot, "接下来表演：" + BotSkillNames.name(next.skillId()));
+        // 预告气泡：bot 在自检后、广播前的一瞬间被移除时 getMap() 会变 null ——
+        // BotChatbubble 对此不设防，走 BotSpeak 的判空路径（打字式/整聊式都带
+        // null map 守卫的入口在 BotFullChat 之下，仍需 alive() 前置；这里是
+        // alive() 已过的窗口，选唯一带判空的广播口）。
+        if (bot.getMap() == null) {
+            stop();
+            return;
+        }
+        SocialCommands.BotSpeakPlain(bot, "接下来表演：" + BotSkillNames.name(next.skillId()));
         pending = next;
         MethodScheduler.runAfterDelay(SkillShowController::beat, ANNOUNCE_LEAD_MS);
     }
