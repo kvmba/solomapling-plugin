@@ -70,6 +70,25 @@ public final class BotSummonSystem {
         }
     }
 
+    /**
+     * GM 技能观测表演：为一个 bot 强制召唤指定的召唤兽（无视 spawnChance/minLevel
+     * 等概率与门槛），技能等级按 bot 的角色等级补授（与 grant 的 teach 路径一致）。
+     * 返回 false 表示该技能不是已注册召唤兽、无法解析或生成失败。
+     */
+    public static boolean showSummon(Character bot, int skillId) {
+        if (bot == null || bot.getMap() == null || BotSummonTable.forSkill(skillId) == null) {
+            return false;
+        }
+        try {
+            BotSummonController.spawnForShow(bot, skillId);
+            return BotSummonFollower.isTracked(bot.getId());
+        } catch (Throwable t) {
+            System.err.println("[BotSummonSystem] showSummon failed for " + botId(bot)
+                    + " skill " + skillId + ": " + t);
+            return false;
+        }
+    }
+
     private static int botId(Character bot) {
         return bot == null ? -1 : bot.getId();
     }

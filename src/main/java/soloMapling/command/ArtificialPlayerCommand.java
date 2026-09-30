@@ -35,6 +35,7 @@ import soloMapling.ArtificialPlayer.BotPartySystem.BotRecruitManager;
 import soloMapling.ArtificialPlayer.BotMessagingSystem.QueueMonitor;
 import soloMapling.ArtificialPlayer.BotGeneration;
 import soloMapling.ArtificialPlayer.BotHelpers;
+import soloMapling.ArtificialPlayer.SkillShowSystem.SkillShowController;
 import soloMapling.ArtificialPlayer.BotSM;
 import soloMapling.ArtificialPlayer.BotTypeManager;
 import soloMapling.ArtificialPlayer.SocialHotPotatoManager;
@@ -118,6 +119,10 @@ public class ArtificialPlayerCommand extends Command {
         }
         if (first.equals("grindstyle")) {
             ExecutorServiceManager.getExecutorService().execute(() -> handleGrindStyle(params, c));
+            return;
+        }
+        if (first.equals("skillshow")) {
+            ExecutorServiceManager.getExecutorService().execute(() -> handleSkillShow(params, c));
             return;
         }
         if (params.length == 1) {
@@ -911,6 +916,34 @@ public class ArtificialPlayerCommand extends Command {
                     return new int[]{tierOrLevel, tierOrLevel}; // exact level
                 }
                 return null;
+        }
+    }
+
+    /*
+     * !bot skillshow [stop|status] — GM 技能观测表演：4 转 bot 按 job id 升序逐个在本图登场，
+     * 逐个「气泡预告中文名 → 3 秒 → 表演 1 次」自己的职业体系技能（增益/攻击/召唤兽，
+     * 即插件侧实战会用的全部），演完退场、下一个职业接力，12 个终职演完自动结束。
+     */
+    private static void handleSkillShow(String[] params, Client c) {
+        String sub = params.length >= 2 ? params[1].toLowerCase() : "";
+        switch (sub) {
+            case "stop" -> {
+                SkillShowController.stop();
+                player.yellowMessage("skillshow 已停止。");
+            }
+            case "status" -> {
+                String s = SkillShowController.status();
+                player.yellowMessage(s != null ? s : "skillshow 未在进行。");
+            }
+            default -> {
+                String err = SkillShowController.start(c.getPlayer().getPosition(), c.getPlayer().getMapId());
+                if (err != null) {
+                    player.yellowMessage(err);
+                } else {
+                    player.yellowMessage("skillshow 开始：12 个 4 转职业将依次在本图登场表演，"
+                            + "!bot skillshow status 查看进度，!bot skillshow stop 停止。");
+                }
+            }
         }
     }
 
