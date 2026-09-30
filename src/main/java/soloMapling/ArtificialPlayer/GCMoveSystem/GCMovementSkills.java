@@ -226,6 +226,17 @@ final class GCMovementSkills {
             best = probe;
             probe = GCMovement.groundPointBelow(map, origin.x, probe.y + 1);
         }
+        // Dead-pit guard: the deepest platform in range may be a basin floor the bot can never
+        // leave (no jump chain, no rope, no portal). Walk the ladder back UP to the deepest
+        // LIVABLE platform still within blink range, or give up the blink entirely — never
+        // into a one-way trap, and never past the range contract.
+        while (best != null && !DeadPitGuard.isLivableLanding(map, best, null)) {
+            Point above = GCMovement.groundPointBelow(map, origin.x, best.y - 1);
+            if (above == null || above.y >= best.y || above.y - origin.y > TELEPORT_RANGE_PX) {
+                return null;
+            }
+            best = above;
+        }
         return best;
     }
 
