@@ -3,6 +3,7 @@ package soloMapling.ArtificialPlayer.BotAttackSystem;
 import org.gms.client.BuffStat;
 import org.gms.client.Character;
 import org.gms.constants.game.CharacterStance;
+import org.gms.constants.skills.Aran;
 import org.gms.constants.skills.Beginner;
 import org.gms.constants.skills.Brawler;
 import org.gms.constants.skills.Buccaneer;
@@ -213,15 +214,17 @@ public final class BotAuraState {
     }
 
     /**
-     * The host's {@code WK_CHARGE} family by skill id (the 烈焰/寒冰/雷电/圣灵之剑 charges). The
-     * host's own predicate scans the statup list; by id it is exactly these charges.
+     * The host's {@code WK_CHARGE} family by skill id (the 烈焰/寒冰/雷电/圣灵之剑 charges, plus
+     * Aran's 雪冲锋 which the host's statup switch also routes to WK_CHARGE). The host's own
+     * predicate scans the statup list; by id it is exactly these skills.
      */
     public static boolean isWkCharge(int skillId) {
         return switch (skillId) {
             case WhiteKnight.BW_FIRE_CHARGE, WhiteKnight.BW_ICE_CHARGE, WhiteKnight.BW_LIT_CHARGE,
                  WhiteKnight.SWORD_FIRE_CHARGE, WhiteKnight.SWORD_ICE_CHARGE, WhiteKnight.SWORD_LIT_CHARGE,
                  Paladin.BW_HOLY_CHARGE, Paladin.SWORD_HOLY_CHARGE,
-                 DawnWarrior.SOUL_CHARGE, ThunderBreaker.LIGHTNING_CHARGE -> true;
+                 DawnWarrior.SOUL_CHARGE, ThunderBreaker.LIGHTNING_CHARGE,
+                 Aran.SNOW_CHARGE -> true;
             default -> false;
         };
     }
