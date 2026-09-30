@@ -1103,6 +1103,23 @@ class BotMovementManager {
     static void tickUnstuck(BotMovementState entry) {
         Character bot = entry.bot;
         int walkStep = BotPhysicsEngine.walkStep(bot.getMap(), entry.movementProfile);
+        // Dead-pit self-heal, FIRST: a bot standing on an unescapable surface (no jump chain,
+        // no rope, no portal) cannot be rescued by any local action - every hop only reshuffles
+        // it inside the basin, and the hop loop is exactly the reported "fell into the pit and
+        // never recovers". Teleport it to the nearest livable ground and drop the goal so the
+        // brain re-decides a reachable target next tick.
+        if (isOnDeadPitFloor(entry, bot)) {
+            Point rescue = nearestLivableGround(bot);
+            clearNavigationState(entry);
+            entry.moveTarget = null;
+            entry.unstuckCooldownMs = delayAfterCurrentTick(5000);
+            if (rescue != null) {
+                BotPhysicsEngine.teleportTo(entry, bot, rescue);
+                BotMovementManager.resetEntryStateAfterTeleport(entry);
+            }
+            broadcastMovement(entry);
+            return;
+        }
         // A random-direction hop is a recovery on solid ground, but at a lip whose outward column has
         // no ground below it is a fall out of the map. Prefer a direction with a real landing; if
         // neither has one, stay put rather than launch off the edge.
@@ -1128,10 +1145,82 @@ class BotMovementManager {
                 return;
             }
         }
+        // Dead-pit guard: a landing EXISTING is not enough - the LPQ stage-3 pit floor is a
+        // perfectly valid landing for the sim yet a one-way trap. Refuse any hop whose arc
+        // lands on an unescapable surface; the hop is a recovery, not a relocation into a
+        // basin the bot can never leave.
+        Point hopPos = bot.getPosition();
+        JumpLanding hopLanding = simulateJumpLanding(bot.getMap(), hopPos, walkStep * dir, entry.movementProfile);
+        if (hopLanding != null
+                && !DeadPitGuard.isLivableLanding(bot.getMap(), hopLanding.point(), entry.movementProfile)) {
+            dir = -dir;
+            hopLanding = simulateJumpLanding(bot.getMap(), hopPos, walkStep * dir, entry.movementProfile);
+            if (hopLanding == null
+                    || !DeadPitGuard.isLivableLanding(bot.getMap(), hopLanding.point(), entry.movementProfile)) {
+                clearNavigationState(entry);
+                entry.unstuckCooldownMs = delayAfterCurrentTick(5000);
+                return;
+            }
+        }
         BotPhysicsEngine.beginGroundJump(entry, bot, walkStep * dir);
         clearNavigationState(entry);
         entry.unstuckCooldownMs = delayAfterCurrentTick(5000);
         broadcastMovement(entry);
+    }
+
+    /** Whether the bot stands on a surface the livability probe cannot clear (a dead pit). */
+    private static boolean isOnDeadPitFloor(BotMovementState entry, Character bot) {
+        Point pos = bot.getPosition();
+        if (pos == null || bot.getMap() == null || bot.getMap().getFootholds() == null) {
+            return false;
+        }
+        Foothold standing = BotPhysicsEngine.findGroundFoothold(bot.getMap(), pos);
+        if (standing == null) {
+            return false;
+        }
+        return !DeadPitGuard.isLivableSurface(bot.getMap(), standing, entry.movementProfile);
+    }
+
+    /**
+     * Nearest livable ground to teleport a pit-trapped bot to: the closest surface above the
+     * bot's own position that the livability probe clears, probed across the map's footholds
+     * column by column. Falls back to the closest foothold at all when nothing reads livable
+     * (better a plausible floor than a null warp), and null when there is no foothold tree.
+     */
+    private static Point nearestLivableGround(Character bot) {
+        MapleMap map = bot.getMap();
+        Point pos = bot.getPosition();
+        if (map == null || map.getFootholds() == null || pos == null) {
+            return null;
+        }
+        BotMovementProfile profile = BotMovementProfile.base();
+        Point best = null;
+        long bestCost = Long.MAX_VALUE;
+        for (Foothold foothold : map.getFootholds().getAllFootholds()) {
+            if (foothold.isWall()) {
+                continue;
+            }
+            int fhLoX = Math.min(foothold.getX1(), foothold.getX2());
+            int fhHiX = Math.max(foothold.getX1(), foothold.getX2());
+            int probeX = Math.clamp(pos.x, fhLoX, fhHiX);
+            int probeY = foothold.getY1();
+            if (probeY >= pos.y) {
+                continue; // rescue means UP; the pit floor itself is never a candidate
+            }
+            Point candidate = new Point(probeX, probeY);
+            if (!DeadPitGuard.isLivableSurface(map, foothold, profile)) {
+                continue;
+            }
+            // Vertical distance dominates: a rescue wants the nearest livable floor ABOVE,
+            // not a lateral wander on a distant platform.
+            long cost = (long) Math.abs(probeY - pos.y) * 4
+                    + Math.abs(probeX - pos.x);
+            if (cost < bestCost) {
+                bestCost = cost;
+                best = candidate;
+            }
+        }
+        return best;
     }
 
     /**

@@ -143,7 +143,18 @@ final class BotFallbackMovementManager {
             return false;
         }
         Point ahead = new Point(botPos.x + stepX, botPos.y);
-        return BotPhysicsEngine.isGroundFarBelow(entry.bot.getMap(), ahead);
+        MapleMap map = entry.bot.getMap();
+        if (!BotPhysicsEngine.isGroundFarBelow(map, ahead)) {
+            return false;
+        }
+        // Dead-pit guard: "ground far below" includes pit floors the bot can never leave.
+        // Simulate the walk-off's real landing and refuse it if that surface has no way out
+        // (no jump chain, no rope, no portal) — the fallback must not walk a bot into a
+        // one-way basin while its graph is still baking.
+        BotPhysicsEngine.JumpLanding landing =
+                BotPhysicsEngine.simulateFallLanding(map, ahead, stepX);
+        return landing != null
+                && DeadPitGuard.isLivableLanding(map, landing.point(), entry.movementProfile);
     }
 
     /*
@@ -411,6 +422,13 @@ final class BotFallbackMovementManager {
         // basin the bot can never jump back out of (base-stat jump apex is 77px) - the
         // warmup fallback must not dive into LPQ-tower-style dead pits either.
         if (landing.point().y - botPos.y > BotNavigationGraphProvider.DOWN_JUMP_MAX_DROP_PX) {
+            return false;
+        }
+        // Dead-pit guard: the cap alone trusts DOWN_JUMP_MAX_DROP_PX to catch every
+        // unescapable basin. It doesn't - a 150px drop can land on a surface whose only
+        // exits are jumps the WZ flags (or their absence) allow on paper but no path
+        // actually serves. Refuse any landing the livability probe cannot clear.
+        if (!DeadPitGuard.isLivableLanding(map, landing.point(), entry.movementProfile)) {
             return false;
         }
         return Math.abs(targetPos.x - botPos.x) <= Math.max(BotMovementManager.cfg.FOLLOW_DIST,

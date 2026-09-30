@@ -77,7 +77,9 @@ public class FallbackDeadPitGuardTest {
     }
 
     /** Rim at y=0 (x -265..-60 and 20..265) with a mid terrace at y=150 (x -200..-120)
-     *  under the left rim piece, and a pit floor at y=413 spanning the whole base. */
+     *  under the left rim piece — its stair steps back up (y=90, y=20) keep the terrace
+     *  LIVABLE for DeadPitGuard (each rise within the 77px apex) — and a pit floor at
+     *  y=413 spanning the whole base. */
     private static MapleMap pitGeometry(int mapId) {
         MapleMap map = new MapleMap(mapId, 0, 0, 922010000, 0.0f);
         map.setMapLineBoundings(-1000, 600, -265, 265);
@@ -87,7 +89,9 @@ public class FallbackDeadPitGuardTest {
         int[][] floors = {
                 {0, -265, -60},      // left rim
                 {0, 20, 265},        // right rim (hole -60..20 between them)
-                {150, -200, -120},   // mid terrace under the left rim
+                {20, -200, -120},    // terrace step 2 (20px below the rim)
+                {90, -200, -120},    // terrace step 1 (70px below step 2)
+                {150, -200, -120},   // mid terrace under the left rim (60px below step 1)
                 {413, -265, 265},    // pit floor
         };
         for (int[] f : floors) {
