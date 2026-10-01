@@ -95,6 +95,16 @@ class BotAuraStateTest {
                 "疾驰 is stance-bound, not a hide");
     }
 
+    @Test
+    void theDisguiseIsAForeignAura() {
+        // The host's StatEffect.isMorph() is the plain morphId > 0 test, so a real Brawler's
+        // 橡木伪装 (morph 1002) answers GIVE_FOREIGN_BUFF with the MORPH statup - the barrel body
+        // every observer renders. The whitelist mirror must name the family or auraPacket returns
+        // null and the disguise never draws (the b963f16 regression).
+        assertTrue(BotAuraState.isForeignAura(Brawler.OAK_BARREL),
+                "橡木伪装 must ride the foreign-aura whitelist or its MORPH frame is never built");
+    }
+
     // ── attack-enabler rules (变身 / 海盗船) ─────────────────────────────────────
 
     @Test

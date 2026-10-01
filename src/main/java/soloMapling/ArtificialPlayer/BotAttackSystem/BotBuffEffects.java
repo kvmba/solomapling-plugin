@@ -6,6 +6,7 @@ import org.gms.client.Mount;
 import org.gms.client.Skill;
 import org.gms.client.SkillFactory;
 import org.gms.constants.id.ItemId;
+import org.gms.constants.skills.Brawler;
 import org.gms.constants.skills.Buccaneer;
 import org.gms.constants.skills.Corsair;
 import org.gms.constants.skills.Crusader;
@@ -185,6 +186,15 @@ public final class BotBuffEffects {
             int wireMorph = bot.getGender() == 0 ? morphId : morphId + 100;
             return PacketCreator.giveForeignBuff(bot.getId(), Collections.singletonList(
                     new Pair<>(BuffStat.MORPH, wireMorph)));
+        }
+        if (BotAuraState.isDisguise(skillId)) {
+            // 橡木伪装 (OAK_BARREL, 5101007): the host's isMorph() is the plain morphId > 0 test,
+            // so a real player's cast answers GIVE_FOREIGN_BUFF with the WZ morph (1002) through
+            // this same generic frame - and getMorph's +100 gender rule is keyed on 1000/1001/1003
+            // only, so 1002 goes out unchanged for both genders. Whitelisted in isForeignAura; the
+            // b963f16 whitelist mirror missed this family and the barrel stopped rendering.
+            return PacketCreator.giveForeignBuff(bot.getId(), Collections.singletonList(
+                    new Pair<>(BuffStat.MORPH, 1002)));
         }
         List<Pair<BuffStat, Integer>> statups = effect.getStatups();
         if (statups.isEmpty()) {

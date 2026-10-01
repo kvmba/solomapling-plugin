@@ -83,6 +83,15 @@ class BotBuffEffectsLayoutTest {
         // be re-sent to a fresh observer either.
         assertTrue(aura.contains("isForeignAura(") && aura.contains("SHOWN_AURAS"),
                 "BotAuraState must gate the SHOWN_AURAS ledger on isForeignAura");
+
+        // The 橡木伪装 family must keep its dedicated MORPH-1002 frame: the b963f16 whitelist
+        // mirror missed it (the host's isMorph() covers every morphId > 0, including the barrel)
+        // and the disguise stopped rendering. The frame must be built from the disguise predicate
+        // and pinned to the WZ morph 1002, gender-independent (getMorph's +100 rule is 1000/1001/1003 only).
+        assertTrue(src.contains("if (BotAuraState.isDisguise(skillId)) {"),
+                "the 橡木伪装 family must have its own auraPacket branch");
+        assertTrue(src.contains("new Pair<>(BuffStat.MORPH, 1002)"),
+                "the disguise frame must carry the barrel's WZ morph 1002");
     }
 
     /**
