@@ -26,6 +26,7 @@ import soloMapling.MapVFX.CustomReactor;
 import java.awt.Point;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ThreadLocalRandom;
 
 import static soloMapling.ArtificialPlayer.BotHelpers.blockingSleep;
 
@@ -160,10 +161,12 @@ public final class PqActions {
 
     // Stage-walk shield: the macro tick's walks (portal following, puzzle holds) must not be
     // re-targeted by the 250ms combat beat, which would yank the walk at a mob and oscillate
-    // the bot between its goal and the fight. walkTo/holdArea/spreadNearStageNpc arm a shield
-    // that outlives the blocking window (the walk keeps flying after walkTo gives up waiting)
-    // and expires on its own - the combat beat reads it and skips steering (still swinging)
-    // until then. Cleared eagerly when the walk lands; the expiry is the wedge escape.
+    // the bot between its goal and the fight. walkTo/holdArea arm a shield that outlives the
+    // blocking window (the walk keeps flying after walkTo gives up waiting) and expires on
+    // its own - the combat beat reads it and skips only the chase's steering (the swing half
+    // still runs) until then. Cleared eagerly when the walk lands; the expiry is the wedge
+    // escape. Deliberately NOT armed by the wait spots (waitNearStageNpc/spreadNearStageNpc):
+    // a park renewed every macro tick was a permanent combat blackout, the reported "发呆".
     private static final long STAGE_WALK_SHIELD_MS = 8_000;
     private static final Map<Integer, Long> stageWalkShieldUntilByBot = new java.util.concurrent.ConcurrentHashMap<>();
 
@@ -401,6 +404,105 @@ public final class PqActions {
                 .mapToInt(r -> r.getObjectId())
                 .findFirst().orElse(-1);
     }
+
+    // ===== Beat-driven reactor work: approach + strike on the 250ms combat sweep =====
+    //
+    // The stage helpers above only RUN on the macro tick (2-6s observed, 36-48s not), so a
+    // bot that arrived beside a box mid-sweep stood there until the next macro beat before
+    // its first strike, and re-docked 2-6s after every box. These entries let the combat
+    // sweep carry the in-flight box work between macro beats: the stage registers the box it
+    // is walking to and strikes it the moment the approach reports IN_POSITION, at the
+    // driver's swing cadence, so arrival converts into hits within one 250ms beat.
+
+    /** botId -> the reactor oid the combat sweep may strike once the approach lands. */
+    private static final Map<Integer, Integer> beatReactorByBot = new java.util.concurrent.ConcurrentHashMap<>();
+    /** botId -> the swing beat's next allowed epoch (the driver cadence mirrors here). */
+    private static final Map<Integer, Long> nextReactorSwingAtByBot = new java.util.concurrent.ConcurrentHashMap<>();
+
+    /**
+     * Register {@code oid} as the reactor the combat sweep should carry while the stage walk
+     * is in flight (call from the macro tick right after issuing the approach). The sweep
+     * strikes it on arrival; a {@code null}/{@code -1} clears the registration.
+     */
+    public static void armReactorBeat(Character bot, int oid) {
+        if (bot == null) {
+            return;
+        }
+        if (oid >= 0) {
+            beatReactorByBot.put(bot.getId(), oid);
+        } else {
+            beatReactorByBot.remove(bot.getId());
+        }
+    }
+
+    public static void clearReactorBeat(int botId) {
+        beatReactorByBot.remove(botId);
+        nextReactorSwingAtByBot.remove(botId);
+    }
+
+    /**
+     * The swing beat for reactor work: ~{@link #REACTOR_SWING_MIN_MS} between hits, per bot.
+     * The 250ms burst read as machine-gun swings; a player's repeat rate is the weapon's
+     * attack cadence, which the attack driver already models at 720-900ms.
+     */
+    private static boolean reactorSwingReady(Character bot, long now) {
+        return now >= nextReactorSwingAtByBot.getOrDefault(bot.getId(), 0L);
+    }
+
+    /**
+     * Strike {@code oid} now if the swing beat allows: the basic swing plus the engine's own
+     * hit, the same pair {@link #hitReactor} plays. A fully broken box (its state walk has no
+     * further step, {@code isActive} false) simply drops out of the registration and the
+     * stage's own next tick rotates to the next box - the claim/rotate/loot bookkeeping stays
+     * in exactly one place.
+     */
+    private static void strikeReactorOnBeat(Character bot, int oid, long now) {
+        nextReactorSwingAtByBot.put(bot.getId(), now + REACTOR_SWING_MIN_MS
+                + ThreadLocalRandom.current().nextLong(REACTOR_SWING_JITTER_MS));
+        hitReactor(bot, oid);
+        var reactor = bot.getMap().getReactorByOid(oid);
+        if (reactor == null || !reactor.isActive()) {
+            beatReactorByBot.remove(bot.getId());
+        }
+    }
+
+    /**
+     * Carry the armed reactor work one combat beat: approach the box, strike it the beat the
+     * approach says IN_POSITION. Non-blocking by design - the caller is the shared 250ms
+     * sweep, one Thread.sleep here would hold every registered bot's beat. No-op unless a
+     * stage armed a box via {@link #armReactorBeat}.
+     */
+    public static void workReactorOnBeat(Character bot) {
+        if (bot == null || bot.getMap() == null) {
+            return;
+        }
+        Integer oid = beatReactorByBot.get(bot.getId());
+        if (oid == null) {
+            return;
+        }
+        long now = System.currentTimeMillis();
+        var reactor = bot.getMap().getReactorByOid(oid);
+        if (reactor == null || !reactor.isActive()) {
+            beatReactorByBot.remove(bot.getId()); // broken by a teammate mid-walk
+            return;
+        }
+        // Never strike from across the room: the same honest-shot rule approachUnder's
+        // callers follow. The approach also owns the walk (and re-issues it when the driver
+        // has given up), so the beat advances the descent/approach the macro tick started.
+        Approach outcome = descendToFloorAerialTarget(bot, reactor.getPosition());
+        if (outcome == Approach.STUCK) {
+            beatReactorByBot.remove(bot.getId()); // the stage's next tick rotates the target
+            return;
+        }
+        if (outcome == Approach.IN_POSITION && reactorSwingReady(bot, now)) {
+            strikeReactorOnBeat(bot, oid, now);
+        }
+    }
+
+    /** Floor between two reactor swings: a player's repeat rate, not a machine-gun burst. */
+    private static final long REACTOR_SWING_MIN_MS = 600;
+    /** Jitter on that floor so a cohort does not swing in lockstep. */
+    private static final long REACTOR_SWING_JITTER_MS = 250;
 
     // =========================================================================
     // N4 - items
@@ -958,7 +1060,10 @@ public final class PqActions {
             return;
         }
         walkTo(bot, spot);
-        armStageWalkShield(bot); // holding the ring spot: keep the beat's chase off the walk
+        // No shield here: parked-by-the-NPC is a wait, not a staged walk. The combat beat
+        // may steer at whatever spawns nearby and - critically - the 250ms beat keeps the
+        // bot's swings alive while it stands (a shield renewed every macro tick read as a
+        // 100% combat blackout for the whole wait).
     }
 
     /** The closest stage NPC's spot (the next00 portal's mouth as fallback), or null. */
@@ -1014,7 +1119,7 @@ public final class PqActions {
         }
         Point target = claimNear(bot, npc);
         walkTo(bot, target);
-        armStageWalkShield(bot); // holding the ring spot: keep the beat's chase off the walk
+        // No shield: the ring is a park, not a puzzle hold (see waitNearStageNpc).
     }
 
     /**

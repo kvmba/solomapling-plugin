@@ -13,6 +13,7 @@ import org.gms.constants.inventory.ItemConstants;
 import java.awt.Point;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ThreadLocalRandom;
 
 import static soloMapling.ArtificialPlayer.BotHelpers.blockingSleep;
 
@@ -287,6 +288,7 @@ public final class LudiStages {
     /** Drop this bot's stage-2 tower box claim, so a later bot can take its share. */
     public static void releaseTowerBox(int botId) {
         TOWER_BOX_CLAIMS.remove(botId);
+        PqActions.clearReactorBeat(botId);
     }
 
     // =========================================================================
@@ -442,11 +444,10 @@ public final class LudiStages {
      * Strike a box until it is gone, standing where the approach left us. The tower's pass
      * box is a multi-state reactor (each hit cracks it further, the last breaks it), and the
      * trap room's boxes share it - so one swing per macro tick was a full tick per state,
-     * and eleven boxes crawled. The swings land back to back with a short beat between them
-     * so the swing animation still reads. The stop test is the engine's own {@code isActive}
-     * (alive AND a further transition exists): a fully broken box keeps {@code isAlive}
-     * true on this host - it is never removed, just out of transitions - and the break can
-     * take three or four swings, not two.
+     * and eleven boxes crawled. The swings still land in one visit so the box does not
+     * straddle macro beats, but each beat waits the driver's swing cadence out rather than a
+     * fixed 250ms machine-gun: a player's repeat rate is the weapon's attack speed, which
+     * the attack driver models at 720-900ms.
      */
     private static void breakBoxInPlace(Character bot, int oid) {
         for (int swings = 0; swings < BOX_SWING_CAP; swings++) {
@@ -455,15 +456,18 @@ public final class LudiStages {
                 return; // broken (or being reset) - no further transition to walk
             }
             PqActions.hitReactor(bot, oid);
-            blockingSleep(BOX_SWING_BEAT_MS);
+            blockingSleep(BOX_SWING_BEAT_MIN_MS
+                    + ThreadLocalRandom.current().nextLong(BOX_SWING_BEAT_JITTER_MS));
         }
     }
 
     /** Upper bound on one in-place box combo: a box needs 3-4 swings; more means a bug. */
     private static final int BOX_SWING_CAP = 6;
 
-    /** The beat between a combo's swings, so the swing animation reads before the next one. */
-    private static final long BOX_SWING_BEAT_MS = 250;
+    /** The floor between a combo's swings, so the swing animation reads before the next one. */
+    private static final long BOX_SWING_BEAT_MIN_MS = 600;
+    /** Jitter on the beat so a cohort does not swing in lockstep. */
+    private static final long BOX_SWING_BEAT_JITTER_MS = 250;
 
     /**
      * Approach-and-strike {@code oid} when the approach can reach it by walking DOWN (a box
@@ -481,9 +485,13 @@ public final class LudiStages {
             PqActions.Approach outcome =
                     PqActions.descendToFloorAerialTarget(bot, reactor.getPosition());
             if (outcome == PqActions.Approach.TRAVELLING) {
+                // Hand the approach to the 250ms combat sweep: it strikes the box the beat
+                // the descent lands instead of the box waiting out the next macro tick.
+                PqActions.armReactorBeat(bot, oid);
                 return true;
             }
             if (outcome == PqActions.Approach.IN_POSITION) {
+                PqActions.armReactorBeat(bot, -1); // arrived: the visit's own combo takes over
                 breakBoxInPlace(bot, oid);
                 return true;
             }
@@ -506,10 +514,12 @@ public final class LudiStages {
             }
             PqActions.Approach outcome = PqActions.approachUnder(bot, reactor.getPosition());
             if (outcome == PqActions.Approach.IN_POSITION) {
+                PqActions.armReactorBeat(bot, -1); // arrived: the visit's own combo takes over
                 breakBoxInPlace(bot, oid);
                 return true;
             }
             if (outcome == PqActions.Approach.TRAVELLING) {
+                PqActions.armReactorBeat(bot, oid); // the sweep strikes it on arrival
                 return true;
             }
             oid = nearestBoxOid(bot, dataId, oid); // STUCK: rotate to another box

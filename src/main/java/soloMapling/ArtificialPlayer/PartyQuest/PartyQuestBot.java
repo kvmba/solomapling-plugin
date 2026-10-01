@@ -122,6 +122,7 @@ public abstract class PartyQuestBot extends BotSM implements GrindTickRegistry.P
         GrindTickRegistry.getInstance().unregister(this);
         GCMovement.disable(getChr());
         PqActions.clearSeekState(getChr().getId());
+        PqActions.clearReactorBeat(getChr().getId());
         releaseRoomState(); // a stopped bot holds no wait spots or box claims
         super.stopScheduledTask();
     }
@@ -146,9 +147,10 @@ public abstract class PartyQuestBot extends BotSM implements GrindTickRegistry.P
      *   <li>the stage-walk shield ({@code PqActions.movementShielded}): while the macro tick
      *       has the bot walking somewhere (following the leader through a portal, holding a
      *       puzzle spot), the beat must not re-issue {@code GCMovement.move} at a mob and
-     *       yank the walk around. It still swings - whatever comes into reach on the way is
-     *       fair - it just does not steer. The shield is armed by every walk/hold helper and
-     *       expires on its own.</li>
+     *       yank the walk around - it only skips the CHASE HALF ({@code seekAndAttack}'s
+     *       steering); the swing half still runs through {@code PqActions.attack}, so a mob
+     *       or a stray within reach on the way is fought rather than walked past. The shield
+     *       is armed by every walk/hold helper and expires on its own.</li>
      *   <li>{@link #fightsOnSweep}: a stage whose contract forbids swinging (the frog room's
      *       catch-don't-kill mobs, Ludi's invincible guards, the pyramid's marked monsters)
      *       opts out entirely. Default is to fight.</li>
@@ -161,11 +163,15 @@ public abstract class PartyQuestBot extends BotSM implements GrindTickRegistry.P
                 || !getRunning()
                 || death().isCorpse() || status().isFrozen()
                 || bot.getParty() == null
-                || movementShielded()
                 || !fightsOnSweep()
                 || !isInsideQuest(bot.getMapId())) {
             return;
         }
+        if (movementShielded()) {
+            PqActions.attack(bot); // the walk owns the steering; the swing still lands
+            return;
+        }
+        PqActions.workReactorOnBeat(bot); // carry an armed box approach between macro beats
         PqActions.seekAndAttack(bot);
     }
 
