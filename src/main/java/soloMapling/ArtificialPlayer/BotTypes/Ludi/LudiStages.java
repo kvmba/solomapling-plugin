@@ -358,10 +358,11 @@ public final class LudiStages {
             soloMapling.ArtificialPlayer.BotAttackSystem.BotBuffEffects.showBuff(bot, Rogue.DARK_SIGHT);
         }
         // Boxes while hidden: the strike cancels the hide (an attack action), so re-show
-        // happens next tick - one box per tick, which is the honest pace for a sneak.
+        // happens next tick - one box per tick, which is the honest pace for a sneak. The
+        // beat is off: a swing mid-walk would break Dark Sight in a PAD-999 room.
         int box = nearestBoxOid(bot, LudiPqData.BOX_STAGE5);
         if (box >= 0) {
-            hitReactorRotate(bot, box, LudiPqData.BOX_STAGE5);
+            hitReactorRotate(bot, box, LudiPqData.BOX_STAGE5, false);
         }
         PqActions.loot(bot, bot.getPosition(), 2_000, new int[]{LudiPqData.PASS});
         PqActions.recoverUngatheredHandoffs(bot, LudiPqData.PASS);
@@ -453,6 +454,7 @@ public final class LudiStages {
         for (int swings = 0; swings < BOX_SWING_CAP; swings++) {
             var reactor = bot.getMap().getReactorByOid(oid);
             if (reactor == null || !reactor.isActive()) {
+                PqActions.boxFinishedThisBeat(bot); // pull the next box's tick forward
                 return; // broken (or being reset) - no further transition to walk
             }
             PqActions.hitReactor(bot, oid);
@@ -504,8 +506,13 @@ public final class LudiStages {
      * Approach-and-strike {@code oid} on the bot's own level (a same-floor walk or jump);
      * on a STUCK approach rotate to the next-nearest box of the same kind. Returns true
      * while a box is still being worked, false when none is reachable.
+     *
+     * <p>{@code onBeat} arms the combat sweep to carry the in-flight approach and strike on
+     * arrival. The sneak stage passes {@code false}: its bot is hidden, the beat's swing
+     * would break Dark Sight in a PAD-999 room, and one box per macro tick is already that
+     * stage's documented honest pace.
      */
-    private static boolean hitReactorRotate(Character bot, int firstOid, int dataId) {
+    private static boolean hitReactorRotate(Character bot, int firstOid, int dataId, boolean onBeat) {
         int oid = firstOid;
         for (int attempt = 0; attempt < 3 && oid >= 0; attempt++) {
             var reactor = bot.getMap().getReactorByOid(oid);
@@ -519,12 +526,18 @@ public final class LudiStages {
                 return true;
             }
             if (outcome == PqActions.Approach.TRAVELLING) {
-                PqActions.armReactorBeat(bot, oid); // the sweep strikes it on arrival
+                if (onBeat) {
+                    PqActions.armReactorBeat(bot, oid); // the sweep strikes it on arrival
+                }
                 return true;
             }
             oid = nearestBoxOid(bot, dataId, oid); // STUCK: rotate to another box
         }
         return false; // every candidate failed this tick; try again next tick
+    }
+
+    private static boolean hitReactorRotate(Character bot, int firstOid, int dataId) {
+        return hitReactorRotate(bot, firstOid, dataId, true);
     }
 
     // =========================================================================

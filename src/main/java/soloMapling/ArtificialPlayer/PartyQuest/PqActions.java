@@ -414,30 +414,40 @@ public final class PqActions {
     // is walking to and strikes it the moment the approach reports IN_POSITION, at the
     // driver's swing cadence, so arrival converts into hits within one 250ms beat.
 
-    /** botId -> the reactor oid the combat sweep may strike once the approach lands. */
-    private static final Map<Integer, Integer> beatReactorByBot = new java.util.concurrent.ConcurrentHashMap<>();
+    /** botId -> the box the combat sweep may strike once the approach lands (oid + map instance). */
+    private record BeatBox(int oid, int mapInstance) {
+    }
+
+    private static final Map<Integer, BeatBox> beatBoxByBot = new java.util.concurrent.ConcurrentHashMap<>();
     /** botId -> the swing beat's next allowed epoch (the driver cadence mirrors here). */
     private static final Map<Integer, Long> nextReactorSwingAtByBot = new java.util.concurrent.ConcurrentHashMap<>();
 
     /**
      * Register {@code oid} as the reactor the combat sweep should carry while the stage walk
      * is in flight (call from the macro tick right after issuing the approach). The sweep
-     * strikes it on arrival; a {@code null}/{@code -1} clears the registration.
+     * strikes it on arrival; a {@code null}/{@code -1} clears the registration. Keyed to the
+     * map instance: reactor oids collide across maps (the stage-2 tower and its trap room),
+     * so an armed box must die with the room change.
      */
     public static void armReactorBeat(Character bot, int oid) {
         if (bot == null) {
             return;
         }
         if (oid >= 0) {
-            beatReactorByBot.put(bot.getId(), oid);
+            beatBoxByBot.put(bot.getId(), new BeatBox(oid, System.identityHashCode(bot.getMap())));
         } else {
-            beatReactorByBot.remove(bot.getId());
+            beatBoxByBot.remove(bot.getId());
         }
     }
 
     public static void clearReactorBeat(int botId) {
-        beatReactorByBot.remove(botId);
+        beatBoxByBot.remove(botId);
         nextReactorSwingAtByBot.remove(botId);
+    }
+
+    /** Whether a box is registered for the combat sweep to carry (the beat's steering gate). */
+    public static boolean reactorBeatArmed(Character bot) {
+        return bot != null && beatBoxByBot.containsKey(bot.getId());
     }
 
     /**
@@ -452,9 +462,12 @@ public final class PqActions {
     /**
      * Strike {@code oid} now if the swing beat allows: the basic swing plus the engine's own
      * hit, the same pair {@link #hitReactor} plays. A fully broken box (its state walk has no
-     * further step, {@code isActive} false) simply drops out of the registration and the
-     * stage's own next tick rotates to the next box - the claim/rotate/loot bookkeeping stays
-     * in exactly one place.
+     * further step, {@code isActive} false) drops out of the registration and pulls the next
+     * macro tick forward - picking the next box is stage logic that only runs there, and
+     * without the pull the party stares at the bot standing beside the rubble it just made
+     * for one full macro cadence (the "打完停顿才继续" half of the rhythm report). The nudge
+     * is debounced, so a multi-box combo only ever pulls one tick, and the cadence settles
+     * back on its own.
      */
     private static void strikeReactorOnBeat(Character bot, int oid, long now) {
         nextReactorSwingAtByBot.put(bot.getId(), now + REACTOR_SWING_MIN_MS
@@ -462,7 +475,8 @@ public final class PqActions {
         hitReactor(bot, oid);
         var reactor = bot.getMap().getReactorByOid(oid);
         if (reactor == null || !reactor.isActive()) {
-            beatReactorByBot.remove(bot.getId());
+            beatBoxByBot.remove(bot.getId());
+            nudgeStageTick(bot);
         }
     }
 
@@ -470,20 +484,23 @@ public final class PqActions {
      * Carry the armed reactor work one combat beat: approach the box, strike it the beat the
      * approach says IN_POSITION. Non-blocking by design - the caller is the shared 250ms
      * sweep, one Thread.sleep here would hold every registered bot's beat. No-op unless a
-     * stage armed a box via {@link #armReactorBeat}.
+     * stage armed a box via {@link #armReactorBeat}. The registration dies with the map
+     * instance it was armed on (oid collisions across rooms), and its steering runs only
+     * while no other walk owns the bot.
      */
     public static void workReactorOnBeat(Character bot) {
         if (bot == null || bot.getMap() == null) {
             return;
         }
-        Integer oid = beatReactorByBot.get(bot.getId());
-        if (oid == null) {
-            return;
+        BeatBox box = beatBoxByBot.get(bot.getId());
+        if (box == null || box.mapInstance() != System.identityHashCode(bot.getMap())) {
+            return; // stale room (or nothing armed): the stage re-arms on its next tick
         }
+        int oid = box.oid();
         long now = System.currentTimeMillis();
         var reactor = bot.getMap().getReactorByOid(oid);
         if (reactor == null || !reactor.isActive()) {
-            beatReactorByBot.remove(bot.getId()); // broken by a teammate mid-walk
+            beatBoxByBot.remove(bot.getId()); // broken by a teammate mid-walk
             return;
         }
         // Never strike from across the room: the same honest-shot rule approachUnder's
@@ -491,7 +508,7 @@ public final class PqActions {
         // has given up), so the beat advances the descent/approach the macro tick started.
         Approach outcome = descendToFloorAerialTarget(bot, reactor.getPosition());
         if (outcome == Approach.STUCK) {
-            beatReactorByBot.remove(bot.getId()); // the stage's next tick rotates the target
+            beatBoxByBot.remove(bot.getId()); // the stage's next tick rotates the target
             return;
         }
         if (outcome == Approach.IN_POSITION && reactorSwingReady(bot, now)) {
@@ -503,6 +520,32 @@ public final class PqActions {
     private static final long REACTOR_SWING_MIN_MS = 600;
     /** Jitter on that floor so a cohort does not swing in lockstep. */
     private static final long REACTOR_SWING_JITTER_MS = 250;
+
+    /** Short delay for the pulled-forward macro tick: a breath between boxes, not a snap. */
+    private static final long NEXT_BOX_NUDGE_MS = 500;
+
+    /**
+     * Pull this bot's next macro tick forward so stage work (rotate to the next box, loot,
+     * hand off) resumes promptly after a beat-driven moment finished it. The pull is the
+     * only bridge from the 250ms beat back into stage logic - it must never run the stage
+     * inline, that is what produced the old act-freeze-act cadence. Debounced by BotSM's
+     * own nudge guard; a no-op when the wheel entry is gone (bot stopping).
+     */
+    private static void nudgeStageTick(Character bot) {
+        soloMapling.ArtificialPlayer.BotSM nudgeable =
+                soloMapling.ArtificialPlayer.BotMessagingSystem.CharacterStorage.getBotById(bot.getId());
+        if (nudgeable != null) {
+            nudgeable.nudgeSoon(NEXT_BOX_NUDGE_MS);
+        }
+    }
+
+    /**
+     * The stage's in-visit combo just finished a box: pull the next macro tick forward so
+     * the next box (or the loot/hand-off) starts within a breath instead of a full cadence.
+     */
+    public static void boxFinishedThisBeat(Character bot) {
+        nudgeStageTick(bot);
+    }
 
     // =========================================================================
     // N4 - items
