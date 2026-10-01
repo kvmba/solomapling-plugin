@@ -111,6 +111,15 @@ public final class LudiPqData {
         return -1;
     }
 
+    /**
+     * The main-map door portal name for a door room, in room order: the first room sits
+     * behind in01, the second behind in02, and so on (922010400's WZ portals run
+     * 0=sp, 1=st00, 2=in01..6=in05; 922010500 adds in06 for its sixth room).
+     */
+    public static String roomPortalName(int roomOffset) {
+        return "in" + String.format("%02d", roomOffset + 1);
+    }
+
     // =========================================================================
     // Stage 8 - the crate combination
     // =========================================================================

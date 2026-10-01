@@ -85,6 +85,19 @@ public class LudiPQBot extends PartyQuestBot {
         if (stage < 0) {
             return false;
         }
+        // Stages 4 and 5's main maps route into the door-room loops here (not only when
+        // standing in a sub-room): a bot on 922010400/922010500 claims a room and walks in
+        // on its own. The cleared check gates it - once the leader has turned the stage in,
+        // the bots drop the errand and follow the party through the next door.
+        if (stage == 4 && !LudiStages.stageCleared(getChr(), 4)) {
+            LudiStages.workDoorRooms(getChr(), LudiPqData.STAGE4_ROOM_FIRST,
+                    LudiPqData.STAGE4_ROOM_LAST);
+            return false;
+        }
+        if (stage == 5 && !LudiStages.stageCleared(getChr(), 5)) {
+            LudiStages.sneakDoorRooms(getChr());
+            return false;
+        }
         if (LudiStages.stageCleared(getChr(), stage)) {
             // Stage work is done: stand by the room's stage NPC instead of idling wherever
             // the last fight ended. Walking the portal is the leader's business, and the map
@@ -118,26 +131,46 @@ public class LudiPQBot extends PartyQuestBot {
                 }
             }
             case 3 -> LudiStages.breakCratesAndHunt(getChr());
-            case 5 -> {
-                // The main room's guards are invincible (PAD 999, WZ invincible=1): hide
-                // only while one can actually TOUCH us (same ledge), then fight nothing -
-                // but the delivery must still run from the NPC post, which sits 273px
-                // above the guards' floor and outside their reach. The old tower-wide
-                // guard box short-circuited this case forever, so a bot holding the
-                // post-work delivery never delivered.
-                if (LudiStages.guardCanReach(getChr())) {
-                    LudiStages.stayHidden(getChr());
-                    return false;
-                }
-                LudiStages.gatherPasses(getChr(), 5);
-            }
-            case 4, 7 -> LudiStages.gatherPasses(getChr(), stage);
+            case 7 -> LudiStages.gatherPasses(getChr(), stage);
             case 6 -> climb();
             case 8 -> standOnCrates();
             case 9 -> LudiStages.fightBoss(getChr());
             default -> { /* unreachable */ }
         }
         return false;
+    }
+
+    /**
+     * The door-room loops drive this bot room by room on their own claims; the follow beat
+     * must not pull it back to the leader's map mid-exploration (the leader stays on the
+     * main map while the bots clear the rooms behind the doors). Two gates end the errand
+     * and restore normal following: the stage turned in ("4stageclear"/"5stageclear" set),
+     * or every room personally cleared / held by a live teammate - the bot parks at the
+     * NPC, delivers, and moves with the party again.
+     */
+    @Override
+    protected boolean isFollowingLeader() {
+        int mapId = getChr().getMapId();
+        int roomStage = LudiPqData.roomStage(mapId);
+        int stage = stageOf(mapId);
+        if (roomStage != 4 && roomStage != 5 && stage != 4 && stage != 5) {
+            return true; // not a door-room stage: follow as usual
+        }
+        if (stage >= 0 && LudiStages.stageCleared(getChr(), stage)) {
+            return true; // the stage is turned in - move with the party
+        }
+        // Stage 5, job without a hide: the party's next room may be a guard room, and a
+        // body with no 隐身术/橡木伪装 walking in there dies to the first PAD-999 touch.
+        // The leaders' door scripts admit any party member, so this bot must NOT follow
+        // while stage 5 is live; the quest's own next00 warp carries it along instead.
+        if (roomStage == 5 || (stage == 5 && roomStage < 0)) {
+            if (LudiStages.hideSkillFor(getChr()) == 0) {
+                return false;
+            }
+        }
+        int roomFirst = roomStage == 5 ? LudiPqData.STAGE5_ROOM_FIRST : LudiPqData.STAGE4_ROOM_FIRST;
+        int roomLast = roomStage == 5 ? LudiPqData.STAGE5_ROOM_LAST : LudiPqData.STAGE4_ROOM_LAST;
+        return !LudiStages.doorRoomsOutstanding(getChr(), roomFirst, roomLast);
     }
 
     /**

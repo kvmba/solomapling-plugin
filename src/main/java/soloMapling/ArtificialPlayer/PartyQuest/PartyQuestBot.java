@@ -635,6 +635,9 @@ public abstract class PartyQuestBot extends BotSM implements GrindTickRegistry.P
      * @return true when this bot changed rooms
      */
     protected final boolean followLeaderIntoNextRoom() {
+        if (!isFollowingLeader()) {
+            return false; // this bot is on its own errand right now - the stage work decides
+        }
         Character leader = partyLeader();
         if (leader == null || leader == getChr()) {
             return false;
@@ -658,7 +661,19 @@ public abstract class PartyQuestBot extends BotSM implements GrindTickRegistry.P
         return getChr().getMapId() != here;
     }
 
-    /** The portal on this bot's map that leads to {@code targetMapId}, or null when there is none. */
+    /**
+     * Whether this bot should trail the leader's room changes. The default is always:
+     * most quests move by the party walking through a portal together, and a bot that
+     * stays behind contributes nothing. A bot on a self-directed errand (the Ludi door
+     * rooms) overrides this to say no while its own loop is still driving it, so the
+     * follow beat does not yank it back out mid-exploration.
+     */
+    protected boolean isFollowingLeader() {
+        return true;
+    }
+
+    /**
+     * The portal on this bot's map that leads to {@code targetMapId}, or null when there is none. */
     private Portal portalTo(int targetMapId) {
         var map = getChr().getMap();
         return map == null ? null : portalTo(map.getPortals(), targetMapId);

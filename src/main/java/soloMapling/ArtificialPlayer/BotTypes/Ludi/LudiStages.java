@@ -17,7 +17,6 @@ import org.gms.constants.inventory.ItemConstants;
 import java.awt.Point;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import java.util.concurrent.ThreadLocalRandom;
 
 import static soloMapling.ArtificialPlayer.BotHelpers.blockingSleep;
@@ -368,51 +367,110 @@ public final class LudiStages {
 
     /**
      * The door room a bot has claimed (stage 4's plain rooms and stage 5's guard rooms
-     * share the mechanism), keyed by bot id. A claim releases with the room change or the
-     * bot, and a held room is re-claimed on the next tick, so a bot keeps working the room
-     * it walked into. Claims are best-effort anti-crowding, not locks: two bots may still
-     * briefly work one room, and the first clear wins.
+     * share the mechanism), keyed by bot id. The value carries the map INSTANCE's identity
+     * along the room id (two concurrent runs hold separate room copies with the same ids -
+     * a claim must not shadow the other run's rooms), so a live claim is judged against the
+     * claimant's current instance. Claims are best-effort anti-crowding, not locks: two
+     * bots may still briefly work one room, and the first clear wins.
      */
-    private static final Map<Integer, Integer> DOOR_ROOM_CLAIMS = new java.util.concurrent.ConcurrentHashMap<>();
+    private record DoorClaim(int instance, int room) {}
+
+    private static final Map<Integer, DoorClaim> DOOR_ROOM_CLAIMS = new java.util.concurrent.ConcurrentHashMap<>();
+
+    /**
+     * The door rooms this bot has personally cleared, per instance: the tower's room ids
+     * repeat across concurrent runs, so a fresh run's rooms must not read as pre-cleared.
+     * A cleared room is never re-claimed; released with the bot so a fresh run starts clean.
+     */
+    private static final Map<Integer, java.util.Set<Integer>> CLEARED_DOOR_ROOMS = new java.util.concurrent.ConcurrentHashMap<>();
+
+    /** The map-instance key a bot's door-room records belong to. */
+    private static int instanceOf(Character bot) {
+        return System.identityHashCode(bot.getMap());
+    }
+
+    /** This bot's cleared-room set for the CURRENT instance (empty if none recorded yet). */
+    private static java.util.Set<Integer> clearedRoomsFor(Character bot) {
+        return CLEARED_DOOR_ROOMS.getOrDefault(bot.getId(), java.util.Set.of());
+    }
+
+    /** Record that this bot has personally finished a door room - it will not re-claim it. */
+    private static void markRoomCleared(Character bot, int room) {
+        CLEARED_DOOR_ROOMS.computeIfAbsent(bot.getId(),
+                k -> java.util.concurrent.ConcurrentHashMap.newKeySet()).add(room);
+    }
+
+    /**
+     * Whether door-room work still exists for THIS bot: a room it has not cleared that is
+     * either unclaimed or claimed only by a dead/despawned bot. This - not "a claim exists"
+     * - is what keeps the follow-leader beat off the bot's back: while true, the bot is on
+     * its own errand; once false, it parks at the NPC, delivers, and follows the party again.
+     */
+    public static boolean doorRoomsOutstanding(Character bot, int roomFirst, int roomLast) {
+        var cleared = clearedRoomsFor(bot);
+        for (int room = roomFirst; room <= roomLast; room++) {
+            if (cleared.contains(room) || roomClaimedByOtherLiveBot(bot, room)) {
+                continue;
+            }
+            return true;
+        }
+        return false;
+    }
+
+    /** Whether a room is currently claimed by a bot that is alive and still around. */
+    private static boolean roomClaimedByOtherLiveBot(Character bot, int room) {
+        int here = instanceOf(bot);
+        for (Map.Entry<Integer, DoorClaim> claim : DOOR_ROOM_CLAIMS.entrySet()) {
+            if (claim.getKey() != bot.getId() && claim.getValue().room() == room
+                    && claim.getValue().instance() == here
+                    && CharacterStorage.getBotById(claim.getKey()) != null) {
+                return true;
+            }
+        }
+        return false;
+    }
 
     /**
      * Claim one of {@code roomFirst}..{@code roomLast} for this bot: the room it already
-     * holds, or the first unclaimed one. Returns -1 when every room is taken - the caller
-     * parks the bot by the stage NPC instead.
+     * holds, or the first unclaimed, not-personally-cleared one. Returns -1 when every
+     * room is taken or already done - the caller parks the bot by the stage NPC.
      */
     private static int claimDoorRoom(Character bot, int roomFirst, int roomLast) {
-        int mine = DOOR_ROOM_CLAIMS.getOrDefault(bot.getId(), -1);
-        if (mine >= roomFirst && mine <= roomLast) {
-            return mine; // keep the room we are working
+        DoorClaim mine = DOOR_ROOM_CLAIMS.get(bot.getId());
+        int here = instanceOf(bot);
+        // Keep the claim only while we are INSIDE its room (or holding it from the main map
+        // between the claim and the door walk). A bot that exited carries a claim whose room
+        // is already in the cleared set - dropping it here is what stops the exit, re-claim,
+        // re-enter ping-pong; a bot still walking in keeps its claim.
+        if (mine != null && mine.instance() == here && bot.getMapId() == mine.room()) {
+            return mine.room();
         }
-        DOOR_ROOM_CLAIMS.remove(bot.getId());
+        if (mine != null && mine.instance() != here) {
+            DOOR_ROOM_CLAIMS.remove(bot.getId()); // stale: a room change or a new run
+            mine = null;
+        }
+        var cleared = clearedRoomsFor(bot);
         for (int room = roomFirst; room <= roomLast; room++) {
-            boolean taken = false;
-            for (Map.Entry<Integer, Integer> claim : DOOR_ROOM_CLAIMS.entrySet()) {
-                if (claim.getKey() != bot.getId() && claim.getValue() == room
-                        && CharacterStorage.getBotById(claim.getKey()) != null) {
-                    taken = true;
-                    break;
-                }
+            if (cleared.contains(room) || roomClaimedByOtherLiveBot(bot, room)) {
+                continue;
             }
-            if (!taken) {
-                DOOR_ROOM_CLAIMS.put(bot.getId(), room);
-                return room;
-            }
+            DOOR_ROOM_CLAIMS.put(bot.getId(), new DoorClaim(here, room));
+            return room;
         }
         return -1;
     }
 
     /**
      * Walk a bot from the stage's main map into its claimed door room through the door's
-     * in portal. The door id derives from the room's offset in the run (stage 4's five
-     * rooms sit at STAGE_4+1..+5 behind in01..in05), and the in portals are script portals
-     * - the same door scripts the leader uses - so entering runs the script and the warp
-     * lands the bot inside the room. Returns true once the bot is inside.
+     * in portal, entered by NAME (in01..in06, in room order) - the WZ portal ids run
+     * 0=sp, 1=st00, 2=in01..., so a numeric offset from the room number would land on
+     * the spawn portal and go nowhere. These doors carry no script: their WZ tm/tn data
+     * (in01 -> 922010401 st00) routes the engine straight into the instance's room copy.
+     * Returns true once the bot is inside.
      */
-    private static boolean enterDoorRoom(Character bot, int room, int stageMainMap) {
-        int portalId = room - stageMainMap;
-        org.gms.server.maps.Portal door = bot.getMap().getPortal(portalId);
+    private static boolean enterDoorRoom(Character bot, int room, int roomFirst) {
+        String doorName = LudiPqData.roomPortalName(room - roomFirst);
+        org.gms.server.maps.Portal door = bot.getMap().getPortal(doorName);
         if (door == null || door.getPosition() == null) {
             return false;
         }
@@ -470,31 +528,46 @@ public final class LudiStages {
         PqActions.seekAndAttack(bot);
         PqActions.loot(bot, bot.getPosition(), LOOT_RADIUS_PX, new int[]{LudiPqData.PASS});
         PqActions.recoverUngatheredHandoffs(bot, LudiPqData.PASS);
-        // Room quiet (all the room's killable mobs dead): the work is done. Slip out the
-        // door and deliver on the main map's stage-NPC post - the stage NPC lives there,
-        // so that is where the leader comes for the turn-in. The exit waits for the leader
-        // to have LEFT this room first: while he is still inside, the follow-the-leader
-        // beat re-enters the room behind him and the bot ping-pongs through the door.
+        // Room quiet (all the room's killable mobs dead): the work is done. Remember it as
+        // cleared, then slip out the door and deliver on the main map's stage-NPC post -
+        // the stage NPC lives there, so that is where the leader comes for the turn-in.
+        // The exit waits for the leader to have LEFT this room first: while he is still
+        // inside, the follow beat re-enters the room behind him and the bot ping-pongs.
         if (killableMobPresent(bot) || leaderInRoom(bot)) {
             return;
         }
+        markRoomCleared(bot, mapId);
         exitDoorRoom(bot);
     }
 
     /**
-     * The main-room half of the stage-4 loop: claim a door room and walk in, or wait by
-     * the stage NPC when every room is spoken for. Runs only while the leader is on the
-     * main map - once he picks a door and walks in, the bots work their own claims.
+     * The main-room half of the stage-4 loop. A bot with door work left claims a room and
+     * walks in; a bot with nothing left to do (every room personally cleared or held by a
+     * live teammate) parks by the stage NPC and delivers its stock when the leader comes
+     * for the turn-in - the delivery the room loop can no longer run once it stops
+     * entering rooms.
      */
     private static void workStage4FromMainRoom(Character bot) {
         int room = claimDoorRoom(bot, LudiPqData.STAGE4_ROOM_FIRST, LudiPqData.STAGE4_ROOM_LAST);
         if (room < 0) {
-            // Every room claimed or being cleared: hold the NPC post, deliveries still run
-            // from there when the leader comes for the turn-in.
-            PqActions.waitNearStageNpc(bot);
+            deliverAndPark(bot);
             return;
         }
-        enterDoorRoom(bot, room, LudiPqData.STAGE_4);
+        enterDoorRoom(bot, room, LudiPqData.STAGE4_ROOM_FIRST);
+    }
+
+    /**
+     * Hold the stage-NPC post and hand the stock over the moment the leader walks into
+     * hand-off range - the same post-work beat the collection stages run. One wide sweep
+     * first: a pass that settled just outside every bot's kill-radius would orphan here.
+     */
+    private static void deliverAndPark(Character bot) {
+        PqActions.recoverUngatheredHandoffs(bot, LudiPqData.PASS);
+        PqActions.loot(bot, bot.getPosition(), CLEANUP_RADIUS_PX, new int[]{LudiPqData.PASS});
+        if (PqActions.handItemsToLeaderAfterStage(bot, LudiPqData.PASS) > 0) {
+            PqActions.say(bot, BotMessages.get("pq.passes_dropped"));
+        }
+        PqActions.waitNearStageNpc(bot);
     }
 
     /**
@@ -527,35 +600,37 @@ public final class LudiStages {
         }
         PqActions.loot(bot, bot.getPosition(), LOOT_RADIUS_PX, new int[]{LudiPqData.PASS});
         PqActions.recoverUngatheredHandoffs(bot, LudiPqData.PASS);
-        // All four boxes broken: the room's work is done. Slip out the door and deliver on
-        // the main map's stage-NPC post - the leader turns the stage in there, not at this
-        // room's mouth. Leaving while a box stands (or with nothing pocketed, or while the
-        // leader is still in the room - the follow beat would walk the bot back in behind
-        // him) keeps the sneak inside its room.
+        // All four boxes broken: the room's work is done. Remember it as cleared, then slip
+        // out the door and deliver on the main map's stage-NPC post - the leader turns the
+        // stage in there, not at this room's mouth. Leaving while a box stands (or with
+        // nothing pocketed, or while the leader is still in the room - the follow beat would
+        // walk the bot back in behind him) keeps the sneak inside its room.
         if (box >= 0 || PqActions.countItem(bot, LudiPqData.PASS) <= 0
                 || leaderInRoom(bot)) {
             return;
         }
+        markRoomCleared(bot, mapId);
         exitDoorRoom(bot);
     }
 
     /**
      * The main-room half of the stage-5 loop. A bot whose kit carries a hide (隐身术 rogue
      * lineage or 橡木伪装 Brawler) claims a guard room the same way stage 4's are claimed
-     * and sneaks in alone; everyone else waits by the stage NPC - a non-hide body in a
-     * PAD-999 room dies to the first touch, and stage 5's passes live nowhere else.
+     * and sneaks in alone; everyone else - and a bot with nothing left to do - parks by
+     * the stage NPC and delivers its stock there: a non-hide body in a PAD-999 room dies
+     * to the first touch, and stage 5's turn-in runs from this post.
      */
     private static void workStage5FromMainRoom(Character bot) {
         if (hideSkillFor(bot) == 0) {
-            PqActions.waitNearStageNpc(bot);
+            deliverAndPark(bot);
             return;
         }
         int room = claimDoorRoom(bot, LudiPqData.STAGE5_ROOM_FIRST, LudiPqData.STAGE5_ROOM_LAST);
         if (room < 0) {
-            PqActions.waitNearStageNpc(bot);
+            deliverAndPark(bot);
             return;
         }
-        enterDoorRoom(bot, room, LudiPqData.STAGE_5);
+        enterDoorRoom(bot, room, LudiPqData.STAGE5_ROOM_FIRST);
     }
 
     /**
@@ -565,7 +640,7 @@ public final class LudiStages {
      * auras on the bot, but the JOB check is real: the kit registry is what decides whether
      * this body can survive the room.
      */
-    private static int hideSkillFor(Character bot) {
+    public static int hideSkillFor(Character bot) {
         var kit = BotBuffConfig.buffsForJob(bot.getJob());
         if (kit.contains(Rogue.DARK_SIGHT)) {
             return Rogue.DARK_SIGHT;
@@ -597,6 +672,7 @@ public final class LudiStages {
     public static void releaseRoomState(int botId) {
         releaseTowerBox(botId);
         DOOR_ROOM_CLAIMS.remove(botId);
+        CLEARED_DOOR_ROOMS.remove(botId);
         PqActions.releaseWaitClaims(botId);
     }
 
