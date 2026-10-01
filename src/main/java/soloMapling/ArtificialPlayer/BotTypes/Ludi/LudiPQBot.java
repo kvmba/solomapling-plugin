@@ -88,11 +88,16 @@ public class LudiPQBot extends PartyQuestBot {
             // the last fight ended. Walking the portal is the leader's business, and the map
             // change re-homes this bot when it follows. The one exception: a bot still in
             // the stage-2 trap room - that room has no stage NPC and no next00, so waiting
-            // there is a freeze; it takes its own exit back to the tower.
+            // there is a freeze; it takes its own exit back to the tower. The wait also IS
+            // the delivery post: the stock of passes in this bot's pockets is dropped at
+            // the leader's feet the moment he comes to the NPC for the turn-in.
             sayStageClearOnce(getChr().getMapId());
             if (getChr().getMapId() == LudiPqData.TRAP_ROOM) {
                 LudiStages.exitTrapRoom(getChr());
                 return false;
+            }
+            if (PqActions.handItemsToLeaderAfterStage(getChr(), LudiPqData.PASS) > 0) {
+                PqActions.say(getChr(), BotMessages.get("pq.passes_dropped"));
             }
             PqActions.waitNearStageNpc(getChr());
             return stage >= 9;

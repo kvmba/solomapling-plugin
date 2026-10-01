@@ -675,6 +675,42 @@ public final class PqActions {
     }
 
     /**
+     * Deliver this bot's whole stock of an item to the leader, but ONLY once the stage's work
+     * is over - the bot is holding its post at the stage NPC and the leader has come over
+     * (he has to: the turn-in conversation is his).
+     *
+     * <p>The old mid-fight delivery (hand over the moment the leader happened to pass within
+     * 400px) read as the bot throwing passes around while the party was still killing - the
+     * reported "bots drop their passes as soon as the leader is nearby". The turn-in is not
+     * possible until the stage's bar is met anyway, so the stock is worth exactly nothing
+     * until then; holding it costs the party nothing and the fight keeps its rhythm. The
+     * deliver beat therefore runs where the bot parks after the work: walk to the stage NPC
+     * (or the exit portal's mouth), wait for the leader to walk into hand-off range of THAT
+     * spot, and only then drop. The leader is drawn to the NPC by the turn-in itself, so the
+     * wait ends on its own.
+     *
+     * @return how many of the item were handed to the leader (0 when nothing was due)
+     */
+    public static int handItemsToLeaderAfterStage(Character bot, int itemId) {
+        if (bot == null || countItem(bot, itemId) <= 0) {
+            return 0;
+        }
+        // Hold the delivery post: the NPC ring spot the cleared-stage wait uses, so the
+        // leader knows where the party's stock is. No-op when the room has no NPC (trap
+        // room) - the caller handles that room separately.
+        waitNearStageNpc(bot);
+        // Deliver only up close. A far pile is owned by the leader where nobody but him can
+        // pick it, and the host despawns what nobody picks up - the walk-to-him behaviour
+        // would steer the bot off its post every tick; instead the leader comes to the NPC.
+        Character leader = partyLeader(bot);
+        if (leader == null || leader == bot
+                || leader.getMapId() != bot.getMapId() || !leaderNear(bot, leader)) {
+            return 0;
+        }
+        return handItemsToLeader(bot, itemId);
+    }
+
+    /**
      * Sweep back the hand-off piles this bot dropped that the leader has not picked up yet.
      *
      * <p>The host despawns drops after {@code item_expire_time} (3 min by default) whether or
@@ -995,21 +1031,30 @@ public final class PqActions {
     }
 
     /** Pick up matching drops near a point. Returns how many items were gathered. */
-    public static int loot(Character bot, Point at, double range, int[] itemIds) {
+    public static int loot(Character bot, Point at, double radiusPx, int[] itemIds) {
         if (bot == null || at == null) {
             return 0;
         }
-        List<MapObject> found = BotLogic.checkForItemsOnFloor(bot, at, range, itemIds);
+        // The radius is px, but the engine's getMapObjectsInRange compares distanceSq - the
+        // old call passed the px value straight through, so "2_000" scanned a ~45px circle
+        // around the bot's feet. A kill lands its drop at the mob's x, and the attack reach
+        // alone spans 90-400px, so most kills left their passes unlooted on the floor (the
+        // "bots do not pick up the passes" report). Square it here so every caller's radius
+        // means px.
+        List<MapObject> found = BotLogic.checkForItemsOnFloor(bot, at, radiusPx * radiusPx, itemIds);
         if (found.isEmpty()) {
             return 0;
         }
         // Never take a multi-piece stack: the item-triggered reactors read their stack five
         // seconds after it lands and match it by identity, so picking one up cancels it.
-        // At most LOOT_INLINE_MAX pickups run inline (each carries a 100ms stagger): an
-        // overflow pile waits for the next macro tick, far below the drops' own despawn -
-        // a wide sweep can no longer freeze a busy stage tick.
+        // Never take an addressed pile either: a drop flagged permanent-owner is somebody's
+        // hand-off (the leader's), not floor loot - the same rule botCanLoot enforces for the
+        // sweep paths; without it a qty-1 hand-off is read as a pass and the party's stock
+        // ping-pongs between the bots. At most LOOT_INLINE_MAX pickups run inline (each
+        // carries a 100ms stagger): an overflow pile waits for the next macro tick, far below
+        // the drops' own despawn - a wide sweep can no longer freeze a busy stage tick.
         List<MapObject> lone = found.stream()
-                .filter(o -> !(o instanceof MapItem drop) || drop.getItem().getQuantity() <= 1)
+                .filter(o -> o instanceof MapItem drop && isFloorLoot(drop))
                 .limit(LOOT_INLINE_MAX)
                 .toList();
         if (lone.isEmpty()) {
@@ -1025,6 +1070,14 @@ public final class PqActions {
             after += countItem(bot, id);
         }
         return after - before;
+    }
+
+    /**
+     * Whether a floor drop is ordinary loot a bot may pocket: a single piece (reactor stacks
+     * are matched by identity) and not an addressed hand-off pile (permanent owner).
+     */
+    static boolean isFloorLoot(MapItem drop) {
+        return drop.getItem().getQuantity() <= 1 && !drop.isPermanentOwner();
     }
 
     // =========================================================================
