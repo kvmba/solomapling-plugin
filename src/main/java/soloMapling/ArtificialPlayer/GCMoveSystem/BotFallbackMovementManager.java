@@ -398,6 +398,16 @@ final class BotFallbackMovementManager {
         return new Point(best.x, targetPos.y);
     }
 
+    /* Swim-map down-jump eligibility, factored out of shouldUseDownJump: a swim drop enters
+     * open water (the water floor clamps), so the land-map livability probe and the bounded-
+     * drop rule never apply — pinned by the swim exception in DeadPitInvariantTest. */
+    static boolean swimDownJumpAllowed(BotMovementState entry, Point botPos, Point targetPos) {
+        MapleMap map = entry.bot.getMap();
+        return BotPhysicsEngine.canStartDownJump(map, botPos)
+                && Math.abs(targetPos.x - botPos.x) <= Math.max(BotMovementManager.cfg.FOLLOW_DIST,
+                BotPhysicsEngine.walkStep(map, entry.movementProfile) * 4);
+    }
+
     private static boolean shouldUseDownJump(BotMovementState entry, Point botPos, Point targetPos, Rope rope) {
         if (entry == null || botPos == null || targetPos == null || rope != null) {
             return false;
@@ -414,9 +424,7 @@ final class BotFallbackMovementManager {
         // Ground maps need the full landing sim (bounded-drop rule included); in swim maps
         // the bot drops into open water — no landing foothold exists or is required.
         if (map != null && map.isSwim()) {
-            return BotPhysicsEngine.canStartDownJump(map, botPos)
-                    && Math.abs(targetPos.x - botPos.x) <= Math.max(BotMovementManager.cfg.FOLLOW_DIST,
-                    BotPhysicsEngine.walkStep(map, entry.movementProfile) * 4);
+            return swimDownJumpAllowed(entry, botPos, targetPos);
         }
         BotPhysicsEngine.JumpLanding landing = BotPhysicsEngine.simulateDownJumpLanding(map, botPos);
         if (landing == null) {

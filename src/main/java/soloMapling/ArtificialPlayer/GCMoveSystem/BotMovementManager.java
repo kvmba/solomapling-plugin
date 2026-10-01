@@ -1141,10 +1141,7 @@ class BotMovementManager {
         // no rope, no portal) cannot be rescued by any local action - every hop only reshuffles
         // it inside the basin, and the hop loop is exactly the reported "fell into the pit and
         // never recovers". Teleport it to the nearest livable ground and drop the goal so the
-        // brain re-decides a reachable target next tick. (The landing transition in
-        // BotPhysicsEngine already self-heals at the touch-down tick via
-        // rescueFromDeadSurface; this per-tick re-check catches anything that arrives on a
-        // dead surface outside the physics landing path - e.g. a script warp.)
+        // brain re-decides a reachable target next tick.
         if (isOnDeadPitFloor(entry, bot)) {
             Point rescue = nearestLivableGround(bot);
             clearNavigationState(entry);
@@ -1216,43 +1213,6 @@ class BotMovementManager {
             return false;
         }
         return !DeadPitGuard.isLivableSurface(bot.getMap(), standing, entry.movementProfile);
-    }
-
-    /**
-     * Land-on-dead-surface invariant, called at the physics touch-down transition: a bot that
-     * just landed on a surface the livability probe cannot clear (a dead pit floor) is teleported
-     * to the nearest livable ground in the same beat it arrives, so the basin can never hold the
-     * bot even one tick. Every graph-pruned descent is already safe; this closes the entries no
-     * guard can see in advance (air steering over a pit column, knockback, future skills/warps) —
-     * the invariant holds at the LANDING instead of only at the descent decisions.
-     *
-     * <p>Swim maps are skipped: their falls end in open water with a floor clamp, no landing
-     * foothold exists, and the livability probe is a land-map concept.
-     *
-     * <p>Deliberately unconditional (no cooldown, no cache): the probe verdict is cached per
-     * foothold, the descent to a dead surface is rare by construction, and a dead landing that
-     * stays put for one tick is the exact "fell into the pit" report this exists to end.
-     */
-    static void rescueFromDeadSurface(BotMovementState entry, Character bot) {
-        if (bot == null || entry == null || bot.getMap() == null || bot.getMap().isSwim()) {
-            return;
-        }
-        Point pos = bot.getPosition();
-        if (pos == null) {
-            return;
-        }
-        Foothold landed = BotPhysicsEngine.findGroundFoothold(bot.getMap(), pos);
-        if (landed == null || DeadPitGuard.isLivableSurface(bot.getMap(), landed, entry.movementProfile)) {
-            return;
-        }
-        Point rescue = nearestLivableGround(bot);
-        if (rescue == null) {
-            return; // nothing livable above: the per-tick tickUnstuck re-check keeps trying
-        }
-        BotPhysicsEngine.teleportTo(entry, bot, rescue);
-        resetEntryStateAfterTeleport(entry);
-        entry.moveTarget = null; // the goal steered here; the brain re-decides a reachable one
-        broadcastMovement(entry);
     }
 
     /**
