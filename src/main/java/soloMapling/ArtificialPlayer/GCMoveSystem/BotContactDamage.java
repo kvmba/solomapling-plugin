@@ -2,6 +2,7 @@ package soloMapling.ArtificialPlayer.GCMoveSystem;
 
 import org.gms.client.Character;
 import org.gms.server.life.Monster;
+import org.gms.server.maps.MapleMap;
 import org.gms.server.maps.MapObject;
 import org.gms.server.maps.MapObjectType;
 import org.slf4j.Logger;
@@ -407,6 +408,14 @@ final class BotContactDamage {
         clearActionState(entry); // cancel current walk/nav so the recoil reads cleanly
         float dampen = isWarrior(bot) ? WARRIOR_KB_DAMPEN : 1.0f; // a warrior that does get knocked barely budges
         int hVel = Math.round(knockbackAirVelX * dampen);
+        // Dead-pit guard: a recoil whose ballistic column lands on an unescapable surface (a
+        // one-way basin) is refused its horizontal component - the hit reads as braced rather
+        // than relocating the bot into a trap. The landing rescue in BotPhysicsEngine is the
+        // backstop; this keeps the arc out of the dead column in the first place. Swim maps fall
+        // into water (floor-clamped), and any probe failure falls back to the honest recoil.
+        if (hVel != 0 && knockbackLandsOnDeadSurface(entry, bot, botPos, hVel)) {
+            hVel = 0;
+        }
         if (entry.inAir) {
             BotPhysicsEngine.applyAirKnockback(entry, bot, hVel);
         } else {
@@ -414,6 +423,21 @@ final class BotContactDamage {
                     -scaledOpenStoryStep(KNOCKBACK_VFORCE) * dampen, hVel);
         }
         BotMovementManager.broadcastMovement(entry);
+    }
+
+    /** Whether the knockback {@code hVel} from {@code botPos} would land on a dead surface. */
+    private static boolean knockbackLandsOnDeadSurface(BotMovementState entry, Character bot,
+                                                       Point botPos, int hVel) {
+        MapleMap map = bot.getMap();
+        if (map == null || map.getFootholds() == null || map.isSwim()) {
+            return false;
+        }
+        // The knockback launcher supplies a vertical kick too, so probe with a full jump arc,
+        // not a bare fall: closer to the real trajectory the recoil produces.
+        BotPhysicsEngine.JumpLanding landing = BotPhysicsEngine.simulateJumpLanding(
+                map, botPos, hVel, entry.movementProfile);
+        return landing != null
+                && !DeadPitGuard.isLivableLanding(map, landing.point(), entry.movementProfile);
     }
 
     // Knockback applies on any real (non-zero) hit unless the bot is climbing. The donor also rolled

@@ -1101,6 +1101,16 @@ final class BotPhysicsEngine {
         // and on the fall-distance threshold; must run before fallPeakPhysY resets below.
         BotContactDamage.applyFallDamage(entry, bot, (float) fallDistance);
         entry.fallPeakPhysY = Double.POSITIVE_INFINITY;
+
+        // Dead-pit invariant at the landing beat: a bot that just touched down on an unescapable
+        // surface is teleported back to livable ground in this same tick. Decision-side guards
+        // (walk-off / down-jump / hop livability probes, the graph's dead-region prune) cover the
+        // descents the engine authorises; this covers the descents nothing vetoes in advance -
+        // free air steering over a pit column, knockback, any future skill or warp. Swim maps skip
+        // it (falls end in open water; no landing foothold, no dead-pit concept).
+        if (foothold != null) {
+            BotMovementManager.rescueFromDeadSurface(entry, bot);
+        }
     }
 
     static void attachToRope(BotMovementState entry, Character bot, Rope rope, int y) {
