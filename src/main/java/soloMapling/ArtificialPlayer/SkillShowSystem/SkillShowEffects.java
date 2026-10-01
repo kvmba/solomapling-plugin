@@ -51,21 +51,23 @@ public final class SkillShowEffects {
         GCMovement.markAlerted(bot);
     }
 
-    /** 技能在 SP 预算等级的效果；WZ 缺行返回 null（调用方跳过）。 */
+    /** 技能级（SP 预算推导，封顶 maxLevel）：表演 bot 固定 180 级 → 全部满级。 */
+    private static int levelOf(int skillId) {
+        Skill skill = SkillFactory.getSkill(skillId);
+        if (skill == null) {
+            return -1;
+        }
+        return Math.max(1, Math.min(skill.getMaxLevel(),
+                Math.max(1, (SHOW_BOT_LEVEL - THIRD_JOB_LEARN_LEVEL) * 3)));
+    }
+
+    /** 技能效果；WZ 缺行返回 null（调用方跳过）。 */
     private static StatEffect resolveEffect(int skillId) {
         Skill skill = SkillFactory.getSkill(skillId);
         if (skill == null) {
             return null;
         }
-        int level = Math.max(1, Math.min(skill.getMaxLevel(),
-                Math.max(1, (SHOW_BOT_LEVEL - THIRD_JOB_LEARN_LEVEL) * 3)));
-        return skill.getEffect(level);
-    }
-
-    /** 技能级（封顶 maxLevel，回退 1），广播包用。 */
-    private static int skillLevelOf(int skillId) {
-        Skill skill = SkillFactory.getSkill(skillId);
-        return skill != null ? skill.getMaxLevel() : 1;
+        return skill.getEffect(levelOf(skillId));
     }
 
     /** 单怪单行伤害包（木桩表演的统一伤害面）。 */
@@ -106,11 +108,11 @@ public final class SkillShowEffects {
                 : new Rectangle(pos.x - 110, pos.y - 82, 220, 165);
         Map<Integer, List<Integer>> dmg = singleLine(bot, mob);
         bot.getMap().broadcastMessage(bot, PacketCreator.magicAttack(bot,
-                FPMage.POISON_MIST, skillLevelOf(FPMage.POISON_MIST), facingMask(left),
+                FPMage.POISON_MIST, levelOf(FPMage.POISON_MIST), facingMask(left),
                 (dmg.size() << 4) | 1, dmg, BotAttackData.magicChargeFor(FPMage.POISON_MIST),
                 BotAttackData.DEFAULT_ATTACK_SPEED,
                 BotAttackData.actionFor(FPMage.POISON_MIST, null), 0), false);
-        bot.getMap().spawnMist(new Mist(box, bot, effect, skillLevelOf(FPMage.POISON_MIST)),
+        bot.getMap().spawnMist(new Mist(box, bot, effect, levelOf(FPMage.POISON_MIST)),
                 effect.getDuration(), true, false, false);
         return true;
     }
@@ -131,7 +133,7 @@ public final class SkillShowEffects {
         boolean left = facingLeft(bot);
         Map<Integer, List<Integer>> dmg = singleLine(bot, mob);
         bot.getMap().broadcastMessage(bot, PacketCreator.closeRangeAttack(bot,
-                Hermit.SHADOW_WEB, skillLevelOf(Hermit.SHADOW_WEB), facingMask(left),
+                Hermit.SHADOW_WEB, levelOf(Hermit.SHADOW_WEB), facingMask(left),
                 (dmg.size() << 4) | 1, dmg, BotAttackData.DEFAULT_ATTACK_SPEED,
                 BotAttackData.actionFor(Hermit.SHADOW_WEB, null), 0), false);
         return true;
@@ -153,7 +155,7 @@ public final class SkillShowEffects {
         boolean left = facingLeft(bot);
         Map<Integer, List<Integer>> dmg = singleLine(bot, mob);
         bot.getMap().broadcastMessage(bot, PacketCreator.rangedAttack(bot,
-                Hermit.SHADOW_MESO, skillLevelOf(Hermit.SHADOW_MESO), facingMask(left),
+                Hermit.SHADOW_MESO, levelOf(Hermit.SHADOW_MESO), facingMask(left),
                 (dmg.size() << 4) | 1, /* projectile */ 0, dmg,
                 BotAttackData.DEFAULT_ATTACK_SPEED,
                 BotAttackData.actionFor(Hermit.SHADOW_MESO, null), 0), false);
