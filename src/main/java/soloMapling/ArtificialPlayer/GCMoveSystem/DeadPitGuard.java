@@ -52,11 +52,13 @@ final class DeadPitGuard {
     private static final int PORTAL_Y_ABOVE_PX = 80;
     private static final int PORTAL_Y_BELOW_PX = 30;
 
-    /** tree -> foothold id -> verdict. Keyed by tree identity (weak): a reloaded map gets a
-     *  fresh cache automatically (same shape as BotPhysicsEngine's collision index), instanced
-     *  copies sharing one tree share their verdicts, and trees dropped by the server do not
-     *  pin their verdict maps here forever. */
-    private static final Map<org.gms.server.maps.FootholdTree, Map<Integer, Boolean>> VERDICTS =
+    /** tree -> (apex px -> foothold id -> verdict). Keyed by tree identity (weak) so a reloaded
+     *  map gets a fresh cache automatically (the COLLISION_INDEX pattern), instanced copies
+     *  sharing one tree share their verdicts, and dropped trees do not pin their verdicts here
+     *  forever. The apex dimension is REQUIRED: the verdict's jump reach derives from the
+     *  caller's profile, and a thief bot (117px apex) escapes shelves a base bot (77px) cannot -
+     *  one shared verdict across profiles would serve one of them a wrong answer. */
+    private static final Map<org.gms.server.maps.FootholdTree, Map<Integer, Map<Integer, Boolean>>> VERDICTS =
             java.util.Collections.synchronizedMap(new java.util.WeakHashMap<>());
     /** Guards against re-entrant verdict computation on the same foothold (cycles in the chain). */
     private static final Map<org.gms.server.maps.FootholdTree, Set<Integer>> IN_PROGRESS =
@@ -83,7 +85,12 @@ final class DeadPitGuard {
         if (map == null || foothold == null || map.getFootholds() == null) {
             return true;
         }
-        Map<Integer, Boolean> verdicts = VERDICTS.computeIfAbsent(map.getFootholds(), k -> new ConcurrentHashMap<>());
+        // The apex bucket is part of the cache key: the same surface is escapable for a
+        // max-jump bot and a trap for a base-stat one (see the field doc above).
+        int apexPx = (int) Math.ceil(BotPhysicsEngine.calculateMaxJumpHeight(profile));
+        Map<Integer, Map<Integer, Boolean>> byApex =
+                VERDICTS.computeIfAbsent(map.getFootholds(), k -> new ConcurrentHashMap<>());
+        Map<Integer, Boolean> verdicts = byApex.computeIfAbsent(apexPx, k -> new ConcurrentHashMap<>());
         Boolean cached = verdicts.get(foothold.getId());
         if (cached != null) {
             return cached;

@@ -163,4 +163,24 @@ public class DeadPitGuardTest {
         assertTrue(DeadPitGuard.isLivableSurface(map, terrace, BotMovementProfile.base()),
                 "terraces with a stair chain back up are ordinary ground");
     }
+
+    @Test
+    void theVerdictCacheKeysOnTheCallerProfile() {
+        // The cache bug this pins: one verdict per foothold shared across profiles served a
+        // base bot a strong jumper's answer. Geometry: a 120px shelf under an open top row.
+        // Base reach = ceil(77) + 25 = 102px -> the shelf is DEAD for a base bot. A max-jump
+        // thief (jump 123 -> apex 117 -> reach 142) CAN jump back up -> LIVABLE for it.
+        MapleMap map = new MapleMap(922011907, 0, 0, 922010000, 0.0f);
+        map.setMapLineBoundings(-1000, 600, -265, 265);
+        FootholdTree tree = new FootholdTree(new Point(-265, -100), new Point(265, 600));
+        tree.insert(new Foothold(new Point(-265, 0), new Point(265, 0), 1));    // top row
+        tree.insert(new Foothold(new Point(-100, 120), new Point(100, 120), 2)); // the shelf
+        map.setFootholds(tree);
+        Foothold shelf = map.getFootholds().getAllFootholds().get(1);
+
+        assertFalse(DeadPitGuard.isLivableSurface(map, shelf, BotMovementProfile.base()),
+                "a 120px shelf is a trap for a base-stat bot (reach 102px)");
+        assertTrue(DeadPitGuard.isLivableSurface(map, shelf, new BotMovementProfile(100, 123)),
+                "the SAME shelf is escapable for a max-jump bot (reach 142px)");
+    }
 }
