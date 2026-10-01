@@ -457,6 +457,28 @@ public final class LudiStages {
                 .count();
     }
 
+    /**
+     * Whether a PAD-999 guard can actually REACH this bot: alive, within its touch box -
+     * a tight same-ledge test, not the tower-wide seek box.
+     *
+     * <p>The guards stand on the ground floor (y≈58); the stage NPC's post (y≈-215) is
+     * ~273px above them, well past a touch. The tower-wide box the combat-sweep gate uses
+     * counts the guards as "near" from the NPC post too, which is right for "don't swing
+     * AT them" but dead wrong for "hide or die": a bot holding the post-work delivery
+     * there is untouchable and must keep delivering. This is that reach test.
+     */
+    public static boolean guardCanReach(Character bot) {
+        Point p = bot.getPosition();
+        if (p == null) {
+            return false;
+        }
+        return bot.getMap().getAllMonsters().stream()
+                .anyMatch(m -> m.isAlive() && m.getId() == LudiPqData.GUARD_MOB
+                        && m.getPosition() != null
+                        && Math.abs(m.getPosition().x - p.x) <= 120
+                        && Math.abs(m.getPosition().y - p.y) <= 150);
+    }
+
     /** The room's exit portal (out00), or null. */
     private static org.gms.server.maps.Portal exitPortalOf(Character bot) {
         var map = bot.getMap();
