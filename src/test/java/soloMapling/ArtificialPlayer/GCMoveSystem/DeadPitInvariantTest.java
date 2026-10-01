@@ -14,7 +14,6 @@ import org.springframework.context.ApplicationContext;
 import java.awt.Point;
 import java.util.List;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.RETURNS_DEEP_STUBS;
@@ -26,16 +25,16 @@ import static org.mockito.Mockito.when;
  * production WZ loader): the rim row (fh243..246, y=-160, forbidFallDown), the pit floor
  * (fh224..230, y=242, 402px down), walls at x=-265/265, no rope, no portal in the pit.
  *
- * The invariant has two halves, and every entrance path must satisfy BOTH:
- *   1. NO decision that produces a landing the livability probe cannot clear may fire —
- *      enumerated here over every descent entrance the engine has (walk-off, down-jump,
- *      rescue hop, free air steer, knockback recoil);
- *   2. a landing on a dead surface is left within the same tick it happens — the landing
- *      rescue (rescueFromDeadSurface) teleports the bot to livable ground immediately, so
- *      even an entrance this enumeration misses cannot hold the bot.
+ * The invariant: NO decision that produces a landing the livability probe cannot clear may
+ * fire — enumerated here over every descent entrance the engine has (walk-off, down-jump,
+ * rescue hop, free air steer, knockback recoil). A bot that nonetheless ends up wedged on a
+ * dead surface recovers through tickUnstuck's dead-pit self-heal (0.5s stuck + 5s cooldown),
+ * NOT through a landing-time teleport: an unconditional touch-down rescue reads every platform
+ * the probe misjudges as an instant warp-back — the "jump somewhere and get yanked back"
+ * regression on the LPQ tower, whose wide geometry the probe over-calls dead.
  *
  * Swim maps are the documented exception (falls end in open water, floor-clamped): the
- * exclusion lives in the ENTRANCES, and is pinned by asserting the rescue is a no-op there.
+ * exclusion lives in the ENTRANCES, and is pinned there.
  */
 public class DeadPitInvariantTest {
 
@@ -246,29 +245,7 @@ public class DeadPitInvariantTest {
         assertTrue(refused >= 0, "knockback probe enumeration ran");
     }
 
-    // ── 2. the landing rescue leaves a dead surface immediately ─────────────
-
-    @Test
-    void aBotLandedOnThePitFloorIsRescuedInTheSameBeat() {
-        MapleMap map = stage3();
-        // Place a state ON the pit floor through the state the physics landing uses.
-        BotMovementState entry = entryAt(map, PIT_FLOOR.x, PIT_FLOOR.y);
-        BotPhysicsEngine.teleportTo(entry, entry.bot, new Point(PIT_FLOOR));
-        assertFalse(DeadPitGuard.isLivableSurface(map,
-                BotPhysicsEngine.findGroundFoothold(map, new Point(PIT_FLOOR)), entry.movementProfile),
-                "precondition: the pit floor reads dead");
-
-        // The landing hook itself. rescueFromDeadSurface must relocate the bot in this call.
-        Point before = entry.bot.getPosition();
-        BotMovementManager.rescueFromDeadSurface(entry, entry.bot);
-
-        Point now = entry.bot.getPosition();
-        assertTrue(!before.equals(now) || !DeadPitGuard.isLivableLanding(map, now, entry.movementProfile),
-                "the bot moved or was already livable");
-        assertTrue(DeadPitGuard.isLivableLanding(map, now, entry.movementProfile),
-                "after the landing rescue the bot stands on livable ground (was at " + now + ")");
-        assertTrue(now.y < PIT_FLOOR.y, "the rescue lifts the bot UP out of the basin");
-    }
+    // ── 2. the rescue data invariant ─────────────────────────────────────────
 
     @Test
     void theRescueNeverMovesABoToAnotherDeadSurface() {
@@ -310,10 +287,9 @@ public class DeadPitInvariantTest {
     @Test
     void aSwimMapIsNeverTreatedAsDead() {
         // There is no dead-pit concept in water: falls end at the swim floor clamp. The
-        // exclusion lives in the ENTRANCES (rescueFromDeadSurface / shouldUseDownJump /
-        // the steer and knockback probes), not in the guard itself - so assert it where it
-        // runs: the landing rescue must be a no-op on a swim map standing on "pit-shaped"
-        // geometry.
+        // exclusion lives in the ENTRANCES (shouldUseDownJump / the steer and knockback
+        // probes): every descent decision must be a no-op ("allowed") on a swim map
+        // standing on "pit-shaped" geometry.
         MapleMap map = BotNavigationMapLoader.loadMapGeometry(922010300);
         map.setSwim(true);
         Foothold pitFloor = BotPhysicsEngine.findGroundFoothold(map, PIT_FLOOR);
@@ -322,9 +298,12 @@ public class DeadPitInvariantTest {
         }
         assertFalse(DeadPitGuard.isLivableSurface(map, pitFloor, BotMovementProfile.base()),
                 "precondition: the probe itself calls this surface dead");
+        // The swim exception as the ENTRANCES implement it: the fallback's down-jump gate
+        // takes the swim branch (canStartDownJump + short horizontal check) and never
+        // consults the land-map livability probe.
         BotMovementState entry = entryAt(map, PIT_FLOOR.x, PIT_FLOOR.y);
-        BotMovementManager.rescueFromDeadSurface(entry, entry.bot);
-        assertEquals(PIT_FLOOR.y, entry.bot.getPosition().y,
-                "a swim-map bot must NOT be teleported by the dead-pit rescue");
+        assertTrue(BotFallbackMovementManager.swimDownJumpAllowed(entry, PIT_FLOOR,
+                        new Point(PIT_FLOOR.x + 40, PIT_FLOOR.y)),
+                "a swim-map down-jump must not be refused by the dead-pit gate");
     }
 }
