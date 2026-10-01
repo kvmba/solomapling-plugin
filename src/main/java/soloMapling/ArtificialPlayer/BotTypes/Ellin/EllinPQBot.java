@@ -74,13 +74,21 @@ public class EllinPQBot extends PartyQuestBot {
             return false;
         }
 
-        // The spine blocks the way until it is broken, in the room that has it.
+        // The spine blocks the way until it is broken, in the room that has it. The guard
+        // cap bounds a stuck state walk; the sleep between hits is the player's repeat rate,
+        // the same beat breakBoxInPlace uses - eight back-to-back swings read as a machine gun.
         int spine = PqActions.findReactorOid(getChr(), EllinPqData.SPINE_REACTOR);
         if (spine >= 0) {
             for (int guard = 0; guard < 8 && spine >= 0; guard++) {
                 PqActions.hitReactor(getChr(), spine);
+                if (!soloMapling.ArtificialPlayer.BotHelpers.blockingSleep(
+                        soloMapling.ArtificialPlayer.BotTypes.Ludi.LudiStages.reactorSwingBeatMs())) {
+                    Thread.currentThread().interrupt();
+                    break;
+                }
                 spine = PqActions.findReactorOid(getChr(), EllinPqData.SPINE_REACTOR);
             }
+            PqActions.boxFinishedPullTick(getChr()); // broken (or stuck): resume promptly
         }
 
         // Then whatever is standing in the room.

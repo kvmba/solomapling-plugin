@@ -454,12 +454,11 @@ public final class LudiStages {
         for (int swings = 0; swings < BOX_SWING_CAP; swings++) {
             var reactor = bot.getMap().getReactorByOid(oid);
             if (reactor == null || !reactor.isActive()) {
-                PqActions.boxFinishedThisBeat(bot); // pull the next box's tick forward
+                PqActions.boxFinishedPullTick(bot); // pull the next box's tick forward
                 return; // broken (or being reset) - no further transition to walk
             }
             PqActions.hitReactor(bot, oid);
-            blockingSleep(BOX_SWING_BEAT_MIN_MS
-                    + ThreadLocalRandom.current().nextLong(BOX_SWING_BEAT_JITTER_MS));
+            blockingSleep(reactorSwingBeatMs());
         }
     }
 
@@ -470,6 +469,11 @@ public final class LudiStages {
     private static final long BOX_SWING_BEAT_MIN_MS = 600;
     /** Jitter on the beat so a cohort does not swing in lockstep. */
     private static final long BOX_SWING_BEAT_JITTER_MS = 250;
+
+    /** The player-repeat-rate beat between reactor hits, shared with the other quests' loops. */
+    public static long reactorSwingBeatMs() {
+        return BOX_SWING_BEAT_MIN_MS + ThreadLocalRandom.current().nextLong(BOX_SWING_BEAT_JITTER_MS);
+    }
 
     /**
      * Approach-and-strike {@code oid} when the approach can reach it by walking DOWN (a box
