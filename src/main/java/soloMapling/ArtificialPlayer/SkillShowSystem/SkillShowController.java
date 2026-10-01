@@ -4,6 +4,9 @@ import org.gms.client.Character;
 import org.gms.client.Job;
 import org.gms.client.inventory.WeaponType;
 import org.gms.constants.skills.Crusader;
+import org.gms.constants.skills.FPMage;
+import org.gms.constants.skills.Hermit;
+import org.gms.server.life.Monster;
 import org.gms.server.maps.MapleMap;
 import soloMapling.ArtificialPlayer.BotAttackSystem.BotAttackConfig;
 import soloMapling.ArtificialPlayer.BotAttackSystem.BotAttackProfile;
@@ -101,6 +104,22 @@ public final class SkillShowController {
             // 先收掉上一只，再召唤这一只：同一 bot 的召唤兽逐只亮相，不叠影。
             BotSummonSystem.remove(bot);
             return BotSummonSystem.showSummon(bot, skillId) ? SUMMON_SHOW_MS : 0;
+        }
+    }
+
+    /**
+     * 木桩条件技（毒雾/影网/影子貔貅/能量反击）：木桩在场且存活时执行
+     * {@code action}（返回是否真的出招），否则零耗时跳过 —— 不阻塞整场表演。
+     */
+    private record TargetedStep(int skillId, String label,
+                                java.util.function.Predicate<Character> action) implements Step {
+        @Override
+        public long perform(Character bot) {
+            Monster staged = SkillShowTarget.find(bot.getMapId());
+            if (staged == null || !staged.isAlive()) {
+                return 0;
+            }
+            return action.test(bot) ? PERFORM_MS : 0;
         }
     }
 
@@ -296,8 +315,11 @@ public final class SkillShowController {
         stepDone = 0;
         pending = null;
         consecutiveSpawnFailures = 0;
+        // 木桩（毒雾/影网/影子貔貅/能量反击的可作用目标）与 bot 同登同退。
+        boolean staged = SkillShowTarget.spawn(spawnPos, bot.getMap(), bot.getId());
         say("[skillshow] job " + cidToJob(cid) + " 登场（cid " + cid + "），"
-                + stepTotal + " 个技能，" + (stepTotal * 4500 / 1000) + " 秒演完");
+                + stepTotal + " 个技能" + (staged ? "，木桩就位" : "") + "，"
+                + (stepTotal * 4500 / 1000) + " 秒演完");
         MethodScheduler.runAfterDelay(SkillShowController::beat, ARRIVE_MS);
     }
 
@@ -349,6 +371,7 @@ public final class SkillShowController {
     private static void removeShowBot() {
         if (bot != null) {
             try {
+                SkillShowTarget.remove(bot.getMapId()); // 木桩与 bot 同退
                 BotGeneration.removeBotFromServer(bot);
             } catch (Throwable t) {
                 BotLogger.log("[skillshow] 退场失败: " + t);
@@ -399,6 +422,33 @@ public final class SkillShowController {
 
         for (int skillId : BotSummonTable.summonsForJobId(job.getId())) {
             out.add(new SummonStep(skillId));
+        }
+        out.addAll(targetedSteps(job));
+        return out;
+    }
+
+    /**
+     * 木桩条件技：三张注册表之外、实战 bot 在 AUTO 回合会打出来的技能
+     * （毒雾/影网/影子貔貅的 beat、能量获得触身反击）。依赖木桩在场；
+     * 木桩不在时这些步骤零耗时跳过。
+     */
+    private static List<Step> targetedSteps(Job job) {
+        List<Step> out = new ArrayList<>();
+        if (job.isA(Job.FP_MAGE)) { // F/P 3/4 转: 致命毒雾（魔攻包 + 宿主 Mist 毒云管线）
+            out.add(new TargetedStep(FPMage.POISON_MIST, "致命毒雾",
+                    SkillShowEffects::castMist));
+        }
+        if (job.isA(Job.HERMIT)) { // 隐士 3 转: 影网术（近战包 + 网怪）
+            out.add(new TargetedStep(Hermit.SHADOW_WEB, "影网术",
+                    SkillShowEffects::castWeb));
+        }
+        if (job.isA(Job.HERMIT)) { // 隐士 3 转: 影子貔貅（远程包 + 落钱）
+            out.add(new TargetedStep(Hermit.SHADOW_MESO, "影子貔貅",
+                    SkillShowEffects::throwShadowMeso));
+        }
+        if (job.isA(Job.BUCCANEER)) { // 冲锋队长 3 转: 能量获得充满 → 触身反击
+            out.add(new TargetedStep(0, "能量获得·反击",
+                    SkillShowEffects::energyRetaliate));
         }
         return out;
     }
