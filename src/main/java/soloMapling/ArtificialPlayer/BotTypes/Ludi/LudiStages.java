@@ -1,6 +1,7 @@
 package soloMapling.ArtificialPlayer.BotTypes.Ludi;
 
 import org.gms.client.Character;
+import org.gms.server.life.Monster;
 import soloMapling.ArtificialPlayer.BotAttackSystem.BotAuraState;
 import org.gms.constants.skills.Rogue;
 import soloMapling.ArtificialPlayer.PartyQuest.PqActions;
@@ -71,11 +72,16 @@ public final class LudiStages {
      * old behaviour, on every leader pass-by) threw passes around while the party was still
      * killing; the turn-in is impossible before the bar is met, so the stock is worth nothing
      * until the work is over anyway.
+     *
+     * <p>"Quiet" means no KILLABLE mob is left. The stage-5 main map's Block Golems
+     * (9300013) carry WZ invincible and a 99999 HP pool a level-35 party cannot burn
+     * through - they are scenery, not work - so they are excluded; counting them kept
+     * the room "busy" forever and the delivery never fired.
      */
     public static void gatherPasses(Character bot, int stage) {
         // Recover our stale hand-off piles (the leader missed them and the despawn clock runs).
         PqActions.recoverUngatheredHandoffs(bot, LudiPqData.PASS);
-        if (bot.getMap().getAllMonsters().stream().anyMatch(m -> m.isAlive())) {
+        if (killableMobPresent(bot)) {
             PqActions.seekAndAttack(bot);
             PqActions.loot(bot, bot.getPosition(), 2_000, new int[]{LudiPqData.PASS});
             return;
@@ -89,6 +95,21 @@ public final class LudiStages {
             // Delivered: spread into the NPC ring with the rest of the ready party.
             PqActions.spreadNearStageNpc(bot);
         }
+    }
+
+    /**
+     * Whether any mob the party is expected to KILL stands in the room: alive, and not one
+     * of the quest's invincible scenery mobs (the stage-5 guard, WZ {@code invincible=1}
+     * with a 99999 HP pool). Those never die and never stop the room reading as busy.
+     */
+    public static boolean killableMobPresent(Character bot) {
+        return bot.getMap().getAllMonsters().stream()
+                .anyMatch(m -> m.isAlive() && !isInvincibleScenery(m));
+    }
+
+    /** The quest's invincible set: mobs the WZ marks unkillable for this party tier. */
+    private static boolean isInvincibleScenery(Monster m) {
+        return m.getId() == LudiPqData.GUARD_MOB;
     }
 
     // =========================================================================
@@ -334,14 +355,23 @@ public final class LudiStages {
         PqActions.seekAndAttack(bot);
         PqActions.loot(bot, bot.getPosition(), 2_000, new int[]{LudiPqData.PASS});
         PqActions.recoverUngatheredHandoffs(bot, LudiPqData.PASS);
-        // Room quiet (all the room's mobs dead): the work is done. Take the room's exit
-        // back to the main map and deliver there - the stage NPC lives on the main map, so
-        // that is where the leader comes for the turn-in, and the door-mouth drops (the old
-        // mid-room hand-off) only worked when he chanced to walk past that door.
-        if (bot.getMap().getAllMonsters().stream().anyMatch(m -> m.isAlive())) {
+        // Room quiet (all the room's killable mobs dead): the work is done. Slip out the
+        // door and deliver on the main map's stage-NPC post - the stage NPC lives there,
+        // so that is where the leader comes for the turn-in; the door-mouth drops (the old
+        // mid-room hand-off) only worked when he chanced to walk past that door. The exit
+        // waits for the leader to have LEFT this room first: while he is still inside, the
+        // follow-the-leader beat re-enters the room behind him and the bot ping-pongs
+        // through the door until he moves on.
+        if (killableMobPresent(bot) || leaderInRoom(bot)) {
             return;
         }
         exitDoorRoom(bot);
+    }
+
+    /** Whether the party leader stands in this bot's room right now. */
+    private static boolean leaderInRoom(Character bot) {
+        Character leader = PqActions.partyLeader(bot);
+        return leader != null && leader != bot && leader.getMapId() == bot.getMapId();
     }
 
     /**
@@ -388,9 +418,11 @@ public final class LudiStages {
         PqActions.recoverUngatheredHandoffs(bot, LudiPqData.PASS);
         // All four boxes broken: the room's work is done. Slip out the door and deliver on
         // the main map's stage-NPC post - the leader turns the stage in there, not at this
-        // room's mouth. Leaving while a box stands (or with nothing pocketed) keeps the
-        // sneak inside its room.
-        if (box >= 0 || PqActions.countItem(bot, LudiPqData.PASS) <= 0) {
+        // room's mouth. Leaving while a box stands (or with nothing pocketed, or while the
+        // leader is still in the room - the follow beat would walk the bot back in behind
+        // him) keeps the sneak inside its room.
+        if (box >= 0 || PqActions.countItem(bot, LudiPqData.PASS) <= 0
+                || leaderInRoom(bot)) {
             return;
         }
         exitDoorRoom(bot);
