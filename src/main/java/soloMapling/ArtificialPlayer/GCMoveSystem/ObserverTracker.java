@@ -83,7 +83,7 @@ final class ObserverTracker {
 
     // Treat mapId as observed (FULL) immediately for a short window, regardless of the 1s poll.
     static void markObservedNow(int mapId) {
-        forcedFull.put(mapId, System.currentTimeMillis() + FORCE_TTL_MS);
+        forcedFull.put(mapId, MovementClock.nowMs() + FORCE_TTL_MS);
     }
 
     private static boolean forced(int mapId) {
@@ -91,7 +91,7 @@ final class ObserverTracker {
         if (until == null) {
             return false;
         }
-        if (until < System.currentTimeMillis()) {
+        if (until < MovementClock.nowMs()) {
             forcedFull.remove(mapId);
             return false;
         }
@@ -198,7 +198,7 @@ final class ObserverTracker {
         // active for DWELL_MS past its last observation — so demotion lags but promotion is immediate.
         Set<Integer> observed = new HashSet<>(full);
         observed.addAll(halo);
-        DWELL.observe(observed, System.currentTimeMillis());
+        DWELL.observe(observed, MovementClock.nowMs());
 
         fullMaps = full.isEmpty() ? Set.of() : Set.copyOf(full);
         haloMaps = halo.isEmpty() ? Set.of() : Set.copyOf(halo);

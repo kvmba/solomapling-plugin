@@ -6,6 +6,7 @@ import org.gms.manager.ServerManager;
 import org.gms.property.ServiceProperty;
 import org.gms.server.maps.MapleMap;
 import org.gms.service.ConfigService;
+import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.springframework.context.ApplicationContext;
@@ -60,8 +61,17 @@ public class TowerMazeExecutionSimTest {
         setter.invoke(new ServerManager(), ctx);
         GameConfig.add(config("server", "update_interval", "100"));
         org.gms.net.server.Server.getInstance();
+        // Drive every GCMoveSystem wall-clock gate off a virtual clock (advanced one TICK_MS per
+        // tick by tickN) instead of sleeping, so the sims run at full speed yet still see the 1s
+        // down-jump cadence and 2s airborne stall elapse. Reset in @AfterAll.
+        MovementClock.useVirtual(1_000_000L);
         org.junit.jupiter.api.Assumptions.assumeTrue(mapWzAvailable(),
                 "Map.wz not resolvable from this working directory (sim needs the real WZ)");
+    }
+
+    @AfterAll
+    static void restoreClock() {
+        MovementClock.reset();
     }
 
     static boolean mapWzAvailable() {
@@ -129,11 +139,12 @@ public class TowerMazeExecutionSimTest {
     }
 
     /**
-     * @param realTimePacing true sleeps 50ms per tick so wall-clock gates (the 1s down-jump
-     *                       cadence, the airborne 2s stall) elapse at the rate production sees.
-     *                       The compressed default (no sleep) is fine for gates that tick-time.
+     * Drives {@code ticks} production ticks against a virtual clock, advancing it by one TICK_MS per
+     * tick so the wall-clock gates (the 1s down-jump cadence, the airborne 2s stall, portal/observer
+     * timers) elapse exactly as production sees them — with zero real waiting. (The previous version
+     * {@code Thread.sleep(50)}d per tick; this test alone then cost ~4.5 minutes.)
      */
-    private static void tickN(Sim sim, int ticks, boolean keepActive, int mapId, boolean realTimePacing) {
+    private static void tickN(Sim sim, int ticks, boolean keepActive, int mapId) {
         for (int i = 0; i < ticks; i++) {
             if (keepActive && i % 30 == 0) {
                 ObserverTracker.markObservedNow(mapId);
@@ -143,14 +154,7 @@ public class TowerMazeExecutionSimTest {
             } catch (ReflectiveOperationException e) {
                 throw new RuntimeException(e.getCause() != null ? e.getCause() : e);
             }
-            if (realTimePacing) {
-                try {
-                    Thread.sleep(BotPhysicsEngine.cfg.TICK_MS);
-                } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
-                    return;
-                }
-            }
+            MovementClock.advance(BotPhysicsEngine.cfg.TICK_MS);
             BotMovementState st = sim.st();
             if (i % 10 == 0) {
                 sim.trace().append(String.format("t=%4d pos=%s nav=%-18s edge=%s block=%s air=%b climb=%b mt=%s%n",
@@ -170,7 +174,7 @@ public class TowerMazeExecutionSimTest {
         st.moveTargetPrecise = true;
         st.moveTargetSource = "gcmove";
         st.moveBestDist = Integer.MAX_VALUE;
-        st.moveProgressAtMs = System.currentTimeMillis();
+        st.moveProgressAtMs = MovementClock.nowMs();
     }
 
     private void report(String label, Sim sim) {
@@ -182,11 +186,12 @@ public class TowerMazeExecutionSimTest {
     }
 
     /** PQ-realistic macro cadence: the quest layer re-issues the move every ~1.5s beat (30 ticks),
-     * resetting moveProgressAtMs. Ticks run real-time so the wall-clock gates behave as in production. */
+     * resetting moveProgressAtMs. The virtual clock advances per tick, so the wall-clock gates behave
+     * exactly as in production. */
     private static void beats(Sim sim, int beats, int x, int y, int mapId) {
         for (int beat = 0; beat < beats; beat++) {
             move(sim.st(), x, y);
-            tickN(sim, 30, true, mapId, true);
+            tickN(sim, 30, true, mapId);
         }
     }
 
@@ -235,7 +240,7 @@ public class TowerMazeExecutionSimTest {
             // A full-rope descent (r11 -> r12, ~1500px at ~5px/tick) needs ~400 ticks.
             for (int beat = 0; beat < 16; beat++) {
                 move(sim.st(), row[2], row[3]);
-                tickN(sim, 30, true, 922010501, true);
+                tickN(sim, 30, true, 922010501);
             }
             Point end = sim.p();
             boolean ok = Math.abs(end.y - row[3]) <= 30;

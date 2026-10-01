@@ -299,7 +299,7 @@ final class BotNavigationManager {
         if (owner == null) return;
         int ownerId = owner.getId();
         int mapId = bot.getMap().getId();
-        long now = System.currentTimeMillis();
+        long now = MovementClock.nowMs();
         Map<Integer, Long> byMap = WARMUP_NOTIFIED.get(ownerId);
         if (byMap != null) {
             Long last = byMap.get(mapId);
@@ -805,14 +805,14 @@ final class BotNavigationManager {
                                                         Character bot,
                                                         Point rawTargetPos,
                                                         BotNavigationGraph.Edge edge) {
-        if (System.currentTimeMillis() < entry.portalUseCooldownUntilMs) {
+        if (MovementClock.nowMs() < entry.portalUseCooldownUntilMs) {
             return null;
         }
         if (!usePortal(bot, edge.portalId)) {
             return null;
         }
 
-        entry.portalUseCooldownUntilMs = System.currentTimeMillis() + PORTAL_USE_COOLDOWN_MS;
+        entry.portalUseCooldownUntilMs = MovementClock.nowMs() + PORTAL_USE_COOLDOWN_MS;
         clearNavigation(entry);
         BotMovementManager.resetEntryState(entry);
         return new NavigationDirective(rawTargetPos, true);
@@ -1271,7 +1271,7 @@ final class BotNavigationManager {
         if (profile.elapsedNs() < SLOW_PATHFIND_WARN_NS) {
             return;
         }
-        long now = System.currentTimeMillis();
+        long now = MovementClock.nowMs();
         long next = slowPathfindNextWarnAtMs.get();
         if (now < next || !slowPathfindNextWarnAtMs.compareAndSet(next, now + SLOW_PATHFIND_WARN_COOLDOWN_MS)) {
             slowPathfindSuppressed.incrementAndGet();

@@ -159,7 +159,7 @@ public final class GCMovement {
         // GachaBot / SocialBot / FollowerBot 等)停下后疾驰光环滞留,直到下次 enable 的首个
         // tick、换图或 despawn 才消失 —— 停止移动未取消疾驰的报告。
         // finishDeferredDisable(空中延迟交接)也收敛到这里;对无疾驰 bot 是一次缓存查询即早退。
-        BotDashBurst.tickMovement(bot, bot.getPosition().x, System.currentTimeMillis(), true);
+        BotDashBurst.tickMovement(bot, bot.getPosition().x, MovementClock.nowMs(), true);
         soloMapling.ArtificialPlayer.BotAttackSystem.BotAuraState.tickMovement(bot);
         GCMovementDriver.stop(st);
         MovementCommands.releaseMovementLock(bot);
@@ -253,7 +253,7 @@ public final class GCMovement {
         st.moveTargetPrecise = true;
         st.moveTargetSource = "gcmove";
         st.moveBestDist = Integer.MAX_VALUE;
-        st.moveProgressAtMs = System.currentTimeMillis();
+        st.moveProgressAtMs = MovementClock.nowMs();
         if (onArrival != null) {
             ARRIVAL_CALLBACKS.put(bot.getId(), onArrival);
         } else {
@@ -277,7 +277,7 @@ public final class GCMovement {
         st.moveTarget = new Point(x, y);
         st.moveTargetPrecise = true;
         st.moveBestDist = Integer.MAX_VALUE;
-        st.moveProgressAtMs = System.currentTimeMillis();
+        st.moveProgressAtMs = MovementClock.nowMs();
     }
 
     /* Dynamically tail a character — including ACROSS maps (travels to the target's map when they
@@ -551,7 +551,7 @@ public final class GCMovement {
      * is armed with the drop on map change and lapses on its own. */
     public static boolean isPortalArriving(Character bot) {
         BotMovementState st = bot == null ? null : STATES.get(bot.getId());
-        return st != null && System.currentTimeMillis() < st.portalArrivalGuardUntilMs;
+        return st != null && MovementClock.nowMs() < st.portalArrivalGuardUntilMs;
     }
 
     /**
@@ -715,7 +715,7 @@ public final class GCMovement {
     public static void duck(Character bot, int durationMs) {
         BotMovementState st = bot == null ? null : STATES.get(bot.getId());
         if (st != null && !st.inAir && !st.climbing) {
-            st.duckUntilMs = System.currentTimeMillis() + Math.max(1, durationMs);
+            st.duckUntilMs = MovementClock.nowMs() + Math.max(1, durationMs);
         }
     }
 

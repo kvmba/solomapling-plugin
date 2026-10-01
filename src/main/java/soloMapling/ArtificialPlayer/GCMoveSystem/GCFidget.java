@@ -104,7 +104,7 @@ final class GCFidget {
             s.base = new Point(pos);
         }
 
-        long now = System.currentTimeMillis();
+        long now = MovementClock.nowMs();
         if (now < s.nextActionAtMs) {
             return;
         }

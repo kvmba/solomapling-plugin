@@ -854,7 +854,7 @@ final class BotPhysicsEngine {
      * than a player pressing Down+Alt can. Gated at the three down-jump entry points only.
      */
     static boolean downJumpOnCadenceCooldown(BotMovementState entry) {
-        return entry.downJumpCadenceUntilMs > System.currentTimeMillis();
+        return entry.downJumpCadenceUntilMs > MovementClock.nowMs();
     }
 
     static void queueTopRopeEntry(BotMovementState entry, Character bot, Rope rope, int y) {
@@ -899,7 +899,7 @@ final class BotPhysicsEngine {
             // The first impulse off a foothold is the small ground jump. A
             // mid-water swim burst may follow later, but not on the next swim
             // tick just because the steering target is still above the bot.
-            entry.swimNextJumpAtMs = System.currentTimeMillis() + cfg.SWIM_JUMP_COOLDOWN_MS;
+            entry.swimNextJumpAtMs = MovementClock.nowMs() + cfg.SWIM_JUMP_COOLDOWN_MS;
             setMovementVelocity(entry, 0, Math.round(entry.velY));
             syncCharacterState(entry);
             return;
@@ -926,7 +926,7 @@ final class BotPhysicsEngine {
         // Ours: arm the humanlike cadence beat for the next down-jump BEFORE the guards — a guard
         // bail-out clears downJumpPending (the bot stays on this platform) and a failed launch is
         // exactly when a player would also pause before trying again.
-        entry.downJumpCadenceUntilMs = System.currentTimeMillis() + cfg.DOWN_JUMP_CADENCE_MS;
+        entry.downJumpCadenceUntilMs = MovementClock.nowMs() + cfg.DOWN_JUMP_CADENCE_MS;
         boolean swim = bot.getMap() != null && bot.getMap().isSwim();
         // Void guard (land maps): refuse a straight down-jump that has no foothold below - firing it
         // free-falls out of the map. Swim maps drop into water, which has its own floor clamp.
@@ -963,7 +963,7 @@ final class BotPhysicsEngine {
             entry.swimJumpRequested = false;
             // A mid-water swim burst may follow later, but not on the next swim tick just because
             // the steering target is still below the bot.
-            entry.swimNextJumpAtMs = System.currentTimeMillis() + cfg.SWIM_JUMP_COOLDOWN_MS;
+            entry.swimNextJumpAtMs = MovementClock.nowMs() + cfg.SWIM_JUMP_COOLDOWN_MS;
             setMovementVelocity(entry, 0, 0);
             syncCharacterState(entry);
             entry.downJumpGracePeriodMS = cfg.DOWN_JUMP_GRACE_MS;
@@ -1738,7 +1738,7 @@ final class BotPhysicsEngine {
     }
 
     private static int broadcastStance(BotMovementState entry, int baseStance) {
-        if (System.currentTimeMillis() >= entry.alertedUntilMs) {
+        if (MovementClock.nowMs() >= entry.alertedUntilMs) {
             return baseStance;
         }
         if (baseStance == CharacterStance.STAND_RIGHT_STANCE) {
@@ -2047,7 +2047,7 @@ final class BotPhysicsEngine {
                 // 在绳索攀爬卡住" report. Hold for a bounded window, then fall and let the
                 // normal recovery nets (ClimbRecovery, tickUnstuck, re-path) take over: they
                 // are all grounded-state recoveries, which the clamp was starving.
-                long now = System.currentTimeMillis();
+                long now = MovementClock.nowMs();
                 if (entry.topClampSinceMs == 0L) {
                     entry.topClampSinceMs = now;
                 } else if (now - entry.topClampSinceMs >= TOP_CLAMP_RELEASE_MS) {

@@ -67,7 +67,7 @@ final class BotContactDamage {
         if (a == null) {
             return null;
         }
-        return (System.currentTimeMillis() < a.expiresAtMs) ? a : null;
+        return (MovementClock.nowMs() < a.expiresAtMs) ? a : null;
     }
 
     /* Release a despawned bot's attacker register (mirrors the other per-bot clearBot hooks). */
@@ -78,7 +78,7 @@ final class BotContactDamage {
     /* Register `mobOid` as the bot's last attacker for the retaliation memory window. */
     static void registerRetaliation(int botId, int mobOid) {
         LAST_ATTACKER_BY_BOT.put(botId, new Attacker(mobOid,
-                System.currentTimeMillis() + BotMovementManager.delayAfterCurrentTick(RETALIATION_MEMORY_MS)));
+                MovementClock.nowMs() + BotMovementManager.delayAfterCurrentTick(RETALIATION_MEMORY_MS)));
     }
 
     // Knockback / i-frame tunables (OpenStory Player::damage: hspeed +/-1.5, vforce -= 3.5).
@@ -230,7 +230,7 @@ final class BotContactDamage {
         if (bot == null || !CompanionRoster.isCompanion(bot.getId()) || !log.isInfoEnabled()) {
             return;
         }
-        long now = System.currentTimeMillis();
+        long now = MovementClock.nowMs();
         Long next = NEXT_DIAGNOSTIC_AT.get(bot.getId());
         if (next != null && next > now) {
             return;
@@ -544,7 +544,7 @@ final class BotContactDamage {
     // Package-visible so the attack layer can flag the pose after a swing (via GCMovement.markAlerted),
     // not just mob-touch/fall damage. Absolute reset to now+5s; the reset task keeps the wire stance honest.
     static void markAlerted(BotMovementState entry) {
-        entry.alertedUntilMs = System.currentTimeMillis() + ALERT_DURATION_MS;
+        entry.alertedUntilMs = MovementClock.nowMs() + ALERT_DURATION_MS;
         scheduleAlertReset(entry);
     }
 
@@ -556,9 +556,9 @@ final class BotContactDamage {
             return;
         }
         entry.alertResetScheduled = true;
-        long delay = Math.max(50L, entry.alertedUntilMs - System.currentTimeMillis() + 100L);
+        long delay = Math.max(50L, entry.alertedUntilMs - MovementClock.nowMs() + 100L);
         MethodScheduler.runAfterDelay(() -> {
-            long now = System.currentTimeMillis();
+            long now = MovementClock.nowMs();
             if (now < entry.alertedUntilMs) {
                 entry.alertResetScheduled = false;
                 scheduleAlertReset(entry);

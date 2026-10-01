@@ -200,7 +200,7 @@ final class GCMovementDriver {
     // PROFILE_REFRESH_INTERVAL_MS we recompute; refreshMovementProfile returns fast and re-warms only when
     // the speed/jump bucket actually changed, so a non-party bot pays just one fromCharacter() per interval.
     private static void maybeRefreshProfile(BotMovementState entry) {
-        long now = System.currentTimeMillis();
+        long now = MovementClock.nowMs();
         if (now - entry.lastProfileRefreshMs < PROFILE_REFRESH_INTERVAL_MS) {
             return;
         }
@@ -223,7 +223,7 @@ final class GCMovementDriver {
             // trace. One line per bot per 10s keeps a chronically failing bot cheap; the stack names the
             // subsystem the first time.
             int botId = entry.bot != null ? entry.bot.getId() : -1;
-            long now = System.currentTimeMillis();
+            long now = MovementClock.nowMs();
             Long last = TICK_FAILURE_LOG_AT.get(botId);
             if (last == null || now - last >= TICK_FAILURE_LOG_INTERVAL_MS) {
                 // Keep the map bounded: entries outside the interval prune themselves on the next
@@ -276,7 +276,7 @@ final class GCMovementDriver {
         // the aura tick reads at the end of this tick.
         boolean dashStopped = !(entry.inAir || entry.climbing)
                 && entry.hspeed == 0.0 && entry.moveDir == 0 && entry.groundBrakeDir == 0;
-        BotDashBurst.tickMovement(bot, bot.getPosition().x, System.currentTimeMillis(), dashStopped);
+        BotDashBurst.tickMovement(bot, bot.getPosition().x, MovementClock.nowMs(), dashStopped);
         entry.dashSpeedBonus = BotDashBurst.isActive(bot) ? BotDashBurst.speedBonus(bot) : 0;
 
         // Pending organic portal/teleport drop: hold standing at the spawn portal (the bot appears
@@ -287,7 +287,7 @@ final class GCMovementDriver {
         // float point in the jump pose. The entry beat owns the bot for its ~1.5-2.1s; nothing
         // else about an entering bot is meaningful until it has actually dropped.
         if (entry.portalDropAtMs > 0L) {
-            if (System.currentTimeMillis() < entry.portalDropAtMs) {
+            if (MovementClock.nowMs() < entry.portalDropAtMs) {
                 BotPhysicsEngine.idleOnGround(entry, bot); // float at the spawn point
                 entry.inAir = true; // show the JUMP stance while floating (the release fall already does)
                 broadcastIfObserved(entry);
@@ -421,8 +421,8 @@ final class GCMovementDriver {
         }
         // While a stop-reaction is in progress, hold position (don't walk off mid-greeting) and keep the
         // stall timer fresh so the pause isn't mistaken for being stuck. Resumes automatically after.
-        if (entry.reactingUntilMs > System.currentTimeMillis()) {
-            entry.moveProgressAtMs = System.currentTimeMillis();
+        if (entry.reactingUntilMs > MovementClock.nowMs()) {
+            entry.moveProgressAtMs = MovementClock.nowMs();
             BotPhysicsEngine.idleOnGround(entry, bot);
             broadcastIfObserved(entry);
             return;
@@ -463,7 +463,7 @@ final class GCMovementDriver {
             entry.stuckMs = 0;
             entry.stuckCheckX = Integer.MIN_VALUE;
             entry.stuckCheckY = Integer.MIN_VALUE;
-            if (entry.duckUntilMs > System.currentTimeMillis()) {
+            if (entry.duckUntilMs > MovementClock.nowMs()) {
                 BotPhysicsEngine.proneOnGround(entry, bot); // idle fidget: hold a crouch/duck pose
             } else {
                 BotPhysicsEngine.idleOnGround(entry, bot);
@@ -503,7 +503,7 @@ final class GCMovementDriver {
         if (graph == null) {
             return false; // no cached graph -> let the M1 throttle cover it (don't trigger a bake)
         }
-        long now = System.currentTimeMillis();
+        long now = MovementClock.nowMs();
         boolean needPlan = entry.coarsePlan == null
                 || entry.coarsePlanMapId != bot.getMapId()
                 || !target.equals(entry.coarsePlanTarget);
@@ -581,7 +581,7 @@ final class GCMovementDriver {
         // closer to the goal still resets the clock below, so long legitimate arcs are untouched.
         Point bp = entry.bot.getPosition();
         int dist = Math.abs(bp.x - entry.moveTarget.x) + Math.abs(bp.y - entry.moveTarget.y);
-        long now = System.currentTimeMillis();
+        long now = MovementClock.nowMs();
         if (entry.moveProgressAtMs == 0L) {
             entry.moveProgressAtMs = now;
         }
@@ -913,7 +913,7 @@ final class GCMovementDriver {
             // GCMovement.disable() landing in that window used to settle+stop the driver with the
             // drop never armed - the jump-pose freeze. Arming first makes the window always visible
             // as "pending drop" instead.
-            entry.portalDropAtMs = System.currentTimeMillis() + PORTAL_DROP_DELAY_MS
+            entry.portalDropAtMs = MovementClock.nowMs() + PORTAL_DROP_DELAY_MS
                     + ThreadLocalRandom.current().nextInt(PORTAL_DROP_DELAY_JITTER_MS + 1);
             // Also silence flavor for the float + the fall that follows the drop release, so an arriving
             // bot doesn't swing a skill in mid-air in front of the player who is watching the entry.

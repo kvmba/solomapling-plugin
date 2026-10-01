@@ -573,7 +573,7 @@ class BotMovementManager {
                     entry.swimMoveDir = -1;
                 }
             } else {
-                long nowStranded = System.currentTimeMillis();
+                long nowStranded = MovementClock.nowMs();
                 if (nowStranded >= entry.swimNextJumpAtMs) {
                     entry.swimJumpRequested = true;
                     entry.swimNextJumpAtMs = nowStranded + BotPhysicsEngine.cfg.SWIM_JUMP_COOLDOWN_MS;
@@ -608,7 +608,7 @@ class BotMovementManager {
         int wallTopY = BotPhysicsEngine.swimWallTopAhead(entry.bot.getMap(), pos, targetPos);
         if (wallTopY != Integer.MIN_VALUE) {
             entry.swimVerticalHold = -1;
-            long nowWallMs = System.currentTimeMillis();
+            long nowWallMs = MovementClock.nowMs();
             if (nowWallMs >= entry.swimNextJumpAtMs) {
                 entry.swimJumpRequested = true;
                 entry.swimNextJumpAtMs = nowWallMs + BotPhysicsEngine.cfg.SWIM_JUMP_COOLDOWN_MS;
@@ -641,7 +641,7 @@ class BotMovementManager {
         // active last tick so the bot doesn't flip-flop between UP and free
         // sink as dy crosses LEVEL_BAND each frame while chasing a target
         // that sinks faster than UP-terminal.
-        long now = System.currentTimeMillis();
+        long now = MovementClock.nowMs();
         int jumpTrigger = BotPhysicsEngine.cfg.SWIM_JUMP_TRIGGER_DY_PX;
         int downBand = BotPhysicsEngine.cfg.SWIM_DOWN_BAND_PX;
         if (dy <= -jumpTrigger && now >= entry.swimNextJumpAtMs) {

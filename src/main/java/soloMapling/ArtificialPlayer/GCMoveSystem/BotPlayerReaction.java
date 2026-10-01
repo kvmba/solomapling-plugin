@@ -52,7 +52,7 @@ final class BotPlayerReaction {
 
     // Throttled scan for a nearby real player; roll a reaction for the first one off cooldown.
     static void maybeReact(BotMovementState entry, Character bot) {
-        long nowMs = System.currentTimeMillis();
+        long nowMs = MovementClock.nowMs();
         if (nowMs < entry.nextPlayerScanMs || entry.reactingUntilMs > nowMs) {
             return;
         }
@@ -90,7 +90,7 @@ final class BotPlayerReaction {
             entry.facingDir = (pp.x >= bp.x) ? 1 : -1;
             BotMovementManager.broadcastMovement(entry);
         }
-        entry.reactingUntilMs = System.currentTimeMillis()
+        entry.reactingUntilMs = MovementClock.nowMs()
                 + ThreadLocalRandom.current().nextLong(STOP_PAUSE_MIN_MS, STOP_PAUSE_MAX_MS + 1);
         speak(bot, player);
     }
