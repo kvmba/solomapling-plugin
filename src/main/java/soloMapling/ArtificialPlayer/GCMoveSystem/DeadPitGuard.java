@@ -146,7 +146,7 @@ final class DeadPitGuard {
         // guards against platforms a bot leaves by simply stepping off. The landing's own
         // livability is that landing's verdict - not recursed here, mirroring the one-hop
         // depth of the jump chain above.
-        if (fallEscape(map, floorY, loX, hiX, profile)) {
+        if (fallEscape(map, foothold, floorY, loX, hiX, profile)) {
             return true;
         }
         // And the rope the other direction: a rope whose BOTTOM reaches (or passes below)
@@ -159,15 +159,19 @@ final class DeadPitGuard {
     }
 
     /*
-     * Ours: can the bot leave {@code (loX..hiX, floorY)} by walking off or down-jumping
-     * into open air and landing somewhere standable? Probed at the surface's midpoint and
-     * quarter points (a plain midpoint can sit over a hole while an edge still lands), via
-     * the same two simulators the executor's own moves use - a "yes" here is the move the
-     * bot would actually make. The landing surface's own verdict is NOT chased (one-hop
-     * depth, like the jump chain); it is cached on its own foothold.
+     * Ours: can the bot leave {@code (loX..hiX, floorY)} by dropping into open air and
+     * landing somewhere standable? Probed at the surface's endpoints and midpoint (a plain
+     * midpoint can sit over a hole while an edge still lands), via the same two simulators
+     * the executor's own moves use - a "yes" here is the move the bot would actually make.
+     * The landing surface's own verdict is NOT chased (one-hop depth, like the jump chain);
+     * it is cached on its own foothold. An ffd source is refused: the straight drop-through
+     * is exactly the move the client blocks there (canStartDownJump honours the flag too).
      */
-    private static boolean fallEscape(MapleMap map, int floorY, int loX, int hiX,
+    private static boolean fallEscape(MapleMap map, Foothold source, int floorY, int loX, int hiX,
                                       BotMovementProfile profile) {
+        if (source.isForbidFallDown()) {
+            return false;
+        }
         int probeXs = (hiX - loX) >= 200 ? 3 : 1;
         for (int i = 0; i < probeXs; i++) {
             int x = probeXs == 1 ? (loX + hiX) / 2

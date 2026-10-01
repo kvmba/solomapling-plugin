@@ -25,10 +25,13 @@ import static org.mockito.Mockito.when;
  * The downward-half of livability (our fix): a surface a bot leaves by walking off,
  * down-jumping, or riding a rope DOWN is not a dead pit - the guard previously only
  * counted escapes that go UP (portal / rope above / jump chain), which called LPQ
- * stage-1's spawn row (one walk-off to the door row) and every plain drop-through
- * ledge dead. Geometry mirrors that shape at test scale: a high row whose only way
- * down is a fall to a lower row far beyond jump reach, plus the guard cases that
- * must STAY dead (no landing below at all) or turn live via a rope that bottoms there.
+ * stage-1's top platform (whose descent rope hangs BELOW the platform face) dead.
+ *
+ * Every case here pins a rule the up-only model got WRONG or must keep right:
+ * each geometry removes the up-escapes by construction (a strictly higher world
+ * surface beyond jump reach kills the "topmost surface" rule, there are no
+ * portals, and any rope present hangs too high to jump-grab) so the verdict can
+ * only come from the new down-escape checks.
  */
 public class DeadPitDownEscapeTest {
 
@@ -57,75 +60,104 @@ public class DeadPitDownEscapeTest {
         return d;
     }
 
-    /** A high row over a lower floor 392px below (beyond any jump reach) — the LPQ
-     *  stage-1 spawn-row shape: the only way off is DOWN, and down works. */
-    private static MapleMap highRowOverFloor(int mapId) {
-        MapleMap map = new MapleMap(mapId, 0, 0, 922010000, 0.0f);
-        map.setMapLineBoundings(-1000, 600, -265, 265);
+    /**
+     * A surface under open sky (nothing above it within jump reach) with NO landing
+     * below at all: the sealed-pocket shape. {@code surfaceY} is the surface whose
+     * verdict is asked; the world row 200px above is strictly beyond the base apex
+     * (77+25=102px reach) so no up-escape can fire — the verdict must come from the
+     * down-escape probes alone.
+     */
+    private static Foothold sealedPocketShape(MapleMap map, int surfaceY) {
         FootholdTree tree = new FootholdTree(new Point(-265, -100), new Point(265, 600));
-        tree.insert(new Foothold(new Point(-265, 0), new Point(265, 0), 1));     // high row
-        tree.insert(new Foothold(new Point(-265, 392), new Point(265, 392), 2)); // lower floor
+        Foothold world = new Foothold(new Point(-265, surfaceY - 200), new Point(265, surfaceY - 200), 1);
+        Foothold surface = new Foothold(new Point(-100, surfaceY), new Point(100, surfaceY), 2);
+        tree.insert(world);
+        tree.insert(surface);
         map.setFootholds(tree);
-        return map;
+        return surface;
+    }
+
+    private static MapleMap map(int mapId) {
+        MapleMap m = new MapleMap(mapId, 0, 0, 922010000, 0.0f);
+        m.setMapLineBoundings(-1000, 600, -265, 265);
+        return m;
     }
 
     @Test
-    void aRowWithARealWalkOffBelowIsLivable() {
-        MapleMap map = highRowOverFloor(922011911);
-        Foothold highRow = map.getFootholds().getAllFootholds().get(0);
-        assertTrue(DeadPitGuard.isLivableSurface(map, highRow, BotMovementProfile.base()),
-                "a walk-off with a real landing 392px below is an exit (LPQ stage-1 spawn row)");
-    }
-
-    @Test
-    void aRowOverBareVoidStaysDead() {
-        // Same shape but the lower floor only spans x[-100..100]: the high row's midpoint
-        // column (x=0) still lands, so this stays LIVE — the quarter-point probe pins that
-        // a partial floor keeps the surface alive when any probed column lands.
-        MapleMap map = new MapleMap(922011912, 0, 0, 922010000, 0.0f);
-        map.setMapLineBoundings(-1000, 600, -265, 265);
+    void aDropThroughWithARealLandingBelowIsLivable() {
+        // The LPQ stage-1 spawn-row shape: a lower floor 392px below (far beyond jump
+        // reach), and a world row 200px ABOVE the surface (beyond the base apex of
+        // 102px) so the "topmost surface" rule cannot fire. The only way off is DOWN,
+        // and down works -> LIVE. The old up-only model answered dead here.
+        MapleMap map = map(922011911);
         FootholdTree tree = new FootholdTree(new Point(-265, -100), new Point(265, 600));
-        tree.insert(new Foothold(new Point(-265, 0), new Point(265, 0), 1));
-        tree.insert(new Foothold(new Point(-100, 392), new Point(100, 392), 2));
+        tree.insert(new Foothold(new Point(-265, -200), new Point(265, -200), 3)); // world beyond apex
+        Foothold highRow = new Foothold(new Point(-265, 0), new Point(265, 0), 1);
+        Foothold lowerFloor = new Foothold(new Point(-265, 392), new Point(265, 392), 2);
+        tree.insert(highRow);
+        tree.insert(lowerFloor);
         map.setFootholds(tree);
-        Foothold highRow = map.getFootholds().getAllFootholds().get(0);
         assertTrue(DeadPitGuard.isLivableSurface(map, highRow, BotMovementProfile.base()),
-                "a row with any real landing below (x=0 column) is live");
+                "a drop with a real landing 392px below is an exit (LPQ stage-1 spawn row)");
     }
 
     @Test
-    void aRowWithNothingBelowStaysDead() {
-        // The sealed-pocket shape (LPQ stage-1's top pocket): a floor inside two wall
-        // columns with a higher surface ABOVE the walls (so the "topmost surface" rule
-        // does not fire), no portal, no rope, and no landing below the pocket floor.
-        // Walls are vertical footholds (x1==x2), exactly as the WZ lays them.
-        MapleMap map = new MapleMap(922011913, 0, 0, 922010000, 0.0f);
-        map.setMapLineBoundings(-1000, 600, -265, 265);
+    void aRowWithNoLandingBelowStaysDead() {
+        // The sealed pocket: floor inside two wall columns, world above the walls, no
+        // landing below, no rope, no portal. Wall columns are vertical footholds
+        // (x1==x2) as the WZ lays them. Must stay DEAD - this is the verdict that
+        // keeps the fall-off-map recovery out of LPQ stage-1's top pocket.
+        MapleMap map = map(922011913);
         FootholdTree tree = new FootholdTree(new Point(-265, -100), new Point(265, 600));
-        tree.insert(new Foothold(new Point(-265, 0), new Point(265, 0), 1));      // open world above the walls
+        tree.insert(new Foothold(new Point(-265, 0), new Point(265, 0), 1));      // world above the walls
         tree.insert(new Foothold(new Point(-100, 60), new Point(-100, 392), 2));  // left wall (vertical)
         tree.insert(new Foothold(new Point(100, 60), new Point(100, 392), 3));    // right wall (vertical)
         tree.insert(new Foothold(new Point(-100, 392), new Point(100, 392), 4));  // the pocket floor
         map.setFootholds(tree);
-        Foothold pocketFloor = map.getFootholds().getAllFootholds().get(3);
+        Foothold pocketFloor = tree.getAllFootholds().get(3);
         assertFalse(DeadPitGuard.isLivableSurface(map, pocketFloor, BotMovementProfile.base()),
                 "a walled pocket floor with no landing below, no rope, no portal stays dead");
     }
 
     @Test
-    void aRopeBottomingAtTheFloorIsADownExit() {
-        // The mid-shaft platform shape: no way up (rope tops far above jump reach beyond
-        // the platform), no portal — but a rope whose BOTTOM ends at the platform lets the
-        // bot mount and ride DOWN. The up-rope check ignores it; the down-rope check must not.
-        MapleMap map = new MapleMap(922011914, 0, 0, 922010000, 0.0f);
-        map.setMapLineBoundings(-1000, 600, -265, 265);
+    void anFfdSourceNeverCountsTheStraightDrop() {
+        // The forbidFallDown source: the same geometry as the live drop-through case
+        // (world beyond apex above, real landing below), but the source carries the WZ
+        // ffd flag - the client blocks the straight drop-through there (canStartDownJump
+        // honours the flag), so the guard must not mint a phantom exit from a move the
+        // bot can never make. fallEscape refuses -> no escape left -> DEAD.
+        MapleMap map = map(922011915);
         FootholdTree tree = new FootholdTree(new Point(-265, -100), new Point(265, 600));
-        tree.insert(new Foothold(new Point(-60, 392), new Point(60, 392), 1)); // lone platform
-        tree.insert(new Foothold(new Point(-265, 600), new Point(265, 600), 2)); // bottom basin
+        tree.insert(new Foothold(new Point(-265, -200), new Point(265, -200), 3)); // world beyond apex
+        Foothold ffdRow = new Foothold(new Point(-265, 0), new Point(265, 0), 1);
+        ffdRow.setForbidFallDown(true);
+        tree.insert(ffdRow);
+        tree.insert(new Foothold(new Point(-265, 392), new Point(265, 392), 2));
         map.setFootholds(tree);
-        map.addRope(new org.gms.server.maps.Rope(0, 200, 392, false)); // bottoms at the platform
-        Foothold platform = map.getFootholds().getAllFootholds().get(0);
+        assertFalse(DeadPitGuard.isLivableSurface(map, ffdRow, BotMovementProfile.base()),
+                "an ffd source's straight drop-through is not an exit");
+    }
+
+    @Test
+    void aRopeToppingJustBelowThePlatformFaceIsARideDownExit() {
+        // The LPQ stage-1 top-platform shape: the descent rope's TOP hangs 2px BELOW
+        // the platform face - ropeAbove skips it (top below the floor: nothing to climb
+        // up), and the rope cannot be jump-grabbed from the face. But its bottom ends
+        // 267px down at a real foothold: mount at the face and ride down. ropeBelow
+        // must count it. (Anchored near the platform's right edge, like the map's.)
+        // The world row 200px above the face (beyond the apex) kills the topmost rule,
+        // so the verdict can only come from ropeBelow.
+        MapleMap map = map(922011914);
+        FootholdTree tree = new FootholdTree(new Point(-265, -100), new Point(265, 600));
+        tree.insert(new Foothold(new Point(-265, -200), new Point(265, -200), 3)); // world beyond apex
+        Foothold platform = new Foothold(new Point(-265, 0), new Point(265, 0), 1);
+        Foothold bottomFh = new Foothold(new Point(100, 267), new Point(230, 267), 2);
+        tree.insert(platform);
+        tree.insert(bottomFh);
+        map.setFootholds(tree);
+        // x=165, top=-2 relative to the face (y=0 -> 2), bottom at the lower foothold.
+        map.addRope(new org.gms.server.maps.Rope(165, 2, 267, false));
         assertTrue(DeadPitGuard.isLivableSurface(map, platform, BotMovementProfile.base()),
-                "a rope bottoming at the floor is a ride-down exit");
+                "a rope topping just below the face and bottoming on a real foothold is a ride-down exit");
     }
 }
