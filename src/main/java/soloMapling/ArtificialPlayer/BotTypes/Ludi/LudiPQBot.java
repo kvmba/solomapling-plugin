@@ -117,9 +117,13 @@ public class LudiPQBot extends PartyQuestBot {
             }
             case 3 -> LudiStages.breakCratesAndHunt(getChr());
             case 5 -> {
-                // The main room's guards are invincible (PAD 999): stay hidden, stay off
-                // them, and let the room's pass boxes come from the door rooms instead.
-                if (LudiStages.nearbyGuardCount(getChr()) > 0) {
+                // The main room's guards are invincible (PAD 999, WZ invincible=1): hide
+                // only while one can actually TOUCH us (same ledge), then fight nothing -
+                // but the delivery must still run from the NPC post, which sits 273px
+                // above the guards' floor and outside their reach. The old tower-wide
+                // guard box short-circuited this case forever, so a bot holding the
+                // post-work delivery never delivered.
+                if (LudiStages.guardCanReach(getChr())) {
                     LudiStages.stayHidden(getChr());
                     return false;
                 }
@@ -135,10 +139,11 @@ public class LudiPQBot extends PartyQuestBot {
     }
 
     /**
-     * The combat beat must not swing while stage-5's invincible guards are near: attacking
-     * breaks Dark Sight and the PAD-999 guards one-shot the bot out of it. That covers the
-     * stage-5 main map (guards in reach) and the stage-5 door rooms (the whole sneak is
-     * "hide through the visit") - the same guards' contract the macro tick already honours.
+     * The combat beat must not swing while a stage-5 guard could be the target: swinging
+     * breaks Dark Sight and the PAD-999 guards one-shot the bot out of it. The seek box
+     * (not the tighter touch box) is the right gate here - a bot hunting killable mobs
+     * from across the room must not open a fight that walks it into a guard, and a bot
+     * at the NPC post has no swings to gate anyway (nothing to hunt, delivery holds it).
      */
     @Override
     protected boolean fightsOnSweep() {
