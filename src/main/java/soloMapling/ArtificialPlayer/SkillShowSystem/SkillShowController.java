@@ -117,6 +117,8 @@ public final class SkillShowController {
     private static int stepTotal;
     private static int stepDone;
     private static int jobTotal = SHOWCASE_JOBS.length;
+    /** 连续生成失败计数：到顶自动收场，防止 12 个职业逐个静默失败拖 12 轮。 */
+    private static int consecutiveSpawnFailures;
 
     // ---- 命令入口（!bot skillshow） ----
 
@@ -137,7 +139,9 @@ public final class SkillShowController {
         stepTotal = 0;
         stepDone = 0;
         jobTotal = SHOWCASE_JOBS.length;
+        consecutiveSpawnFailures = 0;
         phase = Phase.SPAWN;
+        say("[skillshow] 开始登场：job 队列 " + jobTotal + " 个职业");
         MethodScheduler.runAfterDelay(SkillShowController::beat, 0);
         return null;
     }
@@ -152,6 +156,18 @@ public final class SkillShowController {
         jobIndex = -1;
         steps.clear();
         pending = null;
+    }
+
+    /**
+     * 回喊 GM（dropMessage，不依赖 bot 存活）。控制台场景（GM 已下线）回喊
+     * 静默降级为日志 —— 表演照常进行，诊断信息不丢。
+     */
+    private static void say(String message) {
+        BotLogger.log(message);
+        Character gm = soloMapling.command.ArtificialPlayerCommand.currentPlayer();
+        if (gm != null && gm.getMap() != null) {
+            gm.dropMessage(message);
+        }
     }
 
     /** 当前进度，null = 未在进行。 */
@@ -187,13 +203,15 @@ public final class SkillShowController {
                 case STEP -> beatStep();
                 case DESPAWN -> {
                     removeShowBot();
+                    say("[skillshow] job " + (jobIndex >= 0 ? SHOWCASE_JOBS[jobIndex] : 0)
+                            + " 表演完毕退场");
                     phase = Phase.SPAWN;
                     MethodScheduler.runAfterDelay(SkillShowController::beat, INTER_JOB_GAP_MS);
                 }
                 default -> { }
             }
         } catch (Throwable t) {
-            BotLogger.log("[skillshow] 拍子异常，中断收场: " + t);
+            say("[skillshow] 拍子异常，中断收场: " + t);
             stop();
         }
     }
@@ -201,7 +219,13 @@ public final class SkillShowController {
     /** 登场：生成下一个职业的 bot；全部演完则收场。 */
     private static void beatSpawn() {
         if (jobIndex + 1 >= SHOWCASE_JOBS.length) {
-            BotLogger.log("[skillshow] 全部职业表演完毕，收场");
+            say("[skillshow] 全部职业表演完毕，收场");
+            stop();
+            return;
+        }
+        if (consecutiveSpawnFailures >= 3) {
+            say("[skillshow] 连续 " + consecutiveSpawnFailures
+                    + " 个职业生成失败，停止表演。常见原因：channel_capacity 已满 / fmbot 模板缺失。");
             stop();
             return;
         }
@@ -209,33 +233,83 @@ public final class SkillShowController {
         int jobId = SHOWCASE_JOBS[jobIndex];
         MapleMap map = SoloMaplingUtilities.getMapleMapById(mapId);
         if (map == null) {
-            BotLogger.log("[skillshow] map " + mapId + " gone, 收场");
+            say("[skillshow] 地图 " + mapId + " 已不可用，收场");
             stop();
             return;
         }
-        int created = BotGeneration.createBot(spawnPos, map, jobId / 100, 180, 180, jobId);
-        Character createdBot = created > 0 ? BotHelpers.getCharFromChannelStorage(created) : null;
-        if (createdBot == null) {
-            BotLogger.log("[skillshow] createBot failed for job " + jobId + ", 收场");
-            stop();
+        // 生成是全异步管线（模板加载 + 节流排队 + 落地编排），createBot 返回后
+        // bot 并不立刻进 channelStorage —— 既有 createBotPollReadiness 就是为此
+        // 而设的轮询。这里等待期间先把进度喊给 GM，别让他对着黑屏猜。
+        say("[skillshow] (" + (jobIndex + 1) + "/" + jobTotal + ") 生成 job " + jobId + " …");
+        int created;
+        try {
+            created = BotGeneration.createBot(spawnPos, map, jobId / 100, 180, 180, jobId);
+        } catch (Throwable t) {
+            created = -1;
+            say("[skillshow] job " + jobId + " 生成抛异常: " + t);
+        }
+        if (created <= 0) {
+            // -1 = 每个频道都满员（BotChannelRouter.NONE）；节流排队不会走这条。
+            consecutiveSpawnFailures++;
+            say("[skillshow] job " + jobId + " 生成失败（频道满员？），跳过。失败 "
+                    + consecutiveSpawnFailures + "/3");
+            MethodScheduler.runAfterDelay(SkillShowController::beat, INTER_JOB_GAP_MS);
             return;
         }
-        bot = createdBot;
         botId = created;
+        phase = Phase.ARRIVE;
+        waitBotReady(created, 30, 0);
+    }
+
+    /**
+     * 轮询等 bot 进入 channelStorage（createBotPollReadiness 的非阻塞版）：
+     * 就绪 → 落地等待后开演；超时 → 记一次失败并跳过该职业。
+     */
+    private static void waitBotReady(int cid, int attemptsLeft, int waitedMs) {
+        Character ready = attemptsLeft > 0 ? BotHelpers.getCharFromChannelStorage(cid) : null;
+        if (ready == null) {
+            if (attemptsLeft <= 0) {
+                consecutiveSpawnFailures++;
+                say("[skillshow] job " + cidToJob(cid) + " 的 bot " + cid
+                        + " 生成后 3s 未就绪，跳过。失败 " + consecutiveSpawnFailures + "/3");
+                removeShowBot();
+                phase = Phase.SPAWN;
+                MethodScheduler.runAfterDelay(SkillShowController::beat, INTER_JOB_GAP_MS);
+                return;
+            }
+            MethodScheduler.runAfterDelay(() -> waitBotReady(cid, attemptsLeft - 1, waitedMs + 100), 100);
+            return;
+        }
+        bot = ready;
         steps.clear();
-        steps.addAll(buildSteps(createdBot));
+        try {
+            steps.addAll(buildSteps(bot));
+        } catch (Throwable t) {
+            consecutiveSpawnFailures++;
+            say("[skillshow] job " + cidToJob(cid) + " 表演序列构建失败: " + t);
+            removeShowBot();
+            phase = Phase.SPAWN;
+            MethodScheduler.runAfterDelay(SkillShowController::beat, INTER_JOB_GAP_MS);
+            return;
+        }
         stepTotal = steps.size();
         stepDone = 0;
         pending = null;
-        phase = Phase.ARRIVE;
-        BotLogger.log("[skillshow] job " + jobId + " 登场，" + stepTotal + " 个技能");
+        consecutiveSpawnFailures = 0;
+        say("[skillshow] job " + cidToJob(cid) + " 登场（cid " + cid + "），"
+                + stepTotal + " 个技能，" + (stepTotal * 4500 / 1000) + " 秒演完");
         MethodScheduler.runAfterDelay(SkillShowController::beat, ARRIVE_MS);
+    }
+
+    /** cid 反查本次表演的 job id（仅用于日志文案）。 */
+    private static int cidToJob(int cid) {
+        return jobIndex >= 0 && jobIndex < SHOWCASE_JOBS.length ? SHOWCASE_JOBS[jobIndex] : 0;
     }
 
     /** 表演节拍：有待演的先演，否则预告下一个。 */
     private static void beatStep() {
         if (!alive()) {
-            BotLogger.log("[skillshow] bot/map 丢失，中断");
+            say("[skillshow] 表演 bot 或地图丢失，中断收场");
             stop();
             return;
         }
@@ -253,11 +327,10 @@ public final class SkillShowController {
             MethodScheduler.runAfterDelay(SkillShowController::beat, 0);
             return;
         }
-        // 预告气泡：bot 在自检后、广播前的一瞬间被移除时 getMap() 会变 null ——
-        // BotChatbubble 对此不设防，走 BotSpeak 的判空路径（打字式/整聊式都带
-        // null map 守卫的入口在 BotFullChat 之下，仍需 alive() 前置；这里是
-        // alive() 已过的窗口，选唯一带判空的广播口）。
+        // 预告气泡：bot 在自检后、广播前的一瞬间被移除时 getMap() 会变 null，
+        // 广播前显式守住（alive() 已过，这里是竞态窗口的最后一道闸）。
         if (bot.getMap() == null) {
+            say("[skillshow] 表演 bot 地图丢失，中断收场");
             stop();
             return;
         }

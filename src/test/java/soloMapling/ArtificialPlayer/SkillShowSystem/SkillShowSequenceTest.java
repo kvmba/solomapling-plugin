@@ -74,7 +74,7 @@ class SkillShowSequenceTest {
         assertTrue(src.contains("BotBuffConfig.buffsForJob"), "增益来自注册表");
         assertTrue(src.contains("BotAttackConfig.resolve"), "攻击来自注册表");
         assertTrue(src.contains("BotSummonTable.summonsForJobId"), "召唤兽来自注册表");
-        assertTrue(src.contains("BotChatbubble"), "同图气泡预告");
+        assertTrue(src.contains("BotSpeakPlain"), "同图气泡预告（带判空的广播口）");
     }
 
     @Test

@@ -96,6 +96,11 @@ public class ArtificialPlayerCommand extends Command {
 
     private static Character player;
 
+    /** 表演系统等外部子系统的进度回喊口：最近一次 !bot 命令的发起者。 */
+    public static Character currentPlayer() {
+        return player;
+    }
+
     @Override
     public void execute(Client c, String[] params) {
         player = c.getPlayer();
@@ -940,7 +945,7 @@ public class ArtificialPlayerCommand extends Command {
                 if (err != null) {
                     player.yellowMessage(err);
                 } else {
-                    player.yellowMessage("skillshow 开始：12 个 4 转职业将依次在本图登场表演，"
+                    player.yellowMessage("skillshow 已开启，进度会在聊天框实时回喊；"
                             + "!bot skillshow status 查看进度，!bot skillshow stop 停止。");
                 }
             }
