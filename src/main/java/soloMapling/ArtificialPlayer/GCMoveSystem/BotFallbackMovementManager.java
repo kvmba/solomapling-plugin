@@ -386,6 +386,11 @@ final class BotFallbackMovementManager {
 
         Point left = walkOffTarget(map, foothold, entry.movementProfile, -1);
         Point right = walkOffTarget(map, foothold, entry.movementProfile, 1);
+        // Same dead-pit gate the committed walk-off (shouldWalkOffLedge) enforces: the steering
+        // half must not aim at a ledge the strike half would refuse — otherwise the bot walks to
+        // the rim of a one-way basin and is handed over to a fall the decision guards rejected.
+        left = livableWalkOff(map, entry.movementProfile, left);
+        right = livableWalkOff(map, entry.movementProfile, right);
         Point best = chooseBetterLedgeTarget(botPos, targetPos, left, right);
         if (best == null) {
             return null;
@@ -461,6 +466,24 @@ final class BotFallbackMovementManager {
         int step = direction * Math.max(1, BotPhysicsEngine.walkStep(map, profile));
         Point ahead = new Point(endpoint.x + step, endpoint.y);
         return BotPhysicsEngine.isGroundFarBelow(map, ahead) ? ahead : null;
+    }
+
+    /*
+     * The steering twin of shouldWalkOffLedge's landing check: simulate the fall from the
+     * walk-off point and keep the target only when its landing surface is livable. Null drops
+     * the candidate. Swings the same probe the decision side runs, so steering and execution can
+     * never disagree about a dead basin.
+     */
+    private static Point livableWalkOff(MapleMap map, BotMovementProfile profile, Point target) {
+        if (target == null || map == null || map.isSwim()) {
+            return target;
+        }
+        BotPhysicsEngine.JumpLanding landing =
+                BotPhysicsEngine.simulateFallLanding(map, target, 0);
+        return landing != null
+                && DeadPitGuard.isLivableLanding(map, landing.point(), profile)
+                ? target
+                : null;
     }
 
     private static Point chooseBetterLedgeTarget(Point botPos, Point targetPos, Point left, Point right) {

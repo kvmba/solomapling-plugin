@@ -382,8 +382,17 @@ class BotMovementManager {
                 if (shouldApplyAirSteering(entry)) {
                     if (targetPos != null) {
                         int dx = targetPos.x - botPos.x;
-                        entry.moveDir = Math.abs(dx) > BotPhysicsEngine.cfg.SWIM_ARRIVAL_RADIUS_PX
+                        int dir = Math.abs(dx) > BotPhysicsEngine.cfg.SWIM_ARRIVAL_RADIUS_PX
                                 ? Integer.signum(dx) : 0;
+                        // Free-flight steering only (no committed arc owns the bot): a steer
+                        // direction whose column below reads dead is refused - steering into a
+                        // dead pit's column would dive the bot into a one-way basin nothing
+                        // authorised. The landing rescue in BotPhysicsEngine is the backstop;
+                        // this keeps the fall OUT of the column in the first place.
+                        if (dir != 0 && !steerColumnBelowIsLivable(entry, botPos, dir)) {
+                            dir = 0;
+                        }
+                        entry.moveDir = dir;
                     }
                 } else {
                     entry.moveDir = Integer.signum(entry.airVelX);
@@ -472,6 +481,31 @@ class BotMovementManager {
                 && entry.navEdge.type != BotNavigationGraph.EdgeType.DROP
                 && !(entry.navEdge.type == BotNavigationGraph.EdgeType.CLIMB
                 && entry.navEdge.launchStepX != 0);
+    }
+
+    /*
+     * Whether free-fall steering toward {@code dir} keeps the bot out of a dead pit: probe the
+     * ground below the steered column and require its landing surface to be livable. No ground
+     * below (open sky under the map) or a swim map returns true — the fall-off-map recovery and
+     * the swim floor clamp own those cases, not this probe. Only the free-flight path consults
+     * this; committed arcs (fixedAirArc) fly their simulated trajectory and are checked by the
+     * graph's dead-region prune.
+     */
+    private static boolean steerColumnBelowIsLivable(BotMovementState entry, Point botPos, int dir) {
+        Character bot = entry.bot;
+        MapleMap map = (bot != null) ? bot.getMap() : null;
+        if (map == null || map.getFootholds() == null || botPos == null || dir == 0) {
+            return true;
+        }
+        if (map.isSwim()) {
+            return true;
+        }
+        Point column = new Point(botPos.x + dir * BotPhysicsEngine.walkStep(map, entry.movementProfile), botPos.y);
+        Point ground = BotPhysicsEngine.findGroundPoint(map, column);
+        if (ground == null) {
+            return true; // nothing below: out-of-map recovery's case
+        }
+        return DeadPitGuard.isLivableLanding(map, ground, entry.movementProfile);
     }
 
     static void tickSwimming(BotMovementState entry, Point targetPos) {
@@ -1107,7 +1141,10 @@ class BotMovementManager {
         // no rope, no portal) cannot be rescued by any local action - every hop only reshuffles
         // it inside the basin, and the hop loop is exactly the reported "fell into the pit and
         // never recovers". Teleport it to the nearest livable ground and drop the goal so the
-        // brain re-decides a reachable target next tick.
+        // brain re-decides a reachable target next tick. (The landing transition in
+        // BotPhysicsEngine already self-heals at the touch-down tick via
+        // rescueFromDeadSurface; this per-tick re-check catches anything that arrives on a
+        // dead surface outside the physics landing path - e.g. a script warp.)
         if (isOnDeadPitFloor(entry, bot)) {
             Point rescue = nearestLivableGround(bot);
             clearNavigationState(entry);
@@ -1179,6 +1216,43 @@ class BotMovementManager {
             return false;
         }
         return !DeadPitGuard.isLivableSurface(bot.getMap(), standing, entry.movementProfile);
+    }
+
+    /**
+     * Land-on-dead-surface invariant, called at the physics touch-down transition: a bot that
+     * just landed on a surface the livability probe cannot clear (a dead pit floor) is teleported
+     * to the nearest livable ground in the same beat it arrives, so the basin can never hold the
+     * bot even one tick. Every graph-pruned descent is already safe; this closes the entries no
+     * guard can see in advance (air steering over a pit column, knockback, future skills/warps) —
+     * the invariant holds at the LANDING instead of only at the descent decisions.
+     *
+     * <p>Swim maps are skipped: their falls end in open water with a floor clamp, no landing
+     * foothold exists, and the livability probe is a land-map concept.
+     *
+     * <p>Deliberately unconditional (no cooldown, no cache): the probe verdict is cached per
+     * foothold, the descent to a dead surface is rare by construction, and a dead landing that
+     * stays put for one tick is the exact "fell into the pit" report this exists to end.
+     */
+    static void rescueFromDeadSurface(BotMovementState entry, Character bot) {
+        if (bot == null || entry == null || bot.getMap() == null || bot.getMap().isSwim()) {
+            return;
+        }
+        Point pos = bot.getPosition();
+        if (pos == null) {
+            return;
+        }
+        Foothold landed = BotPhysicsEngine.findGroundFoothold(bot.getMap(), pos);
+        if (landed == null || DeadPitGuard.isLivableSurface(bot.getMap(), landed, entry.movementProfile)) {
+            return;
+        }
+        Point rescue = nearestLivableGround(bot);
+        if (rescue == null) {
+            return; // nothing livable above: the per-tick tickUnstuck re-check keeps trying
+        }
+        BotPhysicsEngine.teleportTo(entry, bot, rescue);
+        resetEntryStateAfterTeleport(entry);
+        entry.moveTarget = null; // the goal steered here; the brain re-decides a reachable one
+        broadcastMovement(entry);
     }
 
     /**
