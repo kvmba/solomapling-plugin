@@ -67,11 +67,13 @@ public class LudiPQBot extends PartyQuestBot {
     @Override
     protected boolean workStage() {
         // The door rooms (stages 4 and 5) sit just past their stage's main map, which the
-        // stage arithmetic reads as stage 302+ - route them first, by room id.
+        // stage arithmetic reads as stage 302+ - route them first, by room id. Both stages
+        // explore autonomously: a bot in the main room claims a room and walks in through
+        // its script portal; stage 5's guard rooms admit only hide-carrying lineages.
         int roomStage = LudiPqData.roomStage(getChr().getMapId());
         if (roomStage == 4) {
             LudiStages.workDoorRooms(getChr(), LudiPqData.STAGE4_ROOM_FIRST,
-                    LudiPqData.STAGE4_ROOM_LAST, 5);
+                    LudiPqData.STAGE4_ROOM_LAST);
             return false;
         }
         if (roomStage == 5) {

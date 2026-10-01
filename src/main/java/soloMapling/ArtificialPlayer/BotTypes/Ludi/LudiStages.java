@@ -3,7 +3,10 @@ package soloMapling.ArtificialPlayer.BotTypes.Ludi;
 import org.gms.client.Character;
 import org.gms.server.life.Monster;
 import soloMapling.ArtificialPlayer.BotAttackSystem.BotAuraState;
+import soloMapling.ArtificialPlayer.GCMoveSystem.GCMovement;
+import org.gms.constants.skills.Brawler;
 import org.gms.constants.skills.Rogue;
+import soloMapling.ArtificialPlayer.BotAttackSystem.BotBuffConfig;
 import soloMapling.ArtificialPlayer.PartyQuest.PqActions;
 import soloMapling.ArtificialPlayer.BotMessagingSystem.CharacterStorage;
 import soloMapling.Environment.BotMessages;
@@ -14,6 +17,7 @@ import org.gms.constants.inventory.ItemConstants;
 import java.awt.Point;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ThreadLocalRandom;
 
 import static soloMapling.ArtificialPlayer.BotHelpers.blockingSleep;
@@ -34,6 +38,26 @@ public final class LudiStages {
 
     private LudiStages() {
     }
+
+    /** The pass boxes: stage 2's tower, stage 3's mob crates, stage 5's guarded rooms. */
+    // (box ids live in LudiPqData; the loot radius lives here because it is this file's pacing)
+
+    /**
+     * How far a bot walks to pick up a dropped pass: its own kill's drop plus a small
+     * neighbourhood, not the whole room. The old full-room sweep read as every bot racing
+     * the others across the map for each card; a kill lands its drop at the mob's x, so a
+     * walk-up-and-pick radius keeps a bot on its own share.
+     */
+    private static final int LOOT_RADIUS_PX = 260;
+    /** Stage 3's crates pop 3 mobs from one box; their spawn spread needs a wider reach. */
+    private static final int CRATE_LOOT_RADIUS_PX = 400;
+    /**
+     * The one whole-room sweep a bot makes when its room's work is done, before delivering:
+     * the live radius is deliberately small (bots keep to their own kills' drops), so a drop
+     * that landed just outside everyone's reach would orphan the pass and stall the stage -
+     * the quiet-room sweep is what guarantees completeness.
+     */
+    private static final int CLEANUP_RADIUS_PX = 2_000;
 
     /**
      * The stage-2 box this bot is working: the map instance's identity (the tower and its
@@ -83,11 +107,14 @@ public final class LudiStages {
         PqActions.recoverUngatheredHandoffs(bot, LudiPqData.PASS);
         if (killableMobPresent(bot)) {
             PqActions.seekAndAttack(bot);
-            PqActions.loot(bot, bot.getPosition(), 2_000, new int[]{LudiPqData.PASS});
+            PqActions.loot(bot, bot.getPosition(), LOOT_RADIUS_PX, new int[]{LudiPqData.PASS});
             return;
         }
         // Room quiet: the work is done. Hold the stage-NPC post and hand the stock over the
-        // moment the leader comes for the turn-in.
+        // moment the leader comes for the turn-in. The quiet-room sweep is the one wide one:
+        // the live radius is a kill's neighbourhood, so a pass nobody was beside when it
+        // settled would orphan without this.
+        PqActions.loot(bot, bot.getPosition(), CLEANUP_RADIUS_PX, new int[]{LudiPqData.PASS});
         if (PqActions.handItemsToLeaderAfterStage(bot, LudiPqData.PASS) > 0) {
             PqActions.say(bot, BotMessages.get("pq.passes_dropped"));
         }
@@ -139,7 +166,7 @@ public final class LudiStages {
 
         int box = nearestOwnedBoxOid(bot, LudiPqData.BOX_STAGE2);
         if (box >= 0 && hitReactorDescendRotate(bot, box, LudiPqData.BOX_STAGE2)) {
-            PqActions.loot(bot, bot.getPosition(), 2_000, new int[]{LudiPqData.PASS});
+            PqActions.loot(bot, bot.getPosition(), LOOT_RADIUS_PX, new int[]{LudiPqData.PASS});
             return;
         }
         // Boxes all gone: the stage's work is done and the leader still has to turn the
@@ -154,7 +181,7 @@ public final class LudiStages {
         }
         // Still carrying passes while a box stands is fine: the stock rides along, the
         // delivery waits for the post-work beat above.
-        PqActions.loot(bot, bot.getPosition(), 2_000, new int[]{LudiPqData.PASS});
+        PqActions.loot(bot, bot.getPosition(), LOOT_RADIUS_PX, new int[]{LudiPqData.PASS});
     }
 
     /**
@@ -173,10 +200,10 @@ public final class LudiStages {
 
         int box = nearestOwnedBoxOid(bot, LudiPqData.BOX_STAGE2);
         if (box >= 0 && hitReactorRotate(bot, box, LudiPqData.BOX_STAGE2)) {
-            PqActions.loot(bot, bot.getPosition(), 2_000, new int[]{LudiPqData.PASS});
+            PqActions.loot(bot, bot.getPosition(), LOOT_RADIUS_PX, new int[]{LudiPqData.PASS});
             return;
         }
-        PqActions.loot(bot, bot.getPosition(), 2_000, new int[]{LudiPqData.PASS});
+        PqActions.loot(bot, bot.getPosition(), LOOT_RADIUS_PX, new int[]{LudiPqData.PASS});
         // Nothing of ours left standing (a teammate's bot may be mid-box): back to the
         // tower to work it from there. Our claim releases with the room change. The passes
         // stay pocketed - the tower's own post-work beat delivers them; this room has no
@@ -321,7 +348,7 @@ public final class LudiStages {
             hitReactorRotate(bot, crate, LudiPqData.BOX_STAGE3);
         }
         PqActions.seekAndAttack(bot);
-        PqActions.loot(bot, bot.getPosition(), 2_000, new int[]{LudiPqData.PASS});
+        PqActions.loot(bot, bot.getPosition(), CRATE_LOOT_RADIUS_PX, new int[]{LudiPqData.PASS});
         // No crates left and nothing alive to fight: the stage's work is done. Hold the
         // stage-NPC post and deliver the stock only when the leader comes for the turn-in,
         // instead of throwing passes the moment he passes by mid-fight.
@@ -340,32 +367,62 @@ public final class LudiStages {
     // Stage 4 - the door rooms
 
     /**
-     * Work the stage-4 door rooms: the main room has no mobs, the five rooms behind the
-     * doors each hold box mobs (9300008/9300014) that drop the passes. A bot inside a room
-     * kills the occupants, pockets the passes, and once the room is quiet slips out the
-     * door back to the main map - the stage NPC (and so the delivery post and the turn-in)
-     * live there. A bot in the main room stands by the doors.
+     * The door room a bot has claimed (stage 4's plain rooms and stage 5's guard rooms
+     * share the mechanism), keyed by bot id. A claim releases with the room change or the
+     * bot, and a held room is re-claimed on the next tick, so a bot keeps working the room
+     * it walked into. Claims are best-effort anti-crowding, not locks: two bots may still
+     * briefly work one room, and the first clear wins.
      */
-    public static void workDoorRooms(Character bot, int roomFirst, int roomLast, int doorsToOpen) {
-        int mapId = bot.getMapId();
-        if (mapId < roomFirst || mapId > roomLast) {
-            return; // main room: the leader picks the doors and does the talking
+    private static final Map<Integer, Integer> DOOR_ROOM_CLAIMS = new java.util.concurrent.ConcurrentHashMap<>();
+
+    /**
+     * Claim one of {@code roomFirst}..{@code roomLast} for this bot: the room it already
+     * holds, or the first unclaimed one. Returns -1 when every room is taken - the caller
+     * parks the bot by the stage NPC instead.
+     */
+    private static int claimDoorRoom(Character bot, int roomFirst, int roomLast) {
+        int mine = DOOR_ROOM_CLAIMS.getOrDefault(bot.getId(), -1);
+        if (mine >= roomFirst && mine <= roomLast) {
+            return mine; // keep the room we are working
         }
-        // Fight the room's box mobs and sweep the passes they drop.
-        PqActions.seekAndAttack(bot);
-        PqActions.loot(bot, bot.getPosition(), 2_000, new int[]{LudiPqData.PASS});
-        PqActions.recoverUngatheredHandoffs(bot, LudiPqData.PASS);
-        // Room quiet (all the room's killable mobs dead): the work is done. Slip out the
-        // door and deliver on the main map's stage-NPC post - the stage NPC lives there,
-        // so that is where the leader comes for the turn-in; the door-mouth drops (the old
-        // mid-room hand-off) only worked when he chanced to walk past that door. The exit
-        // waits for the leader to have LEFT this room first: while he is still inside, the
-        // follow-the-leader beat re-enters the room behind him and the bot ping-pongs
-        // through the door until he moves on.
-        if (killableMobPresent(bot) || leaderInRoom(bot)) {
-            return;
+        DOOR_ROOM_CLAIMS.remove(bot.getId());
+        for (int room = roomFirst; room <= roomLast; room++) {
+            boolean taken = false;
+            for (Map.Entry<Integer, Integer> claim : DOOR_ROOM_CLAIMS.entrySet()) {
+                if (claim.getKey() != bot.getId() && claim.getValue() == room
+                        && CharacterStorage.getBotById(claim.getKey()) != null) {
+                    taken = true;
+                    break;
+                }
+            }
+            if (!taken) {
+                DOOR_ROOM_CLAIMS.put(bot.getId(), room);
+                return room;
+            }
         }
-        exitDoorRoom(bot);
+        return -1;
+    }
+
+    /**
+     * Walk a bot from the stage's main map into its claimed door room through the door's
+     * in portal. The door id derives from the room's offset in the run (stage 4's five
+     * rooms sit at STAGE_4+1..+5 behind in01..in05), and the in portals are script portals
+     * - the same door scripts the leader uses - so entering runs the script and the warp
+     * lands the bot inside the room. Returns true once the bot is inside.
+     */
+    private static boolean enterDoorRoom(Character bot, int room, int stageMainMap) {
+        int portalId = room - stageMainMap;
+        org.gms.server.maps.Portal door = bot.getMap().getPortal(portalId);
+        if (door == null || door.getPosition() == null) {
+            return false;
+        }
+        if (bot.getPosition() != null
+                && bot.getPosition().distanceSq(door.getPosition()) > EXIT_WARP_RANGE_SQ) {
+            PqActions.walkTo(bot, door.getPosition());
+            return false;
+        }
+        PqActions.enterPortal(bot, door);
+        return bot.getMapId() == room;
     }
 
     /** Whether the party leader stands in this bot's room right now. */
@@ -375,9 +432,10 @@ public final class LudiStages {
     }
 
     /**
-     * Take a door room's own exit (out00) back to its stage's main map, walking to it first
-     * so the return reads as walking. The door rooms' out00 portals are script-less, so the
-     * engine accepts the warp from anywhere; the walk keeps it honest.
+     * Take a door room's own exit back to its stage's main map, walking to it first so the
+     * return reads as walking. The door rooms' out portals are script-less, so the engine
+     * accepts the warp from anywhere; the walk keeps it honest. The exit is whichever
+     * {@code out} portal the bot can still path to (see {@link #exitPortalOf}).
      */
     private static void exitDoorRoom(Character bot) {
         org.gms.server.maps.Portal exit = exitPortalOf(bot);
@@ -392,29 +450,82 @@ public final class LudiStages {
     }
 
     /**
+     * Work the stage-4 door rooms autonomously: a bot in the main room claims a door room
+     * nobody else holds, walks in through its script portal, clears the box mobs inside,
+     * and slips back out through the room's own exit once the room is quiet - delivering
+     * on the main map's stage-NPC post like before. A bot with no room left to take (all
+     * claimed or cleared by teammates) waits by the stage NPC with the leader.
+     *
+     * <p>The door's in portals are scripted, so entering them warps the bot inside without
+     * the leader having to open anything first - which is what makes self-service exploration
+     * possible here at all.
+     */
+    public static void workDoorRooms(Character bot, int roomFirst, int roomLast) {
+        int mapId = bot.getMapId();
+        if (mapId < roomFirst || mapId > roomLast) {
+            workStage4FromMainRoom(bot);
+            return;
+        }
+        // Inside a room: fight the box mobs and sweep the passes they drop.
+        PqActions.seekAndAttack(bot);
+        PqActions.loot(bot, bot.getPosition(), LOOT_RADIUS_PX, new int[]{LudiPqData.PASS});
+        PqActions.recoverUngatheredHandoffs(bot, LudiPqData.PASS);
+        // Room quiet (all the room's killable mobs dead): the work is done. Slip out the
+        // door and deliver on the main map's stage-NPC post - the stage NPC lives there,
+        // so that is where the leader comes for the turn-in. The exit waits for the leader
+        // to have LEFT this room first: while he is still inside, the follow-the-leader
+        // beat re-enters the room behind him and the bot ping-pongs through the door.
+        if (killableMobPresent(bot) || leaderInRoom(bot)) {
+            return;
+        }
+        exitDoorRoom(bot);
+    }
+
+    /**
+     * The main-room half of the stage-4 loop: claim a door room and walk in, or wait by
+     * the stage NPC when every room is spoken for. Runs only while the leader is on the
+     * main map - once he picks a door and walks in, the bots work their own claims.
+     */
+    private static void workStage4FromMainRoom(Character bot) {
+        int room = claimDoorRoom(bot, LudiPqData.STAGE4_ROOM_FIRST, LudiPqData.STAGE4_ROOM_LAST);
+        if (room < 0) {
+            // Every room claimed or being cleared: hold the NPC post, deliveries still run
+            // from there when the leader comes for the turn-in.
+            PqActions.waitNearStageNpc(bot);
+            return;
+        }
+        enterDoorRoom(bot, room, LudiPqData.STAGE_4);
+    }
+
+    /**
      * Work the stage-5 door rooms in stealth: each room's four pass boxes are guarded by
      * invincible Block Golems (PAD 999 - a touch is a death sentence), so the bot shows
      * 隐身术 for the whole visit. The hide makes it untouchable (isMonsterImmune) and costs
      * nothing: it is cancelled by the reactor strike itself, and re-shown next tick.
+     *
+     * <p>Only a bot whose kit actually carries a hide may enter a guard room: 隐身术 is
+     * rogue-lineage (Assassin/Bandit/夜行者), 橡木伪装 is the Brawler's barrel disguise -
+     * both are the two auras that make a bot monster-immune, and anything else walking in
+     * is a one-touch death. Non-hide bots stay on the main map and wait by the stage NPC.
      */
     public static void sneakDoorRooms(Character bot) {
         int mapId = bot.getMapId();
         if (mapId < LudiPqData.STAGE5_ROOM_FIRST || mapId > LudiPqData.STAGE5_ROOM_LAST) {
-            return; // main room: the guards there are the leader's problem; stay off them
+            workStage5FromMainRoom(bot);
+            return;
         }
+        // Re-show every tick while inside: the strike cancels the hide (an attack action),
+        // so the next tick's show re-stealths - one box per tick, the honest sneak pace.
         if (!BotAuraState.isMonsterImmune(bot)) {
-            // Any lineage bot shows the rogue hide: it is a display-only aura on the bot
-            // (no job check in showBuff), and this is the one place the quest needs it.
-            soloMapling.ArtificialPlayer.BotAttackSystem.BotBuffEffects.showBuff(bot, Rogue.DARK_SIGHT);
+            soloMapling.ArtificialPlayer.BotAttackSystem.BotBuffEffects.showBuff(bot, hideSkillFor(bot));
         }
-        // Boxes while hidden: the strike cancels the hide (an attack action), so re-show
-        // happens next tick - one box per tick, which is the honest pace for a sneak. The
-        // beat is off: a swing mid-walk would break Dark Sight in a PAD-999 room.
+        // Boxes while hidden: the strike cancels the hide, so re-show happens next tick.
+        // The beat is off: a swing mid-walk would break the hide in a PAD-999 room.
         int box = nearestBoxOid(bot, LudiPqData.BOX_STAGE5);
         if (box >= 0) {
             hitReactorRotate(bot, box, LudiPqData.BOX_STAGE5, false);
         }
-        PqActions.loot(bot, bot.getPosition(), 2_000, new int[]{LudiPqData.PASS});
+        PqActions.loot(bot, bot.getPosition(), LOOT_RADIUS_PX, new int[]{LudiPqData.PASS});
         PqActions.recoverUngatheredHandoffs(bot, LudiPqData.PASS);
         // All four boxes broken: the room's work is done. Slip out the door and deliver on
         // the main map's stage-NPC post - the leader turns the stage in there, not at this
@@ -429,12 +540,52 @@ public final class LudiStages {
     }
 
     /**
-     * Show 隐身术 and keep it up: the movement tick only retires the hide on an attack or a
-     * mount, so simply re-showing each tick while guards are near reads as one long stealth.
+     * The main-room half of the stage-5 loop. A bot whose kit carries a hide (隐身术 rogue
+     * lineage or 橡木伪装 Brawler) claims a guard room the same way stage 4's are claimed
+     * and sneaks in alone; everyone else waits by the stage NPC - a non-hide body in a
+     * PAD-999 room dies to the first touch, and stage 5's passes live nowhere else.
+     */
+    private static void workStage5FromMainRoom(Character bot) {
+        if (hideSkillFor(bot) == 0) {
+            PqActions.waitNearStageNpc(bot);
+            return;
+        }
+        int room = claimDoorRoom(bot, LudiPqData.STAGE5_ROOM_FIRST, LudiPqData.STAGE5_ROOM_LAST);
+        if (room < 0) {
+            PqActions.waitNearStageNpc(bot);
+            return;
+        }
+        enterDoorRoom(bot, room, LudiPqData.STAGE_5);
+    }
+
+    /**
+     * The hide skill this bot's kit carries for sneaking past the stage-5 guards, or 0 for
+     * a job that has none: 隐身术 (rogue lineage - the one place a THIEF bot's registered
+     * hide is spent) or 橡木伪装 (the Brawler's barrel disguise). Both are display-only
+     * auras on the bot, but the JOB check is real: the kit registry is what decides whether
+     * this body can survive the room.
+     */
+    private static int hideSkillFor(Character bot) {
+        var kit = BotBuffConfig.buffsForJob(bot.getJob());
+        if (kit.contains(Rogue.DARK_SIGHT)) {
+            return Rogue.DARK_SIGHT;
+        }
+        if (kit.contains(Brawler.OAK_BARREL)) {
+            return Brawler.OAK_BARREL;
+        }
+        return 0;
+    }
+
+    /**
+     * Show this bot's own hide (隐身术 for rogue lineage, 橡木伪装 for a Brawler) and keep
+     * it up: the movement tick only retires the hide on an attack or a mount, so simply
+     * re-showing each tick while guards are near reads as one long stealth. A no-op for a
+     * bot whose kit carries neither - those never enter a guard room in the first place.
      */
     public static void stayHidden(Character bot) {
-        if (!BotAuraState.isMonsterImmune(bot)) {
-            soloMapling.ArtificialPlayer.BotAttackSystem.BotBuffEffects.showBuff(bot, Rogue.DARK_SIGHT);
+        int hide = hideSkillFor(bot);
+        if (hide != 0 && !BotAuraState.isMonsterImmune(bot)) {
+            soloMapling.ArtificialPlayer.BotAttackSystem.BotBuffEffects.showBuff(bot, hide);
         }
     }
 
@@ -445,6 +596,7 @@ public final class LudiStages {
      */
     public static void releaseRoomState(int botId) {
         releaseTowerBox(botId);
+        DOOR_ROOM_CLAIMS.remove(botId);
         PqActions.releaseWaitClaims(botId);
     }
 
@@ -479,9 +631,47 @@ public final class LudiStages {
                         && Math.abs(m.getPosition().y - p.y) <= 150);
     }
 
-    /** The room's exit portal (out00), or null. */
+    /**
+     * The room's exit back to its stage's main map: the exit portal the bot can actually
+     * PATH to, nearest first.
+     *
+     * <p>房 501 (and anything shaped like it) makes this a real choice, not a nicety: the
+     * 塔的迷路 tower is entered at the top, its boxes sit on ledges that only chain DOWNWARD
+     * (the middle rope's bottom hangs above the lowest two-way ledge, so nothing below can
+     * climb back), and its second exit (out01) is at the bottom. A bot that finished the deep
+     * boxes cannot return to the top-row out00 - the old hard-coded out00 sent the climb back
+     * up as an unwalkable goal, and the bot stalled against it until the movement layer gave
+     * up (the "climbs, stalls, drops, retries, quits" report). Asking the nav graph which
+     * exit is reachable answers this for every room shape: the top-row bot paths to out00,
+     * a bot past the one-way ledge paths to out01.
+     */
     private static org.gms.server.maps.Portal exitPortalOf(Character bot) {
         var map = bot.getMap();
+        org.gms.server.maps.Portal best = null;
+        double bestSq = Double.MAX_VALUE;
+        for (org.gms.server.maps.Portal p : map.getPortals()) {
+            String name = p.getName();
+            if (!"out00".equals(name) && !"out01".equals(name)) {
+                continue;
+            }
+            if (p.getPosition() == null) {
+                continue;
+            }
+            double dsq = bot.getPosition().distanceSq(p.getPosition());
+            if (dsq >= bestSq) {
+                continue;
+            }
+            if (!GCMovement.canPathTo(bot, p.getPosition().x, p.getPosition().y)) {
+                continue; // on the far side of a one-way ledge; the other exit is the way out
+            }
+            best = p;
+            bestSq = dsq;
+        }
+        // No reachable exit (graph still baking / degenerate room): fall back to the
+        // nearest exit rather than none, so the walk at least starts somewhere.
+        if (best != null) {
+            return best;
+        }
         for (org.gms.server.maps.Portal p : map.getPortals()) {
             if ("out00".equals(p.getName())) {
                 return p;
