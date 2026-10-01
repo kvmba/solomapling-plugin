@@ -606,9 +606,15 @@ final class BotNavigationManager {
 
         // Ours: humanlike pause between two down-jumps (see BotPhysicsEngine.downJumpOnCadenceCooldown).
         // Not a "-pos" reason: the bot is not parked against a gate, it is deliberately resting after
-        // the previous down-jump, so the blocked-gate give-up must not retire the edge for it.
+        // the previous down-jump, so the blocked-gate give-up must not retire the edge for it. The
+        // launch-hold flag is raised with it: a cadence-holding bot stands still in the drop window
+        // for the full beat, and without the flag the stuck watchdog reads that stillness as a wedge
+        // and rescue-hops the bot off the row it is about to drop from (the Tower's Maze descent
+        // loop: hop, re-land, hop, until the move is abandoned). Same deliberate-hold contract as the
+        // jump branches' launchReadyAwaiting.
         if (BotPhysicsEngine.downJumpOnCadenceCooldown(entry)) {
             entry.lastEdgeBlockReason = "drop-cadence";
+            entry.launchReadyAwaiting = true;
             return null;
         }
 
