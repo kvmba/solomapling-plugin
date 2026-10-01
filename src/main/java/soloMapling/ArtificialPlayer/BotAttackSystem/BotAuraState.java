@@ -344,12 +344,8 @@ public final class BotAuraState {
             // An attack-enabler morph: note which MORPH visual is up (so an expiry swap can name the
             // exact cancel frame) and when it expires. A later enabler overwrites the earlier one -
             // the swap below broadcasts that cancellation - exactly how the client's single MORPH
-            // stat slot behaves. The disguise it supersedes leaves the ledger here: the barrel is
-            // gone as an aura (the single MORPH stat slot now names the enabler), and its entry
-            // must not survive into the on-arrival replay.
+            // stat slot behaves (a disguise it supersedes leaves the slot with it).
             MORPH_SKILL.put(id, skillId);
-            SHOWN_AURAS.computeIfAbsent(id, k -> ConcurrentHashMap.newKeySet())
-                    .remove(Brawler.OAK_BARREL);
             // The level-scaled durationOf: for the 海盗船 the WZ time is a ~24-day mount-style
             // ride - the clamp is what makes the ship an attack-enabler aura a bot actually
             // cycles, instead of a one-cast-per-bot-session pose.
@@ -357,13 +353,12 @@ public final class BotAuraState {
             long life = durationMs > 0 ? (long) (durationMs * 0.9) : ENABLER_FALLBACK_MS;
             ATTACK_ENABLER_UNTIL.put(id, System.currentTimeMillis() + life);
         } else if (isDisguise(skillId)) {
+            // The disguise rides ONLY the MORPH slot - never the SHOWN_AURAS ledger. The slot is
+            // the disguise's single live holder (its cancel, mount teardown and the
+            // isAuraLiveGiven replay rule all read it), and adding the id here as well would put
+            // it twice into visibleAurasFor's list (slot + ledger) - a doubled MORPH frame to
+            // every arriving observer.
             MORPH_SKILL.put(id, skillId);
-            // 伪装 also rides the plain-aura replay ledger: visibleAurasFor only names ONE morph
-            // id, and it reads it from MORPH_SKILL - which a later 变身/海盗船 show overwrites,
-            // leaving the disguise undrawable on a fresh arrival. In the ledger the disguise stays
-            // listed while the morph slot carries whichever enabler superseded it (the client
-            // renders one body; the MORPH stat the disguise frame carries is the barrel).
-            SHOWN_AURAS.computeIfAbsent(id, k -> ConcurrentHashMap.newKeySet()).add(skillId);
         } else if (isDarkSight(skillId)) {
             DARK_SIGHT_UP.add(id);
         } else if (skillId == Crusader.COMBO) {
@@ -432,14 +427,6 @@ public final class BotAuraState {
                 }
             }
         }
-        // A transformation granted while an old disguise was still up: the disguise is gone as an
-        // aura, so its ledger entry must go too (the barrel's MORPH frame would otherwise survive
-        // in the on-arrival replay forever - the MORPH stat slot itself now belongs to whichever
-        // enabler the barrel was swapped for).
-        if (SHOWN_AURAS.getOrDefault(id, Set.of()).contains(Brawler.OAK_BARREL)
-                && !MORPH_SKILL.containsKey(id)) {
-            removeDisguiseFromLedger(id);
-        }
 
         // 疾驰: the aura is the visible side of the BotDashBurst buff — it shows whenever the
         // burst is live and the bot is not mounted, and is cancelled the moment the burst is
@@ -472,7 +459,6 @@ public final class BotAuraState {
         if (mounted) {
             if (isDisguised(id)) {
                 MORPH_SKILL.remove(id);
-                removeDisguiseFromLedger(id);
                 cancel(bot, MORPH_STATS);
             }
             if (DARK_SIGHT_UP.remove(id)) {
@@ -494,7 +480,6 @@ public final class BotAuraState {
         int id = bot.getId();
         if (isDisguised(id)) {
             MORPH_SKILL.remove(id);
-            removeDisguiseFromLedger(id);
             cancel(bot, MORPH_STATS);
         }
         if (DARK_SIGHT_UP.remove(id)) {
@@ -634,14 +619,6 @@ public final class BotAuraState {
             }
         }
         return result;
-    }
-
-    /** Retire the disguise's plain-aura ledger entry at any teardown site (attack / mount / supersede). */
-    private static void removeDisguiseFromLedger(int botId) {
-        Set<Integer> ledger = SHOWN_AURAS.get(botId);
-        if (ledger != null) {
-            ledger.remove(Brawler.OAK_BARREL);
-        }
     }
 
     /** Release a despawned bot's aura bookkeeping so the maps don't grow unbounded. */
