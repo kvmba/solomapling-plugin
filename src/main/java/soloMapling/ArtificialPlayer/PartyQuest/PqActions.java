@@ -122,6 +122,7 @@ public final class PqActions {
         if (bot == null || target == null) {
             return;
         }
+        armStageWalkShield(bot);
         java.util.concurrent.CountDownLatch arrived = new java.util.concurrent.CountDownLatch(1);
         GCMovement.move(bot, target.x, target.y, arrived::countDown);
         // Bounded block: the tick waits for the walk to land, but never longer than one slow
@@ -137,9 +138,11 @@ public final class PqActions {
             // walk costs one cap at most rather than the whole timeout.
             while (System.currentTimeMillis() < deadline) {
                 if (arrived.await(50, java.util.concurrent.TimeUnit.MILLISECONDS)) {
+                    disarmStageWalkShield(bot);
                     return;
                 }
                 if (!GCMovement.isMoving(bot)) {
+                    disarmStageWalkShield(bot);
                     return;
                 }
             }
@@ -154,6 +157,41 @@ public final class PqActions {
      * a wedged walk must cost one short cap rather than a wedged combat beat everywhere.
      */
     private static final long WALK_BLOCK_CAP_MS = 1_200;
+
+    // Stage-walk shield: the macro tick's walks (portal following, puzzle holds) must not be
+    // re-targeted by the 250ms combat beat, which would yank the walk at a mob and oscillate
+    // the bot between its goal and the fight. walkTo/holdArea/spreadNearStageNpc arm a shield
+    // that outlives the blocking window (the walk keeps flying after walkTo gives up waiting)
+    // and expires on its own - the combat beat reads it and skips steering (still swinging)
+    // until then. Cleared eagerly when the walk lands; the expiry is the wedge escape.
+    private static final long STAGE_WALK_SHIELD_MS = 8_000;
+    private static final Map<Integer, Long> stageWalkShieldUntilByBot = new java.util.concurrent.ConcurrentHashMap<>();
+
+    /** Whether the combat beat must leave this bot's movement alone right now. */
+    public static boolean movementShielded(int botId) {
+        Long until = stageWalkShieldUntilByBot.get(botId);
+        if (until == null) {
+            return false;
+        }
+        if (System.currentTimeMillis() >= until) {
+            stageWalkShieldUntilByBot.remove(botId);
+            return false;
+        }
+        return true;
+    }
+
+    private static void armStageWalkShield(Character bot) {
+        if (bot != null) {
+            stageWalkShieldUntilByBot.put(bot.getId(),
+                    System.currentTimeMillis() + STAGE_WALK_SHIELD_MS);
+        }
+    }
+
+    private static void disarmStageWalkShield(Character bot) {
+        if (bot != null) {
+            stageWalkShieldUntilByBot.remove(bot.getId());
+        }
+    }
 
     /**
      * Walk so the bot ends up standing on the floor <em>under</em> an airborne point.
@@ -559,7 +597,9 @@ public final class PqActions {
      *
      * <p>Standing still is the whole mechanic for the area puzzles: the quest counts players
      * inside each rectangle ({@code MapleMap#getNumPlayersInArea}) and compares that against
-     * a target it picked at random. A bot that wanders mid-check reads as absent.
+     * a target it picked at random. A bot that wanders mid-check reads as absent. The walk in
+     * arms the stage-walk shield, and the hold extends it: a puzzle room with mobs must not
+     * have its hold yanked apart by the combat beat's chase move.
      */
     public static void holdArea(Character bot, Point spot, long millis) {
         if (bot == null || spot == null) {
@@ -569,6 +609,7 @@ public final class PqActions {
         // Capped at one walk block: a longer hold freezes a busy stage tick for the whole
         // span, and a bot-only room's 36-48s cadence already spaces its ticks far apart.
         blockingSleep(Math.min(millis, WALK_BLOCK_CAP_MS));
+        armStageWalkShield(bot); // keep the beat off the bot while it holds the puzzle spot
     }
 
     /** Inline-pickup cap for a loot sweep (see {@link #loot}): what one tick may pay for. */
@@ -749,15 +790,40 @@ public final class PqActions {
         return chosen;
     }
 
-    /** Whether the bot's graph can plan a route to this mob's floor point (peek, no build). */
+    /**
+     * Whether the bot's graph can plan a route to this mob's floor point (peek, no build).
+     *
+     * <p>The answer is cached per (bot, mob) for a beat-window: the sweep calls this on every
+     * mob in the room every 250ms, and each call walks the nav graph's region data - a
+     * per-beat re-plan for a chase that is already under way is wasted work (the sticky check
+     * re-plans too), so a mob keeps its last verdict briefly. Short on purpose: a mob that
+     * wanders onto an unreachable ledge must be released soon after, not at the timeout.
+     */
+    private static final long PATHABILITY_TTL_MS = 1_000;
+    private record PathabilityKey(int botId, int mobOid) {
+    }
+    private static final Map<PathabilityKey, Long> pathableVerdictAtByBot =
+            new java.util.concurrent.ConcurrentHashMap<>();
+    private static final Map<PathabilityKey, Boolean> pathableVerdictByBot =
+            new java.util.concurrent.ConcurrentHashMap<>();
+
     private static boolean isPathable(Character bot, Monster m) {
         Point mp = m.getPosition();
         if (mp == null) {
             return false;
         }
+        var key = new PathabilityKey(bot.getId(), m.getObjectId());
+        long now = System.currentTimeMillis();
+        Long stamped = pathableVerdictAtByBot.get(key);
+        if (stamped != null && now - stamped < PATHABILITY_TTL_MS) {
+            return pathableVerdictByBot.get(key);
+        }
         Point ground = GCMovement.groundPointBelow(bot.getMap(), mp.x, mp.y);
         int ty = (ground != null) ? ground.y : mp.y;
-        return GCMovement.canPathTo(bot, mp.x, ty);
+        boolean pathable = GCMovement.canPathTo(bot, mp.x, ty);
+        pathableVerdictAtByBot.put(key, now);
+        pathableVerdictByBot.put(key, pathable);
+        return pathable;
     }
 
     /** Release a stopped/despawned quest bot's seek state so the per-bot maps do not grow. */
@@ -766,6 +832,8 @@ public final class PqActions {
         seekAnchorByBot.remove(botId);
         seekDeadlineByBot.remove(botId);
         seekLastXByBot.remove(botId);
+        pathableVerdictAtByBot.keySet().removeIf(k -> k.botId() == botId);
+        pathableVerdictByBot.keySet().removeIf(k -> k.botId() == botId);
     }
 
     /** Whether this mob is a legitimate chase target from {@code pos}: hostile and in the seek box. */
@@ -885,7 +953,12 @@ public final class PqActions {
         if (bot == null || bot.getMap() == null) {
             return;
         }
-        walkTo(bot, stageNpcSpot(bot));
+        Point spot = stageNpcSpot(bot);
+        if (spot == null) {
+            return;
+        }
+        walkTo(bot, spot);
+        armStageWalkShield(bot); // holding the ring spot: keep the beat's chase off the walk
     }
 
     /** The closest stage NPC's spot (the next00 portal's mouth as fallback), or null. */
@@ -941,6 +1014,7 @@ public final class PqActions {
         }
         Point target = claimNear(bot, npc);
         walkTo(bot, target);
+        armStageWalkShield(bot); // holding the ring spot: keep the beat's chase off the walk
     }
 
     /**

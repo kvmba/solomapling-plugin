@@ -143,12 +143,12 @@ public abstract class PartyQuestBot extends BotSM implements GrindTickRegistry.P
      *
      * <p>Two coordination gates keep the beat from fighting the macro tick:
      * <ul>
-     *   <li>{@code movementOverride}: while the macro tick has the bot walking somewhere
-     *       (following the leader through a portal, taking a puzzle spot), the beat must not
-     *       re-issue {@code GCMovement.move} at a mob and yank the walk around. It still
-     *       swings - whatever comes into reach on the way is fair - it just does not steer.
-     *       The flag is armed by the walk helpers and cleared by the macro tick once the
-     *       step's own checks have run.</li>
+     *   <li>the stage-walk shield ({@code PqActions.movementShielded}): while the macro tick
+     *       has the bot walking somewhere (following the leader through a portal, holding a
+     *       puzzle spot), the beat must not re-issue {@code GCMovement.move} at a mob and
+     *       yank the walk around. It still swings - whatever comes into reach on the way is
+     *       fair - it just does not steer. The shield is armed by every walk/hold helper and
+     *       expires on its own.</li>
      *   <li>{@link #fightsOnSweep}: a stage whose contract forbids swinging (the frog room's
      *       catch-don't-kill mobs, Ludi's invincible guards, the pyramid's marked monsters)
      *       opts out entirely. Default is to fight.</li>
@@ -161,7 +161,7 @@ public abstract class PartyQuestBot extends BotSM implements GrindTickRegistry.P
                 || !getRunning()
                 || death().isCorpse() || status().isFrozen()
                 || bot.getParty() == null
-                || movementOverride
+                || movementShielded()
                 || !fightsOnSweep()
                 || !isInsideQuest(bot.getMapId())) {
             return;
@@ -180,18 +180,13 @@ public abstract class PartyQuestBot extends BotSM implements GrindTickRegistry.P
     /**
      * Set while this bot's macro tick is driving a walk whose arrival the stage work depends
      * on (portal following, puzzle spots): the combat beat must not re-target the movement
-     * engine mid-walk. Cleared at the top of the next macro tick.
+     * engine mid-walk. The shield lives in {@code PqActions} - armed by every walk/hold
+     * helper, expiring on its own after a few seconds so a wedged walk cannot pin the bot
+     * forever.
      */
-    private volatile boolean movementOverride;
-
-    /** Mark that a stage-driven walk is in flight; the combat beat stops steering. */
-    protected final void holdMovementForStageWalk() {
-        movementOverride = true;
-    }
-
-    /** Release the stage-walk hold; called at the top of every macro tick. */
-    private void clearMovementOverride() {
-        movementOverride = false;
+    private boolean movementShielded() {
+        Character bot = getChr();
+        return bot != null && PqActions.movementShielded(bot.getId());
     }
 
     /** Where the run happens: the map that proves the bot is inside the quest. */
@@ -238,7 +233,6 @@ public abstract class PartyQuestBot extends BotSM implements GrindTickRegistry.P
         if (bot == null || bot.getMap() == null) {
             return;
         }
-        clearMovementOverride();
 
         // A pending invitation is answered even outside the quest - that is when they arrive.
         if (bot.getParty() == null) {
@@ -640,10 +634,6 @@ public abstract class PartyQuestBot extends BotSM implements GrindTickRegistry.P
         BotLogger.log("PQ bot " + getChr().getName() + " following the leader from "
                 + here + " to " + leaderMap + " through portal " + exit.getName());
         sayDoorLine();
-        // The walk to the door must not be fought over by the combat beat: a mob still in this
-        // room would re-target the movement engine every 250ms and the bot would oscillate
-        // between the door and the mob, never entering. Held until the next macro tick clears it.
-        holdMovementForStageWalk();
         PqActions.walkTo(getChr(), exit.getPosition());
         PqActions.enterPortal(getChr(), exit);
         return getChr().getMapId() != here;
