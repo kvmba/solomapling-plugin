@@ -14,9 +14,10 @@ import java.util.concurrent.ConcurrentHashMap;
 /*
  * Plugin-side dead-pit guard. Independent of the WZ forbidFallDown flags and of the nav
  * graph being baked: a landing surface is a DEAD PIT FLOOR when nothing above it is
- * escapable - no portal, no rope to grab, and no jump chain (apex-bounded) back up to a
- * higher surface. The semantics mirror scripts/wzaudit/dead_pit_scan.py, evaluated at
- * runtime from the live foothold tree.
+ * escapable - no portal, no rope to grab, no jump chain (apex-bounded) back up to a
+ * higher surface, AND no way off downward either (walk-off / down-jump with a real
+ * landing, or a rope bottoming at the floor to ride down). The semantics mirror
+ * scripts/wzaudit/dead_pit_scan.py, evaluated at runtime from the live foothold tree.
  *
  * Why: the graph's dead-region prune keeps the PLANNED routes out of such pits, but a bot
  * can still reach one through paths the graph never sees - the stuck watchdog's rescue hop
@@ -139,7 +140,63 @@ final class DeadPitGuard {
         if (highestSurfaceY(surfaces) >= floorY) {
             return true;
         }
+        // Ours (LPQ stage-1 tower): a walk-off / down-jump off this surface is an exit too.
+        // The old "up-only" model called the stage-1 spawn row (y=130, one walk-off to the
+        // door row) and every plain drop-through ledge dead, which steered recoveries and
+        // guards against platforms a bot leaves by simply stepping off. The landing's own
+        // livability is that landing's verdict - not recursed here, mirroring the one-hop
+        // depth of the jump chain above.
+        if (fallEscape(map, floorY, loX, hiX, profile)) {
+            return true;
+        }
+        // And the rope the other direction: a rope whose BOTTOM reaches (or passes below)
+        // this floor can be mounted here and ridden DOWN. ropeAbove only counts ropes to
+        // climb UP, so a mid-shaft platform beside a long rope read as dead on both checks.
+        if (ropeBelow(map, floorY, loX, hiX)) {
+            return true;
+        }
         return jumpChainEscapes(surfaces, foothold, apex, new java.util.HashSet<>());
+    }
+
+    /*
+     * Ours: can the bot leave {@code (loX..hiX, floorY)} by walking off or down-jumping
+     * into open air and landing somewhere standable? Probed at the surface's midpoint and
+     * quarter points (a plain midpoint can sit over a hole while an edge still lands), via
+     * the same two simulators the executor's own moves use - a "yes" here is the move the
+     * bot would actually make. The landing surface's own verdict is NOT chased (one-hop
+     * depth, like the jump chain); it is cached on its own foothold.
+     */
+    private static boolean fallEscape(MapleMap map, int floorY, int loX, int hiX,
+                                      BotMovementProfile profile) {
+        int probeXs = (hiX - loX) >= 200 ? 3 : 1;
+        for (int i = 0; i < probeXs; i++) {
+            int x = probeXs == 1 ? (loX + hiX) / 2
+                    : loX + (hiX - loX) * i / (probeXs - 1);
+            Point from = new Point(x, floorY);
+            if (BotPhysicsEngine.simulateFallLanding(map, from, 0) != null) {
+                return true;
+            }
+            if (BotPhysicsEngine.simulateDownJumpLanding(map, from) != null) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /*
+     * Ours: a rope whose climbable bottom reaches this floor (within the same slack the
+     * up-direction grants) can be grabbed here and ridden down - an exit, not scenery.
+     */
+    private static boolean ropeBelow(MapleMap map, int floorY, int loX, int hiX) {
+        for (Rope rope : map.getRopes()) {
+            if (rope.bottomY() < floorY - ROPE_GRAB_SLACK_PX) {
+                continue; // the rope ends too far above this floor to mount it here
+            }
+            if (loX - ROPE_X_SLACK_PX <= rope.x() && rope.x() <= hiX + ROPE_X_SLACK_PX) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static int highestSurfaceY(List<Foothold> surfaces) {

@@ -1222,7 +1222,7 @@ class BotMovementManager {
      * never mid-air beside a slope. Null when nothing above reads livable - the caller stays
      * put rather than warping into another trap.
      */
-    private static Point nearestLivableGround(Character bot) {
+    static Point nearestLivableGround(Character bot) {
         MapleMap map = bot.getMap();
         Point pos = bot.getPosition();
         if (map == null || map.getFootholds() == null || pos == null) {

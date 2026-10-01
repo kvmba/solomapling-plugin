@@ -1069,13 +1069,19 @@ final class GCMovementDriver {
         // (Time Lane <1>) the goal is routinely a mob on a floor 100-900px up, so a goal-anchored
         // recovery re-appeared the bot on the MOB'S floor - the observed "bot on a lower platform
         // suddenly fights from the upper floor". x is clamped into the map (an off-side fall has no
-        // foothold at its raw x); if the column has no floor at all, fall back to the VR-top row.
+        // foothold at its raw x).
+        // Ours (LPQ stage-1 tower): the raw column can end at an UNLIVABLE floor (LPQ 922010100's
+        // y=542 dead-pit basin), and the old no-floor fallback probed from the VR-TOP row - which on
+        // that map resolved the sealed top pocket at y=-3945 and teleported every falling bot INTO
+        // it (the reported "bots sucked to the top of the map"). Both answers must pass the
+        // livability probe: anything dead falls back to the nearest livable ground (a real exit
+        // exists there), and the VR top is never consulted again.
         Point clamped = new Point(Math.max(vr.x, Math.min(vr.x + vr.width, pos.x)), pos.y);
         Point ground = BotPhysicsEngine.findGroundPoint(map, new Point(clamped.x, clamped.y - 1));
-        if (ground == null) {
-            ground = BotPhysicsEngine.findGroundPoint(map, new Point(clamped.x, vr.y - 1));
+        if (ground == null || !DeadPitGuard.isLivableLanding(map, ground, entry.movementProfile)) {
+            ground = BotMovementManager.nearestLivableGround(bot);
         }
-        Point dest = (ground != null) ? ground : new Point(clamped.x, vr.y);
+        Point dest = (ground != null) ? ground : clamped;
         BotPhysicsEngine.teleportTo(entry, bot, dest);
         BotMovementManager.resetEntryStateAfterTeleport(entry);
         // De-thrash: resetEntryStateAfterTeleport only clears NAV state, leaving moveTarget — so the bot
