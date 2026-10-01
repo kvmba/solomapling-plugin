@@ -395,6 +395,22 @@ public class MovementCommands {
         if (!endsAirborne((byte) fakechar.getStance())) {
             return; // walking/standing ends are the existing paths' job
         }
+        settleOnGround(fakechar);
+    }
+
+    /**
+     * Unconditional ground snap + standing re-anchor, regardless of the bot's current pose.
+     *
+     * <p>{@link #settleRecordedReplay} only fires for airborne end poses because ordinary replays get
+     * their own stop/stand handling; a station bot that just played its spawn choreography (offset-shifted
+     * recording) has no such guarantee — started from a stair/slope coordinate its final frame can hover
+     * with a WALK/STAND stance and no client gravity will ever resolve it. Snap to the ground below and
+     * broadcast the standing idler so observers see a bot planted on the foothold, not floating.
+     */
+    public static void settleOnGround(Character fakechar) {
+        if (fakechar == null || fakechar.getMap() == null) {
+            return;
+        }
         MapleMap map = fakechar.getMap();
         Point position = fakechar.getPosition();
         // The public spatial query (the engine's own indexed lookup) - the movement engine itself is

@@ -18,6 +18,8 @@ import soloMapling.ArtificialPlayer.BotGeneration;
 import soloMapling.ArtificialPlayer.BotHelpers;
 import soloMapling.ArtificialPlayer.BotSummonSystem.BotSummonSystem;
 import soloMapling.ArtificialPlayer.BotSummonSystem.BotSummonTable;
+import soloMapling.ArtificialPlayer.BotMovementSystem.MovementCommands;
+import soloMapling.ArtificialPlayer.GCMoveSystem.GCMovement;
 import soloMapling.BotLogger;
 import soloMapling.server.BotChannelRouter;
 import soloMapling.server.MethodScheduler;
@@ -152,7 +154,6 @@ public final class SkillShowController {
         if (pos == null) {
             return "无法取得 GM 的位置。";
         }
-        spawnPos = new Point(pos);
         mapId = gmMapId;
         channelId = gmChannel > 0 ? gmChannel : BotChannelRouter.DEFAULT_CHANNEL;
         jobIndex = -1;
@@ -162,6 +163,10 @@ public final class SkillShowController {
         stepDone = 0;
         jobTotal = SHOWCASE_JOBS.length;
         consecutiveSpawnFailures = 0;
+        // 起点吸附：GM 在楼梯/斜坡上启动时 pos 是坡面坐标（可能不在任何 foothold
+        // 的支撑正上方），bot 带着它出生、落地编排播完仍悬空表演。先吸附到该 x
+        // 的真实地面，bot 与木桩的出生点才是「高于地面的可站立点」。
+        spawnPos = groundSnap(mapId, pos);
         phase = Phase.SPAWN;
         say("[skillshow] 开始登场：job 队列 " + jobTotal + " 个职业");
         MethodScheduler.runAfterDelay(SkillShowController::beat, 0);
@@ -260,6 +265,23 @@ public final class SkillShowController {
         return soloMapling.server.SoloMaplingConstants.mainChannel().getMapFactory().getMap(mapId);
     }
 
+    /**
+     * 出生点吸附：把 GM 给的点垂直落到该 x 的真实地面上。
+     *
+     * <p>地图对象按频道隔离，而 start 时频道里可能还没有人 —— 直接拿 GM 的
+     * mapId 任意一份实例做 foothold 查询即可：foothold 地形是同图各频道共享的
+     * WZ 数据，落在哪份实例上结果一致。查不到地面（黑屏图/坐标离谱）时原样
+     * 返回，后续流程照旧。</p>
+     */
+    private static Point groundSnap(int mapId, Point pos) {
+        MapleMap map = mapOnGmChannel(mapId);
+        if (map == null) {
+            return new Point(pos);
+        }
+        Point ground = GCMovement.groundPointBelow(map, pos.x, pos.y);
+        return ground != null ? ground : new Point(pos);
+    }
+
     /** 登场：生成下一个职业的 bot；全部演完则收场。 */
     private static void beatSpawn() {
         if (jobIndex + 1 >= SHOWCASE_JOBS.length) {
@@ -346,6 +368,11 @@ public final class SkillShowController {
         stepDone = 0;
         pending = null;
         consecutiveSpawnFailures = 0;
+        // 落地锚定：bot 的出生编排是录像回放（带 offset 平移），GM 在楼梯/斜坡上
+        // 启动时回放终点不在 foothold 上 —— 无客户端重力替它结算，最后一帧悬空
+        // 就是整场表演的姿态。开演前把位置吸附到脚下地面并广播 idle 站立帧
+        // （settleRecordedReplay 同款收尾），确保站得实、不掉屏。
+        MovementCommands.settleOnGround(bot);
         // 木桩（毒雾/影网/影子貔貅/能量反击的可作用目标）与 bot 同登同退。
         boolean staged = SkillShowTarget.spawn(spawnPos, bot.getMap(), bot.getId());
         say("[skillshow] job " + cidToJob(cid) + " 登场（cid " + cid + "），"

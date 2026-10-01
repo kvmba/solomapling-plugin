@@ -2,7 +2,9 @@ package soloMapling.ArtificialPlayer.SkillShowSystem;
 
 import org.gms.server.life.LifeFactory;
 import org.gms.server.life.Monster;
+import org.gms.server.maps.Foothold;
 import org.gms.server.maps.MapleMap;
+import soloMapling.ArtificialPlayer.GCMoveSystem.GCMovement;
 
 import java.awt.Point;
 import java.util.Map;
@@ -14,12 +16,21 @@ import java.util.concurrent.ConcurrentHashMap;
  * 终极攻击要主挥击落地才掷 prop，影子貔貅要有钱包目标。
  *
  * <p>选 9300093（冒牌泰勒斯，宿主常量 MobId.TYLUS）：WZ 自带 PADamage=0 /
- * MADamage=0 / pushed=0 / exp=0 / maxHP=10 万 / dropItemPeriod=10s。关键点：</p>
+ * MADamage=0 / pushed=0 / exp=0 / changeable=false / dropItemPeriod=10s。关键点：</p>
  * <ul>
  *   <li><b>PADamage=0</b>：接触伤害扫描 {@code rollMobDamage} 按
  *       {@code getPADamage() × 0.5} 结算，0 → Math.max(1,·) 兜底 1 点/次，
  *       表演 bot 绝不会被自己的木桩打死（黑暗勇猛石巨人 9300021 的
  *       PADamage=1999 会，那正是它不能用的原因）。</li>
+ *   <li><b>maxHP=10 亿（运行时 setStartingHp）</b>：WZ 原值 10 万会被表演的
+ *       终极攻击几分钟磨死，10 亿（&lt; Integer.MAX_VALUE）保证整场表演打不死；
+ *       收场仍走 setHpZero（Integer.MAX_VALUE 伤害）照常清除。WZ
+ *       changeable=false → 宿主 spawnMonster 的 changeDifficulty 不会重算 HP。</li>
+ *   <li><b>出生点吸附地面</b>：GM 在楼梯/斜坡上启动表演时给的是坡面坐标，
+ *       直接把怪放在坐标上（fh=0）客户端控制器找不到 foothold 会一路物理下坠
+ *       出屏幕。这里把 y 吸附到该 x 的真实地面 foothold、把 foothold id 写进
+ *       出生包，再向上抬 {@value #SPAWN_LIFT_PX}px（向上 = y 减小）—— 怪从
+ *       地面上方一点落到脚下 foothold，站得稳、不掉屏。</li>
  *   <li><b>无 elemAttr</b>：元素全部 NORMAL，毒雾的 POISON 状态真实生效、
  *       跳出毒伤数字。</li>
  *   <li><b>dropItemPeriod=10s</b>：宿主 spawnMonster 对 TYLUS 特判启动定时
@@ -38,6 +49,15 @@ public final class SkillShowTarget {
     /** 9300093 冒牌泰勒斯 —— 无攻击力 / 推不动 / exp=0，且在宿主 MobId 表有常量。 */
     static final int TARGET_MOB_ID = org.gms.constants.id.MobId.TYLUS;
 
+    /** 木桩血量：10 亿 —— 表演的终极攻击几分钟内磨不完，整场打不死。 */
+    private static final int TARGET_MAX_HP = 1_000_000_000;
+
+    /**
+     * 出生点向上抬升量：向上 = y 减小。让怪从地面上方一点落到脚下 foothold，
+     * 与「出生必须高于地面」的观感一致（斜坡上也留出坡度差余量）。
+     */
+    private static final int SPAWN_LIFT_PX = 10;
+
     /** mapId -> 本图当前的木桩。每职业一个，重登覆盖，防泄漏。 */
     private static final Map<Integer, TargetRef> TARGET_BY_MAP = new ConcurrentHashMap<>();
 
@@ -55,13 +75,31 @@ public final class SkillShowTarget {
         }
         // 木桩不掉落；exp=0 / 抗性 / 推不动由 WZ 行自带。
         mob.disableDrops();
-        mob.setPosition(new Point(at.x, at.y + 5));
+        mob.setStartingHp(TARGET_MAX_HP); // WZ maxHP=10 万会被磨死，换成打不死的 10 亿
+        mob.setPosition(spawnPoint(mob, at, map));
         map.spawnMonster(mob);
         TargetRef prev = TARGET_BY_MAP.put(map.getId(), new TargetRef(map, mob.getObjectId()));
         if (prev != null) {
             remove(prev); // 上一场的木桩忘收时在此兜底
         }
         return true;
+    }
+
+    /**
+     * 木桩出生点：吸附 {@code at.x} 下方的真实地面，再向上抬 {@value #SPAWN_LIFT_PX}px。
+     *
+     * <p>GM 在楼梯/斜坡上启动时 {@code at} 是坡面坐标，直接放怪（fh=0）客户端
+     * 控制器找不到 foothold，物理模拟会让怪一路下坠出屏幕。吸附到脚下 foothold
+     * 并把 foothold id 写进 {@code mob}（spawnMonsterInternal 的 Origin FH / FH
+     * 字段），客户端把怪锚定在该平台上，先落 10px 再站定 —— 出生即高于地面。</p>
+     */
+    private static Point spawnPoint(Monster mob, Point at, MapleMap map) {
+        Foothold ground = GCMovement.footholdBelow(map, at.x, at.y);
+        if (ground == null) {
+            return new Point(at.x, at.y); // 无地面可吸附（黑屏图）——保持原坐标，别臆造
+        }
+        mob.setFh(ground.getId());
+        return new Point(at.x, ground.calculateFooting(at.x) - SPAWN_LIFT_PX);
     }
 
     /** 收掉本图当前的木桩（无登记时 no-op）。 */
