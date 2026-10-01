@@ -1107,6 +1107,12 @@ final class BotPhysicsEngine {
     static void attachToRope(BotMovementState entry, Character bot, Rope rope, int y) {
         int ropeY = Math.clamp(y, firstClimbableY(rope), rope.bottomY());
         entry.climbVerticalDir = 0;
+        // Re-grabbing a rope is a fresh climb: the top-clamp clock must restart, or a clock
+        // left over from an earlier clamp on THIS session (clamp 2s -> release -> re-grab the
+        // next rope down) is already past TOP_CLAMP_RELEASE_MS and the release fires on the
+        // FIRST touch of the new rope's top - re-creating the climb/fall loop the window exists
+        // to prevent on long ropes.
+        entry.topClampSinceMs = 0L;
         setClimbPosition(entry, bot, rope, ropeY);
     }
 
