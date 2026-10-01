@@ -63,7 +63,14 @@ public class RestSpotFinder {
 
     private static final int SPOT_SAMPLES = 12;           // max samples across a ledge when hunting its safest x
     private static final int EDGE_MARGIN = 40;            // keep the sit point this far off a ledge's lip
-    private static final int ROPE_END_MARGIN = 24;        // keep the hang this far off a rope's very top/bottom
+    // Ours (玩具塔): the top margin is WIDER than the bottom one on purpose. A hang point
+    // near the rope head sits inside the physics top-clamp band (TOP_EXIT_UP_TOL/DOWN_TOL
+    // around topY), and on bare-headed ropes (Eos Tower 221020100 x=-3 等 — no foothold in
+    // the band) the rest hold can pin the bot against the clamp release and the driver's
+    // snap logic; a hang kept further below the head stays clean mid-rope. 40 clears the
+    // 24px top tolerance plus a climb step's wriggle room.
+    private static final int ROPE_TOP_MARGIN = 40;        // keep the hang this far below a rope's very top
+    private static final int ROPE_END_MARGIN = 24;        // keep the hang this far off a rope's bottom
 
     // Vertical separation above a spawn is worth this many px of horizontal separation in the safety metric
     // (mobs don't climb, so height is the strongest protection). Only counts when the point is ABOVE the
@@ -146,7 +153,7 @@ public class RestSpotFinder {
                 continue; // can't climb onto this rope from here
             }
             boolean bottomHot = isLedgeHot(ctx, bottomRegion);
-            int highBound = topY + ROPE_END_MARGIN;                                  // min y (highest hang)
+            int highBound = topY + ROPE_TOP_MARGIN;                                  // min y (highest hang)
             int lowBound = bottomY - (bottomHot ? ctx.inflation() : ROPE_END_MARGIN); // max y (lowest hang)
             if (highBound > lowBound) {
                 continue; // no safe band (both ends hot + short rope, etc.) -> chair fallback

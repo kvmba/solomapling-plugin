@@ -1,6 +1,7 @@
 package soloMapling.ArtificialPlayer.BotTypes;
 
 import org.gms.client.Character;
+import org.gms.server.maps.MapleMap;
 import org.gms.server.maps.Rope;
 import soloMapling.ArtificialPlayer.BotGrindSystem.GrindBrain;
 import soloMapling.ArtificialPlayer.BotGrindSystem.RestSpotFinder;
@@ -229,7 +230,7 @@ final class GrindBreakRoutine {
             }
             if (restKind == RestSpotFinder.Kind.ROPE) {
                 GCMovement.setRestHold(chr, false);
-                GCMovement.dismountRope(chr, 0); // drop straight off onto the ground below; GRIND re-picks a spot
+                dismountRopeSafely(chr);
             } else if (chr.getChair() > 0) {
                 botCancelChair(chr);
             }
@@ -237,6 +238,36 @@ final class GrindBreakRoutine {
             return true;
         }
         return false;
+    }
+
+    /*
+     * Ours (玩具塔): leave the rest rope in the direction of real ground. The old dismount
+     * was always a straight drop (dx=0); on the tower's bare rope heads a straight drop
+     * sails past every platform into the map floor - the drop re-grabs some rope on the way
+     * (climbUpIntent is still armed) and the break-over reads as "still hanging", then the
+     * macro watchdog bails the map: one contributor to the 玩具塔 "bots stuck on ropes"
+     * report. A straight drop is only taken when something is actually below; otherwise a
+     * sideways kick (toward the nearer side's landing) is used, which is the same rope
+     * dismount a player would give.
+     */
+    private static void dismountRopeSafely(Character chr) {
+        Point pos = chr.getPosition();
+        MapleMap map = chr.getMap();
+        if (pos == null || map == null) {
+            GCMovement.dismountRope(chr, 0);
+            return;
+        }
+        if (GCMovement.groundPointBelow(map, pos.x, pos.y) != null) {
+            GCMovement.dismountRope(chr, 0); // straight drop lands on something: keep it
+            return;
+        }
+        int dir = 0;
+        if (GCMovement.groundPointBelow(map, pos.x - 40, pos.y) != null) {
+            dir = -1;
+        } else if (GCMovement.groundPointBelow(map, pos.x + 40, pos.y) != null) {
+            dir = 1;
+        }
+        GCMovement.dismountRope(chr, dir); // 0 = nothing near either side: the fall's own recovery owns it
     }
 
     private static long now() {

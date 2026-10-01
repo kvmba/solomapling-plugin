@@ -71,12 +71,30 @@ final class ClimbRecovery {
         if (mob != null && mob.getPosition() != null && pos != null) {
             dx = Integer.compare(mob.getPosition().x, pos.x);
         }
+        // Ours (玩具塔): the mob's side wins only when it has real ground to land on. On the
+        // tower's stacked shafts one side is routinely bare air (a rope hugging a wall); the
+        // old raw kick could launch the bot into a full-map fall - the bottom half of the
+        // climb-charge cycle a player reads as "卡在绳上". A side with no floor at the bot's
+        // own depth loses the tie, and when NEITHER side has one (a bare mid-rope stall) the
+        // straight drop lets the fall integrator pick the landing it already models.
+        org.gms.server.maps.MapleMap map = chr.getMap();
+        if (map != null && pos != null && dx != 0
+                && GCMovement.groundPointBelow(map, pos.x + dx * KICK_PROBE_PX, pos.y) == null) {
+            int other = -dx;
+            dx = GCMovement.groundPointBelow(map, pos.x + other * KICK_PROBE_PX, pos.y) != null
+                    ? other : 0;
+        }
         GCMovement.dismountRope(chr, dx);
         lastDismountMs = now();
         climbStallSinceMs = 0L;
         b.engaged = false;
         b.lastMoveTargetX = Integer.MIN_VALUE;
     }
+
+    // Ours: how far sideways the dismount's landing probe looks for real ground. A rope-jump
+    // kick covers roughly a walk step or two of air before the arc crosses a neighbouring
+    // platform's column, so 40px is a cheap "is there a floor over there" check.
+    private static final int KICK_PROBE_PX = 40;
 
     private static long now() {
         return System.currentTimeMillis();

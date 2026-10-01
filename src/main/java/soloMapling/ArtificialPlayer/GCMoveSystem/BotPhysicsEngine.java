@@ -1084,6 +1084,7 @@ final class BotPhysicsEngine {
         entry.downJumpGracePeriodMS = 0L;
         entry.groundPhysicsCarryMs = 0.0;
         entry.blockedRopeGrab = null;
+        entry.topClampSinceMs = 0L;
         entry.hspeed = landingGroundHSpeed(bot.getMap(), foothold, incomingDeltaX, incomingDeltaY, entry.movementProfile);
         // NOTE: we deliberately do NOT counter-strafe-brake here. At the landing tick entry.moveDir
         // still holds stale AIRBORNE steering, not the ground continuation direction, so the old
@@ -2025,12 +2026,29 @@ final class BotPhysicsEngine {
         if (candidateY <= rope.topY()) {
             Point landing = findTopLandingPoint(bot, rope, candidateY);
             if (landing != null) {
+                entry.topClampSinceMs = 0L;
                 landOnGround(entry, bot, landing);
             } else {
                 // Top of a rope always connects to a foothold in valid map data.
                 // If none is found, clamp to topY and hold rather than falling — the bot will
                 // recover on re-path. Falling here would cause the oscillation bug where the bot
                 // climbs to the top, falls, re-grabs the rope, and loops indefinitely.
+                //
+                // Ours (玩具塔 bail-out): some real maps break the "always" above — Eos Tower
+                // (221020100 x=-3 等 28 条) tops out over bare air. The clamp is only safe while
+                // the nav layer still has a use for the perch (a rope jump-off exit waiting for
+                // the snap); a bot whose climb has no exit hangs here forever — the "大量 bot
+                // 在绳索攀爬卡住" report. Hold for a bounded window, then fall and let the
+                // normal recovery nets (ClimbRecovery, tickUnstuck, re-path) take over: they
+                // are all grounded-state recoveries, which the clamp was starving.
+                long now = System.currentTimeMillis();
+                if (entry.topClampSinceMs == 0L) {
+                    entry.topClampSinceMs = now;
+                } else if (now - entry.topClampSinceMs >= TOP_CLAMP_RELEASE_MS) {
+                    entry.topClampSinceMs = 0L;
+                    beginFall(entry, bot, 0);
+                    return true;
+                }
                 setClimbPosition(entry, bot, rope, firstClimbableY(rope));
             }
             return true;
@@ -2041,6 +2059,11 @@ final class BotPhysicsEngine {
         }
         return false;
     }
+
+    // Ours: how long a rope-top clamp with no landing may hold the bot before the fall
+    // is released (see resolveClimbBoundary). Long enough for a committed jump-off exit's
+    // snap + launch (well past the 2s airborne stall give-up), far short of "stuck statue".
+    private static final long TOP_CLAMP_RELEASE_MS = 2_500;
 
     // Ours (SoloMapling): widened top-exit probe — see Fable Handoff 2026-07-07.
     // The original strict probe (exactly rope.x, topY-3..topY+7) rejected trivially-steppable
@@ -2148,6 +2171,7 @@ final class BotPhysicsEngine {
         entry.climbUpIntent = false;
         entry.blockedRopeGrab = null;
         entry.ropeGrabCooldownMs = 0;
+        entry.topClampSinceMs = 0L;
         entry.downJumpPending = false;
         entry.downJumpGracePeriodMS = 0L;
         clearRopeEntryIntent(entry);

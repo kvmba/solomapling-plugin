@@ -86,6 +86,11 @@ class BotMovementState {
     float flashJumpScale = 1f;
     boolean climbUpIntent = false;
     int ropeGrabCooldownMs = 0;
+    // Ours (玩具塔 bail-out): wall-clock time the bot has been clamped at a rope top with no
+    // landing (resolveClimbBoundary's no-foothold branch), 0 = not clamped. Released to a fall
+    // past TOP_CLAMP_RELEASE_MS so a bare rope head cannot hold the bot forever. Cleared on
+    // every landing (landOnGround) and teleport (clearMovementState).
+    long topClampSinceMs = 0L;
 
     // ── Down-jump / rope entry ──
     boolean downJumpPending = false;
