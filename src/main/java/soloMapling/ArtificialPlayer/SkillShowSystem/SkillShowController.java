@@ -19,8 +19,8 @@ import soloMapling.ArtificialPlayer.BotHelpers;
 import soloMapling.ArtificialPlayer.BotSummonSystem.BotSummonSystem;
 import soloMapling.ArtificialPlayer.BotSummonSystem.BotSummonTable;
 import soloMapling.BotLogger;
+import soloMapling.server.BotChannelRouter;
 import soloMapling.server.MethodScheduler;
-import soloMapling.server.SoloMaplingUtilities;
 
 import java.awt.Point;
 import java.util.ArrayList;
@@ -131,6 +131,8 @@ public final class SkillShowController {
     private static int botId = -1;
     private static Point spawnPos;
     private static int mapId = -1;
+    /** GM 发起表演时所在的频道：bot 与木桩全程跟随这个频道的地图实例。 */
+    private static int channelId = BotChannelRouter.DEFAULT_CHANNEL;
     private static final Deque<Step> steps = new java.util.ArrayDeque<>();
     private static Step pending;           // 已预告、等 3 秒后表演
     private static int stepTotal;
@@ -141,8 +143,8 @@ public final class SkillShowController {
 
     // ---- 命令入口（!bot skillshow） ----
 
-    /** 开启。返回给 GM 的错误提示，null = 已开启。 */
-    public static synchronized String start(Point pos, int gmMapId) {
+    /** 开启。返回给 GM 的错误提示，null = 已开启。表演全程在 GM 所在频道进行。 */
+    public static synchronized String start(Point pos, int gmMapId, int gmChannel) {
         if (phase != Phase.IDLE) {
             return "表演已在进行中（第 " + (jobIndex + 1) + "/" + jobTotal
                     + " 个职业），!bot skillshow stop 可停止。";
@@ -152,6 +154,7 @@ public final class SkillShowController {
         }
         spawnPos = new Point(pos);
         mapId = gmMapId;
+        channelId = gmChannel > 0 ? gmChannel : BotChannelRouter.DEFAULT_CHANNEL;
         jobIndex = -1;
         steps.clear();
         pending = null;
@@ -235,6 +238,28 @@ public final class SkillShowController {
         }
     }
 
+    /** 频道解析不到时回退频道 1（EnvironmentManager.mapOnChannel 同款兜底）。 */
+    private static MapleMap mapOnGmChannel(int mapId) {
+        try {
+            org.gms.net.server.Server server = org.gms.net.server.Server.getInstance();
+            org.gms.net.server.world.World world = server.getWorld(
+                    soloMapling.server.SoloMaplingConstants.GameConstants.WORLD_SCANIA);
+            if (world != null) {
+                org.gms.net.server.channel.Channel ch = world.getChannel(channelId);
+                if (ch != null) {
+                    MapleMap resolved = ch.getMapFactory().getMap(mapId);
+                    if (resolved != null) {
+                        return resolved;
+                    }
+                }
+            }
+        } catch (RuntimeException e) {
+            BotLogger.log("[skillshow] could not resolve map " + mapId + " on ch" + channelId
+                    + " (" + e + ")");
+        }
+        return soloMapling.server.SoloMaplingConstants.mainChannel().getMapFactory().getMap(mapId);
+    }
+
     /** 登场：生成下一个职业的 bot；全部演完则收场。 */
     private static void beatSpawn() {
         if (jobIndex + 1 >= SHOWCASE_JOBS.length) {
@@ -250,9 +275,12 @@ public final class SkillShowController {
         }
         jobIndex++;
         int jobId = SHOWCASE_JOBS[jobIndex];
-        MapleMap map = SoloMaplingUtilities.getMapleMapById(mapId);
+        // GM 所在频道的地图实例：地图是按频道隔离的对象，bot 与木桩必须落在
+        // GM 能看见的那份实例上（createBot 内部还会把地图重解析到 bot 自己的
+        // 频道，这里给对频道，两边就是同一份）。
+        MapleMap map = mapOnGmChannel(mapId);
         if (map == null) {
-            say("[skillshow] 地图 " + mapId + " 已不可用，收场");
+            say("[skillshow] 频道 " + channelId + " 的地图 " + mapId + " 已不可用，收场");
             stop();
             return;
         }
@@ -262,15 +290,18 @@ public final class SkillShowController {
         say("[skillshow] (" + (jobIndex + 1) + "/" + jobTotal + ") 生成 job " + jobId + " …");
         int created;
         try {
-            created = BotGeneration.createBot(spawnPos, map, jobId / 100, 180, 180, jobId);
+            // 频道必须与上面解析的地图实例一致：pin 在 GM 的频道，频道满员时
+            // 宁可跳过该职业，也不让 bot 落到别的频道让 GM 看不见。
+            created = BotGeneration.createBotOnChannel(spawnPos, map, jobId / 100, 180, 180,
+                    jobId, channelId);
         } catch (Throwable t) {
             created = -1;
             say("[skillshow] job " + jobId + " 生成抛异常: " + t);
         }
         if (created <= 0) {
-            // -1 = 每个频道都满员（BotChannelRouter.NONE）；节流排队不会走这条。
+            // -1 = GM 频道满员或不存在（BotChannelRouter.NONE）；节流排队不会走这条。
             consecutiveSpawnFailures++;
-            say("[skillshow] job " + jobId + " 生成失败（频道满员？），跳过。失败 "
+            say("[skillshow] job " + jobId + " 在频道 " + channelId + " 生成失败（频道满员？），跳过。失败 "
                     + consecutiveSpawnFailures + "/3");
             MethodScheduler.runAfterDelay(SkillShowController::beat, INTER_JOB_GAP_MS);
             return;

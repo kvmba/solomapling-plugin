@@ -941,7 +941,8 @@ public class ArtificialPlayerCommand extends Command {
                 player.yellowMessage(s != null ? s : "skillshow 未在进行。");
             }
             default -> {
-                String err = SkillShowController.start(c.getPlayer().getPosition(), c.getPlayer().getMapId());
+                String err = SkillShowController.start(c.getPlayer().getPosition(),
+                        c.getPlayer().getMapId(), c.getChannel());
                 if (err != null) {
                     player.yellowMessage(err);
                 } else {
