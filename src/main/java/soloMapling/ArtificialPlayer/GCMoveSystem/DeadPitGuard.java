@@ -52,14 +52,15 @@ final class DeadPitGuard {
     private static final int PORTAL_Y_ABOVE_PX = 80;
     private static final int PORTAL_Y_BELOW_PX = 30;
 
-    /** tree -> foothold id -> verdict. Keyed by tree identity: a reloaded map gets a fresh
-     *  cache automatically (same shape as BotPhysicsEngine's collision index), and instanced
-     *  copies sharing one tree share their verdicts. */
+    /** tree -> foothold id -> verdict. Keyed by tree identity (weak): a reloaded map gets a
+     *  fresh cache automatically (same shape as BotPhysicsEngine's collision index), instanced
+     *  copies sharing one tree share their verdicts, and trees dropped by the server do not
+     *  pin their verdict maps here forever. */
     private static final Map<org.gms.server.maps.FootholdTree, Map<Integer, Boolean>> VERDICTS =
-            new java.util.concurrent.ConcurrentHashMap<>();
+            java.util.Collections.synchronizedMap(new java.util.WeakHashMap<>());
     /** Guards against re-entrant verdict computation on the same foothold (cycles in the chain). */
     private static final Map<org.gms.server.maps.FootholdTree, Set<Integer>> IN_PROGRESS =
-            new java.util.concurrent.ConcurrentHashMap<>();
+            java.util.Collections.synchronizedMap(new java.util.WeakHashMap<>());
 
     /*
      * Whether a bot landing at {@code landing} (a simulated jump/drop/walk-off landing, or the
@@ -111,6 +112,9 @@ final class DeadPitGuard {
     }
 
     private static boolean hasEscape(MapleMap map, Foothold foothold, BotMovementProfile profile) {
+        // One list for the whole verdict: getAllFootholds() rebuilds its collection per call,
+        // so per-candidate calls inside the chain scan below would multiply that cost.
+        List<Foothold> surfaces = walkableFootholds(map);
         int floorY = surfaceY(foothold);
         int loX = Math.min(foothold.getX1(), foothold.getX2());
         int hiX = Math.max(foothold.getX1(), foothold.getX2());
@@ -125,16 +129,16 @@ final class DeadPitGuard {
         // No higher ground at all means this IS the map's top surface - ordinary ground,
         // not a trap. The trap verdict only applies to surfaces that sit BELOW other
         // reachable ground they cannot climb back to. Y grows downward: higher = smaller y.
-        if (highestSurfaceY(map) >= floorY) {
+        if (highestSurfaceY(surfaces) >= floorY) {
             return true;
         }
-        return jumpChainEscapes(map, foothold, apex, new java.util.HashSet<>());
+        return jumpChainEscapes(surfaces, foothold, apex, new java.util.HashSet<>());
     }
 
-    private static int highestSurfaceY(MapleMap map) {
+    private static int highestSurfaceY(List<Foothold> surfaces) {
         // The TOPMOST walkable surface = the smallest surface y (y grows downward).
         int topmost = Integer.MAX_VALUE;
-        for (Foothold foothold : walkableFootholds(map)) {
+        for (Foothold foothold : surfaces) {
             if (foothold.isWall()) {
                 continue;
             }
@@ -182,7 +186,7 @@ final class DeadPitGuard {
      * O(N^2) foothold scans for a map with N surfaces (computed once per foothold, behind the
      * verdict cache).
      */
-    private static boolean jumpChainEscapes(MapleMap map, Foothold foothold, int apex,
+    private static boolean jumpChainEscapes(List<Foothold> surfaces, Foothold foothold, int apex,
                                             Set<Integer> visited) {
         if (!visited.add(foothold.getId())) {
             return false;
@@ -190,7 +194,7 @@ final class DeadPitGuard {
         int floorY = surfaceY(foothold);
         int loX = Math.min(foothold.getX1(), foothold.getX2());
         int hiX = Math.max(foothold.getX1(), foothold.getX2());
-        for (Foothold higher : walkableFootholds(map)) {
+        for (Foothold higher : surfaces) {
             if (higher.getId() == foothold.getId() || higher.isWall()) {
                 continue;
             }
@@ -207,14 +211,14 @@ final class DeadPitGuard {
             // No surface may sit between this floor and the target band over the overlap -
             // otherwise the jump would land on the intermediate surface, which the chain
             // explores as its own foothold instead of assuming a pass-through.
-            if (!columnClear(map, floorY, higherY, loX, hiX, hLoX, hHiX)) {
+            if (!columnClear(surfaces, floorY, higherY, loX, hiX, hLoX, hHiX)) {
                 continue;
             }
             return true;
         }
         // No direct jump out: try climbing THROUGH adjacent surfaces at (roughly) this level
         // or up to one apex above, which may themselves have a jump/rope/portal exit.
-        for (Foothold neighbour : walkableFootholds(map)) {
+        for (Foothold neighbour : surfaces) {
             if (neighbour.getId() == foothold.getId() || neighbour.isWall() || visited.contains(neighbour.getId())) {
                 continue;
             }
@@ -227,17 +231,16 @@ final class DeadPitGuard {
             if (horizontalGap(loX, hiX, nLoX, nHiX) > JUMP_ACROSS_PX) {
                 continue;
             }
-            if (jumpChainEscapes(map, neighbour, apex, visited)) {
+            if (jumpChainEscapes(surfaces, neighbour, apex, visited)) {
                 return true;
             }
         }
         return false;
     }
 
-    private static boolean columnClear(MapleMap map, int floorY, int targetY,
+    private static boolean columnClear(List<Foothold> surfaces, int floorY, int targetY,
                                        int loX, int hiX, int tLoX, int tHiX) {
-        List<Foothold> all = walkableFootholds(map);
-        for (Foothold other : all) {
+        for (Foothold other : surfaces) {
             if (other.isWall()) {
                 continue;
             }
@@ -255,8 +258,8 @@ final class DeadPitGuard {
     }
 
     private static List<Foothold> walkableFootholds(MapleMap map) {
-        // getAllFootholds() rebuilds a list per call; acceptable here because every caller is
-        // behind the per-foothold verdict cache (computed once per foothold per tree).
+        // getAllFootholds() rebuilds its collection per call — call it ONCE per verdict (see
+        // hasEscape) and thread the list through the scans below.
         return map.getFootholds().getAllFootholds();
     }
 

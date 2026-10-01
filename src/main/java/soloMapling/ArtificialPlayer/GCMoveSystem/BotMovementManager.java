@@ -1183,9 +1183,10 @@ class BotMovementManager {
 
     /**
      * Nearest livable ground to teleport a pit-trapped bot to: the closest surface above the
-     * bot's own position that the livability probe clears, probed across the map's footholds
-     * column by column. Falls back to the closest foothold at all when nothing reads livable
-     * (better a plausible floor than a null warp), and null when there is no foothold tree.
+     * bot's own position that the livability probe clears. The candidate point is snapped to
+     * the surface's REAL y at the probed column (slopes included) so the bot lands standing,
+     * never mid-air beside a slope. Null when nothing above reads livable - the caller stays
+     * put rather than warping into another trap.
      */
     private static Point nearestLivableGround(Character bot) {
         MapleMap map = bot.getMap();
@@ -1200,20 +1201,29 @@ class BotMovementManager {
             if (foothold.isWall()) {
                 continue;
             }
+            // Rescue means UP: judge the candidate by its HIGHEST end so a slope rising past
+            // the bot never warps it DOWN to the slope's low end (which can sit inside the pit).
+            int fhTopY = Math.min(foothold.getY1(), foothold.getY2());
+            if (fhTopY >= pos.y) {
+                continue;
+            }
             int fhLoX = Math.min(foothold.getX1(), foothold.getX2());
             int fhHiX = Math.max(foothold.getX1(), foothold.getX2());
             int probeX = Math.clamp(pos.x, fhLoX, fhHiX);
-            int probeY = foothold.getY1();
-            if (probeY >= pos.y) {
-                continue; // rescue means UP; the pit floor itself is never a candidate
+            // Snap to the surface's real y at the probed column (slope-interpolated): the
+            // bot must arrive STANDING, not floating beside a ramp. The snap can resolve to
+            // a DIFFERENT (overlapping, higher) foothold than this candidate, so livability
+            // is judged on the SNAPPED point, not on the iterated foothold.
+            Point candidate = BotPhysicsEngine.findGroundPoint(map, new Point(probeX, fhTopY - 1));
+            if (candidate == null || candidate.y >= pos.y) {
+                continue;
             }
-            Point candidate = new Point(probeX, probeY);
-            if (!DeadPitGuard.isLivableSurface(map, foothold, profile)) {
+            if (!DeadPitGuard.isLivableLanding(map, candidate, profile)) {
                 continue;
             }
             // Vertical distance dominates: a rescue wants the nearest livable floor ABOVE,
             // not a lateral wander on a distant platform.
-            long cost = (long) Math.abs(probeY - pos.y) * 4
+            long cost = (long) Math.abs(candidate.y - pos.y) * 4
                     + Math.abs(probeX - pos.x);
             if (cost < bestCost) {
                 bestCost = cost;
