@@ -142,20 +142,23 @@ public abstract class PartyQuestBot extends BotSM implements GrindTickRegistry.P
      * the host zeroed behind the damage layer's back has no episode yet but must still not
      * swing), frozen, outside a quest room or without a party has no fight to be in.
      *
-     * <p>Three coordination gates keep the beat from fighting the macro tick:
+     * <p>Three coordination gates keep the beat from fighting the macro tick, in priority
+     * order:
      * <ul>
+     *   <li>the stage-walk shield ({@code PqActions.movementShielded}): while the macro tick
+     *       has the bot walking somewhere whose arrival it depends on (following the leader
+     *       through a portal, holding a puzzle spot), the beat must not re-issue
+     *       {@code GCMovement.move} at ANYTHING - it only swings through
+     *       {@code PqActions.attack}, so a mob within reach on the way is fought rather
+     *       than walked past. This outranks the armed box below: a critical position walk
+     *       is the macro tick's to finish.</li>
      *   <li>an armed reactor beat ({@code PqActions.workReactorOnBeat}): a stage walking its
      *       bot to a box owns the steering until the approach lands - the beat carries the
      *       box work and RETURNS. Mixing it with the mob chase would re-issue a move at a
      *       mob every other beat and oscillate the bot between box and fight (stage 3 has
-     *       both).</li>
-     *   <li>the stage-walk shield ({@code PqActions.movementShielded}): while the macro tick
-     *       has the bot walking somewhere (following the leader through a portal, holding a
-     *       puzzle spot), the beat must not re-issue {@code GCMovement.move} at a mob and
-     *       yank the walk around - it only skips the CHASE HALF ({@code seekAndAttack}'s
-     *       steering); the swing half still runs through {@code PqActions.attack}, so a mob
-     *       or a stray within reach on the way is fought rather than walked past. The shield
-     *       is armed by the walk/hold helpers and expires on its own.</li>
+     *       both). While the approach is still in flight the beat swings at whatever is in
+     *       reach (attack only turns, it never steers), so the walk to the box is not also
+     *       a combat blackout.</li>
      *   <li>{@link #fightsOnSweep}: a stage whose contract forbids swinging (the frog room's
      *       catch-don't-kill mobs, Ludi's invincible guards, the pyramid's marked monsters)
      *       opts out entirely. Default is to fight.</li>
@@ -172,12 +175,14 @@ public abstract class PartyQuestBot extends BotSM implements GrindTickRegistry.P
                 || !isInsideQuest(bot.getMapId())) {
             return;
         }
-        if (PqActions.reactorBeatArmed(bot)) {
-            PqActions.workReactorOnBeat(bot); // the box owns the steering until IN_POSITION
-            return;
-        }
         if (movementShielded()) {
             PqActions.attack(bot); // the walk owns the steering; the swing still lands
+            return;
+        }
+        if (PqActions.reactorBeatArmed(bot)) {
+            if (PqActions.workReactorOnBeat(bot)) {
+                PqActions.attack(bot); // still travelling to the box: fight on the way
+            }
             return;
         }
         PqActions.seekAndAttack(bot);

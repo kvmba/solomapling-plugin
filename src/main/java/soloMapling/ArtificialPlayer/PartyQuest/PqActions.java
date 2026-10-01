@@ -483,25 +483,27 @@ public final class PqActions {
     /**
      * Carry the armed reactor work one combat beat: approach the box, strike it the beat the
      * approach says IN_POSITION. Non-blocking by design - the caller is the shared 250ms
-     * sweep, one Thread.sleep here would hold every registered bot's beat. No-op unless a
-     * stage armed a box via {@link #armReactorBeat}. The registration dies with the map
-     * instance it was armed on (oid collisions across rooms), and its steering runs only
-     * while no other walk owns the bot.
+     * sweep, one Thread.sleep here would hold every registered bot's beat. The registration
+     * dies with the map instance it was armed on (oid collisions across rooms).
+     *
+     * @return true when the approach is still TRAVELLING (the caller may keep swinging at
+     *         whatever is in reach - attack never steers), false when the box work ended the
+     *         beat (struck, broken, stuck, or disarmed by a room change).
      */
-    public static void workReactorOnBeat(Character bot) {
+    public static boolean workReactorOnBeat(Character bot) {
         if (bot == null || bot.getMap() == null) {
-            return;
+            return false;
         }
         BeatBox box = beatBoxByBot.get(bot.getId());
         if (box == null || box.mapInstance() != System.identityHashCode(bot.getMap())) {
-            return; // stale room (or nothing armed): the stage re-arms on its next tick
+            return false; // stale room (or nothing armed): the stage re-arms on its next tick
         }
         int oid = box.oid();
         long now = System.currentTimeMillis();
         var reactor = bot.getMap().getReactorByOid(oid);
         if (reactor == null || !reactor.isActive()) {
             beatBoxByBot.remove(bot.getId()); // broken by a teammate mid-walk
-            return;
+            return false;
         }
         // Never strike from across the room: the same honest-shot rule approachUnder's
         // callers follow. The approach also owns the walk (and re-issues it when the driver
@@ -509,11 +511,13 @@ public final class PqActions {
         Approach outcome = descendToFloorAerialTarget(bot, reactor.getPosition());
         if (outcome == Approach.STUCK) {
             beatBoxByBot.remove(bot.getId()); // the stage's next tick rotates the target
-            return;
+            return false;
         }
         if (outcome == Approach.IN_POSITION && reactorSwingReady(bot, now)) {
             strikeReactorOnBeat(bot, oid, now);
+            return false;
         }
+        return outcome == Approach.TRAVELLING;
     }
 
     /** Floor between two reactor swings: a player's repeat rate, not a machine-gun burst. */
@@ -540,10 +544,13 @@ public final class PqActions {
     }
 
     /**
-     * The stage's in-visit combo just finished a box: pull the next macro tick forward so
-     * the next box (or the loot/hand-off) starts within a breath instead of a full cadence.
+     * The stage's visit just finished a box: pull the next macro tick forward so the next
+     * box (or the loot/hand-off) starts within a breath instead of a full cadence. Called
+     * from BOTH the in-visit combo path (macro tick) and the beat-carried strike path
+     * (combat sweep) - whichever broke the box, the next box is stage logic and lives on
+     * the macro tick.
      */
-    public static void boxFinishedThisBeat(Character bot) {
+    public static void boxFinishedPullTick(Character bot) {
         nudgeStageTick(bot);
     }
 
