@@ -61,6 +61,8 @@ public final class SkillShowController {
     private static final long ARRIVE_MS = BotGeneration.SPAWN_CHOREOGRAPHY_MAX_MS;
     /** 换职业之间的空场。 */
     private static final long INTER_JOB_GAP_MS = 2000;
+    /** bot 与木桩的最小间隔：太近时近战挥击/远程弹道在视觉上从木桩身体里穿出。 */
+    private static final int TARGET_GAP_PX = 45;
 
     /** 12 个冒险家 4 转终职，job id 升序（战→法→弓→贼→海盗）。 */
     private static final int[] SHOWCASE_JOBS = {
@@ -282,6 +284,31 @@ public final class SkillShowController {
         return ground != null ? ground : new Point(pos);
     }
 
+    /**
+     * 木桩出生点：bot 落点朝演出方向（朝 GM/观众一侧）让出 {@value #TARGET_GAP_PX}px
+     * 的同 foothold 地面点。间隔太近时近战挥击/远程弹道在视觉上从木桩身体里穿出。
+     *
+     * <p>演出方向取 bot 落点相对 GM 起点的那一侧 —— GM 通常把机位架在起点看表演，
+     * 木桩立在 bot 与 GM 之间，观众看到的是正脸出招。地面吸附失败时退回 bot 落点
+     * （紧贴着演，好过把木桩丢进空中）。</p>
+     */
+    private static Point stageTargetPos(Character bot) {
+        Point at = bot.getPosition();
+        boolean left = spawnPos == null || bot.getPosition().x <= spawnPos.x;
+        int tx = left ? at.x - TARGET_GAP_PX : at.x + TARGET_GAP_PX;
+        Point ground = GCMovement.groundPointBelow(bot.getMap(), tx, at.y);
+        return ground != null ? ground : new Point(at);
+    }
+
+    /** 让 bot 面向木桩：面向不对时补一次原地转身（录像回放，无 X 漂移）。 */
+    private static void faceTarget(Character bot) {
+        Monster mob = SkillShowTarget.find(bot.getMapId());
+        if (mob == null) {
+            return;
+        }
+        MovementCommands.botFaceTowardsPoint(bot, mob.getPosition());
+    }
+
     /** 登场：生成下一个职业的 bot；全部演完则收场。 */
     private static void beatSpawn() {
         if (jobIndex + 1 >= SHOWCASE_JOBS.length) {
@@ -373,8 +400,11 @@ public final class SkillShowController {
         // 就是整场表演的姿态。开演前把位置吸附到脚下地面并广播 idle 站立帧
         // （settleRecordedReplay 同款收尾），确保站得实、不掉屏。
         MovementCommands.settleOnGround(bot);
-        // 木桩（毒雾/影网/影子貔貅/能量反击的可作用目标）与 bot 同登同退。
-        boolean staged = SkillShowTarget.spawn(spawnPos, bot.getMap(), bot.getId());
+        // 木桩（毒雾/影网/影子貔貅/能量反击的可作用目标）与 bot 同登同退，
+        // 放在 bot 摆位之后：木桩出生点由 bot 落点 + TARGET_GAP_PX 推出，
+        // 保证「面向木桩 + 一小段间隔」，近战/远程的攻击帧才落在木桩身上。
+        boolean staged = SkillShowTarget.spawn(stageTargetPos(bot), bot.getMap(), bot.getId());
+        faceTarget(bot);
         say("[skillshow] job " + cidToJob(cid) + " 登场（cid " + cid + "），"
                 + stepTotal + " 个技能" + (staged ? "，木桩就位" : "") + "，"
                 + (stepTotal * 4500 / 1000) + " 秒演完");
@@ -397,6 +427,7 @@ public final class SkillShowController {
             Step step = pending;
             pending = null;
             stepDone++;
+            faceTarget(bot); // 出招前再校一次面向：预告气泡的转身/杂项可能翻回原向
             long hold = step.perform(bot);
             MethodScheduler.runAfterDelay(SkillShowController::beat, Math.max(0, hold));
             return;
