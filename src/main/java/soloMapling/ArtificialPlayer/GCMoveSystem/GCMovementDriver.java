@@ -463,6 +463,16 @@ final class GCMovementDriver {
             entry.stuckMs = 0;
             entry.stuckCheckX = Integer.MIN_VALUE;
             entry.stuckCheckY = Integer.MIN_VALUE;
+            // Ours (climber escape): a climber WITHOUT a goal is the wedge state itself —
+            // climbing keeps hasGoal true so this branch never ran for it, and inside
+            // stepMovementCore the driver steered the climb at the bot's OWN position (dy=0 ->
+            // holdClimb froze it mid-ladder, the Eos Tower "爬一下就不动"). Escape it here.
+            // The dismount launches the bot airborne; returning hands the very next tick to the
+            // airborne integrator (idleOnGround below would pin a kicked-off climber at its
+            // mid-air pixel — frozen-air, the failure mode the pre-existing comments warn about).
+            if (tickClimbStallEscape(entry)) {
+                return;
+            }
             if (entry.duckUntilMs > MovementClock.nowMs()) {
                 BotPhysicsEngine.proneOnGround(entry, bot); // idle fidget: hold a crouch/duck pose
             } else {
@@ -593,6 +603,16 @@ final class GCMovementDriver {
         long stallMs = (entry.inAir || entry.climbing) ? AIR_MOVE_STALL_MS : MOVE_NO_PROGRESS_MS;
         if (now - entry.moveProgressAtMs <= stallMs) {
             return false;
+        }
+        // A CLIMBER must not be abandoned into the self-aim wedge: the caller then steers toward
+        // the bot's OWN position (resolveTarget falls through to null -> stepMovementCore gets
+        // botPos), dy reads 0 and tickClimbing integrates MoveAction.idle() -> holdClimb freezes
+        // the climb pixel-still mid-ladder. Every driver-level watchdog exempts climbing
+        // (isStuckCheckExempt), so nothing below would ever dislodge it — the Eos Tower ladder
+        // wedge ("爬一下就不动，过几秒被传送走"). Dismount instead: a rope-kick with the same
+        // ground-probed side bias the grind recovery uses, so the bot lands and replans normally.
+        if (entry.climbing) {
+            BotMovementManager.dismountTowardGround(entry);
         }
         entry.moveTarget = null;
         entry.moveTargetPrecise = false;
@@ -954,6 +974,14 @@ final class GCMovementDriver {
         if (BotMovementManager.isStuckCheckExempt(entry)) {
             entry.stuckMs = 0;
             entry.stuckCheckX = Integer.MIN_VALUE;
+            // Ours (climber escape): climbing is exempt from the positional stuck test above (a
+            // climb legitimately pins X while Y advances, and rescue-hopping a climber was the
+            // old wedge), but the exemption also shielded a DEAD climb: a bot holding the rope
+            // pixel-still (move abandoned mid-climb pre-fix, rest-hold leak, a hold the nav layer
+            // never returns to) has no driver-level escape at all — the Eos Tower "爬一下就不动".
+            // A genuine climb moves vertically every few ticks, so a climber that hasn't moved
+            // ~8px in CLIMB_STALL_ESCAPE_MS is not climbing, it is parked: dismount toward ground.
+            tickClimbStallEscape(entry);
             return;
         }
         Point botPos = entry.bot.getPosition();
@@ -1039,6 +1067,47 @@ final class GCMovementDriver {
             case NONE -> BotMovementManager.invalidateBroadcastSnapshot(entry);
             default -> broadcastIfObserved(entry);
         }
+    }
+
+    // Ours (climber escape window): a genuine climb covers >= one climb step (~5px) per integrated
+    // tick, so any real climb moves far more than 8px within this window; a parked climber (no move,
+    // no committed edge, rest-hold leak) does not. Generous vs the grind layer's 1.2s stall sampler —
+    // this is the driver-level LAST net, not the first responder.
+    private static final long CLIMB_STALL_ESCAPE_MS = 4_000;
+    private static final int CLIMB_STALL_EPS_PX = 8;
+
+    // A climber that hasn't moved ~8px in 4s while NOT resting is parked mid-rope: dismount toward
+    // ground so the fall integrator lands it and normal recovery/replanning takes over. Resting
+    // (a deliberate grind-break hang) is exempt — that hold is the break, not a wedge. Running here
+    // (inside the stuck-exempt branch) keeps the position anchor reset every tick, so only a truly
+    // stationary climber ever accumulates the window. True = dismounted this tick (caller must let
+    // the airborne physics own the next ticks, not settle the bot in place).
+    private static boolean tickClimbStallEscape(BotMovementState entry) {
+        if (!entry.climbing || entry.resting) {
+            entry.climbStallSinceMs = 0L;
+            entry.climbStallY = Integer.MIN_VALUE;
+            return false;
+        }
+        Point pos = entry.bot.getPosition();
+        if (pos == null) {
+            return false;
+        }
+        if (entry.climbStallY == Integer.MIN_VALUE
+                || Math.abs(pos.y - entry.climbStallY) >= CLIMB_STALL_EPS_PX
+                || pos.x != entry.climbStallX) {
+            entry.climbStallSinceMs = MovementClock.nowMs();
+            entry.climbStallY = pos.y;
+            entry.climbStallX = pos.x;
+            return false;
+        }
+        if (MovementClock.nowMs() - entry.climbStallSinceMs < CLIMB_STALL_ESCAPE_MS) {
+            return false;
+        }
+        entry.climbStallSinceMs = 0L;
+        entry.climbStallY = Integer.MIN_VALUE;
+        BotMovementManager.dismountTowardGround(entry);
+        entry.unstuckCooldownMs = BotMovementManager.delayAfterCurrentTick(5000);
+        return true;
     }
 
     // Live fall-off-map recovery: if the bot has left the map's VR bounds by more than a slack margin (fell

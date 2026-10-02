@@ -289,6 +289,43 @@ class BotMovementManager {
         broadcastMovement(entry);
     }
 
+    // Ours: how far sideways the dismount's landing probe looks for real ground — same band the
+    // grind recovery's KICK_PROBE_PX uses (a rope kick covers a step or two of air before the arc
+    // crosses a neighbouring platform's column).
+    private static final int DISMOUNT_PROBE_PX = 40;
+
+    /*
+     * Driver-level escape for a climber whose move was just abandoned (giveUpStalledMove): kick
+     * off the rope toward a side that has ground at the bot's own depth, preferring the side the
+     * climb was heading (the goal's direction) when both are landable. A straight drop (dx=0) is
+     * only taken when NOTHING beside is landable — the fall integrator picks the landing it models.
+     * Mirrors ClimbRecovery.dismountTowardMob's probe semantics without depending on the grind
+     * layer (which is phase-gated and may never fire — the Eos Tower mid-ladder freeze).
+     */
+    static void dismountTowardGround(BotMovementState entry) {
+        Character bot = entry.bot;
+        Point pos = bot.getPosition();
+        MapleMap map = bot.getMap();
+        if (pos == null || map == null) {
+            return;
+        }
+        int dx = 0;
+        if (entry.moveTarget != null) {
+            dx = Integer.compare(entry.moveTarget.x, pos.x);
+        }
+        if (dx != 0 && BotPhysicsEngine.findGroundPoint(map, new Point(pos.x + dx * DISMOUNT_PROBE_PX, pos.y)) == null) {
+            int other = -dx;
+            dx = BotPhysicsEngine.findGroundPoint(map, new Point(pos.x + other * DISMOUNT_PROBE_PX, pos.y)) != null
+                    ? other : 0;
+        }
+        if (dx == 0 && BotPhysicsEngine.findGroundPoint(map, new Point(pos.x + DISMOUNT_PROBE_PX, pos.y)) != null) {
+            dx = 1;
+        } else if (dx == 0 && BotPhysicsEngine.findGroundPoint(map, new Point(pos.x - DISMOUNT_PROBE_PX, pos.y)) != null) {
+            dx = -1;
+        }
+        jumpOffRope(entry, bot, dx);
+    }
+
     static void jumpToRope(BotMovementState entry, Character bot, int dx) {
         Rope sourceRope = entry.climbRope;
         int airVelX = resolveAirVelocityX(entry, bot.getMap(), entry.movementProfile, dx);

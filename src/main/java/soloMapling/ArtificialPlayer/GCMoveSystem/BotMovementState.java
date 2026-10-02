@@ -240,6 +240,13 @@ class BotMovementState {
     int airStuckX = Integer.MIN_VALUE;
     int airStuckY = Integer.MIN_VALUE;
 
+    // Ours (climber escape): the driver-level climb-stall window state. A climber whose position
+    // stops changing (~8px band) for CLIMB_STALL_ESCAPE_MS while not resting is parked mid-rope,
+    // not climbing — GCMovementDriver.tickClimbStallEscape dismounts it toward ground.
+    long climbStallSinceMs = 0L;
+    int climbStallY = Integer.MIN_VALUE;
+    int climbStallX = Integer.MIN_VALUE;
+
     // ── Movement-broadcast packet cache (dedup of no-op move packets) ──
     boolean movementBroadcastValid = false;
     int lastBroadcastX = 0;
