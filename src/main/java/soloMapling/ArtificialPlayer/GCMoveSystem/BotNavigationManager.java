@@ -1546,7 +1546,7 @@ final class BotNavigationManager {
         // so its tolerance can reach a few px past that validated span; the alternative there is a
         // single-pixel window a walkStep-stepping bot can never hit, which strands it entirely.
         int tolerance = Math.max(1, BotPhysicsEngine.walkStep(null, graph.movementProfile));
-        if (!edge.containsLaunchX(botPos.x, tolerance)) {
+        if (!edge.acceptsLaunchX(botPos.x, tolerance)) {
             return false;
         }
 
@@ -1600,6 +1600,17 @@ final class BotNavigationManager {
 
         int minX = Math.max(edge.launchMinX, fromRegion.minX);
         int maxX = Math.min(edge.launchMaxX, fromRegion.maxX);
+        // Ours (LPQ shelf loop): never select a launch pixel the builder's per-pixel validation
+        // rejected. A collapsed window (validated span < 2 x walkStep) is the failure shape — its
+        // stamped single pixel plus the executor's ±walkStep phase reaches rejected pixels, and the
+        // arc from there lands two floors down (the chase fell and looped). Clamping the SELECTION
+        // into the pre-inset validated span keeps every arc the executor can fly inside the span
+        // the builder validated; the phase gate (acceptsLaunchX) clamps the FIRE position the same
+        // way, so walk-in drift past the selection is also contained.
+        if (edge.launchValidMinX != 0 || edge.launchValidMaxX != 0) {
+            minX = Math.max(minX, edge.launchValidMinX);
+            maxX = Math.min(maxX, edge.launchValidMaxX);
+        }
         if (minX > maxX) {
             minX = edge.launchMinX;
             maxX = edge.launchMaxX;

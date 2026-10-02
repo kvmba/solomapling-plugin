@@ -834,6 +834,35 @@ class BotMovementManager {
         if (stepX == 0) {
             return MoveAction.idle();
         }
+        // Ours (LPQ stage-1 shelf loop): a COLLAPSED JUMP launch window (one stamped pixel) whose
+        // approach would overfly it. The intent step clamps to the remaining distance, but the
+        // ground physics integrates the real hspeed — a full stride that starts outside the
+        // window's far edge lands PAST it (and past the platform lip, a fall). Counter-strafe
+        // instead: the reverse input bleeds the momentum off over a few ticks, and the small
+        // steps that follow land INSIDE the window, where the fire gate accepts the jump.
+        if (entry.navEdge != null
+                && entry.navEdge.type == BotNavigationGraph.EdgeType.JUMP
+                && entry.navEdge.launchMinX == entry.navEdge.launchMaxX) {
+            int dir = Integer.signum(stepX);
+            int near = dir > 0 ? entry.navEdge.launchMinX : entry.navEdge.launchMaxX;
+            int far = dir > 0 ? entry.navEdge.launchMaxX : entry.navEdge.launchMinX;
+            boolean insideNow = botPos.x >= near && botPos.x <= far;
+            if (!insideNow) {
+                BotPhysicsEngine.GroundStepResult held = BotPhysicsEngine.simulateGroundMotion(
+                        entry.bot.getMap(), botPos, currentFh, dir,
+                        new BotPhysicsEngine.GroundTravelState(entry.physX, entry.hspeed, entry.groundPhysicsCarryMs),
+                        entry.movementProfile);
+                int landingX = held.lostGround()
+                        ? botPos.x + dir * BotPhysicsEngine.walkStep(entry.bot.getMap(), entry.movementProfile)
+                        : held.point().x;
+                // A lost-ground held sim IS the danger case (the momentum carries off the lip):
+                // its estimated landing overflies just the same, so it triggers the brake too.
+                boolean overflies = dir > 0 ? landingX > far : landingX < far;
+                if (overflies) {
+                    return MoveAction.walk(-dir);
+                }
+            }
+        }
         boolean canWalkStep = BotPhysicsEngine.canWalkGroundStep(entry.bot.getMap(), botPos, stepX);
         if (!canWalkStep) {
             boolean blockedByWall = BotPhysicsEngine.isGroundStepBlockedByWall(entry.bot.getMap(), botPos, stepX);
@@ -843,6 +872,18 @@ class BotMovementManager {
                 // Walk-off drops should keep walking in the authored direction until physics
                 // detects lost ground and transitions into a fall with preserved momentum.
                 return MoveAction.walk(stepX);
+            }
+            // Ours (LPQ stage-1 shelf loop): a JUMP-window approach whose next full stride would
+            // leave the platform. The intent step is clamped to the remaining distance, but the
+            // ground physics integrates the real hspeed (a full walkStep) and ignores the clamp —
+            // idling here still glides off the edge (friction alone carries ~8px, the probe:
+            // glide from -36 FELL). Counter-strafe one step: the reverse input kills the momentum,
+            // the bot regains stride control, and the sub-step walk-ins land INSIDE the collapsed
+            // launch window instead of past it. (A collapsed window can be as narrow as one pixel;
+            // full strides can never reliably land in it.)
+            if (!blockedByWall && entry.navEdge != null
+                    && entry.navEdge.type == BotNavigationGraph.EdgeType.JUMP) {
+                return MoveAction.walk(-Integer.signum(stepX));
             }
             // Wall-blocked nav edges are stale or invalid. Clear them so the next AI tick can
             // replan instead of holding a walk stance into the wall.

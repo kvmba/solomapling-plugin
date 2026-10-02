@@ -201,7 +201,7 @@ final class BotNavigationGraph implements Serializable {
     static final class Edge implements Serializable {
         // Part of the on-disk BotNavigationGraph cache schema; do not remove.
         @Serial
-        private static final long serialVersionUID = 1L;
+        private static final long serialVersionUID = 2L;
 
         final int fromRegionId;
         final int toRegionId;
@@ -210,6 +210,15 @@ final class BotNavigationGraph implements Serializable {
         final Point endPoint;
         final int launchMinX;
         final int launchMaxX;
+        // Ours (LPQ stage-1 shelf loop): the PRE-INSET span the builder validated pixel by pixel.
+        // When the inset collapses the window (validated span < 2 x walkStep), the executor's
+        // ±walkStep launch phase band around the single stamped pixel re-reaches past it onto
+        // pixels the builder REJECTED (two floors down) — the chase fired, overshot, fell, and
+        // looped. The phase is clamped to this span: the arc the builder validated is the arc
+        // the executor flies, at any window width. 0,0 = "not recorded" (older caches): the
+        // executor falls back to the stamped window + tolerance.
+        final int launchValidMinX;
+        final int launchValidMaxX;
         final int launchStepX;
         final int portalId;
         final int ropeX;
@@ -230,6 +239,26 @@ final class BotNavigationGraph implements Serializable {
              int ropeTopY,
              int ropeBottomY,
              int cost) {
+            this(fromRegionId, toRegionId, type, startPoint, endPoint,
+                    launchMinX, launchMaxX, launchMinX, launchMaxX, launchStepX, portalId,
+                    ropeX, ropeTopY, ropeBottomY, cost);
+        }
+
+        Edge(int fromRegionId,
+             int toRegionId,
+             EdgeType type,
+             Point startPoint,
+             Point endPoint,
+             int launchMinX,
+             int launchMaxX,
+             int launchValidMinX,
+             int launchValidMaxX,
+             int launchStepX,
+             int portalId,
+             int ropeX,
+             int ropeTopY,
+             int ropeBottomY,
+             int cost) {
             this.fromRegionId = fromRegionId;
             this.toRegionId = toRegionId;
             this.type = type;
@@ -237,6 +266,8 @@ final class BotNavigationGraph implements Serializable {
             this.endPoint = new Point(endPoint);
             this.launchMinX = Math.min(launchMinX, launchMaxX);
             this.launchMaxX = Math.max(launchMinX, launchMaxX);
+            this.launchValidMinX = Math.min(launchValidMinX, launchValidMaxX);
+            this.launchValidMaxX = Math.max(launchValidMinX, launchValidMaxX);
             this.launchStepX = launchStepX;
             this.portalId = portalId;
             this.ropeX = ropeX;
@@ -266,6 +297,22 @@ final class BotNavigationGraph implements Serializable {
 
         boolean containsLaunchX(int x, int tolerance) {
             return x >= launchMinX - tolerance && x <= launchMaxX + tolerance;
+        }
+
+        /**
+         * Whether the executor's launch phase may fire from {@code x}: inside the stamped window
+         * widened by {@code tolerance}, AND inside the pre-inset validated span when the edge
+         * carries one. The clamp is what stops a collapsed window's phase band from re-reaching
+         * rejected pixels (the LPQ shelf loop).
+         */
+        boolean acceptsLaunchX(int x, int tolerance) {
+            if (!containsLaunchX(x, tolerance)) {
+                return false;
+            }
+            if (launchValidMinX != 0 || launchValidMaxX != 0) {
+                return x >= launchValidMinX && x <= launchValidMaxX;
+            }
+            return true;
         }
 
         /* Launch point at the in-window x nearest to x (the x execution would actually fire from). */

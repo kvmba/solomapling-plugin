@@ -42,10 +42,17 @@ class JumpLaunchGateTest {
 
     /** A JUMP edge out of region 1 whose launch window is [launchMinX, launchMaxX]. */
     private static BotNavigationGraph.Edge jumpEdge(int launchMinX, int launchMaxX) {
+        // Legacy edge shape: no recorded validated span (0,0) — the phase band stays unclamped.
+        return jumpEdge(launchMinX, launchMaxX, 0, 0);
+    }
+
+    /** A JUMP edge with an explicit pre-inset validated span (0,0 = legacy edge without one). */
+    private static BotNavigationGraph.Edge jumpEdge(int launchMinX, int launchMaxX,
+                                                    int validMinX, int validMaxX) {
         int step = BotPhysicsEngine.walkStep(null, PROFILE);
         return new BotNavigationGraph.Edge(1, 2, BotNavigationGraph.EdgeType.JUMP,
                 new Point(launchMinX, 0), new Point(launchMaxX + 200, -50),
-                launchMinX, launchMaxX, step, 0, 0, 0, 0, 500);
+                launchMinX, launchMaxX, validMinX, validMaxX, step, 0, 0, 0, 0, 500);
     }
 
     /** A graph whose region 1 is the flat ledge [-200,200] at y=0. */
@@ -62,11 +69,26 @@ class JumpLaunchGateTest {
     void acceptsABotWithinOneWalkStepOfACollapsedSinglePixelWindow() {
         // The inset collapsed a thin window to one pixel (launchMinX == launchMaxX). A bot one walk
         // step short of it must still be allowed to fire — this is the exact case that paced.
+        // (A legacy edge without a recorded validated span keeps the phase-band membership.)
         int step = BotPhysicsEngine.walkStep(null, PROFILE);
         BotNavigationGraph g = graph();
         BotNavigationGraph.Edge edge = jumpEdge(100, 100);
         assertTrue(BotNavigationManager.isWithinJumpLaunchWindow(g, new Point(100 - step, 0), edge),
                 "a bot one walk step short of the launch x must be within the window");
+    }
+
+    @Test
+    void aCollapsedWindowWithAValidatedSpanClampsThePhaseToIt() {
+        // Ours (LPQ shelf loop): when the builder recorded the pre-inset validated span, the
+        // ±walkStep phase must NOT re-reach the rejected pixels outside it — a fire from there
+        // lands two floors down and the chase loops. The gate rejects x=99 when only [100,102]
+        // was validated, even though the legacy phase band would have accepted it.
+        BotNavigationGraph g = graph();
+        BotNavigationGraph.Edge edge = jumpEdge(100, 100, 100, 102);
+        assertFalse(BotNavigationManager.isWithinJumpLaunchWindow(g, new Point(99, 0), edge),
+                "outside the validated span is rejected even within the legacy phase band");
+        assertTrue(BotNavigationManager.isWithinJumpLaunchWindow(g, new Point(101, 0), edge),
+                "inside the validated span is accepted");
     }
 
     @Test
@@ -85,7 +107,7 @@ class JumpLaunchGateTest {
     @Test
     void aWideWindowStillAcceptsItsInteriorAndNeighbourhood() {
         BotNavigationGraph g = graph();
-        BotNavigationGraph.Edge edge = jumpEdge(60, 100);
+        BotNavigationGraph.Edge edge = jumpEdge(60, 100, 57, 103);
         assertTrue(BotNavigationManager.isWithinJumpLaunchWindow(g, new Point(80, 0), edge),
                 "an in-window launch x is always accepted");
         assertTrue(BotNavigationManager.isWithinJumpLaunchWindow(g, new Point(60 - 3, 0), edge),

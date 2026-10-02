@@ -49,7 +49,7 @@ final class BotNavigationGraphProvider {
     //     inside an 8.93 x fs px/s band (no walkSpeed air cap; counter-strafe pins at the
     //     band edge) and no-input flight drags 1 x fs (100 x fs at terminal fall). Committed
     //     arcs still fly the launch key held, so constant-stepX arc sims stay exact.
-    private static final int GRAPH_VERSION = 67; // 67: one-way-island repair - shelves with no inbound edge (the LPQ stage-1 tower's -2288/-1924 mob rows: >DOWN_JUMP_MAX_DROP_PX from above, jump-gap unsimulable, no rope) get an escapable-landing-gated straight-drop edge from the row above, so mobs on them stay pathable and the chase never degrades to pacing the floor above; 66: flight bound clamped to the standable foothold AABB (was max(VR, tree bounds)) - arcs that crossed the platform edge into a map's full-height no-foothold VR margin (Eos Tower 920010100's x=220..359 band) free-fell forever; the tightened boundary invalidates baked arcs that reached past the standable extent (old v65 caches parked in dead v65/); 65: dead-region arc prune - DROP/JUMP arcs landing in regions the bot can never leave are cut to a fixpoint (the escape-hatch deep drop must not land the bot in a one-way pit: LPQ stage 3's y-242 pit under a forbidFallDown stage row); 64: escape-hatch deep-drop edge (a region with no capped descent edge gets one full-descent straight drop to its deepest landing, dead ends like the 玩具塔 floor-1 R5 vanish); 51: kinetic slippery model + snowshoes; 52: brake-to-stop landings; 53: glide-unless-edge stop policy (slipperyStopDir); 56: uncap straight-drop launch windows (full droppable span, no +/-20 fragmentation); 57: remove the (empirically wrong) 300px down-jump drop cap - down-jumps fall until landing; 58: rope-grab reach counts descent below the ledge (mid-rope jump-grabs from adjacent platforms); 59: fall-sim caps to map height not 1500ms - long single-fall descents (tall shafts: Ellinia tree, Perion) now generate DROP/JUMP/ROPE edges; 60: re-cap drops for organic descent - walk-offs capped at MAX_DROP_PX, down-jumps at the tighter DOWN_JUMP_MAX_DROP_PX, and down-jumps carry DOWN_JUMP_COST_PENALTY_MS so the pathfinder prefers ropes/walk-offs over plummeting an entire vertical map; 61: widened rope top-exit probe (BotPhysicsEngine.findTopExitLanding) - accept a step-off foothold slightly above/below the rope top and a few px off-axis, so uneven/slanted ladder heads mint a clean CLIMB step-off edge instead of only ballistic top jump-offs; 62: cache filename now encodes snowShoes (the 4th key dimension) - old three-dimension filenames are unreadable by design, and the bump parks them in a dead v61/ directory that can be deleted wholesale; 63: inset every JUMP launch window by one walk step before stamping it on the edge - an edge-pressed window let the executor's +/-walkStep launch phase overfly a small platform and the bot fall to the bottom
+    private static final int GRAPH_VERSION = 68; // 68: JUMP edges carry the PRE-INSET validated launch span; the executor's ±walkStep launch phase is clamped to it (collapsed windows' phase band used to re-reach pixels the builder rejected — arcs landed two floors down, the LPQ stage-1 shelf chase fell and looped: "追怪但不跳上平台打"); 67: one-way-island repair - shelves with no inbound edge (the LPQ stage-1 tower's -2288/-1924 mob rows: >DOWN_JUMP_MAX_DROP_PX from above, jump-gap unsimulable, no rope) get an escapable-landing-gated straight-drop edge from the row above, so mobs on them stay pathable and the chase never degrades to pacing the floor above; 66: flight bound clamped to the standable foothold AABB (was max(VR, tree bounds)) - arcs that crossed the platform edge into a map's full-height no-foothold VR margin (Eos Tower 920010100's x=220..359 band) free-fell forever; the tightened boundary invalidates baked arcs that reached past the standable extent (old v65 caches parked in dead v65/); 65: dead-region arc prune - DROP/JUMP arcs landing in regions the bot can never leave are cut to a fixpoint (the escape-hatch deep drop must not land the bot in a one-way pit: LPQ stage 3's y-242 pit under a forbidFallDown stage row); 64: escape-hatch deep-drop edge (a region with no capped descent edge gets one full-descent straight drop to its deepest landing, dead ends like the 玩具塔 floor-1 R5 vanish); 51: kinetic slippery model + snowshoes; 52: brake-to-stop landings; 53: glide-unless-edge stop policy (slipperyStopDir); 56: uncap straight-drop launch windows (full droppable span, no +/-20 fragmentation); 57: remove the (empirically wrong) 300px down-jump drop cap - down-jumps fall until landing; 58: rope-grab reach counts descent below the ledge (mid-rope jump-grabs from adjacent platforms); 59: fall-sim caps to map height not 1500ms - long single-fall descents (tall shafts: Ellinia tree, Perion) now generate DROP/JUMP/ROPE edges; 60: re-cap drops for organic descent - walk-offs capped at MAX_DROP_PX, down-jumps at the tighter DOWN_JUMP_MAX_DROP_PX, and down-jumps carry DOWN_JUMP_COST_PENALTY_MS so the pathfinder prefers ropes/walk-offs over plummeting an entire vertical map; 61: widened rope top-exit probe (BotPhysicsEngine.findTopExitLanding) - accept a step-off foothold slightly above/below the rope top and a few px off-axis, so uneven/slanted ladder heads mint a clean CLIMB step-off edge instead of only ballistic top jump-offs; 62: cache filename now encodes snowShoes (the 4th key dimension) - old three-dimension filenames are unreadable by design, and the bump parks them in a dead v61/ directory that can be deleted wholesale; 63: inset every JUMP launch window by one walk step before stamping it on the edge - an edge-pressed window let the executor's +/-walkStep launch phase overfly a small platform and the bot fall to the bottom
 
     // Drop caps for organic descent (re-added; v57 had removed the old single cap). A bot must
     // never plummet down a whole vertical map. Two distinct downward moves, treated differently:
@@ -329,7 +329,8 @@ final class BotNavigationGraphProvider {
         }
     }
 
-    private record JumpLaunchWindow(int minX, int maxX, Point startPoint, Point endPoint, int landingTimeMs) {
+    private record JumpLaunchWindow(int minX, int maxX, int validMinX, int validMaxX,
+                                    Point startPoint, Point endPoint, int landingTimeMs) {
     }
 
     private static final class JumpBuildStats {
@@ -1198,7 +1199,6 @@ final class BotNavigationGraphProvider {
             addDeepDescentDropEdge(from, map, regionIdByFootholdId, outgoing, edgeKeys, movementProfile);
         }
     }
-
     /**
      * The ground regions with NO inbound edge from any other region: the one-way islands the
      * repair pass exists for. Normal maps return an empty set here, so the pass costs one
@@ -1611,6 +1611,7 @@ final class BotNavigationGraphProvider {
                 addEdge(from.id, to.id, BotNavigationGraph.EdgeType.JUMP,
                         launchWindow.startPoint(), launchWindow.endPoint(),
                         launchWindow.minX(), launchWindow.maxX(),
+                        launchWindow.validMinX(), launchWindow.validMaxX(),
                         launchStepX, 0, launchWindow.landingTimeMs(),
                         outgoing, edgeKeys);
                 stats.edgeCount++;
@@ -1732,6 +1733,13 @@ final class BotNavigationGraphProvider {
                 true, stats, jumpLandingCache, movementProfile);
         int maxX = findJumpBoundary(from, map, regionIdByFootholdId, anchorX, launchStepX, targetRegionId,
                 false, stats, jumpLandingCache, movementProfile);
+        // Ours (LPQ stage-1 shelf loop): the pre-inset validated span rides on the edge, so the
+        // executor's ±walkStep launch phase can be clamped to it. When the inset below collapses
+        // the window (validated span < 2 x margin), the phase band around the single stamped pixel
+        // otherwise re-reaches the REJECTED pixels outside the span — the arc fires, overshots,
+        // falls two floors, and the chase loops (the "追怪但不跳上平台" report).
+        int validMinX = minX;
+        int validMaxX = maxX;
         // Inset the window by the executor's launch phase before it is stamped onto the edge, so the
         // whole reachable takeoff span sits strictly inside the validated window (see jumpLaunchMargin:
         // an edge-pressed window is what lets a small-platform jump overfly its target and fall).
@@ -1752,7 +1760,8 @@ final class BotNavigationGraphProvider {
             return null;
         }
 
-        return new JumpLaunchWindow(minX, maxX, representativeStart, representativeSimulation.landing().point(),
+        return new JumpLaunchWindow(minX, maxX, validMinX, validMaxX,
+                representativeStart, representativeSimulation.landing().point(),
                 representativeSimulation.landing().timeMs());
     }
 
@@ -1783,7 +1792,7 @@ final class BotNavigationGraphProvider {
             return null;
         }
 
-        return new JumpLaunchWindow(minX, maxX, representativeStart,
+        return new JumpLaunchWindow(minX, maxX, minX, maxX, representativeStart,
                 representativeLanding.point(), representativeLanding.timeMs());
     }
 
@@ -1917,6 +1926,7 @@ final class BotNavigationGraphProvider {
         }
         return new int[]{lo, hi};
     }
+
 
     private static boolean isValidJumpLaunchX(BotNavigationGraph.Region from,
                                               MapleMap map,
@@ -2069,7 +2079,7 @@ final class BotNavigationGraphProvider {
 
         int travelMs = BotPhysicsEngine.estimateGroundJumpRopeGrabTimeMs(
                 map, representativeStart, launchStepX, rope, movementProfile);
-        return new JumpLaunchWindow(minX, maxX, representativeStart, representativeGrab, travelMs);
+        return new JumpLaunchWindow(minX, maxX, minX, maxX, representativeStart, representativeGrab, travelMs);
     }
 
     private static int findRopeGrabBoundary(BotNavigationGraph.Region from,
@@ -2617,6 +2627,26 @@ final class BotNavigationGraphProvider {
                 0, 0, 0, cost, outgoing, edgeKeys);
     }
 
+    // Ours (LPQ shelf loop): as above, plus the pre-inset validated span the executor's launch
+    // phase is clamped to (see BotNavigationGraph.Edge.acceptsLaunchX).
+    private static void addEdge(int fromRegionId,
+                                int toRegionId,
+                                BotNavigationGraph.EdgeType type,
+                                Point startPoint,
+                                Point endPoint,
+                                int launchMinX,
+                                int launchMaxX,
+                                int launchValidMinX,
+                                int launchValidMaxX,
+                                int launchStepX,
+                                int portalId,
+                                int cost,
+                                Map<Integer, List<BotNavigationGraph.Edge>> outgoing,
+                                Set<String> edgeKeys) {
+        addEdge(fromRegionId, toRegionId, type, startPoint, endPoint, launchMinX, launchMaxX,
+                launchValidMinX, launchValidMaxX, launchStepX, portalId, 0, 0, 0, cost, outgoing, edgeKeys);
+    }
+
     private static void addEdge(int fromRegionId,
                                 int toRegionId,
                                 BotNavigationGraph.EdgeType type,
@@ -2646,6 +2676,28 @@ final class BotNavigationGraphProvider {
                                 int cost,
                                 Map<Integer, List<BotNavigationGraph.Edge>> outgoing,
                                 Set<String> edgeKeys) {
+        addEdge(fromRegionId, toRegionId, type, startPoint, endPoint,
+                launchMinX, launchMaxX, launchMinX, launchMaxX, launchStepX, portalId,
+                ropeX, ropeTopY, ropeBottomY, cost, outgoing, edgeKeys);
+    }
+
+    private static void addEdge(int fromRegionId,
+                                int toRegionId,
+                                BotNavigationGraph.EdgeType type,
+                                Point startPoint,
+                                Point endPoint,
+                                int launchMinX,
+                                int launchMaxX,
+                                int launchValidMinX,
+                                int launchValidMaxX,
+                                int launchStepX,
+                                int portalId,
+                                int ropeX,
+                                int ropeTopY,
+                                int ropeBottomY,
+                                int cost,
+                                Map<Integer, List<BotNavigationGraph.Edge>> outgoing,
+                                Set<String> edgeKeys) {
         String key = fromRegionId + ":" + toRegionId + ":" + type + ":" + startPoint.x + ":" + startPoint.y + ":"
                 + endPoint.x + ":" + endPoint.y + ":" + launchStepX + ":" + portalId + ":"
                 + ropeX + ":" + ropeTopY + ":" + ropeBottomY + ":" + launchMinX + ":" + launchMaxX;
@@ -2655,7 +2707,8 @@ final class BotNavigationGraphProvider {
 
         outgoing.computeIfAbsent(fromRegionId, ignored -> new ArrayList<>())
                 .add(new BotNavigationGraph.Edge(fromRegionId, toRegionId, type, startPoint, endPoint,
-                        launchMinX, launchMaxX, launchStepX, portalId, ropeX, ropeTopY, ropeBottomY, cost));
+                        launchMinX, launchMaxX, launchValidMinX, launchValidMaxX, launchStepX, portalId,
+                        ropeX, ropeTopY, ropeBottomY, cost));
         BuildProfileBuilder profile = ACTIVE_BUILD_PROFILE.get();
         if (profile != null) {
             profile.recordEdge(type);
