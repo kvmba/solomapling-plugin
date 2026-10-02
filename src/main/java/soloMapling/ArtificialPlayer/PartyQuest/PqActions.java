@@ -837,10 +837,23 @@ public final class PqActions {
     private static final int RETARGET_EPS_PX = 16;          // skip re-issuing a move for tiny shifts
     private static final long RETARGET_TIMEOUT_MS = 4_000;  // give up an unreachable target after this
     private static final int PROGRESS_EPS_PX = 20;          // movement worth counting as chase progress
+    /** A mob within this |dy| of the bot's feet counts as same-level: patrol tracking is allowed. */
+    private static final int FLOOR_SNAP_BAND_PX = 60;
     private static final Map<Integer, Integer> seekTargetByBot = new java.util.concurrent.ConcurrentHashMap<>();
     private static final Map<Integer, Point> seekAnchorByBot = new java.util.concurrent.ConcurrentHashMap<>();
     private static final Map<Integer, Long> seekDeadlineByBot = new java.util.concurrent.ConcurrentHashMap<>();
     private static final Map<Integer, Integer> seekLastXByBot = new java.util.concurrent.ConcurrentHashMap<>();
+    // FROZEN chase anchor (LPQ stage-1 "追着上方巡逻怪小步卡顿、永远上不去"): a live mob's position
+    // changes EVERY beat (aggro walk / knockback / an airborne arc), and re-aiming the seek move at
+    // its floor point each beat can land that point in a DIFFERENT nav region than the last — so the
+    // driver discards the committed climb edge mid-rope, replans from the bottom, and the bot paces
+    // under the mob forever (the phase never completes; the deadline keeps being pushed by real
+    // progress made on the wasted replans). Anchor the chase on the mob's FROZEN PLATFORM instead:
+    // the floor point is re-derived only when it actually shifts platforms, and the per-beat micro
+    // tracking (fresh tx each beat) is allowed ONLY on the bot's own level, where no climb is at
+    // stake. Per-bot state: the frozen floor point + how many consecutive beats it has drifted.
+    private static final Map<Integer, Point> chaseAnchorByBot = new java.util.concurrent.ConcurrentHashMap<>();
+    private static final int CHASE_PLATFORM_DRIFT_BEATS = 4;  // ~1s of beats before re-deriving
 
     /**
      * Seek a mob and fight it, the way the roaming grind brain does: swing at whatever the
@@ -887,6 +900,7 @@ public final class PqActions {
         Monster target = seekPathableTarget(bot, pos);
         if (target == null) {
             seekLastXByBot.remove(bot.getId());
+            chaseAnchorByBot.remove(bot.getId());
             return; // the room is quiet (or nothing reachable); hold position this beat
         }
 
@@ -894,9 +908,31 @@ public final class PqActions {
         // ropes as its edges need). Ranged/magic reach is respected by the swing above firing
         // before the walk gets there, so this walk always ends in a landed swing or a timeout.
         Point mp = target.getPosition();
-        Point ground = GCMovement.groundPointBelow(bot.getMap(), mp.x, mp.y);
-        int tx = mp.x;
-        int ty = (ground != null) ? ground.y : mp.y;
+
+        // FROZEN chase anchor: derive the floor point ONCE and keep it across beats while the mob
+        // stays on its platform. A mob jitters every beat (patrol, knockback, an airborne arc whose
+        // column probes a DIFFERENT foothold), and each re-derivation re-issues a move whose target
+        // region can flip — discarding the committed climb edge mid-rope and stranding the bot
+        // pacing under a mob it can never reach. Same platform (floor y within the snap band): keep
+        // the frozen anchor and let the driver finish its climb/trip to it. The mob has actually
+        // moved floors only after CHASE_PLATFORM_DRIFT_BEATS consecutive off-platform samples
+        // (filters the one-beat airborne arc); then re-derive and restart the progress clock.
+        Point anchorFloor = chaseAnchorByBot.get(bot.getId());
+        Point ground = (anchorFloor != null)
+                ? GCMovement.groundPointBelow(bot.getMap(), anchorFloor.x, anchorFloor.y)
+                : null;
+        if (anchorFloor == null || ground == null || Math.abs(mp.y - ground.y) > FLOOR_SNAP_BAND_PX) {
+            int drift = (anchorFloor == null || ground == null)
+                    ? CHASE_PLATFORM_DRIFT_BEATS : 1;
+            if (drift >= CHASE_PLATFORM_DRIFT_BEATS) {
+                ground = GCMovement.groundPointBelow(bot.getMap(), mp.x, mp.y);
+                anchorFloor = new Point(mp.x, (ground != null) ? ground.y : mp.y);
+                chaseAnchorByBot.put(bot.getId(), anchorFloor);
+                seekAnchorByBot.remove(bot.getId()); // a new platform restarts the progress clock
+            }
+        }
+        int tx = anchorFloor.x;
+        int ty = anchorFloor.y;
 
         // Some quest rooms seat their prize mob on a ledge the nav graph cannot climb TO (a
         // pedestal with no upward edges - LPQ's Alishar). Chasing the mob's own platform would
@@ -921,6 +957,7 @@ public final class PqActions {
             seekDeadlineByBot.put(bot.getId(), System.currentTimeMillis() + RETARGET_TIMEOUT_MS);
         } else if (System.currentTimeMillis() > seekDeadlineByBot.getOrDefault(bot.getId(), 0L)) {
             seekTargetByBot.put(bot.getId(), -1);
+            chaseAnchorByBot.remove(bot.getId());
             seekAnchorByBot.remove(bot.getId());
             seekLastXByBot.remove(bot.getId());
             return;
@@ -928,10 +965,17 @@ public final class PqActions {
 
         // Retarget epsilon: re-issuing GCMovement.move for the same X every beat would reset
         // the walk's progress clock each time, so only a real shift in the goal re-issues it.
+        // Same-level mobs keep the per-beat tracking (the mob's own patrol is the goal, the bot
+        // is walking its own floor, no climb is at stake); a CROSS-level anchor only re-issues
+        // when the FROZEN platform itself changed (handled above).
         Integer lastX = seekLastXByBot.get(bot.getId());
-        if (lastX == null || Math.abs(tx - lastX) >= RETARGET_EPS_PX) {
+        boolean sameLevel = Math.abs(mp.y - pos.y) <= FLOOR_SNAP_BAND_PX;
+        if (lastX == null || (sameLevel && Math.abs(tx - lastX) >= RETARGET_EPS_PX)) {
             GCMovement.move(bot, tx, ty);
             seekLastXByBot.put(bot.getId(), tx);
+        } else if (!sameLevel && lastX != null && Math.abs(tx - lastX) >= RETARGET_EPS_PX
+                && GCMovement.isMoving(bot)) {
+            seekLastXByBot.put(bot.getId(), tx); // adopt the frozen goal without re-issuing mid-climb
         }
     }
 
@@ -951,6 +995,7 @@ public final class PqActions {
                 return m;
             }
             seekTargetByBot.put(bot.getId(), -1); // gone, out of the box, or unreachable
+            chaseAnchorByBot.remove(bot.getId()); // the frozen platform belongs to the dropped mob
         }
         Monster best = null;
         double bestSq = Double.MAX_VALUE;
@@ -973,6 +1018,7 @@ public final class PqActions {
         }
         Monster chosen = bestPathable != null ? bestPathable : best;
         seekTargetByBot.put(bot.getId(), chosen != null ? chosen.getObjectId() : -1);
+        chaseAnchorByBot.remove(bot.getId()); // a fresh target restarts the frozen platform anchor
         seekAnchorByBot.remove(bot.getId()); // a fresh target restarts the progress clock
         seekLastXByBot.remove(bot.getId());
         return chosen;
@@ -1017,6 +1063,7 @@ public final class PqActions {
     /** Release a stopped/despawned quest bot's seek state so the per-bot maps do not grow. */
     public static void clearSeekState(int botId) {
         seekTargetByBot.remove(botId);
+        chaseAnchorByBot.remove(botId);
         seekAnchorByBot.remove(botId);
         seekDeadlineByBot.remove(botId);
         seekLastXByBot.remove(botId);
