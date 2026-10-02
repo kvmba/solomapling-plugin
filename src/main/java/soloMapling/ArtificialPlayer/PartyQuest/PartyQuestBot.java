@@ -8,6 +8,7 @@ import soloMapling.ArtificialPlayer.BotDialogueHandler;
 import soloMapling.ArtificialPlayer.BotPartySystem.BotPartyLogic;
 import soloMapling.ArtificialPlayer.BotPartySystem.BotRecruitManager;
 import soloMapling.ArtificialPlayer.BotSM;
+import soloMapling.ArtificialPlayer.BotAttackSystem.BotAuraState;
 import soloMapling.ArtificialPlayer.BotHealthSystem.BotPotionSim;
 import soloMapling.ArtificialPlayer.BotMessagingSystem.ChatMessage;
 import soloMapling.ArtificialPlayer.BotGrindSystem.GrindTickRegistry;
@@ -741,6 +742,11 @@ public abstract class PartyQuestBot extends BotSM implements GrindTickRegistry.P
             return;
         }
         BotLogger.log("PQ bot " + bot.getName() + " leaving the run: " + reason);
+        // A hide aura (LPQ stage-5 隐身术/橡木伪装) has no expiry of its own - only an attack,
+        // a mount or a death retires it, and none of those happen on the way home. Send the
+        // cancelForeignBuff before the warp, so the bot doesn't arrive at the lobby invisible
+        // (the on-arrival aura replay would even keep re-drawing it to every new arrival).
+        BotAuraState.cancelHidesForAction(bot);
         // Drop the instance before warping: changeMap would otherwise resolve the lobby through
         // the instance's own map cache and put the bot in an empty copy of the town.
         leaveInstance();
