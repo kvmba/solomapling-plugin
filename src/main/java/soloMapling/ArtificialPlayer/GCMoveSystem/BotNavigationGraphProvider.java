@@ -49,7 +49,7 @@ final class BotNavigationGraphProvider {
     //     inside an 8.93 x fs px/s band (no walkSpeed air cap; counter-strafe pins at the
     //     band edge) and no-input flight drags 1 x fs (100 x fs at terminal fall). Committed
     //     arcs still fly the launch key held, so constant-stepX arc sims stay exact.
-    private static final int GRAPH_VERSION = 66; // 66: flight bound clamped to the standable foothold AABB (was max(VR, tree bounds)) - arcs that crossed the platform edge into a map's full-height no-foothold VR margin (Eos Tower 920010100's x=220..359 band) free-fell forever; the tightened boundary invalidates baked arcs that reached past the standable extent (old v65 caches parked in dead v65/); 65: dead-region arc prune - DROP/JUMP arcs landing in regions the bot can never leave are cut to a fixpoint (the escape-hatch deep drop must not land the bot in a one-way pit: LPQ stage 3's y-242 pit under a forbidFallDown stage row); 64: escape-hatch deep-drop edge (a region with no capped descent edge gets one full-descent straight drop to its deepest landing, dead ends like the 玩具塔 floor-1 R5 vanish); 51: kinetic slippery model + snowshoes; 52: brake-to-stop landings; 53: glide-unless-edge stop policy (slipperyStopDir); 56: uncap straight-drop launch windows (full droppable span, no +/-20 fragmentation); 57: remove the (empirically wrong) 300px down-jump drop cap - down-jumps fall until landing; 58: rope-grab reach counts descent below the ledge (mid-rope jump-grabs from adjacent platforms); 59: fall-sim caps to map height not 1500ms - long single-fall descents (tall shafts: Ellinia tree, Perion) now generate DROP/JUMP/ROPE edges; 60: re-cap drops for organic descent - walk-offs capped at MAX_DROP_PX, down-jumps at the tighter DOWN_JUMP_MAX_DROP_PX, and down-jumps carry DOWN_JUMP_COST_PENALTY_MS so the pathfinder prefers ropes/walk-offs over plummeting an entire vertical map; 61: widened rope top-exit probe (BotPhysicsEngine.findTopExitLanding) - accept a step-off foothold slightly above/below the rope top and a few px off-axis, so uneven/slanted ladder heads mint a clean CLIMB step-off edge instead of only ballistic top jump-offs; 62: cache filename now encodes snowShoes (the 4th key dimension) - old three-dimension filenames are unreadable by design, and the bump parks them in a dead v61/ directory that can be deleted wholesale; 63: inset every JUMP launch window by one walk step before stamping it on the edge - an edge-pressed window let the executor's +/-walkStep launch phase overfly a small platform and the bot fall to the bottom
+    private static final int GRAPH_VERSION = 67; // 67: one-way-island repair - shelves with no inbound edge (the LPQ stage-1 tower's -2288/-1924 mob rows: >DOWN_JUMP_MAX_DROP_PX from above, jump-gap unsimulable, no rope) get an escapable-landing-gated straight-drop edge from the row above, so mobs on them stay pathable and the chase never degrades to pacing the floor above; 66: flight bound clamped to the standable foothold AABB (was max(VR, tree bounds)) - arcs that crossed the platform edge into a map's full-height no-foothold VR margin (Eos Tower 920010100's x=220..359 band) free-fell forever; the tightened boundary invalidates baked arcs that reached past the standable extent (old v65 caches parked in dead v65/); 65: dead-region arc prune - DROP/JUMP arcs landing in regions the bot can never leave are cut to a fixpoint (the escape-hatch deep drop must not land the bot in a one-way pit: LPQ stage 3's y-242 pit under a forbidFallDown stage row); 64: escape-hatch deep-drop edge (a region with no capped descent edge gets one full-descent straight drop to its deepest landing, dead ends like the 玩具塔 floor-1 R5 vanish); 51: kinetic slippery model + snowshoes; 52: brake-to-stop landings; 53: glide-unless-edge stop policy (slipperyStopDir); 56: uncap straight-drop launch windows (full droppable span, no +/-20 fragmentation); 57: remove the (empirically wrong) 300px down-jump drop cap - down-jumps fall until landing; 58: rope-grab reach counts descent below the ledge (mid-rope jump-grabs from adjacent platforms); 59: fall-sim caps to map height not 1500ms - long single-fall descents (tall shafts: Ellinia tree, Perion) now generate DROP/JUMP/ROPE edges; 60: re-cap drops for organic descent - walk-offs capped at MAX_DROP_PX, down-jumps at the tighter DOWN_JUMP_MAX_DROP_PX, and down-jumps carry DOWN_JUMP_COST_PENALTY_MS so the pathfinder prefers ropes/walk-offs over plummeting an entire vertical map; 61: widened rope top-exit probe (BotPhysicsEngine.findTopExitLanding) - accept a step-off foothold slightly above/below the rope top and a few px off-axis, so uneven/slanted ladder heads mint a clean CLIMB step-off edge instead of only ballistic top jump-offs; 62: cache filename now encodes snowShoes (the 4th key dimension) - old three-dimension filenames are unreadable by design, and the bump parks them in a dead v61/ directory that can be deleted wholesale; 63: inset every JUMP launch window by one walk step before stamping it on the edge - an edge-pressed window let the executor's +/-walkStep launch phase overfly a small platform and the bot fall to the bottom
 
     // Drop caps for organic descent (re-added; v57 had removed the old single cap). A bot must
     // never plummet down a whole vertical map. Two distinct downward moves, treated differently:
@@ -811,6 +811,16 @@ final class BotNavigationGraphProvider {
             for (Portal portal : map.getPortals()) {
                 addPortalEdges(portal, map, regionsById, regionIdByFootholdId, outgoing, edgeKeys);
             }
+            // One-way-island repair runs here, after EVERY edge phase: an island whose only exit
+            // is a rope counts as escapable, so the escape gate must read the completed outbound
+            // picture. Only islands with NO inbound edge at all are repaired, and the repair
+            // validates each launch against the island in isolation, so no ordering between
+            // islands is required. (y grows DOWNWARD in MapleStory: island.maxY > island.minY,
+            // and a repair edge's landing.y is always > its launch.y.)
+            for (BotNavigationGraph.Region island : islandsWithoutInboundEdge(regions, outgoing)) {
+                addOneWayIslandDropEdges(island, map, regionIdByFootholdId, groundRegions,
+                        outgoing, edgeKeys, movementProfile);
+            }
             // A dead-region arc prune rides the portal phase: it must run after EVERY edge phase
             // (its verdict is global), and its cost is a small O(E) fixpoint sweep.
             pruneDeadRegionArcEdges(regions, outgoing);
@@ -1187,6 +1197,134 @@ final class BotNavigationGraphProvider {
         if (canReachBelow.isEmpty()) {
             addDeepDescentDropEdge(from, map, regionIdByFootholdId, outgoing, edgeKeys, movementProfile);
         }
+    }
+
+    /**
+     * The ground regions with NO inbound edge from any other region: the one-way islands the
+     * repair pass exists for. Normal maps return an empty set here, so the pass costs one
+     * O(E) inbound-count sweep and zero simulations.
+     */
+    private static List<BotNavigationGraph.Region> islandsWithoutInboundEdge(List<BotNavigationGraph.Region> regions,
+                                                                             Map<Integer, List<BotNavigationGraph.Edge>> outgoing) {
+        List<BotNavigationGraph.Region> islands = new ArrayList<>();
+        if (outgoing.isEmpty()) {
+            return islands;
+        }
+        java.util.Set<Integer> withInbound = new java.util.HashSet<>();
+        for (List<BotNavigationGraph.Edge> edges : outgoing.values()) {
+            for (BotNavigationGraph.Edge edge : edges) {
+                if (edge.toRegionId != edge.fromRegionId) {
+                    withInbound.add(edge.toRegionId);
+                }
+            }
+        }
+        for (BotNavigationGraph.Region region : regions) {
+            if (!region.isRopeRegion && !withInbound.contains(region.id)) {
+                islands.add(region);
+            }
+        }
+        return islands;
+    }
+
+    /*
+     * One-way-island repair (the LPQ stage-1 tower's -2288 mob shelf): a shelf the bot can only
+     * reach by jumping UP from below has no INBOUND edge, so mobs on it read as unpathable and
+     * the chase degrades into pacing the floor above. The straight down-jump from the row above
+     * IS physics-legal there - the capped sim rejected it only because its drop exceeded
+     * DOWN_JUMP_MAX_DROP_PX (an anti-plummet cost heuristic, not a physics limit). For such an
+     * island, bake one straight-drop edge per launch region above whose columns drop onto it,
+     * under the deep-descent heavy penalty so the pathfinder still prefers ropes/walk-offs. The
+     * per-column straight-drop rule holds: same integrator as the executor, a straight drop has
+     * stepX 0 so the per-column sim IS the flight, and the window is a contiguous run of
+     * only-good columns (the deep-descent launch-window rule).
+     */
+    private static void addOneWayIslandDropEdges(BotNavigationGraph.Region island,
+                                                 MapleMap map,
+                                                 Map<Integer, Integer> regionIdByFootholdId,
+                                                 List<BotNavigationGraph.Region> launchRegions,
+                                                 Map<Integer, List<BotNavigationGraph.Edge>> outgoing,
+                                                 Set<String> edgeKeys,
+                                                 BotMovementProfile movementProfile) {
+        // The island must be escapable, or the drop would trade one wedge for another. This
+        // runs after every edge phase, so a rope/walk/drop exit all count here.
+        if (outgoing.get(island.id) == null || outgoing.get(island.id).isEmpty()) {
+            return;
+        }
+        for (BotNavigationGraph.Region from : launchRegions) {
+            if (from.id == island.id || from.minY > island.minY) {
+                continue; // y grows downward: a launch region's top must sit ABOVE the island's
+            }
+            launchPerRegion(from, island, map, regionIdByFootholdId, outgoing, edgeKeys, movementProfile);
+        }
+    }
+
+    private static void launchPerRegion(BotNavigationGraph.Region from,
+                                        BotNavigationGraph.Region island,
+                                        MapleMap map,
+                                        Map<Integer, Integer> regionIdByFootholdId,
+                                        Map<Integer, List<BotNavigationGraph.Edge>> outgoing,
+                                        Set<String> edgeKeys,
+                                        BotMovementProfile movementProfile) {
+        // Longest contiguous run of launch columns whose straight drop lands on the island.
+        // One left-to-right sweep: a run is a maximal span of columns that (a) stand on `from`
+        // and (b) drop onto the island. O(columns) simulations, each column checked once.
+        int bestLo = 0;
+        int bestHi = -1;
+        Point bestLanding = null;
+        int runLo = Integer.MIN_VALUE;
+        for (int x = from.minX; x <= from.maxX + 1; x++) {
+            boolean good = x <= from.maxX
+                    && columnStandsOn(from, x)
+                    && dropLandsOnRegion(from, map, regionIdByFootholdId, x, island.id);
+            if (good) {
+                if (runLo == Integer.MIN_VALUE) {
+                    runLo = x;
+                }
+            } else if (runLo != Integer.MIN_VALUE) {
+                if (x - 1 - runLo > bestHi - bestLo) {
+                    bestLo = runLo;
+                    bestHi = x - 1;
+                    bestLanding = landingAt(from, map, (runLo + x - 1) / 2);
+                }
+                runLo = Integer.MIN_VALUE;
+            }
+        }
+        if (bestLanding == null) {
+            return;
+        }
+        int launchX = (bestLo + bestHi) / 2;
+        addEdge(from.id, island.id, BotNavigationGraph.EdgeType.DROP,
+                from.pointAt(launchX), bestLanding,
+                bestLo, bestHi,
+                0, 0, DOWN_JUMP_COST_PENALTY_MS * 2, outgoing, edgeKeys);
+    }
+
+    /**
+     * Whether column {@code x} stands on {@code region} itself: the region has a segment whose
+     * x span contains x (pointAt would otherwise clamp to a distant segment and "stand" the
+     * launch off the platform's own floor).
+     */
+    private static boolean columnStandsOn(BotNavigationGraph.Region region, int x) {
+        for (BotNavigationGraph.Segment segment : region.segments) {
+            if (segment.containsX(x)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean dropLandsOnRegion(BotNavigationGraph.Region from,
+                                             MapleMap map,
+                                             Map<Integer, Integer> regionIdByFootholdId,
+                                             int x,
+                                             int landingRegionId) {
+        BotPhysicsEngine.JumpLanding sim = BotPhysicsEngine.simulateDownJumpLanding(map, from.pointAt(x));
+        return sim != null && regionIdByFootholdId.getOrDefault(sim.foothold().getId(), -1) == landingRegionId;
+    }
+
+    private static Point landingAt(BotNavigationGraph.Region from, MapleMap map, int x) {
+        BotPhysicsEngine.JumpLanding sim = BotPhysicsEngine.simulateDownJumpLanding(map, from.pointAt(x));
+        return sim != null ? sim.point() : from.pointAt(x);
     }
 
     /*
