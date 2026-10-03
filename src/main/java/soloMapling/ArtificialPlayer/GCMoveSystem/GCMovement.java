@@ -536,6 +536,19 @@ public final class GCMovement {
                 || st.navEdge != null || st.portalDropAtMs > 0L);
     }
 
+    /*
+     * True while the driver still holds a MOVE TARGET for this bot (a GCMovement.move/farmHere goal
+     * that has not been reached, abandoned by the no-progress watchdog, or superseded). A caller that
+     * re-issues moves on a cadence (the PQ chase) uses this to tell "my last move is still in flight"
+     * from "the driver gave up and the bot now has no goal": when it drops to false the caller must
+     * re-issue even if its own target x is unchanged, or the bot sits goal-less until the caller's
+     * own timeout - the LPQ stage-1 "hangs mid-climb, only recovers after ~4s" report.
+     */
+    public static boolean hasMoveTarget(Character bot) {
+        BotMovementState st = bot == null ? null : STATES.get(bot.getId());
+        return st != null && st.moveTarget != null;
+    }
+
     /* True while the bot is on a rope/ladder (cleared only once it's back on a foothold). Combat holds
      * off attacking until then so the bot doesn't swing from the rope when a mob is near the rope top. */
     public static boolean isClimbing(Character bot) {
