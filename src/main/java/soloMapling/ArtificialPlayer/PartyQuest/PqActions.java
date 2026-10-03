@@ -928,6 +928,7 @@ public final class PqActions {
         // deadline wiped state. Following the live x while the platform holds fixes both.
         Point mobFloor = GCMovement.groundPointBelow(bot.getMap(), mp.x, mp.y);
         Point anchorFloor = chaseAnchorByBot.get(bot.getId());
+        boolean sameLevel = Math.abs(mp.y - pos.y) <= FLOOR_SNAP_BAND_PX;
         int tx;
         int ty;
         if (anchorFloor == null || mobFloor == null) {
@@ -936,13 +937,19 @@ public final class PqActions {
             chaseDriftByBot.remove(bot.getId());
             tx = anchorFloor.x;
             ty = anchorFloor.y;
-        } else if (Math.abs(mobFloor.y - anchorFloor.y) <= FLOOR_SNAP_BAND_PX) {
-            // Still on the pinned platform: track the mob's live floor (the region is unchanged).
+        } else if (sameLevel
+                || Math.abs(mobFloor.y - anchorFloor.y) <= FLOOR_SNAP_BAND_PX) {
+            // Same level (no climb at stake) or the mob's floor probe still reads the pinned
+            // platform: track the mob's live floor. CROSS-LEVEL chases do NOT follow the live x
+            // — a knockback slide or a gap-crossing floor probe re-aims the goal every beat,
+            // each re-aim can land in a different nav region and discards the committed climb
+            // edge mid-rope (the LPQ stage-1 卡绳索/永不登台 loop). The pinned anchor is within
+            // one platform of the mob; melee reach (±90px) covers the rest once the bot lands.
             anchorFloor = new Point(mp.x, anchorFloor.y);
             chaseAnchorByBot.put(bot.getId(), anchorFloor);
             chaseDriftByBot.remove(bot.getId());
-            tx = mp.x;
-            ty = mobFloor.y;
+            tx = sameLevel ? mp.x : anchorFloor.x;
+            ty = sameLevel ? mobFloor.y : anchorFloor.y;
         } else {
             int drift = chaseDriftByBot.merge(bot.getId(), 1, Integer::sum);
             if (drift >= CHASE_PLATFORM_DRIFT_BEATS) {
