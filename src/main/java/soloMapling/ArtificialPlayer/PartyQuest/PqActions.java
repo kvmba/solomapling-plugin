@@ -849,7 +849,7 @@ public final class PqActions {
     private static final Map<Integer, Integer> seekTargetByBot = new java.util.concurrent.ConcurrentHashMap<>();
     private static final Map<Integer, Point> seekAnchorByBot = new java.util.concurrent.ConcurrentHashMap<>();
     private static final Map<Integer, Long> seekDeadlineByBot = new java.util.concurrent.ConcurrentHashMap<>();
-    private static final Map<Integer, Integer> seekLastXByBot = new java.util.concurrent.ConcurrentHashMap<>();
+    private static final Map<Integer, Point> seekLastGoalByBot = new java.util.concurrent.ConcurrentHashMap<>();
     // PINNED chase PLATFORM (LPQ stage-1 "追着上方巡逻怪小步卡顿、永远上不去"): a live mob's position
     // changes EVERY beat (aggro walk / knockback / an airborne arc), and re-aiming the seek move at
     // its floor point each beat can land that point in a DIFFERENT nav region than the last — so the
@@ -931,7 +931,7 @@ public final class PqActions {
         //    standing, and the graph may bake later).
         Monster target = seekPathableTarget(bot, pos);
         if (target == null) {
-            seekLastXByBot.remove(bot.getId());
+            seekLastGoalByBot.remove(bot.getId());
             clearChaseGoalState(bot.getId());
             return; // the room is quiet (or nothing reachable); hold position this beat
         }
@@ -1053,23 +1053,31 @@ public final class PqActions {
             seekTargetByBot.put(bot.getId(), -1);
             clearChaseGoalState(bot.getId());
             seekAnchorByBot.remove(bot.getId());
-            seekLastXByBot.remove(bot.getId());
+            seekLastGoalByBot.remove(bot.getId());
             return;
         }
 
-        // Retarget epsilon: re-issuing GCMovement.move for the same X every beat would reset the
+        // Retarget epsilon: re-issuing GCMovement.move for the same POINT every beat would reset the
         // walk's progress clock each time, so only a real shift in the goal re-issues it — UNLESS
         // the driver no longer holds a move target (it gave up on an unreachable leg, or the move
         // was superseded): then the bot has no goal at all and this beat must re-arm it even at the
-        // same x, or it sits goal-less until the seek's own timeout (the stage-1 "hangs mid-climb,
-        // only recovers after ~4s" report). hasMoveTarget is the driver's "goal still in flight".
-        Integer lastX = seekLastXByBot.get(bot.getId());
-        if (lastX == null || !GCMovement.hasMoveTarget(bot) || Math.abs(tx - lastX) >= RETARGET_EPS_PX) {
+        // same point, or it sits goal-less until the seek's own timeout (the stage-1 "hangs
+        // mid-climb, only recovers after ~4s" report). hasMoveTarget is the driver's "goal still in
+        // flight". The Y is part of the goal: a persistent flip adopted on a vertically-stacked
+        // tower routinely keeps the same x and changes only the row — comparing x alone left the
+        // new y un-issued and the bot chasing the previous row's floor until the driver's own
+        // arrival cleared the stale target.
+        Point lastGoal = seekLastGoalByBot.get(bot.getId());
+        boolean rearmNeeded = !GCMovement.hasMoveTarget(bot);
+        boolean goalShifted = lastGoal == null
+                || Math.abs(tx - lastGoal.x) >= RETARGET_EPS_PX
+                || Math.abs(ty - lastGoal.y) >= RETARGET_EPS_PX;
+        if (rearmNeeded || goalShifted) {
             GCMovement.move(bot, tx, ty);
-            seekLastXByBot.put(bot.getId(), tx);
+            seekLastGoalByBot.put(bot.getId(), new Point(tx, ty));
         }
         if (seekTraceEnabled(bot.getId())) {
-            seekTrace(bot, target, mp, mobFloor, tx, ty, lastX);
+            seekTrace(bot, target, mp, mobFloor, tx, ty, lastGoal);
         }
     }
 
@@ -1093,11 +1101,11 @@ public final class PqActions {
     }
 
     private static void seekTrace(Character bot, Monster target, Point mp, Point mobFloor,
-                                  int tx, int ty, Integer lastX) {
+                                  int tx, int ty, Point lastGoal) {
         Point pos = bot.getPosition();
         org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(PqActions.class);
-        log.info("[seek-trace] bot={} pos={} target={} mobPos={} mobFloor={} goal=({},{}) lastX={} sticky={} drift={} pathable={} nav={} edge={} block={} hasGoal={}",
-                bot.getId(), pos, target.getId(), mp, mobFloor, tx, ty, lastX,
+        log.info("[seek-trace] bot={} pos={} target={} mobPos={} mobFloor={} goal=({},{}) lastGoal={} sticky={} drift={} pathable={} nav={} edge={} block={} hasGoal={}",
+                bot.getId(), pos, target.getId(), mp, mobFloor, tx, ty, lastGoal,
                 seekTargetByBot.get(bot.getId()), chaseDriftByBot.get(bot.getId()),
                 pathableMemo(bot, tx, ty), // the memo, not a raw A*: the trace must not double the beat's path cost
                 GCMovement.navDecision(bot), GCMovement.navEdgeSummary(bot),
@@ -1247,7 +1255,7 @@ public final class PqActions {
         seekTargetByBot.put(bot.getId(), chosen != null ? chosen.getObjectId() : -1);
         clearChaseGoalState(bot.getId()); // a fresh target restarts the frozen platform anchor
         seekAnchorByBot.remove(bot.getId()); // a fresh target restarts the progress clock
-        seekLastXByBot.remove(bot.getId());
+        seekLastGoalByBot.remove(bot.getId());
         return chosen;
     }
 
@@ -1293,7 +1301,7 @@ public final class PqActions {
         clearChaseGoalState(botId);
         seekAnchorByBot.remove(botId);
         seekDeadlineByBot.remove(botId);
-        seekLastXByBot.remove(botId);
+        seekLastGoalByBot.remove(botId);
         stuckTargetByBot.remove(botId);
         stuckCountByBot.remove(botId);
         pathableVerdictAtByBot.keySet().removeIf(k -> k.botId() == botId);

@@ -201,9 +201,17 @@ final class DeadPitGuard {
     /*
      * Ours: a rope whose climbable bottom reaches this floor (within the same slack the
      * up-direction grants) can be grabbed here and ridden down - an exit, not scenery.
+     * The rope must also RISE above the floor: a rope that hangs entirely below it
+     * (topY >= floorY) can be mounted only from a stand point at or under the rope's top,
+     * which this floor is not (a stander sits above firstClimbableY, and a plain fall cannot
+     * grab — climbUpIntent is false). Counting such a rope minted a phantom exit and steered
+     * recoveries onto surfaces with no real way out.
      */
     private static boolean ropeBelow(MapleMap map, int floorY, int loX, int hiX) {
         for (Rope rope : map.getRopes()) {
+            if (rope.topY() >= floorY) {
+                continue; // the rope never rises above this floor: nothing to mount from here
+            }
             if (rope.bottomY() < floorY - ROPE_GRAB_SLACK_PX) {
                 continue; // the rope ends too far above this floor to mount it here
             }

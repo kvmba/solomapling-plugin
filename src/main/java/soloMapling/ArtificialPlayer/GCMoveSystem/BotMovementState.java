@@ -148,11 +148,13 @@ class BotMovementState {
     int skipDelayMs = ThreadLocalRandom.current().nextInt(0, 501);
     int spawnWarmupMs = 2_000 + ThreadLocalRandom.current().nextInt(0, 5_001);
     int aiTickAccumulatorMs = 0;
-    // Wall-clock ms the previous tick took (work-elapsed is a faithful cadence proxy for the
-    // accumulator: constant at steady state, large on a slow tier exactly when the AI gate
-    // should fire). Set by the self-rescheduling driver right after safeTick; initialised to
-    // the observed cadence so the first tick behaves like a normal fast tick.
-    long lastTickElapsedMs = 50L;
+    // Bot-time ms this tick covered: the gap between this tick's scheduled deadline and the next
+    // one (the bot's own cadence — 50ms observed, 1s coarse, 4s idle — inflated past the skipped
+    // slots after an overrun). Feeds consumeAiTick's accumulator, whose contract is measured in
+    // BOT time ("every ~100ms of the bot's clock"), not in how long the tick's WORK took. Set by
+    // the self-rescheduling driver before each tick runs; initialised to the observed cadence so
+    // the first tick and direct-tick execution sims behave like a normal fast tick.
+    long lastTickSpanMs = 50L;
     // LOD scheduling: the driver self-reschedules each bot's tick at a cadence that matches its tier
     // (fast when observed, slow when unobserved), so an unobserved bot stops consuming 20 Hz wakeups.
     // The generation invalidates stale tasks across stop/start; the driver also synchronizes on this

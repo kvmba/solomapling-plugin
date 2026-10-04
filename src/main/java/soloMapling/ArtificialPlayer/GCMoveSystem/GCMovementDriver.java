@@ -148,13 +148,18 @@ final class GCMovementDriver {
             }
             long tickStartedNanos = System.nanoTime();
             safeTick(entry);
-            entry.lastTickElapsedMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - tickStartedNanos);
             if (entry.tickStopped || entry.tickGeneration != generation) {
                 return;
             }
             long completedAtNanos = System.nanoTime();
             long cadenceNanos = TimeUnit.MILLISECONDS.toNanos(nextCadenceMs(entry));
             long nextDeadlineNanos = nextDeadline(deadlineNanos, completedAtNanos, cadenceNanos);
+            // The AI accumulator spends BOT time, not work time: this tick covered the span from
+            // its own deadline to the next one (the cadence, or several slots after an overrun).
+            // Recording the tick's WORK elapsed instead (the previous version) made the heavy
+            // decisions run 4-10x late on an observed map (a 50ms tick's work is only a few ms)
+            // and diverged from the direct-tick execution sims, which never set a work value.
+            entry.lastTickSpanMs = TimeUnit.NANOSECONDS.toMillis(nextDeadlineNanos - deadlineNanos);
             scheduleNext(entry, generation, nextDeadlineNanos);
         }
     }
@@ -882,12 +887,12 @@ final class GCMovementDriver {
     }
 
     private static boolean consumeAiTick(BotMovementState entry) {
-        // Advance by the elapsed wall time between ticks, not a constant TICK_MS: the accumulator's
-        // "every other tick" contract only holds at the observed 50ms cadence. At the LOD cadences
-        // (1s coarse / 4s idle) a constant 50ms per tick made the heavy AI decisions run 2-4s late
-        // per decision (20-160x the intended 100ms spacing), which is most visible as a sluggish
-        // warmup-fallback steer on an unobserved bot whose graph is still baking.
-        entry.aiTickAccumulatorMs += (int) Math.min(entry.lastTickElapsedMs, 10_000L);
+        // Spend the bot time this tick covered (the scheduler's own cadence span — see
+        // runScheduledTick), so the accumulator's "every other tick" contract holds at the
+        // observed 50ms cadence AND the LOD cadences (1s coarse / 4s idle) advance the heavy AI
+        // decisions in real bot time instead of freezing them between slow wakeups. Ticks that
+        // skipped slots (an overrun) carry the whole skipped span, so no bot time is lost.
+        entry.aiTickAccumulatorMs += (int) Math.min(entry.lastTickSpanMs, 10_000L);
         if (entry.aiTickAccumulatorMs < AI_TICK_MS) {
             return false;
         }

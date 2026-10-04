@@ -194,7 +194,7 @@ final class BotFallbackMovementManager {
      * so a wide floor always yields candidates. Y is the launch row the bot stands on.
      */
     private static List<Point> grabLaunchAnchors(MapleMap map, Point botPos,
-                                                 BotMovementProfile profile) {
+                                                  BotMovementProfile profile) {
         Set<Point> out = new HashSet<>();
         FootholdTree tree = map.getFootholds();
         int walkStep = BotPhysicsEngine.walkStep(map, profile);
@@ -207,13 +207,22 @@ final class BotFallbackMovementManager {
                     || minX > botPos.x + ROPE_LAUNCH_SCAN_RADIUS_PX + walkStep) {
                 continue;
             }
-            int fy = fh.getY1(); // builder anchors stand on the foothold itself
+            // Slope-aware standing Y: an endpoint value mid-slope probes a pixel off the real
+            // surface (findGroundPoint then resolves it to a DIFFERENT platform or none), so the
+            // anchor is never actually standable and the launch scan rejects it. pointBelowIndexed
+            // reproduces the tree's own interpolation at the anchor's x.
             for (int x = minX; x <= maxX; x += Math.max(walkStep, ROPE_LAUNCH_SCAN_STEP_PX)) {
-                out.add(new Point(x, fy));
+                out.add(slopeAwareAnchor(map, x, fh));
             }
-            out.add(new Point(maxX, fy));
+            out.add(slopeAwareAnchor(map, maxX, fh));
         }
         return new ArrayList<>(out);
+    }
+
+    /** The real surface point at {@code x} on {@code fh} (endpoint value on flat footholds). */
+    private static Point slopeAwareAnchor(MapleMap map, int x, Foothold fh) {
+        Point surface = BotPhysicsEngine.pointBelowIndexed(map, new Point(x, fh.getY1()));
+        return surface != null ? surface : new Point(x, fh.getY1());
     }
 
     /* True when the bot standing at botPos can reach the anchor's column by GROUND travel:
