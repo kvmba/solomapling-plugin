@@ -549,6 +549,27 @@ public final class GCMovement {
         return st != null && st.moveTarget != null;
     }
 
+    /* Field-trace accessors (the !gcmove trace path log): the driver's own last nav decision,
+     * the committed edge summary, and the edge block reason. Package state exposed read-only. */
+    public static String navDecision(Character bot) {
+        BotMovementState st = bot == null ? null : STATES.get(bot.getId());
+        return st != null ? st.lastNavDecision : "-";
+    }
+
+    public static String navEdgeSummary(Character bot) {
+        BotMovementState st = bot == null ? null : STATES.get(bot.getId());
+        if (st == null || st.navEdge == null) {
+            return "-";
+        }
+        return st.navEdge.type + "@" + st.navEdge.fromRegionId + "->" + st.navEdge.toRegionId
+                + " sx=" + st.navEdge.launchStepX;
+    }
+
+    public static String edgeBlockReason(Character bot) {
+        BotMovementState st = bot == null ? null : STATES.get(bot.getId());
+        return (st != null && st.lastEdgeBlockReason != null) ? st.lastEdgeBlockReason : "-";
+    }
+
     /* True while the bot is on a rope/ladder (cleared only once it's back on a foothold). Combat holds
      * off attacking until then so the bot doesn't swing from the rope when a mob is near the rope top. */
     public static boolean isClimbing(Character bot) {

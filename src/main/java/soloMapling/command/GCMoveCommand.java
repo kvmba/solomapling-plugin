@@ -6,6 +6,7 @@ import org.gms.client.command.Command;
 import soloMapling.ArtificialPlayer.BotHelpers;
 import soloMapling.ArtificialPlayer.BotTypes.TrainingBot;
 import soloMapling.ArtificialPlayer.GCMoveSystem.GCMovement;
+import soloMapling.ArtificialPlayer.PartyQuest.PqActions;
 import soloMapling.server.BotTiming;
 
 import java.awt.Point;
@@ -173,6 +174,14 @@ public class GCMoveCommand extends Command {
                     + " moving=" + GCMovement.isMoving(bot)
                     + " traveling=" + GCMovement.isTraveling(bot)
                     + " following=" + GCMovement.isFollowing(bot));
+            case "trace" -> {
+                // Field trace: log one line per PQ seek beat (250ms) for this bot for 60s, so a
+                // live treadmill (卡绳索/小步卡顿) can be correlated with the seek's decisions.
+                long ms = params.length >= 3 ? parseMs(params[2]) : 60_000L;
+                PqActions.toggleSeekTrace(bot.getId(), ms);
+                player.dropMessage(bot.getName() + " seek trace " + (ms > 0 ? "on for " + ms + "ms" : "off")
+                        + " — watch the plugin log for [seek-trace] lines.");
+            }
             default -> help(player);
         }
     }
@@ -242,5 +251,14 @@ public class GCMoveCommand extends Command {
         player.dropMessage("!gcmove stop <botId>           - stop the bot");
         player.dropMessage("!gcmove off <botId>            - remove the bot from dynamic control");
         player.dropMessage("!gcmove status <botId>         - dynamic state of the bot");
+        player.dropMessage("!gcmove trace <botId> [ms]     - log one [seek-trace] line per PQ seek beat (default 60s)");
+    }
+
+    private static long parseMs(String raw) {
+        try {
+            return Math.max(0L, Long.parseLong(raw));
+        } catch (NumberFormatException e) {
+            return 60_000L;
+        }
     }
 }

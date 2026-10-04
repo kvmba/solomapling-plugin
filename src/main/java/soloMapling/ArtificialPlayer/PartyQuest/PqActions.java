@@ -1006,6 +1006,40 @@ public final class PqActions {
             GCMovement.move(bot, tx, ty);
             seekLastXByBot.put(bot.getId(), tx);
         }
+        if (seekTraceEnabled(bot.getId())) {
+            seekTrace(bot, target, mp, mobFloor, tx, ty, lastX);
+        }
+    }
+
+    // ── Field trace (the LPQ stage-1 treadmill diagnostics): a GM toggles a per-bot trace with
+    // !gcmove trace <botId>; each seek beat then logs one line — the target, its floor probe,
+    // the emitted goal, the sticky target and the driver's own nav state. The line is the
+    // production half of the harness-vs-field divergence hunt (the harness reproduces none of
+    // the reported shapes on this map with correct WZ spans).
+    private static final Map<Integer, Long> SEEK_TRACE_UNTIL = new java.util.concurrent.ConcurrentHashMap<>();
+
+    public static void toggleSeekTrace(int botId, long durationMs) {
+        if (durationMs <= 0) {
+            SEEK_TRACE_UNTIL.remove(botId);
+        } else {
+            SEEK_TRACE_UNTIL.put(botId, System.currentTimeMillis() + durationMs);
+        }
+    }
+
+    private static boolean seekTraceEnabled(int botId) {
+        return System.currentTimeMillis() < SEEK_TRACE_UNTIL.getOrDefault(botId, 0L);
+    }
+
+    private static void seekTrace(Character bot, Monster target, Point mp, Point mobFloor,
+                                  int tx, int ty, Integer lastX) {
+        Point pos = bot.getPosition();
+        org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(PqActions.class);
+        log.info("[seek-trace] bot={} pos={} target={} mobPos={} mobFloor={} goal=({},{}) lastX={} sticky={} drift={} pathable={} nav={} edge={} block={} hasGoal={}",
+                bot.getId(), pos, target.getId(), mp, mobFloor, tx, ty, lastX,
+                seekTargetByBot.get(bot.getId()), chaseDriftByBot.get(bot.getId()),
+                GCMovement.canPathTo(bot, tx, ty),
+                GCMovement.navDecision(bot), GCMovement.navEdgeSummary(bot),
+                GCMovement.edgeBlockReason(bot), GCMovement.hasMoveTarget(bot));
     }
 
     /**
