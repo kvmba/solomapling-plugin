@@ -1150,7 +1150,14 @@ final class GCMovementDriver {
         if (ground == null || !DeadPitGuard.isLivableLanding(map, ground, entry.movementProfile)) {
             ground = BotMovementManager.nearestLivableGround(bot);
         }
-        Point dest = (ground != null) ? ground : clamped;
+        // No livable ground anywhere (a pathological map): teleporting to the bot's own clamped
+        // pixel changes nothing and the trigger below-floor/off-side would re-fire EVERY tick
+        // (this recovery has no cooldown). Leave the bot to the frozen-air watchdog (which snaps
+        // once the position stops changing) instead of spinning here.
+        if (ground == null) {
+            return;
+        }
+        Point dest = ground;
         BotPhysicsEngine.teleportTo(entry, bot, dest);
         BotMovementManager.resetEntryStateAfterTeleport(entry);
         // De-thrash: resetEntryStateAfterTeleport only clears NAV state, leaving moveTarget — so the bot

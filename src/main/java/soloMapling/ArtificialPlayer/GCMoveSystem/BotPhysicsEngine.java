@@ -2047,6 +2047,17 @@ final class BotPhysicsEngine {
                 // 在绳索攀爬卡住" report. Hold for a bounded window, then fall and let the
                 // normal recovery nets (ClimbRecovery, tickUnstuck, re-path) take over: they
                 // are all grounded-state recoveries, which the clamp was starving.
+                //
+                // An explicit rest hold (the grind break's rope hang) is a DELIBERATE hold, not a
+                // wedge: releasing the fall mid-break ends the rest and drops the bot to the
+                // mobs it parked away from. Suspend the clock while resting; the release resumes
+                // when the break clears the hold (setRestHold false), and the window restarts
+                // because the clock was reset on entry to the rest.
+                if (entry.resting) {
+                    entry.topClampSinceMs = 0L;
+                    setClimbPosition(entry, bot, rope, firstClimbableY(rope));
+                    return true;
+                }
                 long now = MovementClock.nowMs();
                 if (entry.topClampSinceMs == 0L) {
                     entry.topClampSinceMs = now;

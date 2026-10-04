@@ -46,8 +46,6 @@ final class DeadPitGuard {
     private static final int JUMP_ACROSS_PX = 140;
     /** A rope hanging this far above the floor can still be jumped and caught. */
     private static final int ROPE_GRAB_SLACK_PX = 40;
-    /** A rope this far off to the side still counts as enterable from the landing. */
-    private static final int ROPE_X_SLACK_PX = 60;
     /** A portal within this box of the landing counts as an exit. */
     private static final int PORTAL_X_SLACK_PX = 30;
     private static final int PORTAL_Y_ABOVE_PX = 80;
@@ -172,10 +170,15 @@ final class DeadPitGuard {
         if (source.isForbidFallDown()) {
             return false;
         }
-        int probeXs = (hiX - loX) >= 200 ? 3 : 1;
+        // Probe density scales with width: a 1px midpoint on a wide ledge sits over the hole
+        // while its edges land, and a 3px probe on a narrow one misses a narrow gap column.
+        // ~1 probe per 64px (a walk step's scale) keeps the sim cost bounded — the verdict is
+        // cached per foothold — while removing the width cliff the 1/3-probe split had.
+        int width = hiX - loX;
+        int probeXs = Math.max(1, Math.min(8, Math.round(width / 64.0f) + 1));
         for (int i = 0; i < probeXs; i++) {
             int x = probeXs == 1 ? (loX + hiX) / 2
-                    : loX + (hiX - loX) * i / (probeXs - 1);
+                    : loX + Math.round(width * i / (float) (probeXs - 1));
             Point from = new Point(x, floorY);
             if (BotPhysicsEngine.simulateFallLanding(map, from, 0) != null) {
                 return true;
@@ -196,7 +199,7 @@ final class DeadPitGuard {
             if (rope.bottomY() < floorY - ROPE_GRAB_SLACK_PX) {
                 continue; // the rope ends too far above this floor to mount it here
             }
-            if (loX - ROPE_X_SLACK_PX <= rope.x() && rope.x() <= hiX + ROPE_X_SLACK_PX) {
+            if (ropeEnterableFromSurface(map, rope.x(), loX, hiX, floorY)) {
                 return true;
             }
         }
@@ -239,11 +242,29 @@ final class DeadPitGuard {
             if (ropeTop > floorY) {
                 continue; // rope entirely below the floor: nothing to climb up
             }
-            if (loX - ROPE_X_SLACK_PX <= rope.x() && rope.x() <= hiX + ROPE_X_SLACK_PX) {
+            if (ropeEnterableFromSurface(map, rope.x(), loX, hiX, floorY)) {
                 return true;
             }
         }
         return false;
+    }
+
+    /*
+     * Whether a rope at {@code ropeX} beside the surface [loX..hiX] at level {@code floorY} can
+     * actually be reached from it. Within the grab column (ROPE_GRAB_X) the mount is direct;
+     * beyond it the slack is only honest when the side-step's landing column has real ground at
+     * the surface's own level — a rope hanging off the edge over a pit is NOT an exit, and
+     * counting it was steering recoveries toward a leap into the void (the guard's own purpose).
+     * The probe reuses the executor's ground lookup at the rope's x, judged by the SURFACE's own
+     * level (not MAX_SLOPE_UP above): the bot steps off the edge, it does not float to the rope.
+     */
+    private static boolean ropeEnterableFromSurface(MapleMap map, int ropeX, int loX, int hiX, int floorY) {
+        if (ropeX >= loX - BotPhysicsEngine.cfg.ROPE_GRAB_X
+                && ropeX <= hiX + BotPhysicsEngine.cfg.ROPE_GRAB_X) {
+            return true; // within grab distance of the surface itself
+        }
+        Point step = BotPhysicsEngine.findGroundPoint(map, new Point(ropeX, floorY));
+        return step != null && Math.abs(step.y - floorY) <= BotPhysicsEngine.cfg.MAX_SLOPE_UP;
     }
 
     /*

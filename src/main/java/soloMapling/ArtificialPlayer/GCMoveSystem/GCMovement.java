@@ -919,6 +919,16 @@ public final class GCMovement {
     /* Sentinel from peekRegionIdAt: the map has no baked nav graph, so no ledge is answerable. */
     public static final int UNBAKED_REGION = -2;
 
+    /**
+     * The shared movement clock, exposed as the package's public seam: plugin subsystems outside
+     * GCMoveSystem (PqActions' seek deadlines and trace windows) must read the SAME clock the
+     * driver reads, so a virtual-clock execution sim drives them identically. Mutators stay
+     * package-private — external callers can only read.
+     */
+    public static long movementNowMs() {
+        return MovementClock.nowMs();
+    }
+
     /*
      * The walk-region id this specific FOOTHOLD belongs to, on an ALREADY-baked graph — or
      * UNBAKED_REGION when the map isn't baked, or -1 when the foothold is in no region (e.g. a wall).

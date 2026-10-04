@@ -215,8 +215,11 @@ final class BotNavigationGraph implements Serializable {
         // ±walkStep launch phase band around the single stamped pixel re-reaches past it onto
         // pixels the builder REJECTED (two floors down) — the chase fired, overshot, fell, and
         // looped. The phase is clamped to this span: the arc the builder validated is the arc
-        // the executor flies, at any window width. 0,0 = "not recorded" (older caches): the
-        // executor falls back to the stamped window + tolerance.
+        // the executor flies, at any window width. NO_VALID_SPAN = "not recorded" (older caches
+        // whose pre-span launchValidX fields deserialize as 0): the executor falls back to the
+        // stamped window + tolerance. A real span can legitimately be [0,0] (a window at x=0),
+        // which is why the sentinel is MIN_VALUE, not 0.
+        static final int NO_VALID_SPAN = Integer.MIN_VALUE;
         final int launchValidMinX;
         final int launchValidMaxX;
         final int launchStepX;
@@ -266,8 +269,18 @@ final class BotNavigationGraph implements Serializable {
             this.endPoint = new Point(endPoint);
             this.launchMinX = Math.min(launchMinX, launchMaxX);
             this.launchMaxX = Math.max(launchMinX, launchMaxX);
-            this.launchValidMinX = Math.min(launchValidMinX, launchValidMaxX);
-            this.launchValidMaxX = Math.max(launchValidMinX, launchValidMaxX);
+            // Legacy v68 caches carry 0,0 here for "not recorded"; NO_VALID_SPAN is the honest
+            // sentinel (a real span can legitimately be [0,0] at x=0). A 0,0 input from the
+            // current builder is impossible — a JUMP window's validated span always contains its
+            // representative pixel, and map geometry with a real x=0 span is preserved below.
+            int vMin = launchValidMinX;
+            int vMax = launchValidMaxX;
+            if (vMin == 0 && vMax == 0) {
+                vMin = NO_VALID_SPAN;
+                vMax = NO_VALID_SPAN;
+            }
+            this.launchValidMinX = Math.min(vMin, vMax);
+            this.launchValidMaxX = Math.max(vMin, vMax);
             this.launchStepX = launchStepX;
             this.portalId = portalId;
             this.ropeX = ropeX;
@@ -309,7 +322,7 @@ final class BotNavigationGraph implements Serializable {
             if (!containsLaunchX(x, tolerance)) {
                 return false;
             }
-            if (launchValidMinX != 0 || launchValidMaxX != 0) {
+            if (launchValidMinX != NO_VALID_SPAN || launchValidMaxX != NO_VALID_SPAN) {
                 return x >= launchValidMinX && x <= launchValidMaxX;
             }
             return true;

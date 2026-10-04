@@ -451,10 +451,14 @@ final class BotNavigationManager {
                     || edge.type == BotNavigationGraph.EdgeType.JUMP)) {
             return edge;
         }
-        if (entry.inAir && edge.type == BotNavigationGraph.EdgeType.CLIMB && edge.launchStepX != 0) {
-            // Rope-exit jump arcs use the same sampled ballistic model as JUMP/DROP edges.
-            // Keep the committed edge until the bot actually lands or grabs a rope again;
-            // otherwise mid-air replans can steer the bot off the authored landing path.
+        if (entry.inAir && edge.type == BotNavigationGraph.EdgeType.CLIMB
+                && (edge.launchStepX != 0 || isBallisticClimbExit(edge))) {
+            // Rope-exit jump arcs use the same sampled ballistic model as JUMP/DROP edges — and
+            // so does the launchStepX==0 rope-head BALLISTIC exit (the straight-up arc fired for
+            // a climb whose real landing is out of the physics top-exit probe band): both fly a
+            // validated trajectory the graph authored, so keep the committed edge until the bot
+            // actually lands or grabs a rope again; otherwise mid-air replans can steer the bot
+            // off the authored landing path.
             return edge;
         }
         return null;
@@ -1640,7 +1644,8 @@ final class BotNavigationManager {
         // into the pre-inset validated span keeps every arc the executor can fly inside the span
         // the builder validated; the phase gate (acceptsLaunchX) clamps the FIRE position the same
         // way, so walk-in drift past the selection is also contained.
-        if (edge.launchValidMinX != 0 || edge.launchValidMaxX != 0) {
+        if (edge.launchValidMinX != BotNavigationGraph.Edge.NO_VALID_SPAN
+                || edge.launchValidMaxX != BotNavigationGraph.Edge.NO_VALID_SPAN) {
             minX = Math.max(minX, edge.launchValidMinX);
             maxX = Math.min(maxX, edge.launchValidMaxX);
         }
@@ -2019,6 +2024,25 @@ final class BotNavigationManager {
         return edge.startPoint.x == rope.x()
                 && botPos.x == rope.x()
                 && Math.abs(botPos.y - edge.startPoint.y) <= BotPhysicsEngine.climbStepPerTick() + 2;
+    }
+
+    /*
+     * Whether this launchStepX==0 CLIMB edge is the rope-head BALLISTIC exit (fb4cb83): an
+     * upward, off-topY anchor whose arc the graph validated with simulateRopeJumpLanding and the
+     * executor fires as a fixed straight-up jumpOffRope. Distinguishable from a physics top
+     * step-off by the anchor itself: a step-off's startPoint sits at rope.topY, while a ballistic
+     * exit's anchor is firstClimbableY (or a 30px interval below it) — strictly below the head.
+     * The predicate needs no map access: it classifies the edge geometry alone, so it is usable
+     * from reuseCommittedEdge's mid-air retention clause too.
+     */
+    static boolean isBallisticClimbExit(BotNavigationGraph.Edge edge) {
+        if (edge == null || edge.type != BotNavigationGraph.EdgeType.CLIMB || edge.launchStepX != 0) {
+            return false;
+        }
+        // Upward (a downward exit is physics-owned climb-down) with no lateral component: the
+        // straight-up arc's landing x equals its launch x by construction.
+        return edge.startPoint.y < edge.endPoint.y
+                && edge.startPoint.x == edge.endPoint.x;
     }
 
     private static Rope findRopeForRegion(MapleMap map, BotNavigationGraph.Region region) {

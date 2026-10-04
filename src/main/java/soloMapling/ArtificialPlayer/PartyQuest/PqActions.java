@@ -23,6 +23,8 @@ import soloMapling.ArtificialPlayer.BotLogic;
 import soloMapling.ArtificialPlayer.GCMoveSystem.GCMovement;
 import soloMapling.MapVFX.CustomReactor;
 
+import static soloMapling.ArtificialPlayer.GCMoveSystem.GCMovement.movementNowMs;
+
 import java.awt.Point;
 import java.util.List;
 import java.util.Map;
@@ -132,12 +134,12 @@ public final class PqActions {
         // still, then snap back" report). Past the cap the walk keeps running on its own;
         // the tick moves on and position checks retry on the next one (the pre-existing
         // no-pathing behaviour).
-        long deadline = System.currentTimeMillis() + WALK_BLOCK_CAP_MS;
+        long deadline = movementNowMs() + WALK_BLOCK_CAP_MS;
         try {
             // Also stop as soon as the engine gives the move up (an unreachable/stalled
             // target that the driver abandons without firing the callback), so a wedged
             // walk costs one cap at most rather than the whole timeout.
-            while (System.currentTimeMillis() < deadline) {
+            while (movementNowMs() < deadline) {
                 if (arrived.await(50, java.util.concurrent.TimeUnit.MILLISECONDS)) {
                     disarmStageWalkShield(bot);
                     return;
@@ -176,7 +178,7 @@ public final class PqActions {
         if (until == null) {
             return false;
         }
-        if (System.currentTimeMillis() >= until) {
+        if (movementNowMs() >= until) {
             stageWalkShieldUntilByBot.remove(botId);
             return false;
         }
@@ -186,7 +188,7 @@ public final class PqActions {
     private static void armStageWalkShield(Character bot) {
         if (bot != null) {
             stageWalkShieldUntilByBot.put(bot.getId(),
-                    System.currentTimeMillis() + STAGE_WALK_SHIELD_MS);
+                    movementNowMs() + STAGE_WALK_SHIELD_MS);
         }
     }
 
@@ -499,7 +501,7 @@ public final class PqActions {
             return false; // stale room (or nothing armed): the stage re-arms on its next tick
         }
         int oid = box.oid();
-        long now = System.currentTimeMillis();
+        long now = movementNowMs();
         var reactor = bot.getMap().getReactorByOid(oid);
         if (reactor == null || !reactor.isActive()) {
             beatBoxByBot.remove(bot.getId()); // broken by a teammate mid-walk
@@ -731,7 +733,7 @@ public final class PqActions {
         if (bot == null || bot.getMap() == null) {
             return 0;
         }
-        long now = System.currentTimeMillis();
+        long now = movementNowMs();
         List<MapObject> mine = BotLogic.checkForItemsOnFloor(bot, bot.getPosition(), 9_000, new int[]{itemId});
         int recovered = 0;
         for (MapObject obj : mine) {
@@ -856,6 +858,28 @@ public final class PqActions {
     /** botId -> consecutive beats the mob's live floor has been off the pinned platform. */
     private static final Map<Integer, Integer> chaseDriftByBot = new java.util.concurrent.ConcurrentHashMap<>();
     private static final int CHASE_PLATFORM_DRIFT_BEATS = 4;  // ~1s of beats before re-deriving
+    // REGION-STABLE GOAL (the unified gate for the whole region-flip family): whatever the anchor
+    // branch above computes, the goal actually ISSUED must not change nav region beat to beat — a
+    // region flip is what makes the driver discard the committed climb/jump edge mid-flight (the
+    // bot replans from the bottom and paces under the mob). The candidate goal's region is compared
+    // against the last issued goal's region; a flip is held on the PREVIOUS goal until
+    // CHASE_PLATFORM_DRIFT_BEATS consecutive flipping beats prove the mob really changed platforms
+    // (then the new region is accepted and the progress clock restarts). Unbaked graphs (-2) and
+    // region-less points (-1) cannot answer, so they pass through ungated (peek-only: no bake stall).
+    private static final Map<Integer, Point> chaseGoalByBot = new java.util.concurrent.ConcurrentHashMap<>();
+    private static final Map<Integer, Integer> chaseGoalRegionByBot = new java.util.concurrent.ConcurrentHashMap<>();
+    /** botId -> consecutive beats the candidate goal's region differed from the issued one. */
+    private static final Map<Integer, Integer> chaseFlipByBot = new java.util.concurrent.ConcurrentHashMap<>();
+    /** botId -> best manhattan distance to the chased mob so far this episode (progress = closing). */
+    private static final Map<Integer, Integer> seekBestDistByBot = new java.util.concurrent.ConcurrentHashMap<>();
+    // Goal-pathability memo: a full A* per 250ms beat per bot is waste while the goal's nav region
+    // is unchanged (the region gate above pins it for the whole episode). The verdict is cached
+    // against the goal's peek region and re-verified only when that region changes (or falls
+    // outside the memo's domain). The memo's region ids come from the peek graph while canPathTo
+    // plans on the bot's best graph — a mismatch can only ever SKIP a re-check, never fake one:
+    // a stale "pathable" self-heals through the driver's own no-path handling and the seek deadline.
+    private static final Map<Integer, Integer> chasePathRegionByBot = new java.util.concurrent.ConcurrentHashMap<>();
+    private static final Map<Integer, Boolean> chasePathableByBot = new java.util.concurrent.ConcurrentHashMap<>();
 
     /**
      * Seek a mob and fight it, the way the roaming grind brain does: swing at whatever the
@@ -902,8 +926,7 @@ public final class PqActions {
         Monster target = seekPathableTarget(bot, pos);
         if (target == null) {
             seekLastXByBot.remove(bot.getId());
-            chaseAnchorByBot.remove(bot.getId());
-            chaseDriftByBot.remove(bot.getId());
+            clearChaseGoalState(bot.getId());
             return; // the room is quiet (or nothing reachable); hold position this beat
         }
 
@@ -970,26 +993,51 @@ public final class PqActions {
         // re-issue an unwalkable goal every tick, so aim for the floor UNDER the mob instead:
         // the bot ends up standing beneath it, which is a real fight position (the boss reach
         // box is vertically padded) and a far better crowd position than the doorway.
-        if (!GCMovement.canPathTo(bot, tx, ty)) {
+        // Memoized per goal-region: the region gate below pins the goal for whole seconds at a
+        // time, so re-running a full A* on every beat while pinned is pure waste (and the trace
+        // call would double it). The cache is re-verified whenever the goal's region changes.
+        boolean pathable = pathableMemo(bot, tx, ty);
+        if (!pathable) {
             Point underMob = GCMovement.groundPointBelow(bot.getMap(), mp.x, mp.y + 1);
             if (underMob != null && Math.abs(underMob.y - ty) > 20
-                    && GCMovement.canPathTo(bot, mp.x, underMob.y)) {
+                    && pathableMemo(bot, mp.x, underMob.y)) {
                 tx = mp.x;
                 ty = underMob.y;
             }
         }
 
+        // REGION-STABLE GOAL GATE (the unified fix for the whole region-flip family): the anchor
+        // branches above still emit a goal whose nav region can differ from the one the bot is
+        // actually being driven to — the sameLevel branch follows the live pixel into a gap, a
+        // drift re-pin lands on a neighbouring row, and any of them discards the committed climb
+        // edge MID-ROPE. Whatever the branch decided, the goal that reaches GCMovement.move must
+        // hold ONE region for the whole approach: a candidate goal in a new region is held back
+        // until CHASE_FLIP_BEATS consecutive flipping beats prove the mob really changed
+        // platforms — then the new region is adopted and the progress clock restarts. This is the
+        // single place the invariant is enforced; the anchor bookkeeping above stays heuristic.
+        Point issued = stableChaseGoal(bot, new Point(tx, ty));
+        if (issued == null) {
+            return; // gate holds: keep flying the previous goal; nothing to re-issue this beat
+        }
+        tx = issued.x;
+        ty = issued.y;
+
         // Progress bookkeeping: a chase that moves the bot nowhere for a while is dropped so
-        // the next beat seeks something else instead of walking into a wall forever.
+        // the next beat seeks something else instead of walking into a wall forever. "Nowhere"
+        // means NOT CLOSING on the mob — raw displacement (the old test) renews the deadline for
+        // a left-right sway whose stride exceeds the epsilon, which is exactly the treadmill the
+        // field traces showed. The manhattan distance to the mob is the honest measure: any
+        // real approach beats the best-seen by the epsilon; swaying never does.
         Point anchor = seekAnchorByBot.get(bot.getId());
-        if (anchor == null || Math.abs(pos.x - anchor.x) > PROGRESS_EPS_PX
-                || Math.abs(pos.y - anchor.y) > PROGRESS_EPS_PX) {
+        int mobDist = Math.abs(pos.x - mp.x) + Math.abs(pos.y - mp.y);
+        Integer bestDist = seekBestDistByBot.get(bot.getId());
+        if (anchor == null || mobDist < bestDist - PROGRESS_EPS_PX) {
             seekAnchorByBot.put(bot.getId(), new Point(pos));
-            seekDeadlineByBot.put(bot.getId(), System.currentTimeMillis() + RETARGET_TIMEOUT_MS);
-        } else if (System.currentTimeMillis() > seekDeadlineByBot.getOrDefault(bot.getId(), 0L)) {
+            seekBestDistByBot.put(bot.getId(), mobDist);
+            seekDeadlineByBot.put(bot.getId(), movementNowMs() + RETARGET_TIMEOUT_MS);
+        } else if (movementNowMs() > seekDeadlineByBot.getOrDefault(bot.getId(), 0L)) {
             seekTargetByBot.put(bot.getId(), -1);
-            chaseAnchorByBot.remove(bot.getId());
-            chaseDriftByBot.remove(bot.getId());
+            clearChaseGoalState(bot.getId());
             seekAnchorByBot.remove(bot.getId());
             seekLastXByBot.remove(bot.getId());
             return;
@@ -1022,12 +1070,12 @@ public final class PqActions {
         if (durationMs <= 0) {
             SEEK_TRACE_UNTIL.remove(botId);
         } else {
-            SEEK_TRACE_UNTIL.put(botId, System.currentTimeMillis() + durationMs);
+            SEEK_TRACE_UNTIL.put(botId, movementNowMs() + durationMs);
         }
     }
 
     private static boolean seekTraceEnabled(int botId) {
-        return System.currentTimeMillis() < SEEK_TRACE_UNTIL.getOrDefault(botId, 0L);
+        return movementNowMs() < SEEK_TRACE_UNTIL.getOrDefault(botId, 0L);
     }
 
     private static void seekTrace(Character bot, Monster target, Point mp, Point mobFloor,
@@ -1040,6 +1088,98 @@ public final class PqActions {
                 GCMovement.canPathTo(bot, tx, ty),
                 GCMovement.navDecision(bot), GCMovement.navEdgeSummary(bot),
                 GCMovement.edgeBlockReason(bot), GCMovement.hasMoveTarget(bot));
+    }
+
+    /** Release every per-bot goal-state entry (the anchor bookkeeping + the region gate). */
+    private static void clearChaseGoalState(int botId) {
+        chaseAnchorByBot.remove(botId);
+        chaseDriftByBot.remove(botId);
+        chaseGoalByBot.remove(botId);
+        chaseGoalRegionByBot.remove(botId);
+        chaseFlipByBot.remove(botId);
+        seekBestDistByBot.remove(botId);
+        chasePathRegionByBot.remove(botId);
+        chasePathableByBot.remove(botId);
+    }
+
+    /**
+     * The goal the driver is actually steered with: the candidate from the anchor bookkeeping, or
+     * the PREVIOUS issued goal while the candidate's nav region still differs from it. A goal whose
+     * region changes beat to beat is what makes the driver discard the committed climb/jump edge
+     * mid-flight (reuseCommittedEdge sees previousTargetRegionId != targetRegionId and drops it) —
+     * the bot replans from the bottom and paces under the mob. Holding the candidate until
+     * CHASE_FLIP_BEATS consecutive flipping beats prove the mob moved platforms keeps every issued
+     * goal region-stable for the whole approach, whichever anchor branch produced it.
+     *
+     * <p>Peek-only region reads (no bake join). Unbaked graph or region-less point: no answer, the
+     * candidate passes through and the state is dropped — never strand a chase on an unanswerable
+     * gate. Null means "gate holds": keep flying the previous goal, nothing to issue this beat.
+     */
+    private static Point stableChaseGoal(Character bot, Point candidate) {
+        int botId = bot.getId();
+        int candidateRegion = GCMovement.peekRegionIdAt(bot.getMap(), candidate.x, candidate.y);
+        if (candidateRegion < 0) {
+            // -1 (no ledge) or -2 (unbaked): cannot gate on region. Issue directly, and reset so a
+            // later answerable beat re-arms the gate from whatever the driver last saw.
+            chaseGoalByBot.remove(botId);
+            chaseGoalRegionByBot.remove(botId);
+            chaseFlipByBot.remove(botId);
+            return candidate;
+        }
+        Integer lastRegion = chaseGoalRegionByBot.get(botId);
+        if (lastRegion == null) {
+            // First gated beat: issue and pin.
+            chaseGoalByBot.put(botId, candidate);
+            chaseGoalRegionByBot.put(botId, candidateRegion);
+            chaseFlipByBot.remove(botId);
+            return candidate;
+        }
+        if (candidateRegion == lastRegion) {
+            // Same region: the live pixel may move within the platform (patrol tracking) — adopt
+            // it and clear the flip tally.
+            chaseGoalByBot.put(botId, candidate);
+            chaseGoalRegionByBot.put(botId, candidateRegion);
+            chaseFlipByBot.remove(botId);
+            return candidate;
+        }
+        // Region flip: hold the previous goal until the flip proves persistent.
+        int flips = chaseFlipByBot.merge(botId, 1, Integer::sum);
+        if (flips < CHASE_PLATFORM_DRIFT_BEATS) {
+            Point held = chaseGoalByBot.get(botId);
+            return held != null ? held : candidate;
+        }
+        // Persistent flip: the mob really changed platforms — adopt the candidate, restart.
+        chaseGoalByBot.put(botId, candidate);
+        chaseGoalRegionByBot.put(botId, candidateRegion);
+        chaseFlipByBot.remove(botId);
+        seekAnchorByBot.remove(botId); // a new platform restarts the progress clock
+        seekBestDistByBot.remove(botId);
+        return candidate;
+    }
+
+    /**
+     * {@link GCMovement#canPathTo}, memoized per goal nav region: the region gate above keeps the
+     * goal in one region for whole seconds, so the beat-by-beat A* re-check is only meaningful
+     * when that region changes. The memo key is the goal's region id under the PEEK graph; it can
+     * only ever suppress a re-check when the region is genuinely unchanged, so a stale verdict is
+     * refreshed by the next region change (or the seek deadline) — it can never fake a pass.
+     */
+    private static boolean pathableMemo(Character bot, int x, int y) {
+        int botId = bot.getId();
+        int region = GCMovement.peekRegionIdAt(bot.getMap(), x, y);
+        Integer memoRegion = chasePathRegionByBot.get(botId);
+        if (region >= 0 && Integer.valueOf(region).equals(memoRegion)) {
+            Boolean memo = chasePathableByBot.get(botId);
+            if (memo != null) {
+                return memo;
+            }
+        }
+        boolean pathable = GCMovement.canPathTo(bot, x, y);
+        if (region >= 0) {
+            chasePathRegionByBot.put(botId, region);
+            chasePathableByBot.put(botId, pathable);
+        }
+        return pathable;
     }
 
     /**
@@ -1058,8 +1198,7 @@ public final class PqActions {
                 return m;
             }
             seekTargetByBot.put(bot.getId(), -1); // gone, out of the box, or unreachable
-            chaseAnchorByBot.remove(bot.getId()); // the frozen platform belongs to the dropped mob
-            chaseDriftByBot.remove(bot.getId());
+            clearChaseGoalState(bot.getId()); // the frozen platform belongs to the dropped mob
         }
         Monster best = null;
         double bestSq = Double.MAX_VALUE;
@@ -1082,8 +1221,7 @@ public final class PqActions {
         }
         Monster chosen = bestPathable != null ? bestPathable : best;
         seekTargetByBot.put(bot.getId(), chosen != null ? chosen.getObjectId() : -1);
-        chaseAnchorByBot.remove(bot.getId()); // a fresh target restarts the frozen platform anchor
-        chaseDriftByBot.remove(bot.getId());
+        clearChaseGoalState(bot.getId()); // a fresh target restarts the frozen platform anchor
         seekAnchorByBot.remove(bot.getId()); // a fresh target restarts the progress clock
         seekLastXByBot.remove(bot.getId());
         return chosen;
@@ -1112,7 +1250,7 @@ public final class PqActions {
             return false;
         }
         var key = new PathabilityKey(bot.getId(), m.getObjectId());
-        long now = System.currentTimeMillis();
+        long now = movementNowMs();
         Long stamped = pathableVerdictAtByBot.get(key);
         if (stamped != null && now - stamped < PATHABILITY_TTL_MS) {
             return pathableVerdictByBot.get(key);
@@ -1128,11 +1266,12 @@ public final class PqActions {
     /** Release a stopped/despawned quest bot's seek state so the per-bot maps do not grow. */
     public static void clearSeekState(int botId) {
         seekTargetByBot.remove(botId);
-        chaseAnchorByBot.remove(botId);
-        chaseDriftByBot.remove(botId);
+        clearChaseGoalState(botId);
         seekAnchorByBot.remove(botId);
         seekDeadlineByBot.remove(botId);
         seekLastXByBot.remove(botId);
+        stuckTargetByBot.remove(botId);
+        stuckCountByBot.remove(botId);
         pathableVerdictAtByBot.keySet().removeIf(k -> k.botId() == botId);
         pathableVerdictByBot.keySet().removeIf(k -> k.botId() == botId);
     }
