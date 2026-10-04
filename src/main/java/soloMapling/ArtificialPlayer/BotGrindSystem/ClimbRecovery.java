@@ -11,7 +11,7 @@ import java.awt.Point;
 // Extracted verbatim from the pre-split GrindBrain; the only change is that the dismount direction
 // now reads the brain's shared target (any live target, not the camp-validated sticky one — for a
 // dismount kick the direction is all that matters). Ours (SoloMapling).
-final class ClimbRecovery {
+public final class ClimbRecovery {
 
     private static final long CLIMB_STALL_MS = 1_200;
     private static final int CLIMB_PROGRESS_EPS = 6;
@@ -74,14 +74,17 @@ final class ClimbRecovery {
         // Ours (玩具塔): the mob's side wins only when it has real ground to land on. On the
         // tower's stacked shafts one side is routinely bare air (a rope hugging a wall); the
         // old raw kick could launch the bot into a full-map fall - the bottom half of the
-        // climb-charge cycle a player reads as "卡在绳上". A side with no floor at the bot's
-        // own depth loses the tie, and when NEITHER side has one (a bare mid-rope stall) the
+        // climb-charge cycle a player reads as "卡在绳上". A side with no landable floor within
+        // reach loses the tie, and when NEITHER side has one (a bare mid-rope stall) the
         // straight drop lets the fall integrator pick the landing it already models.
+        // Landable = the column's FIRST ground, and within MAX_DISMOUNT_DROP_PX of the bot —
+        // groundPointBelow answers any depth, so an unlimited probe passed a column whose only
+        // floor is the map bottom hundreds of px down (a full-shaft drop, the original bug).
         org.gms.server.maps.MapleMap map = chr.getMap();
         if (map != null && pos != null && dx != 0
-                && GCMovement.groundPointBelow(map, pos.x + dx * KICK_PROBE_PX, pos.y) == null) {
+                && !isLandableColumn(map, pos.x + dx * KICK_PROBE_PX, pos.y)) {
             int other = -dx;
-            dx = GCMovement.groundPointBelow(map, pos.x + other * KICK_PROBE_PX, pos.y) != null
+            dx = isLandableColumn(map, pos.x + other * KICK_PROBE_PX, pos.y)
                     ? other : 0;
         }
         GCMovement.dismountRope(chr, dx);
@@ -95,6 +98,16 @@ final class ClimbRecovery {
     // kick covers roughly a walk step or two of air before the arc crosses a neighbouring
     // platform's column, so 40px is a cheap "is there a floor over there" check.
     private static final int KICK_PROBE_PX = 40;
+    /** How far below the bot a dismount landing may sit and still count as a safe kick. */
+    static final int MAX_DISMOUNT_DROP_PX = 200;
+
+    /** Whether the column at {@code x} holds a floor the bot can realistically land on from
+     *  {@code y}: its FIRST ground below is within {@link #MAX_DISMOUNT_DROP_PX}. A floor only
+     *  at the map's bottom (a full-shaft column) does not qualify. */
+    public static boolean isLandableColumn(org.gms.server.maps.MapleMap map, int x, int y) {
+        Point ground = GCMovement.groundPointBelow(map, x, y);
+        return ground != null && ground.y - y <= MAX_DISMOUNT_DROP_PX;
+    }
 
     private static long now() {
         return System.currentTimeMillis();

@@ -1348,6 +1348,9 @@ final class BotNavigationManager {
                                                                  Map<SearchState, SearchState> cameFrom,
                                                                  Map<SearchState, BotNavigationGraph.Edge> cameByEdge) {
         if (goalState == null || !cameByEdge.containsKey(goalState)) {
+            // Same-region goal (or an unreachable one): an empty path. A same-region goal IS
+            // directly walkable — the caller treats empty + same-region as "walk there"; a
+            // different-region goal with an empty path is a genuine no-path.
             return List.of();
         }
 

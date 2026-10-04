@@ -146,7 +146,9 @@ final class GCMovementDriver {
             if (entry.tickStopped || entry.tickGeneration != generation) {
                 return;
             }
+            long tickStartedNanos = System.nanoTime();
             safeTick(entry);
+            entry.lastTickElapsedMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - tickStartedNanos);
             if (entry.tickStopped || entry.tickGeneration != generation) {
                 return;
             }
@@ -520,8 +522,19 @@ final class GCMovementDriver {
         if (needPlan) {
             MovementPlan plan = MovementPlan.inMap(graph, bot.getMap(), bot.getPosition(), target);
             if (plan == null) {
-                arriveCoarse(entry, bot, target); // already in the target region / unplannable
-                return true;
+                // Null plan means BOTH "same region — walk straight there" and "no path / no
+                // region". Only the first is an arrival: teleporting to the goal on a no-path
+                // plan was a silent cross-map warp the macro brain read as a real arrival (the
+                // goal could sit on a floor two regions up). Same-region is decided exactly the
+                // way MovementPlan decides it — region ids on the plan's graph; an unresolvable
+                // region falls through to the throttled physics, whose own navigation handles it.
+                int goalRegion = graph.findRegionId(bot.getMap(), target);
+                int botRegion = graph.findRegionId(bot.getMap(), bot.getPosition());
+                if (goalRegion >= 0 && goalRegion == botRegion) {
+                    arriveCoarse(entry, bot, target);
+                    return true;
+                }
+                return false;
             }
             entry.coarsePlan = plan;
             entry.coarsePlanStartMs = now;
@@ -869,7 +882,12 @@ final class GCMovementDriver {
     }
 
     private static boolean consumeAiTick(BotMovementState entry) {
-        entry.aiTickAccumulatorMs += BotPhysicsEngine.cfg.TICK_MS;
+        // Advance by the elapsed wall time between ticks, not a constant TICK_MS: the accumulator's
+        // "every other tick" contract only holds at the observed 50ms cadence. At the LOD cadences
+        // (1s coarse / 4s idle) a constant 50ms per tick made the heavy AI decisions run 2-4s late
+        // per decision (20-160x the intended 100ms spacing), which is most visible as a sluggish
+        // warmup-fallback steer on an unobserved bot whose graph is still baking.
+        entry.aiTickAccumulatorMs += (int) Math.min(entry.lastTickElapsedMs, 10_000L);
         if (entry.aiTickAccumulatorMs < AI_TICK_MS) {
             return false;
         }
@@ -1150,10 +1168,11 @@ final class GCMovementDriver {
         if (ground == null || !DeadPitGuard.isLivableLanding(map, ground, entry.movementProfile)) {
             ground = BotMovementManager.nearestLivableGround(bot);
         }
-        // No livable ground anywhere (a pathological map): teleporting to the bot's own clamped
-        // pixel changes nothing and the trigger below-floor/off-side would re-fire EVERY tick
-        // (this recovery has no cooldown). Leave the bot to the frozen-air watchdog (which snaps
-        // once the position stops changing) instead of spinning here.
+        // Null here now means the map has NO foothold at all (nearestLivableGround falls back to
+        // the nearest candidate even when every verdict reads dead, so a bot deep below the VR can
+        // always be lifted onto SOMETHING — a forced stay put left it in a permanent free fall the
+        // frozen-air watchdog can never time out, because a falling bot's position never stops
+        // changing). Without footholds nothing can be probed; leave the bot to the brain.
         if (ground == null) {
             return;
         }

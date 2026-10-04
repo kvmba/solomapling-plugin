@@ -301,6 +301,9 @@ class BotMovementManager {
      * only taken when NOTHING beside is landable — the fall integrator picks the landing it models.
      * Mirrors ClimbRecovery.dismountTowardMob's probe semantics without depending on the grind
      * layer (which is phase-gated and may never fire — the Eos Tower mid-ladder freeze).
+     * "Landable" is the column's FIRST ground within MAX_DISMOUNT_DROP_PX: findGroundPoint answers
+     * any depth, so an unlimited probe counted a map-bottom-only column (a full-shaft fall) as a
+     * safe side — the exact "kick into the shaft" the probe was added to prevent.
      */
     static void dismountTowardGround(BotMovementState entry) {
         Character bot = entry.bot;
@@ -313,17 +316,26 @@ class BotMovementManager {
         if (entry.moveTarget != null) {
             dx = Integer.compare(entry.moveTarget.x, pos.x);
         }
-        if (dx != 0 && BotPhysicsEngine.findGroundPoint(map, new Point(pos.x + dx * DISMOUNT_PROBE_PX, pos.y)) == null) {
+        if (dx != 0 && !landableColumnAtDepth(map, pos.x + dx * DISMOUNT_PROBE_PX, pos.y)) {
             int other = -dx;
-            dx = BotPhysicsEngine.findGroundPoint(map, new Point(pos.x + other * DISMOUNT_PROBE_PX, pos.y)) != null
+            dx = landableColumnAtDepth(map, pos.x + other * DISMOUNT_PROBE_PX, pos.y)
                     ? other : 0;
         }
-        if (dx == 0 && BotPhysicsEngine.findGroundPoint(map, new Point(pos.x + DISMOUNT_PROBE_PX, pos.y)) != null) {
+        if (dx == 0 && landableColumnAtDepth(map, pos.x + DISMOUNT_PROBE_PX, pos.y)) {
             dx = 1;
-        } else if (dx == 0 && BotPhysicsEngine.findGroundPoint(map, new Point(pos.x - DISMOUNT_PROBE_PX, pos.y)) != null) {
+        } else if (dx == 0 && landableColumnAtDepth(map, pos.x - DISMOUNT_PROBE_PX, pos.y)) {
             dx = -1;
         }
         jumpOffRope(entry, bot, dx);
+    }
+
+    // Ours: a column qualifies as a dismount side only when its FIRST ground below sits within
+    // this drop of the bot (the graph's own bounded-drop rule for down-jumps).
+    private static final int MAX_DISMOUNT_DROP_PX = BotNavigationGraphProvider.DOWN_JUMP_MAX_DROP_PX;
+
+    private static boolean landableColumnAtDepth(MapleMap map, int x, int y) {
+        Point ground = BotPhysicsEngine.findGroundPoint(map, new Point(x, y));
+        return ground != null && ground.y - y <= MAX_DISMOUNT_DROP_PX;
     }
 
     static void jumpToRope(BotMovementState entry, Character bot, int dx) {
@@ -1219,7 +1231,8 @@ class BotMovementManager {
         // no rope, no portal) cannot be rescued by any local action - every hop only reshuffles
         // it inside the basin, and the hop loop is exactly the reported "fell into the pit and
         // never recovers". Teleport it to the nearest livable ground and drop the goal so the
-        // brain re-decides a reachable target next tick.
+        // brain re-decides a reachable target next tick. (nearestLivableGround can only answer
+        // null on a foothold-less map, in which case the guard could not have fired either.)
         if (isOnDeadPitFloor(entry, bot)) {
             Point rescue = nearestLivableGround(bot);
             clearNavigationState(entry);
@@ -1297,8 +1310,11 @@ class BotMovementManager {
      * Nearest livable ground to teleport a pit-trapped bot to: the closest surface above the
      * bot's own position that the livability probe clears. The candidate point is snapped to
      * the surface's REAL y at the probed column (slopes included) so the bot lands standing,
-     * never mid-air beside a slope. Null when nothing above reads livable - the caller stays
-     * put rather than warping into another trap.
+     * never mid-air beside a slope. Null only when the map has no foothold tree at all - the
+     * caller (tickFallOffMapRecovery) relies on a non-null answer whenever ANY foothold exists:
+     * a bot that has left the VR bottom has every surface above it, so candidates always exist,
+     * and a fully dead-verdict map must still yield the nearest candidate (a forced stay put
+     * strands the bot in a permanent free fall the frozen-air watchdog can never time out).
      */
     static Point nearestLivableGround(Character bot) {
         MapleMap map = bot.getMap();
@@ -1309,6 +1325,8 @@ class BotMovementManager {
         BotMovementProfile profile = BotMovementProfile.base();
         Point best = null;
         long bestCost = Long.MAX_VALUE;
+        Point anyBest = null;
+        long anyBestCost = Long.MAX_VALUE;
         for (Foothold foothold : map.getFootholds().getAllFootholds()) {
             if (foothold.isWall()) {
                 continue;
@@ -1330,19 +1348,27 @@ class BotMovementManager {
             if (candidate == null || candidate.y >= pos.y) {
                 continue;
             }
-            if (!DeadPitGuard.isLivableLanding(map, candidate, profile)) {
-                continue;
-            }
             // Vertical distance dominates: a rescue wants the nearest livable floor ABOVE,
             // not a lateral wander on a distant platform.
             long cost = (long) Math.abs(candidate.y - pos.y) * 4
                     + Math.abs(probeX - pos.x);
+            if (!DeadPitGuard.isLivableLanding(map, candidate, profile)) {
+                // Fallback bucket: the nearest candidate even when the livability probe calls
+                // every surface dead (the probe over-calls on probe-narrow maps — see 755ea31).
+                // A teleport onto possibly-trapped ground still beats a permanent free fall;
+                // the wedge recovery nets (tickUnstuck self-heal, replan) own the trap from there.
+                if (cost < anyBestCost) {
+                    anyBestCost = cost;
+                    anyBest = candidate;
+                }
+                continue;
+            }
             if (cost < bestCost) {
                 bestCost = cost;
                 best = candidate;
             }
         }
-        return best;
+        return best != null ? best : anyBest;
     }
 
     /**

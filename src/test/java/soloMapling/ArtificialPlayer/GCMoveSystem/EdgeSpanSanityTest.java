@@ -16,19 +16,19 @@ class EdgeSpanSanityTest {
 
     @Test
     void aRealSpanAtZeroIsHonouredNotTreatedAsLegacy() {
+        // A window whose stamped pixel AND validated span are both exactly 0 (x=0): the 0,0 input
+        // is ambiguous (a real x=0 span IS [0,0], a legacy cache is also 0,0), and the constructor
+        // resolves it as REAL when the stamped window is itself [0,0] — the executor's phase band
+        // around a one-pixel window is exactly the overfly shape the span exists to stop.
         BotNavigationGraph.Edge e = edge(0, 0, 0, 0);
-        // A window whose stamped pixel AND validated span are both exactly 0: after the
-        // constructor's legacy normalization a [0,0] input reads as NO_VALID_SPAN, so the
-        // executor falls back to stamped+tolerance (-8..8). This is the residual ambiguity:
-        // pinned here so the trade-off is visible (a real x=0 span is not clamped).
         assertTrue(e.acceptsLaunchX(0, 8));
-        assertTrue(e.acceptsLaunchX(8, 8));
-        assertFalse(e.acceptsLaunchX(9, 8));
+        assertFalse(e.acceptsLaunchX(8, 8), "a real [0,0] span refuses the phase band beyond x=0");
+        assertFalse(e.acceptsLaunchX(-8, 8), "symmetric");
     }
 
     @Test
     void aLegacyZeroZeroInputNormalizesToTheSentinel() {
-        BotNavigationGraph.Edge e = edge(100, 140, 0, 0); // legacy "not recorded"
+        BotNavigationGraph.Edge e = edge(100, 140, 0, 0); // legacy "not recorded" (stamped window wider than 1px)
         assertEquals(BotNavigationGraph.Edge.NO_VALID_SPAN, e.launchValidMinX);
         assertEquals(BotNavigationGraph.Edge.NO_VALID_SPAN, e.launchValidMaxX);
         // Falls back to the STAMPED window (no tolerance extension past 100..140 for x=150 —

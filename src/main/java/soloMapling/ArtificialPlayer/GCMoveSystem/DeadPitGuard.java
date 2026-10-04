@@ -164,6 +164,13 @@ final class DeadPitGuard {
      * The landing surface's own verdict is NOT chased (one-hop depth, like the jump chain);
      * it is cached on its own foothold. An ffd source is refused: the straight drop-through
      * is exactly the move the client blocks there (canStartDownJump honours the flag too).
+     *
+     * The down-jump probe honours the same bounded-drop rule the executor's fallback gates on
+     * (DOWN_JUMP_MAX_DROP_PX): the live down-jump executor can never fire a deeper straight
+     * drop, so a "depth-500 landing" must not count as an escape or the guard steers recoveries
+     * onto surfaces whose only nominal exit no move can actually take. A plain walk-off fall
+     * (simulateFallLanding) stays uncapped — walking off an edge is not depth-limited and the
+     * fall-off-map recovery owns the no-landing case.
      */
     private static boolean fallEscape(MapleMap map, Foothold source, int floorY, int loX, int hiX,
                                       BotMovementProfile profile) {
@@ -183,7 +190,8 @@ final class DeadPitGuard {
             if (BotPhysicsEngine.simulateFallLanding(map, from, 0) != null) {
                 return true;
             }
-            if (BotPhysicsEngine.simulateDownJumpLanding(map, from) != null) {
+            BotPhysicsEngine.JumpLanding drop = BotPhysicsEngine.simulateDownJumpLanding(map, from);
+            if (drop != null && drop.point().y - floorY <= BotNavigationGraphProvider.DOWN_JUMP_MAX_DROP_PX) {
                 return true;
             }
         }

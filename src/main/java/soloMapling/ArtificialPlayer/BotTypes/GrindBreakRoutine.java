@@ -3,6 +3,7 @@ package soloMapling.ArtificialPlayer.BotTypes;
 import org.gms.client.Character;
 import org.gms.server.maps.MapleMap;
 import org.gms.server.maps.Rope;
+import soloMapling.ArtificialPlayer.BotGrindSystem.ClimbRecovery;
 import soloMapling.ArtificialPlayer.BotGrindSystem.GrindBrain;
 import soloMapling.ArtificialPlayer.BotGrindSystem.RestSpotFinder;
 import soloMapling.ArtificialPlayer.GCMoveSystem.GCMovement;
@@ -246,9 +247,11 @@ final class GrindBreakRoutine {
      * sails past every platform into the map floor - the drop re-grabs some rope on the way
      * (climbUpIntent is still armed) and the break-over reads as "still hanging", then the
      * macro watchdog bails the map: one contributor to the 玩具塔 "bots stuck on ropes"
-     * report. A straight drop is only taken when something is actually below; otherwise a
-     * sideways kick (toward the nearer side's landing) is used, which is the same rope
-     * dismount a player would give.
+     * report. A straight drop is only taken when something is actually landable below — the
+     * column's FIRST ground within ClimbRecovery.MAX_DISMOUNT_DROP_PX (groundPointBelow answers
+     * any depth, so an unlimited probe passed a column whose only floor is the map bottom
+     * hundreds of px down); otherwise a sideways kick (toward the nearer side's landing) is
+     * used, which is the same rope dismount a player would give.
      */
     private static void dismountRopeSafely(Character chr) {
         Point pos = chr.getPosition();
@@ -257,14 +260,14 @@ final class GrindBreakRoutine {
             GCMovement.dismountRope(chr, 0);
             return;
         }
-        if (GCMovement.groundPointBelow(map, pos.x, pos.y) != null) {
+        if (ClimbRecovery.isLandableColumn(map, pos.x, pos.y)) {
             GCMovement.dismountRope(chr, 0); // straight drop lands on something: keep it
             return;
         }
         int dir = 0;
-        if (GCMovement.groundPointBelow(map, pos.x - 40, pos.y) != null) {
+        if (ClimbRecovery.isLandableColumn(map, pos.x - 40, pos.y)) {
             dir = -1;
-        } else if (GCMovement.groundPointBelow(map, pos.x + 40, pos.y) != null) {
+        } else if (ClimbRecovery.isLandableColumn(map, pos.x + 40, pos.y)) {
             dir = 1;
         }
         GCMovement.dismountRope(chr, dir); // 0 = nothing near either side: the fall's own recovery owns it

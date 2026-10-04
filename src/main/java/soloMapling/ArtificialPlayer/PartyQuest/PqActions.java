@@ -141,16 +141,19 @@ public final class PqActions {
             // walk costs one cap at most rather than the whole timeout.
             while (movementNowMs() < deadline) {
                 if (arrived.await(50, java.util.concurrent.TimeUnit.MILLISECONDS)) {
-                    disarmStageWalkShield(bot);
                     return;
                 }
                 if (!GCMovement.isMoving(bot)) {
-                    disarmStageWalkShield(bot);
                     return;
                 }
             }
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
+        } finally {
+            // EVERY exit disarms — arrival, engine give-up, deadline, or interrupt. The
+            // interrupt path previously left the 8s shield armed, blacking out the combat
+            // beat's steering for walks that no longer exist.
+            disarmStageWalkShield(bot);
         }
     }
 
@@ -839,7 +842,9 @@ public final class PqActions {
     private static final int RETARGET_EPS_PX = 16;          // skip re-issuing a move for tiny shifts
     private static final long RETARGET_TIMEOUT_MS = 4_000;  // give up an unreachable target after this
     private static final int PROGRESS_EPS_PX = 20;          // movement worth counting as chase progress
-    /** A mob within this |dy| of the bot's feet counts as same-level: patrol tracking is allowed. */
+    /** A mob within this |dy| of the pinned anchor's floor counts as still on the pinned platform
+     *  (the one-beat off-platform blip tolerance). Same-LEVEL itself is decided by nav region, not
+     *  a raw y band — a 60px band on the LPQ stage-1 tower spans three ~22px stair rows. */
     private static final int FLOOR_SNAP_BAND_PX = 60;
     private static final Map<Integer, Integer> seekTargetByBot = new java.util.concurrent.ConcurrentHashMap<>();
     private static final Map<Integer, Point> seekAnchorByBot = new java.util.concurrent.ConcurrentHashMap<>();
@@ -879,6 +884,7 @@ public final class PqActions {
     // plans on the bot's best graph — a mismatch can only ever SKIP a re-check, never fake one:
     // a stale "pathable" self-heals through the driver's own no-path handling and the seek deadline.
     private static final Map<Integer, Integer> chasePathRegionByBot = new java.util.concurrent.ConcurrentHashMap<>();
+    private static final Map<Integer, Integer> chasePathSurfaceYByBot = new java.util.concurrent.ConcurrentHashMap<>();
     private static final Map<Integer, Boolean> chasePathableByBot = new java.util.concurrent.ConcurrentHashMap<>();
 
     /**
@@ -951,7 +957,15 @@ public final class PqActions {
         // deadline wiped state. Following the live x while the platform holds fixes both.
         Point mobFloor = GCMovement.groundPointBelow(bot.getMap(), mp.x, mp.y);
         Point anchorFloor = chaseAnchorByBot.get(bot.getId());
-        boolean sameLevel = Math.abs(mp.y - pos.y) <= FLOOR_SNAP_BAND_PX;
+        // Same level = the mob stands on the bot's OWN walk-connected surface (one nav region),
+        // NOT a raw y-difference: on the LPQ stage-1 tower the stair rows sit ~22px apart, so a
+        // y-band spans three rows and a mob one or two rows up read "same level" - its live-x
+        // re-aims then discarded the committed climb edge every beat (卡绳索/永不登台). Regions are
+        // the platform granularity the whole frozen-anchor design is keyed on; a raw band is not.
+        boolean sameLevel = mobFloor != null && pos != null
+                && GCMovement.peekRegionIdAt(bot.getMap(), mp.x, mobFloor.y) >= 0
+                && GCMovement.peekRegionIdAt(bot.getMap(), mp.x, mobFloor.y)
+                        == GCMovement.peekRegionIdAt(bot.getMap(), pos.x, pos.y);
         int tx;
         int ty;
         if (anchorFloor == null || mobFloor == null) {
@@ -968,6 +982,9 @@ public final class PqActions {
             // each re-aim can land in a different nav region and discards the committed climb
             // edge mid-rope (the LPQ stage-1 卡绳索/永不登台 loop). The pinned anchor is within
             // one platform of the mob; melee reach (±90px) covers the rest once the bot lands.
+            // The pinned-platform branch keeps the mob's live x but on the PINNED floor y (the
+            // probe falling through a shelf gap onto a deep row is an off-platform blip, and the
+            // region gate below holds it anyway): only a same-REGION mob moves the goal y.
             anchorFloor = new Point(mp.x, anchorFloor.y);
             chaseAnchorByBot.put(bot.getId(), anchorFloor);
             chaseDriftByBot.remove(bot.getId());
@@ -1016,9 +1033,6 @@ public final class PqActions {
         // platforms — then the new region is adopted and the progress clock restarts. This is the
         // single place the invariant is enforced; the anchor bookkeeping above stays heuristic.
         Point issued = stableChaseGoal(bot, new Point(tx, ty));
-        if (issued == null) {
-            return; // gate holds: keep flying the previous goal; nothing to re-issue this beat
-        }
         tx = issued.x;
         ty = issued.y;
 
@@ -1085,7 +1099,7 @@ public final class PqActions {
         log.info("[seek-trace] bot={} pos={} target={} mobPos={} mobFloor={} goal=({},{}) lastX={} sticky={} drift={} pathable={} nav={} edge={} block={} hasGoal={}",
                 bot.getId(), pos, target.getId(), mp, mobFloor, tx, ty, lastX,
                 seekTargetByBot.get(bot.getId()), chaseDriftByBot.get(bot.getId()),
-                GCMovement.canPathTo(bot, tx, ty),
+                pathableMemo(bot, tx, ty), // the memo, not a raw A*: the trace must not double the beat's path cost
                 GCMovement.navDecision(bot), GCMovement.navEdgeSummary(bot),
                 GCMovement.edgeBlockReason(bot), GCMovement.hasMoveTarget(bot));
     }
@@ -1099,6 +1113,7 @@ public final class PqActions {
         chaseFlipByBot.remove(botId);
         seekBestDistByBot.remove(botId);
         chasePathRegionByBot.remove(botId);
+        chasePathSurfaceYByBot.remove(botId);
         chasePathableByBot.remove(botId);
     }
 
@@ -1113,7 +1128,10 @@ public final class PqActions {
      *
      * <p>Peek-only region reads (no bake join). Unbaked graph or region-less point: no answer, the
      * candidate passes through and the state is dropped — never strand a chase on an unanswerable
-     * gate. Null means "gate holds": keep flying the previous goal, nothing to issue this beat.
+     * gate. This NEVER returns null: during a flip hold it returns the HELD goal, so the caller
+     * re-issues it (idempotent for the driver) and keeps the driver's goal in flight — re-issuing
+     * the held goal each beat is what re-arms the move if the driver's own no-progress watchdog
+     * abandoned it mid-climb (the stage-1 "hangs until the 4s deadline" report).
      */
     private static Point stableChaseGoal(Character bot, Point candidate) {
         int botId = bot.getId();
@@ -1158,17 +1176,22 @@ public final class PqActions {
     }
 
     /**
-     * {@link GCMovement#canPathTo}, memoized per goal nav region: the region gate above keeps the
-     * goal in one region for whole seconds, so the beat-by-beat A* re-check is only meaningful
-     * when that region changes. The memo key is the goal's region id under the PEEK graph; it can
-     * only ever suppress a re-check when the region is genuinely unchanged, so a stale verdict is
-     * refreshed by the next region change (or the seek deadline) — it can never fake a pass.
+     * {@link GCMovement#canPathTo}, memoized per (goal nav region, goal surface Y): the region
+     * gate above keeps the goal in one region for whole seconds, so the beat-by-beat A* re-check
+     * is only meaningful when that changes. Region alone is NOT a sufficient key: one region can
+     * be two platforms split by a gap (map 1020000 r11's walkway pair), and a verdict from one
+     * platform must not serve a goal on the other. The goal's probed surface Y is the platform
+     * discriminator — only a goal whose region AND floor both match the memo can skip the A*.
      */
     private static boolean pathableMemo(Character bot, int x, int y) {
         int botId = bot.getId();
         int region = GCMovement.peekRegionIdAt(bot.getMap(), x, y);
+        Point surface = GCMovement.groundPointBelow(bot.getMap(), x, y);
+        int surfaceY = (surface != null) ? surface.y : y;
         Integer memoRegion = chasePathRegionByBot.get(botId);
-        if (region >= 0 && Integer.valueOf(region).equals(memoRegion)) {
+        Integer memoSurfaceY = chasePathSurfaceYByBot.get(botId);
+        if (region >= 0 && Integer.valueOf(region).equals(memoRegion)
+                && Integer.valueOf(surfaceY).equals(memoSurfaceY)) {
             Boolean memo = chasePathableByBot.get(botId);
             if (memo != null) {
                 return memo;
@@ -1177,6 +1200,7 @@ public final class PqActions {
         boolean pathable = GCMovement.canPathTo(bot, x, y);
         if (region >= 0) {
             chasePathRegionByBot.put(botId, region);
+            chasePathSurfaceYByBot.put(botId, surfaceY);
             chasePathableByBot.put(botId, pathable);
         }
         return pathable;

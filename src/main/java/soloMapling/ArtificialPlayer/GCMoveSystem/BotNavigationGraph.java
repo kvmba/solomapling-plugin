@@ -269,15 +269,21 @@ final class BotNavigationGraph implements Serializable {
             this.endPoint = new Point(endPoint);
             this.launchMinX = Math.min(launchMinX, launchMaxX);
             this.launchMaxX = Math.max(launchMinX, launchMaxX);
-            // Legacy v68 caches carry 0,0 here for "not recorded"; NO_VALID_SPAN is the honest
-            // sentinel (a real span can legitimately be [0,0] at x=0). A 0,0 input from the
-            // current builder is impossible — a JUMP window's validated span always contains its
-            // representative pixel, and map geometry with a real x=0 span is preserved below.
+            // Legacy v68 caches carry 0,0 here for "not recorded" (the fields did not exist on
+            // disk, so deserialization fills both with 0). A 0,0 input where the STAMPED window
+            // itself is wider than the single pixel 0 is unambiguously legacy -> normalize to
+            // the sentinel. A 0,0 input on a stamped [0,0] window (x=0) is genuinely ambiguous —
+            // a real validated span at x=0 IS [0,0] — and it is resolved conservatively as REAL:
+            // the executor's phase band around a one-pixel window is exactly the overfly shape
+            // the span exists to stop, while a legacy edge at x=0 loses only the (irrelevant for
+            // a 1px window) phase tolerance.
             int vMin = launchValidMinX;
             int vMax = launchValidMaxX;
             if (vMin == 0 && vMax == 0) {
-                vMin = NO_VALID_SPAN;
-                vMax = NO_VALID_SPAN;
+                if (this.launchMinX != 0 || this.launchMaxX != 0) {
+                    vMin = NO_VALID_SPAN;
+                    vMax = NO_VALID_SPAN;
+                }
             }
             this.launchValidMinX = Math.min(vMin, vMax);
             this.launchValidMaxX = Math.max(vMin, vMax);
