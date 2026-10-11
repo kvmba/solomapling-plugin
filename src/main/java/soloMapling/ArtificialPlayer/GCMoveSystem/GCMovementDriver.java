@@ -1173,11 +1173,10 @@ final class GCMovementDriver {
         if (ground == null || !DeadPitGuard.isLivableLanding(map, ground, entry.movementProfile)) {
             ground = BotMovementManager.nearestLivableGround(bot);
         }
-        // Null here now means the map has NO foothold at all (nearestLivableGround falls back to
-        // the nearest candidate even when every verdict reads dead, so a bot deep below the VR can
-        // always be lifted onto SOMETHING — a forced stay put left it in a permanent free fall the
-        // frozen-air watchdog can never time out, because a falling bot's position never stops
-        // changing). Without footholds nothing can be probed; leave the bot to the brain.
+        // Null here means the map has NO foothold at all: nearestLivableGround answers only with a
+        // livable surface (the TOPMOST surface always is one under the guard's own rule; see its
+        // javadoc), so a foothold-less map is the one case it cannot answer. Nothing can be probed
+        // there - leave the bot to the brain.
         if (ground == null) {
             return;
         }

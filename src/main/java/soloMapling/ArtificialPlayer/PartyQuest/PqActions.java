@@ -135,26 +135,45 @@ public final class PqActions {
         // the tick moves on and position checks retry on the next one (the pre-existing
         // no-pathing behaviour).
         long deadline = movementNowMs() + WALK_BLOCK_CAP_MS;
+        boolean arrivedFlag = false;
         try {
-            // Also stop as soon as the engine gives the move up (an unreachable/stalled
+            // Stop as soon as the engine gives the move up (an unreachable/stalled
             // target that the driver abandons without firing the callback), so a wedged
             // walk costs one cap at most rather than the whole timeout.
             while (movementNowMs() < deadline) {
                 if (arrived.await(50, java.util.concurrent.TimeUnit.MILLISECONDS)) {
-                    return;
+                    arrivedFlag = true;
+                    break;
                 }
                 if (!GCMovement.isMoving(bot)) {
-                    return;
+                    break;
                 }
             }
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-        } finally {
-            // EVERY exit disarms — arrival, engine give-up, deadline, or interrupt. The
-            // interrupt path previously left the 8s shield armed, blacking out the combat
-            // beat's steering for walks that no longer exist.
+        }
+        // The shield outlives the WAIT, not the walk (3ff20b0): a walk still flying after this
+        // method stops waiting keeps its shield — the 250ms combat beat must not re-target it
+        // mid-walk — and the shield expires on its own after STAGE_WALK_SHIELD_MS (the wedge
+        // escape). Only a finished or engine-abandoned walk has nothing left to shield; releasing
+        // on every exit re-opened the puzzle blackout the shield exists to prevent, and releasing
+        // on none left the 8s blackout an interrupt used to block the beat with. The live engine
+        // answer is read once here (not per exit) so the deadline, interrupt and give-up paths
+        // cannot drift apart.
+        if (walkShieldReleases(arrivedFlag, GCMovement.isMoving(bot))) {
             disarmStageWalkShield(bot);
         }
+    }
+
+    /**
+     * Whether {@link #walkTo} must release the stage-walk shield when it stops waiting: only when
+     * nothing is left to shield — the walk landed ({@code arrived}) or the engine gave it up. A
+     * walk still in flight past the wait window keeps its shield (it outlives the block, 3ff20b0)
+     * and expires on its own. Pure and package-visible so the decision table is pinned by test
+     * rather than re-derived at each exit (it has already regressed twice).
+     */
+    static boolean walkShieldReleases(boolean arrived, boolean engineStillMoving) {
+        return arrived || !engineStillMoving;
     }
 
     /**
