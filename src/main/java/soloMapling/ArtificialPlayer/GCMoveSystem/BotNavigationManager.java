@@ -452,13 +452,14 @@ final class BotNavigationManager {
             return edge;
         }
         if (entry.inAir && edge.type == BotNavigationGraph.EdgeType.CLIMB
-                && (edge.launchStepX != 0 || isBallisticClimbExit(edge))) {
-            // Rope-exit jump arcs use the same sampled ballistic model as JUMP/DROP edges — and
-            // so does the launchStepX==0 rope-head BALLISTIC exit (the straight-up arc fired for
-            // a climb whose real landing is out of the physics top-exit probe band): both fly a
-            // validated trajectory the graph authored, so keep the committed edge until the bot
-            // actually lands or grabs a rope again; otherwise mid-air replans can steer the bot
-            // off the authored landing path.
+                && (edge.launchStepX != 0 || entry.navFlightEdge == edge)) {
+            // Rope-exit arcs use the same sampled ballistic model as JUMP/DROP edges — the directional
+            // rope jump-off, the straight-up rope-head ballistic exit, AND the physics-owned top
+            // step-off / climb-down drop. All of them land through the authored trajectory (or its
+            // physics boundary), so keep the committed edge until the bot actually lands or grabs a
+            // rope again; otherwise mid-air replans can steer the bot off the authored landing path.
+            // The fired shape is read from the launch-time fact (navFlightEdge) — never re-derived
+            // from edge geometry, which cannot tell which branch fired it and drifted once already.
             return edge;
         }
         return null;
@@ -752,7 +753,10 @@ final class BotNavigationManager {
             if (rope == null || isTopStepOffExit(rope, botPos, edge)) {
                 // Top STEP-OFF (or no rope geometry): physics owns the landing —
                 // resolveClimbBoundary lands the bot at the top boundary and the edge completes
-                // when the region changes.
+                // when the region changes. The climb carries the edge to the boundary, so record
+                // that fact for reuseCommittedEdge: the eventual fall out of the boundary belongs
+                // to this edge, and a mid-fall replan must not steer off its authored landing.
+                entry.navFlightEdge = edge;
                 return null;
             }
             // Ours (LPQ stage-1 rope-head loop): a BALLISTIC straight-up exit minted from
@@ -771,20 +775,25 @@ final class BotNavigationManager {
             // direction, and fixedAirArc keeps the flight the constant-stepX trajectory the graph
             // validated (simulateRopeJumpLanding).
             if (edge.endPoint.y >= edge.startPoint.y) {
-                return null; // downward exit: physics owns the climb-down and bottom drop
+                // Downward exit: physics owns the climb-down and the bottom drop. The edge stays
+                // committed through the descent, so record the boundary-ownership fact.
+                entry.navFlightEdge = edge;
+                return null;
             }
             Point topLanding = BotPhysicsEngine.findTopExitLanding(bot.getMap(), rope);
             Foothold topFoothold = (topLanding != null)
                     ? BotPhysicsEngine.findGroundFoothold(bot.getMap(), topLanding) : null;
             if (topFoothold != null
                     && graph.regionIdByFootholdId.getOrDefault(topFoothold.getId(), -1) == edge.toRegionId) {
-                return null; // physics lands this edge's target; no jump needed
+                entry.navFlightEdge = edge; // physics lands this edge's target; no jump
+                return null;
             }
             if (botPos.y != edge.startPoint.y) {
                 startClimbing(entry, bot, rope, edge.startPoint.y); // re-seat at the validated anchor
             }
             BotMovementManager.jumpOffRope(entry, bot, 0);
             entry.fixedAirArc = true;
+            entry.navFlightEdge = edge; // this flight belongs to this edge (reuseCommittedEdge)
             return new NavigationDirective(rawTargetPos, true);
         }
 
@@ -794,6 +803,8 @@ final class BotNavigationManager {
             startClimbing(entry, bot, sourceRope, edge.startPoint.y);
         }
         BotMovementManager.jumpOffRope(entry, bot, edge.launchStepX);
+        entry.fixedAirArc = true;
+        entry.navFlightEdge = edge; // this flight belongs to this edge (reuseCommittedEdge)
         return new NavigationDirective(rawTargetPos, true);
     }
 
@@ -2027,25 +2038,6 @@ final class BotNavigationManager {
         return edge.startPoint.x == rope.x()
                 && botPos.x == rope.x()
                 && Math.abs(botPos.y - edge.startPoint.y) <= BotPhysicsEngine.climbStepPerTick() + 2;
-    }
-
-    /*
-     * Whether this launchStepX==0 CLIMB edge is the rope-head BALLISTIC exit (fb4cb83): an
-     * upward, off-topY anchor whose arc the graph validated with simulateRopeJumpLanding and the
-     * executor fires as a fixed straight-up jumpOffRope. Distinguishable from a physics top
-     * step-off by the anchor itself: a step-off's startPoint sits at rope.topY, while a ballistic
-     * exit's anchor is firstClimbableY (or a 30px interval below it) — strictly below the head.
-     * The predicate needs no map access: it classifies the edge geometry alone, so it is usable
-     * from reuseCommittedEdge's mid-air retention clause too.
-     */
-    static boolean isBallisticClimbExit(BotNavigationGraph.Edge edge) {
-        if (edge == null || edge.type != BotNavigationGraph.EdgeType.CLIMB || edge.launchStepX != 0) {
-            return false;
-        }
-        // Upward (a downward exit is physics-owned climb-down) with no lateral component: the
-        // straight-up arc's landing x equals its launch x by construction.
-        return edge.startPoint.y < edge.endPoint.y
-                && edge.startPoint.x == edge.endPoint.x;
     }
 
     private static Rope findRopeForRegion(MapleMap map, BotNavigationGraph.Region region) {

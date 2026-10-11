@@ -1085,6 +1085,8 @@ final class BotPhysicsEngine {
         entry.groundPhysicsCarryMs = 0.0;
         entry.blockedRopeGrab = null;
         entry.topClampSinceMs = 0L;
+        // The flight ended on real ground: the edge it was launched for is no longer in flight.
+        entry.navFlightEdge = null;
         entry.hspeed = landingGroundHSpeed(bot.getMap(), foothold, incomingDeltaX, incomingDeltaY, entry.movementProfile);
         // NOTE: we deliberately do NOT counter-strafe-brake here. At the landing tick entry.moveDir
         // still holds stale AIRBORNE steering, not the ground continuation direction, so the old
@@ -1107,6 +1109,9 @@ final class BotPhysicsEngine {
     static void attachToRope(BotMovementState entry, Character bot, Rope rope, int y) {
         int ropeY = Math.clamp(y, firstClimbableY(rope), rope.bottomY());
         entry.climbVerticalDir = 0;
+        // A flight ends the moment the bot grabs a rope: whatever edge it launched for is no
+        // longer in flight (the climb owns the bot from here).
+        entry.navFlightEdge = null;
         // Re-grabbing a rope is a fresh climb: the top-clamp clock must restart, or a clock
         // left over from an earlier clamp on THIS session (clamp 2s -> release -> re-grab the
         // next rope down) is already past TOP_CLAMP_RELEASE_MS and the release fires on the
@@ -2189,6 +2194,7 @@ final class BotPhysicsEngine {
         entry.blockedRopeGrab = null;
         entry.ropeGrabCooldownMs = 0;
         entry.topClampSinceMs = 0L;
+        entry.navFlightEdge = null; // teleports / map changes / death end any committed flight
         entry.downJumpPending = false;
         entry.downJumpGracePeriodMS = 0L;
         clearRopeEntryIntent(entry);

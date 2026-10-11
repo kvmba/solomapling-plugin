@@ -74,6 +74,14 @@ class BotMovementState {
     int airVelX = 0;                      // committed horizontal step at launch
     double airSteerVelX = 0.0;            // accumulated air-steering correction
     boolean fixedAirArc = false;          // committed nav arc — disables air steering/drag
+    // The nav edge THIS flight was launched for (null for free jumps / hops / knockbacks). Recorded
+    // at the launch site by whichever branch fired, cleared on landing / rope attach / teleport — so
+    // reuseCommittedEdge can hold the committed edge for the whole flight without re-deriving the
+    // fired shape from edge geometry (the geometry classifier keyed on the wrong y direction once,
+    // and any classifier can silently drift from the fire branch). One fact, one writer. Also covers
+    // the physics-owned rope boundary exits (top step-off / climb-down delegation): there the climb
+    // carries the edge to the boundary, and the fall out of it belongs to the same edge.
+    BotNavigationGraph.Edge navFlightEdge = null;
     // Flash Jump (Hermit/NL). execFlashJump launches a normal jump then arms pendingFlashJump; the
     // airborne integrator injects the (±550,-350) dash impulse at the apex (velY>=0) and raises
     // flashJumpFired so tickAirborne broadcasts the type-6 "fj" dash frame that one tick. Adapted from

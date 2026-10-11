@@ -199,6 +199,10 @@ class BotMovementManager {
     static void clearNavigationState(BotMovementState entry) {
         entry.navTargetPos = null;
         entry.navEdge = null;
+        // The in-flight edge fact dies with the commitment it annotates (invariant:
+        // navFlightEdge != null implies navEdge != null). Physics clears it on landing/rope
+        // attach/teleport as well; either end may end the flight.
+        entry.navFlightEdge = null;
         entry.navJumpLaunchEdge = null;
         entry.navJumpLaunchX = Integer.MIN_VALUE;
         entry.navJumpLaunchDelaySteps = Integer.MIN_VALUE;
@@ -1310,11 +1314,15 @@ class BotMovementManager {
      * Nearest livable ground to teleport a pit-trapped bot to: the closest surface above the
      * bot's own position that the livability probe clears. The candidate point is snapped to
      * the surface's REAL y at the probed column (slopes included) so the bot lands standing,
-     * never mid-air beside a slope. Null only when the map has no foothold tree at all - the
-     * caller (tickFallOffMapRecovery) relies on a non-null answer whenever ANY foothold exists:
-     * a bot that has left the VR bottom has every surface above it, so candidates always exist,
-     * and a fully dead-verdict map must still yield the nearest candidate (a forced stay put
-     * strands the bot in a permanent free fall the frozen-air watchdog can never time out).
+     * never mid-air beside a slope.
+     *
+     * <p>Non-null whenever the map has any walkable foothold, by construction: the TOPMOST
+     * surface (smallest surfaceY) is livable under the guard's own rule ("no higher ground at
+     * all means this IS the map's top surface - ordinary ground, not a trap"), and every surface
+     * above a bot that has left the VR bottom (or that stands on a lower dead shelf) is a
+     * candidate - a full-WZ scan over all 5363 shipped maps finds zero dead surfaces with no
+     * livable surface above them. Null only for a foothold-less map, where there is nothing to
+     * probe and the brain owns the recovery.
      */
     static Point nearestLivableGround(Character bot) {
         MapleMap map = bot.getMap();
@@ -1325,8 +1333,6 @@ class BotMovementManager {
         BotMovementProfile profile = BotMovementProfile.base();
         Point best = null;
         long bestCost = Long.MAX_VALUE;
-        Point anyBest = null;
-        long anyBestCost = Long.MAX_VALUE;
         for (Foothold foothold : map.getFootholds().getAllFootholds()) {
             if (foothold.isWall()) {
                 continue;
@@ -1348,27 +1354,19 @@ class BotMovementManager {
             if (candidate == null || candidate.y >= pos.y) {
                 continue;
             }
+            if (!DeadPitGuard.isLivableLanding(map, candidate, profile)) {
+                continue; // a rescue never relocates into another trap
+            }
             // Vertical distance dominates: a rescue wants the nearest livable floor ABOVE,
             // not a lateral wander on a distant platform.
             long cost = (long) Math.abs(candidate.y - pos.y) * 4
                     + Math.abs(probeX - pos.x);
-            if (!DeadPitGuard.isLivableLanding(map, candidate, profile)) {
-                // Fallback bucket: the nearest candidate even when the livability probe calls
-                // every surface dead (the probe over-calls on probe-narrow maps — see 755ea31).
-                // A teleport onto possibly-trapped ground still beats a permanent free fall;
-                // the wedge recovery nets (tickUnstuck self-heal, replan) own the trap from there.
-                if (cost < anyBestCost) {
-                    anyBestCost = cost;
-                    anyBest = candidate;
-                }
-                continue;
-            }
             if (cost < bestCost) {
                 bestCost = cost;
                 best = candidate;
             }
         }
-        return best != null ? best : anyBest;
+        return best;
     }
 
     /**

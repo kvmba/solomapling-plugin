@@ -140,24 +140,45 @@ public class DeadPitDownEscapeTest {
 
     @Test
     void aRopeToppingJustBelowThePlatformFaceIsARideDownExit() {
-        // The LPQ stage-1 top-platform shape: the descent rope's TOP hangs 2px BELOW
-        // the platform face - ropeAbove skips it (top below the floor: nothing to climb
-        // up), and the rope cannot be jump-grabbed from the face. But its bottom ends
-        // 267px down at a real foothold: mount at the face and ride down. ropeBelow
-        // must count it. (Anchored near the platform's right edge, like the map's.)
-        // The world row 200px above the face (beyond the apex) kills the topmost rule,
-        // so the verdict can only come from ropeBelow.
+        // The LPQ stage-1 top-platform shape: the descent rope's TOP hangs 2px BELOW the
+        // platform face — ropeAbove skips it (top below the floor: nothing to climb up), and the
+        // rope cannot be jump-grabbed from the face. But its head is INSIDE the executor's own
+        // top-attach band (canAttachToRopeFromTopPlatform: topY - feet <= MAX_SNAP_DROP), so the
+        // bot mounts at the face and rides down. ropeMountableFromSurface must count it.
+        //
+        // The platform is ffd and the pocket below is walled shut with NO floor reachable from the
+        // face: the verdict can come from the rope rule ALONE. (The old fixture left a real
+        // landing below, so fallEscape alone made it live — the rope was decorative and the pin
+        // could not bite. Verified by deleting the rope: this shape reads DEAD without it.)
         MapleMap map = map(922011914);
         FootholdTree tree = new FootholdTree(new Point(-265, -100), new Point(265, 600));
         tree.insert(new Foothold(new Point(-265, -200), new Point(265, -200), 3)); // world beyond apex
         Foothold platform = new Foothold(new Point(-265, 0), new Point(265, 0), 1);
-        Foothold bottomFh = new Foothold(new Point(100, 267), new Point(230, 267), 2);
+        platform.setForbidFallDown(true); // no straight drop-through: fallEscape must fail
         tree.insert(platform);
-        tree.insert(bottomFh);
+        // The descent shaft: pocket walls + a floor 267px down, all BEHIND the walls (nothing the
+        // face can fall onto — the rope is the only way off).
+        tree.insert(new Foothold(new Point(205, 60), new Point(205, 392), 2));   // left wall
+        tree.insert(new Foothold(new Point(260, 60), new Point(260, 392), 4));   // right wall
+        tree.insert(new Foothold(new Point(205, 392), new Point(260, 392), 5));  // pocket floor
         map.setFootholds(tree);
-        // x=165, top=-2 relative to the face (y=0 -> 2), bottom at the lower foothold.
-        map.addRope(new org.gms.server.maps.Rope(165, 2, 267, false));
+        // x=232 (inside the pocket column), top=-2 relative to the face (y=0 -> 2), bottom 267 down.
+        map.addRope(new org.gms.server.maps.Rope(232, 2, 392, false));
         assertTrue(DeadPitGuard.isLivableSurface(map, platform, BotMovementProfile.base()),
-                "a rope topping just below the face and bottoming on a real foothold is a ride-down exit");
+                "a rope topping inside the top-attach band and bottoming on a real foothold is a ride-down exit");
+
+        // The same geometry WITHOUT the rope must read dead: proves the rope is load-bearing here.
+        MapleMap bare = map(922011916);
+        FootholdTree bareTree = new FootholdTree(new Point(-265, -100), new Point(265, 600));
+        bareTree.insert(new Foothold(new Point(-265, -200), new Point(265, -200), 3));
+        Foothold barePlatform = new Foothold(new Point(-265, 0), new Point(265, 0), 1);
+        barePlatform.setForbidFallDown(true);
+        bareTree.insert(barePlatform);
+        bareTree.insert(new Foothold(new Point(205, 60), new Point(205, 392), 2));
+        bareTree.insert(new Foothold(new Point(260, 60), new Point(260, 392), 4));
+        bareTree.insert(new Foothold(new Point(205, 392), new Point(260, 392), 5));
+        bare.setFootholds(bareTree);
+        assertFalse(DeadPitGuard.isLivableSurface(bare, barePlatform, BotMovementProfile.base()),
+                "without the rope the same platform is a one-way trap: the rope is the exit");
     }
 }

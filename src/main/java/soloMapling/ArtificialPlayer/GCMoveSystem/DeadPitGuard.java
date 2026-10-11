@@ -62,6 +62,11 @@ final class DeadPitGuard {
     /** Guards against re-entrant verdict computation on the same foothold (cycles in the chain). */
     private static final Map<org.gms.server.maps.FootholdTree, Set<Integer>> IN_PROGRESS =
             java.util.Collections.synchronizedMap(new java.util.WeakHashMap<>());
+    /** tree -> foothold-id -> walk-region root (see sameWalkRegion). The engine's own connected-
+     *  surface partition, rebuilt once per tree from prev/next + canWalkAcrossFootholds. Weak-keyed
+     *  like the verdict cache: a reloaded map starts clean, dropped trees do not leak it. */
+    private static final Map<org.gms.server.maps.FootholdTree, Map<Integer, Integer>> WALK_ROOTS =
+            java.util.Collections.synchronizedMap(new java.util.WeakHashMap<>());
 
     /*
      * Whether a bot landing at {@code landing} (a simulated jump/drop/walk-off landing, or the
@@ -129,7 +134,7 @@ final class DeadPitGuard {
         if (portalNear(map, floorY, loX, hiX)) {
             return true;
         }
-        if (ropeAbove(map, floorY, loX, hiX, apex)) {
+        if (ropeAbove(map, foothold, floorY, loX, hiX, apex, profile)) {
             return true;
         }
         // No higher ground at all means this IS the map's top surface - ordinary ground,
@@ -150,7 +155,7 @@ final class DeadPitGuard {
         // And the rope the other direction: a rope whose BOTTOM reaches (or passes below)
         // this floor can be mounted here and ridden DOWN. ropeAbove only counts ropes to
         // climb UP, so a mid-shaft platform beside a long rope read as dead on both checks.
-        if (ropeBelow(map, floorY, loX, hiX)) {
+        if (ropeBelow(map, foothold, floorY, loX, hiX, profile)) {
             return true;
         }
         return jumpChainEscapes(surfaces, foothold, apex, new java.util.HashSet<>());
@@ -199,23 +204,22 @@ final class DeadPitGuard {
     }
 
     /*
-     * Ours: a rope whose climbable bottom reaches this floor (within the same slack the
-     * up-direction grants) can be grabbed here and ridden down - an exit, not scenery.
-     * The rope must also RISE above the floor: a rope that hangs entirely below it
-     * (topY >= floorY) can be mounted only from a stand point at or under the rope's top,
-     * which this floor is not (a stander sits above firstClimbableY, and a plain fall cannot
-     * grab — climbUpIntent is false). Counting such a rope minted a phantom exit and steered
-     * recoveries onto surfaces with no real way out.
+     * A rope whose climbable bottom reaches this floor (within the same slack the up-direction
+     * grants) can be mounted here and ridden DOWN — but only if the bot can actually GET ONTO it.
+     * The mount itself is decided by ropeMountableFromSurface below, evaluated with the executor's
+     * own mechanisms. The old top guard ("topY >= floorY -> skip") was a geometry guess that both
+     * rejected real mounts (the executor's own top-attach band and crouch/jump grabs reach ropes
+     * whose head sits at or below the floor — 7ad7fd3's phantom-exit report was true only for ropes
+     * whose head hangs FAR below) and admitted phantom ones (a rope a kilometre below the floor
+     * "counted" via the off-axis slack). One mechanism-backed predicate, both directions.
      */
-    private static boolean ropeBelow(MapleMap map, int floorY, int loX, int hiX) {
+    private static boolean ropeBelow(MapleMap map, Foothold surface, int floorY, int loX, int hiX,
+                                     BotMovementProfile profile) {
         for (Rope rope : map.getRopes()) {
-            if (rope.topY() >= floorY) {
-                continue; // the rope never rises above this floor: nothing to mount from here
-            }
             if (rope.bottomY() < floorY - ROPE_GRAB_SLACK_PX) {
                 continue; // the rope ends too far above this floor to mount it here
             }
-            if (ropeEnterableFromSurface(map, rope.x(), loX, hiX, floorY)) {
+            if (ropeMountableFromSurface(map, rope, surface, loX, hiX, floorY, profile)) {
                 return true;
             }
         }
@@ -248,7 +252,8 @@ final class DeadPitGuard {
         return false;
     }
 
-    private static boolean ropeAbove(MapleMap map, int floorY, int loX, int hiX, int apex) {
+    private static boolean ropeAbove(MapleMap map, Foothold surface, int floorY, int loX, int hiX,
+                                     int apex, BotMovementProfile profile) {
         for (Rope rope : map.getRopes()) {
             int ropeTop = rope.topY();
             int ropeBottom = rope.bottomY();
@@ -258,7 +263,7 @@ final class DeadPitGuard {
             if (ropeTop > floorY) {
                 continue; // rope entirely below the floor: nothing to climb up
             }
-            if (ropeEnterableFromSurface(map, rope.x(), loX, hiX, floorY)) {
+            if (ropeMountableFromSurface(map, rope, surface, loX, hiX, floorY, profile)) {
                 return true;
             }
         }
@@ -266,21 +271,154 @@ final class DeadPitGuard {
     }
 
     /*
-     * Whether a rope at {@code ropeX} beside the surface [loX..hiX] at level {@code floorY} can
-     * actually be reached from it. Within the grab column (ROPE_GRAB_X) the mount is direct;
-     * beyond it the slack is only honest when the side-step's landing column has real ground at
-     * the surface's own level — a rope hanging off the edge over a pit is NOT an exit, and
-     * counting it was steering recoveries toward a leap into the void (the guard's own purpose).
-     * The probe reuses the executor's ground lookup at the rope's x, judged by the SURFACE's own
-     * level (not MAX_SLOPE_UP above): the bot steps off the edge, it does not float to the rope.
+     * Whether the bot standing on {@code surface} at {@code floorY} can actually GET ONTO
+     * {@code rope} — the engine's own mount mechanisms, in the order a real attempt takes them:
+     *
+     *   1. DIRECT: the floor sits inside the rope's climbable span and the rope is within the grab
+     *      column (the client's ROPE_GRAB_X): walk up and press the key.
+     *   2. TOP-ATTACH: the rope head hangs up to MAX_SNAP_DROP below the floor, within the column
+     *      (canAttachToRopeFromTopPlatform / the graph's canTopGrab): the executor attaches from
+     *      just above the head — the standard way down a tower's face rope.
+     *   3. CROUCH-DROP: simulateDownJumpRopeGrab catches the head from the stand point (the graph's
+     *      own canTopStep gate; ffd surfaces are refused — the executor's down-jump honours the flag).
+     *   4. JUMP-GRAB: simulateGroundJumpRopeGrab, the same fire simulation the graph builder and
+     *      the executor use (canJumpGrab).
+     *
+     * Off-axis ropes (outside the grab column) are only honest when the bot can WALK to the rope's
+     * column on its own surface: the column's ground must sit at the surface's level (the same
+     * ground band a walk uses) AND belong to the same walk region — the engine's own connected-
+     * surface partition (sameWalkRegion below). A rope across a gap or pit is a different region:
+     * not an exit. The old syntactic slack check counted ground at the rope's column without ever
+     * asking whether the row CONNECTS there, which is how a floor and a rope 1.4km apart counted
+     * as mounted on each other.
      */
-    private static boolean ropeEnterableFromSurface(MapleMap map, int ropeX, int loX, int hiX, int floorY) {
-        if (ropeX >= loX - BotPhysicsEngine.cfg.ROPE_GRAB_X
-                && ropeX <= hiX + BotPhysicsEngine.cfg.ROPE_GRAB_X) {
-            return true; // within grab distance of the surface itself
+    private static boolean ropeMountableFromSurface(MapleMap map, Rope rope, Foothold surface,
+                                                    int loX, int hiX, int floorY,
+                                                    BotMovementProfile profile) {
+        Point from;
+        if (rope.x() >= loX - BotPhysicsEngine.cfg.ROPE_GRAB_X
+                && rope.x() <= hiX + BotPhysicsEngine.cfg.ROPE_GRAB_X) {
+            from = new Point(Math.clamp(rope.x(), loX, hiX), floorY);
+        } else {
+            Point step = BotPhysicsEngine.findGroundPoint(map, new Point(rope.x(), floorY));
+            if (step == null || Math.abs(step.y - floorY) > BotPhysicsEngine.cfg.MAX_SLOPE_UP) {
+                return false; // no ground at the rope's column at this level: not a side-step
+            }
+            Foothold column = BotPhysicsEngine.findGroundFoothold(map, step);
+            if (column == null || !sameWalkRegion(map, surface, column)) {
+                return false; // the column's ground is not walk-connected to this surface
+            }
+            from = step;
         }
-        Point step = BotPhysicsEngine.findGroundPoint(map, new Point(ropeX, floorY));
-        return step != null && Math.abs(step.y - floorY) <= BotPhysicsEngine.cfg.MAX_SLOPE_UP;
+        if (Math.abs(from.x - rope.x()) <= BotPhysicsEngine.cfg.ROPE_GRAB_X) {
+            if (from.y >= BotPhysicsEngine.firstClimbableY(rope) && from.y <= rope.bottomY()) {
+                return true; // 1. direct grab within the rope's climbable span
+            }
+            if (from.y < rope.topY()
+                    && rope.topY() - from.y <= BotPhysicsEngine.cfg.MAX_SNAP_DROP) {
+                return true; // 2. top-attach: the executor's own snap band at the head
+            }
+        }
+        // The two simulations below are gated by the SAME preconditions the graph builder uses
+        // before it ever calls them (addRopeEntryEdges): a crouch-drop is tried only when the head
+        // sits within a jump's Y threshold of the stand point, and a jump-grab only when the
+        // builder's own reach heuristic (canReachRopeFromGround) says the arc gets there at all.
+        // Mirroring the preconditions keeps the verdict faithful to the engine's model AND keeps
+        // the sims off the pair-product's hot path (the heuristic is pure arithmetic).
+        if (!surface.isForbidFallDown()
+                && Math.abs(from.x - rope.x()) <= BotPhysicsEngine.cfg.ROPE_GRAB_X
+                && from.y <= rope.topY() + BotMovementManager.cfg.JUMP_Y_THRESH
+                && BotPhysicsEngine.simulateDownJumpRopeGrab(map, from, rope) != null) {
+            return true; // 3. crouch-drop catches the head (the graph's canTopStep)
+        }
+        if (BotPhysicsEngine.canReachRopeFromGround(map, from, rope, profile)) {
+            int walkStep = BotPhysicsEngine.walkStep(map, profile);
+            for (int stepX : new int[]{-walkStep, 0, walkStep}) {
+                if (BotPhysicsEngine.simulateGroundJumpRopeGrab(map, from, stepX, rope, profile) != null) {
+                    return true; // 4. jump-grab (the graph's canJumpGrab / the executor's fire sim)
+                }
+            }
+        }
+        return false;
+    }
+
+    /*
+     * Whether two footholds belong to the same WALK-CONNECTED surface: the engine's own partition,
+     * rebuilt lazily per tree from the same primitives the graph builder's region merge uses —
+     * each foothold unions with its prev/next link when BotPhysicsEngine.canWalkAcrossFootholds
+     * accepts the step. This is the authority the runtime walk, the graph regions and the pet
+     * follower all key on; asking it here keeps the guard's "can I walk there?" answer identical
+     * to the engine's, without paying per-column ground probes (memoized per tree: O(N) once).
+     */
+    private static boolean sameWalkRegion(MapleMap map, Foothold first, Foothold second) {
+        if (first == null || second == null) {
+            return false;
+        }
+        if (first.getId() == second.getId()) {
+            return true;
+        }
+        Map<Integer, Integer> roots = WALK_ROOTS.computeIfAbsent(map.getFootholds(),
+                k -> buildWalkRoots(map));
+        Integer a = roots.get(first.getId());
+        Integer b = roots.get(second.getId());
+        return a != null && a.equals(b);
+    }
+
+    private static Map<Integer, Integer> buildWalkRoots(MapleMap map) {
+        List<Foothold> all = map.getFootholds().getAllFootholds();
+        Map<Integer, Foothold> byId = new java.util.HashMap<>(all.size() * 2);
+        for (Foothold fh : all) {
+            byId.put(fh.getId(), fh);
+        }
+        Map<Integer, Integer> parent = new java.util.HashMap<>(all.size() * 2);
+        for (Foothold fh : all) {
+            parent.put(fh.getId(), fh.getId());
+        }
+        for (Foothold fh : all) {
+            unionWalkable(parent, fh, byId.get(fh.getPrev()));
+            unionWalkable(parent, fh, byId.get(fh.getNext()));
+        }
+        Map<Integer, Integer> roots = new java.util.HashMap<>(parent.size() * 2);
+        for (Foothold fh : all) {
+            roots.put(fh.getId(), findRoot(parent, fh.getId()));
+        }
+        return roots;
+    }
+
+    private static void unionWalkable(Map<Integer, Integer> parent, Foothold first, Foothold second) {
+        if (first == null || second == null || first.isWall() || second.isWall()) {
+            return;
+        }
+        if (!BotPhysicsEngine.canWalkAcrossFootholds(first, second)) {
+            return;
+        }
+        int ra = findRoot(parent, first.getId());
+        int rb = findRoot(parent, second.getId());
+        if (ra != rb) {
+            parent.put(rb, ra);
+        }
+    }
+
+    private static int findRoot(Map<Integer, Integer> parent, int id) {
+        int root = id;
+        while (true) {
+            Integer up = parent.get(root);
+            if (up == null || up == root) {
+                break;
+            }
+            root = up;
+        }
+        // Path compression keeps repeated rope verdicts on stair chains cheap.
+        int cursor = id;
+        while (true) {
+            Integer up = parent.get(cursor);
+            if (up == null || up == cursor) {
+                break;
+            }
+            parent.put(cursor, root);
+            cursor = up;
+        }
+        return root;
     }
 
     /*
