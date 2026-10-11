@@ -51,16 +51,16 @@ final class DeadPitGuard {
     private static final int PORTAL_Y_ABOVE_PX = 80;
     private static final int PORTAL_Y_BELOW_PX = 30;
 
-    /** tree -> (apex px -> foothold id -> verdict). Keyed by tree identity (weak) so a reloaded
-     *  map gets a fresh cache automatically (the COLLISION_INDEX pattern), instanced copies
-     *  sharing one tree share their verdicts, and dropped trees do not pin their verdicts here
-     *  forever. The apex dimension is REQUIRED: the verdict's jump reach derives from the
-     *  caller's profile, and a thief bot (117px apex) escapes shelves a base bot (77px) cannot -
-     *  one shared verdict across profiles would serve one of them a wrong answer. */
-    private static final Map<org.gms.server.maps.FootholdTree, Map<Integer, Map<Integer, Boolean>>> VERDICTS =
-            java.util.Collections.synchronizedMap(new java.util.WeakHashMap<>());
-    /** Guards against re-entrant verdict computation on the same foothold (cycles in the chain). */
-    private static final Map<org.gms.server.maps.FootholdTree, Set<Integer>> IN_PROGRESS =
+    /** tree -> profile bucket -> foothold id -> verdict. Keyed by tree identity (weak) so a
+     *  reloaded map gets a fresh cache automatically (the COLLISION_INDEX pattern), instanced
+     *  copies sharing one tree share their verdicts, and dropped trees do not pin their verdicts
+     *  here forever. The bucket is the caller's movement profile ITSELF (normalized to base when
+     *  null): every dimension the engine reads - jump, speed, snowshoes - is part of the record,
+     *  so the verdict can never be served across two profiles the physics treats differently.
+     *  The earlier apex-only bucket did exactly that for same-jump/different-speed profiles
+     *  (speed gear, party Haste): the rope jump-grab sims step in walkStep-sized increments and
+     *  the chain climb keys on the apex, so both dimensions are load-bearing. */
+    private static final Map<org.gms.server.maps.FootholdTree, Map<BotMovementProfile, Map<Integer, Boolean>>> VERDICTS =
             java.util.Collections.synchronizedMap(new java.util.WeakHashMap<>());
     /** tree -> foothold-id -> walk-region root (see sameWalkRegion). The engine's own connected-
      *  surface partition, rebuilt once per tree from prev/next + canWalkAcrossFootholds. Weak-keyed
@@ -89,27 +89,30 @@ final class DeadPitGuard {
         if (map == null || foothold == null || map.getFootholds() == null) {
             return true;
         }
-        // The apex bucket is part of the cache key: the same surface is escapable for a
-        // max-jump bot and a trap for a base-stat one (see the field doc above).
-        int apexPx = (int) Math.ceil(BotPhysicsEngine.calculateMaxJumpHeight(profile));
-        Map<Integer, Map<Integer, Boolean>> byApex =
-                VERDICTS.computeIfAbsent(map.getFootholds(), k -> new ConcurrentHashMap<>());
-        Map<Integer, Boolean> verdicts = byApex.computeIfAbsent(apexPx, k -> new ConcurrentHashMap<>());
+        // The profile bucket is part of the cache key: see VERDICTS for why the bucket must be
+        // the whole profile, never a hand-picked subset of its dimensions.
+        Map<Integer, Boolean> verdicts = VERDICTS
+                .computeIfAbsent(map.getFootholds(), k -> new ConcurrentHashMap<>())
+                .computeIfAbsent(cacheKey(profile), k -> new ConcurrentHashMap<>());
         Boolean cached = verdicts.get(foothold.getId());
         if (cached != null) {
             return cached;
         }
-        Set<Integer> inProgress = IN_PROGRESS.computeIfAbsent(map.getFootholds(), k -> ConcurrentHashMap.newKeySet());
-        if (!inProgress.add(foothold.getId())) {
-            return true; // chain cycle: an ancestor call is still deciding - treat as reachable
-        }
-        try {
-            boolean live = hasEscape(map, foothold, profile);
-            verdicts.put(foothold.getId(), live);
-            return live;
-        } finally {
-            inProgress.remove(foothold.getId());
-        }
+        boolean live = hasEscape(map, foothold, profile);
+        verdicts.put(foothold.getId(), live);
+        return live;
+    }
+
+    /**
+     * The verdict cache bucket for a profile: the profile itself, with null normalized to base
+     * (the same normalization every engine call applies via {@code profileOrBase}). Package-visible
+     * so the normalization and the bucket identity are pinned by test. The verdict chain has no
+     * re-entrant call into isLivableSurface - jumpChainEscapes carries its own visited set - so
+     * the former per-foothold "in progress" guard was unreachable; it could only ever answer a
+     * concurrent caller a spurious "livable", and is gone.
+     */
+    static BotMovementProfile cacheKey(BotMovementProfile profile) {
+        return profile != null ? profile : BotMovementProfile.base();
     }
 
     /*

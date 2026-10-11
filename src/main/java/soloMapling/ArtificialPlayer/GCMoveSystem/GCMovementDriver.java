@@ -1173,10 +1173,11 @@ final class GCMovementDriver {
         if (ground == null || !DeadPitGuard.isLivableLanding(map, ground, entry.movementProfile)) {
             ground = BotMovementManager.nearestLivableGround(bot);
         }
-        // Null here means the map has NO foothold at all: nearestLivableGround answers only with a
-        // livable surface (the TOPMOST surface always is one under the guard's own rule; see its
-        // javadoc), so a foothold-less map is the one case it cannot answer. Nothing can be probed
-        // there - leave the bot to the brain.
+        // Null here means there is nothing above to lift the bot onto: a foothold-less map, or
+        // the (caller-unreachable) bot-above-every-foothold case - nearestLivableGround answers
+        // only with a livable surface strictly above the bot, and the TOPMOST surface always is
+        // livable under the guard's own rule (see its javadoc). Nothing can be probed there -
+        // leave the bot to the brain (and the frozen-air watchdog).
         if (ground == null) {
             return;
         }

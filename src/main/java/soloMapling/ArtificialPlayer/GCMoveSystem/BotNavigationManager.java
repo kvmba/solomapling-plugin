@@ -803,6 +803,10 @@ final class BotNavigationManager {
             startClimbing(entry, bot, sourceRope, edge.startPoint.y);
         }
         BotMovementManager.jumpOffRope(entry, bot, edge.launchStepX);
+        // The graph authored this directional exit as its constant-stepX arc
+        // (simulateRopeJumpLanding); fixedAirArc holds the launch key so the real flight keeps
+        // that velocity instead of getting the free-flight drag (same contract as the ballistic
+        // branch above, which set it since fb4cb83).
         entry.fixedAirArc = true;
         entry.navFlightEdge = edge; // this flight belongs to this edge (reuseCommittedEdge)
         return new NavigationDirective(rawTargetPos, true);

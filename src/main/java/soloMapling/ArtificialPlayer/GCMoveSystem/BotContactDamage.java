@@ -410,9 +410,10 @@ final class BotContactDamage {
         int hVel = Math.round(knockbackAirVelX * dampen);
         // Dead-pit guard: a recoil whose ballistic column lands on an unescapable surface (a
         // one-way basin) is refused its horizontal component - the hit reads as braced rather
-        // than relocating the bot into a trap. The landing rescue in BotPhysicsEngine is the
-        // backstop; this keeps the arc out of the dead column in the first place. Swim maps fall
-        // into water (floor-clamped), and any probe failure falls back to the honest recoil.
+        // than relocating the bot into a trap. This keeps the arc out of the dead column in the
+        // first place; if a bot still ends up wedged, tickUnstuck's dead-pit self-heal is the
+        // backstop. Swim maps fall into water (floor-clamped), and any probe failure falls back
+        // to the honest recoil.
         if (hVel != 0 && knockbackLandsOnDeadSurface(entry, bot, botPos, hVel)) {
             hVel = 0;
         }

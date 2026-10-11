@@ -42,8 +42,9 @@ import java.util.Set;
  * （{@link BotBuffDriver#castSkill} / {@link BotAttack} 的空挥族 /
  * {@link BotSummonSystem#showSummon}），观众看到的与实战一致。</p>
  *
- * <p>单线程拍子链（MethodScheduler），无共享可变状态跨线程；每个入口与每个
- * 拍子都是 synchronized 的，stop 与拍子互斥。</p>
+ * <p>拍子链（MethodScheduler）的每一拍（含就绪轮询）都是 synchronized 且携带代际号
+ * {@link #generation}：stop()/重新 start 使旧 token 立即作废，过期续拍与过期轮询既不会
+ * 驱动新一场表演，也不会把上一场已生成、尚未登记的 bot 遗留在图里。</p>
  */
 public final class SkillShowController {
 
@@ -144,6 +145,12 @@ public final class SkillShowController {
     private static int jobTotal = SHOWCASE_JOBS.length;
     /** 连续生成失败计数：到顶自动收场，防止 12 个职业逐个静默失败拖 12 轮。 */
     private static int consecutiveSpawnFailures;
+    /**
+     * 本场表演的代际号：start()/stop() 自增。每一拍与每一条就绪轮询都携带发起时的 token，
+     * 到点先比对；不相等说明这场已被 stop/新一场取代，续拍直接退出——旧续拍绝不会驱动
+     * 新一场的状态，也绝不会把上一场已创建但未登记的 bot 交出去。
+     */
+    private static int generation;
 
     // ---- 命令入口（!bot skillshow） ----
 
@@ -170,8 +177,9 @@ public final class SkillShowController {
         // 的真实地面，bot 与木桩的出生点才是「高于地面的可站立点」。
         spawnPos = groundSnap(mapId, pos);
         phase = Phase.SPAWN;
+        generation++; // 本场的代际号：先前残留的拍子/轮询从此作废
         say("[skillshow] 开始登场：job 队列 " + jobTotal + " 个职业");
-        MethodScheduler.runAfterDelay(SkillShowController::beat, 0);
+        scheduleBeat(0, generation);
         return null;
     }
 
@@ -180,6 +188,7 @@ public final class SkillShowController {
         if (phase == Phase.IDLE) {
             return;
         }
+        generation++; // 在途的拍子与就绪轮询全部作废（迟到的续拍会自行清掉它等的那只 bot）
         removeShowBot();
         phase = Phase.IDLE;
         jobIndex = -1;
@@ -221,21 +230,24 @@ public final class SkillShowController {
      * 会滞留地图。所以整拍包在这里兜：出错则干净收场（退场 + 状态归位），而不是
      * 留下一具再也不会动的站桩尸体。
      */
-    private static synchronized void beat() {
+    private static synchronized void beat(int token) {
+        if (token != generation) {
+            return; // 过期续拍：stop()/重新 start 之后，这一拍不属于任何在演的场次
+        }
         try {
             switch (phase) {
-                case SPAWN -> beatSpawn();
+                case SPAWN -> beatSpawn(token);
                 case ARRIVE -> {
                     phase = Phase.STEP;
-                    MethodScheduler.runAfterDelay(SkillShowController::beat, 0);
+                    scheduleBeat(0, token);
                 }
-                case STEP -> beatStep();
+                case STEP -> beatStep(token);
                 case DESPAWN -> {
                     removeShowBot();
                     say("[skillshow] job " + (jobIndex >= 0 ? SHOWCASE_JOBS[jobIndex] : 0)
                             + " 表演完毕退场");
                     phase = Phase.SPAWN;
-                    MethodScheduler.runAfterDelay(SkillShowController::beat, INTER_JOB_GAP_MS);
+                    scheduleBeat(INTER_JOB_GAP_MS, token);
                 }
                 default -> { }
             }
@@ -243,6 +255,11 @@ public final class SkillShowController {
             say("[skillshow] 拍子异常，中断收场: " + t);
             stop();
         }
+    }
+
+    /** 排下一拍：token 随拍子传递，过期拍子在 {@link #beat} 入口即被丢弃。 */
+    private static void scheduleBeat(long delayMs, int token) {
+        MethodScheduler.runAfterDelay(() -> beat(token), delayMs);
     }
 
     /** 频道解析不到时回退频道 1（EnvironmentManager.mapOnChannel 同款兜底）。 */
@@ -310,7 +327,7 @@ public final class SkillShowController {
     }
 
     /** 登场：生成下一个职业的 bot；全部演完则收场。 */
-    private static void beatSpawn() {
+    private static void beatSpawn(int token) {
         if (jobIndex + 1 >= SHOWCASE_JOBS.length) {
             say("[skillshow] 全部职业表演完毕，收场");
             stop();
@@ -333,9 +350,9 @@ public final class SkillShowController {
             stop();
             return;
         }
-        // 生成是全异步管线（模板加载 + 节流排队 + 落地编排），createBot 返回后
-        // bot 并不立刻进 channelStorage —— 既有 createBotPollReadiness 就是为此
-        // 而设的轮询。这里等待期间先把进度喊给 GM，别让他对着黑屏猜。
+        // 生成走同步登记（addBotToServer 在 createBot 返回前完成），但世界 storage 的
+        // 写入方在宿主侧并非只有本调用；createBotPollReadiness 的轮询形态保留为登记延迟的
+        // 防御。等待期间先把进度喊给 GM，别让他对着黑屏猜。
         say("[skillshow] (" + (jobIndex + 1) + "/" + jobTotal + ") 生成 job " + jobId + " …");
         int created;
         try {
@@ -352,19 +369,33 @@ public final class SkillShowController {
             consecutiveSpawnFailures++;
             say("[skillshow] job " + jobId + " 在频道 " + channelId + " 生成失败（频道满员？），跳过。失败 "
                     + consecutiveSpawnFailures + "/3");
-            MethodScheduler.runAfterDelay(SkillShowController::beat, INTER_JOB_GAP_MS);
+            scheduleBeat(INTER_JOB_GAP_MS, token);
             return;
         }
         botId = created;
         phase = Phase.ARRIVE;
-        waitBotReady(created, 30, 0);
+        waitBotReady(token, created, 30);
     }
 
     /**
      * 轮询等 bot 进入 channelStorage（createBotPollReadiness 的非阻塞版）：
      * 就绪 → 落地等待后开演；超时 → 记一次失败并跳过该职业。
+     *
+     * <p>整条轮询链与 {@link #beat} 同一把锁、同一个代际号：stop()/重新 start 之后
+     * 到点的续询只做一件事——在剩余预算内按 cid 把它创建的那只 bot 退掉，然后退出。
+     * 它绝不触碰木桩：本链从未执行到生成木桩的就绪分支（就绪即转入拍子链），而同图
+     * 此刻可能已站着新一场表演的木桩。旧续询既不能把上一场的 bot 交给新一场，也不会
+     * 把没有归属的 bot 留在图里。</p>
      */
-    private static void waitBotReady(int cid, int attemptsLeft, int waitedMs) {
+    private static synchronized void waitBotReady(int token, int cid, int attemptsLeft) {
+        if (token != generation) {
+            // 生成管线的登记可能晚于本拍（这正是轮询存在的理由）：预算内继续找，
+            // 找到即退；预算耗尽仍未出现就放手（终端超时路径同样处理）。
+            if (!removeCreatedBot(cid) && attemptsLeft > 0) {
+                MethodScheduler.runAfterDelay(() -> waitBotReady(token, cid, attemptsLeft - 1), 100);
+            }
+            return;
+        }
         Character ready = attemptsLeft > 0 ? BotHelpers.getCharFromChannelStorage(cid) : null;
         if (ready == null) {
             if (attemptsLeft <= 0) {
@@ -373,10 +404,10 @@ public final class SkillShowController {
                         + " 生成后 3s 未就绪，跳过。失败 " + consecutiveSpawnFailures + "/3");
                 removeShowBot();
                 phase = Phase.SPAWN;
-                MethodScheduler.runAfterDelay(SkillShowController::beat, INTER_JOB_GAP_MS);
+                scheduleBeat(INTER_JOB_GAP_MS, token);
                 return;
             }
-            MethodScheduler.runAfterDelay(() -> waitBotReady(cid, attemptsLeft - 1, waitedMs + 100), 100);
+            MethodScheduler.runAfterDelay(() -> waitBotReady(token, cid, attemptsLeft - 1), 100);
             return;
         }
         bot = ready;
@@ -388,7 +419,7 @@ public final class SkillShowController {
             say("[skillshow] job " + cidToJob(cid) + " 表演序列构建失败: " + t);
             removeShowBot();
             phase = Phase.SPAWN;
-            MethodScheduler.runAfterDelay(SkillShowController::beat, INTER_JOB_GAP_MS);
+            scheduleBeat(INTER_JOB_GAP_MS, token);
             return;
         }
         stepTotal = steps.size();
@@ -408,7 +439,7 @@ public final class SkillShowController {
         say("[skillshow] job " + cidToJob(cid) + " 登场（cid " + cid + "），"
                 + stepTotal + " 个技能" + (staged ? "，木桩就位" : "") + "，"
                 + (stepTotal * 4500 / 1000) + " 秒演完");
-        MethodScheduler.runAfterDelay(SkillShowController::beat, ARRIVE_MS);
+        scheduleBeat(ARRIVE_MS, token);
     }
 
     /** cid 反查本次表演的 job id（仅用于日志文案）。 */
@@ -417,7 +448,7 @@ public final class SkillShowController {
     }
 
     /** 表演节拍：有待演的先演，否则预告下一个。 */
-    private static void beatStep() {
+    private static void beatStep(int token) {
         if (!alive()) {
             say("[skillshow] 表演 bot 或地图丢失，中断收场");
             stop();
@@ -429,13 +460,13 @@ public final class SkillShowController {
             stepDone++;
             faceTarget(bot); // 出招前再校一次面向：预告气泡的转身/杂项可能翻回原向
             long hold = step.perform(bot);
-            MethodScheduler.runAfterDelay(SkillShowController::beat, Math.max(0, hold));
+            scheduleBeat(Math.max(0, hold), token);
             return;
         }
         Step next = steps.poll();
         if (next == null) {
             phase = Phase.DESPAWN; // 本职业演完 → 退场 → 下一个登场
-            MethodScheduler.runAfterDelay(SkillShowController::beat, 0);
+            scheduleBeat(0, token);
             return;
         }
         // 预告气泡：bot 在自检后、广播前的一瞬间被移除时 getMap() 会变 null，
@@ -447,7 +478,7 @@ public final class SkillShowController {
         }
         SocialCommands.BotSpeakPlain(bot, "接下来表演：" + BotSkillNames.name(next.skillId()));
         pending = next;
-        MethodScheduler.runAfterDelay(SkillShowController::beat, ANNOUNCE_LEAD_MS);
+        scheduleBeat(ANNOUNCE_LEAD_MS, token);
     }
 
     /** 每拍自检：bot 仍在线且仍在原地图。 */
@@ -458,17 +489,48 @@ public final class SkillShowController {
     }
 
     private static void removeShowBot() {
-        if (bot != null) {
-            try {
-                SkillShowTarget.remove(bot.getMapId()); // 木桩与 bot 同退
-                BotGeneration.removeBotFromServer(bot);
-            } catch (Throwable t) {
-                BotLogger.log("[skillshow] 退场失败: " + t);
-            }
-        }
+        // 就绪轮询窗口内 stop()/超时收场时 bot 字段还没赋值：按 botId 把已生成的实体找回再退，
+        // 否则它就成了图里没人驱动的站桩（还可能带着 grant 的宠物/召唤兽）。
+        Character target = bot != null ? bot
+                : (botId > 0 ? BotHelpers.getCharFromChannelStorage(botId) : null);
+        removeShowCharacter(target);
         bot = null;
         botId = -1;
         pending = null;
+    }
+
+    /**
+     * 作废轮询的退场：按它自己携带的 cid 找回那只 bot，而不是看当前场次的 {@link #botId}。
+     *
+     * <p>只退 bot，绝不按地图动木桩：作废轮询在其就绪分支（唯一生成木桩的地方）之前就
+     * 被取代，本链从未给这只 bot 生成过木桩；而它等待的这张图上此刻可能已站着新一场
+     * 表演的木桩，按 mapId 放木桩会误删新一场的道具。</p>
+     *
+     * @return true 表示找到了这只 bot 并已退场
+     */
+    private static boolean removeCreatedBot(int cid) {
+        Character stale = cid > 0 ? BotHelpers.getCharFromChannelStorage(cid) : null;
+        if (stale == null) {
+            return false;
+        }
+        try {
+            BotGeneration.removeBotFromServer(stale);
+        } catch (Throwable t) {
+            BotLogger.log("[skillshow] 作废轮询退场失败: " + t);
+        }
+        return true;
+    }
+
+    private static void removeShowCharacter(Character target) {
+        if (target == null) {
+            return;
+        }
+        try {
+            SkillShowTarget.remove(target.getMapId()); // 木桩与 bot 同退
+            BotGeneration.removeBotFromServer(target);
+        } catch (Throwable t) {
+            BotLogger.log("[skillshow] 退场失败: " + t);
+        }
     }
 
     // ---- 表演序列构建 ----

@@ -440,8 +440,10 @@ class BotMovementManager {
                         // Free-flight steering only (no committed arc owns the bot): a steer
                         // direction whose column below reads dead is refused - steering into a
                         // dead pit's column would dive the bot into a one-way basin nothing
-                        // authorised. The landing rescue in BotPhysicsEngine is the backstop;
-                        // this keeps the fall OUT of the column in the first place.
+                        // authorised. This keeps the fall OUT of the column in the first place;
+                        // if a bot still ends up wedged, tickUnstuck's dead-pit self-heal is the
+                        // backstop (the descent guards and the graph's dead-region prune are the
+                        // decision-side protection).
                         if (dir != 0 && !steerColumnBelowIsLivable(entry, botPos, dir)) {
                             dir = 0;
                         }
