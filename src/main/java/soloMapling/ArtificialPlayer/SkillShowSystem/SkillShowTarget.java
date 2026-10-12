@@ -24,8 +24,10 @@ import java.util.concurrent.ConcurrentHashMap;
  *       PADamage=1999 会，那正是它不能用的原因）。</li>
  *   <li><b>maxHP=10 亿（运行时 setStartingHp）</b>：WZ 原值 10 万会被表演的
  *       终极攻击几分钟磨死，10 亿（&lt; Integer.MAX_VALUE）保证整场表演打不死；
- *       收场仍走 setHpZero（Integer.MAX_VALUE 伤害）照常清除。WZ
- *       changeable=false → 宿主 spawnMonster 的 changeDifficulty 不会重算 HP。</li>
+ *       收场仍走 setHpZero（Integer.MAX_VALUE 伤害）照常清除。宿主对 WZ 的
+ *       changeable 字段根本没有读取点（{@code MonsterStats.setChange} 全仓无调用），
+ *       所有 WZ 怪的 changeable 恒为 false，{@code changeLevel} 直接早退 ——
+ *       spawnMonster 的 changeDifficulty 不会重算 HP，setStartingHp 的值原样生效。</li>
  *   <li><b>出生点吸附地面</b>：GM 在楼梯/斜坡上启动表演时给的是坡面坐标，
  *       直接把怪放在坐标上（fh=0）客户端控制器找不到 foothold 会一路物理下坠
  *       出屏幕。这里把 y 吸附到该 x 的真实地面 foothold、把 foothold id 写进

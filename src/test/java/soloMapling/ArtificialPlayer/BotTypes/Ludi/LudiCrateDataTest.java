@@ -113,4 +113,20 @@ class LudiCrateDataTest {
         assertEquals(5, LudiPqData.MIN_PLAYERS);
         assertEquals(LudiPqData.MIN_PLAYERS, LudiPqData.CRATES_TO_STAND_ON);
     }
+
+    @Test
+    void stage7BoxWorkIsAnchoredToTheRealMapReactors() throws Exception {
+        // Stage 7's three passes (4001022) are not loot anywhere on 922010700: the only source
+        // is the Rombard (9300010) that a box reactor (2201002) summons when hit, and the
+        // room's three pre-placed mobs drop 4001156 instead. If the box id ever drifts from the
+        // map's real reactors, the bot's box work silently does nothing and the stage deadlocks
+        // on a bot-only party. Pin the id against the map's own WZ.
+        java.nio.file.Path mapXml = java.nio.file.Path.of(
+                "wz/Map.wz/Map/Map" + (922010700 / 100000000) + "/922010700.img.xml");
+        org.junit.jupiter.api.Assumptions.assumeTrue(java.nio.file.Files.isRegularFile(mapXml),
+                "Map.wz not resolvable from this working directory");
+        String xml = java.nio.file.Files.readString(mapXml);
+        int boxes = xml.split("<string name=\"id\" value=\"" + LudiPqData.BOX_STAGE7 + "\"/>", -1).length - 1;
+        assertEquals(3, boxes, "922010700 holds exactly three stage-7 box reactors");
+    }
 }

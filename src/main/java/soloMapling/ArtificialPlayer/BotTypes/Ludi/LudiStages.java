@@ -109,6 +109,19 @@ public final class LudiStages {
             PqActions.loot(bot, bot.getPosition(), LOOT_RADIUS_PX, new int[]{LudiPqData.PASS});
             return;
         }
+        // Stage 7 hand-writes the passes: its only source is the Rombard (9300010) that the
+        // three box reactors (2201002) summon when hit - the room's pre-placed mobs drop no
+        // passes at all. With nothing killable left, an armed box means the stage is NOT
+        // done: break one (same claim/approach/beat pattern as the stage-1/2 box towers) and
+        // let the next beat hunt what it summons. Only a room whose boxes are all spent
+        // reaches the delivery below.
+        if (stage == 7) {
+            int box = nearestOwnedBoxOid(bot, LudiPqData.BOX_STAGE7);
+            if (box >= 0 && hitReactorRotate(bot, box, LudiPqData.BOX_STAGE7)) {
+                PqActions.loot(bot, bot.getPosition(), LOOT_RADIUS_PX, new int[]{LudiPqData.PASS});
+                return;
+            }
+        }
         // Room quiet: the work is done. Hold the stage-NPC post and hand the stock over the
         // moment the leader comes for the turn-in. The quiet-room sweep is the one wide one:
         // the live radius is a kill's neighbourhood, so a pass nobody was beside when it
@@ -571,10 +584,14 @@ public final class LudiStages {
     }
 
     /**
-     * Work the stage-5 door rooms in stealth: each room's four pass boxes are guarded by
+     * Work the stage-5 door rooms in stealth: the rooms' four pass boxes can be guarded by
      * invincible Block Golems (PAD 999 - a touch is a death sentence), so the bot shows
-     * 隐身术 for the whole visit. The hide makes it untouchable (isMonsterImmune) and costs
-     * nothing: it is cancelled by the reactor strike itself, and re-shown next tick.
+     * 隐身术 for the whole visit. Only 922010500 (the main room, 2 golems) and 922010506
+     * (7) actually hold them - rooms 922010501-505 are empty in WZ - but the stealth stance
+     * is harmless where no guard stands, and it is re-evaluated per room, so a guard added
+     * by a future WZ edit is covered. The hide makes the bot untouchable (isMonsterImmune)
+     * and costs nothing: it is cancelled by the reactor strike itself, and re-shown next
+     * tick.
      *
      * <p>Only a bot whose kit actually carries a hide may enter a guard room: 隐身术 is
      * rogue-lineage (Assassin/Bandit/夜行者), 橡木伪装 is the Brawler's barrel disguise -

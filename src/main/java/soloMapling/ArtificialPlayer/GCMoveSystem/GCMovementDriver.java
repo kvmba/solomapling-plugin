@@ -886,13 +886,26 @@ final class GCMovementDriver {
                 && Math.abs(botPos.y - target.y) <= arrivalDist;
     }
 
-    private static boolean consumeAiTick(BotMovementState entry) {
+    /*
+     * Package-visible for the accumulator regression (GCMovementDriverTest pins the observed
+     * cadence, the unbounded-debt clamp and the overrun case).
+     */
+    static boolean consumeAiTick(BotMovementState entry) {
         // Spend the bot time this tick covered (the scheduler's own cadence span — see
         // runScheduledTick), so the accumulator's "every other tick" contract holds at the
         // observed 50ms cadence AND the LOD cadences (1s coarse / 4s idle) advance the heavy AI
-        // decisions in real bot time instead of freezing them between slow wakeups. Ticks that
-        // skipped slots (an overrun) carry the whole skipped span, so no bot time is lost.
-        entry.aiTickAccumulatorMs += (int) Math.min(entry.lastTickSpanMs, 10_000L);
+        // decisions in real bot time instead of freezing them between slow wakeups.
+        //
+        // The debt is capped at one pending AI decision: at most ONE heavy decision can run per
+        // tick, so a coarse wakeup must not bank the whole 1s/4s span. Unbounded banking did
+        // exactly that — an unobserved bot accrued ~0.9s of debt per second, and on promotion to
+        // an observed map every 50ms tick then read as due until the debt drained (~0.9x the
+        // unobserved duration at double the intended AI rate), with an int overflow freezing the
+        // heavy AI for weeks after ~4 weeks of continuous unobserved roaming. Capping also keeps
+        // the overrun case honest: a skipped slot still fires the next wakeup, but the skipped
+        // slots beyond one cannot inflate the future rate.
+        entry.aiTickAccumulatorMs = Math.min(AI_TICK_MS,
+                entry.aiTickAccumulatorMs + (int) Math.min(entry.lastTickSpanMs, AI_TICK_MS));
         if (entry.aiTickAccumulatorMs < AI_TICK_MS) {
             return false;
         }
@@ -1171,7 +1184,7 @@ final class GCMovementDriver {
         Point clamped = new Point(Math.max(vr.x, Math.min(vr.x + vr.width, pos.x)), pos.y);
         Point ground = BotPhysicsEngine.findGroundPoint(map, new Point(clamped.x, clamped.y - 1));
         if (ground == null || !DeadPitGuard.isLivableLanding(map, ground, entry.movementProfile)) {
-            ground = BotMovementManager.nearestLivableGround(bot);
+            ground = BotMovementManager.nearestLivableGround(bot, entry.movementProfile);
         }
         // Null here means there is nothing above to lift the bot onto: a foothold-less map, or
         // the (caller-unreachable) bot-above-every-foothold case - nearestLivableGround answers

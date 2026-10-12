@@ -125,7 +125,8 @@ public final class OrbisStages {
      *
      * <p>Eak's condition is {@code countMonsters() == 0 && countItems() == 0} - not a kill
      * count - so anything left alive or lying on the floor blocks him. The leftover-items
-     * half matters here: the room's own mob drops {@code 4001046}, and a stray drop keeps
+     * half matters here: the room's mob (9300040) drops {@code 4001074} (the trap item the
+     * Papa room's pots also take - the only drop row for that mob), and a stray drop keeps
      * the check false even after everything is dead.
      */
     public static void clearStorage(Character bot) {
@@ -406,7 +407,12 @@ public final class OrbisStages {
     private static void sweepFloor(Character bot) {
         PqActions.loot(bot, bot.getPosition(), 4_000,
                 new int[]{OrbisPqData.STATUE_PIECE_1, OrbisPqData.STATUE_PIECE_5,
-                        OrbisPqData.STATUE_PIECE_8, OrbisPqData.CLOUD_PIECE});
+                        OrbisPqData.STATUE_PIECE_8, OrbisPqData.CLOUD_PIECE,
+                        // The storage mob's own drop (9300040 -> 4001074): countItems() == 0
+                        // cannot be reached while it lies here, and no other stage-2 path
+                        // picks it up (the Papa room deliberately keeps its spawn stock, so
+                        // only this sweep lists it).
+                        OrbisPqData.PAPA_TRAP_ITEM});
     }
 
     private static boolean mobsPresent(Character bot, int firstMobId, int lastMobId) {

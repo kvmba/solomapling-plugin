@@ -55,6 +55,13 @@ public final class LudiPqData {
     public static final int BOX_STAGE2 = 2202003;
     public static final int BOX_STAGE3 = 2201001;
     public static final int BOX_STAGE5 = 2202003;
+    /**
+     * Stage 7's pass boxes (three on 922010700): hitting one runs the reactor script that
+     * summons a Rombard (9300010), the only mob in the stage that drops a 4001022 pass - the
+     * room's three pre-placed mobs (9300169-71) drop only 4001156. Without hitting these the
+     * stage's three passes can never be produced by the bot itself.
+     */
+    public static final int BOX_STAGE7 = 2201002;
     /** Stage 5's guard: invincible per WZ (PAD 999) - hide, do not fight it. */
     public static final int GUARD_MOB = 9300013;
     /** Stage 4's box mobs - ordinary killables that drop the passes. */

@@ -44,7 +44,14 @@ import static org.mockito.Mockito.when;
 class PetLandStairRegionBakeTest {
 
     private static final int REAL_MAP_ID = 220000400;
-    private static final int BAKE_KEY = 220040400; // re-keyed: never collide with a live bake
+    /**
+     * Re-keyed so this test's bake owns its cache entry. Must be an id no shipped map can have:
+     * it used to be {@code 220040400}, which IS a real map (Map2/220040400.img.xml) — running
+     * this test overwrote that map's cache with the tower geometry, and any later load of the
+     * real map (another test, an audit, a server sharing the cache dir) navigated on foreign
+     * terrain. Negative ids cannot collide with a WZ map.
+     */
+    private static final int BAKE_KEY = -220000400;
 
     private static MapleMap stairMap;
 

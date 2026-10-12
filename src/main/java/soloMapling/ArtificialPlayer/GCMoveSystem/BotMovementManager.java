@@ -1240,7 +1240,7 @@ class BotMovementManager {
         // brain re-decides a reachable target next tick. (nearestLivableGround can only answer
         // null on a foothold-less map, in which case the guard could not have fired either.)
         if (isOnDeadPitFloor(entry, bot)) {
-            Point rescue = nearestLivableGround(bot);
+            Point rescue = nearestLivableGround(bot, entry.movementProfile);
             clearNavigationState(entry);
             entry.moveTarget = null;
             entry.unstuckCooldownMs = delayAfterCurrentTick(5000);
@@ -1318,21 +1318,26 @@ class BotMovementManager {
      * the surface's REAL y at the probed column (slopes included) so the bot lands standing,
      * never mid-air beside a slope.
      *
-     * <p>Non-null whenever the map has any walkable foothold, by construction: the TOPMOST
-     * surface (smallest surfaceY) is livable under the guard's own rule ("no higher ground at
-     * all means this IS the map's top surface - ordinary ground, not a trap"), and every surface
-     * above a bot that has left the VR bottom (or that stands on a lower dead shelf) is a
-     * candidate - a full-WZ scan over all 5363 shipped maps finds zero dead surfaces with no
-     * livable surface above them. Null only for a foothold-less map, where there is nothing to
-     * probe and the brain owns the recovery.
+     * <p>{@code profile} is the caller's own movement profile, never a default: the verdict
+     * depends on it (speed/jump step the rope and chain sims, snowshoes flip the walk), and the
+     * guard's verdict cache is keyed on the whole profile for exactly that reason — judging with
+     * {@code base()} here would relocate a bot whose profile differs (mount speed, party Haste,
+     * reduced gear) onto a surface that is dead for the profile it actually walks with.
+     *
+     * <p>Non-null whenever the map has any walkable foothold and the bot stands below one, by
+     * construction: the TOPMOST surface (smallest surfaceY) is livable under the guard's own rule
+     * ("no higher ground at all means this IS the map's top surface - ordinary ground, not a
+     * trap"), and every surface above a bot that has left the VR bottom (or that stands on a
+     * lower dead shelf) is a candidate - a full-WZ scan over all 5363 shipped maps finds zero
+     * dead surfaces with no livable surface above them. Null only for a foothold-less map, where
+     * there is nothing to probe and the brain owns the recovery.
      */
-    static Point nearestLivableGround(Character bot) {
+    static Point nearestLivableGround(Character bot, BotMovementProfile profile) {
         MapleMap map = bot.getMap();
         Point pos = bot.getPosition();
         if (map == null || map.getFootholds() == null || pos == null) {
             return null;
         }
-        BotMovementProfile profile = BotMovementProfile.base();
         Point best = null;
         long bestCost = Long.MAX_VALUE;
         for (Foothold foothold : map.getFootholds().getAllFootholds()) {

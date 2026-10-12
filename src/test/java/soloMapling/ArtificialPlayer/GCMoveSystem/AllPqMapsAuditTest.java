@@ -95,8 +95,14 @@ public class AllPqMapsAuditTest {
             }
             // clone with only usable ropes (uf=0 decorative removed) for pass B
             MapleMap usable = cloneMapWithUsableRopes(raw, mapId);
-            // re-key the clone so the graph cache does not hand back the raw map's bake
-            usable = reKey(usable, mapId + 5);
+            // Re-key the clone so the graph cache does not hand back the raw map's bake. The id
+            // must be ONE THAT CANNOT COLLIDE WITH A SHIPPED MAP: this used to be `mapId + 5`,
+            // which silently overwrote the real cache entry of any shipped map whose id is 5
+            // above another (103000800+5=103000805, 922010400+5=922010405, 922010500+5=922010505,
+            // 922010501+5=922010506, 240050100+5=240050105, 280011000/001+5=280011005/006) — those
+            // real maps then loaded this clone's foreign geometry. A negative id cannot be a
+            // shipped map, and each clone still gets its own cache key.
+            usable = reKey(usable, -mapId);
             int usableRopes = usable.getRopes().size();
             String a = auditMap(raw, mapId + " as-is");
             String b = auditMap(usable, mapId + " usable");

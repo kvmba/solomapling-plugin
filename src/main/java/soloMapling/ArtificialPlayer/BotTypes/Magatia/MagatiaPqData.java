@@ -52,7 +52,9 @@ public final class MagatiaPqData {
 
     public static final int MIN_PLAYERS = 4;
     public static final int MAX_PLAYERS = 4;
-    public static final int MIN_LEVEL = 40;
+    /** The host events' own level band ({@code MagatiaPQ_A.js} / {@code MagatiaPQ_Z.js}: 71-85). */
+    public static final int MIN_LEVEL = 71;
+    public static final int MAX_LEVEL = 85;
 
     // =========================================================================
     // Stage 6 - the combination that is published per slot

@@ -46,14 +46,20 @@ public final class HorntailPqData {
 
     /**
      * The five crystal keys, room by room: room {@code 240050100 + i} is the home of key
-     * {@code KEY_FIRST + i}, and its carrier is {@code CARRIER_FIRST + 2*i} - the two monsters
-     * in each room are consecutive ids and only the first of each pair carries the key, which
-     * is exactly what the drop table says.
+     * {@code KEY_FIRST + i}, and its carrier is the drop table's own row for that key - see
+     * {@link #ROOM_KEY_MOBS}. The carriers are the odd member of each room's mob pair for
+     * rooms B (9300067), C (9300069), D (9300071) and E (9300073) - the even members
+     * (9300068/70/72/74) are scenery that drops the HT pendant recipe (4031461), not a key.
+     * Only room A's carrier is the even member (9300066).
      */
     public static final int KEY_FIRST = 4001087;
     public static final int KEY_COUNT = 5;
-    public static final int ROOM_KEY_MOB_FIRST = 9300066;
-    public static final int ROOM_KEY_MOB_STEP = 2;
+    /**
+     * The carrier per room index (drop_data rows): 9300066->4001087, 9300067->4001088,
+     * 9300069->4001089, 9300071->4001090, 9300073->4001091. An explicit table because the
+     * sequence is not arithmetic from the first entry (66, 67, 69, 71, 73).
+     */
+    public static final int[] ROOM_KEY_MOBS = {9300066, 9300067, 9300069, 9300071, 9300073};
 
     /** The key the room at {@code index} (0-based) is after. */
     public static int keyForRoom(int index) {
@@ -62,7 +68,10 @@ public final class HorntailPqData {
 
     /** The monster that carries the room's key. */
     public static int carrierForRoom(int index) {
-        return ROOM_KEY_MOB_FIRST + index * ROOM_KEY_MOB_STEP;
+        if (index < 0 || index >= ROOM_KEY_MOBS.length) {
+            return 0;
+        }
+        return ROOM_KEY_MOBS[index];
     }
 
     /** How many keys a room's worth of work is, from the room's own index. */

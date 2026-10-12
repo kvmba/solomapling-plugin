@@ -65,12 +65,12 @@ public final class BotSummonFollower {
     private static final Logger log = LoggerFactory.getLogger(BotSummonFollower.class);
 
     // CSummoned action bytes carried by the spawn packet's nMoveAction and by every move fragment.
-    // The action table itself is the kinoko SummonedActionType (STAND 0, MOVE 1, FLY 2, ...), but
-    // the BYTE is packed like every other Life's moveAction (kinoko Life.isLeft, the pet frames'
-    // even/odd table): bit 0 = the FACING (0 right, 1 left), the action sits in the high bits. The
-    // v83 client reads this bit to mirror the sprite, so the follower packs
-    // flyAction(facingLeft) = ACTION_FLY_BASE | facing for every summon it moves or spawns; without
-    // it the client renders a plain 2 and the bird faces right forever, whatever the owner does.
+    // Bit 0 is the FACING (0 right, 1 left) - the same bit the pet frames use, and the bit the v83
+    // client reads to mirror the sprite (in-game verified: without it the bird faced right forever,
+    // whatever the owner did). The rest of the byte is the summon's own action selector;
+    // ACTION_FLY_BASE is the empirical flyer value for this client build (the pre-fix bare 2
+    // rendered the right-facing flight pose). The follower packs
+    // flyAction(facingLeft) = ACTION_FLY_BASE | facing for every summon it moves or spawns.
     private static final int ACTION_FLY_BASE = 2;
     private static final int ACTION_STAND_BASE = 0;
 
