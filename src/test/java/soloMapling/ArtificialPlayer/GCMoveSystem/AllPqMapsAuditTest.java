@@ -24,12 +24,14 @@ import java.util.TreeSet;
 import static org.mockito.Mockito.*;
 
 /**
- * FULL per-map audit of every PQ stage map (90 maps, all quest families), loaded from the
- * REAL WZ through the production loader. Two passes per map:
- *   A. AS-IS (all WZ ropes): bake + rope-entry links + fallback launch scan;
+ * FULL per-map audit of every PQ stage map (all quest families), loaded from the REAL WZ
+ * through the production loader. Two passes per map:
+ *   A. AS-IS (all WZ ropes): bake + rope-entry links;
  *   B. USABLE-ROPES-ONLY clone (uf=0 decorative ropes removed, which the WZ marks
  *      unclimbable and the engine's Rope record ignores): same audit. Differences
  *      attribute failures to decorative-rope noise.
+ * The per-map fallback-launch sweep is report-only and opt-in
+ * ({@code -Dpq.audit.fallbackScan=true}) - see FALLBACK_SCAN_ENABLED.
  * Report goes to /tmp/pq_audit_report.txt.
  */
 public class AllPqMapsAuditTest {
@@ -87,6 +89,17 @@ public class AllPqMapsAuditTest {
             "AmoriaPQ", "BossRushPQ", "EllinPQ", "HenesysPQ", "HorntailPQ", "KerningPQ",
             "LudiMazePQ", "LudiPQ", "MagatiaPQ_A", "MagatiaPQ_Z", "OrbisPQ", "PiratePQ", "ZakumPQ",
     };
+
+    /**
+     * The informational fallback-launch sweep probes every (rope, ground) region pair x 13 walk
+     * hops with the production grab simulator. A warm JFR profile attributed 99.8% of this
+     * audit's 563s runtime to the sweep, while it gates NOTHING: its fbMiss column is report-only.
+     * It stays available but opt-in, so the default suite pays only for the gated bake/climb-link
+     * verdicts. Enable with {@code -Dpq.audit.fallbackScan=true} when a rope-approach diagnosis
+     * needs the sweep.
+     */
+    private static final boolean FALLBACK_SCAN_ENABLED =
+            Boolean.getBoolean("pq.audit.fallbackScan");
 
     /**
      * Every map id the plugin's own PQ data classes declare, read from the sources so the list
@@ -172,7 +185,7 @@ public class AllPqMapsAuditTest {
         org.junit.jupiter.api.Assertions.assertTrue(mapIds.size() >= 150,
                 "PQ map list looks degenerate: " + mapIds.size() + " ids - a map-list source failed");
         StringBuilder report = new StringBuilder();
-        int bakeFail = 0, linkFail = 0, fallbackFail = 0, audited = 0;
+        int bakeFail = 0, linkFail = 0, audited = 0;
         for (int mapId : mapIds) {
             // Only audit ids that really are maps: the scanned sources also carry item/mob ids.
             try {
@@ -194,11 +207,12 @@ public class AllPqMapsAuditTest {
         }
         Files.writeString(Path.of("/tmp/pq_audit_report.txt"), report.toString());
         System.out.println("[audit] maps=" + audited + " bakeFail=" + bakeFail
-                + " linkFail=" + linkFail + " fallbackFail=" + fallbackFail);
+                + " linkFail=" + linkFail
+                + " fallbackScan=" + (FALLBACK_SCAN_ENABLED ? "on" : "off"));
         // Assertions only on the classes that MUST be clean: bake + real climb links.
-        // The fallback scan is reported per-map (informational): a ground row far from any
-        // rope legitimately has no launch and the walk layer handles approach — the audit
-        // prints those so a human can eyeball each one.
+        // The fallback scan is opt-in (FALLBACK_SCAN_ENABLED): when enabled it is reported
+        // per-map (informational) — a ground row far from any rope legitimately has no launch
+        // and the walk layer handles approach, so a human can eyeball each one.
         org.junit.jupiter.api.Assertions.assertTrue(audited >= 60,
                 "audited too few maps (" + audited + ") - check the map-list sources");
         org.junit.jupiter.api.Assertions.assertEquals(0, bakeFail, "bake failures - see /tmp/pq_audit_report.txt");
@@ -301,39 +315,43 @@ public class AllPqMapsAuditTest {
         }
         int fallbackScans = 0, fallbackMiss = 0;
         BotMovementProfile profile = BotMovementProfile.base();
-        for (BotNavigationGraph.Region rope : g.regions) {
-            if (!rope.isRopeRegion) continue;
-            for (BotNavigationGraph.Region ground : g.regions) {
-                if (ground.isRopeRegion) continue;
-                if (ground.maxY <= rope.minY) continue;
-                if (Math.abs(rope.minX - ground.minX) > 400 && Math.abs(rope.minX - ground.maxX) > 400
-                        && !(rope.minX >= ground.minX && rope.minX <= ground.maxX)) continue;
-                Point probe = ground.centerPoint();
-                try {
-                    var m = BotFallbackMovementManager.class.getDeclaredMethod("nearestUpwardRopeLaunch",
-                            MapleMap.class, Point.class, BotMovementProfile.class);
-                    m.setAccessible(true);
-                    fallbackScans++;
-                    boolean found = false;
-                    // walk toward the rope's X in walkStep hops (what the bot actually does);
-                    // a launch found anywhere along the approach counts as a pass.
-                    int step = BotPhysicsEngine.walkStep(map, profile);
-                    for (int hop = 0; hop <= 12 && !found; hop++) {
-                        int dir = Integer.compare(rope.minX, probe.x);
-                        Point p2 = hop == 0 ? probe
-                                : new Point(probe.x + dir * hop * step, probe.y);
-                        Point launch = (Point) m.invoke(null, map, p2, profile);
-                        if (launch != null) found = true;
+        // Opt-in only: see FALLBACK_SCAN_ENABLED. The sweep is report-only and used to dominate
+        // the whole suite's wall time.
+        if (FALLBACK_SCAN_ENABLED) {
+            for (BotNavigationGraph.Region rope : g.regions) {
+                if (!rope.isRopeRegion) continue;
+                for (BotNavigationGraph.Region ground : g.regions) {
+                    if (ground.isRopeRegion) continue;
+                    if (ground.maxY <= rope.minY) continue;
+                    if (Math.abs(rope.minX - ground.minX) > 400 && Math.abs(rope.minX - ground.maxX) > 400
+                            && !(rope.minX >= ground.minX && rope.minX <= ground.maxX)) continue;
+                    Point probe = ground.centerPoint();
+                    try {
+                        var m = BotFallbackMovementManager.class.getDeclaredMethod("nearestUpwardRopeLaunch",
+                                MapleMap.class, Point.class, BotMovementProfile.class);
+                        m.setAccessible(true);
+                        fallbackScans++;
+                        boolean found = false;
+                        // walk toward the rope's X in walkStep hops (what the bot actually does);
+                        // a launch found anywhere along the approach counts as a pass.
+                        int step = BotPhysicsEngine.walkStep(map, profile);
+                        for (int hop = 0; hop <= 12 && !found; hop++) {
+                            int dir = Integer.compare(rope.minX, probe.x);
+                            Point p2 = hop == 0 ? probe
+                                    : new Point(probe.x + dir * hop * step, probe.y);
+                            Point launch = (Point) m.invoke(null, map, p2, profile);
+                            if (launch != null) found = true;
+                        }
+                        if (!found) fallbackMiss++;
+                    } catch (Exception e) {
+                        throw new RuntimeException(e);
                     }
-                    if (!found) fallbackMiss++;
-                } catch (Exception e) {
-                    throw new RuntimeException(e);
                 }
             }
         }
         String verdict = "OK";
         if (ropeNoEntry > 0) verdict = "LINK-FAIL(" + ropeNoEntry + "/" + ropeRegions + ")";
-        else if (fallbackMiss > 0) verdict = "fbMiss=" + fallbackMiss + "/" + fallbackScans;
+        else if (FALLBACK_SCAN_ENABLED && fallbackMiss > 0) verdict = "fbMiss=" + fallbackMiss + "/" + fallbackScans;
         return tag + " " + verdict;
     }
 }
