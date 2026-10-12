@@ -19,6 +19,11 @@ import java.util.concurrent.ConcurrentHashMap;
  * landing, or a rope bottoming at the floor to ride down). The semantics mirror
  * scripts/wzaudit/dead_pit_scan.py, evaluated at runtime from the live foothold tree.
  *
+ * The verdict is the walk-connected COMPONENT's, not one foothold's: every escape check
+ * above is a local predicate, and a component is livable iff ANY of its walk-connected
+ * footholds clears one (see isLivableSurface). A floor row that walks to its door portal
+ * is live from every piece of the row - judging pieces apart called such rows dead.
+ *
  * Why: the graph's dead-region prune keeps the PLANNED routes out of such pits, but a bot
  * can still reach one through paths the graph never sees - the stuck watchdog's rescue hop
  * (any simulated landing counted as valid), warmup-fallback walk-offs, air steering and
@@ -59,7 +64,9 @@ final class DeadPitGuard {
      *  so the verdict can never be served across two profiles the physics treats differently.
      *  The earlier apex-only bucket did exactly that for same-jump/different-speed profiles
      *  (speed gear, party Haste): the rope jump-grab sims step in walkStep-sized increments and
-     *  the chain climb keys on the apex, so both dimensions are load-bearing. */
+     *  the chain climb keys on the apex, so both dimensions are load-bearing. The verdict is a
+     *  property of the walk-connected COMPONENT, not of one foothold (see isLivableSurface), so
+     *  every foothold of one walk region caches the same answer. */
     private static final Map<org.gms.server.maps.FootholdTree, Map<BotMovementProfile, Map<Integer, Boolean>>> VERDICTS =
             java.util.Collections.synchronizedMap(new java.util.WeakHashMap<>());
     /** tree -> foothold-id -> walk-region root (see sameWalkRegion). The engine's own connected-
@@ -98,9 +105,57 @@ final class DeadPitGuard {
         if (cached != null) {
             return cached;
         }
-        boolean live = hasEscape(map, foothold, profile);
-        verdicts.put(foothold.getId(), live);
+        // Escape options are shared across the WALK-CONNECTED surface, not owned per foothold: a
+        // bot that can walk from this surface to any other foothold of its own walk region (the
+        // engine's canonical partition - prev/next links accepted by canWalkAcrossFootholds, the
+        // same rule the graph's region merge and the runtime walk use) can use THAT foothold's
+        // portal / rope / walk-off. Judging only the probed foothold called the 103000900 floor
+        // row - one continuous walk to the door portal at x=1214 - dead, after which the guard
+        // refused every authorised descent onto the row and the dead-pit self-heal relocated
+        // bots standing on it. So the verdict is a property of the component: livable iff ANY
+        // member has a local escape, and every member caches the same answer.
+        List<Foothold> surfaces = walkableFootholds(map);
+        List<Foothold> members = walkRegionFootholds(map, foothold);
+        boolean live = false;
+        for (Foothold member : members) {
+            if (hasEscape(map, member, profile, surfaces)) {
+                live = true;
+                break;
+            }
+        }
+        for (Foothold member : members) {
+            verdicts.put(member.getId(), live);
+        }
         return live;
+    }
+
+    /*
+     * The walk-connected component of {@code foothold}: itself plus every other non-wall foothold
+     * the canonical walk partition puts in the same region (see sameWalkRegion). Read once per
+     * region - after the first verdict every member carries the cached component answer - so the
+     * scan is a plain O(N) root comparison behind the per-foothold verdict cache.
+     */
+    private static List<Foothold> walkRegionFootholds(MapleMap map, Foothold foothold) {
+        List<Foothold> members = new java.util.ArrayList<>();
+        members.add(foothold);
+        if (foothold.isWall()) {
+            return members; // walls are outside the walk partition; keep the per-surface verdict
+        }
+        Map<Integer, Integer> roots = WALK_ROOTS.computeIfAbsent(map.getFootholds(),
+                k -> buildWalkRoots(map));
+        Integer root = roots.get(foothold.getId());
+        if (root == null) {
+            return members;
+        }
+        for (Foothold other : map.getFootholds().getAllFootholds()) {
+            if (other == foothold || other.isWall()) {
+                continue;
+            }
+            if (root.equals(roots.get(other.getId()))) {
+                members.add(other);
+            }
+        }
+        return members;
     }
 
     /**
@@ -125,10 +180,10 @@ final class DeadPitGuard {
         return Math.max(foothold.getY1(), foothold.getY2());
     }
 
-    private static boolean hasEscape(MapleMap map, Foothold foothold, BotMovementProfile profile) {
-        // One list for the whole verdict: getAllFootholds() rebuilds its collection per call,
-        // so per-candidate calls inside the chain scan below would multiply that cost.
-        List<Foothold> surfaces = walkableFootholds(map);
+    private static boolean hasEscape(MapleMap map, Foothold foothold, BotMovementProfile profile,
+                                     List<Foothold> surfaces) {
+        // One list for the whole component sweep: getAllFootholds() rebuilds its collection per
+        // call, so every member's verdict reads the same prebuilt list (see isLivableSurface).
         int floorY = surfaceY(foothold);
         int loX = Math.min(foothold.getX1(), foothold.getX2());
         int hiX = Math.max(foothold.getX1(), foothold.getX2());
