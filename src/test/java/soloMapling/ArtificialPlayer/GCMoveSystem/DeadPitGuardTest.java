@@ -167,20 +167,22 @@ public class DeadPitGuardTest {
     @Test
     void theVerdictCacheKeysOnTheCallerProfile() {
         // The cache bug this pins: one verdict per foothold shared across profiles served a
-        // base bot a strong jumper's answer. Geometry: a 120px shelf under an open top row.
-        // Base reach = ceil(77) + 25 = 102px -> the shelf is DEAD for a base bot. A max-jump
-        // thief (jump 123 -> apex 117 -> reach 142) CAN jump back up -> LIVABLE for it.
+        // base bot a strong jumper's answer. Geometry: a 100px shelf under an open top row.
+        // Base sim reach is ~75px -> the shelf is DEAD for a base bot. A max-jump thief
+        // (jump 123 -> sim reach ~113px) CAN jump back up -> LIVABLE for it. (The rise is
+        // engine-measured: the earlier 120px fixture was only "reachable" under the deleted
+        // apex+margin heuristic; the simulator cannot make that jump at any stat.)
         MapleMap map = new MapleMap(922011907, 0, 0, 922010000, 0.0f);
         map.setMapLineBoundings(-1000, 600, -265, 265);
         FootholdTree tree = new FootholdTree(new Point(-265, -100), new Point(265, 600));
         tree.insert(new Foothold(new Point(-265, 0), new Point(265, 0), 1));    // top row
-        tree.insert(new Foothold(new Point(-100, 120), new Point(100, 120), 2)); // the shelf
+        tree.insert(new Foothold(new Point(-100, 100), new Point(100, 100), 2)); // the shelf
         map.setFootholds(tree);
         Foothold shelf = map.getFootholds().getAllFootholds().get(1);
 
         assertFalse(DeadPitGuard.isLivableSurface(map, shelf, BotMovementProfile.base()),
-                "a 120px shelf is a trap for a base-stat bot (reach 102px)");
+                "a 100px shelf is a trap for a base-stat bot (sim reach ~75px)");
         assertTrue(DeadPitGuard.isLivableSurface(map, shelf, new BotMovementProfile(100, 123)),
-                "the SAME shelf is escapable for a max-jump bot (reach 142px)");
+                "the SAME shelf is escapable for a max-jump bot (sim reach ~113px)");
     }
 }

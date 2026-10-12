@@ -130,17 +130,39 @@ public class DeadPitWalkRegionVerdictTest {
     }
 
     @Test
-    void anUnlinkedPieceCannotBorrowTheFarPiecesPortal() {
-        MapleMap map = linkedRow(922011923);
-        // Unlink: the pieces touch geometrically, but prev/next is the authored walk graph the
-        // guard (and the runtime walk) trusts - a piece outside the row must not inherit its exits.
+    void anUnlinkedPieceBeyondJumpReachCannotBorrowTheFarPiecesPortal() {
+        // Unlink AND separate beyond a jump: prev/next is the authored walk graph, and a piece
+        // the bot can neither walk to nor jump to must not inherit the far piece's exits. (The
+        // old fixture left the pieces touching at x=0, which the engine's own jump sim crosses -
+        // a real one-move exit the verdict must honour, pinned by the contiguous-neighbour test
+        // below.)
+        MapleMap map = new MapleMap(922011923, 0, 0, 922010000, 0.0f);
+        map.setMapLineBoundings(-1000, 600, -600, 600);
+        FootholdTree tree = new FootholdTree(new Point(-600, -100), new Point(600, 600));
+        tree.insert(new Foothold(new Point(-600, -300), new Point(600, -300), 1)); // beyond the apex
+        tree.insert(new Foothold(new Point(-500, 0), new Point(0, 0), 2));   // the unlinked piece
+        tree.insert(new Foothold(new Point(200, 0), new Point(600, 0), 3));  // far piece: a 200px gap
+        map.setFootholds(tree);
+        map.addPortal(portalAt(7, 300, 0));
+        assertFalse(DeadPitGuard.isLivableSurface(map, fh(map, 2), BotMovementProfile.base()),
+                "a piece 200px from the portal row cannot use that row's portal");
+        assertTrue(DeadPitGuard.isLivableSurface(map, fh(map, 3), BotMovementProfile.base()),
+                "the portal's own piece keeps its local exit");
+    }
+
+    @Test
+    void aContiguousUnlinkedNeighbourIsReachableByAnArcedJump() {
+        // Two pieces sharing an endpoint, authored without prev/next: the runtime walk graph does
+        // not connect them, but the engine's own jump sim launches from one and lands on the
+        // other - a real player move (the WZ links only decide walk warps; the client finds
+        // ground by position). The dead-pit verdict answers what a real player can do, so the
+        // seam is an exit - and a portal on the far piece is reachable through it.
+        MapleMap map = linkedRow(922011926);
         fh(map, 2).setNext(0);
         fh(map, 3).setPrev(0);
         map.addPortal(portalAt(7, 300, 0));
-        assertFalse(DeadPitGuard.isLivableSurface(map, fh(map, 2), BotMovementProfile.base()),
-                "an unwalkable piece cannot use the far piece's portal");
-        assertTrue(DeadPitGuard.isLivableSurface(map, fh(map, 3), BotMovementProfile.base()),
-                "the portal's own piece keeps its local exit");
+        assertTrue(DeadPitGuard.isLivableSurface(map, fh(map, 2), BotMovementProfile.base()),
+                "the contiguous seam is jumpable: the far piece's portal is a real exit");
     }
 
     @Test

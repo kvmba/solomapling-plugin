@@ -8,21 +8,38 @@ import org.gms.server.maps.Rope;
 import java.awt.Point;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
 /*
  * Plugin-side dead-pit guard. Independent of the WZ forbidFallDown flags and of the nav
  * graph being baked: a landing surface is a DEAD PIT FLOOR when nothing above it is
- * escapable - no portal, no rope to grab, no jump chain (apex-bounded) back up to a
- * higher surface, AND no way off downward either (walk-off / down-jump with a real
- * landing, or a rope bottoming at the floor to ride down). The semantics mirror
- * scripts/wzaudit/dead_pit_scan.py, evaluated at runtime from the live foothold tree.
+ * escapable - no portal, no rope to grab, and no real one-move escape off it either.
  *
- * The verdict is the walk-connected COMPONENT's, not one foothold's: every escape check
- * above is a local predicate, and a component is livable iff ANY of its walk-connected
- * footholds clears one (see isLivableSurface). A floor row that walks to its door portal
- * is live from every piece of the row - judging pieces apart called such rows dead.
+ * The verdict is the walk-connected COMPONENT's, not one foothold's: escape options are
+ * shared across the engine's own walk partition (prev/next links accepted by
+ * canWalkAcrossFootholds - the same rule the graph's region merge and the runtime walk
+ * use), so a component is livable iff ANY member clears an escape, and every member
+ * caches that answer.
+ *
+ * Which moves count as an escape (all evaluated with the ENGINE'S OWN simulators, on the
+ * surface's real per-column geometry):
+ *   - teleport: any portal in the reach window (the map's own door);
+ *   - climb:    the rope/ladder mount mechanisms the graph builder and the executor use;
+ *   - the map's TOP surface is ordinary ground, never a trap (it has no higher ground to
+ *     be trapped below - the documented shortcut nearestLivableGround also relies on);
+ *   - down-jump: the pass-through drop (simulateDownJumpLanding; the sim itself honours
+ *     forbidFallDown - the flag blocks the drop-through and nothing else);
+ *   - walk-off: stepping past the lip with the move's real horizontal momentum
+ *     (simulateFallLanding at the border column - legal on ffd platforms too);
+ *   - arced jump / jump-off: simulateJumpLanding in the three launch-step directions
+ *     (up through one-way platforms, across a gap, or off the edge down);
+ *   - class abilities: a magician's Teleport landing, a Hermit/Night Lord's Flash Jump
+ *     dash (BotMovementCapabilities) - only for bots whose class grants them.
+ * A landing inside the SAME walk component is not an escape (the component already shares
+ * the verdict); any landing on a different component is, mirroring the one-hop semantics
+ * the descent branches have always used (the landing's own verdict is not chased).
  *
  * Why: the graph's dead-region prune keeps the PLANNED routes out of such pits, but a bot
  * can still reach one through paths the graph never sees - the stuck watchdog's rescue hop
@@ -30,46 +47,44 @@ import java.util.concurrent.ConcurrentHashMap;
  * knockback. Every such "will I land somewhere survivable?" decision goes through
  * isLivableLanding here.
  *
- * An LPQ stage-3 pit floor (rim-to-floor 402px, base jump apex 77px) reads as dead; a 150px
+ * An LPQ stage-3 pit floor (rim-to-floor 402px, base jump apex 75px) reads as dead; a 150px
  * terrace with an open sky above it reads as live. Portal/rope escapes are honoured so the
- * stage-2 tower base (a ladder chain climbs back out) never reads as dead.
+ * stage-2 tower base (a ladder chain climbs back out) never reads as dead. A swim map has
+ * no dead pits at all: every underwater surface is left by swimming up.
  */
 final class DeadPitGuard {
 
     private DeadPitGuard() {
     }
 
-    /** A rise beyond this from the landing's own level is unreachable by a jump. */
-    private static final int STEP_UP_TOLERANCE_PX = 40;
-    /**
-     * Jump-up reach beyond the raw ballistic apex: the scanner's calibrated JUMP_REACH
-     * (apex ~77px + margin) - grab/step-up rounding makes a rise at the apex boundary
-     * climbable in practice, and the stage-1 audit maps pin rises of ~100px as climbable.
-     */
-    private static final int REACH_MARGIN_PX = 25;
-    /** Max horizontal gap between surfaces for a jump-up to be considered. */
-    private static final int JUMP_ACROSS_PX = 140;
+    /** Probes are one walk step apart along the surface: a drop hole a walk could cross is never stepped over. */
+    private static final int MAX_PROBES_PER_FOOTHOLD = 512;
     /** A rope hanging this far above the floor can still be jumped and caught. */
     private static final int ROPE_GRAB_SLACK_PX = 40;
-    /** A portal within this box of the landing counts as an exit. */
+    /** A portal within this box of the surface counts as an exit. */
     private static final int PORTAL_X_SLACK_PX = 30;
     private static final int PORTAL_Y_ABOVE_PX = 80;
     private static final int PORTAL_Y_BELOW_PX = 30;
 
-    /** tree -> profile bucket -> foothold id -> verdict. Keyed by tree identity (weak) so a
+    /**
+     * The verdict cache bucket: the caller's movement profile AND its class abilities. Every
+     * dimension the engine reads - jump, speed, snowshoes, teleport, dash scale - is part of the
+     * key, so a verdict can never be served across two bots the physics treats differently (the
+     * earlier apex-only and profile-only buckets served same-jump/different-speed and
+     * mage/warrior answers across each other).
+     */
+    record VerdictKey(BotMovementProfile profile, BotMovementCapabilities capabilities) {
+    }
+
+    /** tree -> verdict key -> foothold id -> verdict. Keyed by tree identity (weak) so a
      *  reloaded map gets a fresh cache automatically (the COLLISION_INDEX pattern), instanced
      *  copies sharing one tree share their verdicts, and dropped trees do not pin their verdicts
-     *  here forever. The bucket is the caller's movement profile ITSELF (normalized to base when
-     *  null): every dimension the engine reads - jump, speed, snowshoes - is part of the record,
-     *  so the verdict can never be served across two profiles the physics treats differently.
-     *  The earlier apex-only bucket did exactly that for same-jump/different-speed profiles
-     *  (speed gear, party Haste): the rope jump-grab sims step in walkStep-sized increments and
-     *  the chain climb keys on the apex, so both dimensions are load-bearing. The verdict is a
-     *  property of the walk-connected COMPONENT, not of one foothold (see isLivableSurface), so
-     *  every foothold of one walk region caches the same answer. */
-    private static final Map<org.gms.server.maps.FootholdTree, Map<BotMovementProfile, Map<Integer, Boolean>>> VERDICTS =
+     *  here forever. The verdict is a property of the walk-connected COMPONENT, not of one
+     *  foothold (see isLivableSurface), so every foothold of one walk region caches the same
+     *  answer. */
+    private static final Map<org.gms.server.maps.FootholdTree, Map<VerdictKey, Map<Integer, Boolean>>> VERDICTS =
             java.util.Collections.synchronizedMap(new java.util.WeakHashMap<>());
-    /** tree -> foothold-id -> walk-region root (see sameWalkRegion). The engine's own connected-
+    /** tree -> foothold-id -> walk-region root (see walkRegionFootholds). The engine's own connected-
      *  surface partition, rebuilt once per tree from prev/next + canWalkAcrossFootholds. Weak-keyed
      *  like the verdict cache: a reloaded map starts clean, dropped trees do not leak it. */
     private static final Map<org.gms.server.maps.FootholdTree, Map<Integer, Integer>> WALK_ROOTS =
@@ -82,6 +97,11 @@ final class DeadPitGuard {
      * strand a bot on ground it already occupies.
      */
     static boolean isLivableLanding(MapleMap map, Point landing, BotMovementProfile profile) {
+        return isLivableLanding(map, landing, profile, BotMovementCapabilities.NONE);
+    }
+
+    static boolean isLivableLanding(MapleMap map, Point landing, BotMovementProfile profile,
+                                    BotMovementCapabilities capabilities) {
         if (map == null || landing == null || map.getFootholds() == null) {
             return true;
         }
@@ -89,18 +109,25 @@ final class DeadPitGuard {
         if (foothold == null) {
             return true; // no floor: the fall-off-map recovery owns that case, not this guard
         }
-        return isLivableSurface(map, foothold, profile);
+        return isLivableSurface(map, foothold, profile, capabilities);
     }
 
     static boolean isLivableSurface(MapleMap map, Foothold foothold, BotMovementProfile profile) {
+        return isLivableSurface(map, foothold, profile, BotMovementCapabilities.NONE);
+    }
+
+    static boolean isLivableSurface(MapleMap map, Foothold foothold, BotMovementProfile profile,
+                                    BotMovementCapabilities capabilities) {
         if (map == null || foothold == null || map.getFootholds() == null) {
             return true;
         }
-        // The profile bucket is part of the cache key: see VERDICTS for why the bucket must be
-        // the whole profile, never a hand-picked subset of its dimensions.
+        if (map.isSwim()) {
+            return true; // there is no dead-pit concept in water: any surface is left by entering it
+        }
+        VerdictKey key = cacheKey(profile, capabilities);
         Map<Integer, Boolean> verdicts = VERDICTS
                 .computeIfAbsent(map.getFootholds(), k -> new ConcurrentHashMap<>())
-                .computeIfAbsent(cacheKey(profile), k -> new ConcurrentHashMap<>());
+                .computeIfAbsent(key, k -> new ConcurrentHashMap<>());
         Boolean cached = verdicts.get(foothold.getId());
         if (cached != null) {
             return cached;
@@ -109,16 +136,18 @@ final class DeadPitGuard {
         // bot that can walk from this surface to any other foothold of its own walk region (the
         // engine's canonical partition - prev/next links accepted by canWalkAcrossFootholds, the
         // same rule the graph's region merge and the runtime walk use) can use THAT foothold's
-        // portal / rope / walk-off. Judging only the probed foothold called the 103000900 floor
+        // portal / rope / move-off. Judging only the probed foothold called the 103000900 floor
         // row - one continuous walk to the door portal at x=1214 - dead, after which the guard
         // refused every authorised descent onto the row and the dead-pit self-heal relocated
-        // bots standing on it. So the verdict is a property of the component: livable iff ANY
-        // member has a local escape, and every member caches the same answer.
+        // bots standing on it.
         List<Foothold> surfaces = walkableFootholds(map);
-        List<Foothold> members = walkRegionFootholds(map, foothold);
+        Map<Integer, Integer> roots = WALK_ROOTS.computeIfAbsent(map.getFootholds(),
+                k -> buildWalkRoots(map));
+        List<Foothold> members = walkRegionFootholds(surfaces, roots, foothold);
+        int componentRoot = rootOf(roots, foothold);
         boolean live = false;
         for (Foothold member : members) {
-            if (hasEscape(map, member, profile, surfaces)) {
+            if (hasEscape(map, member, key, surfaces, roots, componentRoot)) {
                 live = true;
                 break;
             }
@@ -129,25 +158,37 @@ final class DeadPitGuard {
         return live;
     }
 
+    /**
+     * The verdict cache bucket for a caller: the profile and capabilities themselves, with null
+     * normalized to base / NONE (the same normalization every engine call applies via
+     * {@code profileOrBase}). Package-visible so the normalization and the bucket identity are
+     * pinned by test. The verdict chain has no re-entrant call into isLivableSurface, so no
+     * "in progress" guard is needed.
+     */
+    static VerdictKey cacheKey(BotMovementProfile profile, BotMovementCapabilities capabilities) {
+        return new VerdictKey(profile != null ? profile : BotMovementProfile.base(),
+                capabilities != null ? capabilities : BotMovementCapabilities.NONE);
+    }
+
     /*
      * The walk-connected component of {@code foothold}: itself plus every other non-wall foothold
-     * the canonical walk partition puts in the same region (see sameWalkRegion). Read once per
+     * the canonical walk partition puts in the same region (see buildWalkRoots). Read once per
      * region - after the first verdict every member carries the cached component answer - so the
      * scan is a plain O(N) root comparison behind the per-foothold verdict cache.
      */
-    private static List<Foothold> walkRegionFootholds(MapleMap map, Foothold foothold) {
+    private static List<Foothold> walkRegionFootholds(List<Foothold> surfaces,
+                                                      Map<Integer, Integer> roots,
+                                                      Foothold foothold) {
         List<Foothold> members = new java.util.ArrayList<>();
         members.add(foothold);
         if (foothold.isWall()) {
             return members; // walls are outside the walk partition; keep the per-surface verdict
         }
-        Map<Integer, Integer> roots = WALK_ROOTS.computeIfAbsent(map.getFootholds(),
-                k -> buildWalkRoots(map));
         Integer root = roots.get(foothold.getId());
         if (root == null) {
             return members;
         }
-        for (Foothold other : map.getFootholds().getAllFootholds()) {
+        for (Foothold other : surfaces) {
             if (other == foothold || other.isWall()) {
                 continue;
             }
@@ -158,41 +199,43 @@ final class DeadPitGuard {
         return members;
     }
 
-    /**
-     * The verdict cache bucket for a profile: the profile itself, with null normalized to base
-     * (the same normalization every engine call applies via {@code profileOrBase}). Package-visible
-     * so the normalization and the bucket identity are pinned by test. The verdict chain has no
-     * re-entrant call into isLivableSurface - jumpChainEscapes carries its own visited set - so
-     * the former per-foothold "in progress" guard was unreachable; it could only ever answer a
-     * concurrent caller a spurious "livable", and is gone.
-     */
-    static BotMovementProfile cacheKey(BotMovementProfile profile) {
-        return profile != null ? profile : BotMovementProfile.base();
-    }
-
     /*
-     * A surface's effective Y: its LOWEST point. For horizontal footholds this is the surface
-     * itself; for slopes it reads the bottom end, which biases every verdict toward "dead" -
-     * the safe direction (over-calling dead merely loses an optional descent, under-calling it
-     * drops a bot into a trap).
+     * A surface's effective Y for the window checks: its LOWEST point. For horizontal footholds
+     * this is the surface itself; for slopes it reads the bottom end, which biases the portal /
+     * rope windows toward "dead" - the safe direction (over-calling dead merely loses an optional
+     * descent, under-calling it drops a bot into a trap). Per-column probes use surfaceYAt
+     * instead, so slope traversals are judged on their real geometry.
      */
     private static int surfaceY(Foothold foothold) {
         return Math.max(foothold.getY1(), foothold.getY2());
     }
 
-    private static boolean hasEscape(MapleMap map, Foothold foothold, BotMovementProfile profile,
-                                     List<Foothold> surfaces) {
-        // One list for the whole component sweep: getAllFootholds() rebuilds its collection per
-        // call, so every member's verdict reads the same prebuilt list (see isLivableSurface).
+    /*
+     * The surface's real Y at column x (linear interpolation between the endpoints; callers pass
+     * columns inside the span). Orientation-proof: the WZ authors a share of footholds
+     * right-to-left (x1 > x2), which the engine's findBelow-index skips - a probe that resolved its
+     * standing point through findGroundFoothold would silently skip every such surface.
+     */
+    private static int surfaceYAt(Foothold foothold, int x) {
+        if (foothold.getY1() == foothold.getY2()) {
+            return foothold.getY1();
+        }
+        long dy = (long) (foothold.getY2() - foothold.getY1()) * (x - foothold.getX1());
+        return foothold.getY1() + (int) (dy / (foothold.getX2() - foothold.getX1()));
+    }
+
+    private static boolean hasEscape(MapleMap map, Foothold foothold, VerdictKey key,
+                                     List<Foothold> surfaces, Map<Integer, Integer> roots,
+                                     int componentRoot) {
         int floorY = surfaceY(foothold);
         int loX = Math.min(foothold.getX1(), foothold.getX2());
         int hiX = Math.max(foothold.getX1(), foothold.getX2());
-        int apex = (int) Math.ceil(BotPhysicsEngine.calculateMaxJumpHeight(profile)) + REACH_MARGIN_PX;
+        int apex = (int) Math.ceil(BotPhysicsEngine.calculateMaxJumpHeight(key.profile()));
 
-        if (portalNear(map, floorY, loX, hiX)) {
+        if (portalNear(map, foothold, loX, hiX)) {
             return true;
         }
-        if (ropeAbove(map, foothold, floorY, loX, hiX, apex, profile)) {
+        if (ropeAbove(map, foothold, floorY, loX, hiX, apex, key.profile(), roots)) {
             return true;
         }
         // No higher ground at all means this IS the map's top surface - ordinary ground,
@@ -201,87 +244,131 @@ final class DeadPitGuard {
         if (highestSurfaceY(surfaces) >= floorY) {
             return true;
         }
-        // Ours (LPQ stage-1 tower): a walk-off / down-jump off this surface is an exit too.
-        // The old "up-only" model called the stage-1 spawn row (y=130, one walk-off to the
-        // door row) and every plain drop-through ledge dead, which steered recoveries and
-        // guards against platforms a bot leaves by simply stepping off. The landing's own
-        // livability is that landing's verdict - not recursed here, mirroring the one-hop
-        // depth of the jump chain above.
-        if (fallEscape(map, foothold, floorY, loX, hiX, profile)) {
+        // A rope whose BOTTOM reaches (or passes below) this floor can be mounted here and
+        // ridden DOWN. ropeAbove only counts ropes to climb UP, so a mid-shaft platform
+        // beside a long rope would be judged on the up-check alone.
+        if (ropeBelow(map, foothold, floorY, loX, hiX, key.profile(), roots)) {
             return true;
         }
-        // And the rope the other direction: a rope whose BOTTOM reaches (or passes below)
-        // this floor can be mounted here and ridden DOWN. ropeAbove only counts ropes to
-        // climb UP, so a mid-shaft platform beside a long rope read as dead on both checks.
-        if (ropeBelow(map, foothold, floorY, loX, hiX, profile)) {
-            return true;
-        }
-        return jumpChainEscapes(surfaces, foothold, apex, new java.util.HashSet<>());
+        // Every real one-move exit the engine can execute off this surface. Runs LAST: it is
+        // the only branch that pays simulations, and the cheap non-sim exits above answer the
+        // common cases first.
+        return oneMoveEscapes(map, foothold, loX, hiX, key, roots, componentRoot);
     }
 
     /*
-     * Ours: can the bot leave {@code (loX..hiX, floorY)} by dropping into open air and
-     * landing somewhere standable? Probed at the surface's endpoints and midpoint (a plain
-     * midpoint can sit over a hole while an edge still lands), via the same two simulators
-     * the executor's own moves use - a "yes" here is the move the bot would actually make.
-     * The landing surface's own verdict is NOT chased (one-hop depth, like the jump chain);
-     * it is cached on its own foothold. An ffd source is refused: the straight drop-through
-     * is exactly the move the client blocks there (canStartDownJump honours the flag too).
-     *
-     * The down-jump probe honours the same bounded-drop rule the executor's fallback gates on
-     * (DOWN_JUMP_MAX_DROP_PX): the live down-jump executor can never fire a deeper straight
-     * drop, so a "depth-500 landing" must not count as an escape or the guard steers recoveries
-     * onto surfaces whose only nominal exit no move can actually take. A plain walk-off fall
-     * (simulateFallLanding) stays uncapped — walking off an edge is not depth-limited and the
-     * fall-off-map recovery owns the no-landing case.
+     * Every real one-move exit from {@code foothold}, each probed with the ENGINE'S OWN
+     * simulator and the move's real shape:
+     *   - down-jump at every column (the sim itself refuses forbidFallDown sources);
+     *   - arced jump in the three launch-step directions (up through platforms, across, off);
+     *   - for a magician, the Teleport landing (up / horizontal / down, the executor's own math);
+     *   - for a Hermit/Night Lord, the Flash Jump dash arc;
+     *   - walk-offs at the two border columns with the move's real horizontal momentum.
+     * Probe columns are one walk step apart (endpoints and midpoint always included): a drop
+     * hole any walk could step into is never skipped over, which is how the earlier fixed-column
+     * sampling (one midpoint on a narrow ledge, <=8 samples on a wide one) lost real exits.
      */
-    private static boolean fallEscape(MapleMap map, Foothold source, int floorY, int loX, int hiX,
-                                      BotMovementProfile profile) {
-        if (source.isForbidFallDown()) {
+    private static boolean oneMoveEscapes(MapleMap map, Foothold foothold, int loX, int hiX,
+                                          VerdictKey key, Map<Integer, Integer> roots,
+                                          int componentRoot) {
+        BotMovementProfile profile = key.profile();
+        int step = Math.max(1, BotPhysicsEngine.walkStep(map, profile));
+        for (int x : probeColumns(loX, hiX, step)) {
+            Point standing = new Point(x, surfaceYAt(foothold, x));
+            // Walk-offs are the plain-fall move: the bot carries its walk momentum past the lip
+            // from exactly this column (the graph builder's own drop shape - simulateFallLanding
+            // at the ledge column with a full walk step of runoff). A plain fall from a column in
+            // the surface's INTERIOR answers only "self" (its first collision is this surface), so
+            // only the border columns can pay off - but they must be probed: on a walk-linked
+            // multi-piece row the edge columns carry the exits.
+            if ((x == loX || x == hiX)
+                    && landsElsewhere(BotPhysicsEngine.simulateFallLanding(map, standing,
+                            x == loX ? -step : step), roots, componentRoot)) {
+                return true;
+            }
+            if (landsElsewhere(BotPhysicsEngine.simulateDownJumpLanding(map, standing),
+                    roots, componentRoot)) {
+                return true;
+            }
+            for (int dir : new int[]{-1, 0, 1}) {
+                if (landsElsewhere(BotPhysicsEngine.simulateJumpLanding(map, standing, dir * step, profile),
+                        roots, componentRoot)) {
+                    return true; // the arced jump: up through a platform, across a gap, or off the edge
+                }
+            }
+            if (key.capabilities().teleport() && teleportEscapes(map, standing, roots, componentRoot)) {
+                return true;
+            }
+            if (key.capabilities().flashJumpScale() > 0f) {
+                for (int dir : new int[]{-1, 1}) {
+                    if (landsElsewhere(BotPhysicsEngine.simulateFlashJumpLanding(map, standing, dir,
+                            profile, key.capabilities().flashJumpScale()), roots, componentRoot)) {
+                        return true;
+                    }
+                }
+            }
+        }
+        return false;
+    }
+
+    /** The magician's blink exits: the executor's own landing math, up / both sides / down. */
+    private static boolean teleportEscapes(MapleMap map, Point standing,
+                                           Map<Integer, Integer> roots, int componentRoot) {
+        if (landsElsewherePoint(GCMovementSkills.upTeleportLanding(map, standing), map, roots, componentRoot)) {
+            return true;
+        }
+        for (int dir : new int[]{-1, 1}) {
+            if (landsElsewherePoint(GCMovementSkills.horizontalTeleportLanding(map, standing, dir),
+                    map, roots, componentRoot)) {
+                return true;
+            }
+        }
+        return landsElsewherePoint(GCMovementSkills.downTeleportLanding(map, standing),
+                map, roots, componentRoot);
+    }
+
+    private static boolean landsElsewhere(BotPhysicsEngine.JumpLanding landing,
+                                          Map<Integer, Integer> roots, int componentRoot) {
+        return landing != null && landing.foothold() != null
+                && rootOf(roots, landing.foothold()) != componentRoot;
+    }
+
+    private static boolean landsElsewherePoint(Point landing, MapleMap map,
+                                               Map<Integer, Integer> roots, int componentRoot) {
+        if (landing == null) {
             return false;
         }
-        // Probe density scales with width: a 1px midpoint on a wide ledge sits over the hole
-        // while its edges land, and a 3px probe on a narrow one misses a narrow gap column.
-        // ~1 probe per 64px (a walk step's scale) keeps the sim cost bounded — the verdict is
-        // cached per foothold — while removing the width cliff the 1/3-probe split had.
-        int width = hiX - loX;
-        int probeXs = Math.max(1, Math.min(8, Math.round(width / 64.0f) + 1));
-        for (int i = 0; i < probeXs; i++) {
-            int x = probeXs == 1 ? (loX + hiX) / 2
-                    : loX + Math.round(width * i / (float) (probeXs - 1));
-            Point from = new Point(x, floorY);
-            if (BotPhysicsEngine.simulateFallLanding(map, from, 0) != null) {
-                return true;
-            }
-            BotPhysicsEngine.JumpLanding drop = BotPhysicsEngine.simulateDownJumpLanding(map, from);
-            if (drop != null && drop.point().y - floorY <= BotNavigationGraphProvider.DOWN_JUMP_MAX_DROP_PX) {
-                return true;
-            }
-        }
-        return false;
+        Foothold under = BotPhysicsEngine.findGroundFoothold(map, landing);
+        return under != null && rootOf(roots, under) != componentRoot;
+    }
+
+    private static int rootOf(Map<Integer, Integer> roots, Foothold foothold) {
+        Integer root = roots.get(foothold.getId());
+        return root != null ? root : foothold.getId();
     }
 
     /*
-     * A rope whose climbable bottom reaches this floor (within the same slack the up-direction
-     * grants) can be mounted here and ridden DOWN — but only if the bot can actually GET ONTO it.
-     * The mount itself is decided by ropeMountableFromSurface below, evaluated with the executor's
-     * own mechanisms. The old top guard ("topY >= floorY -> skip") was a geometry guess that both
-     * rejected real mounts (the executor's own top-attach band and crouch/jump grabs reach ropes
-     * whose head sits at or below the floor — 7ad7fd3's phantom-exit report was true only for ropes
-     * whose head hangs FAR below) and admitted phantom ones (a rope a kilometre below the floor
-     * "counted" via the off-axis slack). One mechanism-backed predicate, both directions.
+     * Probe columns along [loX..hiX]: both endpoints, the midpoint, and a one-walk-step grid
+     * (bounded by MAX_PROBES_PER_FOOTHOLD so one giant floor cannot make a cold verdict pass
+     * unbounded; beyond the cap the grid widens evenly instead of dropping columns).
      */
-    private static boolean ropeBelow(MapleMap map, Foothold surface, int floorY, int loX, int hiX,
-                                     BotMovementProfile profile) {
-        for (Rope rope : map.getRopes()) {
-            if (rope.bottomY() < floorY - ROPE_GRAB_SLACK_PX) {
-                continue; // the rope ends too far above this floor to mount it here
-            }
-            if (ropeMountableFromSurface(map, rope, surface, loX, hiX, floorY, profile)) {
-                return true;
-            }
+    private static int[] probeColumns(int loX, int hiX, int step) {
+        int span = hiX - loX;
+        int spacing = Math.max(step, (int) Math.ceil(span / (double) MAX_PROBES_PER_FOOTHOLD));
+        if (spacing < 1) {
+            spacing = 1;
         }
-        return false;
+        Set<Integer> columns = new java.util.TreeSet<>();
+        columns.add(loX);
+        columns.add(hiX);
+        columns.add((loX + hiX) / 2);
+        for (int x = loX; x <= hiX; x += spacing) {
+            columns.add(x);
+        }
+        for (int x = hiX; x >= loX; x -= spacing) {
+            columns.add(x);
+        }
+        return columns.stream().mapToInt(Integer::intValue).toArray();
     }
 
     private static int highestSurfaceY(List<Foothold> surfaces) {
@@ -296,14 +383,19 @@ final class DeadPitGuard {
         return topmost;
     }
 
-    private static boolean portalNear(MapleMap map, int floorY, int loX, int hiX) {
+    private static boolean portalNear(MapleMap map, Foothold surface, int loX, int hiX) {
         for (Portal portal : map.getPortals()) {
             if (portal == null || portal.getPosition() == null) {
                 continue;
             }
             Point p = portal.getPosition();
-            if (floorY - PORTAL_Y_ABOVE_PX <= p.y && p.y <= floorY + PORTAL_Y_BELOW_PX
-                    && loX - PORTAL_X_SLACK_PX <= p.x && p.x <= hiX + PORTAL_X_SLACK_PX) {
+            if (p.x < loX - PORTAL_X_SLACK_PX || p.x > hiX + PORTAL_X_SLACK_PX) {
+                continue;
+            }
+            // Judge the portal against the surface's REAL y at the portal's column (slope-aware),
+            // not the whole surface's low end - a portal at a long ramp's top is still a door.
+            int surfaceAt = surfaceYAt(surface, Math.clamp(p.x, loX, hiX));
+            if (surfaceAt - PORTAL_Y_ABOVE_PX <= p.y && p.y <= surfaceAt + PORTAL_Y_BELOW_PX) {
                 return true;
             }
         }
@@ -311,7 +403,7 @@ final class DeadPitGuard {
     }
 
     private static boolean ropeAbove(MapleMap map, Foothold surface, int floorY, int loX, int hiX,
-                                     int apex, BotMovementProfile profile) {
+                                     int apex, BotMovementProfile profile, Map<Integer, Integer> roots) {
         for (Rope rope : map.getRopes()) {
             int ropeTop = rope.topY();
             int ropeBottom = rope.bottomY();
@@ -321,7 +413,20 @@ final class DeadPitGuard {
             if (ropeTop > floorY) {
                 continue; // rope entirely below the floor: nothing to climb up
             }
-            if (ropeMountableFromSurface(map, rope, surface, loX, hiX, floorY, profile)) {
+            if (ropeMountableFromSurface(map, rope, surface, loX, hiX, floorY, profile, roots)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean ropeBelow(MapleMap map, Foothold surface, int floorY, int loX, int hiX,
+                                     BotMovementProfile profile, Map<Integer, Integer> roots) {
+        for (Rope rope : map.getRopes()) {
+            if (rope.bottomY() < floorY - ROPE_GRAB_SLACK_PX) {
+                continue; // the rope ends too far above this floor to mount it here
+            }
+            if (ropeMountableFromSurface(map, rope, surface, loX, hiX, floorY, profile, roots)) {
                 return true;
             }
         }
@@ -346,13 +451,12 @@ final class DeadPitGuard {
      * column on its own surface: the column's ground must sit at the surface's level (the same
      * ground band a walk uses) AND belong to the same walk region — the engine's own connected-
      * surface partition (sameWalkRegion below). A rope across a gap or pit is a different region:
-     * not an exit. The old syntactic slack check counted ground at the rope's column without ever
-     * asking whether the row CONNECTS there, which is how a floor and a rope 1.4km apart counted
-     * as mounted on each other.
+     * not an exit.
      */
     private static boolean ropeMountableFromSurface(MapleMap map, Rope rope, Foothold surface,
                                                     int loX, int hiX, int floorY,
-                                                    BotMovementProfile profile) {
+                                                    BotMovementProfile profile,
+                                                    Map<Integer, Integer> roots) {
         Point from;
         if (rope.x() >= loX - BotPhysicsEngine.cfg.ROPE_GRAB_X
                 && rope.x() <= hiX + BotPhysicsEngine.cfg.ROPE_GRAB_X) {
@@ -363,7 +467,7 @@ final class DeadPitGuard {
                 return false; // no ground at the rope's column at this level: not a side-step
             }
             Foothold column = BotPhysicsEngine.findGroundFoothold(map, step);
-            if (column == null || !sameWalkRegion(map, surface, column)) {
+            if (column == null || !sameWalkRegion(surface, column, roots)) {
                 return false; // the column's ground is not walk-connected to this surface
             }
             from = step;
@@ -408,18 +512,16 @@ final class DeadPitGuard {
      * follower all key on; asking it here keeps the guard's "can I walk there?" answer identical
      * to the engine's, without paying per-column ground probes (memoized per tree: O(N) once).
      */
-    private static boolean sameWalkRegion(MapleMap map, Foothold first, Foothold second) {
+    private static boolean sameWalkRegion(Foothold first, Foothold second, Map<Integer, Integer> roots) {
         if (first == null || second == null) {
             return false;
         }
         if (first.getId() == second.getId()) {
             return true;
         }
-        Map<Integer, Integer> roots = WALK_ROOTS.computeIfAbsent(map.getFootholds(),
-                k -> buildWalkRoots(map));
         Integer a = roots.get(first.getId());
         Integer b = roots.get(second.getId());
-        return a != null && a.equals(b);
+        return a != null && Objects.equals(a, b);
     }
 
     private static Map<Integer, Integer> buildWalkRoots(MapleMap map) {
@@ -479,99 +581,9 @@ final class DeadPitGuard {
         return root;
     }
 
-    /*
-     * Can the bot leave {@code foothold} by jumping up (possibly across a gap) onto something
-     * higher, or by stepping/jumping onto a higher surface in the same connected chain? The
-     * chain matters: a shallow terrace over a dead basin is only livable if ITSELF has an exit.
-     * {@code visited} bounds the search: each surface is expanded once, so the worst case is
-     * O(N^2) foothold scans for a map with N surfaces (computed once per foothold, behind the
-     * verdict cache).
-     */
-    private static boolean jumpChainEscapes(List<Foothold> surfaces, Foothold foothold, int apex,
-                                            Set<Integer> visited) {
-        if (!visited.add(foothold.getId())) {
-            return false;
-        }
-        int floorY = surfaceY(foothold);
-        int loX = Math.min(foothold.getX1(), foothold.getX2());
-        int hiX = Math.max(foothold.getX1(), foothold.getX2());
-        for (Foothold higher : surfaces) {
-            if (higher.getId() == foothold.getId() || higher.isWall()) {
-                continue;
-            }
-            int higherY = surfaceY(higher);
-            if (higherY >= floorY - STEP_UP_TOLERANCE_PX || higherY < floorY - apex) {
-                continue; // not above the reach band (beyond trivial step tolerance, within apex)
-            }
-            int hLoX = Math.min(higher.getX1(), higher.getX2());
-            int hHiX = Math.max(higher.getX1(), higher.getX2());
-            int gap = horizontalGap(loX, hiX, hLoX, hHiX);
-            if (gap > JUMP_ACROSS_PX) {
-                continue;
-            }
-            // No surface may sit between this floor and the target band over the overlap -
-            // otherwise the jump would land on the intermediate surface, which the chain
-            // explores as its own foothold instead of assuming a pass-through.
-            if (!columnClear(surfaces, floorY, higherY, loX, hiX, hLoX, hHiX)) {
-                continue;
-            }
-            return true;
-        }
-        // No direct jump out: try climbing THROUGH adjacent surfaces at (roughly) this level
-        // or up to one apex above, which may themselves have a jump/rope/portal exit.
-        for (Foothold neighbour : surfaces) {
-            if (neighbour.getId() == foothold.getId() || neighbour.isWall() || visited.contains(neighbour.getId())) {
-                continue;
-            }
-            int neighbourY = surfaceY(neighbour);
-            if (neighbourY > floorY + apex || neighbourY < floorY - apex) {
-                continue;
-            }
-            int nLoX = Math.min(neighbour.getX1(), neighbour.getX2());
-            int nHiX = Math.max(neighbour.getX1(), neighbour.getX2());
-            if (horizontalGap(loX, hiX, nLoX, nHiX) > JUMP_ACROSS_PX) {
-                continue;
-            }
-            if (jumpChainEscapes(surfaces, neighbour, apex, visited)) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    private static boolean columnClear(List<Foothold> surfaces, int floorY, int targetY,
-                                       int loX, int hiX, int tLoX, int tHiX) {
-        for (Foothold other : surfaces) {
-            if (other.isWall()) {
-                continue;
-            }
-            int oY = surfaceY(other);
-            if (oY >= floorY - STEP_UP_TOLERANCE_PX || oY <= targetY) {
-                continue; // not strictly inside the climbed band
-            }
-            int oLoX = Math.min(other.getX1(), other.getX2());
-            int oHiX = Math.max(other.getX1(), other.getX2());
-            if (overlap(loX, hiX, oLoX, oHiX) > 0 || overlap(tLoX, tHiX, oLoX, oHiX) > 0) {
-                return false; // an intermediate surface would catch the jump first
-            }
-        }
-        return true;
-    }
-
     private static List<Foothold> walkableFootholds(MapleMap map) {
         // getAllFootholds() rebuilds its collection per call — call it ONCE per verdict (see
         // hasEscape) and thread the list through the scans below.
         return map.getFootholds().getAllFootholds();
-    }
-
-    private static int horizontalGap(int aLo, int aHi, int bLo, int bHi) {
-        if (overlap(aLo, aHi, bLo, bHi) > 0) {
-            return 0;
-        }
-        return Math.max(bLo - aHi, aLo - bHi);
-    }
-
-    private static int overlap(int aLo, int aHi, int bLo, int bHi) {
-        return Math.min(aHi, bHi) - Math.max(aLo, bLo);
     }
 }

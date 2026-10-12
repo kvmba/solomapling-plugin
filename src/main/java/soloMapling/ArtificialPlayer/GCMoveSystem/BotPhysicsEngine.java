@@ -1928,6 +1928,75 @@ final class BotPhysicsEngine {
         return simulateLanding(map, from, 0f, stepX, 0L);
     }
 
+    /*
+     * The Hermit/Night Lord Flash Jump arc: a normal directional launch, then the one-time
+     * mid-air dash impulse injected at the live trigger point (stepAirborne's own rule - scale 1
+     * fires at the apex, a reduced scale part-way up the ascent), with the arc pinned exactly
+     * like the executor pins it (fixedAirArc: no drag, steering no-op). Reuses the same collision
+     * resolution as every other flight sim, so a "yes" here is an arc the executor really flies.
+     * dir is the launch direction; scale is the FlashJumpTiers cap (0 = the class has no dash).
+     */
+    static JumpLanding simulateFlashJumpLanding(MapleMap map, Point from, int dir,
+                                                BotMovementProfile profile, float scale) {
+        if (map == null || from == null || dir == 0 || scale <= 0f) {
+            return null;
+        }
+        float impulseScale = Math.min(scale, 1f);
+        float jumpForce = jumpForcePerTick(profile);
+        float triggerVelY = -(1f - impulseScale) * jumpForce;
+        int walkStep = Math.max(1, BotPhysicsEngine.walkStep(map, profile));
+
+        boolean dashFired = false;
+        int stepX = dir * walkStep;
+        float velocityY = -jumpForce;
+        double physX = from.x;
+        double physY = from.y;
+        int previousIntY = from.y;
+        final float gravity = gravityPerTick();
+        final float maxFall = maxFallPerTick();
+        final int floorY = mapFloorY(map);
+
+        for (int tick = 0; tick < FALL_SIM_TICK_CAP; tick++) {
+            if (!dashFired && velocityY >= triggerVelY) {
+                stepX = Math.round(dir * flashJumpHPerTick() * impulseScale);
+                velocityY = flashJumpVPerTick() * impulseScale;
+                dashFired = true;
+            }
+            physX += stepX;
+            physY += velocityY + 0.5f * gravity;
+            velocityY = Math.min(velocityY + gravity, maxFall);
+
+            int x = (int) Math.round(physX);
+            int intY = (int) Math.round(physY);
+            Point previousPoint = new Point((int) Math.round(physX - stepX), previousIntY);
+            Point nextPoint = new Point(x, intY);
+            AirCollision collision = resolveAirCollision(map, previousPoint, nextPoint);
+            if (collision.type() == AirCollisionType.WALL) {
+                stepX = 0;
+                physX = collision.point().x;
+                physY = collision.point().y;
+                previousIntY = collision.point().y;
+                continue;
+            }
+            if (collision.type() == AirCollisionType.CEILING) {
+                physX = collision.point().x;
+                physY = collision.point().y;
+                velocityY = 0f;
+                previousIntY = collision.point().y;
+                continue;
+            }
+            if (collision.type() == AirCollisionType.LAND) {
+                return new JumpLanding(collision.point(), collision.foothold(),
+                        nextPoint.x - previousPoint.x, nextPoint.y - previousPoint.y, tick + 1);
+            }
+            if (intY > floorY) {
+                return null; // fell past the map floor — no foothold exists below
+            }
+            previousIntY = intY;
+        }
+        return null;
+    }
+
     static JumpLanding simulateRopeJumpLanding(MapleMap map, Point from, int stepX) {
         return simulateRopeJumpLanding(map, from, stepX, BotMovementProfile.base());
     }

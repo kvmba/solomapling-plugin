@@ -560,7 +560,8 @@ class BotMovementManager {
         if (ground == null) {
             return true; // nothing below: out-of-map recovery's case
         }
-        return DeadPitGuard.isLivableLanding(map, ground, entry.movementProfile);
+        return DeadPitGuard.isLivableLanding(map, ground, entry.movementProfile,
+                BotMovementCapabilities.of(entry.bot));
     }
 
     static void tickSwimming(BotMovementState entry, Point targetPos) {
@@ -1233,12 +1234,14 @@ class BotMovementManager {
     static void tickUnstuck(BotMovementState entry) {
         Character bot = entry.bot;
         int walkStep = BotPhysicsEngine.walkStep(bot.getMap(), entry.movementProfile);
-        // Dead-pit self-heal, FIRST: a bot standing on an unescapable surface (no jump chain,
-        // no rope, no portal) cannot be rescued by any local action - every hop only reshuffles
+        // Dead-pit self-heal, FIRST: a bot standing on an unescapable surface (no real one-move
+        // exit, no rope, no portal) cannot be rescued by any local action - every hop only reshuffles
         // it inside the basin, and the hop loop is exactly the reported "fell into the pit and
         // never recovers". Teleport it to the nearest livable ground and drop the goal so the
         // brain re-decides a reachable target next tick. (nearestLivableGround can only answer
         // null on a foothold-less map, in which case the guard could not have fired either.)
+        // Swim maps never enter this branch: the guard's swim rule reads every underwater surface
+        // livable (water is always an exit), so isOnDeadPitFloor answers false there.
         if (isOnDeadPitFloor(entry, bot)) {
             Point rescue = nearestLivableGround(bot, entry.movementProfile);
             clearNavigationState(entry);
@@ -1283,11 +1286,13 @@ class BotMovementManager {
         Point hopPos = bot.getPosition();
         JumpLanding hopLanding = simulateJumpLanding(bot.getMap(), hopPos, walkStep * dir, entry.movementProfile);
         if (hopLanding != null
-                && !DeadPitGuard.isLivableLanding(bot.getMap(), hopLanding.point(), entry.movementProfile)) {
+                && !DeadPitGuard.isLivableLanding(bot.getMap(), hopLanding.point(), entry.movementProfile,
+                        BotMovementCapabilities.of(entry.bot))) {
             dir = -dir;
             hopLanding = simulateJumpLanding(bot.getMap(), hopPos, walkStep * dir, entry.movementProfile);
             if (hopLanding == null
-                    || !DeadPitGuard.isLivableLanding(bot.getMap(), hopLanding.point(), entry.movementProfile)) {
+                    || !DeadPitGuard.isLivableLanding(bot.getMap(), hopLanding.point(), entry.movementProfile,
+                            BotMovementCapabilities.of(entry.bot))) {
                 clearNavigationState(entry);
                 entry.unstuckCooldownMs = delayAfterCurrentTick(5000);
                 return;
@@ -1309,7 +1314,8 @@ class BotMovementManager {
         if (standing == null) {
             return false;
         }
-        return !DeadPitGuard.isLivableSurface(bot.getMap(), standing, entry.movementProfile);
+        return !DeadPitGuard.isLivableSurface(bot.getMap(), standing, entry.movementProfile,
+                BotMovementCapabilities.of(entry.bot));
     }
 
     /**
@@ -1338,6 +1344,7 @@ class BotMovementManager {
         if (map == null || map.getFootholds() == null || pos == null) {
             return null;
         }
+        BotMovementCapabilities capabilities = BotMovementCapabilities.of(bot);
         Point best = null;
         long bestCost = Long.MAX_VALUE;
         for (Foothold foothold : map.getFootholds().getAllFootholds()) {
@@ -1361,7 +1368,7 @@ class BotMovementManager {
             if (candidate == null || candidate.y >= pos.y) {
                 continue;
             }
-            if (!DeadPitGuard.isLivableLanding(map, candidate, profile)) {
+            if (!DeadPitGuard.isLivableLanding(map, candidate, profile, capabilities)) {
                 continue; // a rescue never relocates into another trap
             }
             // Vertical distance dominates: a rescue wants the nearest livable floor ABOVE,

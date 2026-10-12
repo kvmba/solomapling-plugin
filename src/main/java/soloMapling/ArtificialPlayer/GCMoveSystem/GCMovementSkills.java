@@ -81,11 +81,11 @@ final class GCMovementSkills {
         int dy = targetY - origin.y;
         Point dest;
         if (Math.abs(dx) >= Math.abs(dy)) {
-            dest = horizontalLanding(map, origin, dx >= 0 ? 1 : -1, TELEPORT_RANGE_PX, TELEPORT_Y_SNAP_PX);
+            dest = horizontalTeleportLanding(map, origin, dx >= 0 ? 1 : -1);
         } else if (dy > 0) {
-            dest = downLanding(map, origin);
+            dest = downLanding(map, origin, st.movementProfile, BotMovementCapabilities.of(bot));
         } else {
-            dest = upLanding(map, origin);
+            dest = upTeleportLanding(map, origin);
         }
         if (dest == null || (dest.x == origin.x && dest.y == origin.y)) {
             return false;
@@ -197,14 +197,17 @@ final class GCMovementSkills {
     }
 
     // ── Landing math (foothold-only; ported concept from BotPhysicsEngine.teleportLanding) ──
+    // Package-visible: the dead-pit guard reuses the SAME landing math as an escape probe, so the
+    // verdict and the executor can never disagree about where a blink ends up.
 
-    // Nearest same-level (±ySnap) foothold up to `range` px toward `dir`, stepping the reach inward if the
-    // full-range spot is off the ledge (keeps the blink on the bot's own platform instead of into a gap).
-    private static Point horizontalLanding(MapleMap map, Point origin, int dir, int range, int ySnap) {
-        for (int reach = range; reach >= 40; reach -= 25) {
+    // Nearest same-level (±TELEPORT_Y_SNAP_PX) foothold up to TELEPORT_RANGE_PX toward `dir`,
+    // stepping the reach inward if the full-range spot is off the ledge (keeps the blink on the
+    // bot's own platform instead of into a gap).
+    static Point horizontalTeleportLanding(MapleMap map, Point origin, int dir) {
+        for (int reach = TELEPORT_RANGE_PX; reach >= 40; reach -= 25) {
             int tx = origin.x + dir * reach;
             Point g = GCMovement.groundPointBelow(map, tx, origin.y - 4);
-            if (g != null && Math.abs(g.y - origin.y) <= ySnap) {
+            if (g != null && Math.abs(g.y - origin.y) <= TELEPORT_Y_SNAP_PX) {
                 return g;
             }
         }
@@ -213,12 +216,13 @@ final class GCMovementSkills {
 
     // Furthest platform within range directly above (mirror of downLanding). No foothold-tree "findAbove"
     // exists, so this goes through the bucket-index scan added to BotPhysicsEngine. Null -> caller walks.
-    private static Point upLanding(MapleMap map, Point origin) {
+    static Point upTeleportLanding(MapleMap map, Point origin) {
         return BotPhysicsEngine.findGroundPointAbove(map, origin, TELEPORT_RANGE_PX);
     }
 
-    // Furthest platform within range directly below (walk platform-by-platform, keep the last in range).
-    private static Point downLanding(MapleMap map, Point origin) {
+    // Furthest platform within range directly below (walk platform-by-platform, keep the last in range) —
+    // the RAW landing ladder; the executor's livability-filtered variant is downLanding below.
+    static Point downTeleportLanding(MapleMap map, Point origin) {
         Point best = null;
         Point probe = GCMovement.groundPointBelow(map, origin.x, origin.y + 1);
         int guard = 0;
@@ -226,11 +230,17 @@ final class GCMovementSkills {
             best = probe;
             probe = GCMovement.groundPointBelow(map, origin.x, probe.y + 1);
         }
-        // Dead-pit guard: the deepest platform in range may be a basin floor the bot can never
-        // leave (no jump chain, no rope, no portal). Walk the ladder back UP to the deepest
-        // LIVABLE platform still within blink range, or give up the blink entirely — never
-        // into a one-way trap, and never past the range contract.
-        while (best != null && !DeadPitGuard.isLivableLanding(map, best, null)) {
+        return best;
+    }
+
+    // The executor's blink-down landing: the deepest platform in range may be a basin floor the bot
+    // can never leave (no real exit), so walk the ladder back UP to the deepest LIVABLE platform
+    // still within blink range under THIS bot's own movement profile / class abilities — or give up
+    // the blink entirely: never into a one-way trap, and never past the range contract.
+    private static Point downLanding(MapleMap map, Point origin, BotMovementProfile profile,
+                                     BotMovementCapabilities capabilities) {
+        Point best = downTeleportLanding(map, origin);
+        while (best != null && !DeadPitGuard.isLivableLanding(map, best, profile, capabilities)) {
             Point above = GCMovement.groundPointBelow(map, origin.x, best.y - 1);
             if (above == null || above.y >= best.y || above.y - origin.y > TELEPORT_RANGE_PX) {
                 return null;

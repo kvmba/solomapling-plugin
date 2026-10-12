@@ -149,12 +149,13 @@ final class BotFallbackMovementManager {
         }
         // Dead-pit guard: "ground far below" includes pit floors the bot can never leave.
         // Simulate the walk-off's real landing and refuse it if that surface has no way out
-        // (no jump chain, no rope, no portal) — the fallback must not walk a bot into a
+        // (no real one-move exit, no rope, no portal) — the fallback must not walk a bot into a
         // one-way basin while its graph is still baking.
         BotPhysicsEngine.JumpLanding landing =
                 BotPhysicsEngine.simulateFallLanding(map, ahead, stepX);
         return landing != null
-                && DeadPitGuard.isLivableLanding(map, landing.point(), entry.movementProfile);
+                && DeadPitGuard.isLivableLanding(map, landing.point(), entry.movementProfile,
+                        BotMovementCapabilities.of(entry.bot));
     }
 
     /*
@@ -398,8 +399,8 @@ final class BotFallbackMovementManager {
         // Same dead-pit gate the committed walk-off (shouldWalkOffLedge) enforces: the steering
         // half must not aim at a ledge the strike half would refuse — otherwise the bot walks to
         // the rim of a one-way basin and is handed over to a fall the decision guards rejected.
-        left = livableWalkOff(map, entry.movementProfile, left);
-        right = livableWalkOff(map, entry.movementProfile, right);
+        left = livableWalkOff(map, entry, left);
+        right = livableWalkOff(map, entry, right);
         Point best = chooseBetterLedgeTarget(botPos, targetPos, left, right);
         if (best == null) {
             return null;
@@ -450,7 +451,8 @@ final class BotFallbackMovementManager {
         // unescapable basin. It doesn't - a 150px drop can land on a surface whose only
         // exits are jumps the WZ flags (or their absence) allow on paper but no path
         // actually serves. Refuse any landing the livability probe cannot clear.
-        if (!DeadPitGuard.isLivableLanding(map, landing.point(), entry.movementProfile)) {
+        if (!DeadPitGuard.isLivableLanding(map, landing.point(), entry.movementProfile,
+                BotMovementCapabilities.of(entry.bot))) {
             return false;
         }
         return Math.abs(targetPos.x - botPos.x) <= Math.max(BotMovementManager.cfg.FOLLOW_DIST,
@@ -491,14 +493,15 @@ final class BotFallbackMovementManager {
      * the candidate. Swings the same probe the decision side runs, so steering and execution can
      * never disagree about a dead basin.
      */
-    private static Point livableWalkOff(MapleMap map, BotMovementProfile profile, Point target) {
+    private static Point livableWalkOff(MapleMap map, BotMovementState entry, Point target) {
         if (target == null || map == null || map.isSwim()) {
             return target;
         }
         BotPhysicsEngine.JumpLanding landing =
                 BotPhysicsEngine.simulateFallLanding(map, target, 0);
         return landing != null
-                && DeadPitGuard.isLivableLanding(map, landing.point(), profile)
+                && DeadPitGuard.isLivableLanding(map, landing.point(), entry.movementProfile,
+                BotMovementCapabilities.of(entry.bot))
                 ? target
                 : null;
     }

@@ -52,6 +52,23 @@ class SmallPlatformSwayTest {
         ServiceProperty props = mock(ServiceProperty.class);
         when(props.getLanguage()).thenReturn("zh-CN");
         when(ctx.getBean(ServiceProperty.class)).thenReturn(props);
+        // Job's static initializer resolves names through I18nUtil's MessageSource beans (the guard
+        // reads the bot's class abilities); install them so the mock host stays complete.
+        org.springframework.context.MessageSource messageSource =
+                mock(org.springframework.context.MessageSource.class);
+        when(messageSource.getMessage(org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.any(Object[].class),
+                org.mockito.ArgumentMatchers.any(java.util.Locale.class)))
+                .thenAnswer(inv -> inv.getArgument(0));
+        when(ctx.getBean(org.mockito.ArgumentMatchers.eq("messageSource"),
+                org.mockito.ArgumentMatchers.eq(org.springframework.context.MessageSource.class)))
+                .thenReturn(messageSource);
+        when(ctx.getBean(org.mockito.ArgumentMatchers.eq("logSource"),
+                org.mockito.ArgumentMatchers.eq(org.springframework.context.MessageSource.class)))
+                .thenReturn(messageSource);
+        when(ctx.getBean(org.mockito.ArgumentMatchers.eq("exceptionSource"),
+                org.mockito.ArgumentMatchers.eq(org.springframework.context.MessageSource.class)))
+                .thenReturn(messageSource);
         try {
             var setter = ServerManager.class.getDeclaredMethod("setApplicationContext", ApplicationContext.class);
             setter.setAccessible(true);
@@ -267,13 +284,18 @@ class SmallPlatformSwayTest {
     void theRescueHopPrefersLandingOffTheCurrentSurface() {
         // Direct pin on the escape rule: a bot parked on a narrow-but-not-residency platform with a
         // precise goal, next to an edge that drops to another surface, must hop the ESCAPING way.
-        // Synthetic geometry (FallbackDeadPitGuardTest's construction): a 100px perch whose right
-        // edge drops onto a wide lower floor — only the RIGHT hop leaves the perch surface.
+        // Synthetic geometry: a 100px perch whose right edge drops onto a wide lower floor — only
+        // the RIGHT hop leaves the perch surface. The floor carries a small step above its right
+        // end so it is a genuinely livable landing under the engine-exact escape check (a bare
+        // floor 100px under the perch has no real way out — jump apex ~77px — and the guard would
+        // rightly refuse the hop; the step gives it a real exit, keeping this fixture's subject
+        // the hop DIRECTION, not the livability of the destination).
         MapleMap map = new MapleMap(922010193, 0, 0, 922010000, 0.0f);
         map.setMapLineBoundings(-500, 600, -800, 800);
         FootholdTree tree = new FootholdTree(new Point(-800, -500), new Point(800, 600));
         tree.insert(new Foothold(new Point(1000, 0), new Point(1100, 0), 1)); // the perch
         tree.insert(new Foothold(new Point(1100, 100), new Point(1600, 100), 2)); // lower floor
+        tree.insert(new Foothold(new Point(1300, 40), new Point(1400, 40), 3)); // the floor's step up
         map.setFootholds(tree);
         BotMovementState st = botOn(map, 1080, 0);
         moveGoal(st, 1050, 0);

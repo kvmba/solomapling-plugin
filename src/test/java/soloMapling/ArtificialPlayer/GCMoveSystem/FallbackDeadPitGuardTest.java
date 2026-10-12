@@ -106,6 +106,9 @@ public class FallbackDeadPitGuardTest {
         when(bot.getMap()).thenReturn(map);
         when(bot.getPosition()).thenReturn(new Point(x, y));
         when(bot.getId()).thenReturn(x + 7100);
+        // No class abilities in this fixture: a null job normalizes to NONE (a deep-stub Job would
+        // drag in Job.<clinit> and its host I18n wiring for nothing).
+        when(bot.getJob()).thenReturn(null);
         return bot;
     }
 

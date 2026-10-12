@@ -121,21 +121,39 @@ public class DeadPitDownEscapeTest {
 
     @Test
     void anFfdSourceNeverCountsTheStraightDrop() {
-        // The forbidFallDown source: the same geometry as the live drop-through case
-        // (world beyond apex above, real landing below), but the source carries the WZ
-        // ffd flag - the client blocks the straight drop-through there (canStartDownJump
-        // honours the flag), so the guard must not mint a phantom exit from a move the
-        // bot can never make. fallEscape refuses -> no escape left -> DEAD.
+        // The forbidFallDown source: the only way DOWN is a pass-through drop onto the pocket
+        // floor directly beneath it (sealed sides: walls connect the platform's underside to
+        // the floor), so the flag is the whole difference. The client blocks the straight
+        // drop-through on an ffd surface (canStartDownJump honours the flag), and the guard
+        // probes the pass-through with that same sim - it must not mint a phantom exit from a
+        // move the bot can never make. The open edges fall off the map (no landing: the
+        // fall-out recovery owns that), so no walk-off exit exists either.
         MapleMap map = map(922011915);
         FootholdTree tree = new FootholdTree(new Point(-265, -100), new Point(265, 600));
         tree.insert(new Foothold(new Point(-265, -200), new Point(265, -200), 3)); // world beyond apex
         Foothold ffdRow = new Foothold(new Point(-265, 0), new Point(265, 0), 1);
         ffdRow.setForbidFallDown(true);
         tree.insert(ffdRow);
-        tree.insert(new Foothold(new Point(-265, 392), new Point(265, 392), 2));
+        tree.insert(new Foothold(new Point(-50, 0), new Point(-50, 392), 4));   // left wall
+        tree.insert(new Foothold(new Point(50, 0), new Point(50, 392), 5));     // right wall
+        tree.insert(new Foothold(new Point(-50, 392), new Point(50, 392), 2));  // pocket floor
         map.setFootholds(tree);
         assertFalse(DeadPitGuard.isLivableSurface(map, ffdRow, BotMovementProfile.base()),
                 "an ffd source's straight drop-through is not an exit");
+
+        // Same geometry without the flag: the pass-through drop lands on the pocket floor, so
+        // the surface is live - the flag is load-bearing in this fixture.
+        MapleMap open = map(922011917);
+        FootholdTree openTree = new FootholdTree(new Point(-265, -100), new Point(265, 600));
+        openTree.insert(new Foothold(new Point(-265, -200), new Point(265, -200), 3));
+        openTree.insert(new Foothold(new Point(-265, 0), new Point(265, 0), 1));
+        openTree.insert(new Foothold(new Point(-50, 0), new Point(-50, 392), 4));
+        openTree.insert(new Foothold(new Point(50, 0), new Point(50, 392), 5));
+        openTree.insert(new Foothold(new Point(-50, 392), new Point(50, 392), 2));
+        open.setFootholds(openTree);
+        assertTrue(DeadPitGuard.isLivableSurface(open,
+                        BotPhysicsEngine.findGroundFoothold(open, new Point(0, 0)), BotMovementProfile.base()),
+                "without the flag the same drop-through is a real exit");
     }
 
     @Test

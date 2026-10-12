@@ -1183,7 +1183,8 @@ final class GCMovementDriver {
         // exists there), and the VR top is never consulted again.
         Point clamped = new Point(Math.max(vr.x, Math.min(vr.x + vr.width, pos.x)), pos.y);
         Point ground = BotPhysicsEngine.findGroundPoint(map, new Point(clamped.x, clamped.y - 1));
-        if (ground == null || !DeadPitGuard.isLivableLanding(map, ground, entry.movementProfile)) {
+        if (ground == null || !DeadPitGuard.isLivableLanding(map, ground, entry.movementProfile,
+                BotMovementCapabilities.of(entry.bot))) {
             ground = BotMovementManager.nearestLivableGround(bot, entry.movementProfile);
         }
         // Null here means there is nothing above to lift the bot onto: a foothold-less map, or

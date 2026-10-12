@@ -438,7 +438,8 @@ final class BotContactDamage {
         BotPhysicsEngine.JumpLanding landing = BotPhysicsEngine.simulateJumpLanding(
                 map, botPos, hVel, entry.movementProfile);
         return landing != null
-                && !DeadPitGuard.isLivableLanding(map, landing.point(), entry.movementProfile);
+                && !DeadPitGuard.isLivableLanding(map, landing.point(), entry.movementProfile,
+                BotMovementCapabilities.of(entry.bot));
     }
 
     // Knockback applies on any real (non-zero) hit unless the bot is climbing. The donor also rolled

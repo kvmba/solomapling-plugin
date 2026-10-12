@@ -47,6 +47,23 @@ public class DeadPitInvariantTest {
         ServiceProperty props = mock(ServiceProperty.class);
         when(props.getLanguage()).thenReturn("zh-CN");
         when(ctx.getBean(ServiceProperty.class)).thenReturn(props);
+        // The guard now reads the bot's class abilities (bot.getJob()), which can initialize Job and
+        // through it I18nUtil's MessageSource beans — install them so the mock host stays complete.
+        org.springframework.context.MessageSource messageSource =
+                mock(org.springframework.context.MessageSource.class);
+        when(messageSource.getMessage(org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.any(Object[].class),
+                org.mockito.ArgumentMatchers.any(java.util.Locale.class)))
+                .thenAnswer(inv -> inv.getArgument(0));
+        when(ctx.getBean(org.mockito.ArgumentMatchers.eq("messageSource"),
+                org.mockito.ArgumentMatchers.eq(org.springframework.context.MessageSource.class)))
+                .thenReturn(messageSource);
+        when(ctx.getBean(org.mockito.ArgumentMatchers.eq("logSource"),
+                org.mockito.ArgumentMatchers.eq(org.springframework.context.MessageSource.class)))
+                .thenReturn(messageSource);
+        when(ctx.getBean(org.mockito.ArgumentMatchers.eq("exceptionSource"),
+                org.mockito.ArgumentMatchers.eq(org.springframework.context.MessageSource.class)))
+                .thenReturn(messageSource);
         var setter = ServerManager.class.getDeclaredMethod("setApplicationContext", ApplicationContext.class);
         setter.setAccessible(true);
         setter.invoke(new ServerManager(), ctx);
@@ -79,6 +96,9 @@ public class DeadPitInvariantTest {
         when(bot.getMapId()).thenReturn(map.getId());
         when(bot.getHp()).thenReturn(50);
         when(bot.getChair()).thenReturn(0);
+        // No class abilities in this fixture: a null job normalizes to NONE (a deep-stub Job would
+        // drag in Job.<clinit> and its host I18n wiring for nothing).
+        when(bot.getJob()).thenReturn(null);
         java.awt.Point pos = new java.awt.Point(x, y);
         when(bot.getPosition()).thenAnswer(inv -> new Point(pos));
         org.mockito.Mockito.doAnswer(inv -> {
@@ -286,18 +306,17 @@ public class DeadPitInvariantTest {
 
     @Test
     void aSwimMapIsNeverTreatedAsDead() {
-        // There is no dead-pit concept in water: falls end at the swim floor clamp. The
-        // exclusion lives in the ENTRANCES (shouldUseDownJump / the steer and knockback
-        // probes): every descent decision must be a no-op ("allowed") on a swim map
-        // standing on "pit-shaped" geometry.
+        // There is no dead-pit concept in water: the water itself is the way out (a swimmer rises
+        // and leaves any surface), so the PROBE reads every underwater surface livable, and the
+        // descent ENTRANCES (shouldUseDownJump / the steer and knockback probes) stay no-ops too.
         MapleMap map = BotNavigationMapLoader.loadMapGeometry(922010300);
         map.setSwim(true);
         Foothold pitFloor = BotPhysicsEngine.findGroundFoothold(map, PIT_FLOOR);
         if (pitFloor == null) {
             return; // no indexed tree on this stub: nothing to assert
         }
-        assertFalse(DeadPitGuard.isLivableSurface(map, pitFloor, BotMovementProfile.base()),
-                "precondition: the probe itself calls this surface dead");
+        assertTrue(DeadPitGuard.isLivableSurface(map, pitFloor, BotMovementProfile.base()),
+                "the guard's swim rule reads every underwater surface livable");
         // The swim exception as the ENTRANCES implement it: the fallback's down-jump gate
         // takes the swim branch (canStartDownJump + short horizontal check) and never
         // consults the land-map livability probe.
