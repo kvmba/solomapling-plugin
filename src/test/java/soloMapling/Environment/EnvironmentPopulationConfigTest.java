@@ -107,8 +107,10 @@ class EnvironmentPopulationConfigTest {
     @Test
     void bundledYamlDisablesSpawnPacing() {
         var plan = EnvironmentPopulationConfig.reload();
-        // Bundled config sets spawn_rate_per_second: 0 => unlimited (pacing disabled).
-        assertTrue(plan.spawnRatePerSecond() <= 0);
+        // Bundled config sets spawn_rate_per_second: 0 => unlimited (pacing disabled). Pinned to
+        // the exact shipped value: a near-tautological `<= 0` would pass just as well on a bug
+        // that ignored the field entirely, so the pin has to name the value the file carries.
+        assertEquals(0, plan.spawnRatePerSecond());
     }
 
     @Test
@@ -153,7 +155,9 @@ class EnvironmentPopulationConfigTest {
                 """);
         try {
             EnvironmentPopulationConfig.setConfigPath(tmp.toString());
-            assertTrue(EnvironmentPopulationConfig.reload().spawnRatePerSecond() <= 0);
+            // The documented sentinel is exactly 0 ("unlimited"); the exact pin catches a parser
+            // that mis-reads the value (e.g. a negative default leaking through).
+            assertEquals(0, EnvironmentPopulationConfig.reload().spawnRatePerSecond());
         } finally {
             Files.deleteIfExists(tmp);
         }

@@ -37,6 +37,16 @@ public final class PyramidPqData {
      */
     public static final int LOBBY_MAP = 926010000;
 
+    /**
+     * The quest's own in-run ("Nett's Pyramid") instance maps, which the audit also covers: the
+     * NETTS_PYRAMID entry the run warps into, plus the two bonus-room variants the host's
+     * {@code killing_BonusSetting.js} distinguishes. Named here so the whole Pyramid map set is
+     * declared in one place rather than only appearing in script/map data.
+     */
+    public static final int RUN_MAP = 926010001;
+    public static final int BONUS_MAP = 926010013;
+    public static final int BONUS_MAP_ALT = 926010070;
+
     /** The quest's own bar, straight from Duarte's refusals. */
     public static final int MIN_PARTY = 2;
     public static final int MIN_LEVEL = 40;

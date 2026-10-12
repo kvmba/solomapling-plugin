@@ -71,7 +71,26 @@ final class BotNavigationGraphProvider {
     private static final int JUMP_POST_LANDING_STABILITY_TICKS = 3;
     private static final int MAX_PROFILED_JUMP_REGIONS = 5;
     private static final int FAST_WARMUP_MAX_FOOTHOLDS = 200;
-    private static final Path CACHE_DIR = Path.of("cache", "bot-nav", "v" + GRAPH_VERSION);
+    // The on-disk cache root. Deliberately NOT final, with the accessors below as the supported
+    // seam: a test must be able to redirect this away from the server's real working directory.
+    // (Poking a static final Path through sun.misc.Unsafe is unsound — once the JIT has
+    // constant-folded the field the write is simply not observed, which is how the cache test
+    // silently wrote the REAL cache directory under a warm JVM.)
+    private static volatile Path CACHE_DIR = defaultCacheDir();
+
+    private static Path defaultCacheDir() {
+        return Path.of("cache", "bot-nav", "v" + GRAPH_VERSION);
+    }
+
+    /** The cache root currently in effect (the real directory in production). */
+    static Path cacheDir() {
+        return CACHE_DIR;
+    }
+
+    /** Redirect the cache root — the supported test seam (see the field note). */
+    static void setCacheDir(Path dir) {
+        CACHE_DIR = dir;
+    }
     private static final Map<GraphCacheKey, BotNavigationGraph> GRAPHS = new ConcurrentHashMap<>();
     // mapId -> the GraphCacheKeys cached for that map. GRAPHS is keyed by (map, speed, jump, snowshoes),
     // but the three hottest lookups (peekGraph(MapleMap), peekClosestGraph, peekBestGraph) only know the

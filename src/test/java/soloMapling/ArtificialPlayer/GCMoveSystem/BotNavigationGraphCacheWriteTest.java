@@ -364,6 +364,9 @@ class BotNavigationGraphCacheWriteTest {
      */
     private static Path originalCacheDir;
 
+    /** Production cache paths that already existed before this test's current method ran. */
+    private static final Set<Path> productionHitsBefore = new java.util.HashSet<>();
+
     /*
      * The single temp dir for a test. It has to be captured here rather than taken as a
      * @TempDir parameter on each test method: JUnit hands the @BeforeEach and the test method
@@ -375,9 +378,18 @@ class BotNavigationGraphCacheWriteTest {
     @BeforeEach
     void redirectCacheDir(@TempDir Path tmp) {
         tmpRoot = tmp;
-        originalCacheDir = readCacheDir();
+        originalCacheDir = BotNavigationGraphProvider.cacheDir();
+        // Snapshot which of THIS test's cache keys already exist in the real directory, so the
+        // after-check only reports files the test itself created (a dev machine may legitimately
+        // hold real cache files for the same map ids).
+        productionHitsBefore.clear();
+        for (Path p : productionKeyFiles()) {
+            if (Files.exists(p)) {
+                productionHitsBefore.add(p);
+            }
+        }
         Path redirected = cacheDirFor(tmp);
-        writeCacheDir(redirected);
+        BotNavigationGraphProvider.setCacheDir(redirected);
         try {
             Files.createDirectories(redirected);
         } catch (IOException e) {
@@ -385,53 +397,36 @@ class BotNavigationGraphCacheWriteTest {
         }
     }
 
+    /** The cache files this test's own keys can produce in the production directory. */
+    private static List<Path> productionKeyFiles() {
+        Path wrongDir = Path.of("cache", "bot-nav", "v" + graphVersion());
+        List<Path> out = new ArrayList<>();
+        for (int[] key : new int[][]{
+                {1_000_000, 140, 110}, {2_000_000, 130, 110}, {2_000_000, 145, 120},
+                {2_000_000, 155, 123}, {3_000_000, 140, 110}, {4_000_000, 140, 110}}) {
+            for (int shoed = 0; shoed <= 1; shoed++) {
+                out.add(wrongDir.resolve(key[0] + "-s" + key[1] + "-j" + key[2] + "-ss" + shoed + ".bin"));
+            }
+        }
+        return out;
+    }
+
     @AfterEach
     void restoreCacheDir() {
+        // The regression this guards: with an unsupported seam (sun.misc.Unsafe on a static final
+        // field) a warm JIT does not observe the redirect and the test writes the REAL cache
+        // directory — which is exactly how it silently poisoned production cache files. The seam
+        // above is observable; this check turns any future regression into a loud failure instead
+        // of silent pollution, comparing against the pre-test snapshot so an unrelated existing
+        // file can never trip it.
+        for (Path p : productionKeyFiles()) {
+            if (!productionHitsBefore.contains(p) && Files.exists(p)) {
+                org.junit.jupiter.api.Assertions.fail(
+                        "cache test wrote the production cache directory (redirect not observed): " + p);
+            }
+        }
         if (originalCacheDir != null) {
-            writeCacheDir(originalCacheDir);
-        }
-    }
-
-    private static Path readCacheDir() {
-        try {
-            return (Path) cacheDirField().get(null);
-        } catch (IllegalAccessException e) {
-            throw new AssertionError(e);
-        }
-    }
-
-    /*
-     * CACHE_DIR is a static final Path pointing at the real server cache directory. Tests must
-     * never write there, so it gets swapped for a temp dir. `Field.setAccessible` alone cannot
-     * write a static final field, and the old `modifiers` hack was removed in JDK 12+, so go
-     * through Unsafe: staticFieldBase + staticFieldOffset is the surviving way to poke a static
-     * field on a modern JDK, and it sidesteps the final-field write barrier entirely.
-     */
-    private static void writeCacheDir(Path value) {
-        Field f = cacheDirField();
-        UNSAFE.putObject(UNSAFE.staticFieldBase(f), UNSAFE.staticFieldOffset(f), value);
-    }
-
-    private static Field cacheDirField() {
-        try {
-            Field f = BotNavigationGraphProvider.class.getDeclaredField("CACHE_DIR");
-            f.setAccessible(true);
-            return f;
-        } catch (NoSuchFieldException e) {
-            throw new AssertionError("CACHE_DIR not found", e);
-        }
-    }
-
-    private static final sun.misc.Unsafe UNSAFE = unsafe();
-
-    @SuppressWarnings("deprecation")
-    private static sun.misc.Unsafe unsafe() {
-        try {
-            Field f = sun.misc.Unsafe.class.getDeclaredField("theUnsafe");
-            f.setAccessible(true);
-            return (sun.misc.Unsafe) f.get(null);
-        } catch (ReflectiveOperationException e) {
-            throw new AssertionError("Unsafe unavailable", e);
+            BotNavigationGraphProvider.setCacheDir(originalCacheDir);
         }
     }
 }

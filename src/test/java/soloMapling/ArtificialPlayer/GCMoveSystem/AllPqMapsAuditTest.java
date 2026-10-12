@@ -14,10 +14,12 @@ import org.junit.jupiter.api.Test;
 import org.springframework.context.ApplicationContext;
 
 import java.awt.Point;
+import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.TreeSet;
 
 import static org.mockito.Mockito.*;
 
@@ -53,24 +55,137 @@ public class AllPqMapsAuditTest {
     }
 
     private static List<Integer> maps() throws Exception {
-        return Files.readAllLines(Path.of("/tmp/all_pq_maps.txt")).stream()
-                .map(String::trim).filter(s -> !s.isEmpty()).map(Integer::parseInt).toList();
+        // The audit's input used to be ONLY the baked /tmp/all_pq_maps.txt artifact, so on any
+        // machine that never baked it the whole audit silently never ran — and a PQ map added to
+        // the plugin afterwards could never enter the list. The list is now DERIVED from the two
+        // sources that define the plugin's PQ content, both of which always ship:
+        //   1. every numeric map id the plugin's own PQ data classes declare (BotTypes/**), and
+        //   2. every numeric map id named by the HOST's own PQ event scripts - the scripts the
+        //      plugin's quest families run on, found beside the wz tree.
+        // /tmp/all_pq_maps.txt stays supported as an extra source for the old workflow, but the
+        // audit no longer depends on it. Every id is WZ-validated before it is audited.
+        TreeSet<Integer> ids = new TreeSet<>();
+        ids.addAll(repoDeclaredPqMaps());
+        ids.addAll(hostPqScriptMaps());
+        Path baked = Path.of("/tmp/all_pq_maps.txt");
+        if (Files.isRegularFile(baked)) {
+            for (String line : Files.readAllLines(baked)) {
+                String t = line.trim();
+                if (!t.isEmpty()) {
+                    try {
+                        ids.add(Integer.parseInt(t));
+                    } catch (NumberFormatException ignored) {
+                    }
+                }
+            }
+        }
+        return new ArrayList<>(ids);
+    }
+
+    /** The host's PQ event scripts, i.e. the runs this plugin's quest bots actually play. */
+    private static final String[] PQ_EVENTS = {
+            "AmoriaPQ", "BossRushPQ", "EllinPQ", "HenesysPQ", "HorntailPQ", "KerningPQ",
+            "LudiMazePQ", "LudiPQ", "MagatiaPQ_A", "MagatiaPQ_Z", "OrbisPQ", "PiratePQ", "ZakumPQ",
+    };
+
+    /**
+     * Every map id the plugin's own PQ data classes declare, read from the sources so the list
+     * cannot drift: a numeric {@code public static final int} in the quest data classes is an id.
+     * Scanning (not a class list) is deliberate - adding a quest must not mean editing this audit.
+     */
+    private static List<Integer> repoDeclaredPqMaps() throws Exception {
+        List<Integer> out = new ArrayList<>();
+        Path root = Path.of("src/main/java/soloMapling/ArtificialPlayer/BotTypes");
+        if (!Files.isDirectory(root)) {
+            return out; // packaged/other cwd - the host-script + baked sources still apply
+        }
+        java.util.regex.Pattern decl =
+                java.util.regex.Pattern.compile("public\\s+static\\s+final\\s+int\\s+\\w+\\s*=\\s*(\\d{4,9})\\s*;");
+        try (java.util.stream.Stream<Path> walk = Files.walk(root)) {
+            for (Path p : walk.filter(f -> f.toString().endsWith(".java")).toList()) {
+                java.util.regex.Matcher m = decl.matcher(Files.readString(p));
+                while (m.find()) {
+                    out.add(Integer.parseInt(m.group(1)));
+                }
+            }
+        }
+        return out;
+    }
+
+    /**
+     * Every numeric map id named by the host's own PQ event scripts. The scripts are the authority
+     * for "which maps does a run touch" - they warp by id, and they list the per-stage sub-rooms
+     * the data classes only parameterise. Scoped to the plugin's own quest families, never the
+     * whole event tree: an unrelated event's maps are not this audit's contract. Located through
+     * the wz tree's sibling; absent (packaged runs) contributes nothing.
+     */
+    private static List<Integer> hostPqScriptMaps() throws Exception {
+        List<Integer> out = new ArrayList<>();
+        // Resolve the wz symlink for REAL before stepping to its parent: normalize() would collapse
+        // "wz/.." textually and point at the project root instead of the host checkout that the
+        // symlink targets. Absent (packaged runs) simply contributes nothing.
+        Path scripts = null;
+        try {
+            Path wz = Path.of("wz").toRealPath();
+            Path parent = wz.getParent();
+            if (parent != null) {
+                Path candidate = parent.resolve("scripts").resolve("event");
+                if (Files.isDirectory(candidate)) {
+                    scripts = candidate;
+                }
+            }
+        } catch (IOException ignored) {
+            // no wz tree beside this checkout - the repo-declared source still applies
+        }
+        if (scripts == null) {
+            return out;
+        }
+        java.util.regex.Pattern id = java.util.regex.Pattern.compile("\\b(\\d{9})\\b");
+        for (String event : PQ_EVENTS) {
+            Path js = scripts.resolve(event + ".js");
+            if (!Files.isRegularFile(js)) {
+                continue;
+            }
+            java.util.regex.Matcher m = id.matcher(Files.readString(js));
+            while (m.find()) {
+                out.add(Integer.parseInt(m.group(1)));
+            }
+        }
+        return out;
     }
 
     @Test
     void auditEveryPqStageMap() throws Exception {
-        // The audit's input is the baked PQ map list at /tmp/all_pq_maps.txt (a WZ-walk artifact,
-        // not a repo file). Without it every case would just error out, so skip - but skip from
-        // INSIDE the test: a class-level @BeforeAll assumption aborts the container and surefire
-        // reports tests=0, which reads exactly like a green audit on a machine that never ran one.
-        // A method-level assumption makes the skip visible as a skipped test instead.
-        org.junit.jupiter.api.Assumptions.assumeTrue(Files.exists(Path.of("/tmp/all_pq_maps.txt")),
-                "baked PQ map list /tmp/all_pq_maps.txt not present on this machine");
+        // No skip is possible any more: the map list is derived from sources that ship with the
+        // audit, so this test either runs a real audit or fails. (The only machine dependency is
+        // Map.wz itself, which every other WZ-backed test in this package also requires.)
+        org.junit.jupiter.api.Assumptions.assumeTrue(
+                org.gms.provider.DataProviderFactory.getDataProvider(org.gms.provider.wz.WZFiles.MAP)
+                        .getData("Map/Map9/922010100.img") != null,
+                "Map.wz not resolvable from this working directory");
+        List<Integer> mapIds = maps();
+        // The plugin's PQ families declare well over 60 map ids and their host scripts add the
+        // per-stage sub-rooms on top; a running count near the repo-only figure means a source
+        // silently vanished (which is exactly how the fixed bug slipped through: `wz/..` was
+        // normalised textually, so the script source contributed nothing while the audit still
+        // looked green). The floor is deliberately between the two.
+        org.junit.jupiter.api.Assertions.assertTrue(mapIds.size() >= 150,
+                "PQ map list looks degenerate: " + mapIds.size() + " ids - a map-list source failed");
         StringBuilder report = new StringBuilder();
-        int bakeFail = 0, linkFail = 0, fallbackFail = 0;
-        for (int mapId : maps()) {
+        int bakeFail = 0, linkFail = 0, fallbackFail = 0, audited = 0;
+        for (int mapId : mapIds) {
+            // Only audit ids that really are maps: the scanned sources also carry item/mob ids.
+            try {
+                if (org.gms.provider.DataProviderFactory.getDataProvider(org.gms.provider.wz.WZFiles.MAP)
+                        .getData(BotNavigationMapLoader.getMapName(mapId)) == null) {
+                    continue;
+                }
+            } catch (Throwable t) {
+                continue;
+            }
             String line = audit(mapId);
             report.append(line).append('\n');
+            audited++;
             if (line.contains("BAKE-FAIL")) bakeFail++;
             // The uf=0 decorative-rope LINK-FAILs show up in the AS-IS pass by design (the
             // engine treats them as climbable; the USABLE pass is the truth). Only the
@@ -78,11 +193,14 @@ public class AllPqMapsAuditTest {
             if (line.contains("usable LINK-FAIL")) linkFail++;
         }
         Files.writeString(Path.of("/tmp/pq_audit_report.txt"), report.toString());
-        System.out.println("[audit] bakeFail=" + bakeFail + " linkFail=" + linkFail + " fallbackFail=" + fallbackFail);
+        System.out.println("[audit] maps=" + audited + " bakeFail=" + bakeFail
+                + " linkFail=" + linkFail + " fallbackFail=" + fallbackFail);
         // Assertions only on the classes that MUST be clean: bake + real climb links.
         // The fallback scan is reported per-map (informational): a ground row far from any
         // rope legitimately has no launch and the walk layer handles approach — the audit
         // prints those so a human can eyeball each one.
+        org.junit.jupiter.api.Assertions.assertTrue(audited >= 60,
+                "audited too few maps (" + audited + ") - check the map-list sources");
         org.junit.jupiter.api.Assertions.assertEquals(0, bakeFail, "bake failures - see /tmp/pq_audit_report.txt");
         org.junit.jupiter.api.Assertions.assertEquals(0, linkFail, "climb-link failures - see /tmp/pq_audit_report.txt");
     }

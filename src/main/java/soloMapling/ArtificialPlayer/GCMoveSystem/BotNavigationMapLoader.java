@@ -146,7 +146,9 @@ final class BotNavigationMapLoader {
         }
     }
 
-    private static String getMapName(int mapId) {
+    /** The WZ path of a map id. Package-visible for callers that only probe existence (the PQ
+     *  audit filters scanned numeric ids down to real maps with it) - one copy of the rule. */
+    static String getMapName(int mapId) {
         return "Map/Map" + (mapId / 100000000) + "/" + String.format("%09d", mapId) + ".img";
     }
 }
