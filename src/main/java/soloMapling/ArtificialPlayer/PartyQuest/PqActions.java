@@ -188,9 +188,11 @@ public final class PqActions {
     // the bot between its goal and the fight. walkTo/holdArea arm a shield that outlives the
     // blocking window (the walk keeps flying after walkTo gives up waiting) and expires on
     // its own - the combat beat reads it and skips only the chase's steering (the swing half
-    // still runs) until then. Cleared eagerly when the walk lands; the expiry is the wedge
-    // escape. Deliberately NOT armed by the wait spots (waitNearStageNpc/spreadNearStageNpc):
-    // a park renewed every macro tick was a permanent combat blackout, the reported "发呆".
+    // still runs) until then. walkTo releases it through one decision seam (walkShieldReleases)
+    // when the wait saw the landing or an engine-abandoned move; a walk still flying past the
+    // wait keeps the shield until the expiry - the wedge escape. Deliberately NOT armed by the
+    // wait spots (waitNearStageNpc/spreadNearStageNpc): a park renewed every macro tick was a
+    // permanent combat blackout, the reported "发呆".
     private static final long STAGE_WALK_SHIELD_MS = 8_000;
     private static final Map<Integer, Long> stageWalkShieldUntilByBot = new java.util.concurrent.ConcurrentHashMap<>();
 
@@ -996,18 +998,18 @@ public final class PqActions {
         } else if (sameLevel
                 || Math.abs(mobFloor.y - anchorFloor.y) <= FLOOR_SNAP_BAND_PX) {
             // Same level (no climb at stake) or the mob's floor probe still reads the pinned
-            // platform: track the mob's live floor. CROSS-LEVEL chases do NOT follow the live x
-            // — a knockback slide or a gap-crossing floor probe re-aims the goal every beat,
-            // each re-aim can land in a different nav region and discards the committed climb
-            // edge mid-rope (the LPQ stage-1 卡绳索/永不登台 loop). The pinned anchor is within
-            // one platform of the mob; melee reach (±90px) covers the rest once the bot lands.
-            // The pinned-platform branch keeps the mob's live x but on the PINNED floor y (the
-            // probe falling through a shelf gap onto a deep row is an off-platform blip, and the
-            // region gate below holds it anyway): only a same-REGION mob moves the goal y.
+            // platform: follow the mob's live x on the PINNED floor y (the probe falling through
+            // a shelf gap onto a deep row is an off-platform blip, and only a same-REGION mob
+            // moves the goal y). What keeps the committed climb edge alive is not a frozen x -
+            // it is the region-stable goal gate below: a goal whose REGION would change is held
+            // back there, while an x shift inside one region never discards the edge
+            // (reuseCommittedEdge drops it only on a region change). An earlier cross-level
+            // x-pin description was superseded by that gate; live-x tracking is the shipped
+            // behaviour.
             anchorFloor = new Point(mp.x, anchorFloor.y);
             chaseAnchorByBot.put(bot.getId(), anchorFloor);
             chaseDriftByBot.remove(bot.getId());
-            tx = sameLevel ? mp.x : anchorFloor.x;
+            tx = mp.x;
             ty = sameLevel ? mobFloor.y : anchorFloor.y;
         } else {
             int drift = chaseDriftByBot.merge(bot.getId(), 1, Integer::sum);
