@@ -210,8 +210,13 @@ public class DropCommands {
             return;
         }
         Item itemToDrop = BotLogic.generateCleanItemWithQty(itemId, qty);
-        fakechar.getMap().spawnItemDrop(fakechar, owner, itemToDrop,
-                owner.getPosition(), false, false);
+        // Addressed hand-off: the host's own owner-locked drop (permanentOwner set under the
+        // item lock inside the map call). The plain spawnItemDrop left the pile unaddressed -
+        // party members and (after the 15s window) every bot's sweep could pick it, so the
+        // isPermanentOwner guards in botCanLoot/isFloorLoot/recoverUngatheredHandoffs never
+        // engaged and a leader's pile could ping-pong or be lost to the despawn sweeper.
+        fakechar.getMap().spawnOwnerOnlyItemDrop(fakechar, owner, itemToDrop,
+                owner.getPosition());
     }
 
     // Throwing multiple items in a row (for display purposes)
