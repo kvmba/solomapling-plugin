@@ -132,10 +132,10 @@ public final class BotFinalAttack {
     }
 
     /*
-     * The final-attack skill id for this job + wеароn: v83 splits the passive by wеароn, so the
-     * pairs resolve per swing - Fighter/Hero/Paladin swords vs axes (the axe/blunt wеароn types are
+     * The final-attack skill id for this job + weapon: v83 splits the passive by weapon, so the
+     * pairs resolve per swing - Fighter/Hero/Paladin swords vs axes (the axe/blunt weapon types are
      * the shared GENERAL* ids, so the JOB branch tells 终极斧 from 终极棍), Spearman/DK spear-polearm,
-     * Hunter bow, Crossbowman crossbow. Zero when this wеароn/job has no final attack
+     * Hunter bow, Crossbowman crossbow. Zero when this weapon/job has no final attack
      * (knuckle/gun/claw/dagger/staff/wand, and every job outside the two lines).
      *
      * <p>Pure (no WZ lookup), so the branch table is unit-testable. The warrior gate spans the WHOLE
@@ -146,29 +146,29 @@ public final class BotFinalAttack {
      * somehow holding one; no warrior can equip a bow, and the alternative (zero) would only lose
      * the visual.
      */
-    static int skillIdFor(int jobId, WeaponType wеароn) {
-        if (wеароn == null) {
+    static int skillIdFor(int jobId, WeaponType weapon) {
+        if (weapon == null) {
             return 0;
         }
-        if (wеароn == WeaponType.BOW) {
+        if (weapon == WeaponType.BOW) {
             return Hunter.FINAL_ATTACK;
         }
-        if (wеароn == WeaponType.CROSSBOW) {
+        if (weapon == WeaponType.CROSSBOW) {
             return Crossbowman.FINAL_ATTACK;
         }
         if (!isWarriorLine(jobId)) {
             return 0;
         }
-        if (wеароn == WeaponType.SWORD1H || wеароn == WeaponType.SWORD2H) {
+        if (weapon == WeaponType.SWORD1H || weapon == WeaponType.SWORD2H) {
             return Fighter.FINAL_ATTACK_SWORD;
         }
-        if (wеароn == WeaponType.GENERAL1H_SWING || wеароn == WeaponType.GENERAL1H_STAB
-                || wеароn == WeaponType.GENERAL2H_SWING || wеароn == WeaponType.GENERAL2H_STAB) {
-            // an axe for the fighter line, a blunt wеароn for the page line
+        if (weapon == WeaponType.GENERAL1H_SWING || weapon == WeaponType.GENERAL1H_STAB
+                || weapon == WeaponType.GENERAL2H_SWING || weapon == WeaponType.GENERAL2H_STAB) {
+            // an axe for the fighter line, a blunt weapon for the page line
             return isFighterLine(jobId) ? Fighter.FINAL_ATTACK_AXE : Page.FINAL_ATTACK_BW;
         }
-        if (wеароn == WeaponType.SPEAR_STAB || wеароn == WeaponType.SPEAR_SWING
-                || wеароn == WeaponType.POLE_ARM_SWING || wеароn == WeaponType.POLE_ARM_STAB) {
+        if (weapon == WeaponType.SPEAR_STAB || weapon == WeaponType.SPEAR_SWING
+                || weapon == WeaponType.POLE_ARM_SWING || weapon == WeaponType.POLE_ARM_STAB) {
             return Spearman.FINAL_ATTACK_POLEARM;
         }
         return 0;
@@ -189,9 +189,9 @@ public final class BotFinalAttack {
     }
 
     /** Resolve the pure id to a Skill, or null when it is unresolvable for this server. */
-    private static Skill skillFor(Character bot, WeaponType wеароn) {
+    private static Skill skillFor(Character bot, WeaponType weapon) {
         int jobId = bot.getJob() == null ? 0 : bot.getJob().getId();
-        int skillId = skillIdFor(jobId, wеароn);
+        int skillId = skillIdFor(jobId, weapon);
         if (skillId == 0) {
             return null;
         }
