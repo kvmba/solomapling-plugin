@@ -115,21 +115,21 @@ public final class BotSpawnThrottle {
     }
 
     /**
-     * Opens the next window when the current one has expired.
+     * Opens the current window when the previous one has expired.
      * Caller must hold {@link #LOCK}.
      *
-     * <p>Windows ALWAYS advance by exactly {@code WINDOW_MS} - never resynced to
-     * "now". That is what makes the rate bound hold: a window's end is a fixed
-     * point in time, so the permits granted in any 1s interval are bounded even
-     * when a stall lets several windows elapse at once.
+     * <p>Windows advance in whole {@code WINDOW_MS} steps from the anchor, never resynced
+     * to "now": a window's end stays a fixed point in time, so the rate bound holds and a
+     * thread waking on a stale deadline finds a window that has not been reopened under it.
      *
-     * <p>Resyncing to now (the obvious-looking optimisation) silently breaks that
-     * bound: threads still sleeping on an older deadline wake late, find a fresh
-     * window already open, and are granted on top of the permits that window
-     * already handed out - measured 12 permits in one second against a limit of 8.
-     * Idle periods are not worth that: after a long stall the first few windows
-     * are simply spent catching up, which is the correct (conservative) behaviour
-     * for something whose whole job is to protect the server from a flood.
+     * <p>The step is the WHOLE number of windows that have elapsed, landing on the boundary
+     * current at {@code now} - not a single window. Stepping by one window per call looked
+     * equivalent but was not: after an idle of N seconds the anchor sat N windows in the
+     * past, so the next N acquires each opened another window instantly and the backlog
+     * drained as a burst (measured 22 permits in the first second at limit 10, after a 12s
+     * idle). Advancing to the current boundary caps an idle recovery at ONE window, which is
+     * what this class exists for - protecting the server from a flood - while still letting
+     * a wave of {@code limit} spawns go back-to-back inside its window.
      */
     private static void rollWindowIfDue() {
         long now = System.currentTimeMillis();
@@ -138,10 +138,12 @@ public final class BotSpawnThrottle {
             usedInWindow.set(0);
             return;
         }
-        if (now - windowStartMs < WINDOW_MS) {
+        long elapsed = now - windowStartMs;
+        if (elapsed < WINDOW_MS) {
             return; // current window still live
         }
-        windowStartMs += WINDOW_MS;
+        // Land on the latest boundary at or before now, preserving the original phase.
+        windowStartMs += (elapsed / WINDOW_MS) * WINDOW_MS;
         usedInWindow.set(0);
     }
 
@@ -164,6 +166,32 @@ public final class BotSpawnThrottle {
         synchronized (LOCK) {
             windowStartMs = 0L;
             usedInWindow.set(0);
+        }
+    }
+
+    /**
+     * Test seam: pretend the current window was opened {@code ms} earlier, simulating an idle
+     * period without sleeping. Backdate only (a forward move is not a situation the sweep can
+     * face), and only from an already-opened window, so the caller anchors with one
+     * {@link #acquire()} first. Production never calls this - the configured limit always wins,
+     * like {@link #setLimitForTest}.
+     */
+    static void backdateWindowForTest(long ms) {
+        if (ms <= 0) {
+            throw new IllegalArgumentException("backdate must be positive");
+        }
+        synchronized (LOCK) {
+            if (windowStartMs == 0L) {
+                windowStartMs = System.currentTimeMillis();
+            }
+            windowStartMs -= ms;
+        }
+    }
+
+    /** The current window's start, for the idle-recovery test (see {@link #backdateWindowForTest}). */
+    static long windowStartMsForTest() {
+        synchronized (LOCK) {
+            return windowStartMs;
         }
     }
 

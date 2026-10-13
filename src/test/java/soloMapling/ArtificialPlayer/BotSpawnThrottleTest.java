@@ -269,4 +269,34 @@ class BotSpawnThrottleTest {
         });
         assertEquals(0, BotSpawnThrottle.remaining());
     }
+
+    /**
+     * Regression: an idle period must cap the recovery at ONE window, not one window per
+     * second of the idle.
+     *
+     * <p>The sweep used to advance the window anchor by exactly one step per call, so after an
+     * N-second idle the anchor stayed N windows in the past and the next N acquires each opened
+     * another window instantly - the whole backlog drained as a burst, which is the opposite of
+     * this class's job. The startup waves have minutes-long gaps between them, so a wave could
+     * genuinely arrive after such an idle and flood the server.
+     *
+     * <p>The invariant asserted is the root cause itself and is deterministic: after any
+     * acquire, the anchor must be within one window of now. Backdating simulates the idle with
+     * no sleeping, and reading the anchor back avoids timing grants on a loaded machine.
+     */
+    @Test
+    void anIdlePeriodNeverLeavesTheAnchorMoreThanOneWindowBehind() {
+        final int limit = 10;
+        BotSpawnThrottle.setLimitForTest(limit);
+        BotSpawnThrottle.acquire();                     // anchor the window (consumes 1 permit)
+        BotSpawnThrottle.backdateWindowForTest(12_000); // 12 windows of idle
+
+        BotSpawnThrottle.acquire();
+
+        long behindMs = System.currentTimeMillis() - BotSpawnThrottle.windowStartMsForTest();
+        assertTrue(behindMs < 1_000L,
+                "after an idle the anchor must land on the current boundary (it sat " + behindMs
+                        + "ms behind): a single-window step per call leaves it N windows back and"
+                        + " the next N acquires each open another window back-to-back");
+    }
 }
