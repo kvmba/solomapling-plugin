@@ -1481,6 +1481,9 @@ public final class PqActions {
     /** botId -> the wait spot this bot currently holds in one of the rings. */
     private static final Map<Integer, Point> WAIT_CLAIM_BY_BOT = new java.util.concurrent.ConcurrentHashMap<>();
 
+    /** botId -> the map-instance key its claim sits under, so the release touches only that set. */
+    private static final Map<Integer, Integer> WAIT_CLAIM_KEY_BY_BOT = new java.util.concurrent.ConcurrentHashMap<>();
+
     public static void waitNearStageNpc(Character bot) {
         if (bot == null || bot.getMap() == null) {
             return;
@@ -1563,14 +1566,14 @@ public final class PqActions {
         // quest hold separate room copies with the same map id, and their parties must not
         // claim each other's spots.
         Integer key = System.identityHashCode(bot.getMap());
-        java.util.Set<Point> taken = WAIT_SPOT_CLAIMS.computeIfAbsent(key,
-                k -> java.util.Collections.synchronizedSet(new java.util.HashSet<>()));
+        java.util.Set<Point> taken = claimsFor(key);
         Point mine = WAIT_CLAIM_BY_BOT.get(bot.getId());
         if (mine != null) {
             if (taken.contains(mine)) {
                 return mine; // keep walking to (or hold) the spot we already claimed
             }
             WAIT_CLAIM_BY_BOT.remove(bot.getId()); // stale: the ring was reset mid-hold
+            WAIT_CLAIM_KEY_BY_BOT.remove(bot.getId());
         }
         Point spot;
         synchronized (taken) {
@@ -1580,9 +1583,8 @@ public final class PqActions {
                 Point open = nearbyOpenSpot(bot.getMap(), npc, taken);
                 spot = open != null ? open : npc; // crowded: hold the NPC rather than fight
             }
-            taken.add(spot);
+            recordWaitClaim(bot.getId(), key, spot);
         }
-        WAIT_CLAIM_BY_BOT.put(bot.getId(), spot);
         return spot;
     }
 
@@ -1628,14 +1630,57 @@ public final class PqActions {
         return best;
     }
 
+    /**
+     * Record a bot's wait-spot claim under a map-instance key (see {@link #claimNear}). The
+     * single place the three maps are written, so the shapes cannot drift; package seam so the
+     * lifecycle is unit-testable without a live Character/MapleMap (the bookkeeping is what
+     * leaked before). Callers hold the instance set's monitor; the maps are concurrent.
+     */
+    static void recordWaitClaim(int botId, int key, Point spot) {
+        claimsFor(key).add(spot);
+        WAIT_CLAIM_BY_BOT.put(botId, spot);
+        WAIT_CLAIM_KEY_BY_BOT.put(botId, key);
+    }
+
+    /** The claimed-set for a map-instance key, creating it when absent (see {@link #claimNear}). */
+    static java.util.Set<Point> claimsFor(int key) {
+        return WAIT_SPOT_CLAIMS.computeIfAbsent(key,
+                k -> java.util.Collections.synchronizedSet(new java.util.HashSet<>()));
+    }
+
+    /** Whether this bot currently holds a wait-spot claim (test/diagnostic seam). */
+    static boolean holdsWaitClaim(int botId) {
+        return WAIT_CLAIM_BY_BOT.containsKey(botId);
+    }
+
+    /** The claimed-set for a map-instance key, or null when nothing holds one (test seam). */
+    static java.util.Set<Point> waitClaimsFor(int key) {
+        return WAIT_SPOT_CLAIMS.get(key);
+    }
+
     /** Give up a wait-spot claim when the bot leaves the room or the run ends. */
     public static void releaseWaitClaims(int botId) {
         Point mine = WAIT_CLAIM_BY_BOT.remove(botId);
         if (mine == null) {
             return;
         }
-        for (java.util.Set<Point> spots : WAIT_SPOT_CLAIMS.values()) {
+        // Remove the point from its own set only, then drop the entry once it empties. Iterating
+        // every set to find the point (the original shape) left one empty set behind per room
+        // INSTANCE ever visited - the key is an identity hash that is never reused, so the table
+        // grew for the life of the process while each entry held nothing.
+        Integer key = WAIT_CLAIM_KEY_BY_BOT.remove(botId);
+        if (key == null) {
+            return;
+        }
+        java.util.Set<Point> spots = WAIT_SPOT_CLAIMS.get(key);
+        if (spots == null) {
+            return;
+        }
+        synchronized (spots) {
             spots.remove(mine);
+            if (spots.isEmpty()) {
+                WAIT_SPOT_CLAIMS.remove(key, spots);
+            }
         }
     }
 
