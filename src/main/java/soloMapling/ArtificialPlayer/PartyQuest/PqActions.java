@@ -758,7 +758,8 @@ public final class PqActions {
             return 0;
         }
         long now = movementNowMs();
-        List<MapObject> mine = BotLogic.checkForItemsOnFloor(bot, bot.getPosition(), 9_000, new int[]{itemId});
+        List<MapObject> mine = BotLogic.checkForItemsOnFloor(bot, bot.getPosition(),
+                radiusSq(HANDOFF_RECLAIM_RANGE_PX), new int[]{itemId});
         int recovered = 0;
         for (MapObject obj : mine) {
             if (!(obj instanceof MapItem drop) || drop.isPickedUp()) {
@@ -793,6 +794,27 @@ public final class PqActions {
     private static final long HANDOFF_RECLAIM_AFTER_MS = 30_000L;
     /** At most this many piles per tick, to pace the walk. */
     private static final int HANDOFF_RECLAIM_MAX = 3;
+    /**
+     * How far away a reclaimable hand-off pile may sit, in px. The bot walks to it, so this is a
+     * room-scale radius, not an at-the-feet box; the sweep must be able to see a pile the leader
+     * walked past.
+     */
+    private static final int HANDOFF_RECLAIM_RANGE_PX = 9_000;
+
+    /**
+     * Convert a RADIUS in px to the squared distance the map's item/mob scans compare against.
+     *
+     * <p>{@code MapleMap.getMapObjectsInRange} takes {@code rangeSq} and tests
+     * {@code from.distanceSq(pos) <= rangeSq}, so every caller that thinks in px must square
+     * once here. Passing a px value through unsquared scans a circle of sqrt(value) px - the
+     * {@code loot()} "2000 covered ~45px" bug, and the same mistake left the hand-off reclaim
+     * blind past ~95px. Both px-radius scans in this class share this one boundary so they
+     * cannot drift apart again; a compile-time constant that is already squared at its
+     * declaration (WAIT_NPC_RANGE_SQ) does not need it.
+     */
+    static double radiusSq(double radiusPx) {
+        return radiusPx * radiusPx;
+    }
 
     /** The bot's party leader, or null when the bot has no party (or the leader is offline). */
     public static Character partyLeader(Character bot) {
@@ -1351,9 +1373,9 @@ public final class PqActions {
         // old call passed the px value straight through, so "2_000" scanned a ~45px circle
         // around the bot's feet. A kill lands its drop at the mob's x, and the attack reach
         // alone spans 90-400px, so most kills left their passes unlooted on the floor (the
-        // "bots do not pick up the passes" report). Square it here so every caller's radius
-        // means px.
-        List<MapObject> found = BotLogic.checkForItemsOnFloor(bot, at, radiusPx * radiusPx, itemIds);
+        // "bots do not pick up the passes" report). radiusSq squares it once, so every
+        // caller's radius means px.
+        List<MapObject> found = BotLogic.checkForItemsOnFloor(bot, at, radiusSq(radiusPx), itemIds);
         if (found.isEmpty()) {
             return 0;
         }
