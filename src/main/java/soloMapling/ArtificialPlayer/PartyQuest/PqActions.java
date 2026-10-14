@@ -744,7 +744,7 @@ public final class PqActions {
         }
         // Reach the post FIRST: the rule is piles AT the stage NPC. A bot still walking
         // there has not delivered this tick (the arrival nudge re-runs it promptly).
-        if (bot.getPosition().distanceSq(post) > HANDOFF_PICKUP_RANGE_SQ) {
+        if (bot.getPosition().distanceSq(post) > PICKUP_REACH_SQ) {
             walkTo(bot, post);
             return 0;
         }
@@ -803,7 +803,7 @@ public final class PqActions {
             if (at == null) {
                 continue;
             }
-            if (bot.getPosition().distanceSq(at) > HANDOFF_PICKUP_RANGE_SQ) {
+            if (bot.getPosition().distanceSq(at) > PICKUP_REACH_SQ) {
                 GCMovement.move(bot, at.x, at.y);
                 continue; // still walking; the pile is picked up on a later tick, up close
             }
@@ -815,9 +815,6 @@ public final class PqActions {
         }
         return recovered;
     }
-
-    /** How close the bot must stand to a reclaimable pile before picking it up (see recoverUngatheredHandoffs). */
-    private static final double HANDOFF_PICKUP_RANGE_SQ = 150.0 * 150.0;
 
     /** A hand-off pile older than this is walked back and re-pocketed (see recoverUngatheredHandoffs). */
     private static final long HANDOFF_RECLAIM_AFTER_MS = 30_000L;
@@ -1431,7 +1428,7 @@ public final class PqActions {
         // kill's drop reachable without a whole-room grab.
         Point botPos = bot.getPosition();
         List<MapObject> reachable = new java.util.ArrayList<>();
-        Point walkTo = null;
+        Point nearestOutOfReach = null;
         double walkSq = Double.MAX_VALUE;
         for (MapObject o : lone) {
             Point ip = o.getPosition();
@@ -1439,19 +1436,19 @@ public final class PqActions {
                 continue;
             }
             double dsq = botPos.distanceSq(ip);
-            if (dsq <= LOOT_PICKUP_REACH_SQ) {
+            if (dsq <= PICKUP_REACH_SQ) {
                 reachable.add(o);
             } else if (dsq < walkSq) {
                 walkSq = dsq;
-                walkTo = ip; // the nearest out-of-reach drop is this tick's walk target
+                nearestOutOfReach = ip; // the nearest out-of-reach drop is this tick's walk target
             }
         }
         if (reachable.isEmpty()) {
             // No live move to override: seekAndAttack/approachUnder own the walk while one
             // is in flight (a loot walk issued over it would yank the bot off its chase).
             // The re-issue replans from the CURRENT pixel once the driver is idle.
-            if (walkTo != null && !GCMovement.isMoving(bot)) {
-                GCMovement.move(bot, walkTo.x, walkTo.y);
+            if (nearestOutOfReach != null && !GCMovement.isMoving(bot)) {
+                GCMovement.move(bot, nearestOutOfReach.x, nearestOutOfReach.y);
             }
             return 0;
         }
@@ -1467,8 +1464,12 @@ public final class PqActions {
         return after - before;
     }
 
-    /** How close the bot must stand to a drop before picking it up (see loot). */
-    private static final double LOOT_PICKUP_REACH_SQ = 150.0 * 150.0;
+    /**
+     * How close the bot must stand to a drop before picking it up - one reach for every
+     * proximity-honest pickup in this class (loot, the delivery post, the reclaim walk):
+     * the engine's pickupItem has no distance check, so "close" is this class's rule.
+     */
+    private static final double PICKUP_REACH_SQ = 150.0 * 150.0;
 
     /**
      * Whether a floor drop is ordinary loot a bot may pocket: a single piece (reactor stacks
@@ -1631,13 +1632,9 @@ public final class PqActions {
         // claim each other's spots.
         Integer key = System.identityHashCode(bot.getMap());
         java.util.Set<Point> taken = claimsFor(key);
-        Point mine = WAIT_CLAIM_BY_BOT.get(bot.getId());
+        Point mine = heldWaitSpotOrRelease(bot.getId(), taken);
         if (mine != null) {
-            if (taken.contains(mine)) {
-                return mine; // keep walking to (or hold) the spot we already claimed
-            }
-            WAIT_CLAIM_BY_BOT.remove(bot.getId()); // stale: the ring was reset mid-hold
-            WAIT_CLAIM_KEY_BY_BOT.remove(bot.getId());
+            return mine; // keep walking to (or hold) the spot we already claimed
         }
         Point spot;
         synchronized (taken) {
@@ -1720,6 +1717,27 @@ public final class PqActions {
     /** The claimed-set for a map-instance key, or null when nothing holds one (test seam). */
     static java.util.Set<Point> waitClaimsFor(int key) {
         return WAIT_SPOT_CLAIMS.get(key);
+    }
+
+    /**
+     * The spot this bot already holds when that spot is still in the room it is standing in,
+     * else null after RELEASING the stale hold. A bot that moved rooms while holding must not
+     * keep the old room's point booked: dropping only the two bot->spot maps (the old shape)
+     * left it in the old room's set forever, because a claim is only ever removed from the set
+     * named by the bot's own key at release time. Releasing here - the same seam the
+     * stop/lobby paths use - hands the point back to ITS set and drops that entry when it
+     * empties.
+     */
+    static Point heldWaitSpotOrRelease(int botId, java.util.Set<Point> roomSpots) {
+        Point mine = WAIT_CLAIM_BY_BOT.get(botId);
+        if (mine == null) {
+            return null;
+        }
+        if (roomSpots.contains(mine)) {
+            return mine; // keep walking to (or hold) the spot we already claimed
+        }
+        releaseWaitClaims(botId);
+        return null;
     }
 
     /** Give up a wait-spot claim when the bot leaves the room or the run ends. */

@@ -68,6 +68,42 @@ class PqWaitClaimLifecycleTest {
     }
 
     @Test
+    void staleHoldReleasesIntoItsOwnRoomSet() {
+        // A bot that changes rooms while holding a spot: its point sits in the OLD room's set,
+        // and the room it now stands in never names it. Looking the old claim up against the
+        // new room's set must HAND IT BACK, not just drop the bot->spot maps - that left the
+        // point booked in the old set for the life of the process.
+        int oldRoom = 0x7E57_000A;
+        int newRoom = 0x7E57_000B;
+        Point spot = new Point(140, -215);
+        PqActions.recordWaitClaim(8100, oldRoom, spot);
+        try {
+            Point kept = PqActions.heldWaitSpotOrRelease(8100, PqActions.claimsFor(newRoom));
+            assertNull(kept, "a spot held in another room is not this room's claim");
+            assertFalse(PqActions.holdsWaitClaim(8100), "the stale hold is given up");
+            assertNull(PqActions.waitClaimsFor(oldRoom),
+                    "the point must be handed back to its own room's set (entry dropped when empty)");
+        } finally {
+            PqActions.releaseWaitClaims(8100);
+        }
+    }
+
+    @Test
+    void aSpotStillInThisRoomIsKept() {
+        // The hot path: every tick re-asks for the hold; while the spot IS this room's claim the
+        // bot must keep it (no release, no re-roll of the ring).
+        int room = 0x7E57_000C;
+        Point spot = new Point(160, -215);
+        PqActions.recordWaitClaim(8101, room, spot);
+        try {
+            assertSame(spot, PqActions.heldWaitSpotOrRelease(8101, PqActions.claimsFor(room)));
+            assertTrue(PqActions.holdsWaitClaim(8101), "a live claim survives re-asking");
+        } finally {
+            PqActions.releaseWaitClaims(8101);
+        }
+    }
+
+    @Test
     void releaseIsIdempotentAndSafeWithoutAClaim() {
         // A bot that never claimed (the stage-less rooms), or is released twice, must not throw
         // and must not disturb anyone else's table.
