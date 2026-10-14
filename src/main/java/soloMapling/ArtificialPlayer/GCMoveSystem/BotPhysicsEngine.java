@@ -2063,8 +2063,29 @@ final class BotPhysicsEngine {
         if (ceiling.type() != AirCollisionType.NONE && ceiling.progress() < best.progress()) {
             best = ceiling;
         }
-        if (landing.type() != AirCollisionType.NONE && landing.progress() < best.progress()) {
-            best = landing;
+        // Ours (LPQ stage-3 pit, 922010300): a LANDING wins a TIE against a WALL as long as the
+        // floor spans the wall's clamp pixel - the side the bot came from. The pit's wall column
+        // (x=-265) and the stage row's end piece share the corner (-265,-160), so a fall crossing
+        // the row's plane at that column reports BOTH collisions at the same progress (exact:
+        // i/steps and (wallX-startX)/(endX-startX) are the same integer ratio). Keeping the wall
+        // parked the bot against the wall face at (or past) the row's height; below that height
+        // the column has no ground for 402px, and the next straight-down probe (it starts one px
+        // under the feet) cannot re-detect the row's own surface - the bot fell through the row
+        // into the pit (the observed "掉进死坑又被拉回来"). The landing keeps the bot on the
+        // floor it was already flying over, which is what a real client's ground scan does at a
+        // corner. A tie whose floor lies only past the wall face is a fall drifting in from the
+        // other side; landing it would move the bot through the wall, so the wall keeps that
+        // step. Strictly-earlier landings still win, strictly-later ones still lose.
+        if (landing.type() != AirCollisionType.NONE) {
+            boolean strictlyEarlier = landing.progress() < best.progress();
+            // The tie is taken on the bot's side of the wall: safeX = wallX - travel direction.
+            boolean tiedWallOnBotsSide = landing.progress() == best.progress()
+                    && best.type() == AirCollisionType.WALL
+                    && landing.foothold().getX1() <= best.point().x
+                    && landing.foothold().getX2() >= best.point().x;
+            if (strictlyEarlier || tiedWallOnBotsSide) {
+                best = landing;
+            }
         }
         return best;
     }
