@@ -1,12 +1,14 @@
 package soloMapling.ArtificialPlayer.BotTypes.Ludi;
 
 import org.gms.client.Character;
+import org.gms.client.Job;
 import org.gms.server.life.Monster;
 import soloMapling.ArtificialPlayer.BotAttackSystem.BotAuraState;
 import soloMapling.ArtificialPlayer.GCMoveSystem.GCMovement;
 import org.gms.constants.skills.Brawler;
 import org.gms.constants.skills.Rogue;
 import soloMapling.ArtificialPlayer.BotAttackSystem.BotBuffConfig;
+import soloMapling.ArtificialPlayer.BotGrindSystem.MovementStylePolicy;
 import soloMapling.ArtificialPlayer.PartyQuest.PqActions;
 import soloMapling.ArtificialPlayer.BotMessagingSystem.CharacterStorage;
 import soloMapling.Environment.BotMessages;
@@ -50,13 +52,6 @@ public final class LudiStages {
     private static final int LOOT_RADIUS_PX = 260;
     /** Stage 3's crates pop 3 mobs from one box; their spawn spread needs a wider reach. */
     private static final int CRATE_LOOT_RADIUS_PX = 400;
-    /**
-     * The one whole-room sweep a bot makes when its room's work is done, before delivering:
-     * the live radius is deliberately small (bots keep to their own kills' drops), so a drop
-     * that landed just outside everyone's reach would orphan the pass and stall the stage -
-     * the quiet-room sweep is what guarantees completeness.
-     */
-    private static final int CLEANUP_RADIUS_PX = 2_000;
 
     /**
      * The stage-2 box this bot is working: the map instance's identity (the tower and its
@@ -123,10 +118,8 @@ public final class LudiStages {
             }
         }
         // Room quiet: the work is done. Hold the stage-NPC post and hand the stock over the
-        // moment the leader comes for the turn-in. The quiet-room sweep is the one wide one:
-        // the live radius is a kill's neighbourhood, so a pass nobody was beside when it
-        // settled would orphan without this.
-        PqActions.loot(bot, bot.getPosition(), CLEANUP_RADIUS_PX, new int[]{LudiPqData.PASS});
+        // moment the leader comes for the turn-in.
+        PqActions.loot(bot, bot.getPosition(), LOOT_RADIUS_PX, new int[]{LudiPqData.PASS});
         if (PqActions.handItemsToLeaderAfterStage(bot, LudiPqData.PASS) > 0) {
             PqActions.say(bot, BotMessages.get("pq.passes_dropped"));
         }
@@ -467,6 +460,10 @@ public final class LudiStages {
             if (cleared.contains(room) || roomClaimedByOtherLiveBot(bot, room)) {
                 continue;
             }
+            // Stage 5's posting table (top/bottom rooms are skill-restricted); stage 4 admits all.
+            if (roomFirst == LudiPqData.STAGE5_ROOM_FIRST && !stage5RoomAdmits(bot, room)) {
+                continue;
+            }
             DOOR_ROOM_CLAIMS.put(bot.getId(), new DoorClaim(here, room));
             return room;
         }
@@ -571,12 +568,11 @@ public final class LudiStages {
 
     /**
      * Hold the stage-NPC post and hand the stock over the moment the leader walks into
-     * hand-off range - the same post-work beat the collection stages run. One wide sweep
-     * first: a pass that settled just outside every bot's kill-radius would orphan here.
+     * hand-off range - the same post-work beat the collection stages run.
      */
     private static void deliverAndPark(Character bot) {
         PqActions.recoverUngatheredHandoffs(bot, LudiPqData.PASS);
-        PqActions.loot(bot, bot.getPosition(), CLEANUP_RADIUS_PX, new int[]{LudiPqData.PASS});
+        PqActions.loot(bot, bot.getPosition(), LOOT_RADIUS_PX, new int[]{LudiPqData.PASS});
         if (PqActions.handItemsToLeaderAfterStage(bot, LudiPqData.PASS) > 0) {
             PqActions.say(bot, BotMessages.get("pq.passes_dropped"));
         }
@@ -593,10 +589,12 @@ public final class LudiStages {
      * and costs nothing: it is cancelled by the reactor strike itself, and re-shown next
      * tick.
      *
-     * <p>Only a bot whose kit actually carries a hide may enter a guard room: 隐身术 is
-     * rogue-lineage (Assassin/Bandit/夜行者), 橡木伪装 is the Brawler's barrel disguise -
-     * both are the two auras that make a bot monster-immune, and anything else walking in
-     * is a one-touch death. Non-hide bots stay on the main map and wait by the stage NPC.
+     * <p>Which bot enters WHICH room is the posting table ({@link #stage5RoomAdmits}): the
+     * guard room (922010506) admits only a hide-carrying kit - 隐身术 (rogue lineage) or
+     * 橡木伪装 (the Brawler's barrel disguise), the two auras that make a bot
+     * monster-immune; the top room (922010501) only a mobile kit; 502-505 admit everyone.
+     * A bot inside its admitted room works the boxes; the hide is re-shown only by kits
+     * that carry one.
      */
     public static void sneakDoorRooms(Character bot) {
         int mapId = bot.getMapId();
@@ -606,7 +604,10 @@ public final class LudiStages {
         }
         // Re-show every tick while inside: the strike cancels the hide (an attack action),
         // so the next tick's show re-stealths - one box per tick, the honest sneak pace.
-        if (!BotAuraState.isMonsterImmune(bot)) {
+        // Only hide-carrying kits are ever routed into the guard room (the posting table);
+        // a bot in 501-505 without a hide is simply on its own honest legs there - those
+        // rooms are WZ-empty of guards.
+        if (hideSkillFor(bot) != 0 && !BotAuraState.isMonsterImmune(bot)) {
             soloMapling.ArtificialPlayer.BotAttackSystem.BotBuffEffects.showBuff(bot, hideSkillFor(bot));
         }
         // Boxes while hidden: the strike cancels the hide, so re-show happens next tick.
@@ -631,23 +632,60 @@ public final class LudiStages {
     }
 
     /**
-     * The main-room half of the stage-5 loop. A bot whose kit carries a hide (隐身术 rogue
-     * lineage or 橡木伪装 Brawler) claims a guard room the same way stage 4's are claimed
-     * and sneaks in alone; everyone else - and a bot with nothing left to do - parks by
-     * the stage NPC and delivers its stock there: a non-hide body in a PAD-999 room dies
-     * to the first touch, and stage 5's turn-in runs from this post.
+     * The main-room half of the stage-5 loop. Rooms are assigned BY SKILL, per the quest's own
+     * geography (WZ): 922010501 is the TOP room (spawns at its ceiling, every box below it) and
+     * 922010506 the BOTTOM room (spawns at its floor, boxes stacked to its ceiling, the one room
+     * WZ seeds with the 7 undefeatable guards). So:
+     *
+     * <ul>
+     *   <li>922010501 (top) — a body with vertical mobility: 轻功 haste-thief lineage
+     *       (Assassin/Bandit, 2nd job+) or 快速移动 teleport-mage lineage (F/P, I/L, Cleric
+     *       2nd job+) — the climb back up to out00 after breaking the ceiling boxes is what
+     *       those kits shortcut.</li>
+     *   <li>922010506 (bottom) — a body that can survive the guards: a hide (隐身术 rogue
+     *       lineage or 橡木伪装 Brawler). PAD 999 invincible golems one-shot anything else.</li>
+     *   <li>922010502-505 (spawn level) — every other job: plain box rooms with no guards.</li>
+     * </ul>
+     *
+     * A bot with no eligible room (every room taken or outside its posting) parks by the
+     * stage NPC and delivers its stock there: stage 5's turn-in runs from this post.
      */
     private static void workStage5FromMainRoom(Character bot) {
-        if (hideSkillFor(bot) == 0) {
-            deliverAndPark(bot);
-            return;
-        }
         int room = claimDoorRoom(bot, LudiPqData.STAGE5_ROOM_FIRST, LudiPqData.STAGE5_ROOM_LAST);
         if (room < 0) {
             deliverAndPark(bot);
             return;
         }
         enterDoorRoom(bot, room, LudiPqData.STAGE5_ROOM_FIRST);
+    }
+
+    /**
+     * Whether this bot's kit is eligible to claim {@code room} in stage 5 - the posting table
+     * above (top = mobility, bottom = hide, the rest = anyone).
+     */
+    static boolean stage5RoomAdmits(Character bot, int room) {
+        if (room == LudiPqData.STAGE5_ROOM_FIRST) {
+            Job job = bot.getJob();
+            return MovementStylePolicy.hasTeleportSkill(job.getId())
+                    || (job.isA(Job.ASSASSIN) || job.isA(Job.BANDIT)); // 轻功 haste-thief lineage
+        }
+        if (room == LudiPqData.STAGE5_ROOM_LAST) {
+            return hideSkillFor(bot) != 0; // guards: 隐身术 / 橡木伪装 only
+        }
+        return true;
+    }
+
+    /**
+     * Whether stage 5 admits this bot to a specific sub-room if the party moved there: the
+     * follow gate checks the posting table against the room the party is actually in (or
+     * walking into), not against "some room somewhere".
+     */
+    public static boolean stage5AdmitsTo(Character bot, int mapId) {
+        int room = LudiPqData.roomStage(mapId);
+        if (room >= 0) {
+            return stage5RoomAdmits(bot, mapId); // a sub-room: its own posting rule
+        }
+        return true; // the main map: no guard geometry to survive
     }
 
     /**

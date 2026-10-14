@@ -127,7 +127,10 @@ public final class PqActions {
         }
         armStageWalkShield(bot);
         java.util.concurrent.CountDownLatch arrived = new java.util.concurrent.CountDownLatch(1);
-        GCMovement.move(bot, target.x, target.y, arrived::countDown);
+        GCMovement.move(bot, target.x, target.y, () -> {
+            arrived.countDown();
+            nudgeBotTickAfterWalk(bot);
+        });
         // Bounded block: the tick waits for the walk to land, but never longer than one slow
         // cadence. A bot-only room's ticks are 36-48s apart, and a full-length block there is
         // what froze pure-bot parties standing still between macro ticks (the LPQ "stand
@@ -162,6 +165,21 @@ public final class PqActions {
         // cannot drift apart.
         if (walkShieldReleases(arrivedFlag, GCMovement.isMoving(bot))) {
             disarmStageWalkShield(bot);
+        }
+    }
+
+    /**
+     * Pull the bot's macro tick forward right after a stage walk lands. A bot-only room's wheel
+     * runs 36-48s apart, so the follow-up a walk was FOR (taking the portal it arrived at,
+     * re-checking the exit condition) would otherwise wait out the whole period - the reported
+     * "door-room bot takes forever to come out". The walk's arrival is the event the FSM was
+     * waiting on, so it is the thing that must wake the FSM; the nudge is debounced inside
+     * nudgeSoon, so the walkTo-per-tick re-arm pattern costs one wake per landed walk.
+     */
+    private static void nudgeBotTickAfterWalk(Character bot) {
+        var sm = soloMapling.ArtificialPlayer.BotMessagingSystem.CharacterStorage.getBotById(bot.getId());
+        if (sm != null) {
+            sm.nudgeSoon(300);
         }
     }
 
@@ -620,7 +638,16 @@ public final class PqActions {
      * turn the hand-off into a pass ping-pong across the room.
      */
     public static void giveItemTo(Character bot, Character receiver, int itemId, int qty) {
-        if (bot == null || receiver == null || qty <= 0) {
+        giveItemAt(bot, receiver, itemId, qty, receiver.getPosition());
+    }
+
+    /**
+     * As {@link #giveItemTo}, but the pile lands at an explicit spot - the addressed-drop
+     * delivery posts the stock at THE STAGE NPC (the bot's own feet, where it parks) instead
+     * of teleporting it to wherever the leader is standing mid-map.
+     */
+    public static void giveItemAt(Character bot, Character receiver, int itemId, int qty, Point at) {
+        if (bot == null || receiver == null || qty <= 0 || at == null) {
             return;
         }
         if (bot.getMapId() != receiver.getMapId()) {
@@ -634,7 +661,7 @@ public final class PqActions {
         BotClientBinding.runWithBoundPlayer(bot, () ->
                 InventoryManipulator.removeById(bot.getClient(),
                         ItemConstants.getInventoryType(itemId), itemId, handed, true, false));
-        DropCommands.botThrowToOwnerItemQty(bot, itemId, handed, receiver);
+        DropCommands.botThrowToOwnerItemQtyAt(bot, itemId, handed, receiver, at);
     }
 
     /**
@@ -709,20 +736,13 @@ public final class PqActions {
 
     /**
      * Deliver this bot's whole stock of an item to the leader, but ONLY once the stage's work
-     * is over - the bot is holding its post at the stage NPC and the leader has come over
-     * (he has to: the turn-in conversation is his).
+     * is done (the callers gate that). The delivery point is THE STAGE NPC POST, and nowhere
+     * else: the bot parks there and drops the stock addressed to the leader, who sweeps it
+     * when he comes to the NPC for the turn-in. Mid-stage proximity delivery (drop whenever
+     * the leader walks near, wherever he is) is gone on purpose - it sprayed piles across
+     * rooms mid-fight and ping-ponged them with the reclaim loop.
      *
-     * <p>The old mid-fight delivery (hand over the moment the leader happened to pass within
-     * 400px) read as the bot throwing passes around while the party was still killing - the
-     * reported "bots drop their passes as soon as the leader is nearby". The turn-in is not
-     * possible until the stage's bar is met anyway, so the stock is worth exactly nothing
-     * until then; holding it costs the party nothing and the fight keeps its rhythm. The
-     * deliver beat therefore runs where the bot parks after the work: walk to the stage NPC
-     * (or the exit portal's mouth), wait for the leader to walk into hand-off range of THAT
-     * spot, and only then drop. The leader is drawn to the NPC by the turn-in itself, so the
-     * wait ends on its own.
-     *
-     * @return how many of the item were handed to the leader (0 when nothing was due)
+     * @return how many of the item were dropped for the leader (0 when there was nothing)
      */
     public static int handItemsToLeaderAfterStage(Character bot, int itemId) {
         if (bot == null || countItem(bot, itemId) <= 0) {
@@ -732,15 +752,19 @@ public final class PqActions {
         // leader knows where the party's stock is. No-op when the room has no NPC (trap
         // room) - the caller handles that room separately.
         waitNearStageNpc(bot);
-        // Deliver only up close. A far pile is owned by the leader where nobody but him can
-        // pick it, and the host despawns what nobody picks up - the walk-to-him behaviour
-        // would steer the bot off its post every tick; instead the leader comes to the NPC.
         Character leader = partyLeader(bot);
-        if (leader == null || leader == bot
-                || leader.getMapId() != bot.getMapId() || !leaderNear(bot, leader)) {
+        if (leader == null || leader == bot || leader.getMapId() != bot.getMapId()) {
             return 0;
         }
-        return handItemsToLeader(bot, itemId);
+        int qty = countItem(bot, itemId);
+        if (qty <= 0) {
+            return 0;
+        }
+        // The delivery lands at the BOT's feet - the NPC post - not at wherever the leader
+        // happens to stand. The piles are addressed (permanent owner), so they sit there
+        // untouched until HE comes to the post for the turn-in.
+        giveItemAt(bot, leader, itemId, qty, bot.getPosition());
+        return qty;
     }
 
     /**
@@ -749,7 +773,7 @@ public final class PqActions {
      * <p>The host despawns drops after {@code item_expire_time} (3 min by default) whether or
      * not they are owned, so a leader busy fighting can cost the bot its whole stock. A pile
      * of ours older than this window is walked back to and picked up - it re-enters the bot's
-     * inventory and the next hand-off attempt drops it again, right at his feet.
+     * inventory and the next hand-off attempt drops it again at the delivery post.
      *
      * @return how many items were recovered
      */
@@ -776,10 +800,16 @@ public final class PqActions {
             if (now - drop.getDropTime() < HANDOFF_RECLAIM_AFTER_MS) {
                 continue; // still fresh; give the leader time
             }
-            // Walk there; the pickup itself is instant from any distance on the bot path.
+            // Walk there and pick up only once close. The engine's pickupItem has no distance
+            // check (a real client walks to the item first), so the old grab-from-anywhere
+            // teleported the pile across the room into the bot - the reported vacuum pickup.
             Point at = drop.getPosition();
-            if (at != null) {
+            if (at == null) {
+                continue;
+            }
+            if (bot.getPosition().distanceSq(at) > HANDOFF_PICKUP_RANGE_SQ) {
                 GCMovement.move(bot, at.x, at.y);
+                continue; // still walking; the pile is picked up on a later tick, up close
             }
             DropCommands.botLootSingleDrop(bot, drop);
             recovered++;
@@ -789,6 +819,9 @@ public final class PqActions {
         }
         return recovered;
     }
+
+    /** How close the bot must stand to a reclaimable pile before picking it up (see recoverUngatheredHandoffs). */
+    private static final double HANDOFF_PICKUP_RANGE_SQ = 150.0 * 150.0;
 
     /** A hand-off pile older than this is walked back and re-pocketed (see recoverUngatheredHandoffs). */
     private static final long HANDOFF_RECLAIM_AFTER_MS = 30_000L;

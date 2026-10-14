@@ -159,18 +159,31 @@ public class LudiPQBot extends PartyQuestBot {
         if (stage >= 0 && LudiStages.stageCleared(getChr(), stage)) {
             return true; // the stage is turned in - move with the party
         }
-        // Stage 5, job without a hide: the party's next room may be a guard room, and a
-        // body with no 隐身术/橡木伪装 walking in there dies to the first PAD-999 touch.
-        // The leaders' door scripts admit any party member, so this bot must NOT follow
-        // while stage 5 is live; the quest's own next00 warp carries it along instead.
+        // Stage 5: the posting table decides whether THIS bot may be where the party is
+        // moving. A body with no hide must not be carried into the guard room (922010506)
+        // - one PAD-999 touch kills it - and the leaders' door scripts admit any party
+        // member, so the bot must not follow there; the quest's own next00 warp carries it
+        // along instead. The leader's CURRENT room is the room the party is in.
         if (roomStage == 5 || (stage == 5 && roomStage < 0)) {
-            if (LudiStages.hideSkillFor(getChr()) == 0) {
+            Character leader = partyLeader();
+            int leaderStage = (leader != null) ? stageOf(leader.getMapId()) : -1;
+            if (leaderStage == 5 && !LudiStages.stage5AdmitsTo(getChr(), leader.getMapId())) {
                 return false;
             }
         }
         int roomFirst = roomStage == 5 ? LudiPqData.STAGE5_ROOM_FIRST : LudiPqData.STAGE4_ROOM_FIRST;
         int roomLast = roomStage == 5 ? LudiPqData.STAGE5_ROOM_LAST : LudiPqData.STAGE4_ROOM_LAST;
-        return !LudiStages.doorRoomsOutstanding(getChr(), roomFirst, roomLast);
+        if (!LudiStages.doorRoomsOutstanding(getChr(), roomFirst, roomLast)) {
+            // This bot's door errand is done. The leader stepping into a sub-room is HIS
+            // exploring, not a party move - trailing him there re-walks a cleared door and
+            // then walks right back out. The NPC post is this bot's place.
+            Character leader = partyLeader();
+            if (leader != null && LudiPqData.roomStage(leader.getMapId()) >= 0) {
+                return false;
+            }
+            return true;
+        }
+        return false;
     }
 
     /**
@@ -183,8 +196,8 @@ public class LudiPQBot extends PartyQuestBot {
     @Override
     protected boolean fightsOnSweep() {
         int mapId = getChr().getMapId();
-        if (LudiPqData.roomStage(mapId) == 5) {
-            return false; // door rooms: hide is the mechanic
+        if (LudiPqData.roomStage(mapId) == LudiPqData.STAGE5_ROOM_LAST) {
+            return false; // the guard room: hide is the mechanic
         }
         return !(stageOf(mapId) == 5 && LudiStages.nearbyGuardCount(getChr()) > 0);
     }

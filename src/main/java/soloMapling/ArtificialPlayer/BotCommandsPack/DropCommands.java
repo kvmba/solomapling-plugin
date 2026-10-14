@@ -206,6 +206,15 @@ public class DropCommands {
     }
 
     public static void botThrowToOwnerItemQty(Character fakechar, int itemId, int qty, Character owner) {
+        botThrowToOwnerItemQtyAt(fakechar, itemId, qty, owner, owner.getPosition());
+    }
+
+    /**
+     * As {@link #botThrowToOwnerItemQty}, but the addressed pile lands at an explicit spot -
+     * the delivery-post rule needs piles AT the stage NPC, not at wherever the receiver
+     * happens to stand.
+     */
+    public static void botThrowToOwnerItemQtyAt(Character fakechar, int itemId, int qty, Character owner, Point at) {
         if (isUnusableItem(itemId)) {
             return;
         }
@@ -215,8 +224,7 @@ public class DropCommands {
         // party members and (after the 15s window) every bot's sweep could pick it, so the
         // isPermanentOwner guards in botCanLoot/isFloorLoot/recoverUngatheredHandoffs never
         // engaged and a leader's pile could ping-pong or be lost to the despawn sweeper.
-        fakechar.getMap().spawnOwnerOnlyItemDrop(fakechar, owner, itemToDrop,
-                owner.getPosition());
+        fakechar.getMap().spawnOwnerOnlyItemDrop(fakechar, owner, itemToDrop, at);
     }
 
     // Throwing multiple items in a row (for display purposes)

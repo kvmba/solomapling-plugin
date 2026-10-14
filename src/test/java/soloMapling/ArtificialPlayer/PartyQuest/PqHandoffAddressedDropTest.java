@@ -33,10 +33,11 @@ class PqHandoffAddressedDropTest {
     @Test
     void handOffQtySpawnsThroughTheOwnersOwnLockedDrop() throws Exception {
         String java = javaSource(DROP_COMMANDS);
-        // botThrowToOwnerItemQty is the ONLY spawn seam both hand-off paths use
-        // (giveItemTo + giveItemToQuiet). It must go through the host's addressed drop.
-        int qty = java.indexOf("botThrowToOwnerItemQty");
-        assertTrue(qty >= 0, "botThrowToOwnerItemQty must exist (the hand-off seam)");
+        // botThrowToOwnerItemQtyAt is the ONLY spawn seam both hand-off paths use
+        // (giveItemAt + giveItemToQuiet delegate to it). It must go through the host's
+        // addressed drop; the no-spot overload is a thin forwarder onto the same seam.
+        int qty = java.indexOf("public static void botThrowToOwnerItemQtyAt");
+        assertTrue(qty >= 0, "botThrowToOwnerItemQtyAt must exist (the hand-off seam)");
         String body = java.substring(qty);
         body = body.substring(0, body.indexOf("public static", 10) > 0
                 ? body.indexOf("public static", 10) : body.length());

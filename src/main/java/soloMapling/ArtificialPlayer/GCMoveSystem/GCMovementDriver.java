@@ -78,6 +78,13 @@ final class GCMovementDriver {
     // (and far above the frozen-air watchdog's 30-tick recovery, which owns the no-motion case) while
     // still guaranteeing an UNREACHABLE goal is dropped instead of holding isMoving() true forever.
     private static final long AIR_MOVE_STALL_MS = 2_000;
+    // The climbing flavour: longer than the physics' deliberate rope-top clamp hold
+    // (BotPhysicsEngine.TOP_CLAMP_RELEASE_MS, 2.5s) - the clamp holds a climber still BY DESIGN
+    // while the nav layer prepares its rope-head exit, and the physics release at 2.5s is the
+    // designed fallback. Sharing the 2s airborne window here fired the give-up kick FIRST (at 2s),
+    // tearing a climbing bot off its rope mid-climb: the "正常攀爬中突然放手掉下去，然后重新攀爬"
+    // report. Past this window a climb is genuinely wedged and the kick below is the right escape.
+    private static final long CLIMB_MOVE_STALL_MS = 3_000;
     // Recompute a bot's movement profile on this cadence so runtime changes (chiefly party Haste —
     // joining/leaving a party with a high-level thief) take effect without needing a map change.
     // refreshMovementProfile no-ops when the bucket is unchanged, so this is ~free for non-party bots.
@@ -618,7 +625,9 @@ final class GCMovementDriver {
             entry.moveProgressAtMs = now;
             return false;
         }
-        long stallMs = (entry.inAir || entry.climbing) ? AIR_MOVE_STALL_MS : MOVE_NO_PROGRESS_MS;
+        long stallMs = entry.climbing ? CLIMB_MOVE_STALL_MS
+                : entry.inAir ? AIR_MOVE_STALL_MS
+                : MOVE_NO_PROGRESS_MS;
         if (now - entry.moveProgressAtMs <= stallMs) {
             return false;
         }

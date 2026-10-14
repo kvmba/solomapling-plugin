@@ -54,4 +54,9 @@ public final class MovementStylePolicy {
     private static boolean isTeleportMage(int id) {
         return (id >= 210 && id <= 212) || (id >= 220 && id <= 222) || (id >= 230 && id <= 232);
     }
+
+    /** Whether this job's kit carries 快速移动 (Teleport) — the same table the movement style uses. */
+    public static boolean hasTeleportSkill(int jobId) {
+        return isTeleportMage(jobId);
+    }
 }
