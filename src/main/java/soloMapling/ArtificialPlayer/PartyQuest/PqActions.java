@@ -13,6 +13,7 @@ import org.gms.server.life.NPC;
 import org.gms.constants.inventory.ItemConstants;
 import org.gms.client.inventory.manipulator.InventoryManipulator;
 import org.gms.scripting.npc.NPCScriptManager;
+import soloMapling.ArtificialPlayer.BotSM;
 import soloMapling.ArtificialPlayer.BotAttackSystem.BotAttackDriver;
 import soloMapling.ArtificialPlayer.BotClientBinding;
 import soloMapling.ArtificialPlayer.BotAttackSystem.BotAuraState;
@@ -20,6 +21,7 @@ import soloMapling.ArtificialPlayer.BotCommandsPack.BotAttack;
 import soloMapling.ArtificialPlayer.BotCommandsPack.DropCommands;
 import soloMapling.ArtificialPlayer.BotCommandsPack.SocialCommands;
 import soloMapling.ArtificialPlayer.BotLogic;
+import soloMapling.ArtificialPlayer.BotMessagingSystem.CharacterStorage;
 import soloMapling.ArtificialPlayer.GCMoveSystem.GCMovement;
 import soloMapling.MapVFX.CustomReactor;
 
@@ -177,7 +179,7 @@ public final class PqActions {
      * nudgeSoon, so the walkTo-per-tick re-arm pattern costs one wake per landed walk.
      */
     private static void nudgeBotTickAfterWalk(Character bot) {
-        var sm = soloMapling.ArtificialPlayer.BotMessagingSystem.CharacterStorage.getBotById(bot.getId());
+        BotSM sm = CharacterStorage.getBotById(bot.getId());
         if (sm != null) {
             sm.nudgeSoon(300);
         }
@@ -647,7 +649,7 @@ public final class PqActions {
      * of teleporting it to wherever the leader is standing mid-map.
      */
     public static void giveItemAt(Character bot, Character receiver, int itemId, int qty, Point at) {
-        if (bot == null || receiver == null || qty <= 0 || at == null) {
+        if (bot == null || receiver == null || qty <= 0) {
             return;
         }
         if (bot.getMapId() != receiver.getMapId()) {
@@ -737,10 +739,10 @@ public final class PqActions {
     /**
      * Deliver this bot's whole stock of an item to the leader, but ONLY once the stage's work
      * is done (the callers gate that). The delivery point is THE STAGE NPC POST, and nowhere
-     * else: the bot parks there and drops the stock addressed to the leader, who sweeps it
-     * when he comes to the NPC for the turn-in. Mid-stage proximity delivery (drop whenever
-     * the leader walks near, wherever he is) is gone on purpose - it sprayed piles across
-     * rooms mid-fight and ping-ponged them with the reclaim loop.
+     * else: the bot walks there and only drops once standing on the post, addressed to the
+     * leader, who sweeps it when he comes to the NPC for the turn-in. Mid-stage proximity
+     * delivery (drop whenever the leader walks near, wherever he is) is gone on purpose - it
+     * sprayed piles across rooms mid-fight and ping-ponged them with the reclaim loop.
      *
      * @return how many of the item were dropped for the leader (0 when there was nothing)
      */
@@ -751,7 +753,16 @@ public final class PqActions {
         // Hold the delivery post: the NPC ring spot the cleared-stage wait uses, so the
         // leader knows where the party's stock is. No-op when the room has no NPC (trap
         // room) - the caller handles that room separately.
-        waitNearStageNpc(bot);
+        Point post = stageNpcSpot(bot);
+        if (post == null) {
+            return 0; // nowhere to post the delivery - the stock stays pocketed
+        }
+        // Reach the post FIRST: the rule is piles AT the stage NPC. A bot still walking
+        // there has not delivered this tick (the arrival nudge re-runs it promptly).
+        if (bot.getPosition().distanceSq(post) > HANDOFF_PICKUP_RANGE_SQ) {
+            walkTo(bot, post);
+            return 0;
+        }
         Character leader = partyLeader(bot);
         if (leader == null || leader == bot || leader.getMapId() != bot.getMapId()) {
             return 0;
@@ -760,10 +771,10 @@ public final class PqActions {
         if (qty <= 0) {
             return 0;
         }
-        // The delivery lands at the BOT's feet - the NPC post - not at wherever the leader
-        // happens to stand. The piles are addressed (permanent owner), so they sit there
-        // untouched until HE comes to the post for the turn-in.
-        giveItemAt(bot, leader, itemId, qty, bot.getPosition());
+        // At the post: drop the whole stock addressed to the leader. The piles sit here
+        // untouched until HE comes for the turn-in - the delivery point is this post and
+        // nowhere else.
+        giveItemAt(bot, leader, itemId, qty, post);
         return qty;
     }
 
@@ -1427,17 +1438,52 @@ public final class PqActions {
         if (lone.isEmpty()) {
             return 0;
         }
+        // Pickup must be proximity-honest: the engine's pickupItem has no distance check (a
+        // real client walks to the item first), so an item outside the bot's pickup reach
+        // teleports to it if grabbed from here - the reported vacuum pickup. Anything in
+        // reach is picked this tick; anything farther, the bot starts WALKING to the nearest
+        // one and the sweep finishes up close on a later tick. This is what keeps a ranged
+        // kill's drop reachable without a whole-room grab.
+        Point botPos = bot.getPosition();
+        List<MapObject> reachable = new java.util.ArrayList<>();
+        Point walkTo = null;
+        double walkSq = Double.MAX_VALUE;
+        for (MapObject o : lone) {
+            Point ip = o.getPosition();
+            if (ip == null) {
+                continue;
+            }
+            double dsq = botPos.distanceSq(ip);
+            if (dsq <= LOOT_PICKUP_REACH_SQ) {
+                reachable.add(o);
+            } else if (dsq < walkSq) {
+                walkSq = dsq;
+                walkTo = ip; // the nearest out-of-reach drop is this tick's walk target
+            }
+        }
+        if (reachable.isEmpty()) {
+            // No live move to override: seekAndAttack/approachUnder own the walk while one
+            // is in flight (a loot walk issued over it would yank the bot off its chase).
+            // The re-issue replans from the CURRENT pixel once the driver is idle.
+            if (walkTo != null && !GCMovement.isMoving(bot)) {
+                GCMovement.move(bot, walkTo.x, walkTo.y);
+            }
+            return 0;
+        }
         int before = 0;
         for (int id : itemIds) {
             before += countItem(bot, id);
         }
-        DropCommands.lootItemListOnFloor(bot, lone);
+        DropCommands.lootItemListOnFloor(bot, reachable);
         int after = 0;
         for (int id : itemIds) {
             after += countItem(bot, id);
         }
         return after - before;
     }
+
+    /** How close the bot must stand to a drop before picking it up (see loot). */
+    private static final double LOOT_PICKUP_REACH_SQ = 150.0 * 150.0;
 
     /**
      * Whether a floor drop is ordinary loot a bot may pocket: a single piece (reactor stacks

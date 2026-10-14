@@ -661,13 +661,15 @@ public final class LudiStages {
 
     /**
      * Whether this bot's kit is eligible to claim {@code room} in stage 5 - the posting table
-     * above (top = mobility, bottom = hide, the rest = anyone).
+     * above (top = mobility, bottom = hide, the rest = anyone). The mobility predicate is the
+     * movement profile's own haste-thief test (the same table that models a thief's speed),
+     * so the two can never disagree about who carries 轻功.
      */
     static boolean stage5RoomAdmits(Character bot, int room) {
         if (room == LudiPqData.STAGE5_ROOM_FIRST) {
             Job job = bot.getJob();
             return MovementStylePolicy.hasTeleportSkill(job.getId())
-                    || (job.isA(Job.ASSASSIN) || job.isA(Job.BANDIT)); // 轻功 haste-thief lineage
+                    || MovementStylePolicy.hasHasteSkill(job);
         }
         if (room == LudiPqData.STAGE5_ROOM_LAST) {
             return hideSkillFor(bot) != 0; // guards: 隐身术 / 橡木伪装 only

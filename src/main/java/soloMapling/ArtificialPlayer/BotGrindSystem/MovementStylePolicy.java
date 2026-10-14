@@ -1,6 +1,7 @@
 package soloMapling.ArtificialPlayer.BotGrindSystem;
 
 import org.gms.client.Character;
+import org.gms.client.Job;
 
 // Maps a bot's job to how it moves while grinding. Gated on job (which implies job-tier/level), so low-level
 // bots stay PLANTED (slow = organic) and only advanced classes blink/dash. Ours.
@@ -58,5 +59,14 @@ public final class MovementStylePolicy {
     /** Whether this job's kit carries 快速移动 (Teleport) — the same table the movement style uses. */
     public static boolean hasTeleportSkill(int jobId) {
         return isTeleportMage(jobId);
+    }
+
+    /**
+     * Whether this job learns 轻功 (Haste): the Assassin and Bandit lineages from 2nd job on.
+     * The movement profile models a haste thief's speed from its own copy of this predicate;
+     * keep the two in sync.
+     */
+    public static boolean hasHasteSkill(Job job) {
+        return job != null && (job.isA(Job.ASSASSIN) || job.isA(Job.BANDIT));
     }
 }
