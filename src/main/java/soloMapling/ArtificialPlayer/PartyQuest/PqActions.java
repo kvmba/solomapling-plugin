@@ -131,7 +131,7 @@ public final class PqActions {
         java.util.concurrent.CountDownLatch arrived = new java.util.concurrent.CountDownLatch(1);
         GCMovement.move(bot, target.x, target.y, () -> {
             arrived.countDown();
-            nudgeBotTickAfterWalk(bot);
+            nudgeStageTick(bot); // arrival is the event the FSM waits on - wake it (debounced)
         });
         // Bounded block: the tick waits for the walk to land, but never longer than one slow
         // cadence. A bot-only room's ticks are 36-48s apart, and a full-length block there is
@@ -167,21 +167,6 @@ public final class PqActions {
         // cannot drift apart.
         if (walkShieldReleases(arrivedFlag, GCMovement.isMoving(bot))) {
             disarmStageWalkShield(bot);
-        }
-    }
-
-    /**
-     * Pull the bot's macro tick forward right after a stage walk lands. A bot-only room's wheel
-     * runs 36-48s apart, so the follow-up a walk was FOR (taking the portal it arrived at,
-     * re-checking the exit condition) would otherwise wait out the whole period - the reported
-     * "door-room bot takes forever to come out". The walk's arrival is the event the FSM was
-     * waiting on, so it is the thing that must wake the FSM; the nudge is debounced inside
-     * nudgeSoon, so the walkTo-per-tick re-arm pattern costs one wake per landed walk.
-     */
-    private static void nudgeBotTickAfterWalk(Character bot) {
-        BotSM sm = CharacterStorage.getBotById(bot.getId());
-        if (sm != null) {
-            sm.nudgeSoon(300);
         }
     }
 
@@ -572,20 +557,20 @@ public final class PqActions {
     private static final long REACTOR_SWING_JITTER_MS = 250;
 
     /** Short delay for the pulled-forward macro tick: a breath between boxes, not a snap. */
-    private static final long NEXT_BOX_NUDGE_MS = 500;
+    private static final long STAGE_TICK_NUDGE_MS = 500;
 
     /**
-     * Pull this bot's next macro tick forward so stage work (rotate to the next box, loot,
-     * hand off) resumes promptly after a beat-driven moment finished it. The pull is the
-     * only bridge from the 250ms beat back into stage logic - it must never run the stage
-     * inline, that is what produced the old act-freeze-act cadence. Debounced by BotSM's
-     * own nudge guard; a no-op when the wheel entry is gone (bot stopping).
+     * Pull this bot's next macro tick forward so stage work (walk a portal/exit's follow-up,
+     * rotate to the next box, loot, hand off) resumes promptly after the event it waits on:
+     * a walk's arrival or a beat-driven box break. The pull is the only bridge from the
+     * movement/beat layers back into stage logic - it must never run the stage inline, that
+     * is what produced the old act-freeze-act cadence. Debounced by BotSM's own nudge guard;
+     * a no-op when the wheel entry is gone (bot stopping).
      */
     private static void nudgeStageTick(Character bot) {
-        soloMapling.ArtificialPlayer.BotSM nudgeable =
-                soloMapling.ArtificialPlayer.BotMessagingSystem.CharacterStorage.getBotById(bot.getId());
+        BotSM nudgeable = CharacterStorage.getBotById(bot.getId());
         if (nudgeable != null) {
-            nudgeable.nudgeSoon(NEXT_BOX_NUDGE_MS);
+            nudgeable.nudgeSoon(STAGE_TICK_NUDGE_MS);
         }
     }
 

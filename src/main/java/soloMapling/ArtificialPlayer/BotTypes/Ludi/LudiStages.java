@@ -661,9 +661,7 @@ public final class LudiStages {
 
     /**
      * Whether this bot's kit is eligible to claim {@code room} in stage 5 - the posting table
-     * above (top = mobility, bottom = hide, the rest = anyone). The mobility predicate is the
-     * movement profile's own haste-thief test (the same table that models a thief's speed),
-     * so the two can never disagree about who carries 轻功.
+     * above (top = mobility, bottom = hide, the rest = anyone).
      */
     static boolean stage5RoomAdmits(Character bot, int room) {
         if (room == LudiPqData.STAGE5_ROOM_FIRST) {
@@ -683,8 +681,7 @@ public final class LudiStages {
      * walking into), not against "some room somewhere".
      */
     public static boolean stage5AdmitsTo(Character bot, int mapId) {
-        int room = LudiPqData.roomStage(mapId);
-        if (room >= 0) {
+        if (LudiPqData.roomStage(mapId) >= 0) {
             return stage5RoomAdmits(bot, mapId); // a sub-room: its own posting rule
         }
         return true; // the main map: no guard geometry to survive
