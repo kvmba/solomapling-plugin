@@ -1407,6 +1407,7 @@ public final class PqActions {
         stuckCountByBot.remove(botId);
         pathableVerdictAtByBot.keySet().removeIf(k -> k.botId() == botId);
         pathableVerdictByBot.keySet().removeIf(k -> k.botId() == botId);
+        orphanProbeAtByBot.remove(botId);
     }
 
     /** Whether this mob is a legitimate chase target from {@code pos}: hostile and in the seek box. */
@@ -1432,6 +1433,14 @@ public final class PqActions {
         // around the bot's feet - the "bots do not pick up the passes" report).
         List<MapObject> found = BotLogic.checkForItemsOnFloor(bot, at, radiusPx, itemIds);
         if (found.isEmpty()) {
+            // The caller's radius is a kill's neighbourhood, so a drop that landed outside it
+            // (a ranged kill's shot, a knockback slide) is invisible here - the deleted 2000px
+            // cleanup sweep used to cover that blind ring, and its completeness was never
+            // re-homed (f4043a1/317bfbc). The room-wide orphan probe restores the VISIBILITY
+            // half at a paced cadence: it may start a walk to the drop; the pickup itself
+            // still happens up close on a later scan (the engine's pickupItem has no distance
+            // check, so a grab from here would teleport the item).
+            sweepOrphanDropOutside(bot, radiusPx, itemIds);
             return 0;
         }
         // Never take a multi-piece stack: the item-triggered reactors read their stack five
@@ -1508,6 +1517,82 @@ public final class PqActions {
      * the engine's pickupItem has no distance check, so "close" is this class's rule.
      */
     private static final double PICKUP_REACH_SQ = 150.0 * 150.0;
+
+    /**
+     * How often one bot may run the room-wide orphan-drop probe of {@link #loot}: the probe
+     * scans the map's whole item table (one range query, bounded by the items on the floor),
+     * so it cannot ride every quiet tick. 6s is far inside the 3-minute item_expire despawn
+     * the probe exists to beat - a drop seen on its first probe still has ~174s of walk
+     * budget.
+     */
+    private static final long ORPHAN_PROBE_MIN_MS = 6_000L;
+    /** botId -> the last time the orphan probe actually ran (throttle; skipped probes are free). */
+    private static final Map<Integer, Long> orphanProbeAtByBot = new java.util.concurrent.ConcurrentHashMap<>();
+
+    /**
+     * One paced, room-wide VISIBILITY sweep for {@link #loot}: when the caller's own radius
+     * saw nothing, look across the whole room for a matching drop this bot is entitled to,
+     * and start WALKING to the nearest one. The pickup itself never happens here - the drop
+     * is by definition outside this tick's reach, so grabbing it would teleport it; walking
+     * there re-enters {@link #loot} (the arrival nudge re-runs the stage sweep promptly),
+     * and the close-range scan picks it up.
+     *
+     * <p>This is the re-homed completeness half of the 2000px cleanup sweep f4043a1 deleted
+     * (the last pass of a 25-pass stage can land at a ranged kill's fall point, outside every
+     * bot's 260px loot radius, and 3 minutes later it despawns). Two rules keep it from
+     * re-opening the defects the sweep's removal fixed: it NEVER picks up (no vacuum grab -
+     * the walk is proximity-honest like every pickup in this class) and it NEVER takes an
+     * addressed pile or another bot's still-protected drop (the same entitlement
+     * {@link DropCommands#botCanLoot} enforces for the sweep paths, which is what stopped the
+     * pass ping-pong). The walk is only armed when the driver is idle - seekAndAttack and
+     * approachUnder own a live move, and a loot walk issued over it would yank the bot off
+     * its chase (the 317bfbc guard).
+     */
+    private static void sweepOrphanDropOutside(Character bot, double radiusPx, int[] itemIds) {
+        if (GCMovement.isMoving(bot)) {
+            return; // a live chase/approach walk owns the bot; never re-target it mid-flight
+        }
+        long now = movementNowMs();
+        Long last = orphanProbeAtByBot.get(bot.getId());
+        if (last != null && now - last < ORPHAN_PROBE_MIN_MS) {
+            return; // throttled: the caller's own radius scan already ran this tick
+        }
+        orphanProbeAtByBot.put(bot.getId(), now);
+        // Room-wide, in px: every quest room fits inside it (the widest shipped PQ room is
+        // ~2700px), and the engine's range scan compares distanceSq, so this squares once
+        // here like every other px radius (see BotLogic.rangeSq).
+        List<MapObject> anywhere = BotLogic.checkForItemsOnFloor(bot, bot.getPosition(),
+                ORPHAN_PROBE_RANGE_PX, itemIds);
+        Point botPos = bot.getPosition();
+        double callerReachSq = radiusPx * radiusPx;
+        Point nearest = null;
+        double bestSq = Double.MAX_VALUE;
+        for (MapObject o : anywhere) {
+            // botCanLoot already refuses picked-up drops, addressed hand-off piles,
+            // still-protected drops AND position-less drops; isFloorLoot additionally
+            // refuses multi-piece stacks (item-triggered reactors match their stack by
+            // identity).
+            if (!(o instanceof MapItem drop)
+                    || !DropCommands.botCanLoot(bot, drop)
+                    || !isFloorLoot(drop)) {
+                continue;
+            }
+            Point ip = drop.getPosition();
+            double dsq = botPos.distanceSq(ip);
+            if (dsq <= callerReachSq) {
+                continue; // inside the caller's own radius would have matched already
+            }
+            if (dsq < bestSq) {
+                bestSq = dsq;
+                nearest = ip;
+            }
+        }
+        if (nearest != null) {
+            walkForPickup(bot, nearest);
+        }
+    }
+    /** The orphan probe's reach: room-wide (see {@link #sweepOrphanDropOutside}). */
+    private static final double ORPHAN_PROBE_RANGE_PX = 3_000;
 
     /**
      * Whether a floor drop is ordinary loot a bot may pocket: a single piece (reactor stacks
@@ -1605,6 +1690,9 @@ public final class PqActions {
         if (spot == null) {
             return;
         }
+        if (parkYieldsToLiveWalk(bot, spot)) {
+            return;
+        }
         walkTo(bot, spot);
         // No shield here: parked-by-the-NPC is a wait, not a staged walk. The combat beat
         // may steer at whatever spawns nearby and - critically - the 250ms beat keeps the
@@ -1691,8 +1779,45 @@ public final class PqActions {
             return; // no stage NPC and no next00 to gather by - nothing to spread around
         }
         Point target = claimNear(bot, npc);
+        if (parkYieldsToLiveWalk(bot, target)) {
+            return;
+        }
         walkTo(bot, target);
         // No shield: the ring is a park, not a puzzle hold (see waitNearStageNpc).
+    }
+
+    /**
+     * Whether a PARK re-arm ({@code waitNearStageNpc}/{@code spreadNearStageNpc}) must yield
+     * this tick because the bot is already walking somewhere else: TRUE exactly when the
+     * driver holds a move goal the bot has not yet reached.
+     *
+     * <p>The parks re-arm their walk every macro tick, and {@link #walkTo} only refuses the
+     * re-arm while the bot still STANDS on its spot - the moment it steps off (the arrival
+     * nudge from a loot walk fired {@link #loot} again, and the sweep armed a pickup walk to
+     * a drop), the next park re-arm OVERWROTE that walk and dragged the bot back to its spot
+     * before the pickup could land. Every other walk origin in this class already honours the
+     * "a live move is never re-targeted mid-flight" rule (loot's pickup walk, the delivery
+     * walkTo, the reclaim walk - the 317bfbc guard); the parks were the two seams left out,
+     * which is the root of the residual orphan-pass ping-pong. {@link GCMovement#hasMoveTarget}
+     * (not {@link GCMovement#isMoving}) is the honest test: the parks must still be able to
+     * re-arm after the driver gave a move up (abandoned/unreachable), which leaves
+     * {@code isMoving} true only through inAir/climbing - a falling or climbing bot between
+     * moves is exactly when a park re-arm is the RIGHT thing to re-issue.
+     */
+    private static boolean parkYieldsToLiveWalk(Character bot, Point parkSpot) {
+        return parkStandsDown(GCMovement.hasMoveTarget(bot), bot.getPosition(), parkSpot);
+    }
+
+    /**
+     * Pure form of the park yield gate (see {@link #parkYieldsToLiveWalk}), so the decision
+     * table is pinned by test without a live driver (the same pure-seam pattern as
+     * {@link #walkShieldReleases}, which has already regressed twice). A position-less bot
+     * cannot be judged near its spot, so the gate fails OPEN - the re-arm proceeds.
+     */
+    static boolean parkStandsDown(boolean driverHoldsGoal, Point botPos, Point parkSpot) {
+        return driverHoldsGoal && botPos != null
+                && (Math.abs(botPos.x - parkSpot.x) > ARRIVAL_EPS_PX
+                        || Math.abs(botPos.y - parkSpot.y) > ARRIVAL_EPS_PX);
     }
 
     /**
