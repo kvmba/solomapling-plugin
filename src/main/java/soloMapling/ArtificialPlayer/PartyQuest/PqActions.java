@@ -1385,9 +1385,15 @@ public final class PqActions {
     private static final long PATHABILITY_TTL_MS = 1_000;
     private record PathabilityKey(int botId, int mobOid) {
     }
-    private static final Map<PathabilityKey, Long> pathableVerdictAtByBot =
-            new java.util.concurrent.ConcurrentHashMap<>();
-    private static final Map<PathabilityKey, Boolean> pathableVerdictByBot =
+    /**
+     * A verdict and the instant it was taken, in ONE entry: the read can never see a stamp
+     * without its verdict. The two-map shape (stamp here, verdict there) raced every writer -
+     * the read path unboxed a Boolean that a concurrent re-stamp or the stop-time clear could
+     * have absent while the stamp was still present (NPE on the shared combat sweep).
+     */
+    private record PathabilityVerdict(long takenAtMs, boolean pathable) {
+    }
+    private static final Map<PathabilityKey, PathabilityVerdict> pathableVerdictByBot =
             new java.util.concurrent.ConcurrentHashMap<>();
 
     private static boolean isPathable(Character bot, Monster m) {
@@ -1397,15 +1403,14 @@ public final class PqActions {
         }
         var key = new PathabilityKey(bot.getId(), m.getObjectId());
         long now = movementNowMs();
-        Long stamped = pathableVerdictAtByBot.get(key);
-        if (stamped != null && now - stamped < PATHABILITY_TTL_MS) {
-            return pathableVerdictByBot.get(key);
+        PathabilityVerdict memo = pathableVerdictByBot.get(key);
+        if (memo != null && now - memo.takenAtMs() < PATHABILITY_TTL_MS) {
+            return memo.pathable();
         }
         Point ground = GCMovement.groundPointBelow(bot.getMap(), mp.x, mp.y);
         int ty = (ground != null) ? ground.y : mp.y;
         boolean pathable = GCMovement.canPathTo(bot, mp.x, ty);
-        pathableVerdictAtByBot.put(key, now);
-        pathableVerdictByBot.put(key, pathable);
+        pathableVerdictByBot.put(key, new PathabilityVerdict(now, pathable));
         return pathable;
     }
 
@@ -1425,7 +1430,6 @@ public final class PqActions {
         seekLastGoalByBot.remove(botId);
         stuckTargetByBot.remove(botId);
         stuckCountByBot.remove(botId);
-        pathableVerdictAtByBot.keySet().removeIf(k -> k.botId() == botId);
         pathableVerdictByBot.keySet().removeIf(k -> k.botId() == botId);
         orphanProbeAtByBot.remove(botId);
         stageWalkShieldUntilByBot.remove(botId);

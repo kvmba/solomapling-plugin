@@ -144,14 +144,23 @@ public class LudiPQBot extends PartyQuestBot {
     /**
      * The door-room loops drive this bot room by room on their own claims; the follow beat
      * must not pull it back to the leader's map mid-exploration (the leader stays on the
-     * main map while the bots clear the rooms behind the doors). Two gates end the errand
-     * and restore normal following: the stage turned in ("4stageclear"/"5stageclear" set),
-     * or every room personally cleared / held by a live teammate - the bot parks at the
-     * NPC, delivers, and moves with the party again.
+     * main map while the bots clear the rooms behind the doors). The stage-2 trap room never
+     * follows out either: its own work and its own gated exit own the room. For the door
+     * stages, two gates end the errand and restore normal following: the stage turned in
+     * ("4stageclear"/"5stageclear" set), or every room personally cleared / held by a live
+     * teammate - the bot parks at the NPC, delivers, and moves with the party again.
      */
     @Override
     protected boolean isFollowingLeader() {
         int mapId = getChr().getMapId();
+        if (mapId == LudiPqData.TRAP_ROOM) {
+            // The trap room is a self-contained errand: the bot works its four pass boxes and
+            // takes its own gated exit (exitTrapRoom) back to the tower. The follow beat must
+            // not race that - its walk/enter cancels whatever the room's work has in flight (a
+            // box approach, a pickup walk) and can pull the bot out with the room's four passes
+            // still uncollected, which the stage needs to clear.
+            return false;
+        }
         int roomStage = LudiPqData.roomStage(mapId);
         int stage = stageOf(mapId);
         if (roomStage != 4 && roomStage != 5 && stage != 4 && stage != 5) {

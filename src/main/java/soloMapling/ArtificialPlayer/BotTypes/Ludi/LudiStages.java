@@ -232,6 +232,9 @@ public final class LudiStages {
         if (exit == null || exit.getPosition() == null || bot.getPosition() == null) {
             return;
         }
+        if (standsDownForLiveMove(bot)) {
+            return; // a walk owns the driver; see standsDownForLiveMove
+        }
         if (bot.getPosition().distanceSq(exit.getPosition()) > EXIT_WARP_RANGE_SQ) {
             PqActions.walkTo(bot, exit.getPosition());
             return; // still climbing; the next tick takes over from wherever we are
@@ -241,6 +244,26 @@ public final class LudiStages {
 
     /** How close the bot must stand to the trap room's exit before it takes it. */
     private static final double EXIT_WARP_RANGE_SQ = 250.0 * 250.0;
+
+    /**
+     * Whether a room exit must stand down this tick because the movement driver still holds a
+     * live move. {@code walkTo} replaces {@code moveTarget} unconditionally, and entering the
+     * portal mid-walk cancels the walk outright - either way a pickup/reclaim walk armed earlier
+     * in the tick (or the chase) is cut off and its drop is orphaned in a room the bot is
+     * leaving. This is the same "a live move is never re-targeted mid-flight" contract the park
+     * re-arms honour, but STRICTER than {@code PqActions.yieldsToLiveWalk}: that gate lets a
+     * re-arm through when the bot stands on its own spot, while a transition - the one move
+     * that leaves the room - must never cancel a walk, even from its spot. The exit waits for
+     * the driver to go idle; the walk's own arrival nudge re-runs the tick's work promptly, and
+     * a walk the engine ABANDONS (its no-progress watchdog, ~8s) frees the exit on a later tick.
+     * Deliberate trade: a drop that is visible but UNREACHABLE keeps re-arming a walk (loot's
+     * own scan, then the 6s orphan probe) and holds the exit until the drop despawns (~3 min)
+     * or a teammate takes it - the drop is stage-required, and leaving without it orphans it
+     * for good, which is the defect this gate closes.
+     */
+    private static boolean standsDownForLiveMove(Character bot) {
+        return GCMovement.hasMoveTarget(bot);
+    }
 
     /**
      * The nearest alive box of this data id this bot may work.
@@ -517,6 +540,9 @@ public final class LudiStages {
         org.gms.server.maps.Portal exit = exitPortalOf(bot);
         if (exit == null || exit.getPosition() == null || bot.getPosition() == null) {
             return;
+        }
+        if (standsDownForLiveMove(bot)) {
+            return; // a walk owns the driver; see standsDownForLiveMove
         }
         if (bot.getPosition().distanceSq(exit.getPosition()) > EXIT_WARP_RANGE_SQ) {
             PqActions.walkTo(bot, exit.getPosition());

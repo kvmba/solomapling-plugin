@@ -146,7 +146,7 @@ public class DropCommands {
         Item itemToDrop = BotLogic.generateCleanItem(itemId);
         MapItem drop = fakechar.getMap().spawnItemDropNoExpire(fakechar, fakechar, itemToDrop,
                 throwPos, false, false);
-        if (drop != null) drop.setPermanentOwner(true);
+        markPermanentOwner(drop);
         return drop;
     }
 
@@ -157,7 +157,7 @@ public class DropCommands {
         Item itemToDrop = BotLogic.generateCleanItemWithQty(itemId, qty);
         MapItem drop = fakechar.getMap().spawnItemDropNoExpire(fakechar, fakechar, itemToDrop,
                 fakechar.getPosition(), false, false);
-        if (drop != null) drop.setPermanentOwner(true);
+        markPermanentOwner(drop);
     }
 
     public static void botThrowItemQty(Character fakechar, int itemId, int qty, Point throwPos) {
@@ -176,7 +176,30 @@ public class DropCommands {
         Item itemToDrop = BotLogic.generateCleanItem(itemId);
         MapItem drop = dropper.getMap().spawnItemDropNoExpire(dropper, owner, itemToDrop,
                 throwPos, false, false);
-        if (drop != null) drop.setPermanentOwner(true);
+        markPermanentOwner(drop);
+    }
+
+    /**
+     * Mark an owner-only drop's permanent ownership under the host's item lock.
+     *
+     * <p>{@code MapItem.setPermanentOwner} is deprecated precisely because it does not hold the
+     * item lock, and the host's contract is explicit: {@code permanentOwner} is read under that
+     * lock on the pickup path ({@code Character.pickupItem} -> {@code canBePickedBy}), so the
+     * write must take the same lock or the field can tear against a live pickup. The addressed
+     * hand-off path already sidesteps this through {@code MapleMap.spawnOwnerOnlyItemDrop};
+     * these are the no-expire drops, which have no owner-only host seam, so they take the lock
+     * themselves.
+     */
+    private static void markPermanentOwner(MapItem drop) {
+        if (drop == null) {
+            return;
+        }
+        drop.lockItem();
+        try {
+            drop.setPermanentOwnerLocked(true);
+        } finally {
+            drop.unlockItem();
+        }
     }
 
     // Meso, Equip, Item, Item Qty - Throw to Owner - Owner only can loot
