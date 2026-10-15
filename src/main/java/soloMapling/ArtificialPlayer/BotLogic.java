@@ -62,15 +62,32 @@ public class BotLogic {
         return null; // No valid player found
     }
 
+    /** Default reach of the at-feet floor scans: the same kill-neighbourhood scale the PQ loot sweeps use (260-400px). */
+    private static final int ITEM_SCAN_RANGE_PX = 300;
+
     public static List<MapObject> checkForItemsOnFloor(Character chr, Point location, int[] itemIds) {
-        return checkForItemsOnFloor(chr, location, 5000, itemIds);
+        return checkForItemsOnFloor(chr, location, ITEM_SCAN_RANGE_PX, itemIds);
     }
 
-    public static List<MapObject> checkForItemsOnFloor(Character chr, Point location, double range, int[] itemIds) {
-        // Return list of items on floor that matches itemId
-        List<MapObject> itemsOnFloor = readItemOnFloor(chr, location, range);
-        List<MapObject> items = filterDroppedItems(itemsOnFloor, itemIds);
-        return items;
+    /** A RADIUS in px as the squared distance the engine's range scans compare ({@code distanceSq <= rangeSq}). */
+    public static double rangeSq(double rangePx) {
+        return rangePx * rangePx;
+    }
+
+    /**
+     * Items on the floor matching {@code itemIds} within {@code rangePx} pixels of {@code location}.
+     *
+     * <p>The caller talks in PIXELS; the engine's {@code getMapObjectsInRange} compares distanceSq.
+     * Every px value must be squared exactly once - here. This used to pass the caller's value
+     * straight through as the squared bound, so each "radius" really scanned its square root:
+     * PqActions' "2_000" covered ~45px (patched at that one site by 6dc4816) and the hand-off
+     * reclaim's "9_000" ~95px (69555d2) - while the sites those patches did not touch (the
+     * tutorial hats' 10_000 -> ~100px, OPQ stage 1's 8_000 -> ~89px) silently kept the defect.
+     * One boundary, one unit: callers pass px and never square.
+     */
+    public static List<MapObject> checkForItemsOnFloor(Character chr, Point location, double rangePx, int[] itemIds) {
+        List<MapObject> itemsOnFloor = readItemOnFloor(chr, location, rangeSq(rangePx));
+        return filterDroppedItems(itemsOnFloor, itemIds);
     }
 
     public static List<MapObject> checkForItemOnFloor(Character chr, Point location, int itemId) {
@@ -79,15 +96,15 @@ public class BotLogic {
         return checkForItemsOnFloor(chr, location, itemToCheck);
     }
 
-    public static List<MapObject> readItemOnFloor(Character character, Point location, double range) {
-        List<MapObject> items = character.getMap().getMapObjectsInRange(location, range, Arrays.asList(MapObjectType.ITEM));
-        for (MapObject item : items) {
-            MapItem mapItem = (MapItem) item;
-            int mapItemId = mapItem.getItemId();
-            int qty = mapItem.getItem().getQuantity();
-            String itemName = BotHelpers.convertItemIdToName(mapItemId);
-            Point itemLoc = mapItem.getPosition();
-        }
+    /**
+     * Engine-facing primitive: floor items within a squared radius. {@code rangeSq} is the
+     * value {@code MapleMap.getMapObjectsInRange} compares directly ({@code distanceSq <=
+     * rangeSq}) - callers that think in pixels must go through {@link #checkForItemsOnFloor}
+     * or square with {@link #rangeSq}, never pass the px value through here raw (that is the
+     * sqrt-reach bug this family carried).
+     */
+    public static List<MapObject> readItemOnFloor(Character character, Point location, double rangeSq) {
+        List<MapObject> items = character.getMap().getMapObjectsInRange(location, rangeSq, Arrays.asList(MapObjectType.ITEM));
         return items;
     }
 
@@ -340,14 +357,15 @@ public class BotLogic {
 
     // todo refactor to generic
     // todo casino bot only
-    public static List<MapObject> readPlayersBetsStamps(Character player, double range) {
-        return readPlayersBetsStamps(player, player.getPosition(), range);
+    /** {@code rangeSq} is the engine's squared bound (see {@link #readItemOnFloor}); legacy callers' values ("5000") are in those terms. */
+    public static List<MapObject> readPlayersBetsStamps(Character player, double rangeSq) {
+        return readPlayersBetsStamps(player, player.getPosition(), rangeSq);
     }
 
     // todo refactor to generic
     // todo casino bot only
-    public static List<MapObject> readPlayersBetsStamps(Character player, Point location, double range) {
-        List<MapObject> items = readItemOnFloor(player, location, range);
+    public static List<MapObject> readPlayersBetsStamps(Character player, Point location, double rangeSq) {
+        List<MapObject> items = readItemOnFloor(player, location, rangeSq);
         items = filterPlayersDroppedItems(items, player);
 
         int[] stamps = {4002000, 4002001, 4002002, 4002003, 4031558, 4031559, 4031560, 4031561};

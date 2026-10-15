@@ -384,9 +384,14 @@ public final class LudiStages {
     private static final Map<Integer, DoorClaim> DOOR_ROOM_CLAIMS = new java.util.concurrent.ConcurrentHashMap<>();
 
     /**
-     * The door rooms this bot has personally cleared, per instance: the tower's room ids
-     * repeat across concurrent runs, so a fresh run's rooms must not read as pre-cleared.
-     * A cleared room is never re-claimed; released with the bot so a fresh run starts clean.
+     * The door rooms this bot has personally cleared, keyed by bot id. The room ids repeat
+     * across runs, so the set has to be empty when a fresh run begins - that is guaranteed by
+     * the run-exit paths: every plugin-driven exit from the quest (stage done, party lost,
+     * bot stopped) goes through {@link PartyQuestBot#returnToLobby} or
+     * {@code stopScheduledTask}, and both call {@link #releaseRoomState} before warping, so
+     * the set is dropped whole. (A GM/script warp straight into the lobby would skip the
+     * release; the worst case is one bot skipping a room it had cleared in a previous run,
+     * which self-corrects on the next release and is not worth instance-keying the set for.)
      */
     private static final Map<Integer, java.util.Set<Integer>> CLEARED_DOOR_ROOMS = new java.util.concurrent.ConcurrentHashMap<>();
 

@@ -8,6 +8,7 @@ import org.gms.service.ConfigService;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.springframework.context.ApplicationContext;
+import soloMapling.ArtificialPlayer.BotLogic;
 
 import java.awt.Point;
 import java.util.List;
@@ -20,11 +21,11 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 /**
- * Pins the loot-radius fix behind the "bots do not pick up the passes" report:
- * {@link PqActions#loot} takes a RADIUS in px, but the engine's getMapObjectsInRange
- * compares distanceSq - passing 2_000 through unchecked scanned a ~45px circle, and a
- * kill lands its drop at the mob's x, well outside it. The helper squares once, so a
- * 2_000 radius really reads 2_000px.
+ * Pins the loot-radius unit boundary behind the "bots do not pick up the passes" report:
+ * callers pass a RADIUS in px, but the engine's getMapObjectsInRange compares distanceSq -
+ * passing 2_000 through unchecked scanned a ~45px circle, and a kill lands its drop at the
+ * mob's x, well outside it. The square happens once, at
+ * {@link BotLogic#checkForItemsOnFloor}, so a 2_000 radius really reads 2_000px.
  */
 class PqLootRadiusTest {
 
@@ -76,14 +77,16 @@ class PqLootRadiusTest {
      * The hand-off reclaim was the same px-vs-sq defect, missed by the fix above: it passed
      * {@code 9_000} straight to the engine, so its walk-back sweep really covered ~95px and a
      * pile the leader walked past was out of view - the 3-minute despawn could still wipe the
-     * bot's stock. Every px-radius scan now goes through the shared {@link PqActions#radiusSq}
-     * boundary; this pins the reclaim's own range (and the boundary itself).
+     * bot's stock. The unit boundary now lives at ONE place - {@link BotLogic#rangeSq}, applied
+     * inside {@link BotLogic#checkForItemsOnFloor} so every caller passes pixels and nobody
+     * squares by hand (the patch that fixed the reclaim left three sibling call sites carrying
+     * the same defect because they each had to remember the unit themselves).
      */
     @Test
     void handoffReclaimRadiusIsSquaredToo() {
         // The shared boundary is the only square in play.
-        assertEquals(4_000_000.0, PqActions.radiusSq(2_000), 1e-9);
-        assertEquals(81_000_000.0, PqActions.radiusSq(9_000), 1e-9);
+        assertEquals(4_000_000.0, BotLogic.rangeSq(2_000), 1e-9);
+        assertEquals(81_000_000.0, BotLogic.rangeSq(9_000), 1e-9);
 
         // What the broken reclaim actually covered: 9_000 as distanceSq = ~95px.
         assertEquals(94.9, Math.sqrt(9_000), 0.5,
@@ -92,10 +95,10 @@ class PqLootRadiusTest {
         assertFalse(Math.pow(600, 2) <= 9_000,
                 "the regression: a 600px pile was invisible to the reclaim");
         // ...and is inside the fixed room-scale sweep.
-        assertTrue(Math.pow(600, 2) <= PqActions.radiusSq(9_000),
+        assertTrue(Math.pow(600, 2) <= BotLogic.rangeSq(9_000),
                 "the fix: the reclaim sees any pile inside the room");
         // Still a radius, not the whole map: a pile across a 20_000px map stays out.
-        assertFalse(Math.pow(20_000, 2) <= PqActions.radiusSq(9_000),
+        assertFalse(Math.pow(20_000, 2) <= BotLogic.rangeSq(9_000),
                 "the reclaim must not vacuum the entire map");
     }
 }

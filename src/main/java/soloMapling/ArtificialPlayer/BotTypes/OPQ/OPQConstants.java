@@ -83,9 +83,20 @@ public final class OPQConstants {
     // reactor's anchor or fall through several footholds below it. The bot
     // first probes its own feet (where the just-broken reactor was) and, if
     // nothing's there, walks straight down the reactor's x in fixed steps.
-    public static final double STAGE_1_LOOT_SCAN_RANGE_PX    = 8000;
+    //
+    // Units: the scan range is in PIXELS (BotLogic.checkForItemsOnFloor squares
+    // it once at the engine boundary). 150px matches the branch's proximity-
+    // honest pickup reach - the engine's pickupItem has no distance check, so a
+    // wider scan would read as a vacuum grab. The old raw 8000 read as a squared
+    // bound, so the scan really covered sqrt(8000) ~= 89px.
+    //
+    // The fallback step must be <= the scan radius or the probes leave blind
+    // gaps a fallen piece can sit in; the old 2500px step against that <100px
+    // scan was mostly holes. 20 x 150px covers 3000px of column, past the
+    // tower's full 2706px height.
+    public static final double STAGE_1_LOOT_SCAN_RANGE_PX    = 150;
     public static final int    STAGE_1_LOOT_FALLBACK_STEPS   =  20;
-    public static final int    STAGE_1_LOOT_FALLBACK_STEP_PX = 2500;
+    public static final int    STAGE_1_LOOT_FALLBACK_STEP_PX = 150;
 
     // ---- Stage 1 drop / return zone -----------------------------------------
     // The altar reactor ("eak") at (377,66) is what spawns Chamberlain Eak, and it fires

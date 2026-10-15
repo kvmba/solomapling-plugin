@@ -245,31 +245,35 @@ public class DropCommands {
 
     // BotLoot at feet
     // BotPickUp
-    public static void botLoot(Character fakechar, double range) {
-        botLoot(fakechar, fakechar.getPosition(), range);
+    // NOTE on units: these legacy helpers take a SQUARED range (the value the engine compares
+    // directly: distanceSq <= rangeSq). The callers' magic numbers are documented in those
+    // terms ("1000" = ~31px "at feet", "9000" = ~95px ~= 2.5 character widths). New call sites
+    // should prefer BotLogic.checkForItemsOnFloor, which takes PIXELS and squares internally -
+    // passing a pixel value to these raw helpers would scan its square root.
+    public static void botLoot(Character fakechar, double rangeSq) {
+        botLoot(fakechar, fakechar.getPosition(), rangeSq);
     }
 
-    public static void botLoot(Character fakechar, Point itemLocation, double range) {
-        // 1000 Range = next to feet // 3000 = 2.5 character widths length
-        List<MapObject> items = fakechar.getMap().getMapObjectsInRange(itemLocation, range, Arrays.asList(MapObjectType.ITEM));
+    public static void botLoot(Character fakechar, Point itemLocation, double rangeSq) {
+        List<MapObject> items = fakechar.getMap().getMapObjectsInRange(itemLocation, rangeSq, Arrays.asList(MapObjectType.ITEM));
         for (MapObject item : items) {
             botLootSingleDrop(fakechar, (MapItem) item);
         }
     }
 
     public static void botLootLocation(Character fakechar, Point itemLocation) {
-        double range = 1000; // 1000 = Next to feet
-        botLoot(fakechar, itemLocation, range);
+        double rangeSq = 1000; // ~31px = next to feet
+        botLoot(fakechar, itemLocation, rangeSq);
     }
 
-    // Bot loots their own items at item location position within specified range
-    public static void botLootOwnerItems(Character fakechar, Point itemLocation, double range) {
-        botLootTargetCharactersItems(fakechar, fakechar, itemLocation, range);
+    // Bot loots their own items at item location position within specified sq range
+    public static void botLootOwnerItems(Character fakechar, Point itemLocation, double rangeSq) {
+        botLootTargetCharactersItems(fakechar, fakechar, itemLocation, rangeSq);
     }
 
-    // Bot loots target character's items at item location within specified range
-    public static void botLootTargetCharactersItems(Character fakechar, Character targetCharacter, Point itemLocation, double range) {
-        List<MapObject> items = fakechar.getMap().getMapObjectsInRange(itemLocation, range, Arrays.asList(MapObjectType.ITEM));
+    // Bot loots target character's items at item location within specified sq range
+    public static void botLootTargetCharactersItems(Character fakechar, Character targetCharacter, Point itemLocation, double rangeSq) {
+        List<MapObject> items = fakechar.getMap().getMapObjectsInRange(itemLocation, rangeSq, Arrays.asList(MapObjectType.ITEM));
         for (MapObject item : items) {
             MapItem mapItem = (MapItem) item;
             if (mapItem.getOwnerId() == targetCharacter.getId()) {
@@ -302,7 +306,9 @@ public class DropCommands {
     }
 
     public static void botLootSelectedItems(Character chr, int[] itemsToLoot) {
-        List<MapObject> itemsOnFloor = checkForItemsOnFloor(chr, chr.getPosition(), 10000, itemsToLoot);
+        // The hats were thrown in a row at the bot's own feet (75px spacing), so a
+        // neighbourhood scan is the honest reach - BotLogic squares the px value.
+        List<MapObject> itemsOnFloor = checkForItemsOnFloor(chr, chr.getPosition(), 300, itemsToLoot);
         if (!itemsOnFloor.isEmpty()) {
             DropCommands.lootItemListOnFloor(chr, itemsOnFloor);
         }
@@ -344,10 +350,10 @@ public class DropCommands {
         BotClientBinding.runWithBoundPlayer(fakechar, () -> fakechar.pickupItem(mapItem));
     }
 
-    // Sweep all drops the bot is entitled to (own + free-for-all) within range. Used as a tidy-up when a
+    // Sweep all drops the bot is entitled to (own + free-for-all) within sq range. Used as a tidy-up when a
     // bot leaves a spot so it doesn't trail a pile; for in-combat looting use the staggered single pickups.
-    public static void botLootOwnAndFreeForAll(Character fakechar, Point itemLocation, double range) {
-        List<MapObject> items = fakechar.getMap().getMapObjectsInRange(itemLocation, range, Arrays.asList(MapObjectType.ITEM));
+    public static void botLootOwnAndFreeForAll(Character fakechar, Point itemLocation, double rangeSq) {
+        List<MapObject> items = fakechar.getMap().getMapObjectsInRange(itemLocation, rangeSq, Arrays.asList(MapObjectType.ITEM));
         for (MapObject item : items) {
             MapItem mapItem = (MapItem) item;
             if (botCanLoot(fakechar, mapItem)) {
