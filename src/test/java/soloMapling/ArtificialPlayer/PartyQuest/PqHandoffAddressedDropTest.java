@@ -50,15 +50,17 @@ class PqHandoffAddressedDropTest {
 
     @Test
     void reclaimAndLootGuardsStillKeyOnPermanentOwner() throws Exception {
-        // The three guards the fix empowers must keep keying on isPermanentOwner: flip either
-        // side and the contract silently breaks again.
+        // The three guards the fix empowers must keep keying on the permanent-owner read - now
+        // through the locked seam (DropCommands.isPermanentOwnerLocked) so the read honours the
+        // host's item-lock contract like the write does. Flip either side and the contract
+        // silently breaks again.
         String pq = javaSource("src/main/java/soloMapling/ArtificialPlayer/PartyQuest/PqActions.java");
-        assertTrue(pq.contains("!drop.isPermanentOwner()"),
+        assertTrue(pq.contains("!DropCommands.isPermanentOwnerLocked(drop)"),
                 "isFloorLoot must refuse addressed piles");
-        assertTrue(pq.contains("drop.isPermanentOwner()"),
+        assertTrue(pq.contains("!DropCommands.isPermanentOwnerLocked(drop) || drop.getOwnerId() == bot.getId()"),
                 "recoverUngatheredHandoffs must require an addressed pile");
         String drops = javaSource(DROP_COMMANDS);
-        assertTrue(drops.contains("mapItem.isPermanentOwner()"),
+        assertTrue(drops.contains("if (isPermanentOwnerLocked(mapItem))"),
                 "botCanLoot must refuse addressed piles");
     }
 

@@ -840,7 +840,7 @@ public final class PqActions {
                 continue;
             }
             // Only piles this bot dropped FOR the leader (owner-addressed, permanent owner).
-            if (!drop.isPermanentOwner() || drop.getOwnerId() == bot.getId()) {
+            if (!DropCommands.isPermanentOwnerLocked(drop) || drop.getOwnerId() == bot.getId()) {
                 continue;
             }
             Character leader = partyLeader(bot);
@@ -1625,7 +1625,7 @@ public final class PqActions {
      * are matched by identity) and not an addressed hand-off pile (permanent owner).
      */
     static boolean isFloorLoot(MapItem drop) {
-        return drop.getItem().getQuantity() <= 1 && !drop.isPermanentOwner();
+        return drop.getItem().getQuantity() <= 1 && !DropCommands.isPermanentOwnerLocked(drop);
     }
 
     // =========================================================================

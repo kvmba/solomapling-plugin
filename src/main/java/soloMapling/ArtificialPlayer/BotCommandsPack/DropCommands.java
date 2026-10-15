@@ -202,6 +202,23 @@ public class DropCommands {
         }
     }
 
+    /**
+     * Read a drop's permanent-owner flag under the host's item lock - the lock the field's own
+     * contract requires: {@code setPermanentOwnerLocked} writes it under that lock and the pickup
+     * path reads it under that lock ({@code Character.pickupItem} -> {@code canBePickedBy}). The
+     * plugin's entitlement gates are the same kind of read, so they go through this one seam
+     * rather than touching the raw field. Callers already hold a non-null drop (they filter for
+     * it), so nothing guards that here.
+     */
+    public static boolean isPermanentOwnerLocked(MapItem drop) {
+        drop.lockItem();
+        try {
+            return drop.isPermanentOwner();
+        } finally {
+            drop.unlockItem();
+        }
+    }
+
     // Meso, Equip, Item, Item Qty - Throw to Owner - Owner only can loot
     // dropType 0 = userOwn
     // playerDrop false = pet lootable
@@ -350,7 +367,7 @@ public class DropCommands {
         if (mapItem.getOwnerId() == fakechar.getId()) {
             return true; // the bot's own drop
         }
-        if (mapItem.isPermanentOwner()) {
+        if (isPermanentOwnerLocked(mapItem)) {
             return false; // somebody's addressed hand-off (a PQ leader's pile) - not floor loot
         }
         return mapItem.getDropType() == 2

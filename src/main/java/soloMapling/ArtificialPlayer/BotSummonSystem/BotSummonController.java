@@ -51,7 +51,9 @@ public final class BotSummonController {
         if (ThreadLocalRandom.current().nextDouble() >= config.spawnChance()) {
             return;
         }
-        spawn(bot, skillId);
+        // Atomic with the spawn: a recast beat racing this grant must find the summon tracked,
+        // not pass the same "not tracked" check (see BotSummonFollower.spawnIfAbsent).
+        BotSummonFollower.spawnIfAbsent(bot.getId(), () -> spawn(bot, skillId));
     }
 
     /**
@@ -82,8 +84,10 @@ public final class BotSummonController {
         if (skillId == null) {
             return false;
         }
-        spawn(bot, skillId);
-        return BotSummonFollower.isTracked(bot.getId());
+        // The spawn is atomic with the idempotence check: the move tick and the regrant sweep
+        // both run this beat (BotSummonRegrantIsolationTest's two periodic entries), so a check
+        // taken here could be passed twice before either spawn registers (spawnIfAbsent).
+        return BotSummonFollower.spawnIfAbsent(bot.getId(), () -> spawn(bot, skillId));
     }
 
     /**

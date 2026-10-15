@@ -513,7 +513,27 @@ public class BotGeneration {
                 + channel);
     }
 
+    /**
+     * Whether a removal must stop this character's FSM first (see {@link #removeBotFromServer}):
+     * only a BotSM that is still RUNNING. Every stopper in the codebase pairs
+     * {@code setRunning(false)} with {@code stopScheduledTask()}, so a false flag means the tick
+     * wheel entry, the shared combat-sweep registration and the dynamic movement session are
+     * already gone - re-stopping would only log a second shutdown for a stop its caller did.
+     */
+    static boolean removalMustStopFsm(BotSM fsm) {
+        return fsm != null && fsm.getRunning();
+    }
+
     public static void removeBotFromServer(Character fakechar) {
+        // Stop the FSM FIRST: the BotSM owns the tick-wheel entry, the shared combat-sweep
+        // registration and the dynamic movement session, and NONE of them end with the
+        // character's own removal (MapleMap.removePlayer leaves the character's map and running
+        // flag intact) - a removal that skipped the stop left the bot ticking as a ghost (the
+        // !bot dcallmap path). Callers that already stopped the bot just skip; the running flag
+        // is where the whole codebase records that stop.
+        if (removalMustStopFsm(CharacterStorage.getBotById(fakechar.getId()))) {
+            BotTypeManager.manuallyStopBot(fakechar);
+        }
         // Detach pets first: they must be shown leaving while the bot is still on
         // its map. Ambient bots keep pets in memory only, so nothing is left
         // behind; companions are skipped here (their saved pets persist).

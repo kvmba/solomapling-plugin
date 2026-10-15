@@ -235,6 +235,29 @@ public final class BotSummonFollower {
     }
 
     /**
+     * Spawn this bot's summon EXACTLY once: the "already tracked" check and the spawn are one
+     * atomic step under the lifecycle lock. The beats that spawn race by design - the move tick
+     * and the dedicated regrant sweep both call {@link BotSummonController#recastForBot}, and a
+     * spawn-wave grant can race either - so a check taken outside the lock could be passed by two
+     * callers, each putting its own summon entity on the wire (double broadcasts, double strikes,
+     * until the buff-time expiry tore both down). Holding the lock across the spawn is the same
+     * trade the re-home path already documents: the body only builds an entity and queues its
+     * packets.
+     *
+     * @param spawn the spawn body; run only when this bot has no tracked summon
+     * @return whether a summon is tracked for this bot afterwards (the recast's own success rule)
+     */
+    static boolean spawnIfAbsent(int botId, Runnable spawn) {
+        synchronized (LIFECYCLE_LOCK) {
+            if (isTracked(botId)) {
+                return true;
+            }
+            spawn.run();
+            return isTracked(botId);
+        }
+    }
+
+    /**
      * The summon skill's WZ buff time in ms ({@code StatEffect.getDuration()}), the clock a
      * real player's summon expires on; 0 when unreadable. Memoized per skill.
      */
