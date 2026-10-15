@@ -63,8 +63,27 @@ final class BotNavigationManager {
     private static final java.util.concurrent.atomic.AtomicInteger slowPathfindSuppressed =
             new java.util.concurrent.atomic.AtomicInteger();
 
-    /* Throttle warmup notifications per (ownerId -> mapId -> lastNotifyMs). */
+    /*
+     * Throttle warmup notifications per (ownerId -> mapId -> lastNotifyMs). A stamp only
+     * throttles inside its own WINDOW, so the single writer below drops the owner's expired
+     * stamps on the way in: an owner keeps at most the maps of the last window instead of one
+     * entry per map that player ever followed a bot across.
+     */
     private static final Map<Integer, Map<Integer, Long>> WARMUP_NOTIFIED = new ConcurrentHashMap<>();
+    /** How long a warmup notice suppresses a repeat for the same (owner, map). */
+    private static final long WARMUP_NOTIFY_WINDOW_MS = 10_000L;
+
+    /** Record one warmup notice; stamps past their window can never throttle again and are dropped. */
+    static void markWarmupNotified(int ownerId, int mapId, long nowMs) {
+        Map<Integer, Long> stamps = WARMUP_NOTIFIED.computeIfAbsent(ownerId, k -> new ConcurrentHashMap<>());
+        stamps.values().removeIf(t -> nowMs - t >= WARMUP_NOTIFY_WINDOW_MS);
+        stamps.put(mapId, nowMs);
+    }
+
+    /** The stamps this owner holds right now (test seam; see {@link #markWarmupNotified}). */
+    static Map<Integer, Long> warmupNotifiedStamps(int ownerId) {
+        return WARMUP_NOTIFIED.get(ownerId);
+    }
 
     static final class NavigationDirective {
         final Point targetPos;
@@ -303,13 +322,13 @@ final class BotNavigationManager {
         Map<Integer, Long> byMap = WARMUP_NOTIFIED.get(ownerId);
         if (byMap != null) {
             Long last = byMap.get(mapId);
-            if (last != null && (now - last) < 10_000L) return;
+            if (last != null && (now - last) < WARMUP_NOTIFY_WINDOW_MS) return;
         }
         // Only count walkable footholds when we are about to send — lazy, inside throttle gate
         long walkable = bot.getMap().getFootholds().getAllFootholds().stream()
                 .filter(fh -> !fh.isWall()).count();
         if (walkable < 100) return;
-        WARMUP_NOTIFIED.computeIfAbsent(ownerId, k -> new ConcurrentHashMap<>()).put(mapId, now);
+        markWarmupNotified(ownerId, mapId, now);
         owner.dropMessage(5, bot.getName() + " is warming map navigation cache, using fallback movement...");
     }
 

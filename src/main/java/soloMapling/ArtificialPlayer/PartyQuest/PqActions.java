@@ -839,8 +839,14 @@ public final class PqActions {
             if (!(obj instanceof MapItem drop) || drop.isPickedUp()) {
                 continue;
             }
-            // Only piles this bot dropped FOR the leader (owner-addressed, permanent owner).
-            if (!DropCommands.isPermanentOwnerLocked(drop) || drop.getOwnerId() == bot.getId()) {
+            // Only piles THIS bot dropped FOR the leader. The dropper identity is what separates
+            // this bot's own insurance from a teammate's pile for the same leader: every hand-off
+            // is dropped by its own bot (giveItemAt -> botThrowToOwnerItemQtyAt), so a pile with
+            // any other dropper (or none) belongs to someone else - reclaiming it here would only
+            // shuffle the stock between bots, the ping-pong the addressed-pile guards exist to stop.
+            if (drop.getDropper() != bot
+                    || !DropCommands.isPermanentOwnerLocked(drop)
+                    || drop.getOwnerId() == bot.getId()) {
                 continue;
             }
             Character leader = partyLeader(bot);

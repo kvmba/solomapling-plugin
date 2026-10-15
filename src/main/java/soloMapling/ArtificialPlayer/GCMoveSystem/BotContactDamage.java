@@ -73,6 +73,10 @@ final class BotContactDamage {
     /* Release a despawned bot's attacker register (mirrors the other per-bot clearBot hooks). */
     public static void clearBot(int botId) {
         LAST_ATTACKER_BY_BOT.remove(botId);
+        // The 5s diagnostic-log throttle is per-bot state too: a stamp past its window can never
+        // suppress anything again, and keeping it would leave one entry per companion that ever
+        // logged a contact diagnostic for the life of the process.
+        NEXT_DIAGNOSTIC_AT.remove(botId);
     }
 
     /* Register `mobOid` as the bot's last attacker for the retaliation memory window. */

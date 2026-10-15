@@ -117,4 +117,23 @@ class BotContactDamageTest {
         assertEquals(maxHp + 500, damage.broadcastDamage());
         assertEquals(maxHp + 500, damage.hpDamage()); // not clamped to the floor
     }
+
+    /**
+     * The 5s diagnostic-log throttle is per-bot state: a despawned bot's stamp can never suppress
+     * anything again, and keeping it would leave one entry per companion that ever logged a
+     * contact diagnostic for the life of the process. {@code clearBot} is the despawn hook.
+     */
+    @Test
+    void clearingABotDropsItsDiagnosticThrottle() throws Exception {
+        java.lang.reflect.Field field = BotContactDamage.class.getDeclaredField("NEXT_DIAGNOSTIC_AT");
+        field.setAccessible(true);
+        @SuppressWarnings("unchecked")
+        java.util.Map<Integer, Long> stamps = (java.util.Map<Integer, Long>) field.get(null);
+        stamps.put(99_002, 123_456L);
+
+        BotContactDamage.clearBot(99_002);
+
+        assertFalse(stamps.containsKey(99_002),
+                "the diagnostic throttle must not outlive the bot it throttled");
+    }
 }

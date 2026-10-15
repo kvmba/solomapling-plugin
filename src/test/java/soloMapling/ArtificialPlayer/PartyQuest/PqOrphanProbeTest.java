@@ -349,34 +349,87 @@ class PqOrphanProbeTest {
         Character owner = mock(Character.class, RETURNS_DEEP_STUBS);
         when(owner.getId()).thenReturn(1);
         when(owner.getPartyId()).thenReturn(-1);
+        Character bot = botOn(map, new Point(600, 0));
         MapItem loose = new MapItem(new Item(PASS, (short) 0, (short) 1),
                 new Point(0, 0), null, owner, null, (byte) 2, false);
+        // THIS bot is the pile's dropper: the reclaim only walks back its own hand-offs.
         MapItem addressed = new MapItem(new Item(PASS, (short) 0, (short) 1),
-                new Point(300, 0), null, owner, null, (byte) 2, false);
+                new Point(300, 0), bot, owner, null, (byte) 2, false);
         // dropTime 0 = never collected, so the 30s reclaim window has long passed.
         addressed.setPermanentOwner(true);
         map.addMapObject(loose);
         map.addMapObject(addressed);
 
-        Character bot = botOn(map, new Point(600, 0));
         PqActions.loot(bot, bot.getPosition(), 260, new int[]{PASS});
         assertEquals(new Point(0, 0), moveTargetOf(BOT_ID));
 
-        // The pile's owner is this bot's party leader, so the reclaim would claim it. The
-        // party chain is what partyLeader() resolves: getLeader().getPlayer().
-        Character leader = mock(Character.class, RETURNS_DEEP_STUBS);
-        org.mockito.Mockito.doReturn(1).when(leader).getId();
-        PartyCharacter leaderEntry = mock(PartyCharacter.class, RETURNS_DEEP_STUBS);
-        org.mockito.Mockito.doReturn(leader).when(leaderEntry).getPlayer();
-        Party party = mock(Party.class, RETURNS_DEEP_STUBS);
-        org.mockito.Mockito.doReturn(leaderEntry).when(party).getLeader();
-        org.mockito.Mockito.doReturn(party).when(bot).getParty();
+        // The pile's owner is this bot's party leader, so the reclaim would claim it.
+        armPartyLeader(bot, owner);
 
         int recovered = PqActions.recoverUngatheredHandoffs(bot, PASS);
 
         assertEquals(0, recovered, "the reclaim may not pick a pile it has not walked to");
         assertEquals(new Point(0, 0), moveTargetOf(BOT_ID),
                 "the pickup walk must survive the reclaim re-arm too");
+    }
+
+    @Test
+    void aTeammatesHandOffPileIsNotReclaimedByThisBot() throws Exception {
+        // The reclaim is each bot's OWN insurance against the leader's 3-minute despawn window,
+        // not a shared sweep: a pile dropped by ANOTHER bot for the same leader must be left to
+        // that bot - reclaiming it here only shuffles the stock between bots.
+        MapleMap map = wzRoom();
+        Character owner = mock(Character.class, RETURNS_DEEP_STUBS);
+        when(owner.getId()).thenReturn(1);
+        when(owner.getPartyId()).thenReturn(-1);
+        Character bot = botOn(map, new Point(600, 0));
+        Character teammate = mock(Character.class, RETURNS_DEEP_STUBS);
+        when(teammate.getId()).thenReturn(BOT_ID + 1);
+        MapItem addressed = new MapItem(new Item(PASS, (short) 0, (short) 1),
+                new Point(0, 0), teammate, owner, null, (byte) 0, false);
+        addressed.setPermanentOwner(true);
+        addressed.setDropTime(0); // 30s+ old: the reclaim window has long passed
+        map.addMapObject(addressed);
+        // Without the dropper filter this exact shape is what the reclaim walked to.
+        armPartyLeader(bot, owner);
+
+        int recovered = PqActions.recoverUngatheredHandoffs(bot, PASS);
+
+        assertEquals(0, recovered);
+        assertNull(moveTargetOf(BOT_ID),
+                "a teammate's addressed pile must not be walked to or reclaimed by this bot");
+    }
+
+    @Test
+    void thisBotsOwnHandOffPileIsWalkedBack() throws Exception {
+        // Positive control for the dropper filter: the same shape with THIS bot as the dropper
+        // still arms the walk-back - the filter must not silently disable the whole reclaim.
+        MapleMap map = wzRoom();
+        Character owner = mock(Character.class, RETURNS_DEEP_STUBS);
+        when(owner.getId()).thenReturn(1);
+        when(owner.getPartyId()).thenReturn(-1);
+        Character bot = botOn(map, new Point(600, 0));
+        MapItem addressed = new MapItem(new Item(PASS, (short) 0, (short) 1),
+                new Point(0, 0), bot, owner, null, (byte) 0, false);
+        addressed.setPermanentOwner(true);
+        addressed.setDropTime(0); // 30s+ old: the reclaim window has long passed
+        map.addMapObject(addressed);
+        armPartyLeader(bot, owner);
+
+        int recovered = PqActions.recoverUngatheredHandoffs(bot, PASS);
+
+        assertEquals(0, recovered, "still out of reach: the pickup happens on a later tick");
+        assertEquals(new Point(0, 0), moveTargetOf(BOT_ID),
+                "this bot's own hand-off pile is the one the reclaim walks back");
+    }
+
+    /** Wire {@code bot.getParty()} so {@link PqActions#partyLeader(Character)} resolves to {@code leader}. */
+    private static void armPartyLeader(Character bot, Character leader) {
+        PartyCharacter leaderEntry = mock(PartyCharacter.class, RETURNS_DEEP_STUBS);
+        org.mockito.Mockito.doReturn(leader).when(leaderEntry).getPlayer();
+        Party party = mock(Party.class, RETURNS_DEEP_STUBS);
+        org.mockito.Mockito.doReturn(leaderEntry).when(party).getLeader();
+        org.mockito.Mockito.doReturn(party).when(bot).getParty();
     }
 
     @Test
