@@ -5,6 +5,8 @@ import org.gms.client.inventory.Item;
 import org.gms.config.GameConfig;
 import org.gms.dao.entity.GameConfigDO;
 import org.gms.manager.ServerManager;
+import org.gms.net.server.world.Party;
+import org.gms.net.server.world.PartyCharacter;
 import org.gms.property.ServiceProperty;
 import org.gms.server.maps.MapItem;
 import org.gms.server.maps.MapleMap;
@@ -46,12 +48,13 @@ import static org.mockito.Mockito.when;
  * distance check, so a grab from here would teleport it), and it must never target an
  * addressed hand-off or another bot's still-protected drop (the pass ping-pong).
  *
- * <p>The second half pins the park seams: waitNearStageNpc/spreadNearStageNpc re-arm their
- * walk every macro tick, and a re-arm issued while the bot walks to a drop used to OVERWRITE
- * the pickup walk mid-flight (walkTo only refuses the re-arm while the bot still stands on
- * its spot, so the moment it stepped off to pick something up, the next park re-arm dragged
- * it back) - the root of the residual orphan-pass ping-pong. A live move target that is not
- * the park spot must stand the park down.
+ * <p>The second half pins the recurring-re-arm contract: the NPC parks, the delivery walk
+ * and the hand-off reclaim walk re-arm their walk every macro tick, and a re-arm issued
+ * while the bot walks to a drop used to OVERWRITE the pickup walk mid-flight (walkTo only
+ * refuses the re-arm while the bot still stands on its spot, so the moment it stepped off
+ * to pick something up, the next re-arm dragged it back) - the root of the residual
+ * orphan-pass ping-pong. A live move target that is not the re-arm's own spot must stand
+ * the re-arm down (standsDownForLiveWalk, one seam for all three origins).
  *
  * <p>Both halves drive the real {@link PqActions} decision logic against a live {@link
  * MapleMap} and a real {@link GCMovement} state entry (the same state-injection pattern the
@@ -316,19 +319,80 @@ class PqOrphanProbeTest {
     }
 
     @Test
-    void theParkStandDownGateHoldsTheContract() {
-        // Pure decision table of parkStandsDown (see PqActions' javadoc): a live goal that is
-        // not the park spot stands the park down; no goal, or a goal AT the park spot (the
-        // bot is walking home already), does not.
+    void theDeliveryReArmNeverOverwritesALivePickupWalk() throws Exception {
+        MapleMap map = roomWithDropAt(new Point(0, 0), false);
+        Character bot = botOn(map, new Point(600, 0));
+
+        // The probe arms the pickup walk (the shape pinned above).
+        PqActions.loot(bot, bot.getPosition(), 260, new int[]{PASS});
+        assertEquals(new Point(0, 0), moveTargetOf(BOT_ID));
+
+        // The bot holds passes, so the delivery path has something to hand over. doReturn,
+        // not when(): the deep-stubs mock has already served intermediate calls.
+        org.mockito.Mockito.doReturn(3).when(bot).getItemQuantity(PASS, false);
+
+        // Same tick, deliverAndPark's next step fires the delivery re-arm (loot -> handItems).
+        // It must stand down: the live move target (the drop) is not the delivery post.
+        int dropped = PqActions.handItemsToLeaderAfterStage(bot, PASS, STAGE_NPC);
+
+        assertEquals(0, dropped, "nothing may be delivered while a live move owns the driver");
+        assertEquals(new Point(0, 0), moveTargetOf(BOT_ID),
+                "the pickup walk must survive the delivery re-arm (walkTo would have overwritten it)");
+    }
+
+    @Test
+    void theReclaimWalkNeverOverwritesALivePickupWalk() throws Exception {
+        // Two drops: an ordinary pass at (0,0) the probe walks to, and a 30s-old addressed
+        // hand-off pile at (300,0) the reclaim would walk back to. The live move must survive
+        // the reclaim re-arm (without the gate, its walkForPickup overwrote the target).
+        MapleMap map = wzRoom();
+        Character owner = mock(Character.class, RETURNS_DEEP_STUBS);
+        when(owner.getId()).thenReturn(1);
+        when(owner.getPartyId()).thenReturn(-1);
+        MapItem loose = new MapItem(new Item(PASS, (short) 0, (short) 1),
+                new Point(0, 0), null, owner, null, (byte) 2, false);
+        MapItem addressed = new MapItem(new Item(PASS, (short) 0, (short) 1),
+                new Point(300, 0), null, owner, null, (byte) 2, false);
+        // dropTime 0 = never collected, so the 30s reclaim window has long passed.
+        addressed.setPermanentOwner(true);
+        map.addMapObject(loose);
+        map.addMapObject(addressed);
+
+        Character bot = botOn(map, new Point(600, 0));
+        PqActions.loot(bot, bot.getPosition(), 260, new int[]{PASS});
+        assertEquals(new Point(0, 0), moveTargetOf(BOT_ID));
+
+        // The pile's owner is this bot's party leader, so the reclaim would claim it. The
+        // party chain is what partyLeader() resolves: getLeader().getPlayer().
+        Character leader = mock(Character.class, RETURNS_DEEP_STUBS);
+        org.mockito.Mockito.doReturn(1).when(leader).getId();
+        PartyCharacter leaderEntry = mock(PartyCharacter.class, RETURNS_DEEP_STUBS);
+        org.mockito.Mockito.doReturn(leader).when(leaderEntry).getPlayer();
+        Party party = mock(Party.class, RETURNS_DEEP_STUBS);
+        org.mockito.Mockito.doReturn(leaderEntry).when(party).getLeader();
+        org.mockito.Mockito.doReturn(party).when(bot).getParty();
+
+        int recovered = PqActions.recoverUngatheredHandoffs(bot, PASS);
+
+        assertEquals(0, recovered, "the reclaim may not pick a pile it has not walked to");
+        assertEquals(new Point(0, 0), moveTargetOf(BOT_ID),
+                "the pickup walk must survive the reclaim re-arm too");
+    }
+
+    @Test
+    void theStandDownGateHoldsTheContract() {
+        // Pure decision table of standsDownForLiveWalk (see PqActions' javadoc): a live goal
+        // that is not the re-arm's own spot stands the re-arm down; no goal, or a goal AT the
+        // re-arm's spot (the bot is walking home already), does not.
         Point drop = new Point(0, 0);
         Point park = new Point(-157, -192);
-        assertTrue(PqActions.parkStandsDown(true, new Point(600, 0), park),
-                "walking to a drop: the park re-arm must stand down (it would overwrite the walk)");
-        assertFalse(PqActions.parkStandsDown(false, new Point(600, 0), park),
-                "no live goal (driver gave the move up): the park re-arm must still re-issue");
-        assertFalse(PqActions.parkStandsDown(true, new Point(-160, -190), park),
-                "the bot is walking (or standing) on its own park spot: no conflict, no stand-down");
-        assertFalse(PqActions.parkStandsDown(true, null, park),
+        assertTrue(PqActions.standsDownForLiveWalk(true, new Point(600, 0), park),
+                "walking to a drop: the re-arm must stand down (it would overwrite the walk)");
+        assertFalse(PqActions.standsDownForLiveWalk(false, new Point(600, 0), park),
+                "no live goal (driver gave the move up): the re-arm must still re-issue");
+        assertFalse(PqActions.standsDownForLiveWalk(true, new Point(-160, -190), park),
+                "the bot is walking (or standing) on its own spot: no conflict, no stand-down");
+        assertFalse(PqActions.standsDownForLiveWalk(true, null, park),
                 "a position-less bot cannot be judged near anything: the re-arm proceeds");
     }
 }

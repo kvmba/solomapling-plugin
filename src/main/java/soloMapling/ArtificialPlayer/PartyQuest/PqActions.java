@@ -792,6 +792,13 @@ public final class PqActions {
         // Reach the post FIRST: the rule is piles AT the stage NPC. A bot still walking
         // there has not delivered this tick (the arrival nudge re-runs it promptly).
         if (bot.getPosition().distanceSq(post) > PICKUP_REACH_SQ) {
+            // The delivery re-arms every tick while the stock is held, so it must stand down
+            // for a live move like every other recurring origin (yieldsToLiveWalk) - a pickup/
+            // reclaim walk armed earlier this tick would otherwise be overwritten and its
+            // drop left orphaned. The next tick (or the walk's arrival nudge) re-arms this.
+            if (yieldsToLiveWalk(bot, post)) {
+                return 0;
+            }
             walkTo(bot, post);
             return 0;
         }
@@ -851,8 +858,14 @@ public final class PqActions {
                 continue;
             }
             if (bot.getPosition().distanceSq(at) > PICKUP_REACH_SQ) {
-                walkForPickup(bot, at);
-                continue; // still walking; the pile is picked up on a later tick, up close
+                // The reclaim re-runs every deliverAndPark tick and must not overwrite a live
+                // move (yieldsToLiveWalk) - a pickup walk/reclaim walk/chase already in flight
+                // owns the driver, and the pile has the rest of its 3-minute despawn window to
+                // be walked to on a later tick.
+                if (!yieldsToLiveWalk(bot, at)) {
+                    walkForPickup(bot, at);
+                }
+                continue; // out of reach; the pile is picked up on a later tick, up close
             }
             DropCommands.botLootSingleDrop(bot, drop);
             recovered++;
@@ -1396,7 +1409,14 @@ public final class PqActions {
         return pathable;
     }
 
-    /** Release a stopped/despawned quest bot's seek state so the per-bot maps do not grow. */
+    /**
+     * Release every per-bot table this class keeps for a stopped/despawned quest bot (seek /
+     * chase / probe / stage-walk shield / trace state) so none of them grows for the life of
+     * the process. The shield and the !gcmove trace were the two entries left out of this
+     * release: only a later {@code movementShielded}/{@code seekTraceEnabled} read removed an
+     * expired entry, and a stopped bot is never read again - one entry per shielded/traced
+     * bot, kept forever (the same leak family as the wait-spot sets d79b87e closed).
+     */
     public static void clearSeekState(int botId) {
         seekTargetByBot.remove(botId);
         clearChaseGoalState(botId);
@@ -1408,6 +1428,8 @@ public final class PqActions {
         pathableVerdictAtByBot.keySet().removeIf(k -> k.botId() == botId);
         pathableVerdictByBot.keySet().removeIf(k -> k.botId() == botId);
         orphanProbeAtByBot.remove(botId);
+        stageWalkShieldUntilByBot.remove(botId);
+        SEEK_TRACE_UNTIL.remove(botId);
     }
 
     /** Whether this mob is a legitimate chase target from {@code pos}: hostile and in the seek box. */
@@ -1690,7 +1712,7 @@ public final class PqActions {
         if (spot == null) {
             return;
         }
-        if (parkYieldsToLiveWalk(bot, spot)) {
+        if (yieldsToLiveWalk(bot, spot)) {
             return;
         }
         walkTo(bot, spot);
@@ -1779,7 +1801,7 @@ public final class PqActions {
             return; // no stage NPC and no next00 to gather by - nothing to spread around
         }
         Point target = claimNear(bot, npc);
-        if (parkYieldsToLiveWalk(bot, target)) {
+        if (yieldsToLiveWalk(bot, target)) {
             return;
         }
         walkTo(bot, target);
@@ -1787,37 +1809,39 @@ public final class PqActions {
     }
 
     /**
-     * Whether a PARK re-arm ({@code waitNearStageNpc}/{@code spreadNearStageNpc}) must yield
-     * this tick because the bot is already walking somewhere else: TRUE exactly when the
-     * driver holds a move goal the bot has not yet reached.
+     * Whether a RECURRING re-arm ({@code waitNearStageNpc}/{@code spreadNearStageNpc} parks,
+     * the delivery walk, the hand-off reclaim walk) must yield this tick because the driver
+     * already holds a move goal the bot has not reached: TRUE exactly when a live move is in
+     * flight and the bot is not standing on the re-arm's own spot.
      *
-     * <p>The parks re-arm their walk every macro tick, and {@link #walkTo} only refuses the
-     * re-arm while the bot still STANDS on its spot - the moment it steps off (the arrival
-     * nudge from a loot walk fired {@link #loot} again, and the sweep armed a pickup walk to
-     * a drop), the next park re-arm OVERWROTE that walk and dragged the bot back to its spot
-     * before the pickup could land. Every other walk origin in this class already honours the
-     * "a live move is never re-targeted mid-flight" rule (loot's pickup walk, the delivery
-     * walkTo, the reclaim walk - the 317bfbc guard); the parks were the two seams left out,
-     * which is the root of the residual orphan-pass ping-pong. {@link GCMovement#hasMoveTarget}
-     * (not {@link GCMovement#isMoving}) is the honest test: the parks must still be able to
-     * re-arm after the driver gave a move up (abandoned/unreachable), which leaves
-     * {@code isMoving} true only through inAir/climbing - a falling or climbing bot between
-     * moves is exactly when a park re-arm is the RIGHT thing to re-issue.
+     * <p>These origins re-arm their walk every macro tick, and {@link #walkTo} only refuses a
+     * re-arm while the bot still STANDS on its spot - so a re-arm issued after the bot stepped
+     * off would OVERWRITE a pickup/reclaim/chase walk mid-flight and drag the bot back. (That
+     * is how the residual orphan-pass ping-pong kept returning: each round gated one origin -
+     * loot's pickup walk by 317bfbc, the parks by 8d492d5 - while the delivery and reclaim
+     * walks kept re-arming unconditionally.) One rule, one seam, every recurring origin routed
+     * through it: the parks, {@link #handItemsToLeaderAfterStage} and
+     * {@link #recoverUngatheredHandoffs}.
+     *
+     * <p>{@link GCMovement#hasMoveTarget} (not {@link GCMovement#isMoving}) is the honest
+     * test: a re-arm must still fire after the driver gave a move up (abandoned/unreachable),
+     * and {@code isMoving} stays true through inAir/climbing between moves - a falling or
+     * climbing bot between moves is exactly when a re-arm is the RIGHT thing to re-issue.
      */
-    private static boolean parkYieldsToLiveWalk(Character bot, Point parkSpot) {
-        return parkStandsDown(GCMovement.hasMoveTarget(bot), bot.getPosition(), parkSpot);
+    private static boolean yieldsToLiveWalk(Character bot, Point rearmSpot) {
+        return standsDownForLiveWalk(GCMovement.hasMoveTarget(bot), bot.getPosition(), rearmSpot);
     }
 
     /**
-     * Pure form of the park yield gate (see {@link #parkYieldsToLiveWalk}), so the decision
-     * table is pinned by test without a live driver (the same pure-seam pattern as
+     * Pure form of the recurring-re-arm yield gate (see {@link #yieldsToLiveWalk}), so the
+     * decision table is pinned by test without a live driver (the same pure-seam pattern as
      * {@link #walkShieldReleases}, which has already regressed twice). A position-less bot
      * cannot be judged near its spot, so the gate fails OPEN - the re-arm proceeds.
      */
-    static boolean parkStandsDown(boolean driverHoldsGoal, Point botPos, Point parkSpot) {
+    static boolean standsDownForLiveWalk(boolean driverHoldsGoal, Point botPos, Point rearmSpot) {
         return driverHoldsGoal && botPos != null
-                && (Math.abs(botPos.x - parkSpot.x) > ARRIVAL_EPS_PX
-                        || Math.abs(botPos.y - parkSpot.y) > ARRIVAL_EPS_PX);
+                && (Math.abs(botPos.x - rearmSpot.x) > ARRIVAL_EPS_PX
+                        || Math.abs(botPos.y - rearmSpot.y) > ARRIVAL_EPS_PX);
     }
 
     /**
