@@ -100,6 +100,21 @@ public final class LudiPqData {
         };
     }
 
+    /**
+     * The turn-in NPC of a stage map: the NPC whose script holds that stage's pass requirement,
+     * at WZ-derived id {@code 2040035 + stage} for the eight stages that have one (2040036..2040044;
+     * stage 8's 2040043 included, stage 9's Alishar room is 2040044). 0 when the stage has no
+     * turn-in NPC (the trap room, the door rooms, an unknown stage).
+     *
+     * <p>Every stage room ALSO carries the map-exit NPC (2040047, Sgt. Anderson) on the same
+     * ledge 175-405px away, so "the nearest NPC" is a coin flip between the turn-in post and
+     * the exit - the delivery and the ready ring must name the turn-in one. Verified against
+     * {@code wz/Map.wz/Map/Map9/9220101..9.img.xml}'s life entries.
+     */
+    public static int stageNpcId(int stage) {
+        return (stage >= 1 && stage <= 9) ? 2040000 + 35 + stage : 0;
+    }
+
     /** The mob that drops the passes in every collection stage. */
     public static final int PASS_MOB = 9300005;
 

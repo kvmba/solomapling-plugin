@@ -119,13 +119,14 @@ public final class LudiStages {
         }
         // Room quiet: the work is done. Hold the stage-NPC post and hand the stock over the
         // moment the leader comes for the turn-in.
+        int stageNpc = LudiPqData.stageNpcId(stage);
         PqActions.loot(bot, bot.getPosition(), LOOT_RADIUS_PX, new int[]{LudiPqData.PASS});
-        if (PqActions.handItemsToLeaderAfterStage(bot, LudiPqData.PASS) > 0) {
+        if (PqActions.handItemsToLeaderAfterStage(bot, LudiPqData.PASS, stageNpc) > 0) {
             PqActions.say(bot, BotMessages.get("pq.passes_dropped"));
         }
         if (PqActions.countItem(bot, LudiPqData.PASS) <= 0) {
             // Delivered: spread into the NPC ring with the rest of the ready party.
-            PqActions.spreadNearStageNpc(bot);
+            PqActions.spreadNearStageNpc(bot, stageNpc);
         }
     }
 
@@ -177,12 +178,13 @@ public final class LudiStages {
         // Boxes all gone: the stage's work is done and the leader still has to turn the
         // passes in. Hold the stage-NPC post and deliver only when HE comes into range
         // there - no more mid-climb drops every time he walks past the tower.
-        if (PqActions.handItemsToLeaderAfterStage(bot, LudiPqData.PASS) > 0) {
+        int stageNpc = LudiPqData.stageNpcId(2);
+        if (PqActions.handItemsToLeaderAfterStage(bot, LudiPqData.PASS, stageNpc) > 0) {
             PqActions.say(bot, BotMessages.get("pq.passes_dropped"));
         }
         if (PqActions.countItem(bot, LudiPqData.PASS) <= 0) {
             // Delivered: park by the stage NPC with the rest of the ready party.
-            PqActions.spreadNearStageNpc(bot);
+            PqActions.spreadNearStageNpc(bot, stageNpc);
         }
         // Still carrying passes while a box stands is fine: the stock rides along, the
         // delivery waits for the post-work beat above.
@@ -359,11 +361,12 @@ public final class LudiStages {
         // instead of throwing passes the moment he passes by mid-fight.
         if (crate < 0
                 && bot.getMap().getAllMonsters().stream().noneMatch(m -> m.isAlive())) {
-            if (PqActions.handItemsToLeaderAfterStage(bot, LudiPqData.PASS) > 0) {
+            int stageNpc = LudiPqData.stageNpcId(3);
+            if (PqActions.handItemsToLeaderAfterStage(bot, LudiPqData.PASS, stageNpc) > 0) {
                 PqActions.say(bot, BotMessages.get("pq.passes_dropped"));
             }
             if (PqActions.countItem(bot, LudiPqData.PASS) <= 0) {
-                PqActions.spreadNearStageNpc(bot);
+                PqActions.spreadNearStageNpc(bot, stageNpc);
             }
         }
     }
@@ -565,7 +568,7 @@ public final class LudiStages {
     private static void workStage4FromMainRoom(Character bot) {
         int room = claimDoorRoom(bot, LudiPqData.STAGE4_ROOM_FIRST, LudiPqData.STAGE4_ROOM_LAST);
         if (room < 0) {
-            deliverAndPark(bot);
+            deliverAndPark(bot, 4);
             return;
         }
         enterDoorRoom(bot, room, LudiPqData.STAGE4_ROOM_FIRST);
@@ -574,14 +577,18 @@ public final class LudiStages {
     /**
      * Hold the stage-NPC post and hand the stock over the moment the leader walks into
      * hand-off range - the same post-work beat the collection stages run.
+     *
+     * @param stage the stage whose turn-in NPC the delivery belongs to ({@link LudiPqData#stageNpcId}),
+     *              so the post is that NPC and not the map-exit NPC standing on the same ledge
      */
-    private static void deliverAndPark(Character bot) {
+    private static void deliverAndPark(Character bot, int stage) {
+        int stageNpc = LudiPqData.stageNpcId(stage);
         PqActions.recoverUngatheredHandoffs(bot, LudiPqData.PASS);
         PqActions.loot(bot, bot.getPosition(), LOOT_RADIUS_PX, new int[]{LudiPqData.PASS});
-        if (PqActions.handItemsToLeaderAfterStage(bot, LudiPqData.PASS) > 0) {
+        if (PqActions.handItemsToLeaderAfterStage(bot, LudiPqData.PASS, stageNpc) > 0) {
             PqActions.say(bot, BotMessages.get("pq.passes_dropped"));
         }
-        PqActions.waitNearStageNpc(bot);
+        PqActions.waitNearStageNpc(bot, stageNpc);
     }
 
     /**
@@ -658,7 +665,7 @@ public final class LudiStages {
     private static void workStage5FromMainRoom(Character bot) {
         int room = claimDoorRoom(bot, LudiPqData.STAGE5_ROOM_FIRST, LudiPqData.STAGE5_ROOM_LAST);
         if (room < 0) {
-            deliverAndPark(bot);
+            deliverAndPark(bot, 5);
             return;
         }
         enterDoorRoom(bot, room, LudiPqData.STAGE5_ROOM_FIRST);

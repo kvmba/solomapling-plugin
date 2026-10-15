@@ -24,6 +24,7 @@ import soloMapling.ArtificialPlayer.BotLogic;
 import soloMapling.ArtificialPlayer.BotMessagingSystem.CharacterStorage;
 import soloMapling.ArtificialPlayer.GCMoveSystem.GCMovement;
 import soloMapling.MapVFX.CustomReactor;
+import soloMapling.server.ExecutorServiceManager;
 
 import static soloMapling.ArtificialPlayer.GCMoveSystem.GCMovement.movementNowMs;
 
@@ -586,12 +587,24 @@ public final class PqActions {
      * movement/beat layers back into stage logic - it must never run the stage inline, that
      * is what produced the old act-freeze-act cadence. Debounced by BotSM's own nudge guard;
      * a no-op when the wheel entry is gone (bot stopping).
+     *
+     * <p>ALWAYS DISPATCHED, never inlined: this is reachable from the movement driver's tick,
+     * which holds the bot's movement monitor, and {@code BotSM.nudgeSoon} is synchronized on the
+     * macro monitor. Taking the macro monitor from there closes an AB-BA cycle with the stop path
+     * ({@code stopScheduledTask} holds the macro monitor and waits for the movement monitor via
+     * {@code GCMovement.disable}) - a hard deadlock that leaves the bot frozen and the driver
+     * thread parked forever. The same hazard is already handled this way in BotDeath,
+     * BotMapEntryResponder and BotPlayerReaction. Off the driver there is no order to invert, so
+     * dispatching unconditionally is always safe (the nudge is cheap and debounced).
      */
     private static void nudgeStageTick(Character bot) {
-        BotSM nudgeable = CharacterStorage.getBotById(bot.getId());
-        if (nudgeable != null) {
-            nudgeable.nudgeSoon(STAGE_TICK_NUDGE_MS);
-        }
+        final int botId = bot.getId();
+        ExecutorServiceManager.runAsync(() -> {
+            BotSM nudgeable = CharacterStorage.getBotById(botId);
+            if (nudgeable != null) {
+                nudgeable.nudgeSoon(STAGE_TICK_NUDGE_MS);
+            }
+        });
     }
 
     /**
@@ -749,16 +762,30 @@ public final class PqActions {
      * delivery (drop whenever the leader walks near, wherever he is) is gone on purpose - it
      * sprayed piles across rooms mid-fight and ping-ponged them with the reclaim loop.
      *
+     * <p>The post is the nearest NPC in the room: use this overload only where the room holds a
+     * single one. {@link #handItemsToLeaderAfterStage(Character, int, int)} names the stage's
+     * turn-in NPC for rooms that also hold the map-exit NPC.
+     *
      * @return how many of the item were dropped for the leader (0 when there was nothing)
      */
     public static int handItemsToLeaderAfterStage(Character bot, int itemId) {
+        return handItemsToLeaderAfterStage(bot, itemId, 0);
+    }
+
+    /**
+     * As {@link #handItemsToLeaderAfterStage(Character, int)}, with the stage's turn-in NPC
+     * named by id ({@code stageNpcId > 0}). The quest layer knows which stage it is standing in,
+     * so it can name the NPC; rooms that hold both the turn-in NPC and the map-exit NPC (every
+     * Ludi PQ stage room) would otherwise post the stock wherever a proximity choice landed.
+     */
+    public static int handItemsToLeaderAfterStage(Character bot, int itemId, int stageNpcId) {
         if (bot == null || countItem(bot, itemId) <= 0) {
             return 0;
         }
         // Hold the delivery post: the NPC ring spot the cleared-stage wait uses, so the
         // leader knows where the party's stock is. No-op when the room has no NPC (trap
         // room) - the caller handles that room separately.
-        Point post = stageNpcSpot(bot);
+        Point post = stageNpcSpot(bot, stageNpcId);
         if (post == null) {
             return 0; // nowhere to post the delivery - the stock stays pocketed
         }
@@ -1561,10 +1588,20 @@ public final class PqActions {
     private static final Map<Integer, Integer> WAIT_CLAIM_KEY_BY_BOT = new java.util.concurrent.ConcurrentHashMap<>();
 
     public static void waitNearStageNpc(Character bot) {
+        waitNearStageNpc(bot, 0);
+    }
+
+    /**
+     * As {@link #waitNearStageNpc(Character)}, with the stage's turn-in NPC named by id
+     * ({@code stageNpcId > 0}). Rooms that hold both the turn-in NPC and the map-exit NPC
+     * (every Ludi PQ stage room) must name theirs: a proximity choice could park the whole
+     * ready party - and the delivery post - at the exit instead of the turn-in spot.
+     */
+    public static void waitNearStageNpc(Character bot, int stageNpcId) {
         if (bot == null || bot.getMap() == null) {
             return;
         }
-        Point spot = stageNpcSpot(bot);
+        Point spot = stageNpcSpot(bot, stageNpcId);
         if (spot == null) {
             return;
         }
@@ -1575,22 +1612,40 @@ public final class PqActions {
         // 100% combat blackout for the whole wait).
     }
 
-    /** The closest stage NPC's spot (the next00 portal's mouth as fallback), or null. */
-    private static Point stageNpcSpot(Character bot) {
+    /**
+     * The stage NPC's spot (the next00 portal's mouth as fallback), or null.
+     *
+     * <p>{@code stageNpcId > 0} names the NPC BY ID, and a named NPC that is not standing in the
+     * room means there is NO post (null). That matters because every Ludi PQ stage room carries
+     * its turn-in NPC (2040036..2040044) AND the map-exit NPC (2040047, Sgt. Anderson) on the
+     * same ledge, 175-405px apart: a proximity choice is a coin flip between the two, so the
+     * party's stock could be posted at the EXIT while the leader turns the stage in at the stage
+     * NPC - and the ready ring formed around the exit instead of the turn-in spot. The quest
+     * layer, which knows the stage, names the NPC ({@link #stageNpcSpot});
+     * {@code stageNpcId <= 0} keeps the nearest-NPC choice for a room that holds only one.
+     */
+    private static Point stageNpcSpot(Character bot, int stageNpcId) {
         Point spot = null;
-        long bestSq = Long.MAX_VALUE;
-        for (MapObject obj : bot.getMap().getMapObjectsInRange(bot.getPosition(), WAIT_NPC_RANGE_SQ,
-                List.of(org.gms.server.maps.MapObjectType.NPC))) {
-            if (obj instanceof NPC npc && npc.getPosition() != null) {
-                // The CLOSEST stage NPC, not the first in the map's unordered object table.
-                double dsq = bot.getPosition().distanceSq(npc.getPosition());
-                if (dsq < bestSq) {
-                    bestSq = (long) dsq;
-                    spot = npc.getPosition();
+        if (stageNpcId > 0) {
+            NPC stageNpc = bot.getMap().getNPCById(stageNpcId);
+            if (stageNpc != null && stageNpc.getPosition() != null) {
+                spot = stageNpc.getPosition();
+            }
+        } else {
+            long bestSq = Long.MAX_VALUE;
+            for (MapObject obj : bot.getMap().getMapObjectsInRange(bot.getPosition(), WAIT_NPC_RANGE_SQ,
+                    List.of(org.gms.server.maps.MapObjectType.NPC))) {
+                if (obj instanceof NPC npc && npc.getPosition() != null) {
+                    // The CLOSEST NPC, not the first in the map's unordered object table.
+                    double dsq = bot.getPosition().distanceSq(npc.getPosition());
+                    if (dsq < bestSq) {
+                        bestSq = (long) dsq;
+                        spot = npc.getPosition();
+                    }
                 }
             }
         }
-        if (spot == null) {
+        if (spot == null && stageNpcId <= 0) {
             for (Portal portal : bot.getMap().getPortals()) {
                 if ("next00".equals(portal.getName())) {
                     spot = portal.getPosition();
@@ -1619,10 +1674,19 @@ public final class PqActions {
      * the instance, so a new run starts with a clean ring.
      */
     public static void spreadNearStageNpc(Character bot) {
+        spreadNearStageNpc(bot, 0);
+    }
+
+    /**
+     * As {@link #spreadNearStageNpc(Character)}, with the stage's turn-in NPC named by id
+     * ({@code stageNpcId > 0}) - the ring forms around the NPC the stage work delivers to,
+     * not around whichever NPC happens to be nearer.
+     */
+    public static void spreadNearStageNpc(Character bot, int stageNpcId) {
         if (bot == null || bot.getMap() == null) {
             return;
         }
-        Point npc = stageNpcSpot(bot);
+        Point npc = stageNpcSpot(bot, stageNpcId);
         if (npc == null) {
             return; // no stage NPC and no next00 to gather by - nothing to spread around
         }
