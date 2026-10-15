@@ -127,6 +127,12 @@ public final class PqActions {
         if (bot == null || target == null) {
             return;
         }
+        Point here = bot.getPosition();
+        if (here != null
+                && Math.abs(here.x - target.x) <= ARRIVAL_EPS_PX
+                && Math.abs(here.y - target.y) <= ARRIVAL_EPS_PX) {
+            return; // already standing on the target - re-arming the walk only overwrites
+        }
         armStageWalkShield(bot);
         java.util.concurrent.CountDownLatch arrived = new java.util.concurrent.CountDownLatch(1);
         GCMovement.move(bot, target.x, target.y, () -> {
@@ -168,6 +174,20 @@ public final class PqActions {
         if (walkShieldReleases(arrivedFlag, GCMovement.isMoving(bot))) {
             disarmStageWalkShield(bot);
         }
+    }
+
+    /**
+     * The pickup walk: a bare driver move to a drop, plus the arrival nudge. Deliberately NOT
+     * {@link #walkTo} - a pickup may fire from the combat beat's flow (seekAndAttack callers),
+     * where the stage-walk shield would black out the fight and the bounded block would freeze
+     * the tick behind a 260-400px walk. The nudge is the whole point: it re-runs the owning
+     * stage sweep promptly on arrival (decisive in a bot-only room whose macro ticks are
+     * 36-48s apart), and that re-run picks the drop up close or re-arms this walk for the
+     * next out-of-reach one. Callers only reach here with the drop already past
+     * {@link #PICKUP_REACH_SQ}, so no arrival re-check is needed.
+     */
+    private static void walkForPickup(Character bot, Point at) {
+        GCMovement.move(bot, at.x, at.y, () -> nudgeStageTick(bot));
     }
 
     /**
@@ -804,7 +824,7 @@ public final class PqActions {
                 continue;
             }
             if (bot.getPosition().distanceSq(at) > PICKUP_REACH_SQ) {
-                GCMovement.move(bot, at.x, at.y);
+                walkForPickup(bot, at);
                 continue; // still walking; the pile is picked up on a later tick, up close
             }
             DropCommands.botLootSingleDrop(bot, drop);
@@ -1448,7 +1468,7 @@ public final class PqActions {
             // is in flight (a loot walk issued over it would yank the bot off its chase).
             // The re-issue replans from the CURRENT pixel once the driver is idle.
             if (nearestOutOfReach != null && !GCMovement.isMoving(bot)) {
-                GCMovement.move(bot, nearestOutOfReach.x, nearestOutOfReach.y);
+                walkForPickup(bot, nearestOutOfReach);
             }
             return 0;
         }
@@ -1463,6 +1483,15 @@ public final class PqActions {
         }
         return after - before;
     }
+
+    /**
+     * The band {@code walkTo} treats as "already standing on the target": the driver's own
+     * PRECISE arrival box (GCMovementDriver.reachedMoveTarget's moveTargetPrecise branch).
+     * A parked bot re-asking for its spot must not re-arm the walk - the re-arm is what used
+     * to overwrite a live loot/reclaim walk issued earlier the same tick, so the pickup walk
+     * never got a driver tick and the out-of-reach drop it was for stayed orphaned.
+     */
+    private static final int ARRIVAL_EPS_PX = 8;
 
     /**
      * How close the bot must stand to a drop before picking it up - one reach for every
