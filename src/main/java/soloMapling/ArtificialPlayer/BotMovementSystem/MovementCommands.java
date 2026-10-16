@@ -307,6 +307,12 @@ public class MovementCommands {
 
 
     public static void BotIdleStandingUpdate(Character fakechar) {
+        // The dynamic driver already publishes idle/alert poses. This legacy refresh runs on
+        // the macro thread and BotMove writes its captured coordinates back through the host;
+        // letting it race a dynamic step rewinds position and queues a stale 200ms stand frame.
+        if (GCMovement.isEnabled(fakechar)) {
+            return;
+        }
         if (!isStanding(fakechar)) {
             return;
         }

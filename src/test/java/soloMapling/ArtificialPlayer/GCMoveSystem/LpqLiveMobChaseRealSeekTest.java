@@ -29,10 +29,10 @@ import static org.mockito.Mockito.when;
  * REGRESSION for the LPQ stage-1 report: "after killing on a platform the bot follows the mob
  * ABOVE with tiny stutter steps, sways left-right, never climbs up to fight it".
  *
- * <p>Root cause (pinned by a faithful per-beat trace on the real 922010100 geometry): the chase
- * pinned the mob's PIXEL, not its PLATFORM, and its retarget memo then fought the movement layer.
- * Two concrete defects, each pinned here against the REAL {@link PqActions#seekAndAttack} decision
- * logic (no physics — the emergent sim is randomized and would make the assertions flaky):
+ * <p>Checks concrete decision/state defects against the REAL {@link PqActions#seekAndAttack}
+ * and 922010100 geometry. These are not end-to-end client acceptance tests: they do not execute
+ * real attack packets, damage, monster control or the full party quest's macro work.
+ * The original two cases cover the earlier pinned-pixel and missing-goal defects:
  *
  * <ol>
  *   <li>a mob above the bot never reads same-level, so {@code tx} stayed at the mob's FIRST-SEEN x
@@ -237,6 +237,124 @@ public class LpqLiveMobChaseRealSeekTest {
         } finally {
             unregisterState(bot.getId());
             PqActions.clearSeekState(bot.getId());
+        }
+    }
+
+    @Test
+    void realSeekReplacesAnUnrelatedLiveGoalWithoutWaitingForTimeout() throws Exception {
+        MapleMap map = BotNavigationMapLoader.loadMapGeometry(922010100);
+        BotNavigationGraphProvider.getGraph(map, BotMovementProfile.base());
+        AtomicReference<Point> pos = new AtomicReference<>(new Point(88, -450));
+        AtomicReference<Point> mobPos = new AtomicReference<>(new Point(120, -713));
+        Character bot = makeBot(map, pos, 9103);
+        BotMovementState st = freshState(map, bot, 88, -450);
+        registerState(st);
+        injectMob(map, liveMob(mobPos));
+        try {
+            PqActions.seekAndAttack(bot);
+            Point chase = new Point(st.moveTarget);
+            // A macro pickup/park replaced the goal, but the seek's old goal memo still matches
+            // the mob. Having SOME move target is not evidence the driver is still chasing it.
+            GCMovement.move(bot, 88, -450);
+            PqActions.seekAndAttack(bot);
+            org.junit.jupiter.api.Assertions.assertEquals(chase, st.moveTarget,
+                    "the next combat beat must restore the upper mob's goal, not keep a stale pickup walk");
+
+            st.moveProgressAtMs = 123L;
+            PqActions.seekAndAttack(bot);
+            org.junit.jupiter.api.Assertions.assertEquals(123L, st.moveProgressAtMs,
+                    "an unchanged live chase must NOT reset the driver's no-progress clock");
+        } finally {
+            unregisterState(bot.getId());
+            PqActions.clearSeekState(bot.getId());
+        }
+    }
+
+    @Test
+    void realSeekAfterAKillAimsAtTheNextMobAbove() throws Exception {
+        MapleMap map = BotNavigationMapLoader.loadMapGeometry(922010100);
+        BotNavigationGraphProvider.getGraph(map, BotMovementProfile.base());
+        AtomicReference<Point> pos = new AtomicReference<>(new Point(88, -450));
+        Character bot = makeBot(map, pos, 9104);
+        BotMovementState st = freshState(map, bot, 88, -450);
+        registerState(st);
+        Monster killed = liveMob(new AtomicReference<>(new Point(100, -450)));
+        injectMob(map, killed);
+        try {
+            PqActions.seekAndAttack(bot);
+            when(killed.isAlive()).thenReturn(false);
+            Monster next = liveMob(new AtomicReference<>(new Point(120, -713)));
+            when(next.getObjectId()).thenReturn(556);
+            injectMob(map, next);
+            PqActions.seekAndAttack(bot);
+            org.junit.jupiter.api.Assertions.assertTrue(st.moveTarget.y < -650,
+                    "a dead sticky target must not leave its floor/goal attached to the next mob");
+        } finally {
+            unregisterState(bot.getId());
+            PqActions.clearSeekState(bot.getId());
+        }
+    }
+
+    @Test
+    void concurrentMacroAndCombatBeatsCannotEnterTheSameSeekEpisode() throws Exception {
+        MapleMap map = BotNavigationMapLoader.loadMapGeometry(922010100);
+        BotNavigationGraphProvider.getGraph(map, BotMovementProfile.base());
+        AtomicReference<Point> pos = new AtomicReference<>(new Point(88, -450));
+        Character bot = makeBot(map, pos, 9106);
+        BotMovementState st = freshState(map, bot, 88, -450);
+        registerState(st);
+        Monster mob = liveMob(new AtomicReference<>(new Point(120, -713)));
+        injectMob(map, mob);
+        try (var executor = java.util.concurrent.Executors.newVirtualThreadPerTaskExecutor()) {
+            var entered = new java.util.concurrent.CountDownLatch(1);
+            var release = new java.util.concurrent.CountDownLatch(1);
+            var calls = new java.util.concurrent.atomic.AtomicInteger();
+            when(mob.getPosition()).thenAnswer(inv -> {
+                if (calls.incrementAndGet() == 1) {
+                    entered.countDown();
+                    org.junit.jupiter.api.Assertions.assertTrue(release.await(5, java.util.concurrent.TimeUnit.SECONDS));
+                }
+                return new Point(120, -713);
+            });
+            var macro = executor.submit(() -> PqActions.seekAndAttack(bot));
+            org.junit.jupiter.api.Assertions.assertTrue(entered.await(5, java.util.concurrent.TimeUnit.SECONDS));
+            var started = new java.util.concurrent.CountDownLatch(1);
+            var combat = executor.submit(() -> {
+                started.countDown();
+                PqActions.seekAndAttack(bot);
+            });
+            try {
+                org.junit.jupiter.api.Assertions.assertTrue(started.await(5, java.util.concurrent.TimeUnit.SECONDS));
+                org.junit.jupiter.api.Assertions.assertThrows(java.util.concurrent.TimeoutException.class,
+                        () -> combat.get(100, java.util.concurrent.TimeUnit.MILLISECONDS),
+                        "the combat beat must wait while macro work is replacing the chase episode");
+            } finally {
+                release.countDown();
+            }
+            macro.get(5, java.util.concurrent.TimeUnit.SECONDS);
+            combat.get(5, java.util.concurrent.TimeUnit.SECONDS);
+        } finally {
+            unregisterState(bot.getId());
+            PqActions.clearSeekState(bot.getId());
+        }
+    }
+
+    @Test
+    void macroIdleRefreshDoesNotWriteOverADynamicMovementFrame() throws Exception {
+        MapleMap map = BotNavigationMapLoader.loadMapGeometry(922010100);
+        AtomicReference<Point> pos = new AtomicReference<>(new Point(88, -450));
+        Character bot = makeBot(map, pos, 9107);
+        BotMovementState st = freshState(map, bot, 88, -450);
+        registerState(st);
+        when(bot.getStance()).thenReturn(org.gms.constants.game.CharacterStance.STAND_RIGHT_STANCE);
+        ObserverTracker.markObservedNow(922010100);
+        org.mockito.Mockito.clearInvocations(bot);
+        try {
+            soloMapling.ArtificialPlayer.BotMovementSystem.MovementCommands.BotIdleStandingUpdate(bot);
+            org.mockito.Mockito.verify(bot, org.mockito.Mockito.never()).setPosition(any());
+            org.mockito.Mockito.verify(bot, org.mockito.Mockito.never()).setStance(org.mockito.ArgumentMatchers.anyInt());
+        } finally {
+            unregisterState(bot.getId());
         }
     }
 }

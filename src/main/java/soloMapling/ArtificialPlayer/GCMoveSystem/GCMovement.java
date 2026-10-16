@@ -246,6 +246,30 @@ public final class GCMovement {
         if (st == null) {
             return;
         }
+        synchronized (st) {
+            setMoveTarget(st, x, y, onArrival);
+        }
+    }
+
+    /** Reconcile a chase against the live driver goal atomically with arrival/abandonment. */
+    public static void moveIfTargetChanged(Character bot, int x, int y, int epsilonPx) {
+        enable(bot);
+        BotMovementState st = STATES.get(bot.getId());
+        if (st == null) {
+            return;
+        }
+        synchronized (st) {
+            Point current = st.moveTarget;
+            if (current == null || Math.abs(current.x - x) >= epsilonPx
+                    || Math.abs(current.y - y) >= epsilonPx) {
+                setMoveTarget(st, x, y, null);
+            }
+        }
+    }
+
+    // Caller holds the same monitor as the physics tick: never publish half a move or lose a new
+    // target/callback to the previous move's arrival while the combat thread is issuing it.
+    private static void setMoveTarget(BotMovementState st, int x, int y, Runnable onArrival) {
         st.following = false;
         st.farmAnchor = null;
         st.farmAnchorMapId = -1;
@@ -255,9 +279,9 @@ public final class GCMovement {
         st.moveBestDist = Integer.MAX_VALUE;
         st.moveProgressAtMs = MovementClock.nowMs();
         if (onArrival != null) {
-            ARRIVAL_CALLBACKS.put(bot.getId(), onArrival);
+            ARRIVAL_CALLBACKS.put(st.bot.getId(), onArrival);
         } else {
-            ARRIVAL_CALLBACKS.remove(bot.getId());
+            ARRIVAL_CALLBACKS.remove(st.bot.getId());
         }
     }
 
@@ -532,21 +556,28 @@ public final class GCMovement {
 
     public static boolean isMoving(Character bot) {
         BotMovementState st = bot == null ? null : STATES.get(bot.getId());
-        return st != null && (st.moveTarget != null || st.following || st.inAir || st.climbing
-                || st.navEdge != null || st.portalDropAtMs > 0L);
+        if (st == null) {
+            return false;
+        }
+        synchronized (st) {
+            return st.moveTarget != null || st.following || st.inAir || st.climbing
+                    || st.navEdge != null || st.portalDropAtMs > 0L;
+        }
     }
 
     /*
      * True while the driver still holds a MOVE TARGET for this bot (a GCMovement.move/farmHere goal
-     * that has not been reached, abandoned by the no-progress watchdog, or superseded). A caller that
-     * re-issues moves on a cadence (the PQ chase) uses this to tell "my last move is still in flight"
-     * from "the driver gave up and the bot now has no goal": when it drops to false the caller must
-     * re-issue even if its own target x is unchanged, or the bot sits goal-less until the caller's
-     * own timeout - the LPQ stage-1 "hangs mid-climb, only recovers after ~4s" report.
+     * that has not been reached or abandoned). This says nothing about WHO issued it: recurring
+     * low-priority walks yield to any live goal; a chase must use moveIfTargetChanged instead.
      */
     public static boolean hasMoveTarget(Character bot) {
         BotMovementState st = bot == null ? null : STATES.get(bot.getId());
-        return st != null && st.moveTarget != null;
+        if (st == null) {
+            return false;
+        }
+        synchronized (st) {
+            return st.moveTarget != null;
+        }
     }
 
     /* Field-trace accessors (the !gcmove trace path log): the driver's own last nav decision,
@@ -740,8 +771,26 @@ public final class GCMovement {
     public static void face(Character bot, boolean left) {
         BotMovementState st = bot == null ? null : STATES.get(bot.getId());
         if (st != null) {
-            st.facingDir = left ? -1 : 1;
-            BotMovementManager.broadcastMovement(st);
+            synchronized (st) {
+                st.facingDir = left ? -1 : 1;
+                BotMovementManager.broadcastMovement(st);
+            }
+        }
+    }
+
+    /** One coherent driver snapshot for the field chase trace; never runs an extra path search. */
+    public static String movementStateReport(Character bot) {
+        BotMovementState st = bot == null ? null : STATES.get(bot.getId());
+        if (st == null) {
+            return "disabled";
+        }
+        synchronized (st) {
+            return "pos=" + bot.getPosition() + " move=" + st.moveTarget
+                    + " nav=" + st.lastNavDecision + " edge=" + navEdgeSummary(bot)
+                    + " block=" + st.lastEdgeBlockReason + " air=" + st.inAir
+                    + " climb=" + st.climbing + " vel=" + st.movementVelX + "," + st.movementVelY
+                    + " profile=" + st.movementProfile + " warmup=" + st.graphWarmupFallback
+                    + " progressAgeMs=" + (MovementClock.nowMs() - st.moveProgressAtMs);
         }
     }
 

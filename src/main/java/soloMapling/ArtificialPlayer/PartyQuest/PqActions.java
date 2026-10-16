@@ -966,10 +966,6 @@ public final class PqActions {
      *  (the one-beat off-platform blip tolerance). Same-LEVEL itself is decided by nav region, not
      *  a raw y band — a 60px band on the LPQ stage-1 tower spans three ~22px stair rows. */
     private static final int FLOOR_SNAP_BAND_PX = 60;
-    private static final Map<Integer, Integer> seekTargetByBot = new java.util.concurrent.ConcurrentHashMap<>();
-    private static final Map<Integer, Point> seekAnchorByBot = new java.util.concurrent.ConcurrentHashMap<>();
-    private static final Map<Integer, Long> seekDeadlineByBot = new java.util.concurrent.ConcurrentHashMap<>();
-    private static final Map<Integer, Point> seekLastGoalByBot = new java.util.concurrent.ConcurrentHashMap<>();
     // PINNED chase PLATFORM (LPQ stage-1 "追着上方巡逻怪小步卡顿、永远上不去"): a live mob's position
     // changes EVERY beat (aggro walk / knockback / an airborne arc), and re-aiming the seek move at
     // its floor point each beat can land that point in a DIFFERENT nav region than the last — so the
@@ -979,9 +975,6 @@ public final class PqActions {
     // followed; the region is unchanged so the committed edge survives), and the pinned floor is held
     // through an off-platform blip until CHASE_PLATFORM_DRIFT_BEATS consecutive off-platform beats
     // prove the mob changed floors. Per-bot state: the pinned floor point + the off-platform count.
-    private static final Map<Integer, Point> chaseAnchorByBot = new java.util.concurrent.ConcurrentHashMap<>();
-    /** botId -> consecutive beats the mob's live floor has been off the pinned platform. */
-    private static final Map<Integer, Integer> chaseDriftByBot = new java.util.concurrent.ConcurrentHashMap<>();
     private static final int CHASE_PLATFORM_DRIFT_BEATS = 4;  // ~1s of beats before re-deriving
     // REGION-STABLE GOAL (the unified gate for the whole region-flip family): whatever the anchor
     // branch above computes, the goal actually ISSUED must not change nav region beat to beat — a
@@ -991,21 +984,47 @@ public final class PqActions {
     // CHASE_PLATFORM_DRIFT_BEATS consecutive flipping beats prove the mob really changed platforms
     // (then the new region is accepted and the progress clock restarts). Unbaked graphs (-2) and
     // region-less points (-1) cannot answer, so they pass through ungated (peek-only: no bake stall).
-    private static final Map<Integer, Point> chaseGoalByBot = new java.util.concurrent.ConcurrentHashMap<>();
-    private static final Map<Integer, Integer> chaseGoalRegionByBot = new java.util.concurrent.ConcurrentHashMap<>();
-    /** botId -> consecutive beats the candidate goal's region differed from the issued one. */
-    private static final Map<Integer, Integer> chaseFlipByBot = new java.util.concurrent.ConcurrentHashMap<>();
-    /** botId -> best manhattan distance to the chased mob so far this episode (progress = closing). */
-    private static final Map<Integer, Integer> seekBestDistByBot = new java.util.concurrent.ConcurrentHashMap<>();
     // Goal-pathability memo: a full A* per 250ms beat per bot is waste while the goal's nav region
     // is unchanged (the region gate above pins it for the whole episode). The verdict is cached
     // against the goal's peek region and re-verified only when that region changes (or falls
     // outside the memo's domain). The memo's region ids come from the peek graph while canPathTo
     // plans on the bot's best graph — a mismatch can only ever SKIP a re-check, never fake one:
     // a stale "pathable" self-heals through the driver's own no-path handling and the seek deadline.
-    private static final Map<Integer, Integer> chasePathRegionByBot = new java.util.concurrent.ConcurrentHashMap<>();
-    private static final Map<Integer, Integer> chasePathSurfaceYByBot = new java.util.concurrent.ConcurrentHashMap<>();
-    private static final Map<Integer, Boolean> chasePathableByBot = new java.util.concurrent.ConcurrentHashMap<>();
+    private static final Map<Integer, SeekState> seekStates = new java.util.concurrent.ConcurrentHashMap<>();
+
+    /** Macro work and the combat sweep can seek concurrently. One monitor protects the whole episode,
+     * not individual map operations: a kill/retarget must never clear another beat's progress halfway. */
+    private static final class SeekState {
+        MapleMap map;
+        int targetOid = -1;
+        Point anchorFloor;
+        int drift;
+        Point goal;
+        int goalRegion = -1;
+        int flips;
+        int bestDist = Integer.MAX_VALUE;
+        long deadline;
+        int pathRegion = -1;
+        int pathSurfaceY;
+        Boolean pathable;
+        final Map<Integer, PathabilityVerdict> pathability = new java.util.HashMap<>();
+
+        void clearProgress() {
+            bestDist = Integer.MAX_VALUE;
+            deadline = 0L;
+        }
+
+        void clearGoal() {
+            anchorFloor = null;
+            drift = 0;
+            goal = null;
+            goalRegion = -1;
+            flips = 0;
+            pathRegion = -1;
+            pathable = null;
+            clearProgress();
+        }
+    }
 
     /**
      * Seek a mob and fight it, the way the roaming grind brain does: swing at whatever the
@@ -1032,6 +1051,23 @@ public final class PqActions {
         if (bot == null || bot.getMap() == null) {
             return;
         }
+        int botId = bot.getId();
+        SeekState state = seekStates.computeIfAbsent(botId, ignored -> new SeekState());
+        synchronized (state) {
+            if (seekStates.get(botId) != state) {
+                return; // teardown removed this episode while this beat waited
+            }
+            if (state.map != bot.getMap()) {
+                state.map = bot.getMap();
+                state.targetOid = -1;
+                state.clearGoal();
+                state.pathability.clear();
+            }
+            seekAndAttack(bot, state);
+        }
+    }
+
+    private static void seekAndAttack(Character bot, SeekState state) {
         Point pos = bot.getPosition();
         if (pos == null) {
             return;
@@ -1042,17 +1078,19 @@ public final class PqActions {
         //    lands, and the sweep's next beat is the wait the old burst used to sleep out.
         BotAttackDriver.botAttack(bot);
 
-        // 2. Nothing landed (nothing in reach, cooldown, or debuffed): keep closing on the
+        // 2. Whether the swing landed or not, keep closing on the
         //    chase target. The chase target must be PATHABLE: on a tower whose climb chain
         //    the graph cannot plan end-to-end, the nearest mob sits across a missing link and
         //    the un-pathable chase degrades into walking the bot's own floor under it forever
         //    (the stage-1 report). Prefer the nearest pathable hostile; only a room where
         //    NOTHING is pathable keeps the plain nearest (steering is still better than
         //    standing, and the graph may bake later).
-        Monster target = seekPathableTarget(bot, pos);
+        Monster target = seekPathableTarget(bot, pos, state);
         if (target == null) {
-            seekLastGoalByBot.remove(bot.getId());
-            clearChaseGoalState(bot.getId());
+            state.clearGoal();
+            if (seekTraceEnabled(bot.getId())) {
+                seekTrace(bot, state, null, null, null, null, "no-target");
+            }
             return; // the room is quiet (or nothing reachable); hold position this beat
         }
 
@@ -1076,13 +1114,13 @@ public final class PqActions {
         // (that same stale x) then refused to re-arm it: the bot hung on the rope until the 4s seek
         // deadline wiped state. Following the live x while the platform holds fixes both.
         Point mobFloor = GCMovement.groundPointBelow(bot.getMap(), mp.x, mp.y);
-        Point anchorFloor = chaseAnchorByBot.get(bot.getId());
+        Point anchorFloor = state.anchorFloor;
         // Same level = the mob stands on the bot's OWN walk-connected surface (one nav region),
         // NOT a raw y-difference: on the LPQ stage-1 tower the stair rows sit ~22px apart, so a
         // y-band spans three rows and a mob one or two rows up read "same level" - its live-x
         // re-aims then discarded the committed climb edge every beat (卡绳索/永不登台). Regions are
         // the platform granularity the whole frozen-anchor design is keyed on; a raw band is not.
-        boolean sameLevel = mobFloor != null && pos != null
+        boolean sameLevel = mobFloor != null
                 && GCMovement.peekRegionIdAt(bot.getMap(), mp.x, mobFloor.y) >= 0
                 && GCMovement.peekRegionIdAt(bot.getMap(), mp.x, mobFloor.y)
                         == GCMovement.peekRegionIdAt(bot.getMap(), pos.x, pos.y);
@@ -1090,8 +1128,8 @@ public final class PqActions {
         int ty;
         if (anchorFloor == null || mobFloor == null) {
             anchorFloor = new Point(mp.x, (mobFloor != null) ? mobFloor.y : mp.y);
-            chaseAnchorByBot.put(bot.getId(), anchorFloor);
-            chaseDriftByBot.remove(bot.getId());
+            state.anchorFloor = anchorFloor;
+            state.drift = 0;
             tx = anchorFloor.x;
             ty = anchorFloor.y;
         } else if (sameLevel
@@ -1106,17 +1144,17 @@ public final class PqActions {
             // x-pin description was superseded by that gate; live-x tracking is the shipped
             // behaviour.
             anchorFloor = new Point(mp.x, anchorFloor.y);
-            chaseAnchorByBot.put(bot.getId(), anchorFloor);
-            chaseDriftByBot.remove(bot.getId());
+            state.anchorFloor = anchorFloor;
+            state.drift = 0;
             tx = mp.x;
             ty = sameLevel ? mobFloor.y : anchorFloor.y;
         } else {
-            int drift = chaseDriftByBot.merge(bot.getId(), 1, Integer::sum);
+            int drift = ++state.drift;
             if (drift >= CHASE_PLATFORM_DRIFT_BEATS) {
                 anchorFloor = new Point(mp.x, mobFloor.y);
-                chaseAnchorByBot.put(bot.getId(), anchorFloor);
-                chaseDriftByBot.remove(bot.getId());
-                seekAnchorByBot.remove(bot.getId()); // a new platform restarts the progress clock
+                state.anchorFloor = anchorFloor;
+                state.drift = 0;
+                state.clearProgress();
                 tx = mp.x;
                 ty = mobFloor.y;
             } else {
@@ -1133,11 +1171,11 @@ public final class PqActions {
         // Memoized per goal-region: the region gate below pins the goal for whole seconds at a
         // time, so re-running a full A* on every beat while pinned is pure waste (and the trace
         // call would double it). The cache is re-verified whenever the goal's region changes.
-        boolean pathable = pathableMemo(bot, tx, ty);
+        boolean pathable = pathableMemo(bot, tx, ty, state);
         if (!pathable) {
             Point underMob = GCMovement.groundPointBelow(bot.getMap(), mp.x, mp.y + 1);
             if (underMob != null && Math.abs(underMob.y - ty) > 20
-                    && pathableMemo(bot, mp.x, underMob.y)) {
+                    && pathableMemo(bot, mp.x, underMob.y, state)) {
                 tx = mp.x;
                 ty = underMob.y;
             }
@@ -1152,7 +1190,7 @@ public final class PqActions {
         // until CHASE_FLIP_BEATS consecutive flipping beats prove the mob really changed
         // platforms — then the new region is adopted and the progress clock restarts. This is the
         // single place the invariant is enforced; the anchor bookkeeping above stays heuristic.
-        Point issued = stableChaseGoal(bot, new Point(tx, ty));
+        Point issued = stableChaseGoal(bot, new Point(tx, ty), state);
         tx = issued.x;
         ty = issued.y;
 
@@ -1162,42 +1200,24 @@ public final class PqActions {
         // a left-right sway whose stride exceeds the epsilon, which is exactly the treadmill the
         // field traces showed. The manhattan distance to the mob is the honest measure: any
         // real approach beats the best-seen by the epsilon; swaying never does.
-        Point anchor = seekAnchorByBot.get(bot.getId());
         int mobDist = Math.abs(pos.x - mp.x) + Math.abs(pos.y - mp.y);
-        Integer bestDist = seekBestDistByBot.get(bot.getId());
-        if (anchor == null || mobDist < bestDist - PROGRESS_EPS_PX) {
-            seekAnchorByBot.put(bot.getId(), new Point(pos));
-            seekBestDistByBot.put(bot.getId(), mobDist);
-            seekDeadlineByBot.put(bot.getId(), movementNowMs() + RETARGET_TIMEOUT_MS);
-        } else if (movementNowMs() > seekDeadlineByBot.getOrDefault(bot.getId(), 0L)) {
-            seekTargetByBot.put(bot.getId(), -1);
-            clearChaseGoalState(bot.getId());
-            seekAnchorByBot.remove(bot.getId());
-            seekLastGoalByBot.remove(bot.getId());
+        if (mobDist < state.bestDist - PROGRESS_EPS_PX) {
+            state.bestDist = mobDist;
+            state.deadline = movementNowMs() + RETARGET_TIMEOUT_MS;
+        } else if (movementNowMs() > state.deadline) {
+            if (seekTraceEnabled(bot.getId())) {
+                seekTrace(bot, state, target, mp, mobFloor, issued, "timeout");
+            }
+            state.targetOid = -1;
+            state.clearGoal();
             return;
         }
 
-        // Retarget epsilon: re-issuing GCMovement.move for the same POINT every beat would reset the
-        // walk's progress clock each time, so only a real shift in the goal re-issues it — UNLESS
-        // the driver no longer holds a move target (it gave up on an unreachable leg, or the move
-        // was superseded): then the bot has no goal at all and this beat must re-arm it even at the
-        // same point, or it sits goal-less until the seek's own timeout (the stage-1 "hangs
-        // mid-climb, only recovers after ~4s" report). hasMoveTarget is the driver's "goal still in
-        // flight". The Y is part of the goal: a persistent flip adopted on a vertically-stacked
-        // tower routinely keeps the same x and changes only the row — comparing x alone left the
-        // new y un-issued and the bot chasing the previous row's floor until the driver's own
-        // arrival cleared the stale target.
-        Point lastGoal = seekLastGoalByBot.get(bot.getId());
-        boolean rearmNeeded = !GCMovement.hasMoveTarget(bot);
-        boolean goalShifted = lastGoal == null
-                || Math.abs(tx - lastGoal.x) >= RETARGET_EPS_PX
-                || Math.abs(ty - lastGoal.y) >= RETARGET_EPS_PX;
-        if (rearmNeeded || goalShifted) {
-            GCMovement.move(bot, tx, ty);
-            seekLastGoalByBot.put(bot.getId(), new Point(tx, ty));
-        }
+        // Compare with the driver's ACTUAL goal, not a memo of our last command. A pickup/park
+        // can replace it between beats; "has any target" must not suppress the upward chase.
+        GCMovement.moveIfTargetChanged(bot, tx, ty, RETARGET_EPS_PX);
         if (seekTraceEnabled(bot.getId())) {
-            seekTrace(bot, target, mp, mobFloor, tx, ty, lastGoal);
+            seekTrace(bot, state, target, mp, mobFloor, issued, "chase");
         }
     }
 
@@ -1220,29 +1240,14 @@ public final class PqActions {
         return movementNowMs() < SEEK_TRACE_UNTIL.getOrDefault(botId, 0L);
     }
 
-    private static void seekTrace(Character bot, Monster target, Point mp, Point mobFloor,
-                                  int tx, int ty, Point lastGoal) {
-        Point pos = bot.getPosition();
+    private static void seekTrace(Character bot, SeekState state, Monster target, Point mp,
+                                  Point mobFloor, Point goal, String reason) {
         org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(PqActions.class);
-        log.info("[seek-trace] bot={} pos={} target={} mobPos={} mobFloor={} goal=({},{}) lastGoal={} sticky={} drift={} pathable={} nav={} edge={} block={} hasGoal={}",
-                bot.getId(), pos, target.getId(), mp, mobFloor, tx, ty, lastGoal,
-                seekTargetByBot.get(bot.getId()), chaseDriftByBot.get(bot.getId()),
-                pathableMemo(bot, tx, ty), // the memo, not a raw A*: the trace must not double the beat's path cost
-                GCMovement.navDecision(bot), GCMovement.navEdgeSummary(bot),
-                GCMovement.edgeBlockReason(bot), GCMovement.hasMoveTarget(bot));
-    }
-
-    /** Release every per-bot goal-state entry (the anchor bookkeeping + the region gate). */
-    private static void clearChaseGoalState(int botId) {
-        chaseAnchorByBot.remove(botId);
-        chaseDriftByBot.remove(botId);
-        chaseGoalByBot.remove(botId);
-        chaseGoalRegionByBot.remove(botId);
-        chaseFlipByBot.remove(botId);
-        seekBestDistByBot.remove(botId);
-        chasePathRegionByBot.remove(botId);
-        chasePathSurfaceYByBot.remove(botId);
-        chasePathableByBot.remove(botId);
+        log.info("[seek-trace] bot={} thread={} reason={} pos={} target={} oid={} mobPos={} mobFloor={} goal={} sticky={} drift={} pathable={} bestDist={} remainingMs={} driver={}",
+                bot.getId(), Thread.currentThread().getName(), reason, bot.getPosition(),
+                target == null ? -1 : target.getId(), target == null ? -1 : target.getObjectId(),
+                mp, mobFloor, goal, state.targetOid, state.drift, state.pathable,
+                state.bestDist, Math.max(0L, state.deadline - movementNowMs()), GCMovement.movementStateReport(bot));
     }
 
     /**
@@ -1261,45 +1266,41 @@ public final class PqActions {
      * the held goal each beat is what re-arms the move if the driver's own no-progress watchdog
      * abandoned it mid-climb (the stage-1 "hangs until the 4s deadline" report).
      */
-    private static Point stableChaseGoal(Character bot, Point candidate) {
-        int botId = bot.getId();
+    private static Point stableChaseGoal(Character bot, Point candidate, SeekState state) {
         int candidateRegion = GCMovement.peekRegionIdAt(bot.getMap(), candidate.x, candidate.y);
         if (candidateRegion < 0) {
             // -1 (no ledge) or -2 (unbaked): cannot gate on region. Issue directly, and reset so a
             // later answerable beat re-arms the gate from whatever the driver last saw.
-            chaseGoalByBot.remove(botId);
-            chaseGoalRegionByBot.remove(botId);
-            chaseFlipByBot.remove(botId);
+            state.goal = null;
+            state.goalRegion = -1;
+            state.flips = 0;
             return candidate;
         }
-        Integer lastRegion = chaseGoalRegionByBot.get(botId);
-        if (lastRegion == null) {
+        int lastRegion = state.goalRegion;
+        if (lastRegion < 0) {
             // First gated beat: issue and pin.
-            chaseGoalByBot.put(botId, candidate);
-            chaseGoalRegionByBot.put(botId, candidateRegion);
-            chaseFlipByBot.remove(botId);
+            state.goal = candidate;
+            state.goalRegion = candidateRegion;
+            state.flips = 0;
             return candidate;
         }
         if (candidateRegion == lastRegion) {
             // Same region: the live pixel may move within the platform (patrol tracking) — adopt
             // it and clear the flip tally.
-            chaseGoalByBot.put(botId, candidate);
-            chaseGoalRegionByBot.put(botId, candidateRegion);
-            chaseFlipByBot.remove(botId);
+            state.goal = candidate;
+            state.flips = 0;
             return candidate;
         }
         // Region flip: hold the previous goal until the flip proves persistent.
-        int flips = chaseFlipByBot.merge(botId, 1, Integer::sum);
+        int flips = ++state.flips;
         if (flips < CHASE_PLATFORM_DRIFT_BEATS) {
-            Point held = chaseGoalByBot.get(botId);
-            return held != null ? held : candidate;
+            return state.goal;
         }
         // Persistent flip: the mob really changed platforms — adopt the candidate, restart.
-        chaseGoalByBot.put(botId, candidate);
-        chaseGoalRegionByBot.put(botId, candidateRegion);
-        chaseFlipByBot.remove(botId);
-        seekAnchorByBot.remove(botId); // a new platform restarts the progress clock
-        seekBestDistByBot.remove(botId);
+        state.goal = candidate;
+        state.goalRegion = candidateRegion;
+        state.flips = 0;
+        state.clearProgress();
         return candidate;
     }
 
@@ -1311,25 +1312,19 @@ public final class PqActions {
      * platform must not serve a goal on the other. The goal's probed surface Y is the platform
      * discriminator — only a goal whose region AND floor both match the memo can skip the A*.
      */
-    private static boolean pathableMemo(Character bot, int x, int y) {
-        int botId = bot.getId();
+    private static boolean pathableMemo(Character bot, int x, int y, SeekState state) {
         int region = GCMovement.peekRegionIdAt(bot.getMap(), x, y);
         Point surface = GCMovement.groundPointBelow(bot.getMap(), x, y);
         int surfaceY = (surface != null) ? surface.y : y;
-        Integer memoRegion = chasePathRegionByBot.get(botId);
-        Integer memoSurfaceY = chasePathSurfaceYByBot.get(botId);
-        if (region >= 0 && Integer.valueOf(region).equals(memoRegion)
-                && Integer.valueOf(surfaceY).equals(memoSurfaceY)) {
-            Boolean memo = chasePathableByBot.get(botId);
-            if (memo != null) {
-                return memo;
-            }
+        if (region >= 0 && region == state.pathRegion
+                && surfaceY == state.pathSurfaceY && state.pathable != null) {
+            return state.pathable;
         }
         boolean pathable = GCMovement.canPathTo(bot, x, y);
         if (region >= 0) {
-            chasePathRegionByBot.put(botId, region);
-            chasePathSurfaceYByBot.put(botId, surfaceY);
-            chasePathableByBot.put(botId, pathable);
+            state.pathRegion = region;
+            state.pathSurfaceY = surfaceY;
+            state.pathable = pathable;
         }
         return pathable;
     }
@@ -1342,15 +1337,16 @@ public final class PqActions {
      * above/below included - the nav graph's climb edges make "up the rope to the next
      * platform" a normal approach).
      */
-    private static Monster seekPathableTarget(Character bot, Point pos) {
-        int sticky = seekTargetByBot.getOrDefault(bot.getId(), -1);
+    private static Monster seekPathableTarget(Character bot, Point pos, SeekState state) {
+        int sticky = state.targetOid;
         if (sticky >= 0) {
             MapObject mo = bot.getMap().getMapObject(sticky);
-            if (mo instanceof Monster m && isHuntTarget(m, pos) && isPathable(bot, m)) {
+            if (mo instanceof Monster m && isHuntTarget(m, pos) && isPathable(bot, m, state)) {
                 return m;
             }
-            seekTargetByBot.put(bot.getId(), -1); // gone, out of the box, or unreachable
-            clearChaseGoalState(bot.getId()); // the frozen platform belongs to the dropped mob
+            state.targetOid = -1; // gone, out of the box, or unreachable
+            state.pathability.remove(sticky);
+            state.clearGoal(); // the frozen platform belongs to the dropped mob
         }
         Monster best = null;
         double bestSq = Double.MAX_VALUE;
@@ -1366,16 +1362,14 @@ public final class PqActions {
                 bestSq = dsq;
                 best = m;
             }
-            if (dsq < bestPathableSq && isPathable(bot, m)) {
+            if (dsq < bestPathableSq && isPathable(bot, m, state)) {
                 bestPathableSq = dsq;
                 bestPathable = m;
             }
         }
         Monster chosen = bestPathable != null ? bestPathable : best;
-        seekTargetByBot.put(bot.getId(), chosen != null ? chosen.getObjectId() : -1);
-        clearChaseGoalState(bot.getId()); // a fresh target restarts the frozen platform anchor
-        seekAnchorByBot.remove(bot.getId()); // a fresh target restarts the progress clock
-        seekLastGoalByBot.remove(bot.getId());
+        state.targetOid = chosen != null ? chosen.getObjectId() : -1;
+        state.clearGoal();
         return chosen;
     }
 
@@ -1389,8 +1383,6 @@ public final class PqActions {
      * wanders onto an unreachable ledge must be released soon after, not at the timeout.
      */
     private static final long PATHABILITY_TTL_MS = 1_000;
-    private record PathabilityKey(int botId, int mobOid) {
-    }
     /**
      * A verdict and the instant it was taken, in ONE entry: the read can never see a stamp
      * without its verdict. The two-map shape (stamp here, verdict there) raced every writer -
@@ -1399,24 +1391,21 @@ public final class PqActions {
      */
     private record PathabilityVerdict(long takenAtMs, boolean pathable) {
     }
-    private static final Map<PathabilityKey, PathabilityVerdict> pathableVerdictByBot =
-            new java.util.concurrent.ConcurrentHashMap<>();
-
-    private static boolean isPathable(Character bot, Monster m) {
+    private static boolean isPathable(Character bot, Monster m, SeekState state) {
         Point mp = m.getPosition();
         if (mp == null) {
             return false;
         }
-        var key = new PathabilityKey(bot.getId(), m.getObjectId());
+        int key = m.getObjectId();
         long now = movementNowMs();
-        PathabilityVerdict memo = pathableVerdictByBot.get(key);
+        PathabilityVerdict memo = state.pathability.get(key);
         if (memo != null && now - memo.takenAtMs() < PATHABILITY_TTL_MS) {
             return memo.pathable();
         }
         Point ground = GCMovement.groundPointBelow(bot.getMap(), mp.x, mp.y);
         int ty = (ground != null) ? ground.y : mp.y;
         boolean pathable = GCMovement.canPathTo(bot, mp.x, ty);
-        pathableVerdictByBot.put(key, new PathabilityVerdict(now, pathable));
+        state.pathability.put(key, new PathabilityVerdict(now, pathable));
         return pathable;
     }
 
@@ -1429,14 +1418,14 @@ public final class PqActions {
      * bot, kept forever (the same leak family as the wait-spot sets d79b87e closed).
      */
     public static void clearSeekState(int botId) {
-        seekTargetByBot.remove(botId);
-        clearChaseGoalState(botId);
-        seekAnchorByBot.remove(botId);
-        seekDeadlineByBot.remove(botId);
-        seekLastGoalByBot.remove(botId);
+        SeekState state = seekStates.get(botId);
+        if (state != null) {
+            synchronized (state) {
+                seekStates.remove(botId, state);
+            }
+        }
         stuckTargetByBot.remove(botId);
         stuckCountByBot.remove(botId);
-        pathableVerdictByBot.keySet().removeIf(k -> k.botId() == botId);
         orphanProbeAtByBot.remove(botId);
         stageWalkShieldUntilByBot.remove(botId);
         SEEK_TRACE_UNTIL.remove(botId);
