@@ -44,9 +44,20 @@ public final class CompanionSurvivalPolicy {
         }
     }
 
+    /**
+     * Whether a potion should be used now.
+     *
+     * <p>{@code current == 0} is a USE case, not an exclusion: the host clamps HP at zero
+     * ({@code AbstractCharacterObject.setHp}) but heals normally from there ({@code addHP} →
+     * {@code updateHp} only clamps the bounds), so a companion drained to 0 HP by a decHP map
+     * (Aqua Road / El Nath / Orbis Tower) is exactly the character that most needs the sip.
+     * Rejecting zero here - and again on the controller's {@code isAlive()} check - left it with
+     * no recovery path at all: the death episode refuses companions, BotPotionSim skips them,
+     * and no server-side regen reaches a headless bot.
+     */
     public static boolean shouldUse(
             Resource resource, int current, int maximum) {
-        if (maximum <= 0 || current <= 0 || current >= maximum) {
+        if (maximum <= 0 || current < 0 || current >= maximum) {
             return false;
         }
         int threshold = resource == Resource.HP
@@ -136,5 +147,21 @@ public final class CompanionSurvivalPolicy {
 
     public static boolean inventoryPressure(int freeSlots) {
         return freeSlots <= INVENTORY_RESERVE_SLOTS;
+    }
+
+    /**
+     * Whether a USE-inventory item may be sold to clear a slot.
+     *
+     * <p>Whitelist, not blacklist: the USE tab is where scrolls, return scrolls and other
+     * consumables land alongside potions (the host files every 204xxxx item there), and the old
+     * filter - "not rechargeable and no hp/mp effect" - let all of them go at NPC price under
+     * inventory pressure, which reads as a companion dumping its own valuables. Only the potions
+     * this system itself recognises are sellable, so the tab's real contents are never collateral.
+     *
+     * @param hpRestore the item's flat HP restore, 0 when it restores none
+     * @param mpRestore the item's flat MP restore, 0 when it restores none
+     */
+    public static boolean isSellableUseItem(int hpRestore, int mpRestore) {
+        return hpRestore > 0 || mpRestore > 0;
     }
 }

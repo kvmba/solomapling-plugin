@@ -188,8 +188,14 @@ public class OPQOrchestrator {
      * the OPQ stage-1 cloud range) that is alive and not already claimed by
      * another bot. Used by bots to decide whether to loop back for another
      * cloud or transition out of stage-1 work.
+     *
+     * <p>Synchronized for the same reason as {@link #assignCloudReactor}: this is a compound read
+     * ("which oids are taken" + "is any reactor left") over a ConcurrentHashMap whose per-key
+     * operations are atomic but whose iteration is not. Without the lock a bot can observe the
+     * assignment map between a writer's read of `taken` and its put, decide a slot is free, and
+     * then get null back from assignCloudReactor - spinning until STAGE_WAIT_TIMEOUT_MS.
      */
-    public boolean hasUnclaimedLiveCloudReactor(MapleMap map, int askingBotId) {
+    public synchronized boolean hasUnclaimedLiveCloudReactor(MapleMap map, int askingBotId) {
         if (map == null) return false;
         Collection<Integer> taken = context.getCloudAssignmentsView().values();
         Integer mine = context.getMyCloudAssignment(askingBotId);
@@ -261,8 +267,12 @@ public class OPQOrchestrator {
     /**
      * Whether the given map still has at least one box reactor that is alive,
      * untouched (state == 0), and not claimed by another bot.
+     *
+     * <p>Synchronized, matching {@link #assignBoxReactor}: same compound-read-over-a-concurrent-map
+     * shape, same mid-write observation hazard. mySealedSlot was already fixed this way; these two
+     * were the rest of the family.
      */
-    public boolean hasUnclaimedLiveBoxReactor(MapleMap map, int askingBotId) {
+    public synchronized boolean hasUnclaimedLiveBoxReactor(MapleMap map, int askingBotId) {
         if (map == null) return false;
         Collection<Integer> taken = context.getBoxAssignmentsView().values();
         for (Reactor r : map.getAllReactors()) {

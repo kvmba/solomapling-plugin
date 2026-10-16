@@ -320,7 +320,14 @@ public class BotGeneration {
         if (companion == null) {
             throw new IllegalStateException("Unable to load companion character " + characterId);
         }
-        companionClient.setPlayer(companion);
+        // Move onto a private client right away. clientFor() hands back the channel's SHARED
+        // headless client, which carries exactly one player slot: loading a second companion on
+        // the same channel overwrote the first's setPlayer, and every
+        // BotClientBinding.withBoundPlayer window then restored some OTHER companion's Character
+        // when it exited. Companions persist their inventory and gear, so that cross-talk is a
+        // corruption risk rather than a cosmetic one - and it is the same resource shape
+        // adoptPrivateClient already exists for.
+        adoptPrivateClient(companion);
         // No map re-resolve here: loadCharFromDB was called with channelServer=true, so the
         // host already resolved the map through this client's own channel (falling back to
         // Henesys when the recorded map is missing).

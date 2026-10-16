@@ -1,10 +1,8 @@
 package soloMapling.companion.execution;
 
 import org.gms.client.Character;
-import org.gms.constants.game.ExpTable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import soloMapling.ArtificialPlayer.BotFlavorSystem.BotLevelUpNotice;
 import soloMapling.ArtificialPlayer.BotGrindSystem.GrindBrain;
 import soloMapling.ArtificialPlayer.BotGrindSystem.TrainingMap;
 import soloMapling.ArtificialPlayer.BotGrindSystem.TrainingMapChooser;
@@ -396,24 +394,20 @@ public final class SoloGrindController {
             return;
         }
         int startLevel = companion.getLevel();
-        long exp = (long) companion.getExp() + gain;
-        int level = startLevel;
-        while (level < companion.getMaxLevel()) {
-            int needed = ExpTable.getExpNeededForLevel(level);
-            if (needed <= 0 || exp < needed) {
-                break;
-            }
-            exp -= needed;
-            level++;
-        }
-        companion.setLevel(level);
-        companion.setExp((int) Math.min(exp, Integer.MAX_VALUE));
-        if (level > startLevel) {
+        // Through the host's own gainExp, never setLevel/setExp: Character.level is a Lombok
+        // @Setter field with no side effects, so writing it directly skipped the whole levelUp
+        // body - gainAp, the per-job addMaxMPMaxHP, levelUpGainSp, recalcLocalStats, the silent
+        // party update - and saveCharToDB then persisted the shortfall (a high-level companion
+        // with a low-level HP pool, and an allocator with no AP/SP left to spend). gainExp is the
+        // same path an observed companion's real kills already take, and it crosses each ExpTable
+        // threshold exactly where a player would.
+        //
+        // The host broadcasts its own level-up notice on this path (same config switch, same i18n
+        // key), so BotLevelUpNotice is deliberately NOT called here - it would double-announce.
+        companion.gainExp(gain, false, false, false);
+        if (companion.getLevel() > startLevel) {
             log.info("Companion solo grind level up cid={} from={} to={} map={}",
-                    companion.getId(), startLevel, level, companion.getMapId());
-            // Simulated kills bypass the host's gainExp, so announce the level-up the same way a real
-            // player's would be (real players only; the host switch gates it).
-            BotLevelUpNotice.announce(companion);
+                    companion.getId(), startLevel, companion.getLevel(), companion.getMapId());
         }
     }
 

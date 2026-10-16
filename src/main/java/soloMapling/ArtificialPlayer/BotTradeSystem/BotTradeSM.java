@@ -108,6 +108,14 @@ public class BotTradeSM {
     }
 
     public void update() {
+        // Terminal states short-circuit before the timeout check below. A trade that already
+        // COMPLETED (or already timed out) must not be re-timed-out: startTime is only reset on
+        // entering RESPONDING/CONFIRMING, so once 60s of wall clock has passed the trailing
+        // calculateTimeOut() would keep flipping a finished trade back to TIMED_OUT, replaying
+        // the timeout chat line and the delayed decline on every subsequent tick.
+        if (tradeState == TradeState.COMPLETED || tradeState == TradeState.TIMED_OUT) {
+            return;
+        }
         switch (getTradeState()) {
             case INITIALIZE:
                 startTradeCallback();

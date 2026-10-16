@@ -21,6 +21,36 @@ class CompanionSurvivalPolicyTest {
     }
 
     @Test
+    void healsFromZeroHp() {
+        // A decHP map (Aqua Road / El Nath / Orbis Tower) drains a companion to 0 HP, and the host
+        // clamps there but heals normally from there. Zero must be a USE case, not an exclusion,
+        // or the companion has no recovery path at all: the death episode refuses companions,
+        // BotPotionSim skips them, and nothing else regenerates a headless bot.
+        assertTrue(CompanionSurvivalPolicy.shouldUse(HP, 0, 1_000));
+        assertEquals(2000000, CompanionSurvivalPolicy
+                .chooseForUse(HP, 0, 1_000, List.of(potion(2000000, 10, 50, 0, 50)))
+                .orElseThrow().itemId());
+    }
+
+    @Test
+    void rejectsNegativeAndFullAndEmptyPools() {
+        assertFalse(CompanionSurvivalPolicy.shouldUse(HP, -1, 1_000));
+        assertFalse(CompanionSurvivalPolicy.shouldUse(HP, 1_000, 1_000));
+        assertFalse(CompanionSurvivalPolicy.shouldUse(HP, 10, 0));
+    }
+
+    @Test
+    void onlyPotionsAreSellableFromTheUseTab() {
+        // The USE tab also holds scrolls and return scrolls, which the old blacklist
+        // ("not rechargeable and no hp/mp effect") let go at NPC price. Only something that
+        // actually restores HP or MP may be sold.
+        assertTrue(CompanionSurvivalPolicy.isSellableUseItem(50, 0));
+        assertTrue(CompanionSurvivalPolicy.isSellableUseItem(0, 30));
+        assertTrue(CompanionSurvivalPolicy.isSellableUseItem(50, 30));
+        assertFalse(CompanionSurvivalPolicy.isSellableUseItem(0, 0));
+    }
+
+    @Test
     void choosesSmallestDoseThatCoversTheDeficit() {
         List<CompanionSurvivalPolicy.Potion> potions = List.of(
                 potion(2000000, 10, 50, 0, 50),

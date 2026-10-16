@@ -12,6 +12,21 @@ import org.gms.constants.game.GameConstants;
  */
 public final class CompanionBuildAllocator {
 
+    /**
+     * Master level a companion's fourth-job skills are taught with.
+     *
+     * <p>The host reads this from the ITEM that teaches the skill (a skill book's
+     * {@code info/masterLevel} in Item.wz, {@code ItemInformationProvider.getSkillStats}) and
+     * never from the skill itself - {@code Skill} carries no masterLevel field at all, so
+     * {@code Character.getMasterLevel} is the only source and it returns 0 for an untaught skill.
+     * A companion has no books and no quests, so the number has to come from somewhere: it is the
+     * value the v83 Skill.wz rows for these very skills carry (2121001 / 2121002 / 2121006 /
+     * 2221001 / 2221002 / 2221006 / 2321005 / 3121002 / 3121007 / 3221002 / 3221006 / 4121006 /
+     * 4221007 all declare {@code masterLevel = 10}), which is also what the matching skill books
+     * teach. Verified against this repo's own wz/Skill.wz, not assumed.
+     */
+    private static final int FOURTH_JOB_MASTER_LEVEL = 10;
+
     private CompanionBuildAllocator() {
     }
 
@@ -125,8 +140,17 @@ public final class CompanionBuildAllocator {
                         if (skill == null) {
                             return 0;
                         }
+                        // A fourth-job skill's cap is its MASTER level, and the host only stores
+                        // that on a learned skill (Character.getMasterLevel returns 0 for a skill
+                        // the character has never been taught). The host itself learns it from a
+                        // skill book (SkillBookHandler -> changeSkillLevel with the book's WZ
+                        // masterLevel); a companion has neither books nor quests, so nothing ever
+                        // grants it and the cap reads 0 - which made every fourth-job milestone
+                        // "already at target" and the final RESERVE one break the whole plan,
+                        // leaving SP unspendable forever. Grant the WZ master level alongside the
+                        // skill instead (see applySp), and report it here.
                         return skill.isFourthJob()
-                                ? character.getMasterLevel(skill)
+                                ? Math.max(character.getMasterLevel(skill), FOURTH_JOB_MASTER_LEVEL)
                                 : skill.getMaxLevel();
                     }
                 });
@@ -139,7 +163,10 @@ public final class CompanionBuildAllocator {
         for (CompanionSpPlanner.SkillAllocation allocation : plan.allocations()) {
             Skill skill = SkillFactory.getSkill(allocation.skillId());
             int masterLevel = skill.isFourthJob()
-                    ? character.getMasterLevel(skill)
+                    // Teach the master level with the skill, exactly as a host skill book does:
+                    // changeSkillLevel takes (skill, level, masterLevel), and a 0 here both caps
+                    // the skill at 0 for the client and leaves getMasterLevel at 0 forever after.
+                    ? Math.max(character.getMasterLevel(skill), FOURTH_JOB_MASTER_LEVEL)
                     : skill.getMaxLevel();
             character.changeSkillLevel(
                     skill, (byte) allocation.resultingLevel(), masterLevel, -1);

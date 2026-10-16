@@ -700,7 +700,14 @@ public final class PqActions {
         synchronized (reactor) {
             if (!reactor.isAlive() || reactor.getReactorType() != 100) return false;
             var required = reactor.getReactItem(reactor.getEventState());
-            if (required.getLeft() != itemId) return false;
+            // getReactorType() reports the CURRENT state's type while getReactItem() indexes the
+            // EVENT state, so the two are not guaranteed to agree - and the host's
+            // ReactorStats.getReactItem dereferences stateInfo.get(state).get(index) with no
+            // guard, returning null (or throwing) when that chain is empty. Today's five OPQ
+            // reactors all have a single state-0 event so it cannot happen, but the moment any
+            // script calls setEventState(>0) on one it would. required.getRight() is dereferenced
+            // three times below, so the guard goes here rather than at each use.
+            if (required == null || required.getLeft() != itemId) return false;
             for (MapObject object : map.getMapObjectsInRect(reactor.getArea(),
                     List.of(org.gms.server.maps.MapObjectType.ITEM))) {
                 MapItem drop = (MapItem) object;

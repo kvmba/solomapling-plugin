@@ -102,9 +102,9 @@ public final class CompanionSurvivalController {
     }
 
     private boolean useNeededPotion(Character companion) {
-        if (!companion.isAlive()) {
-            return false;
-        }
+        // No isAlive() gate: a companion at 0 HP (drained by a decHP map) must still be able to
+        // drink. The host heals from zero normally - only the host's own death handling treats
+        // zero HP as a corpse, and BotDeath deliberately never adopts companions.
         List<CompanionSurvivalPolicy.Potion> inventory = inventoryPotions(companion);
         Optional<CompanionSurvivalPolicy.Potion> selected =
                 CompanionSurvivalPolicy.chooseForUse(
@@ -300,10 +300,14 @@ public final class CompanionSurvivalController {
                 continue;
             }
             if (type == InventoryType.USE) {
+                // Whitelist: only a potion (something that restores HP or MP) may be sold. The
+                // blacklist this replaces kept rechargeables and hp/mp items and let everything
+                // else through - scrolls, return scrolls and other 204xxxx consumables included,
+                // which are the tab's most valuable contents. See CompanionSurvivalPolicy.
                 StatEffect effect = safeItemEffect(items, item.getItemId());
                 if (ItemConstants.isRechargeable(item.getItemId())
-                        || effect != null && (effect.getHp() > 0 || effect.getMp() > 0
-                        || effect.getHpRate() > 0 || effect.getMpRate() > 0)) {
+                        || effect != null && CompanionSurvivalPolicy.isSellableUseItem(
+                                effect.getHp(), effect.getMp())) {
                     continue;
                 }
             }

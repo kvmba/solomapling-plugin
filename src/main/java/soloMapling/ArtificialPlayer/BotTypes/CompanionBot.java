@@ -12,6 +12,7 @@ import soloMapling.ArtificialPlayer.BotPartySystem.BotPartyQueue;
 import soloMapling.ArtificialPlayer.BotSM;
 import soloMapling.ArtificialPlayer.BotTypeManager;
 import soloMapling.ArtificialPlayer.GCMoveSystem.GCMovement;
+import soloMapling.ArtificialPlayer.LlmSystem.SocialLlmConfig;
 import soloMapling.companion.CompanionRoster;
 import soloMapling.companion.agent.AgentDecision;
 import soloMapling.companion.agent.CompanionAction;
@@ -61,9 +62,23 @@ public final class CompanionBot extends BotSM implements
 
     private static final Logger log = LoggerFactory.getLogger(CompanionBot.class);
     private static final Duration SESSION_TIMEOUT = Duration.ofSeconds(45);
-    private static final Duration PLANNING_TIMEOUT = Duration.ofSeconds(12);
+    // Planning is abandoned at the LLM's own timeout: a companion whose provider call is
+    // configured at 5s would otherwise hold the turn (and refuse every other player) for the
+    // remaining 7s while a result nobody is waiting for sits in the queue. The floor keeps a
+    // misconfigured sub-second timeout from starving the turn before it starts.
+    private static final Duration PLANNING_TIMEOUT =
+            Duration.ofMillis(Math.max(2_000L, SocialLlmConfig.timeoutMs()));
     private static final Duration TURN_COOLDOWN = Duration.ofSeconds(2);
     private static final long COMBAT_REPAIR_COOLDOWN_MS = 15_000L;
+    // Actions ActionValidator's cooldown rule holds back while a player owns this companion's
+    // attention: it is already walking and fighting WITH that player, so the planner must not
+    // also issue a follow / go-to that would compete for the same movement. Planning itself is
+    // interruptible (the engine busy states are checked at execution), so SAY/EMOTE and the
+    // party actions are not gated.
+    private static final Set<CompanionAction.ActionType> BUSY_ACTIONS =
+            Set.of(CompanionAction.ActionType.FOLLOW,
+                    CompanionAction.ActionType.GO_TO,
+                    CompanionAction.ActionType.TRAIN_WITH);
     // Resolved per use, not cached: a language switch invalidates the message pack, and a
     // companion spawned before it would otherwise keep answering in the old language.
     private static String fallbackReply() {
@@ -190,19 +205,22 @@ public final class CompanionBot extends BotSM implements
     // is one more input. The map-proximity gate that governs ambient continuation is deliberately
     // NOT applied here: the player chose to address the companion directly.
     //
-    // The reply channel rides the queued line itself (enqueuePlayerMessage's replyType): a same-map
-    // line carries null and keeps the map bubble, a cross-map line carries the channel it arrived on
-    // so the answer is actually visible. Carrying it on the message is what makes it exact - it
-    // applies to that line's turn only, cannot leak into another player's reply, and needs no
-    // per-player bookkeeping or cleanup.
+    // The reply channel rides the queued line itself (enqueuePlayerMessage's replyType). It is
+    // ALWAYS the channel the line arrived on - never nulled for a same-map speaker: a whisper is
+    // private to its two participants by definition, and the host publishes artificial-recipient
+    // chat events regardless of whether sender and bot share a map (WhisperHandler /
+    // MultiChatHandler publishToArtificialRecipients have no same-map gate), so a same-map whisper
+    // is as reachable - and as private - as a cross-map one. Nulling it here made the answer fall
+    // back to the map bubble (SocialCommands.BotReply with type == null), broadcasting the
+    // player's private line to everyone on the map. Carrying it on the message is what makes it
+    // exact - it applies to that line's turn only, cannot leak into another player's reply, and
+    // needs no per-player bookkeeping or cleanup.
     @Override
     protected void onDirectChat(ChatMessage message) {
         if (message == null || !getRunning()) {
             return;
         }
-        org.gms.extension.event.ChatType replyType =
-                isSameMap(message.getSender()) ? null : message.getChatType();
-        enqueuePlayerMessage(message.getSender(), message.getContent(), replyType);
+        enqueuePlayerMessage(message.getSender(), message.getContent(), message.getChatType());
     }
 
     // The channel this turn answers on. Armed in playDecision from the planned turn's own message
@@ -303,6 +321,12 @@ public final class CompanionBot extends BotSM implements
                 .sorted(java.util.Comparator.comparingInt(Character::getId))
                 .toList();
         if (players.isEmpty()) {
+            // Nobody to greet, so every recorded "last proactive" is stale by definition - the map
+            // it belonged to has no audience. Clearing here bounds the map by the players actually
+            // present instead of by every id that ever walked by. Safe: shouldInitiate takes the
+            // LATER of lastInteractionAt and lastProactiveAt as its baseline, so dropping the
+            // proactive timestamp can only make the cooldown stricter, never looser.
+            lastProactiveByPlayer.clear();
             return;
         }
         Character candidate = players.get(Math.floorMod(proactiveCursor++, players.size()));
@@ -523,6 +547,12 @@ public final class CompanionBot extends BotSM implements
     @Override
     public synchronized void stopForRest() {
         stopTraining();
+        // The solo grind is a movement-resuming activity like the others, so the interface
+        // contract ("stops every high-level activity that would resume movement after REST")
+        // covers it too. Stopping only training left a resting companion's GrindBrain swinging:
+        // the 250ms combat sweep is driven by GrindTickRegistry, not by the FSM tick that
+        // waitFor() suspends, so REST/GOODBYE alone never reached it.
+        soloGrind.stop(getChr());
         survival.cancel();
         gear.cancel();
     }
@@ -574,23 +604,14 @@ public final class CompanionBot extends BotSM implements
         boolean mapObserved = GCMovement.isMapObserved(companion.getMapId());
         CompanionCombatRecoveryPolicy.Recovery recovery =
                 CompanionCombatRecoveryPolicy.choose(
-                        progressAgeMs, mapObserved, now >= nextCombatRepairAt);
-        if (recovery != CompanionCombatRecoveryPolicy.Recovery.NONE
+                        progressAgeMs, now >= nextCombatRepairAt);
+        if (recovery == CompanionCombatRecoveryPolicy.Recovery.REPATH
                 && !status().isFrozen() // a frozen bot lands no hits; that stall is the debuff, not a wedge
                 && !companion.getMap().getAllMonsters().isEmpty()) {
             nextCombatRepairAt = now + COMBAT_REPAIR_COOLDOWN_MS;
             GCMovement.stop(companion);
-            if (recovery == CompanionCombatRecoveryPolicy.Recovery.POSITION_REPAIR
-                    && target.getPosition() != null) {
-                GCMovement.teleportTo(
-                        companion, target.getPosition().x, target.getPosition().y);
-                log.warn("Companion combat position repaired offscreen cid={} targetCid={} map={} progressAgeMs={} destination={}",
-                        companion.getId(), target.getId(), companion.getMapId(),
-                        progressAgeMs, target.getPosition());
-            } else {
-                log.info("Companion combat repathing cid={} targetCid={} map={} progressAgeMs={}",
-                        companion.getId(), target.getId(), companion.getMapId(), progressAgeMs);
-            }
+            log.info("Companion combat repathing cid={} targetCid={} map={} progressAgeMs={}",
+                    companion.getId(), target.getId(), companion.getMapId(), progressAgeMs);
             grind.resetAfterStall(companion);
             return;
         }
@@ -707,22 +728,25 @@ public final class CompanionBot extends BotSM implements
         boolean planningPendingInvite = pendingInviter != null
                 && pendingInviter.getId() == planningPlayerId
                 && inviteKey(pendingInviter.getId(), pending.getPartyId()).equals(pendingInviteKey);
-        Set<Integer> targetIds;
+        // Who this turn may talk about. sameMapCharacterIds stays strictly same-map
+        // (ActionValidator.requireSameMap gates the movement actions on it), while the memory and
+        // relationship disclosure layer is deliberately wider: a whisper reaches the companion
+        // from ANY map, so the speaker's own history must survive the turn or a cross-map whisper
+        // is answered with "Relevant memories: - none" and no relationship row - total amnesia
+        // about the very person addressing it.
+        java.util.Set<Integer> targetIds = new java.util.HashSet<>(sameMapPlayerIds);
         if (planningPendingInvite) {
-            java.util.HashSet<Integer> targets = new java.util.HashSet<>(sameMapPlayerIds);
-            targets.add(pendingInviter.getId());
-            targetIds = Set.copyOf(targets);
-        } else {
-            targetIds = sameMapPlayerIds;
+            targetIds.add(pendingInviter.getId());
         }
+        targetIds.add(planningPlayerId);
         CompanionStateSnapshot state = new CompanionStateSnapshot(
                 mapId,
                 sameMapPlayerIds,
                 companion.getParty() != null,
                 Set.of(mapId), // No knowledge repository yet: current map is the complete allowlist.
-                targetIds,
-                Set.of(),
-                false, // Conversation/planning is interruptible; engine busy states are checked at execution.
+                Set.copyOf(targetIds),
+                trainingTarget != null ? BUSY_ACTIONS : Set.of(),
+                soloGrind.engaged(),
                 CompanionInventoryPerception.snapshot(companion),
                 gear.cachedGoal().map(goal -> new soloMapling.companion.agent.CompanionGearGoal(
                         goal.itemId(),
@@ -772,8 +796,15 @@ public final class CompanionBot extends BotSM implements
         @Override
         public Optional<Character> resolveCharacterFor(
                 CompanionAction.ActionType actionType, int characterId) {
+            // The captured inviter is exempt from the same-map rule (an invite outlives the
+            // inviter walking away) but NOT from the artificial-character rule every other
+            // resolver path applies: a party invite's originator is a real player by the host's
+            // own contract (InviteCoordinator.createInvite(type, from, partyId, target)), so a
+            // bot target here can only be a stale queue entry - rejecting it keeps this
+            // exception consistent with resolveCharacter instead of silently widening it.
             if (actionType == CompanionAction.ActionType.ACCEPT_PARTY
-                    && pendingInviter != null && pendingInviter.getId() == characterId) {
+                    && pendingInviter != null && pendingInviter.getId() == characterId
+                    && !isBot(pendingInviter)) {
                 // The executor independently verifies the live queue entry. This resolver
                 // only grants the captured inviter for ACCEPT_PARTY.
                 return Optional.of(pendingInviter);

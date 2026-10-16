@@ -102,6 +102,32 @@ class CompanionSpPlannerTest {
         assertTrue(plan.blockedReason().startsWith("mastery-cap:"));
     }
 
+    @Test
+    void fourthJobSpendsAgainstAGrantedMasterLevel() {
+        // The bug: a companion's fourth-job skills had maximumLevel 0 because the host stores a
+        // master level only on a LEARNED skill and a companion has no skill book to learn from, so
+        // every milestone read "already at target" and the final RESERVE one broke the plan. A
+        // companion's allocator must therefore report a granted master level (see
+        // CompanionBuildAllocator.FOURTH_JOB_MASTER_LEVEL), which is what this simulates.
+        CompanionSkillBuild build =
+                CompanionSkillBuilds.forCareer(CompanionCareerBuild.BOWMASTER);
+        FakeSkillState state = FakeSkillState.allAvailable(CompanionCareerBuild.BOWMASTER);
+        state.completeJob(build, 300);
+        state.completeJob(build, 310);
+        state.completeJob(build, 311);
+        state.maximums.replaceAll((skillId, ignored) ->
+                skillId / 10_000 == 312 ? 10 : 30);
+
+        CompanionSpPlanner.Plan plan =
+                CompanionSpPlanner.plan(build, 312, 120, 61, state);
+
+        assertEquals(61, plan.spent());
+        assertEquals(0, plan.unspent());
+        assertTrue(plan.blockedReason().isEmpty());
+        assertTrue(plan.allocations().stream()
+                .anyMatch(allocation -> allocation.resultingLevel() == 10));
+    }
+
     private static final class FakeSkillState implements CompanionSpPlanner.SkillState {
         private final Map<Integer, Integer> levels = new HashMap<>();
         private final Map<Integer, Integer> maximums = new HashMap<>();

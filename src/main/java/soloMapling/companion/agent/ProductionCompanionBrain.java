@@ -41,6 +41,30 @@ import java.util.concurrent.Executor;
  */
 public final class ProductionCompanionBrain implements CompanionBrain {
 
+    /**
+     * How many of a companion's most recent memories planning may recall.
+     *
+     * <p>This is a recall bound, not a forgetting point: MemorySelector then ranks the
+     * candidates by salience/strength/recency and keeps the best {@code memoryLimit}, so raising
+     * it widens the pool a long-lived companion can draw on. It was 100, which meant the
+     * hundredth-most-recent episode was invisible to planning no matter how salient it was -
+     * exactly the "the bot has forgotten everything about me" complaint on a companion that has
+     * been talked to a lot.
+     */
+    private static final int MEMORY_RECALL_LIMIT = 200;
+
+    /**
+     * How long one episodic turn memory stays recallable.
+     *
+     * <p>Rows are inserted with this as {@code expires_at} (never null), so the repository's own
+     * {@code expires_at IS NULL OR expires_at > CURRENT_TIMESTAMP(3)} filter drops them and the
+     * table stops growing without bound. Without a TTL every turn appended a permanent row and
+     * nothing ever removed one.
+     */
+    private static final Duration EPISODIC_TTL = Duration.ofDays(30);
+
+    private static volatile CompanionBrain sharedBrain;
+
     private static final Logger log = LoggerFactory.getLogger(ProductionCompanionBrain.class);
 
     private final CompanionPlannerService planner;
@@ -50,26 +74,42 @@ public final class ProductionCompanionBrain implements CompanionBrain {
     private final CompanionActivityRepository activities;
     private final Executor executor;
 
-    public static CompanionBrain createDefault() {
+    /**
+     * The shared production brain.
+     *
+     * <p>Built once and reused: every companion used to get its own DeepSeek HTTP client and its
+     * own four JDBC repositories, and those objects are stateless - the planner is thread-safe,
+     * the repositories open a pooled connection per call and hold no fields, and the executor is
+     * the shared pool. So N companions meant N HTTP clients and N sets of needless wrappers for
+     * no behaviour difference.
+     *
+     * <p>The config is read once here, at construction, exactly like SocialLlmService's own
+     * client - {@code SocialLlmConfig.configure} runs only from plugin onLoad, so there is no
+     * runtime re-configuration path that a cached brain could go stale against.
+     */
+    public static synchronized CompanionBrain createDefault() {
         if (!SocialLlmConfig.enabled()) {
             return request -> CompletableFuture.completedFuture(CompanionPlannerResult.Failure.of(
                     CompanionPlannerResult.FailureType.PROVIDER_FAILURE,
                     "Companion LLM is disabled"));
         }
-        CompanionPlannerService planner = new CompanionPlannerService(
-                DeepSeekLlmClient.create(SocialLlmConfig.apiKey(), SocialLlmConfig.baseUrl()),
-                new CompanionPlannerService.Settings(
-                        SocialLlmConfig.model(),
-                        Math.max(128, SocialLlmConfig.maxTokens()),
-                        0.5,
-                        Duration.ofMillis(SocialLlmConfig.timeoutMs())));
-        return new ProductionCompanionBrain(
-                planner,
-                new JdbcCompanionProfileRepository(),
-                new JdbcCompanionMemoryRepository(),
-                new JdbcCompanionRelationshipRepository(),
-                new JdbcCompanionActivityRepository(),
-                ExecutorServiceManager.getExecutorService());
+        if (sharedBrain == null) {
+            CompanionPlannerService planner = new CompanionPlannerService(
+                    DeepSeekLlmClient.create(SocialLlmConfig.apiKey(), SocialLlmConfig.baseUrl()),
+                    new CompanionPlannerService.Settings(
+                            SocialLlmConfig.model(),
+                            Math.max(128, SocialLlmConfig.maxTokens()),
+                            0.5,
+                            Duration.ofMillis(SocialLlmConfig.timeoutMs())));
+            sharedBrain = new ProductionCompanionBrain(
+                    planner,
+                    new JdbcCompanionProfileRepository(),
+                    new JdbcCompanionMemoryRepository(),
+                    new JdbcCompanionRelationshipRepository(),
+                    new JdbcCompanionActivityRepository(),
+                    ExecutorServiceManager.getExecutorService());
+        }
+        return sharedBrain;
     }
 
     public ProductionCompanionBrain(
@@ -135,7 +175,7 @@ public final class ProductionCompanionBrain implements CompanionBrain {
             }
             List<MemoryRecord> candidates = memories.findCandidates(
                     request.companionCharacterId(), null, null, null, false,
-                    null, null, 100);
+                    null, null, MEMORY_RECALL_LIMIT);
             List<CompanionRelationship> related = relationships
                     .get(request.companionCharacterId(), request.playerCharacterId())
                     .map(List::of)
@@ -214,7 +254,10 @@ public final class ProductionCompanionBrain implements CompanionBrain {
                     turn.request().companionCharacterId(),
                     "companion",
                     1,
-                    null,
+                    // A TTL, not null: this row is one turn's small talk, and an unbounded
+                    // episodic table is what made the fixed 100-row recall window bite. The
+                    // repository's own active-memory filter already honours expires_at.
+                    now.plus(EPISODIC_TTL),
                     new MemoryRecord(
                             "pending-" + now.toEpochMilli(),
                             MemoryType.EPISODIC,

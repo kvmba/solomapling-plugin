@@ -337,7 +337,14 @@ public class BotTypeManager {
     }
 
     public static void manuallyStopBot(Character fakechar) {
+        // Guarded like its two siblings (manuallyStartBot, startAttackTestBot): a character the
+        // bot registry never saw - "!bot spawn" without autoAttack only creates the Character, and
+        // "!bot create"/"!bot disconnect" on an unregistered id - reaches here, and the NPE used
+        // to be swallowed by the executor's pool task, so the GM just saw a command with no reply.
         BotSM bot = getBotById(fakechar.getId());
+        if (bot == null) {
+            return;
+        }
         bot.setRunning(false);
         bot.stopScheduledTask();
     }
