@@ -1,6 +1,7 @@
 package soloMapling.ArtificialPlayer.GCMoveSystem;
 
 import org.gms.client.Character;
+import org.slf4j.LoggerFactory;
 
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -49,27 +50,38 @@ final class GCFollow {
         if (bot == null || target == null) {
             return;
         }
-        cancel(bot);
-        GCMovement.enable(bot);
-        Session s = new Session(bot, target);
-        s.task = POOL.scheduleAtFixedRate(
-                () -> {
-                    try {
-                        tick(s);
-                    } catch (Throwable ignored) {
-                        // a thrown poll would cancel the periodic task
-                    }
-                }, 0, POLL_MS, TimeUnit.MILLISECONDS);
-        SESSIONS.put(bot.getId(), s);
+        if (!GCMovement.enable(bot)) return;
+        BotMovementState st = GCMovement.stateOf(bot);
+        if (st == null) return;
+        synchronized (st) {
+            if (st.tickStopped) return;
+            cancel(bot);
+            GCTravel.cancel(bot);
+            GCMovement.clearMoveIntent(bot);
+            Session s = new Session(bot, target);
+            SESSIONS.put(bot.getId(), s);
+            s.task = POOL.scheduleAtFixedRate(
+                    () -> {
+                        try {
+                            synchronized (st) {
+                                if (!st.tickStopped && SESSIONS.get(bot.getId()) == s) tick(s);
+                            }
+                        } catch (Throwable e) {
+                            LoggerFactory.getLogger(GCFollow.class).warn("Follow poll failed for bot {}", bot.getId(), e);
+                        }
+                    }, 0, POLL_MS, TimeUnit.MILLISECONDS);
+        }
     }
 
     static void cancel(Character bot) {
         if (bot == null) {
             return;
         }
-        Session s = SESSIONS.remove(bot.getId());
-        if (s != null && s.task != null) {
-            s.task.cancel(false);
+        BotMovementState st = GCMovement.stateOf(bot);
+        if (st == null) return;
+        synchronized (st) {
+            Session s = SESSIONS.remove(bot.getId());
+            if (s != null && s.task != null) s.task.cancel(false);
         }
     }
 
@@ -86,7 +98,7 @@ final class GCFollow {
             return;
         }
 
-        if (bot.getMapId() == target.getMapId()) {
+        if (bot.getMap() == target.getMap()) {
             // Same map: cancel any in-flight travel and let the 50 ms driver tail the target.
             if (GCMovement.isTraveling(bot)) {
                 GCTravel.cancel(bot);

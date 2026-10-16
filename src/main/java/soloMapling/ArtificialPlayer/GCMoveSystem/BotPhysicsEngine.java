@@ -2101,6 +2101,7 @@ final class BotPhysicsEngine {
                                        float initialVelY,
                                        int airVelX,
                                        boolean climbUpIntent) {
+        entry.climbPositionHeld = false;
         entry.climbing = false;
         entry.climbRope = null;
         entry.inAir = true;
@@ -2263,6 +2264,7 @@ final class BotPhysicsEngine {
     }
 
     private static void clearMovementState(BotMovementState entry, Point position) {
+        entry.climbPositionHeld = false;
         entry.inAir = false;
         entry.climbing = false;
         entry.climbRope = null;

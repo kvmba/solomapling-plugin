@@ -635,8 +635,9 @@ public abstract class PartyQuestBot extends BotSM implements GrindTickRegistry.P
         BotLogger.log("PQ bot " + getChr().getName() + " following the leader from "
                 + here + " to " + leaderMap + " through portal " + exit.getName());
         sayDoorLine();
-        PqActions.walkTo(getChr(), exit.getPosition());
-        PqActions.enterPortal(getChr(), exit);
+        if (PqActions.walkTo(getChr(), exit.getPosition())) {
+            PqActions.enterPortal(getChr(), exit);
+        }
         return getChr().getMapId() != here;
     }
 

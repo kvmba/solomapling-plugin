@@ -383,6 +383,7 @@ class BotMovementManager {
         if (entry.resting) {
             return true; // explicit rope rest hold: hang regardless of the grind guard
         }
+        if (entry.climbPositionHeld && entry.moveTarget == null && !entry.following) return true;
         if (entry.navPreciseTarget) {
             return false; // a precise anchor must be reached, not held short of
         }

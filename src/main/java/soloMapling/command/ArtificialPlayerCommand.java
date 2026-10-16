@@ -779,13 +779,19 @@ public class ArtificialPlayerCommand extends Command {
                 break;
             case "playrecording":
             case "playrec":
-                player.yellowMessage("Playing recording '" + str + "' on bot " + fakechar.getName() + " (map " + fakechar.getMapId() + ")");
+                if (!MovementCommands.tryAcquireMovementLock(fakechar)) {
+                    c.getPlayer().yellowMessage("Recording refused: bot movement is already controlled by another session.");
+                    break;
+                }
                 try {
+                    player.yellowMessage("Playing recording '" + str + "' on bot " + fakechar.getName() + " (map " + fakechar.getMapId() + ")");
                     MovementRecording mvr = getMovementRecording(fakechar.getMapId(), str);
                     BotMoveStream(mvr, fakechar);
                     player.yellowMessage("Recording '" + str + "' finished.");
                 } catch (Exception e) {
                     player.yellowMessage("Failed to play recording: " + e.getMessage());
+                } finally {
+                    MovementCommands.releaseMovementLock(fakechar);
                 }
                 break;
 

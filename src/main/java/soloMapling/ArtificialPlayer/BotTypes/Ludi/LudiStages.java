@@ -235,15 +235,8 @@ public final class LudiStages {
         if (standsDownForLiveMove(bot)) {
             return; // a walk owns the driver; see standsDownForLiveMove
         }
-        if (bot.getPosition().distanceSq(exit.getPosition()) > EXIT_WARP_RANGE_SQ) {
-            PqActions.walkTo(bot, exit.getPosition());
-            return; // still climbing; the next tick takes over from wherever we are
-        }
-        PqActions.enterPortal(bot, exit);
+        if (PqActions.walkTo(bot, exit.getPosition())) PqActions.enterPortal(bot, exit);
     }
-
-    /** How close the bot must stand to the trap room's exit before it takes it. */
-    private static final double EXIT_WARP_RANGE_SQ = 250.0 * 250.0;
 
     /**
      * Whether a room exit must stand down this tick because the movement driver still holds a
@@ -515,12 +508,7 @@ public final class LudiStages {
         if (door == null || door.getPosition() == null) {
             return false;
         }
-        if (bot.getPosition() != null
-                && bot.getPosition().distanceSq(door.getPosition()) > EXIT_WARP_RANGE_SQ) {
-            PqActions.walkTo(bot, door.getPosition());
-            return false;
-        }
-        PqActions.enterPortal(bot, door);
+        if (PqActions.walkTo(bot, door.getPosition())) PqActions.enterPortal(bot, door);
         return bot.getMapId() == room;
     }
 
@@ -544,11 +532,7 @@ public final class LudiStages {
         if (standsDownForLiveMove(bot)) {
             return; // a walk owns the driver; see standsDownForLiveMove
         }
-        if (bot.getPosition().distanceSq(exit.getPosition()) > EXIT_WARP_RANGE_SQ) {
-            PqActions.walkTo(bot, exit.getPosition());
-            return; // still walking; the next tick takes over from wherever we are
-        }
-        PqActions.enterPortal(bot, exit);
+        if (PqActions.walkTo(bot, exit.getPosition())) PqActions.enterPortal(bot, exit);
     }
 
     /**
@@ -931,17 +915,9 @@ public final class LudiStages {
             if (reactor == null || reactor.getPosition() == null) {
                 return false;
             }
-            PqActions.Approach outcome =
-                    PqActions.descendToFloorAerialTarget(bot, reactor.getPosition());
-            if (outcome == PqActions.Approach.TRAVELLING) {
-                // Hand the approach to the 250ms combat sweep: it strikes the box the beat
-                // the descent lands instead of the box waiting out the next macro tick.
-                PqActions.armReactorBeat(bot, oid);
-                return true;
-            }
-            if (outcome == PqActions.Approach.IN_POSITION) {
-                PqActions.armReactorBeat(bot, -1); // arrived: the visit's own combo takes over
-                breakBoxInPlace(bot, oid);
+            PqActions.Approach outcome = PqActions.approachReactor(bot, oid, true, true);
+            if (outcome != PqActions.Approach.STUCK) {
+                // The sweep owns both the approach and the entire strike sequence.
                 return true;
             }
             oid = nearestOwnedBoxOid(bot, dataId, oid); // STUCK: rotate to an unclaimed box
@@ -966,16 +942,12 @@ public final class LudiStages {
             if (reactor == null || reactor.getPosition() == null) {
                 return false;
             }
-            PqActions.Approach outcome = PqActions.approachUnder(bot, reactor.getPosition());
+            PqActions.Approach outcome = PqActions.approachReactor(bot, oid, false, onBeat);
             if (outcome == PqActions.Approach.IN_POSITION) {
-                PqActions.armReactorBeat(bot, -1); // arrived: the visit's own combo takes over
-                breakBoxInPlace(bot, oid);
+                if (!onBeat) breakBoxInPlace(bot, oid);
                 return true;
             }
             if (outcome == PqActions.Approach.TRAVELLING) {
-                if (onBeat) {
-                    PqActions.armReactorBeat(bot, oid); // the sweep strikes it on arrival
-                }
                 return true;
             }
             oid = nearestBoxOid(bot, dataId, oid); // STUCK: rotate to another box

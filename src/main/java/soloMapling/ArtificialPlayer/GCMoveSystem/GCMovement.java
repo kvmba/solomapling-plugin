@@ -36,45 +36,52 @@ public final class GCMovement {
 
     private static final Map<Integer, BotMovementState> STATES = new ConcurrentHashMap<>();
     private static final Map<Integer, Runnable> ARRIVAL_CALLBACKS = new ConcurrentHashMap<>();
+    private static final Map<Integer, Runnable> FAILURE_CALLBACKS = new ConcurrentHashMap<>();
 
     // ── Lifecycle ───────────────────────────────────────────────────────────
 
     /* Put a bot under dynamic control: build its profile, warm the map graph, start the tick. */
-    public static void enable(Character bot) {
+    public static boolean enable(Character bot) {
         if (bot == null) {
-            return;
+            return false;
         }
         ObserverTracker.ensureStarted(); // LOD observability poll (idempotent)
-        // A handover the PREVIOUS session deferred must not survive into this one. disable() sets
-        // disableAfterLanding when the bot is airborne and leaves the entry alive to finish the
-        // fall; if the bot is re-enabled before it lands, computeIfAbsent hands back that same
-        // entry WITHOUT running the creation lambda - so the flag has to be cleared here, outside
-        // it. Otherwise the stale flag would stop this fresh session the moment the bot next
-        // touches the ground.
-        BotMovementState resumed = STATES.get(bot.getId());
-        if (resumed != null) {
-            resumed.disableAfterLanding = false;
-        }
-        STATES.computeIfAbsent(bot.getId(), id -> {
-            // owner == null by default (no follow anchor, and avoids the nav warmup notice trying to
-            // dropMessage through the shared BotClient). GCFollow sets owner to the followed character.
-            BotMovementState st = new BotMovementState(bot, null);
-            st.movementProfile = BotMovementProfile.fromCharacter(bot);
-            if (bot.getMap() != null) {
-                st.lastMapId = bot.getMapId();
-                st.fhIndex = BotMovementManager.buildFhIndex(bot.getMap());
-                Point cur = bot.getPosition();
-                Point ground = BotPhysicsEngine.findGroundPoint(bot.getMap(), new Point(cur.x, cur.y - 1));
-                BotPhysicsEngine.teleportTo(st, bot, settledPoint(cur, ground));
-                BotMovementManager.resetEntryStateAfterTeleport(st);
-                BotNavigationGraphProvider.warmGraphAsync(bot.getMap(), st.movementProfile);
+        for (;;) {
+            BotMovementState resumed = STATES.get(bot.getId());
+            if (resumed != null) {
+                synchronized (resumed) {
+                    if (STATES.get(bot.getId()) != resumed) continue;
+                    resumed.disableAfterLanding = false;
+                    return true;
+                }
             }
-            GCMovementDriver.start(st);
-            // Hold the shared movement lock for the whole dynamic session so the recorded-path
-            // engine can't drive this bot concurrently.
-            MovementCommands.tryAcquireMovementLock(bot);
-            return st;
-        });
+            BotMovementState st = new BotMovementState(bot, null);
+            // Acquire BEFORE touching the avatar or starting a driver. The state itself is the
+            // session's lease token; a stale teardown cannot release a newer session's lock.
+            if (!MovementCommands.tryAcquireMovementLock(bot, st)) return false;
+            synchronized (st) {
+                try {
+                    st.movementProfile = BotMovementProfile.fromCharacter(bot);
+                    if (bot.getMap() != null) {
+                        st.lastMapId = bot.getMapId();
+                        st.fhIndex = BotMovementManager.buildFhIndex(bot.getMap());
+                        Point cur = bot.getPosition();
+                        Point ground = BotPhysicsEngine.findGroundPoint(bot.getMap(), new Point(cur.x, cur.y - 1));
+                        BotPhysicsEngine.teleportTo(st, bot, settledPoint(cur, ground));
+                        BotMovementManager.resetEntryStateAfterTeleport(st);
+                        BotNavigationGraphProvider.warmGraphAsync(bot.getMap(), st.movementProfile);
+                    }
+                    STATES.put(bot.getId(), st);
+                    GCMovementDriver.start(st);
+                    return true;
+                } catch (RuntimeException | Error e) {
+                    GCMovementDriver.stop(st);
+                    STATES.remove(bot.getId(), st);
+                    MovementCommands.releaseMovementLock(bot, st);
+                    throw e;
+                }
+            }
+        }
     }
 
     /* Remove a bot from dynamic control and release the shared movement lock. */
@@ -82,73 +89,28 @@ public final class GCMovement {
         if (bot == null) {
             return;
         }
-        GCFollow.cancel(bot);
-        GCTravel.cancel(bot);
-        GCFidget.cancel(bot);
-        BotMovementState st = STATES.remove(bot.getId());
+        BotMovementState st = STATES.get(bot.getId());
         if (st != null) {
-            // Settle into the idle stance BEFORE the state is dropped. A bot that is still
-            // mid-walk carries a WALK stance, and nothing would ever clear it: this entry is
-            // about to be removed, so the tick that would have run idleOnGround() can no
-            // longer reach it. The client keeps rendering the walk animation on a bot that is
-            // standing still - the "walking on the spot" town bot. Worst on maps with no
-            // movement recordings, where the old engine never sends a packet that overwrites it.
-            //
-            // inAir / climbing count too, not just movement intent: a jump clears moveDir on
-            // takeoff (see BotPhysicsEngine), so a bot that hopped in place and is then disabled
-            // has moveDir == 0 but is still airborne - and airborne is what makes the stance
-            // render as JUMP. Testing only moveDir left those bots frozen in the jump pose.
-            //
-            // portalDropAtMs counts too: onMapChange lifts the bot and arms the drop with inAir
-            // still FALSE (teleportTo -> clearMovementState), so for that window the bot is
-            // suspended but not "airborne" yet. Without it here the whole branch is skipped and
-            // finishDisable stops the driver on a bot hanging at the float point with the drop
-            // never released - the jump-pose freeze, with nothing left to tick it down.
-            // lastMapId counts too: it trails the bot's live map until onMapChange returns (see the
-            // assignment at the end of that handler), so it flags a map change the driver has not
-            // finished processing - the window in which the arrival is neither airborne nor yet
-            // armed with a drop.
-            if (st.moveDir != 0 || st.groundBrakeDir != 0 || st.inAir || st.climbing
-                    || st.portalDropAtMs > 0L || st.lastMapId != st.bot.getMapId()) {
-                // Mid-air: hand the bot over LATE instead of settling it here. A real player keeps
-                // falling to the floor frame by frame; forcing the landing was a visible teleport,
-                // and cutting the session mid-air was what froze bots in the jump pose. So keep the
-                // driver running and let the physics land it, then finish the handover (see
-                // GCMovementDriver.tick). Covers every caller at once - notably the stroll return,
-                // whose travel-finish callback fires within ~300ms of the map change while the
-                // map-entry float (inAir, ~60px up, 1.5-2.1s hold) is still in flight.
-                //
-                // On a rope: leave the pose ALONE. Hanging on a rope is a legitimate place to
-                // stand, so snapping a climber down to the floor would read as it falling off -
-                // the rope coords plus the ROPE stance are what it is really doing. Whoever takes
-                // over re-enables GC control, and enable() resolves the position from there.
+            synchronized (st) {
+                if (STATES.get(bot.getId()) != st) return;
+                GCFollow.cancel(bot);
+                GCTravel.cancel(bot);
+                GCFidget.cancel(bot);
+                // Keep the live state AND lease through a natural landing. Removing/reinserting
+                // here allowed enable() to publish a second driver in the handover gap.
+                if (st.inAir || st.portalDropAtMs > 0L || st.lastMapId != bot.getMapId()) {
+                    st.disableAfterLanding = true;
+                    clearMoveIntent(bot);
+                    st.following = false;
+                    return;
+                }
+                // A rope hang is a legitimate resting pose; never settle it onto invented ground.
                 if (!st.climbing) {
-                    if (st.inAir || st.portalDropAtMs > 0L || st.lastMapId != st.bot.getMapId()) {
-                        st.disableAfterLanding = true;
-                        // Put the state BACK: the driver keeps ticking it until it lands, and it
-                        // must stay the live entry for that. Leaving it removed would make
-                        // isEnabled() false while the old entry is still driving, so a later
-                        // enable() would build a SECOND state and start a second driver on the
-                        // same bot - and the deferred finish would then find no state to hand over.
-                        // Idempotent: disable() called twice while the fall is still in flight
-                        // (a teardown racing the stroll-return callback) just re-states the same
-                        // intent - the driver still owns landing it and finishing the handover.
-                        //
-                        // lastMapId != bot.getMapId() is the race this branch used to lose: a
-                        // disable() landing between the warp and the driver's onMapChange saw
-                        // neither inAir nor a pending drop, took the settle+stop path, and stopped
-                        // the driver before it could run the arrival at all - leaving the bot
-                        // parked at the portal with nothing left to drop it. Deferring instead
-                        // lets onMapChange play the entry (float -> drop) and hand over on landing.
-                        STATES.put(bot.getId(), st);
-                        return; // the driver calls finishDeferredDisable once it has landed
-                    }
                     settleGroundedOnDisable(st, bot);
                 }
+                finishDisable(st, bot);
             }
-            finishDisable(st, bot);
         }
-        ARRIVAL_CALLBACKS.remove(bot.getId());
     }
 
     /* Shared tail of .disable(): stop the driver and release the lock the old engine needs. */
@@ -162,7 +124,10 @@ public final class GCMovement {
         BotDashBurst.tickMovement(bot, bot.getPosition().x, MovementClock.nowMs(), true);
         soloMapling.ArtificialPlayer.BotAttackSystem.BotAuraState.tickMovement(bot);
         GCMovementDriver.stop(st);
-        MovementCommands.releaseMovementLock(bot);
+        ARRIVAL_CALLBACKS.remove(bot.getId());
+        FAILURE_CALLBACKS.remove(bot.getId());
+        STATES.remove(bot.getId(), st);
+        MovementCommands.releaseMovementLock(bot, st);
     }
 
     /*
@@ -170,22 +135,14 @@ public final class GCMovement {
      * finish the handover, so the bot is left standing on the floor exactly as a real player would
      * be after the drop - no forced snap, no mid-air freeze.
      */
-    static void finishDeferredDisable(Character bot) {
-        if (bot == null) {
-            return;
+    static void finishDeferredDisable(BotMovementState st) {
+        Character bot = st.bot;
+        synchronized (st) {
+            if (STATES.get(bot.getId()) != st || !st.disableAfterLanding || st.inAir) return;
+            // A fall can end by grabbing a rope instead of touching down.
+            if (!st.climbing) settleGroundedOnDisable(st, bot);
+            finishDisable(st, bot);
         }
-        BotMovementState st = STATES.remove(bot.getId());
-        if (st == null) {
-            return; // already taken over (re-enabled, or disabled again) - nothing to finish
-        }
-        // A fall can end by grabbing a rope instead of touching down. The rope pose and coords are
-        // what the bot is really doing, so leave them alone (same rule as disable()'s climbing
-        // path): settling here would render it standing on nothing at the rope's mid-air Y.
-        if (!st.climbing) {
-            settleGroundedOnDisable(st, bot);
-        }
-        finishDisable(st, bot);
-        ARRIVAL_CALLBACKS.remove(bot.getId());
     }
 
     /* Idle stance + one last frame for a bot that is standing when its session ends. */
@@ -238,6 +195,10 @@ public final class GCMovement {
 
     /* As .move(Character, int, int) with an arrival callback. */
     public static void move(Character bot, int x, int y, Runnable onArrival) {
+        move(bot, x, y, onArrival, null);
+    }
+
+    public static void move(Character bot, int x, int y, Runnable onArrival, Runnable onFailure) {
         if (bot == null) {
             return;
         }
@@ -247,7 +208,35 @@ public final class GCMovement {
             return;
         }
         synchronized (st) {
+            if (st.tickStopped) return;
+            GCFollow.cancel(bot);
+            GCTravel.cancel(bot);
             setMoveTarget(st, x, y, onArrival);
+            if (onFailure != null) FAILURE_CALLBACKS.put(bot.getId(), onFailure);
+        }
+    }
+
+    static BotMovementState stateOf(Character bot) {
+        return bot == null ? null : STATES.get(bot.getId());
+    }
+
+    // A travel poll is already the active command producer; do not cancel it on each hop.
+    static void moveForTravel(Character bot, int x, int y) {
+        BotMovementState st = stateOf(bot);
+        if (st == null) return;
+        synchronized (st) {
+            if (!st.tickStopped) setMoveTarget(st, x, y, null);
+        }
+    }
+
+    /** Deck strolls belong to the current voyage; unlike a new command they must not cancel it. */
+    public static void wanderTo(Character bot, int x, int y) {
+        BotMovementState st = stateOf(bot);
+        if (st == null) return;
+        synchronized (st) {
+            if (st.tickStopped) return;
+            if (GCTravel.isWaitingForTransit(bot)) moveForTravel(bot, x, y);
+            else move(bot, x, y);
         }
     }
 
@@ -259,6 +248,9 @@ public final class GCMovement {
             return;
         }
         synchronized (st) {
+            if (st.tickStopped) return;
+            GCFollow.cancel(bot);
+            GCTravel.cancel(bot);
             Point current = st.moveTarget;
             if (current == null || Math.abs(current.x - x) >= epsilonPx
                     || Math.abs(current.y - y) >= epsilonPx) {
@@ -270,14 +262,19 @@ public final class GCMovement {
     // Caller holds the same monitor as the physics tick: never publish half a move or lose a new
     // target/callback to the previous move's arrival while the combat thread is issuing it.
     private static void setMoveTarget(BotMovementState st, int x, int y, Runnable onArrival) {
+        boolean changed = st.moveTarget == null || st.moveTarget.x != x || st.moveTarget.y != y;
+        st.climbPositionHeld = false;
+        FAILURE_CALLBACKS.remove(st.bot.getId());
         st.following = false;
         st.farmAnchor = null;
         st.farmAnchorMapId = -1;
         st.moveTarget = new Point(x, y);
         st.moveTargetPrecise = true;
         st.moveTargetSource = "gcmove";
-        st.moveBestDist = Integer.MAX_VALUE;
-        st.moveProgressAtMs = MovementClock.nowMs();
+        if (changed) {
+            st.moveBestDist = Integer.MAX_VALUE;
+            st.moveProgressAtMs = MovementClock.nowMs();
+        }
         if (onArrival != null) {
             ARRIVAL_CALLBACKS.put(st.bot.getId(), onArrival);
         } else {
@@ -295,13 +292,14 @@ public final class GCMovement {
         if (st == null) {
             return;
         }
-        st.following = false;
-        st.farmAnchor = new Point(x, y);
-        st.farmAnchorMapId = bot.getMapId();
-        st.moveTarget = new Point(x, y);
-        st.moveTargetPrecise = true;
-        st.moveBestDist = Integer.MAX_VALUE;
-        st.moveProgressAtMs = MovementClock.nowMs();
+        synchronized (st) {
+            if (st.tickStopped) return;
+            GCFollow.cancel(bot);
+            GCTravel.cancel(bot);
+            setMoveTarget(st, x, y, null);
+            st.farmAnchor = new Point(x, y);
+            st.farmAnchorMapId = bot.getMapId();
+        }
     }
 
     /* Dynamically tail a character — including ACROSS maps (travels to the target's map when they
@@ -310,7 +308,6 @@ public final class GCMovement {
         if (bot == null || target == null) {
             return;
         }
-        enable(bot);
         GCFollow.start(bot, target);
     }
 
@@ -323,13 +320,16 @@ public final class GCMovement {
         if (bot == null) {
             return;
         }
-        GCFollow.cancel(bot);
-        GCTravel.cancel(bot);
-        clearMoveIntent(bot);
         BotMovementState st = STATES.get(bot.getId());
         if (st != null) {
-            st.following = false;
-            st.owner = null;
+            synchronized (st) {
+                if (st.tickStopped) return;
+                GCFollow.cancel(bot);
+                GCTravel.cancel(bot);
+                clearMoveIntent(bot);
+                st.following = false;
+                st.owner = null;
+            }
         }
     }
 
@@ -349,19 +349,21 @@ public final class GCMovement {
         if (st == null) {
             return;
         }
-        Point origin = bot.getPosition();
-        Point ground = BotPhysicsEngine.findGroundPoint(bot.getMap(), new Point(x, y));
-        Point dest = (ground != null) ? ground : new Point(x, y);
-        BotPhysicsEngine.teleportTo(st, bot, dest);
-        BotMovementManager.resetEntryStateAfterTeleport(st);
-        switch (TeleportCutPolicy.choose(ObserverTracker.isActiveMap(bot.getMapId()), origin, dest)) {
-            case ANIMATED -> GCMovementSkills.teleportCut(st, bot, origin, dest);
-            case NONE -> {
-                // Unobserved: keep the broadcast suppressed, but leave the snapshot stale so the
-                // first observed tick re-announces the new position (mirrors doBroadcastMovement).
-                BotMovementManager.invalidateBroadcastSnapshot(st);
+        synchronized (st) {
+            if (st.tickStopped) return;
+            Point origin = bot.getPosition();
+            Point ground = BotPhysicsEngine.findGroundPoint(bot.getMap(), new Point(x, y));
+            Point dest = (ground != null) ? ground : new Point(x, y);
+            BotPhysicsEngine.teleportTo(st, bot, dest);
+            BotMovementManager.resetEntryStateAfterTeleport(st);
+            switch (TeleportCutPolicy.choose(ObserverTracker.isActiveMap(bot.getMapId()), origin, dest)) {
+                case ANIMATED -> GCMovementSkills.teleportCut(st, bot, origin, dest);
+                case NONE -> {
+                    // Leave the snapshot stale so the first observed tick re-announces it.
+                    BotMovementManager.invalidateBroadcastSnapshot(st);
+                }
+                default -> BotMovementManager.broadcastMovement(st);
             }
-            default -> BotMovementManager.broadcastMovement(st);
         }
     }
 
@@ -375,7 +377,9 @@ public final class GCMovement {
         }
         BotMovementState st = STATES.get(bot.getId());
         if (st != null) {
-            BotContactDamage.markAlerted(st);
+            synchronized (st) {
+                BotContactDamage.markAlerted(st);
+            }
         }
     }
 
@@ -388,7 +392,10 @@ public final class GCMovement {
             return false;
         }
         BotMovementState st = STATES.get(bot.getId());
-        return st != null && GCMovementSkills.execTeleport(st, bot, targetX, targetY);
+        if (st == null) return false;
+        synchronized (st) {
+            return !st.tickStopped && GCMovementSkills.execTeleport(st, bot, targetX, targetY);
+        }
     }
 
     /* Thief flash-jump (air dash) toward a target X on the current map. scaleCap = the bot's level-tier
@@ -399,7 +406,10 @@ public final class GCMovement {
             return false;
         }
         BotMovementState st = STATES.get(bot.getId());
-        return st != null && GCMovementSkills.execFlashJump(st, bot, targetX, scaleCap);
+        if (st == null) return false;
+        synchronized (st) {
+            return !st.tickStopped && GCMovementSkills.execFlashJump(st, bot, targetX, scaleCap);
+        }
     }
 
     /* Dev/calibration (the !gcmove fj hook): fire one flash jump toward dir (+1/-1) at an exact scale,
@@ -409,7 +419,10 @@ public final class GCMovement {
             return false;
         }
         BotMovementState st = STATES.get(bot.getId());
-        return st != null && GCMovementSkills.execFlashJumpForced(st, bot, dir, scale);
+        if (st == null) return false;
+        synchronized (st) {
+            return !st.tickStopped && GCMovementSkills.execFlashJumpForced(st, bot, dir, scale);
+        }
     }
 
     /* The bot's current facing under dynamic control: true = facing left, false = right, or null when it
@@ -419,7 +432,10 @@ public final class GCMovement {
             return null;
         }
         BotMovementState st = STATES.get(bot.getId());
-        return (st == null) ? null : st.facingDir < 0;
+        if (st == null) return null;
+        synchronized (st) {
+            return st.facingDir < 0;
+        }
     }
 
     // ── Package helpers (used by GCTravel / GCFollow) ────────────────────────
@@ -431,12 +447,17 @@ public final class GCMovement {
         if (st == null) {
             return;
         }
-        st.moveTarget = null;
-        st.moveTargetPrecise = false;
-        st.farmAnchor = null;
-        st.farmAnchorMapId = -1;
-        BotMovementManager.clearNavigationState(st);
-        ARRIVAL_CALLBACKS.remove(bot.getId());
+        synchronized (st) {
+            if (st.tickStopped) return;
+            st.climbPositionHeld = st.climbing;
+            st.moveTarget = null;
+            st.moveTargetPrecise = false;
+            st.farmAnchor = null;
+            st.farmAnchorMapId = -1;
+            BotMovementManager.clearNavigationState(st);
+            ARRIVAL_CALLBACKS.remove(bot.getId());
+            FAILURE_CALLBACKS.remove(bot.getId());
+        }
     }
 
     /* GCFollow: target is on the bot's map — arm same-map follow (the driver does the walking). */
@@ -445,19 +466,28 @@ public final class GCMovement {
         if (st == null || target == null) {
             return;
         }
-        st.owner = target;
-        st.followTargetId = target.getId();
-        st.following = true;
-        st.moveTarget = null;
-        st.farmAnchor = null;
-        st.farmAnchorMapId = -1;
+        synchronized (st) {
+            if (st.tickStopped) return;
+            st.climbPositionHeld = false;
+            st.owner = target;
+            st.followTargetId = target.getId();
+            st.following = true;
+            st.moveTarget = null;
+            st.moveTargetPrecise = false;
+            st.farmAnchor = null;
+            st.farmAnchorMapId = -1;
+            ARRIVAL_CALLBACKS.remove(bot.getId());
+            FAILURE_CALLBACKS.remove(bot.getId());
+        }
     }
 
     /* GCFollow: target is on another map — pause same-map follow while the bot travels there. */
     static void pauseFollowForTravel(Character bot) {
         BotMovementState st = bot == null ? null : STATES.get(bot.getId());
         if (st != null) {
-            st.following = false;
+            synchronized (st) {
+                st.following = false;
+            }
         }
     }
 
@@ -465,8 +495,10 @@ public final class GCMovement {
     static void endFollowState(Character bot) {
         BotMovementState st = bot == null ? null : STATES.get(bot.getId());
         if (st != null) {
-            st.following = false;
-            st.owner = null;
+            synchronized (st) {
+                st.following = false;
+                st.owner = null;
+            }
         }
     }
 
@@ -474,12 +506,22 @@ public final class GCMovement {
 
     /* Travel to another map by chaining GCMove-to-portal + portal entry (warp special hops). */
     public static void travel(Character bot, int destMapId) {
-        GCTravel.travel(bot, destMapId, null);
+        travel(bot, destMapId, null);
     }
 
     /* As .travel(Character, int) with a success/fail callback fired on arrival/abort. */
     public static void travel(Character bot, int destMapId, java.util.function.Consumer<Boolean> onDone) {
-        GCTravel.travel(bot, destMapId, onDone);
+        if (!enable(bot)) {
+            if (onDone != null) onDone.accept(false);
+            return;
+        }
+        BotMovementState st = stateOf(bot);
+        if (st == null) return;
+        synchronized (st) {
+            if (st.tickStopped) return;
+            GCFollow.cancel(bot);
+            GCTravel.travel(bot, destMapId, onDone);
+        }
     }
 
     public static boolean isTraveling(Character bot) {
@@ -525,7 +567,7 @@ public final class GCMovement {
             move(bot, x, y, arrive); // already on the map — just navigate to the spot
             return;
         }
-        GCTravel.travel(bot, mapId, ok -> {
+        travel(bot, mapId, ok -> {
             if (ok) {
                 move(bot, x, y, arrive); // arrived on the destination map — now walk to the spot
             } else if (onDone != null) {
@@ -605,7 +647,10 @@ public final class GCMovement {
      * off attacking until then so the bot doesn't swing from the rope when a mob is near the rope top. */
     public static boolean isClimbing(Character bot) {
         BotMovementState st = bot == null ? null : STATES.get(bot.getId());
-        return st != null && st.climbing;
+        if (st == null) return false;
+        synchronized (st) {
+            return st.climbing;
+        }
     }
 
     /* True while the bot is mid portal-arrival: the map-entry float + the natural fall that follows it.
@@ -671,7 +716,11 @@ public final class GCMovement {
      * control (the old recorded engine owns it). Pose-pinning commands (a chair) gate on this so they never
      * fire mid-swim/mid-fall — see MovementCommands.botSitChair. */
     public static boolean isGrounded(Character bot) {
-        return isGrounded(bot == null ? null : STATES.get(bot.getId()));
+        BotMovementState st = bot == null ? null : STATES.get(bot.getId());
+        if (st == null) return false;
+        synchronized (st) {
+            return isGrounded(st);
+        }
     }
 
     static boolean isGrounded(BotMovementState st) {
@@ -690,7 +739,9 @@ public final class GCMovement {
         }
         BotMovementState st = STATES.get(bot.getId());
         if (st != null) {
-            st.grinding = grinding;
+            synchronized (st) {
+                st.grinding = grinding;
+            }
         }
     }
 
@@ -708,7 +759,9 @@ public final class GCMovement {
         }
         BotMovementState st = STATES.get(bot.getId());
         if (st != null) {
-            st.resting = resting;
+            synchronized (st) {
+                st.resting = resting;
+            }
         }
     }
 
@@ -721,8 +774,10 @@ public final class GCMovement {
      * No-op if not currently climbing. Used by grind recovery to dismount instead of hanging. */
     public static void dismountRope(Character bot, int dx) {
         BotMovementState st = bot == null ? null : STATES.get(bot.getId());
-        if (st != null && st.climbing) {
-            BotMovementManager.jumpOffRope(st, bot, dx);
+        if (st != null) {
+            synchronized (st) {
+                if (!st.tickStopped && st.climbing) BotMovementManager.jumpOffRope(st, bot, dx);
+            }
         }
     }
 
@@ -732,7 +787,10 @@ public final class GCMovement {
      * deliberate traversal climb alone instead of fighting it, which would thrash mount/dismount. */
     public static boolean isNavigatingClimb(Character bot) {
         BotMovementState st = bot == null ? null : STATES.get(bot.getId());
-        return st != null && st.climbing && st.navEdge != null;
+        if (st == null) return false;
+        synchronized (st) {
+            return st.climbing && st.navEdge != null;
+        }
     }
 
     // ── Idle fidget primitives (organic liveliness) ─────────────────────────
@@ -740,8 +798,10 @@ public final class GCMovement {
     /* A standing hop in place. */
     public static void jumpInPlace(Character bot) {
         BotMovementState st = bot == null ? null : STATES.get(bot.getId());
-        if (st != null && !st.inAir && !st.climbing) {
-            BotMovementManager.initiateJump(st, bot, 0);
+        if (st != null) {
+            synchronized (st) {
+                if (!st.tickStopped && !st.inAir && !st.climbing) BotMovementManager.initiateJump(st, bot, 0);
+            }
         }
     }
 
@@ -751,8 +811,10 @@ public final class GCMovement {
     // thieves close/kite in an arc instead of pogo-ing. No-op if already airborne or on a rope.
     public static void jumpToward(Character bot, int dx) {
         BotMovementState st = bot == null ? null : STATES.get(bot.getId());
-        if (st != null && !st.inAir && !st.climbing) {
-            BotMovementManager.initiateJump(st, bot, dx);
+        if (st != null) {
+            synchronized (st) {
+                if (!st.tickStopped && !st.inAir && !st.climbing) BotMovementManager.initiateJump(st, bot, dx);
+            }
         }
     }
 
@@ -760,7 +822,10 @@ public final class GCMovement {
     public static void turnAround(Character bot) {
         BotMovementState st = bot == null ? null : STATES.get(bot.getId());
         if (st != null) {
-            st.facingDir = -st.facingDir;
+            synchronized (st) {
+                if (st.tickStopped) return;
+                st.facingDir = -st.facingDir;
+            }
         }
     }
 
@@ -772,6 +837,7 @@ public final class GCMovement {
         BotMovementState st = bot == null ? null : STATES.get(bot.getId());
         if (st != null) {
             synchronized (st) {
+                if (st.tickStopped) return;
                 st.facingDir = left ? -1 : 1;
                 BotMovementManager.broadcastMovement(st);
             }
@@ -797,8 +863,12 @@ public final class GCMovement {
     /* Crouch/duck for durationMs (the driver holds the prone pose while idle). */
     public static void duck(Character bot, int durationMs) {
         BotMovementState st = bot == null ? null : STATES.get(bot.getId());
-        if (st != null && !st.inAir && !st.climbing) {
-            st.duckUntilMs = MovementClock.nowMs() + Math.max(1, durationMs);
+        if (st != null) {
+            synchronized (st) {
+                if (!st.tickStopped && !st.inAir && !st.climbing) {
+                    st.duckUntilMs = MovementClock.nowMs() + Math.max(1, durationMs);
+                }
+            }
         }
     }
 
@@ -1454,6 +1524,8 @@ public final class GCMovement {
     static void abandonMove(BotMovementState entry) {
         if (entry != null && entry.bot != null) {
             ARRIVAL_CALLBACKS.remove(entry.bot.getId());
+            Runnable cb = FAILURE_CALLBACKS.remove(entry.bot.getId());
+            if (cb != null) cb.run();
         }
     }
 
@@ -1461,6 +1533,7 @@ public final class GCMovement {
         if (entry == null || entry.bot == null) {
             return;
         }
+        FAILURE_CALLBACKS.remove(entry.bot.getId());
         Runnable cb = ARRIVAL_CALLBACKS.remove(entry.bot.getId());
         if (cb != null) {
             try {

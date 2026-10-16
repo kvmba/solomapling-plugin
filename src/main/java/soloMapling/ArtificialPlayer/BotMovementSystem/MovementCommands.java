@@ -24,7 +24,6 @@ import java.util.Map;
 import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ThreadLocalRandom;
-import java.util.concurrent.atomic.AtomicBoolean;
 
 import static java.lang.Math.abs;
 import static org.gms.net.server.channel.handlers.AbstractMovementPacketHandler.updatePositionBot;
@@ -120,6 +119,17 @@ public class MovementCommands {
     public static boolean BotMoveStreamHelper(MovementRecording mvr, Character fakechar,
                                            boolean useOffset, Point stopPoint,
                                            MidMovementCheck midCheck) {
+        if (!tryAcquireMovementLock(fakechar)) return true;
+        try {
+            return replayUnlocked(mvr, fakechar, useOffset, stopPoint, midCheck);
+        } finally {
+            releaseMovementLock(fakechar);
+        }
+    }
+
+    private static boolean replayUnlocked(MovementRecording mvr, Character fakechar,
+                                          boolean useOffset, Point stopPoint,
+                                          MidMovementCheck midCheck) {
         List<MovementPacket> fullRecording = mvr.getMovementPacketList();
         fullInPacket:
         for (int i = 0; i < fullRecording.size(); i++) {
@@ -366,20 +376,19 @@ public class MovementCommands {
     }
 
     public static boolean executeMovement(Character fakechar, MovementRecording path, MidMovementCheck midCheck) {
-        boolean interrupted = BotMoveStreamHelper(path, fakechar, false, null, midCheck);
-        if (!interrupted) {
-            // The replay may end on an AIRBORNE frame. A recorded path is routinely a slice of a longer
-            // recording (getPathBetweenTwoPointsInMainArea trims by timestamp), and 244 of the shipped
-            // main-area packets end on a jump stance - so the trimmed slice ends there too. The replay
-            // then leaves the bot mid-air carrying JUMP(6/7), and injectArtificialStopPacket below does
-            // NOT cover it: it only fires for a walking stance, because a walk needs to be stopped while
-            // a jump was thought to be self-resolving. A headless bot has no client gravity sim to
-            // resolve it, so the last broadcast pose is what observers keep rendering - the reported
-            // "bot frozen in the air in the jump pose". Land it first (below), then stop.
-            settleRecordedReplay(fakechar);
-            injectArtificialStopPacket(fakechar);
+        if (!tryAcquireMovementLock(fakechar)) return true;
+        try {
+            boolean interrupted = BotMoveStreamHelper(path, fakechar, false, null, midCheck);
+            if (!interrupted) {
+                // A trimmed replay may end in mid-air. Settle under the SAME lease: a new
+                // dynamic session must not begin between the final frame and this correction.
+                settleRecordedReplay(fakechar);
+                injectArtificialStopPacket(fakechar);
+            }
+            return interrupted;
+        } finally {
+            releaseMovementLock(fakechar);
         }
-        return interrupted;
     }
 
     /**
@@ -757,8 +766,9 @@ public class MovementCommands {
     }
 
     public static void BotMove(InPacket p, Character chr) {
-        p.skip(9);
+        if (!tryAcquireMovementLock(chr)) return;
         try {
+            p.skip(9);
             int movementDataStart = p.getPosition();
             updatePositionBot(p, chr, 0);
             long movementDataLength = p.getPosition() - movementDataStart; //how many bytes were read by updatePosition
@@ -772,6 +782,8 @@ public class MovementCommands {
                 chr.getMap().broadcastMessage(chr, PacketCreator.movePlayer(chr.getId(), p, movementDataLength), false);
             }
         } catch (EmptyMovementException e) {
+        } finally {
+            releaseMovementLock(chr);
         }
     }
 
@@ -793,21 +805,46 @@ public class MovementCommands {
     }
 
     // ── Movement Lock ──────────────────────────────────────────────────
-    private static final ConcurrentHashMap<Integer, AtomicBoolean> movementLocks = new ConcurrentHashMap<>();
+    private static final class MovementLock {
+        Object owner;
+        int holds;
+    }
+
+    private static final ConcurrentHashMap<Integer, MovementLock> movementLocks = new ConcurrentHashMap<>();
 
     public static boolean tryAcquireMovementLock(Character fakechar) {
-        AtomicBoolean lock = movementLocks.computeIfAbsent(fakechar.getId(), k -> new AtomicBoolean(false));
-        return lock.compareAndSet(false, true);
+        return tryAcquireMovementLock(fakechar, Thread.currentThread());
+    }
+
+    // Recorded calls nest on one thread; a dynamic session owns the lease across driver threads.
+    public static boolean tryAcquireMovementLock(Character bot, Object owner) {
+        MovementLock lock = movementLocks.computeIfAbsent(bot.getId(), k -> new MovementLock());
+        synchronized (lock) {
+            if (lock.owner != null && lock.owner != owner) return false;
+            lock.owner = owner;
+            lock.holds++;
+            return true;
+        }
     }
 
     public static void releaseMovementLock(Character fakechar) {
-        AtomicBoolean lock = movementLocks.get(fakechar.getId());
-        if (lock != null) lock.set(false);
+        releaseMovementLock(fakechar, Thread.currentThread());
+    }
+
+    public static void releaseMovementLock(Character bot, Object owner) {
+        MovementLock lock = movementLocks.get(bot.getId());
+        synchronized (lock) {
+            if (lock.owner != owner) throw new IllegalMonitorStateException("Not the bot's movement owner");
+            if (--lock.holds == 0) lock.owner = null;
+        }
     }
 
     public static boolean isBotMoving(Character fakechar) {
-        AtomicBoolean lock = movementLocks.get(fakechar.getId());
-        return lock != null && lock.get();
+        MovementLock lock = movementLocks.get(fakechar.getId());
+        if (lock == null) return false;
+        synchronized (lock) {
+            return lock.owner != null;
+        }
     }
 
     // ── Nudge Utilities ────────────────────────────────────────────────

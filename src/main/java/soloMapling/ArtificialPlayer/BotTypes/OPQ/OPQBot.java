@@ -57,8 +57,8 @@ public class OPQBot extends BotSM {
 
     // volatile: the swing chains run off-tick and read/write these
     private volatile OPQBotState opqBotState = OPQBotState.RESET;
-    private final OPQOrchestrator orchestrator;
-    private final OPQSharedContext sharedContext;
+    private volatile OPQOrchestrator orchestrator;
+    private volatile OPQSharedContext sharedContext = new OPQSharedContext();
     private List<String> hint = Collections.singletonList(getChr().getName());
 
     // Per-state timers / scratch fields
@@ -81,8 +81,6 @@ public class OPQBot extends BotSM {
         // whatever bot last bound itself - or null - so the altar's spawnNpc would silently
         // do nothing. See BotGeneration.adoptPrivateClient.
         BotGeneration.adoptPrivateClient(character);
-        this.orchestrator = OPQOrchestrator.getInstance();
-        this.sharedContext = orchestrator.getSharedContext();
         // The dynamic engine and the orchestrator registration both span the FSM's RUNNING
         // lifetime, so both live in startScheduledTask (see there) - a bot wrapped but never
         // started (the GM createAndSetBot paths) must not hold a live driver thread, the shared
@@ -100,13 +98,22 @@ public class OPQBot extends BotSM {
         // Enable before the FSM starts and before any arrival warp, so the map-entry choreography
         // sees the bot as dynamic-controlled and skips the recorded portal drop.
         GCMovement.enable(getChr());
-        orchestrator.registerBot(this);
+        bindRun();
         super.startScheduledTask(initialDelayMs);
     }
 
     // =========================================================================
     // State machine plumbing
     // =========================================================================
+
+    private void bindRun() {
+        OPQOrchestrator run = OPQOrchestrator.bind(this, orchestrator);
+        if (run != orchestrator) {
+            orchestrator = run;
+            sharedContext = run.getSharedContext();
+        }
+        orchestrator.noteLeaderFromBot(this);
+    }
 
     private void setOPQBotState(OPQBotState state) {
         this.opqBotState = state;
@@ -192,6 +199,7 @@ public class OPQBot extends BotSM {
         if (checkIfNotRunningOrPaused()) {
             return;
         }
+        bindRun();
         getDebugger().debugLoggingFull(
                 String.format("%s OPQBotState: %s", this.getChr().getName(), opqBotState),
                 String.format("%s", opqBotState));
@@ -363,7 +371,7 @@ public class OPQBot extends BotSM {
             // deliberate synchronous warp: warpBotToLocation blocks through the
             // arrival choreography (up to ~7s) and nothing may overlap it
             blockingSleep(3000);
-            OPQOrchestrator.getInstance().followLeaderWarp(getChr(), STAGE_1_ENTRY_TP);
+            orchestrator.followLeaderWarp(getChr(), STAGE_1_ENTRY_TP);
             transitionTo(OPQBotState.STAGE_1_NAVIGATE, "Warp to Stage 1 with Leader");
         }
     }
@@ -528,7 +536,7 @@ public class OPQBot extends BotSM {
         // Walk to the altar, not to the leader's old spot: the drop has to land inside the
         // altar's trigger box, and the altar sits at x=377 (the old target, x=497, was 20px
         // outside it to the right - which is why the altar never fired).
-        PqActions.walkTo(getChr(), OPQConstants.STAGE_1_DROP_POS);
+        if (!PqActions.walkTo(getChr(), OPQConstants.STAGE_1_DROP_POS)) return;
         waitFor(OPQConstants.NAVIGATE_SETTLE_MS); // settle before DROP_ITEMS ticks
         transitionTo(OPQBotState.STAGE_1_DROP_ITEMS, "return state done.");
     }
@@ -546,7 +554,7 @@ public class OPQBot extends BotSM {
         // qualifying stack, and extra stacks would only litter the floor - each one a candidate
         // for another bot's loot sweep to pick up inside the engine's five-second window, which
         // cancels the trigger.
-        boolean thrower = orchestrator.isAltarThrower(getChr().getId());
+        boolean thrower = orchestrator.isAltarThrower(this);
         boolean throwing = thrower && altarStillArmed();
         debugLogf("handleStage1DropItems: held=" + cloudPiecesCount()
                 + " thrower=" + thrower + " throwing=" + throwing
@@ -609,8 +617,8 @@ public class OPQBot extends BotSM {
     }
 
     private void handleStage1Wait() {
-        if (sharedContext.isStage1Complete() && orchestrator.isChamberlainSpawned()) {
-            OPQOrchestrator.getInstance().followLeaderWarp(getChr(), STAGE_1_COMPLETE_TP);
+        if (sharedContext.isStage1Complete() && orchestrator.isChamberlainSpawned(getChr())) {
+            orchestrator.followLeaderWarp(getChr(), STAGE_1_COMPLETE_TP);
             // Walk to the portal on the top platform, then step through it.
             PqActions.walkToPortal(getChr(), 4);
             transitionTo(OPQBotState.STAGE_1_TRANSITION, "stage1Complete flag flipped by orchestrator");
@@ -626,13 +634,13 @@ public class OPQBot extends BotSM {
         int leaderMap = getPartyLeader().getMapId();
         if (leaderMap == OPQConstants.OPQ_EXIT_LOBBY) {
             blockingSleep(1000); // deliberate: blocking follow-warp below
-            OPQOrchestrator.getInstance().followLeaderWarp(getChr(), new Point(-161, 323));
+            orchestrator.followLeaderWarp(getChr(), new Point(-161, 323));
             transitionTo(OPQBotState.EXIT_LOBBY, "leader left stage 1 — following to exit lobby");
             return;
         }
         if (leaderMap == OPQConstants.OPQ_LOBBY) {
             blockingSleep(1000); // deliberate: blocking follow-warp below
-            OPQOrchestrator.getInstance().followLeaderWarp(getChr(), new Point(-233, 174));
+            orchestrator.followLeaderWarp(getChr(), new Point(-233, 174));
             transitionTo(OPQBotState.LOOP_CHECK, "leader already in OPQ lobby");
             return;
         }
@@ -653,7 +661,7 @@ public class OPQBot extends BotSM {
         if (getPartyLeader().getMapId() == OPQConstants.OPQ_TOWER) {
             // deliberate synchronous warp sequence (blocking arrival choreography)
             blockingSleep(1000);
-            OPQOrchestrator.getInstance().followLeaderWarp(getChr(), new Point(-260,-32)); // Spawn point for OPQ tower [x=-260,y=-32]
+            orchestrator.followLeaderWarp(getChr(), new Point(-260,-32)); // Spawn point for OPQ tower [x=-260,y=-32]
             blockingSleep(1000);
             PqActions.walkTo(getChr(), new Point(159, -32)); // Walk to Portal [x=159,y=-32]
             transitionTo(OPQBotState.STAGE_1_TRANSITION_PT_2, "Waiting for leader to enter stage 2");
@@ -773,13 +781,11 @@ public class OPQBot extends BotSM {
             walkToRoom(OrbisStages.roomFor(5));
             return;
         }
-        String door = OrbisPqData.loungeEntryPortal(loungeVisit);
-        Point doorPos = portalPos(door);
-        if (doorPos == null) {
+        var door = getChr().getMap().getPortal(OrbisPqData.loungeEntryPortal(loungeVisit));
+        if (door == null) {
             return;
         }
-        PqActions.walkTo(getChr(), doorPos);
-        PqActions.enterPortalHere(getChr());
+        if (PqActions.walkTo(getChr(), door.getPosition())) PqActions.enterPortal(getChr(), door);
         waitFor(OPQConstants.NAVIGATE_SETTLE_MS);
     }
 
@@ -850,29 +856,22 @@ public class OPQBot extends BotSM {
      * the leader-follow or the stage wait instead.
      */
     private void walkOutOfCurrentRoom() {
-        Point exit = portalPos(OrbisPqData.ROOM_EXIT_PORTAL_NAME);
+        var exit = getChr().getMap().getPortal(OrbisPqData.ROOM_EXIT_PORTAL_NAME);
         if (exit == null) {
-            exit = portalPos(OrbisPqData.LOUNGE_EXIT_PORTAL);
+            exit = getChr().getMap().getPortal(OrbisPqData.LOUNGE_EXIT_PORTAL);
         }
         if (exit == null) {
             waitFor(OPQConstants.NAVIGATE_SETTLE_MS);
             return;
         }
-        PqActions.walkTo(getChr(), exit);
-        PqActions.enterPortalHere(getChr());
+        if (PqActions.walkTo(getChr(), exit.getPosition())) PqActions.enterPortal(getChr(), exit);
         waitFor(OPQConstants.NAVIGATE_SETTLE_MS);
-    }
-
-    /** The position of the named portal on the bot's current map, or null. */
-    private Point portalPos(String portalName) {
-        var portal = getChr().getMap().getPortal(portalName);
-        return portal == null ? null : portal.getPosition();
     }
 
     /** Papa Pixie's room is entered by Eak's warp, so the bot simply stays with the leader. */
     private void followLeaderIntoPapaRoom() {
         if (getPartyLeader().getMapId() == OrbisPqData.STAGE_PAPA) {
-            OPQOrchestrator.getInstance().followLeaderWarp(getChr(),
+            orchestrator.followLeaderWarp(getChr(),
                     OrbisPqData.PAPA_SPRING_SPOT);
         } else {
             walkToTower();
@@ -898,8 +897,10 @@ public class OPQBot extends BotSM {
         if (spot == null) {
             return;
         }
-        PqActions.walkTo(getChr(), spot);
-        PqActions.enterPortalHere(getChr());
+        var portal = getChr().getMap().findClosestPortal(spot);
+        if (portal != null && PqActions.walkTo(getChr(), portal.getPosition())) {
+            PqActions.enterPortal(getChr(), portal);
+        }
         waitFor(OPQConstants.NAVIGATE_SETTLE_MS);
     }
 
@@ -1123,7 +1124,7 @@ public class OPQBot extends BotSM {
         // x∈[-1758,-1666) y∈[-304,-161), and the old target (-1588,-127) was 78px outside it
         // on x. The landing point already accounts for the drop re-seating itself 85px down
         // onto the floor below the box - see OPQConstants.STAGE_2_DROP_POS.
-        PqActions.walkTo(getChr(), OPQConstants.STAGE_2_DROP_POS);
+        if (!PqActions.walkTo(getChr(), OPQConstants.STAGE_2_DROP_POS)) return;
         waitFor(OPQConstants.NAVIGATE_SETTLE_MS); // settle before DROP_ITEMS ticks
         transitionTo(OPQBotState.STAGE_2_DROP_ITEMS,
                 "arrived at music box drop zone");
@@ -1174,13 +1175,13 @@ public class OPQBot extends BotSM {
         int leaderMap = getPartyLeader().getMapId();
         if (leaderMap == OPQConstants.OPQ_EXIT_LOBBY) {
             blockingSleep(1000); // deliberate: blocking follow-warp below
-            OPQOrchestrator.getInstance().followLeaderWarp(getChr(), new Point(-161, 323));
+            orchestrator.followLeaderWarp(getChr(), new Point(-161, 323));
             transitionTo(OPQBotState.EXIT_LOBBY, "followed leader to exit lobby");
             return;
         }
         if (leaderMap == OPQConstants.OPQ_LOBBY) {
             blockingSleep(1000); // deliberate: blocking follow-warp below
-            OPQOrchestrator.getInstance().followLeaderWarp(getChr(), new Point(-233, 174));
+            orchestrator.followLeaderWarp(getChr(), new Point(-233, 174));
             transitionTo(OPQBotState.LOOP_CHECK, "leader already in OPQ lobby");
             return;
         }
@@ -1216,11 +1217,11 @@ public class OPQBot extends BotSM {
         int leaderMap = getPartyLeader().getMapId();
         if (leaderMap == OPQConstants.OPQ_EXIT_LOBBY) {
             blockingSleep(1000); // deliberate: blocking follow-warp below
-            OPQOrchestrator.getInstance().followLeaderWarp(getChr(), new Point(-161, 323));
+            orchestrator.followLeaderWarp(getChr(), new Point(-161, 323));
             transitionTo(OPQBotState.EXIT_LOBBY, "followed leader to exit lobby");
         } else if (leaderMap == OPQConstants.OPQ_LOBBY) {
             blockingSleep(1000); // deliberate: blocking follow-warp below
-            OPQOrchestrator.getInstance().followLeaderWarp(getChr(), new Point(-233, 174));
+            orchestrator.followLeaderWarp(getChr(), new Point(-233, 174));
             transitionTo(OPQBotState.LOOP_CHECK, "followed leader to OPQ lobby");
         }
     }
@@ -1390,10 +1391,10 @@ public class OPQBot extends BotSM {
         int leaderMap = getPartyLeader().getMapId();
         blockingSleep(1000); // deliberate: blocking follow-warps below
         if (leaderMap == OPQConstants.OPQ_EXIT_LOBBY) {
-            OPQOrchestrator.getInstance().followLeaderWarp(getChr(), new Point(-161, 323));
+            orchestrator.followLeaderWarp(getChr(), new Point(-161, 323));
             transitionTo(OPQBotState.EXIT_LOBBY, "leader already left stage 2 — following to exit lobby");
         } else {
-            OPQOrchestrator.getInstance().followLeaderWarp(getChr(), new Point(-233, 174));
+            orchestrator.followLeaderWarp(getChr(), new Point(-233, 174));
             transitionTo(OPQBotState.LOOP_CHECK, "leader already in OPQ lobby — skipping exit");
         }
     }
@@ -1413,7 +1414,7 @@ public class OPQBot extends BotSM {
         // writers package-private while letting subscribers read a single
         // source of truth instead of polling mapIds themselves.
         if (sharedContext.getCurrentPhase() != phase) {
-            orchestrator.mirrorPhase(phase);
+            orchestrator.mirrorPhase(this, phase);
         }
     }
 
@@ -1428,7 +1429,10 @@ public class OPQBot extends BotSM {
      */
     @Override
     public synchronized void stopScheduledTask() {
-        orchestrator.unregisterBot(this);
+        if (orchestrator != null) {
+            OPQOrchestrator.unbind(this, orchestrator);
+            orchestrator = null;
+        }
         // OPQBot extends BotSM directly, so it does not inherit PartyQuestBot's GCMovement.disable.
         // Release the dynamic engine (and the shared movement lock it holds) on stop/convert.
         GCMovement.disable(getChr());

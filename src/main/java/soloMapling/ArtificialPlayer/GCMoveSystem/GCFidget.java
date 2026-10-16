@@ -54,26 +54,36 @@ final class GCFidget {
         if (bot == null) {
             return;
         }
-        cancel(bot);
-        Session s = new Session(bot);
-        s.task = POOL.scheduleAtFixedRate(
-                () -> {
-                    try {
-                        tick(s);
-                    } catch (Throwable ignored) {
-                        // a thrown poll would cancel the periodic task
-                    }
-                }, POLL_MS, POLL_MS, TimeUnit.MILLISECONDS);
-        SESSIONS.put(bot.getId(), s);
+        BotMovementState st = GCMovement.stateOf(bot);
+        if (st == null) return;
+        synchronized (st) {
+            if (st.tickStopped) return;
+            cancel(bot);
+            Session s = new Session(bot);
+            SESSIONS.put(bot.getId(), s);
+            s.task = POOL.scheduleAtFixedRate(
+                    () -> {
+                        try {
+                            synchronized (st) {
+                                if (!st.tickStopped && SESSIONS.get(bot.getId()) == s) tick(s);
+                            }
+                        } catch (Throwable e) {
+                            org.slf4j.LoggerFactory.getLogger(GCFidget.class)
+                                    .warn("Fidget poll failed for bot {}", bot.getId(), e);
+                        }
+                    }, POLL_MS, POLL_MS, TimeUnit.MILLISECONDS);
+        }
     }
 
     static void cancel(Character bot) {
         if (bot == null) {
             return;
         }
-        Session s = SESSIONS.remove(bot.getId());
-        if (s != null && s.task != null) {
-            s.task.cancel(false);
+        BotMovementState st = GCMovement.stateOf(bot);
+        if (st == null) return;
+        synchronized (st) {
+            Session s = SESSIONS.remove(bot.getId());
+            if (s != null && s.task != null) s.task.cancel(false);
         }
     }
 

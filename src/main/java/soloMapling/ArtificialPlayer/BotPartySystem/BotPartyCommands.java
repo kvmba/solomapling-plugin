@@ -28,8 +28,8 @@ public class BotPartyCommands {
         return created;
     }
 
-    // Server-side only leave. Skips player-client concerns (MCPQ, EventInstance,
-    // MatchChecker, partySearch) since bots don't participate in any of those.
+    // Server-side leave: use the actual avatar, not a shared BotClient's current player.
+    // Event-instance membership is real and must observe the same callbacks as a player leave.
     public static void botLeaveParty(Character fakechar) {
         Party party = fakechar.getParty();
         if (party == null) {
@@ -48,6 +48,8 @@ public class BotPartyCommands {
         if (botPC.getId() == party.getLeaderId()) {
             world.removeMapPartyMembers(partyId);
             world.updateParty(partyId, PartyOperation.DISBAND, botPC);
+            var eim = fakechar.getEventInstance();
+            if (eim != null) eim.disbandParty();
             debugprint("botLeaveParty: bot=" + fakechar.getName() + " disbanded party " + partyId);
         } else {
             MapleMap map = fakechar.getMap();
@@ -55,6 +57,8 @@ public class BotPartyCommands {
                 map.removePartyMember(fakechar, partyId);
             }
             world.updateParty(partyId, PartyOperation.LEAVE, botPC);
+            var eim = fakechar.getEventInstance();
+            if (eim != null) eim.leftParty(fakechar);
             debugprint("botLeaveParty: bot=" + fakechar.getName() + " left party " + partyId);
         }
 

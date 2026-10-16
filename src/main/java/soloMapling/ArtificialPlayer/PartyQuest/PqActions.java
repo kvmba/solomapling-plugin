@@ -122,24 +122,33 @@ public final class PqActions {
      * <p>Blocks the calling (virtual) thread until arrival or a deadline, the same
      * synchronous contract the old recorded walk had. A bot that cannot path there (no
      * baked graph yet, an unreachable point) is left where it is and the caller simply
-     * retries on its next tick - the pre-existing behaviour when a recording was missing.
+     * retries on its next tick. Returns true only while still on this map and at the target;
+     * reaching the wait deadline is NOT arrival.
      */
-    public static void walkTo(Character bot, Point target) {
-        if (bot == null || target == null) {
-            return;
+    public static boolean walkTo(Character bot, Point target) {
+        if (bot == null || target == null || bot.getMap() == null) {
+            return false;
         }
-        Point here = bot.getPosition();
-        if (here != null
-                && Math.abs(here.x - target.x) <= ARRIVAL_EPS_PX
-                && Math.abs(here.y - target.y) <= ARRIVAL_EPS_PX) {
-            return; // already standing on the target - re-arming the walk only overwrites
-        }
-        armStageWalkShield(bot);
+        MapleMap map = bot.getMap();
+        SeekState control = seekStates.computeIfAbsent(bot.getId(), ignored -> new SeekState());
         java.util.concurrent.CountDownLatch arrived = new java.util.concurrent.CountDownLatch(1);
-        GCMovement.move(bot, target.x, target.y, () -> {
-            arrived.countDown();
-            nudgeStageTick(bot); // arrival is the event the FSM waits on - wake it (debounced)
-        });
+        StageWalkShield shield;
+        synchronized (control) {
+            clearReactorBeat(bot.getId()); // stage walking supersedes box work
+            stageWalkShieldUntilByBot.remove(bot.getId());
+            Point here = bot.getPosition();
+            if (Math.abs(here.x - target.x) <= ARRIVAL_EPS_PX
+                    && Math.abs(here.y - target.y) <= ARRIVAL_EPS_PX) {
+                GCMovement.stop(bot);
+                return true;
+            }
+            shield = armStageWalkShield(bot);
+            GCMovement.move(bot, target.x, target.y, () -> {
+                stageWalkShieldUntilByBot.remove(bot.getId(), shield);
+                arrived.countDown();
+                nudgeStageTick(bot); // arrival is the event the FSM waits on - wake it (debounced)
+            }, () -> stageWalkShieldUntilByBot.remove(bot.getId(), shield));
+        }
         // Bounded block: the tick waits for the walk to land, but never longer than one slow
         // cadence. A bot-only room's ticks are 36-48s apart, and a full-length block there is
         // what froze pure-bot parties standing still between macro ticks (the LPQ "stand
@@ -164,17 +173,15 @@ public final class PqActions {
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
         }
-        // The shield outlives the WAIT, not the walk (3ff20b0): a walk still flying after this
-        // method stops waiting keeps its shield — the 250ms combat beat must not re-target it
-        // mid-walk — and the shield expires on its own after STAGE_WALK_SHIELD_MS (the wedge
-        // escape). Only a finished or engine-abandoned walk has nothing left to shield; releasing
-        // on every exit re-opened the puzzle blackout the shield exists to prevent, and releasing
-        // on none left the 8s blackout an interrupt used to block the beat with. The live engine
-        // answer is read once here (not per exit) so the deadline, interrupt and give-up paths
-        // cannot drift apart.
+        // A live stage walk owns steering beyond the short blocking window. The driver's
+        // actual no-progress abandonment, not the caller's wait deadline, ends that ownership.
         if (walkShieldReleases(arrivedFlag, GCMovement.isMoving(bot))) {
-            disarmStageWalkShield(bot);
+            stageWalkShieldUntilByBot.remove(bot.getId(), shield);
         }
+        Point pos = bot.getPosition();
+        return bot.getMap() == map && pos != null
+                && Math.abs(pos.x - target.x) <= ARRIVAL_EPS_PX
+                && Math.abs(pos.y - target.y) <= ARRIVAL_EPS_PX;
     }
 
     /**
@@ -188,15 +195,18 @@ public final class PqActions {
      * {@link #PICKUP_REACH_SQ}, so no arrival re-check is needed.
      */
     private static void walkForPickup(Character bot, Point at) {
-        GCMovement.move(bot, at.x, at.y, () -> nudgeStageTick(bot));
+        SeekState control = seekStates.computeIfAbsent(bot.getId(), ignored -> new SeekState());
+        synchronized (control) {
+            if (!movementShielded(bot.getId()) && !reactorBeatArmed(bot)) {
+                GCMovement.move(bot, at.x, at.y, () -> nudgeStageTick(bot));
+            }
+        }
     }
 
     /**
      * Whether {@link #walkTo} must release the stage-walk shield when it stops waiting: only when
      * nothing is left to shield — the walk landed ({@code arrived}) or the engine gave it up. A
-     * walk still in flight past the wait window keeps its shield (it outlives the block, 3ff20b0)
-     * and expires on its own. Pure and package-visible so the decision table is pinned by test
-     * rather than re-derived at each exit (it has already regressed twice).
+     * walk still in flight past the wait window keeps its shield.
      */
     static boolean walkShieldReleases(boolean arrived, boolean engineStillMoving) {
         return arrived || !engineStillMoving;
@@ -212,40 +222,33 @@ public final class PqActions {
     // Stage-walk shield: the macro tick's walks (portal following, puzzle holds) must not be
     // re-targeted by the 250ms combat beat, which would yank the walk at a mob and oscillate
     // the bot between its goal and the fight. walkTo/holdArea arm a shield that outlives the
-    // blocking window (the walk keeps flying after walkTo gives up waiting) and expires on
-    // its own - the combat beat reads it and skips only the chase's steering (the swing half
-    // still runs) until then. walkTo releases it through one decision seam (walkShieldReleases)
-    // when the wait saw the landing or an engine-abandoned move; a walk still flying past the
-    // wait keeps the shield until the expiry - the wedge escape. Deliberately NOT armed by the
+    // blocking window. A live goal stays protected until arrival/abandonment; a puzzle hold
+    // with no walking goal expires on its own. The combat beat skips only chase steering
+    // (the swing half still runs). Deliberately NOT armed by the
     // wait spots (waitNearStageNpc/spreadNearStageNpc): a park renewed every macro tick was a
     // permanent combat blackout, the reported "发呆".
     private static final long STAGE_WALK_SHIELD_MS = 8_000;
-    private static final Map<Integer, Long> stageWalkShieldUntilByBot = new java.util.concurrent.ConcurrentHashMap<>();
+    private record StageWalkShield(Character bot, MapleMap map, long until) {}
+    private static final Map<Integer, StageWalkShield> stageWalkShieldUntilByBot = new java.util.concurrent.ConcurrentHashMap<>();
 
     /** Whether the combat beat must leave this bot's movement alone right now. */
     public static boolean movementShielded(int botId) {
-        Long until = stageWalkShieldUntilByBot.get(botId);
-        if (until == null) {
+        StageWalkShield shield = stageWalkShieldUntilByBot.get(botId);
+        if (shield == null) {
             return false;
         }
-        if (movementNowMs() >= until) {
-            stageWalkShieldUntilByBot.remove(botId);
+        if (shield.bot().getMap() != shield.map()
+                || (movementNowMs() >= shield.until() && !GCMovement.hasMoveTarget(shield.bot()))) {
+            stageWalkShieldUntilByBot.remove(botId, shield);
             return false;
         }
         return true;
     }
 
-    private static void armStageWalkShield(Character bot) {
-        if (bot != null) {
-            stageWalkShieldUntilByBot.put(bot.getId(),
-                    movementNowMs() + STAGE_WALK_SHIELD_MS);
-        }
-    }
-
-    private static void disarmStageWalkShield(Character bot) {
-        if (bot != null) {
-            stageWalkShieldUntilByBot.remove(bot.getId());
-        }
+    private static StageWalkShield armStageWalkShield(Character bot) {
+        StageWalkShield shield = new StageWalkShield(bot, bot.getMap(), movementNowMs() + STAGE_WALK_SHIELD_MS);
+        stageWalkShieldUntilByBot.put(bot.getId(), shield);
+        return shield;
     }
 
     /**
@@ -268,10 +271,17 @@ public final class PqActions {
     /** The approach outcome for a box the bot is walking to. */
     public enum Approach { IN_POSITION, TRAVELLING, STUCK }
 
-    /** botId -> the floor point the bot has failed to reach, and how many times. */
-    private static final Map<Integer, Point> stuckTargetByBot = new java.util.concurrent.ConcurrentHashMap<>();
-    private static final Map<Integer, Integer> stuckCountByBot = new java.util.concurrent.ConcurrentHashMap<>();
-    /** The driver abandons a no-progress move after this long; two abandon cycles = a dead edge. */
+    private static final class ApproachAttempt {
+        final MapleMap map;
+        final Point target;
+        final java.util.concurrent.atomic.AtomicInteger failures = new java.util.concurrent.atomic.AtomicInteger();
+
+        ApproachAttempt(MapleMap map, Point target) {
+            this.map = map;
+            this.target = new Point(target);
+        }
+    }
+    /** Two actual no-progress abandonments mark this approach as failed. */
     private static final int STUCK_RETRIES = 2;
 
     /**
@@ -292,30 +302,37 @@ public final class PqActions {
         }
         Point ground = GCMovement.groundPointBelow(bot.getMap(), aerialTarget.x, aerialTarget.y);
         Point to = ground != null ? ground : aerialTarget;
-        Point pos = bot.getPosition();
-        if (pos != null && Math.abs(pos.x - to.x) <= APPROACH_X && Math.abs(pos.y - to.y) <= APPROACH_Y) {
-            stuckTargetByBot.remove(bot.getId());
-            stuckCountByBot.remove(bot.getId());
-            return Approach.IN_POSITION; // arrived; clear any stale mark
-        }
-        Point failed = stuckTargetByBot.get(bot.getId());
-        if (failed != null && failed.equals(to)) {
-            int attempts = stuckCountByBot.merge(bot.getId(), 1, Integer::sum);
-            if (attempts > STUCK_RETRIES) {
-                return Approach.STUCK; // this edge is dead; make the caller try a different one
+        return approachTo(bot, to, to);
+    }
+
+    private static Approach approachTo(Character bot, Point floor, Point steering) {
+        SeekState control = seekStates.computeIfAbsent(bot.getId(), ignored -> new SeekState());
+        synchronized (control) {
+            Point pos = bot.getPosition();
+            if (Math.abs(pos.x - floor.x) <= APPROACH_X && Math.abs(pos.y - floor.y) <= APPROACH_Y) {
+                if (!movementShielded(bot.getId())) GCMovement.stop(bot);
+                control.approach = null;
+                return Approach.IN_POSITION;
             }
-        } else {
-            stuckTargetByBot.put(bot.getId(), new Point(to));
-            stuckCountByBot.put(bot.getId(), 1);
+            ApproachAttempt attempt = control.approach;
+            boolean changed = attempt == null || attempt.map != bot.getMap() || !attempt.target.equals(floor);
+            if (changed) {
+                attempt = new ApproachAttempt(bot.getMap(), floor);
+                control.approach = attempt;
+            }
+            if (attempt.failures.get() >= STUCK_RETRIES) {
+                // Keep the verdict until the stage selects a different target. The combat
+                // beat may observe failure first; clearing it here would hide it from rotation.
+                return Approach.STUCK;
+            }
+            if (!movementShielded(bot.getId()) && (changed || !GCMovement.hasMoveTarget(bot))) {
+                // Only the driver's actual abandonment counts, never a poll, cancellation or rope pose.
+                ApproachAttempt issued = attempt;
+                GCMovement.move(bot, steering.x, steering.y, () -> nudgeStageTick(bot),
+                        () -> issued.failures.incrementAndGet());
+            }
+            return Approach.TRAVELLING;
         }
-        // Re-issue the move when idle: the driver's own no-progress watchdog abandons a
-        // stalled plan after MOVE_NO_PROGRESS_MS, and this re-issue replans from the bot's
-        // CURRENT pixel - which is also what recovers a bot the executor left on a ledge it
-        // cannot launch from.
-        if (!GCMovement.isMoving(bot)) {
-            GCMovement.move(bot, to.x, to.y);
-        }
-        return Approach.TRAVELLING;
     }
 
     /** Striking box on the same platform: the approach box around its floor point. */
@@ -352,28 +369,7 @@ public final class PqActions {
             // approach's answer is the right one here.
             return approachUnder(bot, aerialTarget);
         }
-        // A healthy descent takes many macro ticks (ropes, drop floors), so the STUCK count
-        // must track "the driver gave up on this floor" - not merely the same target again.
-        // Only an IDLE driver between re-issues means the edge chain is not working.
-        if (!GCMovement.isMoving(bot)) {
-            if (ground.equals(stuckTargetByBot.get(bot.getId()))) {
-                int attempts = stuckCountByBot.merge(bot.getId(), 1, Integer::sum);
-                if (attempts > STUCK_RETRIES) {
-                    // This floor is dead for THIS round of candidates; drop the record so the
-                    // next tick's retry starts fresh instead of STUCK-ing on sight forever
-                    // (every caller-side rotate candidate can fail - without the reset that
-                    // would strand the bot with no box it may approach, permanently).
-                    stuckTargetByBot.remove(bot.getId());
-                    stuckCountByBot.remove(bot.getId());
-                    return Approach.STUCK; // make the caller try another box
-                }
-            } else {
-                stuckTargetByBot.put(bot.getId(), new Point(ground));
-                stuckCountByBot.put(bot.getId(), 1);
-            }
-            GCMovement.move(bot, aerialTarget.x, aerialTarget.y);
-        }
-        return Approach.TRAVELLING;
+        return approachTo(bot, ground, aerialTarget);
     }
 
     /**
@@ -387,14 +383,15 @@ public final class PqActions {
     }
 
     /** Walk to the position of a portal on the bot's current map. No-op if the portal is unknown. */
-    public static void walkToPortal(Character bot, int portalId) {
+    public static boolean walkToPortal(Character bot, int portalId) {
         if (bot == null || bot.getMap() == null) {
-            return;
+            return false;
         }
         Portal portal = bot.getMap().getPortal(portalId);
         if (portal != null) {
-            walkTo(bot, portal.getPosition());
+            return walkTo(bot, portal.getPosition());
         }
+        return false;
     }
 
     // =========================================================================
@@ -467,7 +464,7 @@ public final class PqActions {
     // driver's swing cadence, so arrival converts into hits within one 250ms beat.
 
     /** botId -> the box the combat sweep may strike once the approach lands (oid + map instance). */
-    private record BeatBox(int oid, int mapInstance) {
+    private record BeatBox(int oid, MapleMap map) {
     }
 
     private static final Map<Integer, BeatBox> beatBoxByBot = new java.util.concurrent.ConcurrentHashMap<>();
@@ -485,10 +482,13 @@ public final class PqActions {
         if (bot == null) {
             return;
         }
-        if (oid >= 0) {
-            beatBoxByBot.put(bot.getId(), new BeatBox(oid, System.identityHashCode(bot.getMap())));
-        } else {
-            beatBoxByBot.remove(bot.getId());
+        SeekState control = seekStates.computeIfAbsent(bot.getId(), ignored -> new SeekState());
+        synchronized (control) {
+            if (oid >= 0) {
+                beatBoxByBot.put(bot.getId(), new BeatBox(oid, bot.getMap()));
+            } else {
+                beatBoxByBot.remove(bot.getId());
+            }
         }
     }
 
@@ -499,7 +499,33 @@ public final class PqActions {
 
     /** Whether a box is registered for the combat sweep to carry (the beat's steering gate). */
     public static boolean reactorBeatArmed(Character bot) {
-        return bot != null && beatBoxByBot.containsKey(bot.getId());
+        if (bot == null) return false;
+        BeatBox box = beatBoxByBot.get(bot.getId());
+        if (box == null) return false;
+        Reactor reactor = bot.getMap() == box.map() ? box.map().getReactorByOid(box.oid()) : null;
+        if (reactor != null && reactor.isActive()) return true;
+        if (beatBoxByBot.remove(bot.getId(), box)) {
+            nextReactorSwingAtByBot.remove(bot.getId());
+        }
+        return false;
+    }
+
+    /** Reserve the box and its steering in the same critical section as combat seeking. */
+    public static Approach approachReactor(Character bot, int oid, boolean descend, boolean onBeat) {
+        SeekState control = seekStates.computeIfAbsent(bot.getId(), ignored -> new SeekState());
+        synchronized (control) {
+            Reactor reactor = bot.getMap().getReactorByOid(oid);
+            if (reactor == null || !reactor.isActive()) return Approach.STUCK;
+            if (movementShielded(bot.getId())) return Approach.TRAVELLING;
+            if (onBeat) armReactorBeat(bot, oid);
+            Approach result = descend ? descendToFloorAerialTarget(bot, reactor.getPosition())
+                    : approachUnder(bot, reactor.getPosition());
+            if (result == Approach.STUCK) {
+                clearReactorBeat(bot.getId());
+                control.approach = null; // macro consumed the failure; rotate/retry on its next visit
+            }
+            return result;
+        }
     }
 
     /**
@@ -546,8 +572,17 @@ public final class PqActions {
         if (bot == null || bot.getMap() == null) {
             return false;
         }
+        SeekState control = seekStates.computeIfAbsent(bot.getId(), ignored -> new SeekState());
+        synchronized (control) {
+            if (movementShielded(bot.getId()) || !reactorBeatArmed(bot)) return false;
+            return workReactorOnBeatUnlocked(bot);
+        }
+    }
+
+    private static boolean workReactorOnBeatUnlocked(Character bot) {
         BeatBox box = beatBoxByBot.get(bot.getId());
-        if (box == null || box.mapInstance() != System.identityHashCode(bot.getMap())) {
+        if (box == null || box.map() != bot.getMap()) {
+            if (box != null) beatBoxByBot.remove(bot.getId(), box);
             return false; // stale room (or nothing armed): the stage re-arms on its next tick
         }
         int oid = box.oid();
@@ -732,7 +767,12 @@ public final class PqActions {
             return 0; // nothing to do here; the party's own movement brings them together
         }
         if (!leaderNear(bot, leader)) {
-            GCMovement.move(bot, leader.getPosition().x, leader.getPosition().y);
+            SeekState control = seekStates.computeIfAbsent(bot.getId(), ignored -> new SeekState());
+            synchronized (control) {
+                if (!movementShielded(bot.getId()) && !reactorBeatArmed(bot)) {
+                    GCMovement.move(bot, leader.getPosition().x, leader.getPosition().y);
+                }
+            }
             return 0;
         }
         giveItemTo(bot, leader, itemId, qty);
@@ -919,10 +959,13 @@ public final class PqActions {
             return;
         }
         walkTo(bot, spot);
+        SeekState control = seekStates.computeIfAbsent(bot.getId(), ignored -> new SeekState());
+        synchronized (control) {
+            armStageWalkShield(bot);
+        }
         // Capped at one walk block: a longer hold freezes a busy stage tick for the whole
         // span, and a bot-only room's 36-48s cadence already spaces its ticks far apart.
         blockingSleep(Math.min(millis, WALK_BLOCK_CAP_MS));
-        armStageWalkShield(bot); // keep the beat off the bot while it holds the puzzle spot
     }
 
     /** Inline-pickup cap for a loot sweep (see {@link #loot}): what one tick may pay for. */
@@ -996,6 +1039,7 @@ public final class PqActions {
      * not individual map operations: a kill/retarget must never clear another beat's progress halfway. */
     private static final class SeekState {
         MapleMap map;
+        ApproachAttempt approach;
         int targetOid = -1;
         Point anchorFloor;
         int drift;
@@ -1062,6 +1106,10 @@ public final class PqActions {
                 state.targetOid = -1;
                 state.clearGoal();
                 state.pathability.clear();
+            }
+            if (movementShielded(botId) || reactorBeatArmed(bot)) {
+                attack(bot); // stage/box work owns steering, even for direct macro callers
+                return;
             }
             seekAndAttack(bot, state);
         }
@@ -1424,8 +1472,6 @@ public final class PqActions {
                 seekStates.remove(botId, state);
             }
         }
-        stuckTargetByBot.remove(botId);
-        stuckCountByBot.remove(botId);
         orphanProbeAtByBot.remove(botId);
         stageWalkShieldUntilByBot.remove(botId);
         SEEK_TRACE_UNTIL.remove(botId);
@@ -2077,9 +2123,7 @@ public final class PqActions {
             return;
         }
         Portal portal = bot.getMap().findClosestPortal(bot.getPosition());
-        if (portal != null) {
-            portal.enterPortal(bot.getClient());
-        }
+        enterPortal(bot, portal);
     }
 
     /**
@@ -2093,9 +2137,14 @@ public final class PqActions {
      * stage is clear.
      */
     public static void enterPortal(Character bot, Portal portal) {
-        if (bot == null || portal == null || bot.getClient() == null) {
+        if (bot == null || portal == null || bot.getClient() == null || bot.getMap() == null
+                || bot.getMap().getPortal(portal.getId()) != portal) {
             return;
         }
+        Point pos = bot.getPosition();
+        Point entrance = portal.getPosition();
+        if (Math.abs(pos.x - entrance.x) > ARRIVAL_EPS_PX
+                || Math.abs(pos.y - entrance.y) > ARRIVAL_EPS_PX) return;
         portal.enterPortal(bot.getClient());
     }
 }

@@ -196,33 +196,52 @@ final class GCTravel {
         if (bot == null) {
             return;
         }
-        cancel(bot);
-        if (bot.getMap() != null && bot.getMapId() == destMapId) {
-            fire(callback, true);
+        if (!GCMovement.enable(bot)) {
+            fire(callback, false);
             return;
         }
-        GCMovement.enable(bot);
-        Trip trip = new Trip(bot, destMapId, callback);
-        trip.hopProgressAtMs = nowMs();
-        trip.hopStartAtMs = nowMs();
-        trip.task = POOL.scheduleAtFixedRate(
-                () -> {
-                    try {
-                        tick(trip);
-                    } catch (Throwable ignored) {
-                        // a thrown poll would cancel the periodic task
-                    }
-                }, 0, POLL_MS, TimeUnit.MILLISECONDS);
-        TRIPS.put(bot.getId(), trip);
+        BotMovementState st = GCMovement.stateOf(bot);
+        if (st == null) {
+            fire(callback, false);
+            return;
+        }
+        synchronized (st) {
+            if (st.tickStopped) {
+                fire(callback, false);
+                return;
+            }
+            cancel(bot);
+            if (bot.getMap() != null && bot.getMapId() == destMapId) {
+                fire(callback, true);
+                return;
+            }
+            Trip trip = new Trip(bot, destMapId, callback);
+            trip.hopProgressAtMs = nowMs();
+            trip.hopStartAtMs = nowMs();
+            TRIPS.put(bot.getId(), trip);
+            trip.task = POOL.scheduleAtFixedRate(
+                    () -> {
+                        try {
+                            synchronized (st) {
+                                if (!st.tickStopped && TRIPS.get(bot.getId()) == trip) tick(trip);
+                            }
+                        } catch (Throwable e) {
+                            org.slf4j.LoggerFactory.getLogger(GCTravel.class)
+                                    .warn("Travel poll failed for bot {}", bot.getId(), e);
+                        }
+                    }, 0, POLL_MS, TimeUnit.MILLISECONDS);
+        }
     }
 
     static void cancel(Character bot) {
         if (bot == null) {
             return;
         }
-        Trip t = TRIPS.remove(bot.getId());
-        if (t != null && t.task != null) {
-            t.task.cancel(false);
+        BotMovementState st = GCMovement.stateOf(bot);
+        if (st == null) return;
+        synchronized (st) {
+            Trip t = TRIPS.remove(bot.getId());
+            if (t != null && t.task != null) t.task.cancel(false);
         }
     }
 
@@ -615,7 +634,7 @@ final class GCTravel {
             return;
         }
         if (!GCMovement.isMoving(bot)) {
-            GCMovement.move(bot, rail.centerX(), rail.centerY());
+            GCMovement.moveForTravel(bot, rail.centerX(), rail.centerY());
         }
     }
 
@@ -633,7 +652,7 @@ final class GCTravel {
         }
         Point hatch = GCTransit.hatchPos(bot.getMap());
         if (hatch != null && !GCMovement.isMoving(bot)) {
-            GCMovement.move(bot, hatch.x, hatch.y);
+            GCMovement.moveForTravel(bot, hatch.x, hatch.y);
         }
     }
 
@@ -723,7 +742,7 @@ final class GCTravel {
                 return;
             }
             trip.loiterTarget = pickWaitStroll(bot, anchor);
-            GCMovement.move(bot, trip.loiterTarget.x, trip.loiterTarget.y);
+            GCMovement.moveForTravel(bot, trip.loiterTarget.x, trip.loiterTarget.y);
             return;
         }
 
@@ -739,7 +758,7 @@ final class GCTravel {
             return;
         }
         if (!GCMovement.isMoving(bot)) {
-            GCMovement.move(bot, trip.loiterTarget.x, trip.loiterTarget.y); // (re)issue the stroll
+            GCMovement.moveForTravel(bot, trip.loiterTarget.x, trip.loiterTarget.y); // (re)issue the stroll
         }
     }
 
@@ -969,7 +988,7 @@ final class GCTravel {
         }
 
         if (!GCMovement.isMoving(bot)) {
-            GCMovement.move(bot, dest.x, dest.y);                 // (re)issue the walk to the hop target
+            GCMovement.moveForTravel(bot, dest.x, dest.y);        // (re)issue the walk to the hop target
         }
     }
 
@@ -1017,7 +1036,7 @@ final class GCTravel {
     }
 
     private static void finish(Trip trip, boolean ok) {
-        TRIPS.remove(trip.bot.getId());
+        if (!TRIPS.remove(trip.bot.getId(), trip)) return;
         if (trip.task != null) {
             trip.task.cancel(false);
         }
@@ -1038,8 +1057,8 @@ final class GCTravel {
         if (cb != null) {
             try {
                 cb.accept(ok);
-            } catch (Throwable ignored) {
-                // callback errors must not propagate into the poller
+            } catch (Throwable e) {
+                org.slf4j.LoggerFactory.getLogger(GCTravel.class).warn("Travel completion failed", e);
             }
         }
     }

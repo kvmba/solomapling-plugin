@@ -332,7 +332,7 @@ final class GCMovementDriver {
         // lock for as long as it hangs, starving the old engine. The flag is cleared inside the
         // hand-over itself, so a racing disable() cannot lose it between check and clear.
         if (entry.disableAfterLanding && !entry.inAir) {
-            GCMovement.finishDeferredDisable(entry.bot);
+            GCMovement.finishDeferredDisable(entry);
             return;
         }
 
@@ -399,12 +399,25 @@ final class GCMovementDriver {
         // steered. This is the movement-layer half of the debuff rule; the attack layer (BotAttackDriver)
         // gates swings and the grind brain (GrindBrain) gates its direct moves separately.
         if (status != null && status.isFrozen()) {
-            // Still let a mob touch a frozen bot (it is standing right there): run the contact-damage
-            // tick, then hold the pose. A climber is held ON its rope (idleOnGround would clear the
-            // climb and drop it); anything else settles to a grounded idle - mirrors the resting hold.
+            // Freeze input, not physics: stun must not turn a jump/knockback into a grounded pose.
             BotContactDamage.tickMobDamage(entry, bot);
+            entry.moveProgressAtMs = MovementClock.nowMs();
+            entry.moveDir = 0;
+            entry.climbUpIntent = false;
+            entry.pendingFlashJump = false;
             if (entry.climbing) {
                 BotPhysicsEngine.holdClimb(entry, bot);
+            } else if (entry.inAir) {
+                BotPhysicsEngine.tickMotionTimers(entry);
+                if (isSwimMap(entry)) {
+                    entry.swimMoveDir = 0;
+                    entry.swimVerticalHold = 0;
+                    entry.swimJumpRequested = false;
+                    BotPhysicsEngine.applySwimMotion(entry);
+                } else {
+                    BotPhysicsEngine.stepAirborne(entry, bot);
+                }
+                tickFallOffMapRecovery(entry);
             } else {
                 BotPhysicsEngine.idleOnGround(entry, bot);
             }
@@ -435,13 +448,15 @@ final class GCMovementDriver {
         }
         // While a stop-reaction is in progress, hold position (don't walk off mid-greeting) and keep the
         // stall timer fresh so the pause isn't mistaken for being stuck. Resumes automatically after.
-        if (entry.reactingUntilMs > MovementClock.nowMs()) {
+        if (entry.reactingUntilMs > MovementClock.nowMs() && !entry.inAir && !entry.climbing) {
             entry.moveProgressAtMs = MovementClock.nowMs();
             BotPhysicsEngine.idleOnGround(entry, bot);
             broadcastIfObserved(entry);
             return;
         }
 
+        if (entry.climbing) clearReachedMoveTarget(entry); // rope arrival precedes stall recovery
+        if (entry.tickStopped) return;
         // Abandon a move target the bot can't make progress toward, so it never tries forever.
         if (giveUpStalledMove(entry)) {
             // Settle ONLY a genuinely grounded bot. An airborne or climbing bot must just fall
@@ -765,8 +780,8 @@ final class GCMovementDriver {
         if (runAiTick && !entry.inAir && !entry.climbing) {
             BotNavigationManager.tryExecuteCommittedEdgeAfterGroundMovement(entry, target);
         }
-        tickStuckDetection(entry);
         clearReachedMoveTarget(entry);
+        if (!entry.tickStopped) tickStuckDetection(entry);
     }
 
     private static void tickMovementPhase(BotMovementState entry, Point target, boolean runAiTick) {
@@ -791,6 +806,20 @@ final class GCMovementDriver {
         }
         Point botPos = entry.bot.getPosition();
         int arrivalDist = entry.moveTargetPrecise ? 8 : BotMovementManager.cfg.STOP_DIST;
+        if (entry.climbing && entry.climbRope != null && entry.moveTargetPrecise
+                && Math.abs(entry.moveTarget.x - entry.climbRope.x()) <= 8
+                && entry.moveTarget.y > entry.climbRope.topY() + arrivalDist
+                && entry.moveTarget.y < entry.climbRope.bottomY() - arrivalDist
+                && Math.abs(botPos.y - entry.moveTarget.y) <= arrivalDist
+                && BotPhysicsEngine.findGroundFoothold(entry.bot.getMap(), entry.moveTarget) == null) {
+            entry.climbPositionHeld = true;
+            entry.moveTarget = null;
+            entry.moveTargetPrecise = false;
+            BotMovementManager.clearNavigationState(entry);
+            BotPhysicsEngine.holdClimb(entry, entry.bot);
+            GCMovement.fireArrival(entry);
+            return;
+        }
         // Narrow-ledge residency: a precise target whose foothold is too narrow to hold a pixel hunt
         // is satisfied by STANDING on that foothold inside the target's band. Pixel-hunting a point on
         // a platform narrower than a step + its glide-out (a WALK step is ~7px) can only overshoot,
@@ -866,7 +895,7 @@ final class GCMovementDriver {
      * Whether a bot may be considered to have reached the move target. Pure, so the rule is pinned by a
      * unit test rather than re-derived at the call site.
      *
-     * A bot that is still CLIMBING or mid-AIR has not "arrived" even if it is standing on the target's
+     * A bot that is still CLIMBING toward a ground target or mid-AIR has not "arrived" even if on the target's
      * pixels. Both phases pin or sweep the bot across the target early:
      *
      *  - Climbing pins X to the rope's column while Y is still making its way up, so the box test below
@@ -1121,14 +1150,17 @@ final class GCMovementDriver {
     private static final long CLIMB_STALL_ESCAPE_MS = 4_000;
     private static final int CLIMB_STALL_EPS_PX = 8;
 
-    // A climber that hasn't moved ~8px in 4s while NOT resting is parked mid-rope: dismount toward
-    // ground so the fall integrator lands it and normal recovery/replanning takes over. Resting
-    // (a deliberate grind-break hang) is exempt — that hold is the break, not a wedge. Running here
+    // A climber that hasn't moved ~8px in 4s without an intentional hold is parked mid-rope:
+    // dismount toward ground so the fall integrator lands it. Rest, follow-idle and explicit
+    // rope arrivals are legitimate holds and use the same rule as tickClimbing. Running here
     // (inside the stuck-exempt branch) keeps the position anchor reset every tick, so only a truly
     // stationary climber ever accumulates the window. True = dismounted this tick (caller must let
     // the airborne physics own the next ticks, not settle the bot in place).
     private static boolean tickClimbStallEscape(BotMovementState entry) {
-        if (!entry.climbing || entry.resting) {
+        Point target = entry.climbing ? resolveTarget(entry, entry.bot) : null;
+        if (!entry.climbing || entry.resting || entry.climbPositionHeld
+                || (target != null && BotMovementManager.shouldHoldClimbIdle(entry,
+                        target.y - entry.bot.getPosition().y, target.x - entry.bot.getPosition().x))) {
             entry.climbStallSinceMs = 0L;
             entry.climbStallY = Integer.MIN_VALUE;
             return false;

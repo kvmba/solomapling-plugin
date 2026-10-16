@@ -183,7 +183,7 @@ public final class BotWanderSystem {
             return;
         }
         stop(bot);
-        GCMovement.enable(bot);
+        if (!GCMovement.enable(bot)) return;
         Wander w = new Wander(bot, bot.getMapId(), banded, bandLo, bandHi);
         w.progressAtMs = nowMs();
         long initialDelay = RANDOM.nextInt(START_JITTER_MS);
@@ -269,7 +269,7 @@ public final class BotWanderSystem {
         }
 
         if (!GCMovement.isMoving(bot)) {
-            GCMovement.move(bot, w.target.x, w.target.y); // (re)issue the stroll
+            GCMovement.wanderTo(bot, w.target.x, w.target.y); // (re)issue the stroll
         }
     }
 
@@ -324,7 +324,7 @@ public final class BotWanderSystem {
         w.state = WALKING;
         w.bestDist = Integer.MAX_VALUE;
         w.progressAtMs = now;
-        GCMovement.move(w.bot, spot.x, spot.y);
+        GCMovement.wanderTo(w.bot, spot.x, spot.y);
     }
 
     // One-shot off-door step for an unobserved bot that just arrived through a portal: send it to a

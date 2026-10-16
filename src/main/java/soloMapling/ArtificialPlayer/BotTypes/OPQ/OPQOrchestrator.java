@@ -3,6 +3,7 @@ package soloMapling.ArtificialPlayer.BotTypes.OPQ;
 import org.gms.client.Character;
 import org.gms.server.maps.MapleMap;
 import org.gms.server.maps.Reactor;
+import org.gms.scripting.event.EventInstanceManager;
 import soloMapling.ArtificialPlayer.BotTypes.OPQ.OPQSharedContext.OPQPhase;
 import soloMapling.server.ExecutorServiceManager;
 
@@ -17,6 +18,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 
@@ -27,7 +29,7 @@ import static soloMapling.ArtificialPlayer.BotTypes.OPQ.OPQConstants.STAGE_1_COM
 import static soloMapling.BotLogger.log;
 
 /**
- * Coordinator for a single OPQ run.
+ * Coordinator for one party in one event instance (or its pre-entry lobby session).
  * <p>
  * Responsibilities:
  * - Register / unregister OPQ bots
@@ -46,17 +48,31 @@ public class OPQOrchestrator {
 
     private static final long TICK_PERIOD_MS = 1000; // 1 Hz is plenty
 
-    private static final OPQOrchestrator INSTANCE = new OPQOrchestrator();
+    private record RunKey(Object channel, Object party, EventInstanceManager instance) {
+        static RunKey of(Character chr) {
+            return new RunKey(chr.getClient().getChannelServer(),
+                    chr.getParty() != null ? chr.getParty() : chr, chr.getEventInstance());
+        }
+    }
 
-    public static OPQOrchestrator getInstance() {
-        return INSTANCE;
+    private static final Map<RunKey, OPQOrchestrator> RUNS = new ConcurrentHashMap<>();
+    private final RunKey key;
+
+    static synchronized OPQOrchestrator bind(OPQBot bot, OPQOrchestrator previous) {
+        RunKey key = RunKey.of(bot.getChr());
+        if (previous != null && previous.key.equals(key)) return previous;
+        if (previous != null) previous.unregisterBot(bot);
+        OPQOrchestrator run = RUNS.computeIfAbsent(key, OPQOrchestrator::new);
+        run.registerBot(bot);
+        return run;
+    }
+
+    static synchronized void unbind(OPQBot bot, OPQOrchestrator run) {
+        run.unregisterBot(bot);
     }
 
     private final OPQSharedContext context = new OPQSharedContext();
     private final List<OPQBot> registeredBots = new CopyOnWriteArrayList<>();
-
-    // Leader tracking: cached on first observation by any bot, refreshed each tick.
-    private volatile int leaderId = -1;
 
     // Which bot throws the cloud stack onto the altar this run (-1 = not yet elected).
     private int altarThrowerId = -1;
@@ -67,7 +83,8 @@ public class OPQOrchestrator {
 
     private ScheduledFuture<?> tickHandle;
 
-    private OPQOrchestrator() {
+    private OPQOrchestrator(RunKey key) {
+        this.key = key;
     }
 
     private static void opqLog(String msg) {
@@ -82,7 +99,7 @@ public class OPQOrchestrator {
         return context;
     }
 
-    public synchronized void registerBot(OPQBot bot) {
+    private synchronized void registerBot(OPQBot bot) {
         if (bot == null) return;
         if (!registeredBots.contains(bot)) {
             registeredBots.add(bot);
@@ -91,7 +108,7 @@ public class OPQOrchestrator {
         ensureTickRunning();
     }
 
-    public synchronized void unregisterBot(OPQBot bot) {
+    private synchronized void unregisterBot(OPQBot bot) {
         if (bot == null) return;
         registeredBots.remove(bot);
         int id = bot.getChr().getId();
@@ -102,23 +119,17 @@ public class OPQOrchestrator {
         opqLog("Unregistered bot: " + bot.getChr().getName());
         if (registeredBots.isEmpty()) {
             stopTick();
+            RUNS.remove(key, this);
         }
     }
 
     /**
-     * Bots call this whenever they observe themselves in a party so the
-     * orchestrator can lock onto the leader id. Cheap; safe to call every tick.
+     * Activate this party's session; leader identity is always read from the calling bot.
      */
     public void noteLeaderFromBot(OPQBot bot) {
         if (bot.getChr().getParty() == null) return;
-        int observedLeader = bot.getChr().getParty().getLeaderId();
-        if (observedLeader > 0 && observedLeader != leaderId) {
-            leaderId = observedLeader;
-            opqLog("Leader id locked: " + leaderId);
-        }
         // Auto-activate the run once any bot is partied. Without this the
-        // tick would no-op (pqActive=false) and followLeaderWarp would never
-        // fire. Calling !opq start manually still works and is idempotent.
+        // tick would no-op (pqActive=false).
         if (!context.isPqActive()) {
             context.setPqActive(true);
             opqLog("Auto-activated run on first leader observation.");
@@ -294,14 +305,15 @@ public class OPQOrchestrator {
         context.reset();
         context.setPqActive(true);
         context.setCurrentPhase(OPQPhase.RECRUITMENT);
-        leaderId = -1;
         boxSortedIndex.clear();
         altarThrowerId = -1;
     }
 
-    public void mirrorPhase(OPQPhase phase) {
+    public synchronized void mirrorPhase(OPQBot bot, OPQPhase phase) {
+        if (!key.equals(RunKey.of(bot.getChr()))) return;
         OPQPhase prev = context.getCurrentPhase();
-        if (prev != phase) {
+        // A teammate still finishing an earlier room must not roll this run's phase back.
+        if (phase.ordinal() > prev.ordinal()) {
             context.setCurrentPhase(phase);
             opqLog("Phase mirrored: " + prev + " -> " + phase);
         }
@@ -317,13 +329,17 @@ public class OPQOrchestrator {
      * which would sit there as litter, and each one is a candidate for another bot's loot
      * sweep to pick back up before the delay elapses - which silently cancels the trigger.
      *
-     * <p>Lowest character id wins. Re-elected while the winner is still registered, so a bot
-     * that leaves does not strand the run without a thrower.
+     * <p>Lowest eligible character id wins, retaining the winner while it is alive and
+     * present in this party's cloud map. Lobby recruits and other instances never vote.
      */
-    public synchronized boolean isAltarThrower(int botId) {
+    public synchronized boolean isAltarThrower(OPQBot caller) {
+        Character chr = caller.getChr();
+        if (chr.getParty() == null || chr.getEventInstance() == null
+                || chr.getMapId() != OPQConstants.OPQ_STAGE_1) return false;
         boolean winnerStillHere = false;
         int lowest = Integer.MAX_VALUE;
         for (OPQBot bot : registeredBots) {
+            if (!participates(bot) || bot.getChr().getMap() != chr.getMap()) continue;
             int id = bot.getChr().getId();
             lowest = Math.min(lowest, id);
             if (id == altarThrowerId) {
@@ -337,7 +353,7 @@ public class OPQOrchestrator {
             altarThrowerId = lowest;
             opqLog("Altar thrower elected: bot id " + altarThrowerId);
         }
-        return altarThrowerId == botId;
+        return altarThrowerId == chr.getId();
     }
 
     /**
@@ -346,7 +362,6 @@ public class OPQOrchestrator {
     public synchronized void shutdownRun() {
         opqLog("Shutting down current run.");
         context.reset();
-        leaderId = -1;
         boxSortedIndex.clear();
         altarThrowerId = -1;
     }
@@ -387,7 +402,7 @@ public class OPQOrchestrator {
      * teleports the leader up to the top platform. We poll the leader's
      * position and flip stage1Complete once they land in the tolerance box.
      */
-    private void tick() {
+    private synchronized void tick() {
         if (!context.isPqActive()) return;
 
         if (allBotsLostParty()) {
@@ -417,31 +432,27 @@ public class OPQOrchestrator {
     }
 
     /**
-     * Resolve the live leader Character from any registered bot's channel
-     * server. Returns null if there's no leader yet, no bots registered, or
-     * the leader has logged out / changed channels.
+     * Resolve the caller's own live leader, including a mid-run leadership change.
      */
-    private Character resolveLeader() {
-        if (leaderId <= 0 || registeredBots.isEmpty()) return null;
-        OPQBot anchor = registeredBots.get(0);
-        return anchor.getChr().getClient().getChannelServer()
-                .getPlayerStorage().getCharacterById(leaderId);
+    private static Character resolveLeader(Character bot) {
+        var party = bot.getParty();
+        return party == null ? null : bot.getClient().getChannelServer()
+                .getPlayerStorage().getCharacterById(party.getLeaderId());
     }
 
     /**
-     * Whether Chamberlain Eak is on the leader's map yet. Eak is spawned by the altar
-     * reactor's script (2006000.js act() -> rm.spawnNpc), so his presence is a side effect
-     * of a successful altar drop rather than a stage flag. The leader may also have left
-     * the map (PQ aborted, channel change) while bots are still registered, hence the guard:
-     * this used to dereference resolveLeader() unconditionally and NPE on every tick in
-     * that window, which killed the orchestrator's tick and stalled the whole run.
+     * Observe the altar's NPC in this run's cloud-map instance, even after the leader leaves it.
      */
     public boolean isChamberlainSpawned() {
-        Character leader = resolveLeader();
-        if (leader == null || leader.getMap() == null) {
-            return false;
+        for (OPQBot bot : registeredBots) {
+            if (participates(bot) && isChamberlainSpawned(bot.getChr())) return true;
         }
-        return isNpcPresent(leader.getMap(), CHAMBERLAIN_EAK);
+        return false;
+    }
+
+    public boolean isChamberlainSpawned(Character bot) {
+        return bot.getMap() != null && bot.getMapId() == OPQConstants.OPQ_STAGE_1
+                && key.equals(RunKey.of(bot)) && isNpcPresent(bot.getMap(), CHAMBERLAIN_EAK);
     }
 
 
@@ -451,8 +462,10 @@ public class OPQOrchestrator {
      * 2. Leader completes stage 1 by talking to NPC, who teleports him to the tower
      */
     public void followLeaderWarp(Character fakechar, Point pt) {
-        Character leader = resolveLeader();
+        Character leader = resolveLeader(fakechar);
         if (leader == null) return;
+        if (fakechar.getEventInstance() != null && leader.getEventInstance() != null
+                && fakechar.getEventInstance() != leader.getEventInstance()) return;
 
         try {
             warpBotToLocation(fakechar, pt, leader.getMap());
@@ -492,11 +505,18 @@ public class OPQOrchestrator {
     }
 
     private boolean allRegisteredBotsComplete() {
-        if (registeredBots.isEmpty()) return false;
+        boolean any = false;
         for (OPQBot bot : registeredBots) {
+            if (!participates(bot) || bot.getChr().getMapId() != OPQConstants.OPQ_STAGE_2) continue;
+            any = true;
             if (!context.isMyTaskComplete(bot.getChr().getId())) return false;
         }
-        return true;
+        return any;
+    }
+
+    private boolean participates(OPQBot bot) {
+        return bot.getRunning() && bot.getChr().getHp() > 0 && bot.getChr().getParty() != null
+                && bot.getChr().getEventInstance() != null && key.equals(RunKey.of(bot.getChr()));
     }
 
     private void clearCompletionFlagsForRegistered() {

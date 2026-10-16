@@ -66,6 +66,7 @@ class BotMovementState {
     // ── Rope climbing ──
     boolean climbing = false;
     Rope climbRope = null;
+    boolean climbPositionHeld = false;   // explicit stop/arrival in the middle of a rope
     Rope blockedRopeGrab = null;
     int climbVerticalDir = 0;             // -1 up, 0 idle, +1 down
     boolean wasMovingX = false;
