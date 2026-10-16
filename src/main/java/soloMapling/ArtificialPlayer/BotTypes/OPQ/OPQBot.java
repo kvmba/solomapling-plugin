@@ -81,14 +81,27 @@ public class OPQBot extends BotSM {
         // whatever bot last bound itself - or null - so the altar's spawnNpc would silently
         // do nothing. See BotGeneration.adoptPrivateClient.
         BotGeneration.adoptPrivateClient(character);
-        // OPQBot extends BotSM directly (not PartyQuestBot), so it does not inherit the base
-        // class's GCMovement.enable - wire the dynamic engine here. Enable before the FSM and any
-        // arrival warp so the map-entry choreography sees it as dynamic-controlled and skips the
-        // recorded portal drop.
-        GCMovement.enable(character);
         this.orchestrator = OPQOrchestrator.getInstance();
         this.sharedContext = orchestrator.getSharedContext();
+        // The dynamic engine and the orchestrator registration both span the FSM's RUNNING
+        // lifetime, so both live in startScheduledTask (see there) - a bot wrapped but never
+        // started (the GM createAndSetBot paths) must not hold a live driver thread, the shared
+        // movement lock, or an orchestrator slot that only stopScheduledTask would release.
+    }
+
+    /**
+     * Start this bot's FSM. OPQBot extends BotSM directly (not PartyQuestBot), so it wires the
+     * dynamic engine and its orchestrator slot here itself, in the same register-when-active
+     * shape the base class uses - neither may be armed by the constructor, because the only
+     * release seam is {@link #stopScheduledTask}.
+     */
+    @Override
+    public synchronized void startScheduledTask(long initialDelayMs) {
+        // Enable before the FSM starts and before any arrival warp, so the map-entry choreography
+        // sees the bot as dynamic-controlled and skips the recorded portal drop.
+        GCMovement.enable(getChr());
         orchestrator.registerBot(this);
+        super.startScheduledTask(initialDelayMs);
     }
 
     // =========================================================================

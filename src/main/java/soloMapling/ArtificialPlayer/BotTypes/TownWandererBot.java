@@ -9,7 +9,6 @@ import soloMapling.ArtificialPlayer.BotSM;
 import soloMapling.ArtificialPlayer.BotTownSystem.TownRoamMaps;
 import soloMapling.ArtificialPlayer.BotWanderSystem.BotWanderSystem;
 import soloMapling.ArtificialPlayer.GCMoveSystem.GCMovement;
-import soloMapling.server.EventMessageSystem.EventBus;
 import soloMapling.server.EventMessageSystem.EventType;
 import soloMapling.server.EventMessageSystem.GameEvent;
 
@@ -53,7 +52,15 @@ public class TownWandererBot extends BotSM {
         super(character);
         dialoguePath = "TownWandererDialogue.yaml";
         botType = "TownWandererBot";
-        EventBus.getInstance().subscribe(EventType.LEVEL_UP, this); // congratulate nearby levelers
+    }
+
+    @Override
+    public synchronized void startScheduledTask(long initialDelayMs) {
+        // Subscribe here, not in the constructor: the release seam is unsubscribeAll in
+        // stopScheduledTask, which never runs for a bot that was wrapped but never started - the
+        // subscription would outlive it on the process-wide bus.
+        subscribeEvent(EventType.LEVEL_UP); // congratulate nearby levelers
+        super.startScheduledTask(initialDelayMs);
     }
 
     // A wanderer is always free to emote/congratulate except while a map-hop owns its movement or it's

@@ -717,7 +717,8 @@ public final class LudiStages {
      * Whether stage 5 admits this bot to a specific sub-room if the party moved there: the
      * follow gate checks the posting table against the room the party is actually in (or
      * walking into), not against "some room somewhere". The main map is admitted freely even
-     * though WZ seats guards there too (922010500 holds seven 9300013): following into the
+     * though WZ seats guards there too (922010500 holds two 9300013, on the ground floor at
+     * y≈54-58; the seven-guard room is the bottom sub-room 922010506): following into the
      * main map is ordinary party movement, and the combat sweep already stands the bot's
      * swings down whenever a guard is in its seek box (LudiPQBot#fightsOnSweep), while
      * the NPC post sits ~273px above the guards' ledge - past a touch. The sub-rooms are the

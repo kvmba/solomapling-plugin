@@ -101,26 +101,27 @@ public abstract class PartyQuestBot extends BotSM implements GrindTickRegistry.P
 
     protected PartyQuestBot(Character character) {
         super(character);
-        // Drive every quest bot with the dynamic (WZ-terrain) engine for its whole life. The
-        // recorded-path engine replayed a Haste-speed player's packets at 1:1 (quest bots walked
-        // ~40% too fast) and only ever had data for a handful of maps (any other quest room left
-        // the bot unable to move). Enabling here - before the FSM starts and before any arrival
-        // warp - means the walk helpers in {@link PqActions} have a driver, and the map-entry
-        // choreography already sees the bot as dynamic-controlled and skips the recorded drop.
-        GCMovement.enable(character);
     }
 
     @Override
     public synchronized void startScheduledTask(long initialDelayMs) {
+        // Both engine sessions span the FSM's RUNNING lifetime, not the object's - the same rule
+        // the sweep registration below follows, and for the same reason: a bot wrapped but never
+        // started (the GM createAndSetBot paths) would otherwise hold a live driver thread and the
+        // shared movement lock for good, because stopScheduledTask - the only release seam - never
+        // runs for it. Enable BEFORE delegating (the same order the constructor used), so the walk
+        // helpers in {@link PqActions} have a driver and the map-entry choreography already sees the
+        // bot as dynamic-controlled and skips the recorded drop.
+        //
+        // Why the engine at all: the recorded-path engine replayed a Haste-speed player's packets
+        // at 1:1 (quest bots walked ~40% too fast) and only ever had data for a handful of maps
+        // (any other quest room left the bot unable to move).
+        GCMovement.enable(getChr());
         // The fight rides the shared 250ms combat sweep, the same ticker the grind brains use.
-        // Registration lives HERE, not in the constructor: the sweep tick must span the FSM's
-        // running lifetime, not the object's - a bot wrapped but never started (the GM
-        // createAndSetBot paths) would otherwise sit in the registry as a ghost participant, and
-        // a stopped-then-restarted bot would never re-register (the constructor runs once, the
-        // stop ran unregister). {@link #grindTick} gates on "actually inside a quest room and in
-        // a party", so a bot in the lobby, between rooms or waiting for a run pays only the
-        // cheap gate; the registration never has to chase room changes. Unregistration happens
-        // once, at stop, where the other per-bot state is released too.
+        // {@link #grindTick} gates on "actually inside a quest room and in a party", so a bot in
+        // the lobby, between rooms or waiting for a run pays only the cheap gate; the registration
+        // never has to chase room changes. Unregistration happens once, at stop, where the other
+        // per-bot state is released too.
         GrindTickRegistry.getInstance().register(this);
         super.startScheduledTask(initialDelayMs);
     }
