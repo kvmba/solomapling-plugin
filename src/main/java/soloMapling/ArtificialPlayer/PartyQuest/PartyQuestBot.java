@@ -108,12 +108,21 @@ public abstract class PartyQuestBot extends BotSM implements GrindTickRegistry.P
         // warp - means the walk helpers in {@link PqActions} have a driver, and the map-entry
         // choreography already sees the bot as dynamic-controlled and skips the recorded drop.
         GCMovement.enable(character);
-        // The fight rides the shared 250ms combat sweep, the same ticker the grind brains use,
-        // for this bot's whole life. {@link #grindTick} gates on "actually inside a quest room
-        // and in a party", so a bot in the lobby, between rooms or waiting for a run pays only
-        // the cheap gate; the registration never has to chase room changes. Unregistration
-        // happens once, at stop, where the other per-bot state is released too.
+    }
+
+    @Override
+    public synchronized void startScheduledTask(long initialDelayMs) {
+        // The fight rides the shared 250ms combat sweep, the same ticker the grind brains use.
+        // Registration lives HERE, not in the constructor: the sweep tick must span the FSM's
+        // running lifetime, not the object's - a bot wrapped but never started (the GM
+        // createAndSetBot paths) would otherwise sit in the registry as a ghost participant, and
+        // a stopped-then-restarted bot would never re-register (the constructor runs once, the
+        // stop ran unregister). {@link #grindTick} gates on "actually inside a quest room and in
+        // a party", so a bot in the lobby, between rooms or waiting for a run pays only the
+        // cheap gate; the registration never has to chase room changes. Unregistration happens
+        // once, at stop, where the other per-bot state is released too.
         GrindTickRegistry.getInstance().register(this);
+        super.startScheduledTask(initialDelayMs);
     }
 
     @Override

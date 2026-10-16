@@ -2078,7 +2078,12 @@ final class BotPhysicsEngine {
         // step. Strictly-earlier landings still win, strictly-later ones still lose.
         if (landing.type() != AirCollisionType.NONE) {
             boolean strictlyEarlier = landing.progress() < best.progress();
-            // The tie is taken on the bot's side of the wall: safeX = wallX - travel direction.
+            // The tie goes to the landing when its foothold SPANS the wall's clamp pixel: the
+            // floor the bot was already flying over includes the wall's own x. (NOT "wallX -
+            // direction": the span test is symmetric in travel direction, which is what keeps a
+            // fall drifting in from the far side - its floor lies only past the wall face - on
+            // the wall.) A fall whose floor spans the clamped pixel was over that floor; landing
+            // it does not cross the wall.
             boolean tiedWallOnBotsSide = landing.progress() == best.progress()
                     && best.type() == AirCollisionType.WALL
                     && landing.foothold().getX1() <= best.point().x
