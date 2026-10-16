@@ -62,7 +62,7 @@ public class PiratePQBot extends PartyQuestBot {
                 if (oid < 0) {
                     break; // no more of this kind standing
                 }
-                PqActions.hitReactor(getChr(), oid);
+                if (!PqActions.hitReactor(getChr(), oid)) return false;
                 if (!stillAlive(oid)) {
                     break; // this one is spent; the next pass finds the following one
                 }

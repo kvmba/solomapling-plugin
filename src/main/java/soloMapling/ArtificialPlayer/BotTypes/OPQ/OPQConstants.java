@@ -131,5 +131,4 @@ public final class OPQConstants {
     public static final long ASSIGNMENT_POLL_MS           =     500; // how often the bot re-checks a null assignment
     public static final int  MAX_REACTOR_HITS             =       4; // OPQ cloud reactors break after 4 hits
     public static final long SWING_INTERVAL_MS            =     700; // delay between bot swings (~typical 1H attack speed)
-    public static final int  REACTOR_HIT_RANGE_PX         =      200; // bot must be within this many px of reactor.x to hit
 }

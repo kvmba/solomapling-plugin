@@ -189,6 +189,9 @@ public final class BotAttackDriver {
         if (bot == null || bot.getMap() == null) {
             return AttackResult.miss("bot or map is null");
         }
+        if (GCMovement.isClimbing(bot)) {
+            return AttackResult.miss("climbing");
+        }
         // A mob debuff can disarm the bot: STUN/SEDUCE pin it entirely and SEAL blocks skills, so no
         // swing fires. Forced attacks (the !bot attack GM test) bypass this so a dev can still probe a
         // debuffed bot; organic swings (botAttack) honour it.

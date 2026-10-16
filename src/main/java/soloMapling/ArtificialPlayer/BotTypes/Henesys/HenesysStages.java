@@ -1,9 +1,9 @@
 package soloMapling.ArtificialPlayer.BotTypes.Henesys;
 
 import org.gms.client.Character;
+import soloMapling.ArtificialPlayer.GCMoveSystem.GCMovement;
 import soloMapling.ArtificialPlayer.PartyQuest.PqActions;
 
-import java.awt.Point;
 import java.util.List;
 
 /**
@@ -48,6 +48,12 @@ public final class HenesysStages {
         }
         int seed = HenesysPqData.seedForFlower(wanted);
 
+        // Check the pending drop before looking for another seed: its inventory copy was
+        // consumed, but the flower has not advanced until the delayed trigger fires.
+        if (plantSeedAt(bot, wanted, seed)) {
+            return flowersBloomed(bot) >= HenesysPqData.FLOWERS_TO_BLOOM;
+        }
+
         if (PqActions.countItem(bot, seed) == 0) {
             takeSeed(bot, seed);
             if (PqActions.countItem(bot, seed) == 0) {
@@ -59,27 +65,23 @@ public final class HenesysStages {
         return flowersBloomed(bot) >= HenesysPqData.FLOWERS_TO_BLOOM;
     }
 
-    private static void plantSeedAt(Character bot, int flowerIndex, int seed) {
-        Point spot = HenesysPqData.FLOWER_SPOTS.get(flowerIndex);
-        PqActions.walkTo(bot, spot);
-        // The flower takes the seed as a drop, and it wants exactly one, so throw exactly
-        // one - the engine matches the stack's quantity against the WZ condition.
-        PqActions.dropStack(bot, seed, 1, spot);
-        PqActions.holdArea(bot, spot, 1_200); // stay put while the engine resolves the drop
+    private static boolean plantSeedAt(Character bot, int flowerIndex, int seed) {
+        int oid = PqActions.findReactorOid(bot, HenesysPqData.FLOWER_FIRST + flowerIndex);
+        return oid >= 0 && PqActions.feedReactor(bot, oid, seed);
     }
 
     /** Break leaves until one drops the seed this bot is after. */
     private static void takeSeed(Character bot, int seed) {
+        PqActions.loot(bot, bot.getPosition(), 4_000, new int[]{seed});
+        if (PqActions.countItem(bot, seed) > 0 || GCMovement.hasMoveTarget(bot)) return;
         for (int leafId = HenesysPqData.LEAF_FIRST; leafId <= HenesysPqData.LEAF_LAST; leafId++) {
             int oid = PqActions.findReactorOid(bot, leafId);
             if (oid < 0) {
                 continue;
             }
-            PqActions.hitReactor(bot, oid);
+            if (!PqActions.hitReactor(bot, oid)) return;
             PqActions.loot(bot, bot.getPosition(), 4_000, new int[]{seed});
-            if (PqActions.countItem(bot, seed) > 0) {
-                return;
-            }
+            return; // let this leaf's drop settle before selecting another target
         }
     }
 

@@ -11,6 +11,7 @@ import soloMapling.ArtificialPlayer.BotAttackSystem.BotAttackData;
 import soloMapling.ArtificialPlayer.BotAttackSystem.BotAuraState;
 import org.gms.util.PacketCreator;
 import soloMapling.ArtificialPlayer.BotMountSystem.BotMount;
+import soloMapling.ArtificialPlayer.GCMoveSystem.GCMovement;
 
 import java.util.Collections;
 import java.util.List;
@@ -51,7 +52,7 @@ public final class BotAttack {
      * bot's currently equipped weapon class.
      */
     public static void basicSwing(Character chr) {
-        if (chr == null) return;
+        if (chr == null || GCMovement.isClimbing(chr)) return;
         BotMount.cancelForAction(chr); // an attack is never made from the saddle
         BotAuraState.cancelHidesForAction(chr); // 伪装/隐身术 break on the attack key
 

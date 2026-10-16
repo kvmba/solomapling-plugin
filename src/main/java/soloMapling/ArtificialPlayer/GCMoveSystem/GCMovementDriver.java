@@ -265,7 +265,7 @@ final class GCMovementDriver {
         // Pick up runtime profile changes (party Haste) before the map-change branch, so onMapChange warms
         // the new map's graph with the up-to-date profile. Throttled + no-op when unchanged (see helper).
         maybeRefreshProfile(entry);
-        if (entry.lastMapId != bot.getMapId()) {
+        if (entry.lastMap != bot.getMap()) {
             onMapChange(entry, bot);
             return;
         }
@@ -958,14 +958,14 @@ final class GCMovementDriver {
     private static final int PORTAL_FLOAT_HEIGHT_PX = 60;
 
     static void onMapChange(BotMovementState entry, Character bot) {
-        // Read the target map id ONCE here and publish it to entry.lastMapId only at the very end
-        // (below). Keeping lastMapId trailing the live map for the whole handler lets
-        // GCMovement.disable() - which may run concurrently off the travel/FSM threads - tell that a
-        // map change is still being processed and defer its hand-over instead of stopping the driver
-        // mid-arrival. Reading once up front (rather than at the end) preserves the old entry-time
-        // semantics: should the bot warp AGAIN mid-handler, the end assignment cannot bless the new
-        // map as already-processed.
-        final int mapId = bot.getMapId();
+        // Publish only after arrival is armed. Map identity also detects moves between two
+        // instances with the same id; a second warp mid-handler remains pending for the next tick.
+        MapleMap map = bot.getMap();
+        // A new-map command may already have arrived before this tick. Cancel only old-map
+        // intent; clearing unconditionally would also discard that valid new walk and callback.
+        if (entry.moveTargetMap != map) {
+            GCMovement.clearMoveIntent(bot);
+        }
         // New map: drop any in-progress reaction pause. The per-player react cooldown is intentionally
         // NOT reset here - it's tied to the player so map-hopping can't re-trigger greetings at them.
         entry.reactingUntilMs = 0L;
@@ -980,7 +980,6 @@ final class GCMovementDriver {
         entry.coarsePlan = null;
         entry.coarsePlanTarget = null;
         entry.coarseActive = false;
-        MapleMap map = bot.getMap();
         // If a real player is already on this map, mark it observed NOW so the visible spawn (float →
         // drop, jump stance) and FULL combat start this tick instead of waiting up to one observer poll.
         if (ObserverTracker.hasRealPlayerNow(map)) {
@@ -1021,10 +1020,9 @@ final class GCMovementDriver {
         }
         BotNavigationGraphProvider.warmGraphAsync(map, entry.movementProfile);
         broadcastIfObserved(entry);
-        // Now the arrival is fully armed: publish the captured map id. Any disable() blocked on the
-        // trailing lastMapId has already deferred (or saw a live drop/airborne flag), so this cannot
-        // re-open the window. Uses the id read on entry, not a fresh read, to match the old behaviour.
-        entry.lastMapId = mapId;
+        // Now the arrival is fully armed: publish the captured map. Any disable() blocked on the
+        // trailing lastMap has already deferred (or saw a live drop/airborne flag).
+        entry.lastMap = map;
     }
 
     /*

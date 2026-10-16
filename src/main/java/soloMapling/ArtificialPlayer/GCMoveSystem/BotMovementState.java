@@ -2,6 +2,7 @@ package soloMapling.ArtificialPlayer.GCMoveSystem;
 
 import org.gms.client.Character;
 import org.gms.server.maps.Foothold;
+import org.gms.server.maps.MapleMap;
 import org.gms.server.maps.Rope;
 
 import java.awt.Point;
@@ -149,7 +150,7 @@ class BotMovementState {
     int lastMobTouchMapId = -1;           // invalidates the sweep across a map change
 
     // ── Foothold index, rebuilt on map change ──
-    int lastMapId = -1;
+    MapleMap lastMap = null;
     Map<Integer, Foothold> fhIndex = new HashMap<>();
 
     // ── Spacing / stagger + tick gating ──
@@ -210,6 +211,7 @@ class BotMovementState {
 
     // ── "Move here" / "farm here" targets (set by the GCMovement façade) ──
     Point moveTarget = null;
+    MapleMap moveTargetMap = null;
     boolean moveTargetPrecise = false;
     String moveTargetSource = null;
     // No-progress give-up: closest manhattan distance reached toward moveTarget so far, and when that

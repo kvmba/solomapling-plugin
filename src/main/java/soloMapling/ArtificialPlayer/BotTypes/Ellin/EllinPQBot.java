@@ -80,7 +80,7 @@ public class EllinPQBot extends PartyQuestBot {
         int spine = PqActions.findReactorOid(getChr(), EllinPqData.SPINE_REACTOR);
         if (spine >= 0) {
             for (int guard = 0; guard < 8 && spine >= 0; guard++) {
-                PqActions.hitReactor(getChr(), spine);
+                if (!PqActions.hitReactor(getChr(), spine)) return false;
                 if (!soloMapling.ArtificialPlayer.BotHelpers.blockingSleep(
                         soloMapling.ArtificialPlayer.BotTypes.Ludi.LudiStages.reactorSwingBeatMs())) {
                     Thread.currentThread().interrupt();

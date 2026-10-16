@@ -60,7 +60,7 @@ public class ZakumPQBot extends PartyQuestBot {
             if (oid < 0) {
                 break;
             }
-            PqActions.hitReactor(getChr(), oid);
+            if (!PqActions.hitReactor(getChr(), oid)) break;
         }
         if (firstStandingCrate() < 0) {
             // The room's crates are all broken and the ore is in hand or on the floor:

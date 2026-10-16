@@ -1,6 +1,7 @@
 package soloMapling.ArtificialPlayer.BotTypes.OPQ;
 
 import org.gms.client.Character;
+import org.gms.server.maps.Reactor;
 import soloMapling.ArtificialPlayer.PartyQuest.PqActions;
 
 import java.awt.Point;
@@ -189,12 +190,17 @@ public final class OrbisStages {
      * ten reactors ({@code 2002002}) whose scripts drop the same item, so a bot should work
      * whichever room it is standing in rather than assuming the mobs are the only source.
      */
-    public static void gatherLounge(Character bot) {
-        huntMobs(bot, OrbisPqData.LOUNGE_MOB_FIRST, OrbisPqData.LOUNGE_MOB_LAST);
+    public static boolean gatherLounge(Character bot) {
+        if (mobsPresent(bot, OrbisPqData.LOUNGE_MOB_FIRST, OrbisPqData.LOUNGE_MOB_LAST)) {
+            huntMobs(bot, OrbisPqData.LOUNGE_MOB_FIRST, OrbisPqData.LOUNGE_MOB_LAST);
+            return false;
+        }
         int reactor = PqActions.findReactorOid(bot, OrbisPqData.LOUNGE_REACTOR);
         if (reactor >= 0) {
             PqActions.hitReactor(bot, reactor);
+            return false;
         }
+        return true;
     }
 
     // =========================================================================
@@ -219,10 +225,10 @@ public final class OrbisStages {
                 continue;
             }
             Point lever = OrbisPqData.LEVER_SPOTS[i];
-            PqActions.walkTo(bot, lever);
-            int oid = nearestReactorTo(bot, OrbisPqData.LEVER_REACTOR, lever);
-            if (oid >= 0) {
-                PqActions.hitReactor(bot, oid);
+            Reactor reactor = nearestReactorTo(bot, OrbisPqData.LEVER_REACTOR, lever);
+            if (reactor != null && reactor.getState() == 0
+                    && !PqActions.hitReactor(bot, reactor.getObjectId())) {
+                return false;
             }
         }
         return true;
@@ -242,10 +248,10 @@ public final class OrbisStages {
      */
     public static void breakScars(Character bot) {
         for (Point spot : OrbisPqData.SCAR_SPOTS) {
-            PqActions.walkTo(bot, spot);
-            int oid = nearestReactorInRange(bot, OrbisPqData.SCAR_FIRST, OrbisPqData.SCAR_LAST, spot);
-            if (oid >= 0) {
-                PqActions.hitReactor(bot, oid);
+            Reactor reactor = nearestReactorInRange(bot, OrbisPqData.SCAR_FIRST, OrbisPqData.SCAR_LAST, spot);
+            if (reactor != null && reactor.getState() == 0
+                    && !PqActions.hitReactor(bot, reactor.getObjectId())) {
+                return;
             }
         }
     }
@@ -278,27 +284,21 @@ public final class OrbisStages {
         }
 
         // The finish: drop the Root of Life onto the spring, whose script sets the flag.
-        if (PqActions.countItem(bot, OrbisPqData.PAPA_SEED) > 0) {
-            dropOn(bot, OrbisPqData.PAPA_SPRING_REACTOR, OrbisPqData.PAPA_SPRING_SPOT,
-                    OrbisPqData.PAPA_SEED);
+        if (feedReactor(bot, OrbisPqData.PAPA_SPRING_REACTOR, OrbisPqData.PAPA_SEED)) {
             return PqActions.readEimInt(bot, "statusStg7", -1) != -1;
         }
 
         // With a trap item, end the room: feed a trap and Papa Pixie appears; his death is what
-        // produces the Root of Life. Only a feed that actually happened ends the tick - if every
-        // trap is already spent the bot must fall through to the fight rather than stall here,
-        // because the throw is synthetic and does not consume the item it holds.
-        if (PqActions.countItem(bot, OrbisPqData.PAPA_TRAP_ITEM) > 0
-                && feedReactor(bot, OrbisPqData.PAPA_TRAP, OrbisPqData.PAPA_TRAP_ITEM)) {
+        // produces the Root of Life. A pending drop owns the tick too: do not loot it back
+        // during the host's delayed item trigger.
+        if (feedReactor(bot, OrbisPqData.PAPA_TRAP, OrbisPqData.PAPA_TRAP_ITEM)) {
             return false;
         }
 
         // With a medal, feed a pot, which is what makes the room summon its mobs and drop more.
-        if (PqActions.countItem(bot, OrbisPqData.PAPA_MEDAL) > 0) {
-            if (feedReactor(bot, OrbisPqData.PAPA_POT, OrbisPqData.PAPA_MEDAL)
-                    || feedReactor(bot, OrbisPqData.PAPA_POT_ALT, OrbisPqData.PAPA_MEDAL)) {
-                return false;
-            }
+        if (feedReactor(bot, OrbisPqData.PAPA_POT, OrbisPqData.PAPA_MEDAL)
+                || feedReactor(bot, OrbisPqData.PAPA_POT_ALT, OrbisPqData.PAPA_MEDAL)) {
+            return false;
         }
 
         // Otherwise fight what is here (Papa, or the mobs a pot summoned) and take their drops.
@@ -313,28 +313,13 @@ public final class OrbisStages {
         return false;
     }
 
-    /** Drop {@code qty} of an item on the named reactor's trigger box, or return false. */
-    private static boolean dropOn(Character bot, int reactorDataId, Point fallbackSpot, int itemId) {
-        int oid = findReactorOid(bot, reactorDataId);
-        Point at = oid >= 0 ? reactorPos(bot, oid) : fallbackSpot;
-        if (at == null) {
-            return false;
-        }
-        PqActions.walkTo(bot, at);
-        PqActions.dropStack(bot, itemId, 1, at);
-        return true;
-    }
-
     /** Feed the first live reactor of a data id its item; false when none is standing. */
     private static boolean feedReactor(Character bot, int reactorDataId, int itemId) {
         int oid = findReactorOid(bot, reactorDataId);
         if (oid < 0) {
             return false;
         }
-        Point at = reactorPos(bot, oid);
-        PqActions.walkTo(bot, at);
-        PqActions.dropStack(bot, itemId, 1, at);
-        return true;
+        return PqActions.feedReactor(bot, oid, itemId);
     }
 
     /**
@@ -352,12 +337,6 @@ public final class OrbisStages {
                 .findFirst().orElse(-1);
     }
 
-    /** A reactor's position, or null when it is gone. */
-    private static Point reactorPos(Character bot, int oid) {
-        var reactor = bot.getMap().getReactorByOid(oid);
-        return reactor != null ? reactor.getPosition() : null;
-    }
-
     // =========================================================================
     // Stage 8 - the last piece onto the statue base
     // =========================================================================
@@ -372,16 +351,7 @@ public final class OrbisStages {
      * which is inside the box - see {@link OrbisPqData#STATUE_BASE_SPOT}.
      */
     public static void placeFinalPiece(Character bot) {
-        if (PqActions.countItem(bot, OrbisPqData.STATUE_PIECE_8) <= 0) {
-            return;
-        }
-        int oid = findReactorOid(bot, OrbisPqData.STATUE_BASE_REACTOR);
-        Point at = oid >= 0 ? reactorPos(bot, oid) : OrbisPqData.STATUE_BASE_SPOT;
-        if (at == null) {
-            return;
-        }
-        PqActions.walkTo(bot, at);
-        PqActions.dropStack(bot, OrbisPqData.STATUE_PIECE_8, 1, at);
+        feedReactor(bot, OrbisPqData.STATUE_BASE_REACTOR, OrbisPqData.STATUE_PIECE_8);
     }
 
     // =========================================================================
@@ -420,16 +390,15 @@ public final class OrbisStages {
                 .anyMatch(m -> m.getId() >= firstMobId && m.getId() <= lastMobId);
     }
 
-    private static int nearestReactorTo(Character bot, int dataId, Point spot) {
+    private static Reactor nearestReactorTo(Character bot, int dataId, Point spot) {
         return nearestReactorInRange(bot, dataId, dataId, spot);
     }
 
-    private static int nearestReactorInRange(Character bot, int firstId, int lastId, Point spot) {
+    private static Reactor nearestReactorInRange(Character bot, int firstId, int lastId, Point spot) {
         return bot.getMap().getAllReactors().stream()
                 .filter(r -> r.getId() >= firstId && r.getId() <= lastId)
                 .min((a, b) -> Double.compare(
                         a.getPosition().distance(spot), b.getPosition().distance(spot)))
-                .map(r -> r.getObjectId())
-                .orElse(-1);
+                .orElse(null);
     }
 }

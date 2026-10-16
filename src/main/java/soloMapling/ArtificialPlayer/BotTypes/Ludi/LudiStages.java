@@ -884,7 +884,7 @@ public final class LudiStages {
                 PqActions.boxFinishedPullTick(bot); // pull the next box's tick forward
                 return; // broken (or being reset) - no further transition to walk
             }
-            PqActions.hitReactor(bot, oid);
+            if (!PqActions.hitReactor(bot, oid)) return;
             blockingSleep(reactorSwingBeatMs());
         }
     }
@@ -982,12 +982,13 @@ public final class LudiStages {
         int hereY = bot.getPosition().y;
         org.gms.server.maps.Portal rung = nextRungUp(bot, hereY);
         if (rung == null) {
-            // No rung above us: either the climb is finished (the party may have completed it
-            // while this bot was retrying) or this bot is somehow above the top rung.
-            return stageCleared(bot, 6) || previousY > hereY;
+            rung = bot.getMap().getPortal("next00");
+            if (rung == null) return stageCleared(bot, 6) || previousY > hereY;
+        }
+        if (!PqActions.walkTo(bot, rung.getPosition())) {
+            return false;
         }
         PqActions.enterPortal(bot, rung);
-        PqActions.holdArea(bot, bot.getPosition(), 600);
         // A working rung leaves the bot higher than it was (the tower's y decreases as it goes
         // up); a decoy puts it back at the bottom.
         return bot.getPosition().y < hereY;
@@ -997,7 +998,7 @@ public final class LudiStages {
      * The tower portal that lands on a rung above {@code fromY}, or null when there is none.
      *
      * <p>Only {@code h0NN} portals count, and only those whose {@link
-     * org.gms.server.maps.Portal#getTarget()} names another {@code h0NN} standing higher up -
+     * org.gms.server.maps.Portal#getTarget()} names another {@code h0NN} (or {@code next00}) higher up -
      * the rest target {@code st00} and are the decoys. Picking the LOWEST such rung keeps the
      * climb in order instead of teleporting past rungs the party still has to walk.
      */
@@ -1012,7 +1013,8 @@ public final class LudiStages {
             String name = portal.getName();
             String target = portal.getTarget();
             if (name == null || !name.startsWith(LudiPqData.CLIMB_PORTAL_PREFIX)
-                    || target == null || !target.startsWith(LudiPqData.CLIMB_PORTAL_PREFIX)
+                    || target == null || !(target.startsWith(LudiPqData.CLIMB_PORTAL_PREFIX)
+                            || target.equals("next00"))
                     || target.equals(name)) {
                 continue; // a decoy (lands on st00 / on itself), not a rung
             }
@@ -1022,7 +1024,9 @@ public final class LudiStages {
             }
             int landingY = landing.getPosition().y;
             // Higher up means a smaller y. Take the smallest step that still gains height.
-            if (landingY < fromY && (best == null || landingY > bestY)) {
+            // Portal anchors sit slightly above their foothold. Do not walk back to the
+            // previous rung just because its landing is 1-2px above our grounded feet.
+            if (landingY < fromY - 8 && (best == null || landingY > bestY)) {
                 best = portal;
                 bestY = landingY;
             }

@@ -4,6 +4,7 @@ import org.gms.client.Character;
 import org.gms.constants.game.CharacterStance;
 import org.gms.server.maps.Foothold;
 import org.gms.server.maps.MapleMap;
+import org.gms.server.maps.Portal;
 import org.gms.server.maps.Rope;
 import soloMapling.ArtificialPlayer.BotAttackSystem.BotDashBurst;
 import soloMapling.ArtificialPlayer.BotMovementSystem.MovementCommands;
@@ -63,7 +64,7 @@ public final class GCMovement {
                 try {
                     st.movementProfile = BotMovementProfile.fromCharacter(bot);
                     if (bot.getMap() != null) {
-                        st.lastMapId = bot.getMapId();
+                        st.lastMap = bot.getMap();
                         st.fhIndex = BotMovementManager.buildFhIndex(bot.getMap());
                         Point cur = bot.getPosition();
                         Point ground = BotPhysicsEngine.findGroundPoint(bot.getMap(), new Point(cur.x, cur.y - 1));
@@ -98,7 +99,7 @@ public final class GCMovement {
                 GCFidget.cancel(bot);
                 // Keep the live state AND lease through a natural landing. Removing/reinserting
                 // here allowed enable() to publish a second driver in the handover gap.
-                if (st.inAir || st.portalDropAtMs > 0L || st.lastMapId != bot.getMapId()) {
+                if (st.inAir || st.portalDropAtMs > 0L || st.lastMap != bot.getMap()) {
                     st.disableAfterLanding = true;
                     clearMoveIntent(bot);
                     st.following = false;
@@ -252,7 +253,7 @@ public final class GCMovement {
             GCFollow.cancel(bot);
             GCTravel.cancel(bot);
             Point current = st.moveTarget;
-            if (current == null || Math.abs(current.x - x) >= epsilonPx
+            if (current == null || st.moveTargetMap != bot.getMap() || Math.abs(current.x - x) >= epsilonPx
                     || Math.abs(current.y - y) >= epsilonPx) {
                 setMoveTarget(st, x, y, null);
             }
@@ -262,13 +263,16 @@ public final class GCMovement {
     // Caller holds the same monitor as the physics tick: never publish half a move or lose a new
     // target/callback to the previous move's arrival while the combat thread is issuing it.
     private static void setMoveTarget(BotMovementState st, int x, int y, Runnable onArrival) {
-        boolean changed = st.moveTarget == null || st.moveTarget.x != x || st.moveTarget.y != y;
+        MapleMap map = st.bot.getMap();
+        boolean changed = st.moveTarget == null || st.moveTargetMap != map
+                || st.moveTarget.x != x || st.moveTarget.y != y;
         st.climbPositionHeld = false;
         FAILURE_CALLBACKS.remove(st.bot.getId());
         st.following = false;
         st.farmAnchor = null;
         st.farmAnchorMapId = -1;
         st.moveTarget = new Point(x, y);
+        st.moveTargetMap = map;
         st.moveTargetPrecise = true;
         st.moveTargetSource = "gcmove";
         if (changed) {
@@ -329,6 +333,31 @@ public final class GCMovement {
                 clearMoveIntent(bot);
                 st.following = false;
                 st.owner = null;
+            }
+        }
+    }
+
+    /** Enter a scripted quest portal without racing the physics tick, including same-map warps. */
+    public static void enterPortal(Character bot, Portal portal) {
+        if (bot == null || portal == null || bot.getClient() == null || bot.getMap() == null) return;
+        BotMovementState st = STATES.get(bot.getId());
+        synchronized (st != null ? st : bot) {
+            if (st != null && st.tickStopped) return;
+            MapleMap map = bot.getMap();
+            Point before = new Point(bot.getPosition());
+            Point entrance = portal.getPosition();
+            if (map.getPortal(portal.getId()) != portal
+                    || Math.abs(before.x - entrance.x) > 8 || Math.abs(before.y - entrance.y) > 8) return;
+            portal.enterPortal(bot.getClient());
+            if (st != null && (bot.getMap() != map || !bot.getPosition().equals(before))) {
+                clearMoveIntent(bot);
+                // Map changes are re-seeded by the driver. Same-map portals need the same
+                // physics reset now, or the next tick restores the pre-portal shadow position.
+                if (bot.getMap() == map) {
+                    BotPhysicsEngine.teleportTo(st, bot, bot.getPosition());
+                    BotMovementManager.resetEntryStateAfterTeleport(st);
+                    BotMovementManager.broadcastMovement(st);
+                }
             }
         }
     }
@@ -451,6 +480,7 @@ public final class GCMovement {
             if (st.tickStopped) return;
             st.climbPositionHeld = st.climbing;
             st.moveTarget = null;
+            st.moveTargetMap = null;
             st.moveTargetPrecise = false;
             st.farmAnchor = null;
             st.farmAnchorMapId = -1;

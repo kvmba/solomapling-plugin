@@ -12,7 +12,7 @@ import java.util.concurrent.ConcurrentHashMap;
  * sub-task" signal. Everything else is orchestrator-owned.
  *
  * Thread-safety model: volatile for scalars (atomic publish), ConcurrentHashMap
- * for collections. No compound invariants cross fields, so no lock is needed.
+ * for collections. Sealed-slot allocation and reset share a monitor.
  */
 public class OPQSharedContext {
 
@@ -119,19 +119,19 @@ public class OPQSharedContext {
         boxAssignments.clear();
         platformAssignments.clear();
         botTaskComplete.clear();
-        sealedSlots.clear();
+        clearSealedSlots();
     }
 
     // ---- Sealed room (stage 4) ----
     // Which of the three platforms each bot takes. Assigned in registration order so the
     // party spreads over the areas the quest asked for instead of stacking on one.
-    private final java.util.Map<Integer, Integer> sealedSlots = new java.util.concurrent.ConcurrentHashMap<>();
+    private final Map<Integer, Integer> sealedSlots = new java.util.HashMap<>();
 
-    public int mySealedSlot(int botId) {
+    public synchronized int mySealedSlot(int botId) {
         return sealedSlots.computeIfAbsent(botId, id -> sealedSlots.size());
     }
 
-    public void clearSealedSlots() {
+    public synchronized void clearSealedSlots() {
         sealedSlots.clear();
     }
 }

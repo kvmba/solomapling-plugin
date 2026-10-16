@@ -309,7 +309,8 @@ public final class PqActions {
         SeekState control = seekStates.computeIfAbsent(bot.getId(), ignored -> new SeekState());
         synchronized (control) {
             Point pos = bot.getPosition();
-            if (Math.abs(pos.x - floor.x) <= APPROACH_X && Math.abs(pos.y - floor.y) <= APPROACH_Y) {
+            if (Math.abs(pos.x - floor.x) <= APPROACH_X && Math.abs(pos.y - floor.y) <= APPROACH_Y
+                    && !GCMovement.isClimbing(bot)) {
                 if (!movementShielded(bot.getId())) GCMovement.stop(bot);
                 control.approach = null;
                 return Approach.IN_POSITION;
@@ -328,8 +329,14 @@ public final class PqActions {
             if (!movementShielded(bot.getId()) && (changed || !GCMovement.hasMoveTarget(bot))) {
                 // Only the driver's actual abandonment counts, never a poll, cancellation or rope pose.
                 ApproachAttempt issued = attempt;
-                GCMovement.move(bot, steering.x, steering.y, () -> nudgeStageTick(bot),
-                        () -> issued.failures.incrementAndGet());
+                StageWalkShield shield = reactorBeatArmed(bot) ? null : armStageWalkShield(bot);
+                GCMovement.move(bot, steering.x, steering.y, () -> {
+                    if (shield != null) stageWalkShieldUntilByBot.remove(bot.getId(), shield);
+                    nudgeStageTick(bot);
+                }, () -> {
+                    if (shield != null) stageWalkShieldUntilByBot.remove(bot.getId(), shield);
+                    issued.failures.incrementAndGet();
+                });
             }
             return Approach.TRAVELLING;
         }
@@ -398,19 +405,18 @@ public final class PqActions {
     // N3 - reactors
     // =========================================================================
 
-    /** Hit a reactor through the engine's own state walk, so its script actually runs. */
-    public static void hitReactor(Character bot, int reactorOid) {
-        if (bot == null) {
-            return;
+    /** Approach and hit through the engine's state walk; false when no strike was made. */
+    public static boolean hitReactor(Character bot, int reactorOid) {
+        if (bot == null || bot.getMap() == null
+                || approachReactor(bot, reactorOid, true, false) != Approach.IN_POSITION
+                || GCMovement.isClimbing(bot)) {
+            return false;
         }
-        // Striking a reactor is an attack action (the OPQ path swings first via BotAttack.basicSwing;
-        // the stage scripts hit reactors directly), so it breaks the hide auras the same way.
-        BotAuraState.cancelHidesForAction(bot);
         // Play the swing, or the reactor breaks by itself while the bot stands idle - the
-        // player watches boxes pop open with nobody touching them. Same order OPQ uses:
-        // swing first, the engine hit lands under it.
+        // player watches boxes pop open with nobody touching them. basicSwing also breaks hides.
         BotAttack.basicSwing(bot);
         CustomReactor.hitReactorWithScript(bot.getMap(), reactorOid, bot);
+        return true;
     }
 
     /**
@@ -658,7 +664,7 @@ public final class PqActions {
     // =========================================================================
 
     /**
-     * Drop a stack of exactly {@code qty} at a point.
+     * Drop exactly {@code qty} from the bot's inventory after the reactor approach has landed.
      *
      * <p>Item-triggered reactors match {@code item.getQuantity()} against the number in
      * their WZ condition, so the stack size is part of the trigger and cannot be split up.
@@ -666,11 +672,52 @@ public final class PqActions {
      * (MapleMap#calcDropPos), so {@code at} wants to be a point whose landing is still
      * inside the target's box.
      */
-    public static void dropStack(Character bot, int itemId, int qty, Point at) {
-        if (bot == null || qty <= 0) {
-            return;
+    private static boolean dropStack(Character bot, int itemId, int qty, Point at) {
+        MapleMap map = bot.getMap();
+        var item = BotLogic.generateCleanItemWithQty(itemId, qty);
+        boolean removed = BotClientBinding.withBoundPlayer(bot, () -> {
+            var inventory = bot.getInventory(ItemConstants.getInventoryType(itemId));
+            inventory.lockInventory();
+            try {
+                if (countItem(bot, itemId) < qty) return false;
+                InventoryManipulator.removeById(bot.getClient(),
+                        ItemConstants.getInventoryType(itemId), itemId, qty, true, false);
+                return true;
+            } finally {
+                inventory.unlockInventory();
+            }
+        });
+        if (removed) map.spawnItemDrop(bot, bot, item, at, true, false);
+        return removed;
+    }
+
+    /** True while approaching, feeding or awaiting an armed item reactor's delayed trigger. */
+    public static boolean feedReactor(Character bot, int reactorOid, int itemId) {
+        MapleMap map = bot.getMap();
+        Reactor reactor = map.getReactorByOid(reactorOid);
+        if (reactor == null) return false;
+        // Bots share this monitor for the check-and-drop; the host's trigger owns its own locks.
+        synchronized (reactor) {
+            if (!reactor.isAlive() || reactor.getReactorType() != 100) return false;
+            var required = reactor.getReactItem(reactor.getEventState());
+            if (required.getLeft() != itemId) return false;
+            for (MapObject object : map.getMapObjectsInRect(reactor.getArea(),
+                    List.of(org.gms.server.maps.MapObjectType.ITEM))) {
+                MapItem drop = (MapItem) object;
+                drop.lockItem();
+                try {
+                    var item = drop.getItem();
+                    if (!drop.isPickedUp() && item != null && item.getItemId() == itemId
+                            && item.getQuantity() == required.getRight()) return true;
+                } finally {
+                    drop.unlockItem();
+                }
+            }
+            if (countItem(bot, itemId) < required.getRight()) return false;
+            Approach approach = approachUnder(bot, reactor.getPosition());
+            if (approach != Approach.IN_POSITION) return approach == Approach.TRAVELLING;
+            return dropStack(bot, itemId, required.getRight(), reactor.getPosition());
         }
-        DropCommands.botThrowItemQty(bot, itemId, qty, at);
     }
 
     /** How many of an item the bot is carrying. */
@@ -935,10 +982,9 @@ public final class PqActions {
 
     /** The bot's party leader, or null when the bot has no party (or the leader is offline). */
     public static Character partyLeader(Character bot) {
-        if (bot == null || bot.getParty() == null || bot.getParty().getLeader() == null) {
-            return null;
-        }
-        return bot.getParty().getLeader().getPlayer();
+        var party = bot == null ? null : bot.getParty();
+        var leader = party == null ? null : party.getLeader();
+        return leader == null ? null : leader.getPlayer();
     }
 
     // =========================================================================
@@ -2137,14 +2183,6 @@ public final class PqActions {
      * stage is clear.
      */
     public static void enterPortal(Character bot, Portal portal) {
-        if (bot == null || portal == null || bot.getClient() == null || bot.getMap() == null
-                || bot.getMap().getPortal(portal.getId()) != portal) {
-            return;
-        }
-        Point pos = bot.getPosition();
-        Point entrance = portal.getPosition();
-        if (Math.abs(pos.x - entrance.x) > ARRIVAL_EPS_PX
-                || Math.abs(pos.y - entrance.y) > ARRIVAL_EPS_PX) return;
-        portal.enterPortal(bot.getClient());
+        GCMovement.enterPortal(bot, portal);
     }
 }
