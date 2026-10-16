@@ -11,7 +11,6 @@ import soloMapling.ArtificialPlayer.BotMovementSystem.MovementStructures.Movemen
 import soloMapling.ArtificialPlayer.BotSM;
 import soloMapling.ArtificialPlayer.GCMoveSystem.GCMovement;
 import soloMapling.itemPool.GachaPrizePool;
-import soloMapling.server.EventMessageSystem.EventBus;
 import soloMapling.server.EventMessageSystem.EventType;
 import soloMapling.server.EventMessageSystem.GameEvent;
 import soloMapling.Environment.BotMessages;
@@ -59,9 +58,17 @@ public class GachaBot extends BotSM {
 
     private void resetGachaBotState() {
         setGachaBotState(GachaBotState.RESET);
+    }
 
-        EventBus.getInstance().subscribe(EventType.LEVEL_UP, this);
-        EventBus.getInstance().subscribe(EventType.SCROLLING, this);
+    @Override
+    public synchronized void startScheduledTask(long initialDelayMs) {
+        // Subscribe here, once per running session - NOT from resetGachaBotState. The bus appends on
+        // every subscribe, so the old per-round re-arm stacked a fresh duplicate subscriber every
+        // cycle: each LEVEL_UP / SCROLLING event then fired the handler once per accumulated copy, and
+        // the copies were only ever dropped by stopScheduledTask's unsubscribeAll.
+        subscribeEvent(EventType.LEVEL_UP);
+        subscribeEvent(EventType.SCROLLING);
+        super.startScheduledTask(initialDelayMs);
     }
 
     // Chance a spray comes with a taunt aimed at whoever is watching. Occasional, not every round -

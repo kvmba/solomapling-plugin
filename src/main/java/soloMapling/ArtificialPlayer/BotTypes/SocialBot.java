@@ -27,7 +27,6 @@ import soloMapling.ArtificialPlayer.BotTownSystem.TownStation;
 import soloMapling.ArtificialPlayer.BotTypeManager;
 import soloMapling.ArtificialPlayer.GCMoveSystem.GCMovement;
 import soloMapling.server.BotTiming;
-import soloMapling.server.EventMessageSystem.EventBus;
 import soloMapling.server.EventMessageSystem.EventType;
 import soloMapling.server.EventMessageSystem.GameEvent;
 import soloMapling.server.MethodScheduler;
@@ -165,7 +164,14 @@ public class SocialBot extends BotSM {
         botType = "SocialBot";
         this.variant = random.nextDouble() < 0.30 ? SocialBotVariant.INTERACTIVE : SocialBotVariant.SINGLE_RESPONSE;
         this.persona = SocialPersonaConfig.personaFor(character.getId());
-        EventBus.getInstance().subscribe(EventType.LEVEL_UP, this); // congratulate nearby levelers
+    }
+
+    @Override
+    public synchronized void startScheduledTask(long initialDelayMs) {
+        // Subscribe here, not in the constructor: the release seam is unsubscribeAll in
+        // stopScheduledTask, which never runs for a bot that was wrapped but never started.
+        subscribeEvent(EventType.LEVEL_UP); // congratulate nearby levelers
+        super.startScheduledTask(initialDelayMs);
     }
 
     public SocialBotVariant getVariant() {

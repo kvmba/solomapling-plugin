@@ -1579,11 +1579,12 @@ public final class PqActions {
             return; // throttled: the caller's own radius scan already ran this tick
         }
         orphanProbeAtByBot.put(bot.getId(), now);
-        // Room-wide, in px: every quest room fits inside it (the widest shipped PQ room is
-        // ~2700px), and the engine's range scan compares distanceSq, so this squares once
-        // here like every other px radius (see BotLogic.rangeSq).
+        // The probe's reach is the map's OWN standable extent, not a fixed constant: quest rooms run
+        // well past the old 3_000px (Ludi's towers are ~730px wide but 4575+ tall, and Orbis's
+        // stage-1 cloud map is 2446px across), so a fixed radius silently blind-spots the far end of
+        // a tall room - exactly the completeness this probe exists to restore.
         List<MapObject> anywhere = BotLogic.checkForItemsOnFloor(bot, bot.getPosition(),
-                ORPHAN_PROBE_RANGE_PX, itemIds);
+                roomReachPx(bot.getMap()), itemIds);
         Point botPos = bot.getPosition();
         double callerReachSq = radiusPx * radiusPx;
         Point nearest = null;
@@ -1612,8 +1613,66 @@ public final class PqActions {
             walkForPickup(bot, nearest);
         }
     }
-    /** The orphan probe's reach: room-wide (see {@link #sweepOrphanDropOutside}). */
-    private static final double ORPHAN_PROBE_RANGE_PX = 3_000;
+    /**
+     * The orphan probe's reach in px: the map's walkable extent plus a margin, memoized per
+     * foothold tree.
+     *
+     * <p>Derived, not fixed: a hard-coded radius is only ever right for the widest room it was
+     * measured against, and a too-small one silently re-opens the blind ring between the caller's
+     * kill radius and the room's far corner - the completeness the probe exists to restore. The map's
+     * own extent is the answer by construction; wall columns (x1==x2) are excluded, because a wall
+     * edge can stick out past every standable surface and would stretch the bounds for nothing.
+     *
+     * <p>Keyed by the foothold TREE's identity (the same weak-keyed pattern DeadPitGuard and the
+     * collision index use): instanced copies of one map share their answer, a reloaded map starts
+     * clean, and a dropped tree does not pin its entry here.
+     */
+    private static double roomReachPx(org.gms.server.maps.MapleMap map) {
+        if (map == null) {
+            return ORPHAN_PROBE_MIN_REACH_PX;
+        }
+        org.gms.server.maps.FootholdTree tree = map.getFootholds();
+        if (tree == null) {
+            return ORPHAN_PROBE_MIN_REACH_PX;
+        }
+        return ORPHAN_PROBE_REACH_BY_TREE.computeIfAbsent(tree, t -> {
+            java.util.List<org.gms.server.maps.Foothold> all = t.getAllFootholds();
+            if (all == null || all.isEmpty()) {
+                return ORPHAN_PROBE_MIN_REACH_PX;
+            }
+            int minX = Integer.MAX_VALUE;
+            int maxX = Integer.MIN_VALUE;
+            int minY = Integer.MAX_VALUE;
+            int maxY = Integer.MIN_VALUE;
+            for (org.gms.server.maps.Foothold fh : all) {
+                if (fh.isWall()) {
+                    continue;
+                }
+                minX = Math.min(minX, Math.min(fh.getX1(), fh.getX2()));
+                maxX = Math.max(maxX, Math.max(fh.getX1(), fh.getX2()));
+                minY = Math.min(minY, Math.min(fh.getY1(), fh.getY2()));
+                maxY = Math.max(maxY, Math.max(fh.getY1(), fh.getY2()));
+            }
+            if (minX == Integer.MAX_VALUE) {
+                return ORPHAN_PROBE_MIN_REACH_PX; // wall-only geometry: no standable surface
+            }
+            // The DIAGONAL, not the longer side: the engine's scan compares a 2D distanceSq from
+            // the bot, and a tall tower's orphan can sit at the room's far vertical end.
+            double w = maxX - (double) minX;
+            double h = maxY - (double) minY;
+            return Math.max(ORPHAN_PROBE_MIN_REACH_PX,
+                    Math.sqrt(w * w + h * h) + ORPHAN_PROBE_SLACK_PX);
+        });
+    }
+
+    /** foothold tree -> its room-sized probe reach (see {@link #roomReachPx}). */
+    private static final Map<org.gms.server.maps.FootholdTree, Double> ORPHAN_PROBE_REACH_BY_TREE =
+            java.util.Collections.synchronizedMap(new java.util.WeakHashMap<>());
+
+    /** Never probe less than the historical room scale, even on a tiny synthetic room. */
+    private static final double ORPHAN_PROBE_MIN_REACH_PX = 3_000;
+    /** Slack past the map's own extent so a drop at the very corner is still seen. */
+    private static final double ORPHAN_PROBE_SLACK_PX = 25;
 
     /**
      * Whether a floor drop is ordinary loot a bot may pocket: a single piece (reactor stacks

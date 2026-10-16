@@ -7,7 +7,6 @@ import soloMapling.ArtificialPlayer.BotDialogueHandler;
 import soloMapling.ArtificialPlayer.BotMessagingSystem.ChatMessage;
 import soloMapling.ArtificialPlayer.BotMessagingSystem.MessageQueue;
 import soloMapling.ArtificialPlayer.BotSM;
-import soloMapling.server.EventMessageSystem.EventBus;
 import soloMapling.server.EventMessageSystem.EventType;
 import soloMapling.server.EventMessageSystem.GameEvent;
 import soloMapling.Environment.BotMessages;
@@ -61,7 +60,16 @@ public class GameZoneHostBot extends BotSM {
         dialoguePath = "GameZoneHostBotDialogue.yaml";
         botType = "GameZoneHostBot";
         hint = Collections.singletonList(character.getName());
-        EventBus.getInstance().subscribe(EventType.MAP_ENTERED, this);
+    }
+
+    @Override
+    public synchronized void startScheduledTask(long initialDelayMs) {
+        // Subscribe here, not in the constructor: the release seam is unsubscribeAll in
+        // stopScheduledTask, which never runs for a bot that was wrapped but never started (the GM
+        // createAndSetBot paths) - the subscription would outlive it on the process-wide bus, and the
+        // bot would still answer events it can no longer act on.
+        subscribeEvent(EventType.MAP_ENTERED);
+        super.startScheduledTask(initialDelayMs);
     }
 
     private enum HostBotState {

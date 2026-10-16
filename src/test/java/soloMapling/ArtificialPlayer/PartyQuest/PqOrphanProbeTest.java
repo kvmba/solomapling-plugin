@@ -16,7 +16,6 @@ import org.gms.provider.DataTool;
 import org.gms.provider.wz.WZFiles;
 import soloMapling.ArtificialPlayer.GCMoveSystem.GCMovement;
 import soloMapling.ArtificialPlayer.PartyQuest.PqActions;
-import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
@@ -80,7 +79,7 @@ class PqOrphanProbeTest {
         when(props.getLanguage()).thenReturn("zh-CN");
         when(ctx.getBean(ServiceProperty.class)).thenReturn(props);
         // Job's <clinit> resolves names through the host i18n sources; the walkTo path reaches
-        // it via BotMovementProfile.fromCharacter inside GCMovement.enable.
+        // it via BotMovementProfile.fromCharacter inside the movement engine's entry settle.
         org.springframework.context.MessageSource messageSource =
                 mock(org.springframework.context.MessageSource.class);
         when(messageSource.getMessage(org.mockito.ArgumentMatchers.anyString(),
@@ -104,41 +103,20 @@ class PqOrphanProbeTest {
 
     @AfterEach
     void releaseBotState() throws Exception {
-        // disable (not a bare STATES.remove): the arming paths walked GCMovement.enable,
-        // which STARTED a real self-rescheduling driver for this entry - only disable's
-        // finishDisable -> GCMovementDriver.stop cancels it. It also clears the live move
-        // target, so no test inherits one. The probe throttle is keyed by the shared BOT_ID
-        // too, so it is dropped here (there is no public seam for it).
-        GCMovement.disable(botRef);
+        // Drop the entry directly (no GCMovement.disable): the arming paths walked GCMovement.move
+        // against a Mockito mock, and disable() would dereference the mock outside any stubbing
+        // window - the same reason the entry is injected driverless in the first place. Removing the
+        // entry also clears the live move target, so no test inherits one. The probe throttle is
+        // keyed by the shared BOT_ID too, so it is dropped here.
+        soloMapling.ArtificialPlayer.GCMoveSystem.DriverlessMovementState.remove(BOT_ID);
         Field throttle = PqActions.class.getDeclaredField("orphanProbeAtByBot");
         throttle.setAccessible(true);
         ((Map<?, ?>) throttle.get(null)).remove(BOT_ID);
     }
 
-    @AfterAll
-    static void releaseBotStateFinal() {
-        GCMovement.disable(botRef);
-    }
-
-    /** The latest bot mock, for the teardown's disable (see releaseBotState). */
-    private static Character botRef;
-
-    @SuppressWarnings("unchecked")
-    private static Map<Integer, Object> states() throws Exception {
-        Field f = GCMovement.class.getDeclaredField("STATES");
-        f.setAccessible(true);
-        return (Map<Integer, Object>) f.get(null);
-    }
-
-    /** The live move goal of the bot's driver state, read reflectively (the state is package-private). */
-    private static Point moveTargetOf(int botId) throws Exception {
-        Object st = states().get(botId);
-        if (st == null) {
-            return null;
-        }
-        Field f = st.getClass().getDeclaredField("moveTarget");
-        f.setAccessible(true);
-        return (Point) f.get(st);
+    /** The live move goal of the bot's entry, read through the same-package test seam. */
+    private static Point moveTargetOf(int botId) {
+        return soloMapling.ArtificialPlayer.GCMoveSystem.DriverlessMovementState.moveTargetOf(botId);
     }
 
     private static GameConfigDO cfg(String t, String k, String v) {
@@ -220,7 +198,10 @@ class PqOrphanProbeTest {
         when(bot.getId()).thenReturn(BOT_ID);
         when(bot.getPosition()).thenReturn(at);
         when(bot.getPartyId()).thenReturn(-1);
-        botRef = bot;
+        // Register the movement entry BEFORE any production arm path runs: GCMovement.move would
+        // otherwise call enable() and start a real 50ms driver thread that invokes this mock
+        // concurrently with the test's own stubbing (the flake's root cause: see DriverlessMovementState).
+        soloMapling.ArtificialPlayer.GCMoveSystem.DriverlessMovementState.inject(bot);
         return bot;
     }
 
@@ -238,6 +219,47 @@ class PqOrphanProbeTest {
                         + "pickupItem has no distance check and would teleport it)");
         assertEquals(new Point(0, 0), moveTargetOf(BOT_ID), "the walk aims at the drop");
         assertEquals(0, PqActions.countItem(bot, PASS), "visibility only - nothing picked up");
+    }
+
+    /**
+     * The probe reaches the room's own extent. The old fixed 3_000px claimed "every quest room
+     * fits inside it", but the shipped quest rooms do not: Ludi's towers are ~730x4575 and Orbis's
+     * stage-1 cloud map is 2446x1486. A drop at a Ludi tower's far vertical end therefore sat
+     * outside the probe and despawned unclaimed. The reach is now derived from the map's own
+     * foothold extent, so no room can be bigger than its own probe.
+     */
+    @Test
+    void theProbeReachesTheRoomsOwnFarCorner() throws Exception {
+        MapleMap map = wzRoom();
+        // The real room's extent, as the probe derives it: every walkable foothold's x/y span.
+        org.gms.server.maps.FootholdTree tree = map.getFootholds();
+        int minX = Integer.MAX_VALUE;
+        int maxX = Integer.MIN_VALUE;
+        int minY = Integer.MAX_VALUE;
+        int maxY = Integer.MIN_VALUE;
+        for (org.gms.server.maps.Foothold fh : tree.getAllFootholds()) {
+            if (fh.isWall()) {
+                continue;
+            }
+            minX = Math.min(minX, Math.min(fh.getX1(), fh.getX2()));
+            maxX = Math.max(maxX, Math.max(fh.getX1(), fh.getX2()));
+            minY = Math.min(minY, Math.min(fh.getY1(), fh.getY2()));
+            maxY = Math.max(maxY, Math.max(fh.getY1(), fh.getY2()));
+        }
+
+        // Stand at one vertical extreme, drop a pass at the other: the probe must walk to it.
+        Point botAt = new Point(Math.min(maxX, Math.max(minX, 0)), minY);
+        Point dropAt = new Point(Math.min(maxX, Math.max(minX, 0)), maxY);
+        Character bot = botOn(map, botAt);
+        MapItem drop = new MapItem(new Item(PASS, (short) 0, (short) 1),
+                dropAt, null, bot, null, (byte) 2, false);
+        map.addMapObject(drop);
+
+        PqActions.loot(bot, bot.getPosition(), 260, new int[]{PASS});
+
+        assertEquals(dropAt, moveTargetOf(BOT_ID),
+                "the probe must see a drop at the room's far vertical end (the old fixed 3_000px "
+                        + "reach measured only " + (maxY - minY) + "px of room height here)");
     }
 
     @Test

@@ -20,6 +20,7 @@ import soloMapling.ArtificialPlayer.GCMoveSystem.LodCounts;
 import soloMapling.server.EventMessageSystem.BotEventBuffer;
 import soloMapling.server.EventMessageSystem.EventBus;
 import soloMapling.server.EventMessageSystem.EventSubscriber;
+import soloMapling.server.EventMessageSystem.EventType;
 import soloMapling.server.EventMessageSystem.GameEvent;
 
 import soloMapling.server.BotTiming;
@@ -59,7 +60,11 @@ public abstract class BotSM implements EventSubscriber {
     // The level the current star was rolled for, so starForLevel can tell a real rung change from an
     // ordinary level-up inside the same rung.
     private volatile int chosenStarLevel;
-    private boolean running;
+    // The whole codebase's stop record: every stopper pairs setRunning(false) with
+    // stopScheduledTask(), and readers on OTHER threads (the 250ms combat sweep, the chat
+    // dispatcher, the movement layers, the removal guard) consult it to decide whether this
+    // bot is still live. Volatile so those reads see the stop the writer recorded.
+    private volatile boolean running;
     protected BotState state;
     private BotDebugHandler debugger;
     private BotInteractorsHandler interactors = new BotInteractorsHandler();
@@ -786,6 +791,25 @@ public abstract class BotSM implements EventSubscriber {
         EventBus.getInstance().unsubscribeAll(this);
         botClearChalkboard(this.getChr());
         BotTickService.unregister(getChr().getId());
+    }
+
+    /**
+     * Subscribe this bot to an event family, exactly once per running session.
+     *
+     * <p>The bus appends on every {@code subscribe} call, so a caller that re-arms (GachaBot's
+     * per-round {@code resetGachaBotState}) or a constructor re-run by a type conversion used to
+     * stack duplicate subscribers - each event then fired the handler once per accumulated copy.
+     * Call this from {@link #startScheduledTask} (never the constructor): the matching release is
+     * {@code unsubscribeAll} in {@link #stopScheduledTask}, so a bot that is wrapped but never
+     * started holds no subscription, and a stop/start cycle re-subscribes cleanly.
+     */
+    protected void subscribeEvent(EventType type) {
+        if (type == null) {
+            return;
+        }
+        EventBus bus = EventBus.getInstance();
+        bus.unsubscribe(type, this); // idempotent across re-arms, like the wheel registration
+        bus.subscribe(type, this);
     }
 
     // todo
