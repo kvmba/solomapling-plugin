@@ -61,6 +61,12 @@ final class MovementPlan {
      * Plan an in-map route on a live map+graph from startPos to targetPos. Resolves
      * both endpoints to nav regions and runs the same A* the physics path uses, so the analytic and
      * physics routes match. Returns null when either endpoint has no region or no path exists.
+     *
+     * <p>An EMPTY edge list is kept distinct from an unreachable target here: A* answers "same
+     * region, walk straight there" with an empty path, and answers "cannot get there at all" with
+     * null. Both collapse to a null plan for this API (a direct walk is not a route), but callers
+     * that must tell them apart (the driver's same-region steering, reachability checks) read the
+     * A* result itself, not this plan.
      */
     static MovementPlan inMap(BotNavigationGraph graph, MapleMap map, Point startPos, Point targetPos) {
         if (graph == null || map == null || startPos == null || targetPos == null) {

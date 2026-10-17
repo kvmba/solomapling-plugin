@@ -2,25 +2,23 @@ package soloMapling.ArtificialPlayer.PartyQuest;
 
 import org.junit.jupiter.api.Test;
 
-import java.lang.reflect.Method;
-
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 
 /**
  * Pins the combat beat's stepped-on pickup contract ({@code PqActions.lootSteppedOn}) and the
  * per-quest opt-in that scopes it.
  *
- * <p>Why this exists as a contract test rather than only as behaviour: the LPQ stage-3 report
- * ("the bot does not pick the pass up in time") is caused by loot belonging to the MACRO tick
- * while the fight runs on the 250ms combat sweep. The obvious fix - sweep everything on the floor
- * every beat - is a known defect, because several quest mechanics consume a floor drop by
- * identity (HPQ's seeds on a flower, OPQ's seed on Papa Pixie's spring, both via
- * {@code PqActions.feedReactor}, which matches the pile's stack size). The sweep therefore has to
- * stay: (a) named-item only, (b) at-feet only, (c) the existing entitlement rules. Those three
- * bounds are what this test keeps from being "simplified" away later.
+ * <p>Why this is a contract test and not only a behaviour test: the LPQ stage-3 report ("the bot
+ * does not pick the pass up in time") is caused by loot belonging to the MACRO tick while the
+ * fight runs on the 250ms combat sweep. The obvious fix - sweep everything on the floor every beat
+ * - is a known defect, because several quest mechanics consume a floor drop by identity (HPQ's
+ * seeds on a flower, OPQ's seed on Papa Pixie's spring, both via {@code PqActions.feedReactor},
+ * which matches the pile's stack size). The sweep therefore has to stay: (a) named-item only,
+ * (b) at-feet only, (c) the existing entitlement rules. Those three bounds are what this test
+ * keeps from being "simplified" away later.
  */
 class PqSteppedOnLootTest {
 
@@ -44,7 +42,7 @@ class PqSteppedOnLootTest {
         assertTrue(ludi.matches("(?s).*protected int\\[\\] steppedOnLootIds\\(\\) \\{\\s*"
                         + "return new int\\[\\]\\{LudiPqData.PASS};\\s*}.*"),
                 "Ludi must scoop exactly its pass");
-        assertFalse(ludi.contains("seeds") || ludi.contains("PAPA"),
+        assertFalse(ludi.contains("PAPA_SEED") || ludi.contains("flowerSeed"),
                 "Ludi must not sweep any other mechanic's ground item");
     }
 
@@ -75,7 +73,7 @@ class PqSteppedOnLootTest {
     @Test
     void thePerBotPacingStateIsReleasedWithTheBot() throws Exception {
         String java = javaSource(PQ_ACTIONS);
-        Method clear = PqActions.class.getDeclaredMethod("clearSeekState", int.class);
+        java.lang.reflect.Method clear = PqActions.class.getDeclaredMethod("clearSeekState", int.class);
         assertNotNull(clear, "the per-bot release seam must still exist");
         assertTrue(java.matches("(?s).*clearSeekState.*nextSteppedOnPickupAtByBot\\.remove\\(botId\\).*"),
                 "the pickup throttle must not outlive the bot");

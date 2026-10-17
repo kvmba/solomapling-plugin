@@ -1065,7 +1065,7 @@ final class BotNavigationManager {
                                                         int targetRegionId,
                                                         Point targetPos) {
         List<BotNavigationGraph.Edge> path = findPath(graph, bot.getMap(), bot.getPosition(), startRegionId, targetRegionId, targetPos, null, routeSeed(bot));
-        if (path.isEmpty()) {
+        if (path == null || path.isEmpty()) {
             return null;
         }
         return collapseLeadingWalkEdges(path);
@@ -1258,12 +1258,14 @@ final class BotNavigationManager {
                     relaxations,
                     openPeak,
                     bestGoalCost,
-                    path.size());
+                    path == null ? 0 : path.size());
             boolean usesPortal = false;
-            for (BotNavigationGraph.Edge edge : path) {
-                if (edge.type == BotNavigationGraph.EdgeType.PORTAL) {
-                    usesPortal = true;
-                    break;
+            if (path != null) {
+                for (BotNavigationGraph.Edge edge : path) {
+                    if (edge.type == BotNavigationGraph.EdgeType.PORTAL) {
+                        usesPortal = true;
+                        break;
+                    }
                 }
             }
             return new SearchOutcome(path, bestGoalCost, expandedNodes, usesPortal);
@@ -1381,10 +1383,11 @@ final class BotNavigationManager {
                                                                  SearchState goalState,
                                                                  Map<SearchState, SearchState> cameFrom,
                                                                  Map<SearchState, BotNavigationGraph.Edge> cameByEdge) {
-        if (goalState == null || !cameByEdge.containsKey(goalState)) {
-            // Same-region goal (or an unreachable one): an empty path. A same-region goal IS
-            // directly walkable — the caller treats empty + same-region as "walk there"; a
-            // different-region goal with an empty path is a genuine no-path.
+        if (goalState == null) {
+            return null; // no goal reached at all: UNREACHABLE, distinct from "same region, walk"
+        }
+        if (!cameByEdge.containsKey(goalState)) {
+            // The goal state is the start state itself (a same-region goal): an empty path.
             return List.of();
         }
 
@@ -1393,13 +1396,13 @@ final class BotNavigationManager {
         while (!cursor.equals(startState)) {
             BotNavigationGraph.Edge edge = cameByEdge.get(cursor);
             if (edge == null) {
-                return List.of();
+                return null;
             }
 
             path.add(0, edge);
             SearchState previousState = cameFrom.get(cursor);
             if (previousState == null) {
-                return List.of();
+                return null;
             }
             cursor = previousState;
         }
