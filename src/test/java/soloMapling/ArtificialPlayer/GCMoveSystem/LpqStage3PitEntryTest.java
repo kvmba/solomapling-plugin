@@ -249,7 +249,7 @@ public class LpqStage3PitEntryTest {
         BotMovementState st = new BotMovementState(bot, null);
         st.movementProfile = BotMovementProfile.base();
         st.lastProfileRefreshMs = Long.MAX_VALUE / 4;
-        st.lastMapId = MAP;
+        st.lastMap = map;
         st.fhIndex = BotMovementManager.buildFhIndex(map);
         BotPhysicsEngine.teleportTo(st, bot, new Point(-187, -943));
         BotMovementManager.resetEntryStateAfterTeleport(st);

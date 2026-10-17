@@ -53,13 +53,13 @@ class OPQBotLifecycleTest {
         int start = java.indexOf("public synchronized void startScheduledTask(long initialDelayMs)");
         assertTrue(start > 0, "startScheduledTask must exist");
         int enable = java.indexOf("GCMovement.enable(getChr())", start);
-        int register = java.indexOf("orchestrator.registerBot(this)", start);
+        int register = java.indexOf("bindRun()", start);
         int delegate = java.indexOf("super.startScheduledTask(initialDelayMs)", start);
 
         assertTrue(enable > 0 && enable < delegate,
                 "the movement session must be enabled before the FSM runs its first tick");
         assertTrue(register > 0 && register < delegate,
-                "the orchestrator registration must land before the FSM runs its first tick");
+                "the orchestrator binding (bindRun) must land before the FSM runs its first tick");
     }
 
     private static String source(String rel) throws Exception {

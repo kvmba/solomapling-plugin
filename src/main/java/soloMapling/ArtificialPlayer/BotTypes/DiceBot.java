@@ -267,7 +267,7 @@ public class DiceBot extends BotSM {
     @Override
     public void processMessages() {
         try {
-            ChatMessage message = MessageQueue.getInstance().getMessageWithTimeout("secondary", 1, TimeUnit.SECONDS);
+            ChatMessage message = pollAddressedMessage(1000L);
             if (message == null) {
                 return;
             }

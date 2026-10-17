@@ -79,7 +79,7 @@ class StairFullLoopSwayTest {
             return null;
         }).when(st.bot).setPosition(any(Point.class));
         st.movementProfile = BotMovementProfile.base();
-        st.lastMapId = MAP_ID;
+        st.lastMap = map;
         return st;
     }
 

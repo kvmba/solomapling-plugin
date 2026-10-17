@@ -40,7 +40,7 @@ public final class DriverlessMovementState {
         st.movementProfile = BotMovementProfile.base();
         MapleMap map = bot.getMap();
         if (map != null) {
-            st.lastMapId = bot.getMapId();
+            st.lastMap = map;
             st.fhIndex = BotMovementManager.buildFhIndex(map);
             Point cur = bot.getPosition();
             Point ground = BotPhysicsEngine.findGroundPoint(map, new Point(cur.x, cur.y - 1));

@@ -67,7 +67,7 @@ class PqStageNudgeLockOrderTest {
         String java = source("src/main/java/soloMapling/ArtificialPlayer/PartyQuest/PqActions.java");
 
         // walkTo's arrival callback.
-        int walkTo = java.indexOf("public static void walkTo(Character bot, Point target) {");
+        int walkTo = java.indexOf("public static boolean walkTo(Character bot, Point target) {");
         assertTrue(walkTo >= 0, "walkTo must exist");
         int walkToEnd = java.indexOf("public static ", walkTo + 10);
         String walkToBody = java.substring(walkTo, walkToEnd > walkTo ? walkToEnd : java.length());

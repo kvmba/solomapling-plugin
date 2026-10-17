@@ -754,15 +754,17 @@ public class BlackjackDealerBot extends BotSM {
 
     private void processBlackjackMessages(BlackjackPlayer player) {
         try {
-            ChatMessage message = MessageQueue.getInstance().getMessageNonBlocking("secondary");
+            // The dealer's own queue. Polling the shared "secondary" queue meant a reply typed at
+            // this table was taken by whatever other bot woke first, then discarded.
+            ChatMessage message = MessageQueue.getInstance()
+                    .getAddressedMessage(getChr().getId());
             if (message == null) {
                 return;
             }
             log("[Blackjack] Message: " + message.getSender().getName() + ":" + message.getContent());
 
             if (!getInteractors().isRespondant(message.getSender())) {
-                MessageQueue.getInstance().requeueMessage("secondary", message);
-                return;
+                return; // not this table's player
             }
 
             if (!message.getSender().equals(player.getCharacter())) {
@@ -783,13 +785,15 @@ public class BlackjackDealerBot extends BotSM {
 
     private void processJoinInquiries() {
         try {
-            ChatMessage message = MessageQueue.getInstance().getMessageNonBlocking("tertiary");
+            // This dealer's own queue: the shared "tertiary" queue is single-consumer, so a JOIN
+            // typed for one table could be drained by any other menu bot and dropped.
+            ChatMessage message = MessageQueue.getInstance()
+                    .getAddressedMessage(getChr().getId());
             if (message == null) {
                 return;
             }
             if (!getInteractors().isInquirer(message.getSender())) {
-                MessageQueue.getInstance().requeueMessage("tertiary", message);
-                return;
+                return; // not for this dealer
             }
             String content = message.getContent().toLowerCase();
             if (isJoin(content)) {

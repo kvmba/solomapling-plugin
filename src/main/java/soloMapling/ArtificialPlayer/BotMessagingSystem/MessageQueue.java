@@ -3,6 +3,7 @@ package soloMapling.ArtificialPlayer.BotMessagingSystem;
 import java.util.Map;
 import java.util.HashMap;
 import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
 
@@ -35,6 +36,13 @@ public class MessageQueue {
     }
 
     private final Map<QueueType, BlockingQueue<ChatMessage>> queues;
+    // Addressed follow-ups: one queue per bot. The shared "secondary"/"tertiary" queues are
+    // single-consumer - whichever bot polls first takes the line - and every conversational type
+    // polls them, so a reply meant for the dice bot was routinely swallowed by a SocialBot
+    // mid-conversation (which then dropped it on the sender-id check) and the addressee never saw
+    // it. Keys are character ids; entries are dropped when the bot goes away.
+    private final Map<Integer, BlockingQueue<ChatMessage>> addressed = new ConcurrentHashMap<>();
+    private static final int ADDRESSED_CAPACITY = 64;
     private static final MessageQueue messageQueue = new MessageQueue();
 
     static {
@@ -51,6 +59,41 @@ public class MessageQueue {
 
     public static MessageQueue getInstance() {
         return messageQueue;
+    }
+
+    /**
+     * Hand one line to a specific bot's own queue.
+     *
+     * <p>This is the addressed path (a player answering an interaction the bot itself opened). It
+     * exists because {@code secondary} is single-consumer: with a dozen conversational types polling
+     * it, the first poller takes the line even when it is not the addressee, and the intended bot
+     * waits out its timeout. Bounded so a spammer cannot grow one bot's queue without limit.
+     */
+    public void addMessageForBot(int botCharacterId, ChatMessage message) {
+        if (botCharacterId <= 0 || message == null) {
+            return;
+        }
+        BlockingQueue<ChatMessage> queue = addressed.computeIfAbsent(botCharacterId,
+                id -> new LinkedBlockingQueue<>(ADDRESSED_CAPACITY));
+        queue.offer(message); // full = the bot is far behind anyway; drop the newest
+    }
+
+    /** Poll this bot's own queue (never blocks). Null when empty or never used. */
+    public ChatMessage getAddressedMessage(int botCharacterId) {
+        BlockingQueue<ChatMessage> queue = addressed.get(botCharacterId);
+        return queue == null ? null : queue.poll();
+    }
+
+    /** Wait up to {@code timeout} for a line addressed to this bot; null on timeout. */
+    public ChatMessage getAddressedMessage(int botCharacterId, long timeout, TimeUnit unit)
+            throws InterruptedException {
+        BlockingQueue<ChatMessage> queue = addressed.get(botCharacterId);
+        return queue == null ? null : queue.poll(timeout, unit);
+    }
+
+    /** Drop a despawned bot's queue so the registry cannot grow for the life of the process. */
+    public void forgetBot(int botCharacterId) {
+        addressed.remove(botCharacterId);
     }
 
     public void addMessage(ChatMessage message) {

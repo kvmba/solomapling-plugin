@@ -236,7 +236,11 @@ public class Dispatcher implements Runnable {
         // and a non-matching remainder ("yo Tiger") falls through harmlessly like a junk follow-up would.
         String remainder = message.getContent().replace(bot.getChr().getName(), "").trim();
         if (!remainder.isEmpty()) {
-            messageQueue.addMessage("tertiary", new ChatMessage(message.getSender(), remainder));
+            // Addressed to THIS bot: the tertiary queue is single-consumer, so a follow-up meant for
+            // one bot's open menu was regularly drained (and dropped) by whichever other bot polled
+            // it first.
+            MessageQueue.getInstance().addMessageForBot(bot.getChr().getId(),
+                    new ChatMessage(message.getSender(), remainder));
             bot.nudgeSoon(0L); // player is on the bot's map -> pull the pre-selected option forward so it feels instant
         }
     }
@@ -286,10 +290,48 @@ public class Dispatcher implements Runnable {
         }
         if (CharacterStorage.checkIfRespondant(respondant)) { // Check if message contains a respondant
             expirePlayerChatCommands(respondant); // Expires any bubbles for respondants, catch all.
-            messageQueue.addMessage(message); // Put into 2nd queue
+            // Deliver to the bot whose conversation this player is actually in. The old shared
+            // "secondary" enqueue let ANY conversational bot that polled first consume the line -
+            // it then discarded it on the sender check and the addressee timed out.
+            BotSM addressee = addresseeFor(respondant);
+            if (addressee != null) {
+                MessageQueue.getInstance().addMessageForBot(addressee.getChr().getId(), message);
+            }
+            // Nobody claims the player any more (the conversation ended between the queue check and
+            // here): the line is stale, and re-adding it to the shared queue would only feed it to
+            // an unrelated bot. Drop it.
         } else if (CharacterStorage.checkIfInquirer(respondant)) {
-            messageQueue.addMessage("tertiary", message);
+            // Same addressing rule for the option-menu follow-up path.
+            BotSM addressee = addresseeFor(respondant);
+            if (addressee != null) {
+                MessageQueue.getInstance().addMessageForBot(addressee.getChr().getId(), message);
+            }
         }
+    }
+
+    /**
+     * The bot that is currently in a conversation with {@code player}, or null when none is.
+     *
+     * <p>Resolved from the bots' own interactor records rather than from a shared queue, because
+     * that is the only place the player→bot association actually exists.
+     */
+    private static BotSM addresseeFor(Character player) {
+        if (player == null) {
+            return null;
+        }
+        // Two passes so a live conversation always outranks a pending menu: a bot may still hold the
+        // player as an inquirer after the conversation moved on, and delivering the next line there
+        // would starve the bot actually talking to them.
+        BotSM inquirerMatch = null;
+        for (BotSM bot : CharacterStorage.getAllBots().values()) {
+            if (bot.getInteractors().isRespondant(player)) {
+                return bot;
+            }
+            if (inquirerMatch == null && bot.getInteractors().isInquirer(player)) {
+                inquirerMatch = bot;
+            }
+        }
+        return inquirerMatch;
     }
 
     /*

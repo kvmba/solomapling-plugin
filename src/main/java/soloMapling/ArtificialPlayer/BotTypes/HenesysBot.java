@@ -14,7 +14,6 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Random;
 import java.util.Set;
-import java.util.concurrent.TimeUnit;
 
 import static soloMapling.ArtificialPlayer.BotCommandsPack.SocialCommands.BotEmote;
 import static soloMapling.ArtificialPlayer.BotCommandsPack.SocialCommands.BotSpeak;
@@ -338,7 +337,7 @@ public class HenesysBot extends BotSM {
     @Override
     public void processMessages() {
         try {
-            ChatMessage message = MessageQueue.getInstance().getMessageWithTimeout("secondary", 1, TimeUnit.SECONDS);
+            ChatMessage message = pollAddressedMessage(1000L);
             if (message == null) {
                 return;
             }

@@ -564,6 +564,10 @@ public class BotGeneration {
         // actually lives on, so the counter cannot drift.
         BotChannelRouter.noteBotRemoved(channel);
         CharacterStorage.removeActiveBot(fakechar.getId());//
+        // Addressed chat queues are per bot: a removed bot's queue would otherwise sit in the
+        // registry (holding its last player Character references) for the life of the process.
+        soloMapling.ArtificialPlayer.BotMessagingSystem.MessageQueue.getInstance()
+                .forgetBot(fakechar.getId());
         // A removed bot never converts back out, so its recruit handoffs would linger in the
         // static maps forever (and a reused character id could inherit them).
         BotRecruitManager.clearHandoffs(fakechar.getId());

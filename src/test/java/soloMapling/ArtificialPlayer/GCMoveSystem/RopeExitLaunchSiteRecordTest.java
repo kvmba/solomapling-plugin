@@ -122,7 +122,7 @@ public class RopeExitLaunchSiteRecordTest {
         // Freeze the 20s profile recompute: the mock's stat accessors return deep-stub garbage,
         // which would wreck the profile (and the graph-key identity) on the first tick.
         st.lastProfileRefreshMs = Long.MAX_VALUE / 4;
-        st.lastMapId = MAP_ID;
+        st.lastMap = map;
         st.fhIndex = BotMovementManager.buildFhIndex(map);
         st.navGraph = BotNavigationGraphProvider.getGraph(map, profile);
         st.navEdge = null; // set per case

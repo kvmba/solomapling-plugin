@@ -35,8 +35,15 @@ public class BotOptionMenu {
     // One-slot keyword drop box for the party-broadcast path (Dispatcher). The shared "tertiary"
     // queue can only serve ONE bot - whichever polls first consumes the line and the rest of the
     // party never sees it - so an addressed-without-a-name keyword arrives here instead, per bot.
-    private volatile String pendingKeyword = null;
-    private volatile Character pendingSender = null;
+    //
+    // The offer is a single immutable value, not two fields: offerDirect() runs on the Dispatcher's
+    // pool while poll() runs on the owner's tick, and a split (keyword, sender) pair let a poll read
+    // one player's line attributed to another player - or to nobody, which dropped the command.
+    private record DirectOffer(String keyword, Character sender) {
+    }
+
+    private final java.util.concurrent.atomic.AtomicReference<DirectOffer> pendingOffer =
+            new java.util.concurrent.atomic.AtomicReference<>();
 
     public BotOptionMenu(BotSM owner, List<String> labels, List<List<String>> keywords, Selection onSelect) {
         if (labels.size() != keywords.size()) {
@@ -71,8 +78,7 @@ public class BotOptionMenu {
         if (player == null || !matches(content)) {
             return false;
         }
-        pendingKeyword = content;
-        pendingSender = player;
+        pendingOffer.set(new DirectOffer(content, player));
         active = true; // armed silently: the player typed the answer, so the hint would be noise
         lastActivityMs = System.currentTimeMillis();
         return true;
@@ -93,14 +99,13 @@ public class BotOptionMenu {
             int idx;
             // The direct drop box wins over the queue: it is already matched and already
             // attributed to a specific inquirer, and it must not be stolen by another bot.
-            String direct = pendingKeyword;
+            DirectOffer direct = pendingOffer.getAndSet(null);
             if (direct != null) {
-                pendingKeyword = null;
-                sender = pendingSender;
-                pendingSender = null;
-                idx = sender == null ? -1 : match(direct);
+                sender = direct.sender();
+                idx = sender == null ? -1 : match(direct.keyword());
             } else {
-                ChatMessage message = MessageQueue.getInstance().getMessageNonBlocking("tertiary");
+                ChatMessage message = MessageQueue.getInstance()
+                        .getAddressedMessage(owner.getChr().getId());
                 if (message == null) {
                     return;
                 }
@@ -109,8 +114,7 @@ public class BotOptionMenu {
                     return;
                 }
                 if (!owner.getInteractors().isInquirer(sender)) {
-                    MessageQueue.getInstance().requeueMessage("tertiary", message);
-                    return;
+                    return; // addressed to another bot's menu; that bot's own queue holds it
                 }
                 idx = match(message.getContent());
             }

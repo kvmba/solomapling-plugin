@@ -12,7 +12,6 @@ import soloMapling.FreeMarket.FMItem;
 
 import java.util.Collections;
 import java.util.List;
-import java.util.concurrent.TimeUnit;
 import java.util.function.Supplier;
 
 import static soloMapling.ArtificialPlayer.BotDialogueHandler.getRandomResolvedLine;
@@ -298,7 +297,7 @@ public class SellingMerchantBot extends BotSM {
     @Override
     public void processMessages() {
         try {
-            ChatMessage message = MessageQueue.getInstance().getMessageWithTimeout("secondary", 1, TimeUnit.SECONDS);
+            ChatMessage message = pollAddressedMessage(1000L);
         } catch (Exception e) {
             e.printStackTrace();
         }

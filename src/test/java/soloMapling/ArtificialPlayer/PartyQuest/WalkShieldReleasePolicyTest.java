@@ -50,7 +50,7 @@ class WalkShieldReleasePolicyTest {
     @Test
     void walkToReleasesThroughTheSeamAndNotInAFinally() throws Exception {
         String source = javaSource("soloMapling/ArtificialPlayer/PartyQuest/PqActions.java");
-        String walkTo = methodBody(source, "public static void walkTo(");
+        String walkTo = methodBody(source, "public static boolean walkTo(");
         assertTrue(walkTo.contains("walkShieldReleases("),
                 "walkTo must route its shield release through the pinned decision seam");
         assertFalse(walkTo.contains("finally"),

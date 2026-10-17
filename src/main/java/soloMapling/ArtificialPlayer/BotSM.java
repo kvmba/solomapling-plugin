@@ -81,8 +81,6 @@ public abstract class BotSM implements EventSubscriber {
         debugprint("[" + getBotType() + ":" + getChr().getName() + "] " + msg);
     }
 
-    private static MessageQueue messageQueue = MessageQueue.getInstance();
-
     // Per-bot inbox for directed channels (whisper/buddy/party/guild/alliance). Unlike the shared
     // primary/secondary queues this is addressed to exactly this bot, and unlike the Dispatcher it
     // needs no map proximity - a whisper or party line reaches a bot on any map or channel.
@@ -690,6 +688,25 @@ public abstract class BotSM implements EventSubscriber {
         }
     }
 
+    /**
+     * Poll one line addressed to THIS bot, waiting up to {@code timeoutMs}.
+     *
+     * <p>Every conversational type used to poll the shared "secondary" queue, which is
+     * single-consumer: the first bot to wake took the line even when it was not the addressee, then
+     * discarded it on its own sender check, and the intended bot waited out its reply window and
+     * timed out. The Dispatcher now addresses replies to the bot that owns the conversation, so each
+     * bot drains its own queue.
+     */
+    protected ChatMessage pollAddressedMessage(long timeoutMs) {
+        try {
+            return MessageQueue.getInstance().getAddressedMessage(
+                    getChr().getId(), timeoutMs, java.util.concurrent.TimeUnit.MILLISECONDS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return null;
+        }
+    }
+
     // Method to start the scheduled task
     public synchronized void startScheduledTask() {
         startScheduledTask(0);
@@ -790,7 +807,7 @@ public abstract class BotSM implements EventSubscriber {
         log("Shutting down scheduler: " + this.getChr().getName());
         EventBus.getInstance().unsubscribeAll(this);
         botClearChalkboard(this.getChr());
-        BotTickService.unregister(getChr().getId());
+        BotTickService.unregister(getChr().getId(), tickRunnable);
     }
 
     /**
@@ -816,13 +833,12 @@ public abstract class BotSM implements EventSubscriber {
     // At the moment this is not used as far as I know.
     protected void processMessages() {
         System.out.println("BotSM processMessages");
-        try {
-            ChatMessage message = messageQueue.getMessageNonBlocking("secondary");
-            if (message.getSender() == getInteractors().getRespondant()) {
-                log("This Message is from Respondant: " + getInteractors().getRespondant().getName() + ", Msg: " + message);
-            }
-        } catch (Exception e) {
-            e.printStackTrace();
+        ChatMessage message = MessageQueue.getInstance().getAddressedMessage(getChr().getId());
+        if (message == null) {
+            return; // nothing addressed to this bot (the old code NPE'd on an empty queue)
+        }
+        if (message.getSender() == getInteractors().getRespondant()) {
+            log("This Message is from Respondant: " + getInteractors().getRespondant().getName() + ", Msg: " + message);
         }
     }
 

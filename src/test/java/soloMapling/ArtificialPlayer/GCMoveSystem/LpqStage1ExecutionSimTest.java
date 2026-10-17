@@ -131,7 +131,7 @@ public class LpqStage1ExecutionSimTest {
         // garbage, which would wreck the profile (and thus the graph key) on the first tick.
         // Real characters recompute to their own real stats, which is a no-op on the bucket.
         st.lastProfileRefreshMs = Long.MAX_VALUE / 4;
-        st.lastMapId = 922010100;
+        st.lastMap = map;
         st.fhIndex = BotMovementManager.buildFhIndex(map);
         BotPhysicsEngine.teleportTo(st, bot, new Point(0, 130));
         BotMovementManager.resetEntryStateAfterTeleport(st);

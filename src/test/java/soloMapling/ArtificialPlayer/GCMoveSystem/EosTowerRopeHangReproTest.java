@@ -106,7 +106,7 @@ public class EosTowerRopeHangReproTest {
         BotMovementState st = new BotMovementState(bot, null);
         st.movementProfile = profile;
         st.lastProfileRefreshMs = Long.MAX_VALUE / 4;
-        st.lastMapId = mapId;
+        st.lastMap = map;
         st.fhIndex = BotMovementManager.buildFhIndex(map);
         BotPhysicsEngine.teleportTo(st, bot, new Point(spawnX, spawnY));
         BotMovementManager.resetEntryStateAfterTeleport(st);

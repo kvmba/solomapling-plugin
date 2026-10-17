@@ -109,7 +109,7 @@ public class DeadPitInvariantTest {
         when(bot.getId()).thenReturn(x + 7300);
         BotMovementState entry = new BotMovementState(bot, null);
         entry.movementProfile = BotMovementProfile.base();
-        entry.lastMapId = map.getId();
+        entry.lastMap = map;
         return entry;
     }
 

@@ -406,7 +406,11 @@ public class BotTypeManager {
     public static void massFMBots(Integer start, Integer end) {
         for (int x = start; x <= end; x++) {
             Character fakechar = BotHelpers.getCharFromChannelStorage(x);
-            FM_BOT.createAndSetBot(fakechar);
+            if (fakechar == null) continue;
+            // A mass re-type hits bots that may already be running another type, so it has to go
+            // through the stop-then-wrap path - a bare createAndSetBot left the old FSM ticking
+            // while the new one never got a wheel entry.
+            convertBotType(fakechar, FM_BOT);
         }
     }
 
@@ -429,7 +433,7 @@ public class BotTypeManager {
         for (Integer id : botIds) {
             Character fakechar = getValidBot(id);
             if (fakechar == null) continue;
-            botType.createAndSetBot(fakechar);
+            convertBotType(fakechar, botType);
         }
     }
 

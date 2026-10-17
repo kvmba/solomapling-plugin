@@ -38,7 +38,6 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.TimeUnit;
 import org.gms.server.maps.MapleMap;
 
 import static soloMapling.ArtificialPlayer.BotCommandsPack.SocialCommands.*;
@@ -560,8 +559,7 @@ public class SocialBot extends BotSM {
     @Override
     protected void processMessages() {
         try {
-            ChatMessage message = MessageQueue.getInstance()
-                    .getMessageWithTimeout("secondary", 1, TimeUnit.SECONDS);
+            ChatMessage message = pollAddressedMessage(1000L);
             if (message == null) return;
 
             if (isBot(message.getSender())) return;

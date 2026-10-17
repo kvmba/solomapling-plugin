@@ -14,7 +14,6 @@ import soloMapling.Environment.YesNo;
 
 import java.util.Collections;
 import java.util.List;
-import java.util.concurrent.TimeUnit;
 
 import static soloMapling.ArtificialPlayer.BotCommandsPack.SocialCommands.BotChatbubble;
 import static soloMapling.ArtificialPlayer.BotCommandsPack.SocialCommands.BotEmote;
@@ -188,11 +187,13 @@ public class GameZoneHostBot extends BotSM {
     // --- Player detection (inquirer promotion) ---
 
     private void checkForInquirer() {
-        if (getInteractors().getListInquirer().isEmpty()) {
+        // Take-and-remove in one step: the Dispatcher may add a second inquirer on another thread
+        // between a separate isEmpty()/get(0)/remove() sequence, which used to drop or mis-attribute
+        // the player who was actually waiting.
+        Character inquirer = getInteractors().pollInquirer();
+        if (inquirer == null) {
             return;
         }
-        Character inquirer = getInteractors().getInquirer();
-        getInteractors().removeInquirer(inquirer);
         getInteractors().setRespondant(inquirer);
         setHostBotState(HostBotState.DRINK_OFFER);
     }
@@ -263,7 +264,7 @@ public class GameZoneHostBot extends BotSM {
     @Override
     public void processMessages() {
         try {
-            ChatMessage message = MessageQueue.getInstance().getMessageWithTimeout("secondary", 1, TimeUnit.SECONDS);
+            ChatMessage message = pollAddressedMessage(1000L);
             if (message == null) {
                 return;
             }

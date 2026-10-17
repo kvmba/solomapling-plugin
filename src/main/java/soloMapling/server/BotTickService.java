@@ -71,15 +71,38 @@ public final class BotTickService {
         return throttleFactor;
     }
 
-    // Register a bot's tick on the wheel. Keep-if-present, mirroring the old
-    // startScheduledTask which left a live task alone.
+    // Register a bot's tick on the wheel.
+    //
+    // "Keep-if-present" is per FSM INSTANCE, not per character id: re-arming the same object must
+    // leave a live schedule alone (the old startScheduledTask did), but a fresh BotSM wrapping the
+    // same Character has to replace the previous entry. A plain putIfAbsent kept the OLD runnable,
+    // so after a re-type the replacement FSM never got a wheel slot while the retired one kept
+    // driving the character.
     public static void register(int botId, Runnable tick, long initialDelayMs, long periodMs) {
         ensureDriver();
-        ENTRIES.putIfAbsent(botId, new Entry(tick, periodMs, System.currentTimeMillis() + initialDelayMs));
+        long due = System.currentTimeMillis() + initialDelayMs;
+        ENTRIES.compute(botId, (id, existing) -> {
+            if (existing != null && existing.tick == tick) {
+                return existing; // same FSM re-arming: keep its live cadence
+            }
+            return new Entry(tick, periodMs, due);
+        });
     }
 
     public static void unregister(int botId) {
         ENTRIES.remove(botId);
+    }
+
+    /**
+     * Remove this FSM's entry only.
+     *
+     * <p>Every stopper must use this form. A plain {@link #unregister(int)} by id can delete an entry
+     * that a restarted FSM just installed: the stop and the restart are issued from different threads
+     * (a GM command vs the chat dispatcher), and the losing interleaving leaves the bot running with
+     * no wheel entry - it never ticks again and no path re-registers it.
+     */
+    public static void unregister(int botId, Runnable tick) {
+        ENTRIES.computeIfPresent(botId, (id, existing) -> existing.tick == tick ? null : existing);
     }
 
     public static boolean isRegistered(int botId) {

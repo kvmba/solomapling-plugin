@@ -152,7 +152,7 @@ public class RopeHeadBallisticRetentionTest {
         when(bot.getPosition()).thenReturn(new java.awt.Point(ballistic.startPoint.x, ballistic.startPoint.y - 20));
         BotMovementState st = new BotMovementState(bot, null);
         st.movementProfile = BotMovementProfile.base();
-        st.lastMapId = 922010100;
+        st.lastMap = map;
         st.navEdge = ballistic;
         st.inAir = true;
         st.navFlightEdge = ballistic; // recorded by the launch site

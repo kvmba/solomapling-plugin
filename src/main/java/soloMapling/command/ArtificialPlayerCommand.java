@@ -210,6 +210,21 @@ public class ArtificialPlayerCommand extends Command {
         }
     }
 
+    /**
+     * Re-type one bot from a {@code !bot <type> <cid>} command, reporting a refusal.
+     *
+     * <p>The old set-type cases called {@code createAndSetBot} directly, which replaced the
+     * registry entry without stopping the previous FSM - the old type kept ticking the character
+     * (its running flag and wheel entry both survived) while the new one never got a wheel entry.
+     * Routing through {@link #convertBotType} stops the old FSM first, and also refuses to tear
+     * down a live trade, so the player on the other side of the window is not stranded.
+     */
+    private static void setBotType(Character fakechar, BotTypeManager.BotType botType) {
+        if (!convertBotType(fakechar, botType)) {
+            player.yellowMessage("Bot " + fakechar.getName() + " is mid-trade - re-type refused.");
+        }
+    }
+
     public static void handleNumberedCommand(String input, int input2, Client c) {
         Character fakechar = BotHelpers.getCharFromChannelStorage(input2);
         if (fakechar == null) {
@@ -278,111 +293,111 @@ public class ArtificialPlayerCommand extends Command {
                 break;
             }
             case "dicebot":
-                DICE_BOT.createAndSetBot(fakechar);
+                setBotType(fakechar, DICE_BOT);
                 break;
             case "tutorialbot":
             case "tutbot":
-                TUTORIAL_BOT.createAndSetBot(fakechar);
+                setBotType(fakechar, TUTORIAL_BOT);
                 break;
             case "setfmbot":
             case "fmbot":
-                FM_BOT.createAndSetBot(fakechar);
+                setBotType(fakechar, FM_BOT);
                 break;
             case "scrollingbot":
             case "scrollbot":
-                SCROLL_BOT.createAndSetBot(fakechar);
+                setBotType(fakechar, SCROLL_BOT);
                 break;
             case "merchantbot":
             case "sellingbot":
-                SELLING_MERCHANT_BOT.createAndSetBot(fakechar);
+                setBotType(fakechar, SELLING_MERCHANT_BOT);
                 break;
             case "buyingbot":
-                BUYING_MERCHANT_BOT.createAndSetBot(fakechar);
+                setBotType(fakechar, BUYING_MERCHANT_BOT);
                 break;
             case "nxbot":
             case "nxmerchantbot":
-                NX_MERCHANT_BOT.createAndSetBot(fakechar);
+                setBotType(fakechar, NX_MERCHANT_BOT);
                 break;
             case "gachabot":
-                GACHA_BOT.createAndSetBot(fakechar);
+                setBotType(fakechar, GACHA_BOT);
                 break;
             case "henesysbot":
-                HENESYS_BOT.createAndSetBot(fakechar);
+                setBotType(fakechar, HENESYS_BOT);
                 break;
             case "gamezonehost":
             case "gzhbot":
-                GAME_ZONE_HOST_BOT.createAndSetBot(fakechar);
+                setBotType(fakechar, GAME_ZONE_HOST_BOT);
                 break;
             case "bjbot":
             case "bjdealerbot":
             case "blackjackbot":
-                BLACKJACK_DEALER.createAndSetBot(fakechar);
+                setBotType(fakechar, BLACKJACK_DEALER);
                 break;
             case "dropgamebot":
             case "dgbot":
-                DROP_GAME_BOT.createAndSetBot(fakechar);
+                setBotType(fakechar, DROP_GAME_BOT);
                 break;
             case "opqbot":
-                OPQ_BOT.createAndSetBot(fakechar);
+                setBotType(fakechar, OPQ_BOT);
                 break;
             case "hpqbot":
             case "henesyspqbot":
-                BotTypeManager.BotType.HENESYS_PQ_BOT.createAndSetBot(fakechar);
+                setBotType(fakechar, BotTypeManager.BotType.HENESYS_PQ_BOT);
                 break;
             case "kpqbot":
             case "kerningpqbot":
-                BotTypeManager.BotType.KERNING_PQ_BOT.createAndSetBot(fakechar);
+                setBotType(fakechar, BotTypeManager.BotType.KERNING_PQ_BOT);
                 break;
             case "lpqbot":
             case "ludipqbot":
-                BotTypeManager.BotType.LUDI_PQ_BOT.createAndSetBot(fakechar);
+                setBotType(fakechar, BotTypeManager.BotType.LUDI_PQ_BOT);
                 break;
             case "brpqbot":
             case "bossrushbot":
-                BotTypeManager.BotType.BOSS_RUSH_PQ_BOT.createAndSetBot(fakechar);
+                setBotType(fakechar, BotTypeManager.BotType.BOSS_RUSH_PQ_BOT);
                 break;
             case "ppqbot":
             case "piratepqbot":
-                BotTypeManager.BotType.PIRATE_PQ_BOT.createAndSetBot(fakechar);
+                setBotType(fakechar, BotTypeManager.BotType.PIRATE_PQ_BOT);
                 break;
             case "apqbot":
             case "amoriapqbot":
-                BotTypeManager.BotType.AMORIA_PQ_BOT.createAndSetBot(fakechar);
+                setBotType(fakechar, BotTypeManager.BotType.AMORIA_PQ_BOT);
                 break;
             case "epqbot":
             case "ellinpqbot":
-                BotTypeManager.BotType.ELLIN_PQ_BOT.createAndSetBot(fakechar);
+                setBotType(fakechar, BotTypeManager.BotType.ELLIN_PQ_BOT);
                 break;
             case "zpqbot":
             case "zakumpqbot":
-                BotTypeManager.BotType.ZAKUM_PQ_BOT.createAndSetBot(fakechar);
+                setBotType(fakechar, BotTypeManager.BotType.ZAKUM_PQ_BOT);
                 break;
             case "htpqbot":
             case "horntailpqbot":
-                BotTypeManager.BotType.HORNTAIL_PQ_BOT.createAndSetBot(fakechar);
+                setBotType(fakechar, BotTypeManager.BotType.HORNTAIL_PQ_BOT);
                 break;
             case "mpqbot":
             case "magatiapqbot":
-                BotTypeManager.BotType.MAGATIA_PQ_BOT.createAndSetBot(fakechar);
+                setBotType(fakechar, BotTypeManager.BotType.MAGATIA_PQ_BOT);
                 break;
             case "cpqbot":
             case "carnivalbot":
-                BotTypeManager.BotType.CARNIVAL_PQ_BOT.createAndSetBot(fakechar);
+                setBotType(fakechar, BotTypeManager.BotType.CARNIVAL_PQ_BOT);
                 break;
             case "pyramidbot":
             case "ppbot":
-                BotTypeManager.BotType.PYRAMID_PQ_BOT.createAndSetBot(fakechar);
+                setBotType(fakechar, BotTypeManager.BotType.PYRAMID_PQ_BOT);
                 break;
             case "dojobot":
-                BotTypeManager.BotType.DOJO_PQ_BOT.createAndSetBot(fakechar);
+                setBotType(fakechar, BotTypeManager.BotType.DOJO_PQ_BOT);
                 break;
             case "arpqbot":
             case "ariantbot":
-                BotTypeManager.BotType.ARIANT_PQ_BOT.createAndSetBot(fakechar);
+                setBotType(fakechar, BotTypeManager.BotType.ARIANT_PQ_BOT);
                 break;
             case "jqbot":
             case "henesysjqbot":
-                HENESYS_JQ_BOT.createAndSetBot(fakechar);
+                setBotType(fakechar, HENESYS_JQ_BOT);
                 break;
             case "trainbot":
             case "trainingbot":
@@ -392,8 +407,7 @@ public class ArtificialPlayerCommand extends Command {
                 break;
             case "roamerbot":
             case "roamer":
-                convertBotType(fakechar, BotTypeManager.BotType.ROAMER_BOT);
-                player.yellowMessage("Bot " + fakechar.getId()
+                setBotType(fakechar, BotTypeManager.BotType.ROAMER_BOT);                player.yellowMessage("Bot " + fakechar.getId()
                         + " is now a RoamerBot (hunts low-level maps, roams freely).");
                 break;
             case "breaknow": {
@@ -435,10 +449,10 @@ public class ArtificialPlayerCommand extends Command {
                 manuallyStopBot(fakechar);
                 break;
             case "convertfmbot":
-                convertBotType(fakechar, FM_BOT);
+                setBotType(fakechar, FM_BOT);
                 break;
             case "convertscrollbot":
-                convertBotType(fakechar, SCROLL_BOT);
+                setBotType(fakechar, SCROLL_BOT);
                 break;
 
             case "loot":

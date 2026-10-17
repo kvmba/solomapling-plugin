@@ -24,7 +24,6 @@ import soloMapling.server.BotTiming;
 import java.awt.Point;
 import java.util.Collections;
 import java.util.List;
-import java.util.concurrent.TimeUnit;
 
 import static soloMapling.ArtificialPlayer.BotCommandsPack.WarpCommands.botWarpMapOnPortal;
 import static soloMapling.ArtificialPlayer.BotCommandsPack.WarpCommands.mapForBot;
@@ -296,7 +295,7 @@ public class OPQBot extends BotSM {
     @Override
     public void processMessages() {
         try {
-            ChatMessage message = MessageQueue.getInstance().getMessageWithTimeout("secondary", 1, TimeUnit.SECONDS);
+            ChatMessage message = pollAddressedMessage(1000L);
             if (message == null) {
                 return;
             }

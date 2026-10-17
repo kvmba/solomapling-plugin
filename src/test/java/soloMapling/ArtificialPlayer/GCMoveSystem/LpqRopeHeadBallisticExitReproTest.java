@@ -112,7 +112,7 @@ public class LpqRopeHeadBallisticExitReproTest {
         BotMovementState st = new BotMovementState(bot, null);
         st.movementProfile = profile;
         st.lastProfileRefreshMs = Long.MAX_VALUE / 4;
-        st.lastMapId = 922010100;
+        st.lastMap = map;
         st.fhIndex = BotMovementManager.buildFhIndex(map);
         BotPhysicsEngine.teleportTo(st, bot, new Point(sx, sy));
         BotMovementManager.resetEntryStateAfterTeleport(st);

@@ -12,7 +12,6 @@ import soloMapling.server.BotTiming;
 
 import java.util.Collections;
 import java.util.List;
-import java.util.concurrent.TimeUnit;
 
 import static soloMapling.ArtificialPlayer.BotDialogueHandler.getRandomResolvedLine;
 import static soloMapling.ArtificialPlayer.BotCommandsPack.MapleMessengerCommands.botLeaveMessenger;
@@ -216,7 +215,7 @@ public class NXMerchantBot extends BotSM {
     @Override
     public void processMessages() {
         try {
-            ChatMessage message = MessageQueue.getInstance().getMessageWithTimeout("secondary", 1, TimeUnit.SECONDS);
+            ChatMessage message = pollAddressedMessage(1000L);
         } catch (Exception e) {
             e.printStackTrace();
         }
