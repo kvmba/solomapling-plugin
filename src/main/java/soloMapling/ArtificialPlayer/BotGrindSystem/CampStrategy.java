@@ -217,7 +217,7 @@ class CampStrategy implements GrindStrategy {
         // Movement + transition stay outside the lock (the movement driver takes its own locks).
         b.resetApproachProgress(chr);
         b.lastKillMs = now();
-        if (within(chr, s.anchor(), s.radius())) {
+        if (GCMovement.isSettled(chr) && within(chr, s.anchor(), s.radius())) {
             b.narrate("FIGHT " + label());
             state = State.FIGHT;
         } else {
@@ -307,7 +307,14 @@ class CampStrategy implements GrindStrategy {
             state = State.SELECT_SPOT;
             return;
         }
-        if (within(chr, s.anchor(), s.radius())) {
+        // Arrival is judged only on a SETTLED body: within() grants a 120px vertical slack (for
+        // sloped/stacked anchors), and a jump-grab toward this spot's rope is routinely inside that
+        // band while still mid-arc. Stopping there cleared the move target, the next ticks grabbed
+        // the rope with nothing left to climb for, and the goal-less climber only came down when the
+        // stall nets kicked it off (then the off-anchor watchdog teleported it home) — the 玩具塔
+        // ladder "hangs, lets go, teleports" report. An airborne or climbing beat just keeps
+        // steering; the next settled beat re-judges the same box.
+        if (GCMovement.isSettled(chr) && within(chr, s.anchor(), s.radius())) {
             GCMovement.stop(chr);
             b.resetApproachProgress(chr);
             b.narrate("FIGHT " + label());

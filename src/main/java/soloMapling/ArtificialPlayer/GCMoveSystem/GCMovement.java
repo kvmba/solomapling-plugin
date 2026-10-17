@@ -470,7 +470,13 @@ public final class GCMovement {
     // ── Package helpers (used by GCTravel / GCFollow) ────────────────────────
 
     /* Clear only the move/farm target + nav (NOT follow or travel). GCTravel uses this between hops
-     *  and on arrival so it never tears down an active follow session. */
+     *  and on arrival so it never tears down an active follow session.
+     *
+     *  <p>An on-rope bot becomes an EXPLICIT rope hold: {@code stop()} means "idle in place", and on a
+     *  rope idling in place is hanging on it ({@code shouldHoldClimbIdle}). This is why every caller
+     *  that judges "arrived" must do so on a SETTLED body ({@link #isSettled}) — see the 玩具塔
+     *  ladder report: an arrival fired mid jump-grab arc cleared the goal and then the bot grabbed the
+     *  rope on the next tick, i.e. a climb with no goal at all.</p> */
     static void clearMoveIntent(Character bot) {
         BotMovementState st = bot == null ? null : STATES.get(bot.getId());
         if (st == null) {
@@ -755,6 +761,26 @@ public final class GCMovement {
 
     static boolean isGrounded(BotMovementState st) {
         return st != null && !st.inAir && !st.swimming && !st.climbing;
+    }
+
+    /* True when an "I have arrived" test may trust the bot's current position: the bot is neither on a
+     * rope nor inside a land jump/fall arc. A swimmer carries inAir for its whole session (the swim
+     * integrator sets it together with swimming), so swimming is not a flight here.
+     *
+     * <p>This is the movement layer's OWN arrival predicate (see GCMovementDriver.reachedMoveTarget),
+     * exposed so the decision layer can't disagree with it. A spot's arrival band is generous
+     * vertically (±120px, for sloped/stacked anchors), and a jump-grab toward a rope is routinely
+     * inside it while still mid-arc: stopping there cleared the move target, and the following ticks
+     * grabbed the rope with nothing left to climb for — a goal-less climber only the stall nets could
+     * release (the 玩具塔 ladder "hangs on the rope, lets go, then teleports home" report).</p> */
+    public static boolean isSettled(Character bot) {
+        BotMovementState st = bot == null ? null : STATES.get(bot.getId());
+        if (st == null) {
+            return true; // not under GC control: no flight/climb of ours to distrust
+        }
+        synchronized (st) {
+            return !st.climbing && (!st.inAir || st.swimming);
+        }
     }
 
     /* Mark the bot as actively grinding so the movement layer's grind-specific guards engage — chiefly

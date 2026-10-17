@@ -154,7 +154,12 @@ final class GrindBreakRoutine {
                 GCMovement.stop(chr); // drop the move/nav intent; the rest hold keeps it hanging
                 return true;
             }
-        } else if (pos != null && Math.abs(pos.x - restSpot.x) <= 60 && Math.abs(pos.y - restSpot.y) <= 120) {
+        } else if (pos != null && GCMovement.isSettled(chr)
+                && Math.abs(pos.x - restSpot.x) <= 60 && Math.abs(pos.y - restSpot.y) <= 120) {
+            // A ground rest is only reached STANDING: the 120px vertical band around the rest spot is
+            // the same generous slack that let a mid-arc / mid-climb bot read as arrived - and this
+            // branch stops the move, so taking it on a rope strands a goal-less climber (the 玩具塔
+            // ladder report). Keep travelling until the bot is settled on the spot's own ledge.
             GCMovement.stop(chr);
             return true;
         }

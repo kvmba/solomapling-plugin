@@ -177,7 +177,8 @@ final class StackStrategy implements GrindStrategy {
         b.lastKillMs = now();
         Spot dest = (assigned != null) ? assigned : members.get(members.size() - 1);
         Point pos = chr.getPosition();
-        if (pos != null && Math.abs(pos.x - dest.anchor().x) <= dest.radius()
+        if (pos != null && GCMovement.isSettled(chr)
+                && Math.abs(pos.x - dest.anchor().x) <= dest.radius()
                 && Math.abs(pos.y - dest.anchor().y) <= GrindBrain.APPROACH_Y_TOLERANCE) {
             b.narrate("FIGHT " + label());
             state = State.FIGHT;
@@ -306,7 +307,11 @@ final class StackStrategy implements GrindStrategy {
             return;
         }
         Point pos = chr.getPosition();
-        if (pos != null && Math.abs(pos.x - dest.anchor().x) <= dest.radius()
+        // Same rule as camp's doTravel: the 120px vertical arrival slack must not read a jump-grab
+        // arc or a climb as arrived — stopping there leaves a goal-less climber on the rope, which
+        // only the stall nets release (the 玩具塔 rope-hang report).
+        if (pos != null && GCMovement.isSettled(chr)
+                && Math.abs(pos.x - dest.anchor().x) <= dest.radius()
                 && Math.abs(pos.y - dest.anchor().y) <= GrindBrain.APPROACH_Y_TOLERANCE) {
             GCMovement.stop(chr);
             b.resetApproachProgress(chr);
