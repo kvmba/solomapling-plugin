@@ -81,7 +81,17 @@ public final class CompanionGearController {
 
         if (CompanionGearPolicy.modeForLevel(companion.getLevel())
                 == CompanionGearPolicy.Mode.DROPS) {
-            shopRun = null;
+            // A level-up crossed the SHOP/DROPS boundary mid-trip: abandon the run AND cancel the
+            // travel that belongs to it. Just nulling shopRun left the in-flight trip walking the
+            // companion to a shop nobody will visit - the same orphan-trip rule SoloGrindController
+            // already honours ("a trip in flight outlives the session that asked for it").
+            if (shopRun != null) {
+                GCMovement.cancelTravel(companion);
+                shopRun = null;
+                shopRetryAt = now + SHOP_RETRY_MS;
+                log.info("Companion gear shop run abandoned: level crossed to drops mode cid={} level={} map={}",
+                        companion.getId(), companion.getLevel(), companion.getMapId());
+            }
             if (now >= nextGoalRefreshAt) {
                 nextGoalRefreshAt = now + GOAL_REFRESH_MS;
                 cachedGoal = currentDropGoal(companion, dropSources);

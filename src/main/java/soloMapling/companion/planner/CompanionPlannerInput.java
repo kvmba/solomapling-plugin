@@ -23,7 +23,8 @@ public record CompanionPlannerInput(
         double minimumMemoryStrength,
         List<CompanionRelationship> relationships,
         List<String> gearAdvice,
-        String playerMessage) {
+        String playerMessage,
+        int playerCharacterId) {
 
     public static final int MAX_PLAYER_MESSAGE_LENGTH = CompanionBrain.MAX_PLAYER_MESSAGE_LENGTH;
 
@@ -62,6 +63,29 @@ public record CompanionPlannerInput(
         if (playerMessage.isEmpty()) {
             throw new IllegalArgumentException("playerMessage must not be blank");
         }
+        // The legacy convenience constructors pass -1 (no speaker id): normalization
+        // then cannot append the training-request fallback (its condition requires a
+        // positive speaker id), which is safe - it can only come from a real turn
+        // that knows who spoke.
+        if (playerCharacterId != -1 && playerCharacterId <= 0) {
+            throw new IllegalArgumentException("playerCharacterId must be positive");
+        }
+    }
+
+    public CompanionPlannerInput(
+            CompanionProfile profile,
+            PersonaProfile persona,
+            CompanionStateSnapshot state,
+            List<MemoryRecord> memoryCandidates,
+            MemoryScorer.Context memoryContext,
+            MemoryScorer.Parameters memoryParameters,
+            int memoryLimit,
+            double minimumMemoryStrength,
+            List<CompanionRelationship> relationships,
+            List<String> gearAdvice,
+            String playerMessage) {
+        this(profile, persona, state, memoryCandidates, memoryContext, memoryParameters,
+                memoryLimit, minimumMemoryStrength, relationships, gearAdvice, playerMessage, -1);
     }
 
     public CompanionPlannerInput(
@@ -76,6 +100,6 @@ public record CompanionPlannerInput(
             List<CompanionRelationship> relationships,
             String playerMessage) {
         this(profile, persona, state, memoryCandidates, memoryContext, memoryParameters,
-                memoryLimit, minimumMemoryStrength, relationships, List.of(), playerMessage);
+                memoryLimit, minimumMemoryStrength, relationships, List.of(), playerMessage, -1);
     }
 }

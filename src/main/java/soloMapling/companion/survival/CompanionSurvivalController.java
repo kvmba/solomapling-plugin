@@ -304,9 +304,14 @@ public final class CompanionSurvivalController {
                 // blacklist this replaces kept rechargeables and hp/mp items and let everything
                 // else through - scrolls, return scrolls and other 204xxxx consumables included,
                 // which are the tab's most valuable contents. See CompanionSurvivalPolicy.
+                //
+                // isSellableUseItem ANSWERS "may this be sold" (hp/mp > 0), so it GATES the sale -
+                // feeding it to a keep-filter sold the tab's scrolls and kept its potions, the
+                // exact behaviour the whitelist was written to replace.
                 StatEffect effect = safeItemEffect(items, item.getItemId());
                 if (ItemConstants.isRechargeable(item.getItemId())
-                        || effect != null && CompanionSurvivalPolicy.isSellableUseItem(
+                        || effect == null
+                        || !CompanionSurvivalPolicy.isSellableUseItem(
                                 effect.getHp(), effect.getMp())) {
                     continue;
                 }

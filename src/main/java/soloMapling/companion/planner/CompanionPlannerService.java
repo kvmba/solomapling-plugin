@@ -6,8 +6,11 @@ import soloMapling.companion.agent.ActionValidator;
 import soloMapling.companion.agent.AgentDecision;
 import soloMapling.companion.agent.AgentDecisionParseException;
 import soloMapling.companion.agent.AgentDecisionParser;
+import soloMapling.companion.agent.CompanionAction;
+import soloMapling.companion.agent.CompanionDecisionActions;
 
 import java.time.Duration;
+import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
@@ -128,12 +131,20 @@ public final class CompanionPlannerService {
                         "LLM response was not valid schema v1 JSON");
             }
 
+            // Validate the NORMALIZED execution list, not the raw decision: the
+            // training-request fallback appends a TrainWith, and an action appended
+            // after validation would bypass every gate below (the busy-actions
+            // cooldown above all - the takeover guard). The play site re-derives
+            // this exact list via the same pure call, so what was validated is
+            // what executes.
+            List<CompanionAction> executed = CompanionDecisionActions.forExecution(
+                    decision, input.playerMessage(), input.playerCharacterId());
             ActionValidator.ValidationResult validation =
-                    validator.validate(decision, input.state());
+                    validator.validateActions(executed, input.state());
             if (!validation.valid()) {
                 return new CompanionPlannerResult.Failure(
                         CompanionPlannerResult.FailureType.VALIDATION_REJECTED,
-                        "LLM decision failed action validation",
+                        "Companion decision failed action validation",
                         validation.violations());
             }
             return new CompanionPlannerResult.Success(decision);

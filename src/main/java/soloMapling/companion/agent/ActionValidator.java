@@ -14,10 +14,24 @@ public final class ActionValidator {
             AgentDecision decision, CompanionStateSnapshot snapshot) {
         Objects.requireNonNull(decision, "decision must not be null");
         Objects.requireNonNull(snapshot, "snapshot must not be null");
+        return validateActions(decision.actions(), snapshot);
+    }
+
+    /**
+     * Validates the FINAL execution list. The planner's request-fallback appends
+     * actions after the language model's decision is parsed, so validation must
+     * run on the normalized list - an action validated only in its original form
+     * would bypass every gate here once appended at the play site.
+     */
+    public ValidationResult validateActions(
+            List<CompanionAction> actions, CompanionStateSnapshot snapshot) {
+        Objects.requireNonNull(actions, "actions must not be null");
+        Objects.requireNonNull(snapshot, "snapshot must not be null");
 
         List<Violation> violations = new ArrayList<>();
-        for (int index = 0; index < decision.actions().size(); index++) {
-            CompanionAction action = decision.actions().get(index);
+        for (int index = 0; index < actions.size(); index++) {
+            CompanionAction action = actions.get(index);
+            Objects.requireNonNull(action, "actions must not contain null");
             validateAction(action, snapshot, index, violations);
         }
         return new ValidationResult(violations);

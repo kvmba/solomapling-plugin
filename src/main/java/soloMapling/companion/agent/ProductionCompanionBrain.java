@@ -208,7 +208,8 @@ public final class ProductionCompanionBrain implements CompanionBrain {
                     CompanionGearAdvice.forQuestion(
                             request.playerMessage(), perception.currentMapId(),
                             CompanionRuntimeCapabilities.dropSources()),
-                    request.playerMessage());
+                    request.playerMessage(),
+                    request.playerCharacterId());
         } catch (Throwable error) {
             log.warn("Companion context build failed cid={} playerCid={}",
                     request.companionCharacterId(), request.playerCharacterId(), error);

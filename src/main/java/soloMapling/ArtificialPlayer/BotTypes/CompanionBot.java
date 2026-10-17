@@ -275,20 +275,14 @@ public final class CompanionBot extends BotSM implements
      * somebody's tag-along stays their tag-along.
      */
     private void maintainSoloGrind() {
-        boolean wasEngaged = soloGrind.engaged();
         if (trainingTarget != null) {
-            // A player owns its attention; drop any solo claim so the two never
-            // fight over movement. Unconditional on *whether it has a claim* —
-            // a controller resting between sessions still holds a reserved slot
-            // on a hunting ground, and leaving it would leak that slot for as
-            // long as the player keeps the companion — but skipped once it is
-            // already idle, since this runs every tick.
-            if (wasEngaged) {
-                soloGrind.stop(getChr());
-            }
-        } else {
-            soloGrind.tick(getChr());
+            // A player owns its attention; the solo claim is released by
+            // beginTrainingWith's sequenced hand-off, so nothing to do here —
+            // and touch NOTHING below: soloGrind.stop() would release the
+            // GrindBrain claim the live training episode now owns.
+            return;
         }
+        soloGrind.tick(getChr());
         // The combat sweep is shared, and registering is what makes real
         // fighting happen on an observed map. Register only for the phase that
         // actually fights: a companion walking to its hunting ground, or resting
@@ -434,10 +428,24 @@ public final class CompanionBot extends BotSM implements
         // Arm this turn's reply channel from its own queued line (null = map bubble), and resolve the
         // speaker the same way the resolver would. Nothing bot-wide is written, so a concurrent turn
         // cannot inherit this one's channel.
+        //
+        // A directed line whose speaker is gone is dropped whole, never spoken on the map bubble:
+        // a reply to a vanished whisperer is private by the same rule the line itself was (see
+        // onDirectChat), and falling back to the map bubble would broadcast it to everyone here.
+        // That fallback existed once before and was the exact leak the message-carried channel
+        // was introduced to close - resolveSpeaker returning null must not reopen it.
         org.gms.extension.event.ChatType replyType = planned.message().replyType();
         Character replyTarget = replyType == null ? null
                 : resolveSpeaker(planned.message().playerCharacterId());
-        if (replyType != null && replyTarget != null) {
+        if (replyType != null && replyTarget == null) {
+            log.info("Companion reply dropped: directed speaker vanished cid={} playerCid={} channel={}",
+                    getChr() == null ? -1 : getChr().getId(),
+                    planned.message().playerCharacterId(), replyType);
+            brain.record(new CompanionBrain.CompletedTurn(
+                    context.request(), planned.result(), List.of()));
+            return;
+        }
+        if (replyType != null) {
             activeTurnReplyType.set(replyType);
             activeTurnReplyTarget.set(replyTarget);
         }
@@ -446,14 +454,19 @@ public final class CompanionBot extends BotSM implements
             CompanionPlannerResult result = planned.result();
             if (result instanceof CompanionPlannerResult.Success success) {
                 AgentDecision decision = success.decision();
+                // Same call, same inputs as the planner service's validation: the request's
+                // message and speaker id are immutable, so this list IS the validated list.
+                List<CompanionAction> executed = CompanionDecisionActions.forExecution(
+                        decision,
+                        context.request().playerMessage(),
+                        context.request().playerCharacterId());
                 log.info("Companion planning succeeded cid={} playerCid={} latencyMs={} actions={}",
                         context.request().companionCharacterId(),
-                        context.request().playerCharacterId(), elapsedMs, decision.actions().size());
+                        context.request().playerCharacterId(), elapsedMs, executed.size());
                 log.debug("Companion decision cid={} reason={} reply={} actions={}",
                         context.request().companionCharacterId(),
                         decision.reason(), decision.reply(), decision.actions());
-                for (CompanionAction action : CompanionDecisionActions.forExecution(
-                        decision, context.request().playerMessage(), context.request().playerCharacterId())) {
+                for (CompanionAction action : executed) {
                     ActionExecutionResult execution =
                             actionExecutor.execute(action, getChr(), this, context.resolver());
                     executions.add(execution);
@@ -488,8 +501,8 @@ public final class CompanionBot extends BotSM implements
     }
 
     // The speaker a directed line came from, resolved live from the bot's own world (the player may
-    // have walked off since). Null when the character is gone - then the reply has no recipient and
-    // falls back to the map bubble, which is the same thing a whisper to a vanished player would do.
+    // have walked off since). Null when the character is gone - the caller then drops the whole
+    // reply rather than leaking a private-conversation line onto the map bubble.
     private Character resolveSpeaker(int playerCharacterId) {
         Character self = getChr();
         return self == null || self.getWorldServer() == null
@@ -516,6 +529,13 @@ public final class CompanionBot extends BotSM implements
                     "TRAINING_TARGET_MOVED", "Training target is no longer on the companion's map");
         }
         stopTraining();
+        // Ownership hand-off, sequenced: the solo grind shares this bot's ONE GrindBrain and ONE
+        // combat-sweep seat with the training episode, so the solo claim must be released BEFORE
+        // the training episode starts. Stopping it afterwards (the next macro tick's job, before
+        // this reorder) released the freshly-started training claim and flipped the registration
+        // mirror against a sweep the training combat still needed - the training episode then had
+        // no driver at all until the target re-crossed a map.
+        soloGrind.stop(getChr());
         trainingTarget = target;
         lastTrainingSameMap = true;
         nextCombatRepairAt = 0L;
