@@ -941,7 +941,7 @@ class BotMovementManager {
         if (stopDist > 0
                 && (entry.navEdge == null || entry.navEdge.type == BotNavigationGraph.EdgeType.WALK)) {
             Foothold standing = BotPhysicsEngine.findGroundFoothold(entry.bot.getMap(), botPos);
-            if (settledNarrowLedge(standing, targetPos.x, targetPos.y, botPos.y,
+            if (settledNarrowLedge(standing, botPos.x, targetPos.x, targetPos.y, botPos.y,
                     BotPhysicsEngine.walkStep(entry.bot.getMap(), entry.movementProfile))) {
                 entry.wasMovingX = false;
                 return 0;
@@ -1043,14 +1043,24 @@ class BotMovementManager {
     /**
      * The one narrow-ledge residency rule both arrival ends share. {@code standing} is the foothold
      * under the bot's feet (null when the map has no ground under it); the bot is "resident" when
-     * that foothold is narrower than {@link #NARROW_LEDGE_PX} and the target sits on it — its X
-     * within a walk step of the span (the bot cannot be held mid-step) and its Y within
-     * MAX_SLOPE_UP of the bot's feet (the engine's own same-ground snap). The Y gate is what keeps
-     * vertically stacked stair treads distinct: without it, standing on one tread would satisfy a
-     * precise target aimed at the tread below and strand the bot one storey short.
+     * that foothold is narrower than {@link #NARROW_LEDGE_PX}, the target sits on it — its X within
+     * a walk step of the span (the bot cannot be held mid-step) and its Y within MAX_SLOPE_UP of
+     * the bot's feet (the engine's own same-ground snap) — AND the bot has actually closed to
+     * within one walk step of the target on X. The Y gate is what keeps vertically stacked stair
+     * treads distinct: without it, standing on one tread would satisfy a precise target aimed at
+     * the tread below and strand the bot one storey short.
+     *
+     * <p>The bot's own distance is part of the rule, not a caller's afterthought: the target's X
+     * falling inside the ledge span says only "both are on this tread". Without the bot-X gate a
+     * bot anywhere on a 39-60px ledge (every LPQ door ledge) satisfied a target at the far end,
+     * the steer emitted a zero step and the driver cleared the target - so a bot parked at one end
+     * of a door ledge stood there forever while its walk never reported arrival, and the portal
+     * (which needs |dx| <= 8) could never be entered. That is the stage-4 "chose the door but
+     * stands at it" report.
      * Pure so the driver's arrival check and the steer's release check cannot drift apart.
      */
-    static boolean settledNarrowLedge(Foothold standing, int targetX, int targetY, int botY, int stepPx) {
+    static boolean settledNarrowLedge(Foothold standing, int botX, int targetX, int targetY,
+                                      int botY, int stepPx) {
         if (standing == null) {
             return false;
         }
@@ -1061,6 +1071,9 @@ class BotMovementManager {
         }
         if (Math.abs(targetY - botY) > BotPhysicsEngine.cfg.MAX_SLOPE_UP) {
             return false;
+        }
+        if (Math.abs(targetX - botX) > stepPx) {
+            return false; // still walking along the tread toward the target
         }
         return targetX >= lo - stepPx && targetX <= hi + stepPx;
     }

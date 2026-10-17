@@ -213,6 +213,20 @@ public class LudiPQBot extends PartyQuestBot {
     }
 
     /**
+     * The pass is the item the whole quest is about, and every LPQ collection stage earns it by
+     * killing at close range - so the combat beat scoops a pass the bot is standing on instead of
+     * leaving it for the next macro tick. Stages whose passes come out of a box (2, 4, 5) get the
+     * same treatment: those drops land at the box the bot is working, not across the room.
+     *
+     * <p>Stage 7 is omitted on purpose: its Rombard is summoned at a fixed spawn point and the
+     * stage's own beat already walks to that drop; a stepped-on sweep there adds nothing.
+     */
+    @Override
+    protected int[] steppedOnLootIds() {
+        return new int[]{LudiPqData.PASS};
+    }
+
+    /**
      * Work the entry room like any other collection stage.
      *
      * <p>Stage 1 is not a waiting room: the Red Balloon (NPC 2040036) hands the door to

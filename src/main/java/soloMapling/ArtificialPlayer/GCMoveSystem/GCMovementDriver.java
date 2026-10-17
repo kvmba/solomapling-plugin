@@ -831,8 +831,9 @@ final class GCMovementDriver {
                 && (entry.navEdge == null || entry.navEdge.type == BotNavigationGraph.EdgeType.WALK)
                 && !entry.climbing && !entry.inAir) {
             Foothold standing = BotPhysicsEngine.findGroundFoothold(entry.bot.getMap(), botPos);
-            if (BotMovementManager.settledNarrowLedge(standing, entry.moveTarget.x, entry.moveTarget.y,
-                    botPos.y, BotPhysicsEngine.walkStep(entry.bot.getMap(), entry.movementProfile))) {
+            if (BotMovementManager.settledNarrowLedge(standing, botPos.x, entry.moveTarget.x,
+                    entry.moveTarget.y, botPos.y,
+                    BotPhysicsEngine.walkStep(entry.bot.getMap(), entry.movementProfile))) {
                 entry.moveTarget = null;
                 entry.moveTargetPrecise = false;
                 BotMovementManager.clearNavigationState(entry);

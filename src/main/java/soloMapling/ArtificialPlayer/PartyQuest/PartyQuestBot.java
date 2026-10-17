@@ -186,6 +186,11 @@ public abstract class PartyQuestBot extends BotSM implements GrindTickRegistry.P
                 || !isInsideQuest(bot.getMapId())) {
             return;
         }
+        // Sweep the drops the bot is standing on, whatever the stage's steering is doing this
+        // beat: a kill lands its item at the mob's feet, and waiting for the macro tick to come
+        // back for it is the reported "the pass is still lying there" delay. Narrow on purpose -
+        // see PqActions.lootSteppedOn.
+        PqActions.lootSteppedOn(bot, steppedOnLootIds());
         if (movementShielded()) {
             PqActions.attack(bot); // the walk owns the steering; the swing still lands
             return;
@@ -197,6 +202,22 @@ public abstract class PartyQuestBot extends BotSM implements GrindTickRegistry.P
             return;
         }
         PqActions.seekAndAttack(bot);
+    }
+
+    /** Shared empty opt-in for {@link #steppedOnLootIds()}; never mutated. */
+    private static final int[] EMPTY_LOOT_IDS = new int[0];
+
+    /**
+     * The items this quest's combat beat may scoop off the floor as the bot walks over them.
+     *
+     * <p>Empty by default: a quest opts in with the exact item ids its own stage work produces.
+     * Keeping it declarative is what stops the sweep from eating another mechanic's ground item -
+     * HPQ's seeds and OPQ's spring seeds are floor items too, and the reactors that consume them
+     * match the pile by identity (see {@code PqActions.feedReactor}), so a generic "pick up
+     * everything" beat would break those stages while fixing this one.
+     */
+    protected int[] steppedOnLootIds() {
+        return EMPTY_LOOT_IDS;
     }
 
     /**
@@ -628,8 +649,22 @@ public abstract class PartyQuestBot extends BotSM implements GrindTickRegistry.P
         }
         Portal exit = portalTo(leaderMap);
         if (exit == null) {
-            // No door from here to there: the script warped the leader (or the rooms are not
-            // directly connected). Leave it to the quest's own team warp next tick.
+            // No door from here to there. Two very different situations hide behind that null,
+            // and telling them apart is what the catch-up walk below is for:
+            //
+            //  - the rooms are not directly connected because the party is MORE THAN ONE ROOM
+            //    ahead (a bot that had its own work in this stage - LPQ's trap room or a door
+            //    room - always leaves one stage late). The quest still has a forward door out of
+            //    this room (LPQ's next00 chain), and walking it is exactly what caught-up play
+            //    does. Without this the bot sat at the finished stage's NPC for the rest of the
+            //    run: the reported "one bot never comes back, so every later stage is a body
+            //    short". Its script re-checks the stage gate, so a bot that is refused simply
+            //    stands at the door and retries - it can never skip ahead of the leader.
+            //  - there is no forward door at all (the leader was warped by a script, or this is
+            //    the run's last room): leave it to the quest's own team warp next tick.
+            exit = forwardPortal();
+        }
+        if (exit == null) {
             return false;
         }
         BotLogger.log("PQ bot " + getChr().getName() + " following the leader from "
@@ -640,6 +675,49 @@ public abstract class PartyQuestBot extends BotSM implements GrindTickRegistry.P
         }
         return getChr().getMapId() != here;
     }
+
+    /**
+     * The room's forward door - the portal a party walks to advance one stage.
+     *
+     * <p>Default is {@code next00}, which is the convention every quest chain in this server
+     * shares ({@code linkToNextStage} renames that same portal's script on each stage turn-in, so
+     * it is the door the quest itself opens). A quest whose chain uses another name overrides
+     * this. Deliberately NOT "the nearest portal": a room's nearest portal is its spawn point,
+     * whose target is the engine's no-map sentinel - walking onto it moves nobody (the same
+     * failure {@link #portalTo} exists to prevent).
+     */
+    protected Portal forwardPortal() {
+        var map = getChr().getMap();
+        return map == null ? null : forwardPortalOf(map.getPortals());
+    }
+
+    /**
+     * The pure form of {@link #forwardPortal()}: the {@code next00} door in a map's portal list
+     * that actually leads somewhere, or null when the room has none. Kept collection-taking so the
+     * rule is unit-testable against the engine's own portal type (a real {@code MapleMap} cannot
+     * be constructed in a test).
+     *
+     * <p>A portal named {@code next00} with target {@code 999999999} is NOT a stage door: that is
+     * the engine's "no map" sentinel, and the portal is a script-only gate whose effect depends on
+     * whatever script the room happens to carry (Davy Jones' {@code davy_next*} and the ghost-ship
+     * gates are named the same way but do not lead to a next map). Walking one of those to catch
+     * up would be a guess, so it reports null and the caller waits for the party instead.
+     */
+    static Portal forwardPortalOf(java.util.Collection<Portal> portals) {
+        if (portals == null) {
+            return null;
+        }
+        for (Portal portal : portals) {
+            if (portal != null && "next00".equals(portal.getName())
+                    && portal.getTargetMapId() > 0 && portal.getTargetMapId() != NO_MAP_SENTINEL) {
+                return portal;
+            }
+        }
+        return null;
+    }
+
+    /** The engine's "no map" portal target ({@code 999999999}): spawns and script-only gates. */
+    private static final int NO_MAP_SENTINEL = 999999999;
 
     /**
      * Whether this bot should trail the leader's room changes. The default is always:

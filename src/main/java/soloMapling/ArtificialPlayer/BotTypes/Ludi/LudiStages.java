@@ -205,6 +205,15 @@ public final class LudiStages {
     public static void workTrapRoom(Character bot) {
         PqActions.recoverUngatheredHandoffs(bot, LudiPqData.PASS);
 
+        // The stage can be turned in while this bot is still climbing out of the trap room (the
+        // rest of the party never went in, or left first). From that moment the room's four boxes
+        // are worthless: breaking them spends 30s+ per box AND leaves the bot behind, because the
+        // party's next stage is already open and there is no pass left to gather. Leave at once.
+        if (stageCleared(bot, 2)) {
+            exitTrapRoom(bot);
+            return;
+        }
+
         int box = nearestOwnedBoxOid(bot, LudiPqData.BOX_STAGE2);
         if (box >= 0 && hitReactorRotate(bot, box, LudiPqData.BOX_STAGE2)) {
             PqActions.loot(bot, bot.getPosition(), LOOT_RADIUS_PX, new int[]{LudiPqData.PASS});

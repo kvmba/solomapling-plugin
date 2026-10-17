@@ -1528,6 +1528,7 @@ public final class PqActions {
         orphanProbeAtByBot.remove(botId);
         stageWalkShieldUntilByBot.remove(botId);
         SEEK_TRACE_UNTIL.remove(botId);
+        nextSteppedOnPickupAtByBot.remove(botId);
     }
 
     /** Whether this mob is a legitimate chase target from {@code pos}: hostile and in the seek box. */
@@ -1637,6 +1638,107 @@ public final class PqActions {
      * the engine's pickupItem has no distance check, so "close" is this class's rule.
      */
     private static final double PICKUP_REACH_SQ = 150.0 * 150.0;
+
+    /**
+     * The pickup box a real client uses for an item it walks over ({@code LOOT_PICKUP_PX} in the
+     * grind layer, the same 60px the engine's own client pickup animation covers). Deliberately
+     * tighter than {@link #PICKUP_REACH_SQ}: this reach is for drops the bot is ALREADY standing
+     * on, so it must never read as a ranging grab.
+     */
+    private static final double STEPPED_ON_REACH_SQ = 60.0 * 60.0;
+    /** The same reach in px, for the engine-facing scan (which takes px and squares it itself). */
+    private static final double STEPPED_ON_REACH_PX = 60.0;
+
+    /**
+     * The beat between two stepped-on pickups while fighting. A player's client sweeps a drop it
+     * walks over on the next animation frame; a bot that emptied a whole pile in one combat beat
+     * would read as a vacuum. Same order as the grind layer's {@code LOOT_GAP_MIN/MAX_MS}.
+     */
+    private static final long STEPPED_ON_PICKUP_GAP_MIN_MS = 80L;
+    private static final long STEPPED_ON_PICKUP_GAP_MAX_MS = 220L;
+
+    /** botId -> the earliest moment this bot may scoop another stepped-on drop. */
+    private static final Map<Integer, Long> nextSteppedOnPickupAtByBot = new java.util.concurrent.ConcurrentHashMap<>();
+
+    /**
+     * Scoop the matching drops the bot is standing ON, without steering, without sleeping and
+     * without looking past its own feet.
+     *
+     * <p>This is the combat beat's half of the loot contract. Quest stages collect items that the
+     * room's own work produces (LPQ's passes, Orbis's pieces), and a bot that only loots on the
+     * macro tick leaves everything it walked over to a 2-6s wait - or, in a bot-only room, to the
+     * 36-48s wheel. The reported LPQ stage-3 "bot does not pick the pass up in time" is exactly
+     * that: the crate's Blocktopus dies at the bot's feet and the pass sits there while the bot
+     * chases the next crate, until the macro tick happens to bring it back inside 150px.
+     *
+     * <p>Deliberately NARROW, because a wider sweep is a real defect (the deleted 2000px cleanup
+     * sweeps, and the item-triggered reactors that read their drop's stack identity five seconds
+     * after it lands - see {@link #feedReactor}):
+     * <ul>
+     *   <li>only {@code itemIds} the CALLER names - a stage never scoops another mechanic's pile
+     *       (HPQ's seeds on a flower, OPQ's seed on the spring);</li>
+     *   <li>only drops inside {@link #STEPPED_ON_REACH_SQ} - walking to a drop stays the macro
+     *       tick's job, because a combat beat that re-aims the driver fights the chase;</li>
+     *   <li>the same entitlement the rest of the class uses: {@link DropCommands#botCanLoot} plus
+     *       {@link #isFloorLoot} (no addressed hand-off, no multi-piece stack);</li>
+     *   <li>paced by {@link #STEPPED_ON_PICKUP_GAP_MIN_MS}, so a pile is swept over a few beats
+     *       the way a client renders it.</li>
+     * </ul>
+     *
+     * @return how many items were actually picked up this beat
+     */
+    public static int lootSteppedOn(Character bot, int[] itemIds) {
+        if (bot == null || bot.getMap() == null || itemIds == null || itemIds.length == 0) {
+            return 0;
+        }
+        long now = movementNowMs();
+        Long next = nextSteppedOnPickupAtByBot.get(bot.getId());
+        if (next != null && now < next) {
+            return 0;
+        }
+        Point botPos = bot.getPosition();
+        if (botPos == null) {
+            return 0;
+        }
+        List<MapObject> found = BotLogic.checkForItemsOnFloor(bot, botPos,
+                STEPPED_ON_REACH_PX, itemIds);
+        if (found.isEmpty()) {
+            return 0;
+        }
+        MapItem nearest = null;
+        double bestSq = STEPPED_ON_REACH_SQ;
+        for (MapObject o : found) {
+            if (!(o instanceof MapItem drop) || !isFloorLoot(drop)
+                    || !DropCommands.botCanLoot(bot, drop)) {
+                continue;
+            }
+            Point ip = drop.getPosition();
+            if (ip == null) {
+                continue;
+            }
+            double dsq = botPos.distanceSq(ip);
+            if (dsq <= bestSq) {
+                bestSq = dsq;
+                nearest = drop;
+            }
+        }
+        if (nearest == null) {
+            return 0;
+        }
+        int before = 0;
+        for (int id : itemIds) {
+            before += countItem(bot, id);
+        }
+        DropCommands.botLootSingleDrop(bot, nearest);
+        nextSteppedOnPickupAtByBot.put(bot.getId(), now + STEPPED_ON_PICKUP_GAP_MIN_MS
+                + ThreadLocalRandom.current().nextLong(STEPPED_ON_PICKUP_GAP_MAX_MS
+                - STEPPED_ON_PICKUP_GAP_MIN_MS + 1));
+        int after = 0;
+        for (int id : itemIds) {
+            after += countItem(bot, id);
+        }
+        return after - before;
+    }
 
     /**
      * How often one bot may run the room-wide orphan-drop probe of {@link #loot}: the probe
