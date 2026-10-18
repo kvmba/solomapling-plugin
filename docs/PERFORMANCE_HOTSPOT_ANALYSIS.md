@@ -383,3 +383,55 @@ for (Character player : bot.getWorldServer().getPlayerStorage().getAllCharacters
 | `BotContactDamage` | 同一 tick 内重复构造 bot 触摸盒两次 | 只构造一次，`query` 复制后 grow |
 
 验证：`mvn -o test` → **1684 run, 0 failures, 0 errors, 2 skipped**。
+
+---
+
+## 6.8 第三轮复核：修正两处"描述与事实不符"与一处过度防御
+
+前两轮的复核又发现三处问题，均已在代码里改正。这里记录的是**判断失误**本身，避免后人重复。
+
+### 6.8.1 `BotBuffConfig.buffsForJob` 的收益被高估
+
+我原先把"每个移动 tick 都会调"写进注释与提交信息。核实后发现
+`BotAuraState.dashSkillFor`（唯一每移动 tick 的调用方）**已经按 bot 缓存**了结果：
+
+```java
+Integer cached = DASH_SKILL.get(bot.getId());
+if (cached != null) return cached;   // 命中后不再进 buffsForJob
+```
+
+真实调用频率是：每次挥砍的 `shadowDoubled`（仅 Shadow Partner 判定）、登场的
+buff sweep、flavor flex、Ludi hide 判定、GM 命令。缓存本身仍然正确、零风险，
+但**收益远小于我写的量级**，注释已按事实改正。
+
+### 6.8.2 `BotAttackConfig.resolve` 的调用频率
+
+`BotAttackDriver.attackReachX()` / `attackReachY()` 各自会 `resolve` 一次，而
+`GrindBrain.bestInReachInterloper` 在**每个战斗 tick** 成对调用这两者
+（`GrindBrain.inAttackRange` 则是惰性缓存的，不在此列）。上一轮只把锚点区域提到
+循环外，**没有**消除这对重复解析。本轮新增 `BotAttackDriver.reachProfile(bot)`，
+让该调用点用一次 profile 解析同时取两个轴：
+
+```java
+BotAttackProfile reach = BotAttackDriver.reachProfile(chr);
+int reachX = reach.reachX;
+int reachY = reach.reachY;
+```
+
+`BotAttackProfile` 所有字段都是 `public final`、构造器私有，实例不可变，因此暴露它
+不破坏封装，也不产生新分配。
+
+### 6.8.3 回退一处过度防御
+
+`findBelowIndexed(MapleMap, Point)` 我加了 `p == null ? null : ...`。内部调用点不可能
+传 null（AGENTS.md 第 6 条明确禁止这种"内部不可能触发的空值检查"），而且这会把本来
+会暴露的 NPE 变成静默 null，让探针失效更难诊断。已回退为直接解引用。
+
+### 6.8.4 测试节奏
+
+本轮新增的两个测试文件都**不依赖调度时序**：
+`BotHelpersIsBotTest` 只读写进程内静态注册表，`BotAttackMemoisationSourceTest` 只读源码。
+`pom.xml` 未配置 surefire 并行（仅 `maven-surefire-plugin` 版本号），因此不存在
+"并行测试共享全局注册表"的污染风险。
+
+验证：`mvn -o test` → **1686 run, 0 failures, 0 errors, 2 skipped**。

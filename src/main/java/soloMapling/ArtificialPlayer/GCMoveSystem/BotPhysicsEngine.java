@@ -2904,7 +2904,7 @@ final class BotPhysicsEngine {
      * airborne integrator issue tens of millions of these probes on big maps.
      */
     static Foothold findBelowIndexed(MapleMap map, Point p) {
-        return p == null ? null : findBelowIndexed(map, p.x, p.y);
+        return findBelowIndexed(map, p.x, p.y);
     }
 
     /*

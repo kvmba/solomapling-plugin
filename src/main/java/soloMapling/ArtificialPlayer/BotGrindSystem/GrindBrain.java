@@ -4,6 +4,7 @@ import org.gms.client.Character;
 import org.gms.server.life.Monster;
 import org.gms.server.maps.MapObject;
 import soloMapling.ArtificialPlayer.BotAttackSystem.BotAttackDriver;
+import soloMapling.ArtificialPlayer.BotAttackSystem.BotAttackProfile;
 import soloMapling.ArtificialPlayer.BotStatusSystem.BotDebuffState;
 import soloMapling.ArtificialPlayer.GCMoveSystem.GCMovement;
 
@@ -233,11 +234,14 @@ public final class GrindBrain {
         if (rid == lastSwingMapId) {
             return null; // already stopped for a travel-clear on this map this episode — keep walking
         }
-        int reachX = BotAttackDriver.attackReachX(chr);
-        int reachY = BotAttackDriver.attackReachY(chr);
-        if (reachX <= 0) {
+        // One profile resolution for both axes: the two single-axis getters would each redo the
+        // weapon lookup + resolve, and this gate runs on every combat tick.
+        BotAttackProfile reach = BotAttackDriver.reachProfile(chr);
+        if (reach == null || reach.reachX <= 0) {
             return null; // no configured attack (or the aura-gated slot is down right now)
         }
+        int reachX = reach.reachX;
+        int reachY = reach.reachY;
         Point pos = chr.getPosition();
         if (pos == null || chr.getMap() == null) {
             return null;

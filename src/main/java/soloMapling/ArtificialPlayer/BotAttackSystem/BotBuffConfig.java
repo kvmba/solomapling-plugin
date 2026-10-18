@@ -156,10 +156,13 @@ public final class BotBuffConfig {
      */
     public static List<Integer> buffsForJob(Job job) {
         if (job == null) return Collections.emptyList();
-        // Called from the movement tick (dash-skill probe), the buff sweep and the flavor layer;
-        // the table is a static initializer, so the union is a pure function of the job. Cache one
-        // immutable list per job instead of rebuilding (and re-scanning every entry with isA) each
-        // call. EnumMap iteration order is fixed, so the cached order matches the old result.
+        // The union is a pure function of the job (the table is a static initializer), so memoise
+        // one immutable list per job instead of walking every entry with isA() and allocating on
+        // each call. EnumMap iteration order is fixed, so the cached order is the old order.
+        // Callers: the per-swing Shadow Partner probe (BotAttackDriver), the on-arrival buff sweep,
+        // the flavor flex, the Ludi hide check and the GM commands. The per-movement-tick dash
+        // probe already memoises per bot (BotAuraState.dashSkillFor), so this is not a per-tick
+        // allocation in practice - the win is on the per-swing and per-grant paths.
         List<Integer> cached = CACHE.get(job.ordinal());
         if (cached != null) {
             return cached;

@@ -162,6 +162,16 @@ public final class BotAttackDriver {
         return p != null ? p.reachY : 0;
     }
 
+    /**
+     * The bot's attack reach as a pair, from ONE profile resolution. The two single-axis getters
+     * above each re-derive the profile (weapon lookup + resolve), so a caller that needs both -
+     * the travel-clear gate reads them every combat tick - paid that twice. Null when the bot
+     * has no configured attack.
+     */
+    public static BotAttackProfile reachProfile(Character bot) {
+        return primaryProfile(bot);
+    }
+
     private static BotAttackProfile primaryProfile(Character bot) {
         if (bot == null) {
             return null;
