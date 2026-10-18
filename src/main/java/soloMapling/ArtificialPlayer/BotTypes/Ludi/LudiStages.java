@@ -714,36 +714,9 @@ public final class LudiStages {
             deliverAndPark(bot, 5);
             return;
         }
-        // Stealth BEFORE the door, not after it. The maze's rooms are entered by walking a
-        // script-less portal from 922010500, and 922010500 itself seats two invincible guards
-        // (9300013, PAD 999) on the floor the bot has to cross to reach in06. The hide was only
-        // ever shown inside a sub-room, so a 飞侠 walking to the bottom room crossed the guards
-        // bare - one touch is a death - which is exactly the reported "the thief went down to
-        // the invincible-mob area without hiding". A hide-carrying kit now raises it before the
-        // walk to the door; the walk does not break it (only an attack or a mount does), and
-        // entering a portal does not either.
-        holdHideWhileCrossing(bot, room);
+        // Stealth is already up: updateState() raises it for every stage-5 map before any
+        // movement, which covers both this door walk and following the leader through a door.
         enterDoorRoom(bot, room, LudiPqData.STAGE5_ROOM_FIRST);
-    }
-
-    /**
-     * Raise this bot's hide BEFORE it crosses the stage-5 main room, for the kits that route
-     * into (or past) a guarded room.
-     *
-     * <p>The main map 922010500 seats two invincible 9300013 guards on its ground floor and the
-     * bottom room's door (in06, x=-123 y=251) sits below them, so the walk to that door crosses
-     * their touch box. The guard room 922010506 has seven of them. A 飞侠 / Brawler that owns
-     * 隐身术 / 橡木伪装 must therefore be hidden for the crossing AND for the room - the old
-     * code only hid once the bot was already inside a sub-room.
-     */
-    private static void holdHideWhileCrossing(Character bot, int targetRoom) {
-        if (hideSkillFor(bot) == 0) {
-            return;
-        }
-        boolean guardedTarget = targetRoom == LudiPqData.STAGE5_ROOM_LAST;
-        if (guardedTarget || nearbyGuardCount(bot) > 0) {
-            stayHidden(bot);
-        }
     }
 
     /**

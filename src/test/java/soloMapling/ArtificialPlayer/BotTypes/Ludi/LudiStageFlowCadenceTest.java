@@ -96,27 +96,32 @@ class LudiStageFlowCadenceTest {
     }
 
     /**
-     * Stage 5's hide: the guards stand in the MAIN room, on the way to the bottom room's door,
-     * so a 飞侠 that only hides after entering the room crosses them bare.
+     * Stage 5's hide: the guards stand in the MAIN room, on the way to every sub-room door, so
+     * a thief that only hides after entering the room crosses them bare. Both ways in - the
+     * bot's own door walk and following the leader - must be covered, and the aura has to be up
+     * before the movement starts.
      */
     @Test
     void theHideIsRaisedBeforeCrossingTheGuardedFloor() throws Exception {
-        String stages = javaSource(STAGES);
-        int mainRoom = stages.indexOf("private static void workStage5FromMainRoom");
-        String body = stages.substring(mainRoom, stages.indexOf("\n    }", mainRoom));
-        int hide = body.indexOf("holdHideWhileCrossing");
-        int door = body.indexOf("enterDoorRoom");
-        assertTrue(hide > 0, "the crossing must raise the hide");
-        assertTrue(door > hide, "the hide must be up BEFORE the walk into the room");
+        String bot = javaSource(BOT);
+        int update = bot.indexOf("public void updateState()");
+        assertTrue(update > 0, "updateState must exist");
+        String body = bot.substring(update, bot.indexOf("\n    }", update));
+        int hide = body.indexOf("LudiStages.stayHidden");
+        int work = body.indexOf("tickPartyQuest()");
+        assertTrue(hide > 0, "stage 5 must raise the hide on the macro tick");
+        assertTrue(work > hide,
+                "the hide must be raised BEFORE tickPartyQuest issues any walk (both the "
+                        + "claim-and-walk and the follow walk are issued from it)");
+        assertTrue(body.contains("roomStage(here) == 5") && body.contains("stageOf(here) == 5"),
+                "it must cover both a stage-5 sub-room and the stage-5 main map");
 
-        int helper = stages.indexOf("private static void holdHideWhileCrossing");
-        assertTrue(helper > 0, "the crossing helper must exist");
-        String helperBody = stages.substring(helper, stages.indexOf("\n    }", helper));
-        assertTrue(helperBody.contains("hideSkillFor"),
-                "only hide-carrying kits can hide; the posting table still decides who enters");
-        assertTrue(helperBody.contains("nearbyGuardCount") || helperBody.contains("STAGE5_ROOM_LAST"),
-                "the crossing is dangerous either because guards are in this room or because "
-                        + "the target room is the guarded one");
+        // The predicate must stay side-effect free: the follow decision is a query.
+        int follow = bot.indexOf("protected boolean isFollowingLeader()");
+        String followBody = bot.substring(follow, bot.indexOf("\n    }", follow));
+        assertFalse(followBody.contains("stayHidden"),
+                "isFollowingLeader is a predicate; raising an aura from it is a side effect in "
+                        + "a query");
     }
 
     private static String javaSource(String path) throws Exception {
