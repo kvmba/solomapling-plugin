@@ -132,7 +132,14 @@ class BotMovementState {
     // climb-idle hold on (even though grinding is still set) and makes the driver freeze the hang so no
     // nav/reaction/fidget layer dislodges it. Set/cleared via GCMovement.setRestHold.
     volatile boolean resting = false;
-    int attackCooldownMs = 0;
+    // ── Attack action lock (the "can't move mid-swing" rule) ──
+    // A real client refuses every movement input while CUserLocal::IsAttacking holds: the attack
+    // animation owns the body for its full WZ length (800ms for a basic swing, up to ~1s for the
+    // longer skill poses). Set ONLY where an attack packet is actually broadcast
+    // (GCMovement.markAttackAction), and enforced centrally by the driver + the movement primitives,
+    // so no strategy can walk/jump/teleport on top of a live swing. MovementClock-based (not a
+    // tick counter) so the execution sims drive it off their virtual clock.
+    long attackActionUntilMs = 0L;
     volatile boolean shopVisitPending = false;
     int followTravelTargetMapId = -1;
 

@@ -185,7 +185,7 @@ final class RoamStrategy implements GrindStrategy {
         if (b.engage.skillMoveToward(chr, tx, ty)) {
             return; // blink/dash toward it
         }
-        if (now() < b.attackWalkLockUntil) {
+        if (b.midSwingPlant(chr)) {
             return; // just swung — hold, then move
         }
         if (Math.abs(tx - b.lastMoveTargetX) < GrindBrain.ROAM_RETARGET_EPS) {

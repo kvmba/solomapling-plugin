@@ -398,11 +398,33 @@ public final class GCMovement {
         }
     }
 
-    /* Flag the bot as combat-alerted so it renders the 5s ALERT pose. The observing client already starts
-     * its own alert timer when it renders our attack packet; this keeps the bot's OWN movement broadcasts
-     * carrying ALERT instead of STAND for the duration, so a following idle/move packet doesn't cancel the
-     * pose. Called by the attack layer after each swing. No-op if the bot isn't under GC control. */
-    public static void markAlerted(Character bot) {
+    /**
+     * How long an attack packet owns the body. A real client refuses every movement input while
+     * {@code CUserLocal::IsAttacking} holds, and the attack animation is the clock: the WZ body
+     * poses under {@code Character.wz/00002000.img} run 700ms (swingOF/stabTF/shootF) to 820ms
+     * (shoot2) for the basic swings the bot profiles use. Rounding up to a whole second keeps the
+     * bot's body still until the last frame has played on every observed client, and is the floor
+     * the reported behaviour asks for ("至少间隔1s"). Shorter locks let the walk packet truncate a
+     * live swing, which is exactly the "attacks then instantly walks/jumps" defect.
+     */
+    public static final long ATTACK_ACTION_LOCK_MS = 1_000L;
+
+    /**
+     * Flag a broadcast attack and take the body for {@link #ATTACK_ACTION_LOCK_MS}.
+     *
+     * <p>This is the ONE arming point for the attack-action lock, called from the seams that
+     * actually put an attack packet on the wire ({@link soloMapling.ArtificialPlayer.BotAttackSystem.BotAttackEffects},
+     * the meso/mist/web casts, the flavour swings and the skill show). A decision that never
+     * reaches a packet (driver cooldown, no target, sealed) must not call it — otherwise a miss
+     * would freeze the bot for a second for nothing.
+     *
+     * <p>It also keeps the 5s ALERT pose: the observing client starts its own alert timer when it
+     * renders our attack packet, and this keeps the bot's OWN movement broadcasts carrying ALERT
+     * instead of STAND, so a following idle packet doesn't cancel the pose.
+     *
+     * <p>No-op if the bot isn't under GC control.
+     */
+    public static void markAttackAction(Character bot) {
         if (bot == null) {
             return;
         }
@@ -410,8 +432,33 @@ public final class GCMovement {
         if (st != null) {
             synchronized (st) {
                 BotContactDamage.markAlerted(st);
+                st.attackActionUntilMs = MovementClock.nowMs() + ATTACK_ACTION_LOCK_MS;
             }
         }
+    }
+
+    /**
+     * True while a just-broadcast attack still owns the body: ground movement, jumps, blinks and
+     * turns are refused until the swing has played out. The movement driver enforces it centrally
+     * (so no strategy can walk over a swing) and the pulse commands below refuse at the primitive
+     * (so an immediate teleport/jump/face can't cut the animation either).
+     *
+     * <p>Airborne and climbing bots are deliberately NOT gated: a hop or a rope is already a
+     * committed state, and freezing one is the "hanging in the jump pose" failure mode.
+     */
+    public static boolean isAttackActionLocked(Character bot) {
+        BotMovementState st = bot == null ? null : STATES.get(bot.getId());
+        if (st == null) {
+            return false;
+        }
+        synchronized (st) {
+            return MovementClock.nowMs() < st.attackActionUntilMs;
+        }
+    }
+
+    /** True when a pulse command / move may be issued for this bot right now (package-internal gate). */
+    private static boolean attackActionLocked(BotMovementState st) {
+        return st != null && MovementClock.nowMs() < st.attackActionUntilMs;
     }
 
     /* Mage blink toward a point on the current map: pick a same-ledge landing up to ~150px toward it and
@@ -425,7 +472,8 @@ public final class GCMovement {
         BotMovementState st = STATES.get(bot.getId());
         if (st == null) return false;
         synchronized (st) {
-            return !st.tickStopped && GCMovementSkills.execTeleport(st, bot, targetX, targetY);
+            return !st.tickStopped && !attackActionLocked(st)
+                    && GCMovementSkills.execTeleport(st, bot, targetX, targetY);
         }
     }
 
@@ -439,7 +487,8 @@ public final class GCMovement {
         BotMovementState st = STATES.get(bot.getId());
         if (st == null) return false;
         synchronized (st) {
-            return !st.tickStopped && GCMovementSkills.execFlashJump(st, bot, targetX, scaleCap);
+            return !st.tickStopped && !attackActionLocked(st)
+                    && GCMovementSkills.execFlashJump(st, bot, targetX, scaleCap);
         }
     }
 
@@ -853,12 +902,15 @@ public final class GCMovement {
 
     // ── Idle fidget primitives (organic liveliness) ─────────────────────────
 
-    /* A standing hop in place. */
+    /* A standing hop in place. Refused mid-swing: a jump packet ends the attack animation early, and
+     * a real client cannot jump while IsAttacking holds. */
     public static void jumpInPlace(Character bot) {
         BotMovementState st = bot == null ? null : STATES.get(bot.getId());
         if (st != null) {
             synchronized (st) {
-                if (!st.tickStopped && !st.inAir && !st.climbing) BotMovementManager.initiateJump(st, bot, 0);
+                if (!st.tickStopped && !st.inAir && !st.climbing && !attackActionLocked(st)) {
+                    BotMovementManager.initiateJump(st, bot, 0);
+                }
             }
         }
     }
@@ -866,12 +918,16 @@ public final class GCMovement {
     // ours: a directional (arced) engage hop toward dx (-1 left / +1 right; 0 = vertical). Unlike
     // jumpInPlace (always vertical), a non-zero dx launches a real moving arc — the manager/physics
     // already carry the ±walkStep horizontal velocity. Used by the grind brain's jump-attack so
-    // thieves close/kite in an arc instead of pogo-ing. No-op if already airborne or on a rope.
+    // thieves close/kite in an arc instead of pogo-ing. No-op if already airborne, on a rope, or
+    // still inside the attack-action lock (a hop fired on the same beat as the swing truncated the
+    // animation — the "attacks, then instantly hops" report).
     public static void jumpToward(Character bot, int dx) {
         BotMovementState st = bot == null ? null : STATES.get(bot.getId());
         if (st != null) {
             synchronized (st) {
-                if (!st.tickStopped && !st.inAir && !st.climbing) BotMovementManager.initiateJump(st, bot, dx);
+                if (!st.tickStopped && !st.inAir && !st.climbing && !attackActionLocked(st)) {
+                    BotMovementManager.initiateJump(st, bot, dx);
+                }
             }
         }
     }
@@ -881,7 +937,7 @@ public final class GCMovement {
         BotMovementState st = bot == null ? null : STATES.get(bot.getId());
         if (st != null) {
             synchronized (st) {
-                if (st.tickStopped) return;
+                if (st.tickStopped || attackActionLocked(st)) return;
                 st.facingDir = -st.facingDir;
             }
         }
@@ -890,14 +946,22 @@ public final class GCMovement {
     /* Face a direction (true = left) and broadcast the new idle stance immediately. Broadcasting now
      * (rather than waiting for the next tick) means the turn shows before whatever the caller does next
      * - e.g. an attack swing - and the client's last-movement stance is the new facing, so it won't snap
-     * back the instant the swing ends. No-op if the bot isn't under dynamic control. */
+     * back the instant the swing ends. No-op if the bot isn't under dynamic control.
+     *
+     * <p>Refused while an attack still owns the body: this method broadcasts a STAND frame immediately,
+     * which is what made a bot snap upright mid-swing when a strategy turned on the next beat. The
+     * FACING itself is always recorded (the aimed swing carries it in the attack packet's facing byte),
+     * so a bot whose mob crossed sides still throws in the right direction — only the cosmetic
+     * stand packet is held back until the swing has played out. */
     public static void face(Character bot, boolean left) {
         BotMovementState st = bot == null ? null : STATES.get(bot.getId());
         if (st != null) {
             synchronized (st) {
                 if (st.tickStopped) return;
                 st.facingDir = left ? -1 : 1;
-                BotMovementManager.broadcastMovement(st);
+                if (!attackActionLocked(st)) {
+                    BotMovementManager.broadcastMovement(st);
+                }
             }
         }
     }
@@ -918,12 +982,13 @@ public final class GCMovement {
         }
     }
 
-    /* Crouch/duck for durationMs (the driver holds the prone pose while idle). */
+    /* Crouch/duck for durationMs (the driver holds the prone pose while idle). Refused mid-swing: a
+     * crouch packet cuts the attack animation exactly like a walk does. */
     public static void duck(Character bot, int durationMs) {
         BotMovementState st = bot == null ? null : STATES.get(bot.getId());
         if (st != null) {
             synchronized (st) {
-                if (!st.tickStopped && !st.inAir && !st.climbing) {
+                if (!st.tickStopped && !st.inAir && !st.climbing && !attackActionLocked(st)) {
                     st.duckUntilMs = MovementClock.nowMs() + Math.max(1, durationMs);
                 }
             }

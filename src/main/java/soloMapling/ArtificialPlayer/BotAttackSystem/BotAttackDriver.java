@@ -213,6 +213,13 @@ public final class BotAttackDriver {
         if (!force && now < nextAttackByBot.getOrDefault(bot.getId(), 0L)) {
             return AttackResult.miss("on cooldown");
         }
+        // The attack ACTION lock is the second half of the tempo rule: the body is still playing the
+        // last swing's animation, so a second attack packet would truncate it on every viewer's
+        // client. This gate is what makes the rule unbypassable - callers that swing on a raw beat
+        // (the PQ chase, the travel-clear beat, a retaliation) never consult the engage ordering.
+        if (!force && GCMovement.isAttackActionLocked(bot)) {
+            return AttackResult.miss("attack animation still playing");
+        }
 
         WeaponType weapon = BotAttack.resolveEquippedWeaponType(bot);
         BotAttackConfig.JobAttacks atks = BotAttackConfig.resolve(bot.getJob(), weapon);

@@ -125,7 +125,7 @@ public final class BotShadowWeb {
                 Hermit.SHADOW_WEB, level, facingMask, (mobDamage.size() << 4) | 1,
                 mobDamage, BotAttackData.DEFAULT_ATTACK_SPEED,
                 BotAttackData.actionFor(Hermit.SHADOW_WEB, null), 0), false);
-        GCMovement.markAlerted(bot);
+        GCMovement.markAttackAction(bot);
 
         // Per-mob status roll, the host's generic attack branch: chance first (the WZ prop,
         // 42-46% by level), then applyStatus with the effect's own monster statuses. The web

@@ -49,11 +49,11 @@ public final class SkillShowEffects {
         return mob != null && mob.isAlive() ? mob : null;
     }
 
-    /** 表演公共前置：下坐骑、破隐身、markAlerted。 */
+    /** 表演公共前置：下坐骑、破隐身、markAttackAction。 */
     private static void preCast(Character bot) {
         BotMount.cancelForAction(bot);
         BotAuraState.cancelHidesForAction(bot);
-        GCMovement.markAlerted(bot);
+        GCMovement.markAttackAction(bot);
     }
 
     /** 技能级（SP 预算推导，封顶 maxLevel）：表演 bot 固定 180 级 → 全部满级。 */

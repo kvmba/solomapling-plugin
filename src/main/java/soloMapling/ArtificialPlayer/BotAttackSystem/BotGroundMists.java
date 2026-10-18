@@ -120,7 +120,7 @@ public final class BotGroundMists {
                 mobDamage, BotAttackData.magicChargeFor(FPMage.POISON_MIST),
                 BotAttackData.DEFAULT_ATTACK_SPEED,
                 BotAttackData.actionFor(FPMage.POISON_MIST, null), 0), false);
-        GCMovement.markAlerted(bot);
+        GCMovement.markAttackAction(bot);
 
         // The cloud: the host's own Mist object through the host's own spawnMist - the poison
         // scheduler (2.5s prop rolls, the per-second drain, the expiry broadcast) is the host's

@@ -38,16 +38,24 @@ final class EngageBeat {
     // close that gap in under two beats, so the escape stays real while every other beat swings.
     private static final int KITE_RETRIGGER_MARGIN_PX = 30; // must re-enter KITE_MIN_PX by this much to kite again
 
-    // ── Attack tempo (real classes can't walk mid-attack; only jumps/teleports move while attacking) ──
-    static final long ATTACK_WALK_LOCK_MS = 500;            // after a swing, hold position this long before walking
-    // Must be >= TURN_STEP_MAX_PX: doTurnBeat steps up to TURN_STEP_MAX_PX toward the mob, and if
-    // that step can overshoot the mob's x the mob lands on the other side, flipping needsTurnBeat and
-    // pacing the bot back and forth across it (the flat-ground left-right sway). A pet trailing by
-    // the owner's facing mirrors the same flip, so it paces too.
+    // ── Attack tempo ──
+    // The body is owned by the swing itself: GCMovement.ATTACK_ACTION_LOCK_MS (1s, the WZ animation
+    // length of every basic swing the bot profiles use) is enforced by the movement layer, not here.
+    // This class only has to respect it: see preSwingAdjust.
+    //
+    // The turn step must be >= TURN_STEP_MAX_PX: doTurnBeat steps up to TURN_STEP_MAX_PX toward the
+    // mob, and if that step can overshoot the mob's x the mob lands on the other side, flipping
+    // needsTurnBeat and pacing the bot back and forth across it (the flat-ground left-right sway). A
+    // pet trailing by the owner's facing mirrors the same flip, so it paces too.
     private static final int TURN_DEADZONE_PX = 20;         // mob within this |dx| = no meaningful facing to change
     private static final int TURN_STEP_MIN_PX = 5;          // a turn carries the bot a tap's worth into the new facing...
     private static final int TURN_STEP_MAX_PX = 20;         // ...up to a longer press
     private static final long TURN_BEAT_THROTTLE_MS = 500;  // anti-thrash: don't spend a turn-beat more often than this
+    // How long an adjust step (a kite retreat / an AoE re-centre walk) may hold the swing back while
+    // its move is still in flight. Without this bound a hot adjust trigger would keep preSwingAdjust
+    // returning true and the bot would never attack again - the "keeps repositioning, never fires"
+    // class of report this beat already had to be fixed for once.
+    private static final long ADJUST_SETTLE_MAX_MS = 2_000;
 
     private final GrindBrain b;
 
@@ -60,6 +68,9 @@ final class EngageBeat {
     // each retreat re-arms it at KITE_MIN_PX - KITE_RETRIGGER_MARGIN_PX.
     private long nextTurnBeatOkMs = 0L;
     private int kiteReenterAtDx = KITE_MIN_PX;
+    // The current adjust step owns the beat until its move lands (or this deadline passes) — the
+    // bot must not fire a second swing on top of the step it just started.
+    private long adjustSettleUntilMs = 0L;
 
     EngageBeat(GrindBrain brain) {
         this.b = brain;
@@ -71,43 +82,78 @@ final class EngageBeat {
         nextKiteMs = 0L;
         nextTurnBeatOkMs = 0L;
         kiteReenterAtDx = KITE_MIN_PX;
-    }
-
-    /*
-     * True when the attack driver can actually land a swing this beat: its per-swing cooldown has
-     * elapsed. The driver computes its cooldown at swing time (BotAttackDriver.attack), so this
-     * mirrors that window for the pre-swing ordering only - a cosmetically early/late beat is
-     * harmless (the driver re-gates and simply no-ops).
-     */
-    private boolean swingReady(Character chr) {
-        return now() >= BotAttackDriver.nextAttackEpochMs(chr.getId());
+        adjustSettleUntilMs = 0L;
     }
 
     // Pre-swing adjustments, in priority order: turn to face, ranged kite-back, AoE re-center.
-    // Returns true when the beat was spent moving/turning — the caller swings next tick instead.
+    // Returns true when the beat was spent holding/moving — the caller swings next tick instead.
     //
-    // A swing-ready gate sits in front of the whole block: a player whose attack is off cooldown
-    // presses attack NOW and moves between swings. Without the gate, every adjust's trigger
-    // condition (a mob crossing sides, a chasing mob inside the comfort band, a pack centroid
-    // drifting) outranks the swing itself, so a moving mob kept the bot busy repositioning while
-    // its damage window lapsed - the "keeps adjusting, never attacks" report.
+    // Two gates decide when the beat may act at all, and they are NOT the same window:
+    //
+    //  1. The attack animation lock (GCMovement.ATTACK_ACTION_LOCK_MS = 1s) owns the body. The
+    //     driver's swing cooldown is only 720-900ms, so "cooldown elapsed" no longer implies "may
+    //     act": swinging then would broadcast a second attack over the first animation. Hold.
+    //  2. An adjust step (a kite retreat / an AoE re-centre) has started but its walk has not landed
+    //     yet. Firing during it would arm the animation lock and freeze the very step it just
+    //     issued - the bot would shoot, freeze, shoot, freeze and never actually move. Hold until
+    //     the move completes, bounded by ADJUST_SETTLE_MAX_MS so an unreachable step cannot starve
+    //     the attack.
+    //
+    // With the body free and no step pending, one adjust may go (and it does NOT swing: the step is
+    // the beat). Every adjust either changes the condition that triggered it (the facing flips / the
+    // gap opens / the pack is re-centred) or reports that it cannot act, in which case the caller
+    // swings on that same beat. Steady state stays swing-swing-swing, with at most one adjustment
+    // between swings.
     boolean preSwingAdjust(Character chr, Monster t) {
-        if (swingReady(chr)) {
-            return false; // the button is up: swing this beat, adjust in the cooldown gap instead
+        if (midSwingPlant(chr)) {
+            return true; // the attack animation still owns the body: stand it out, no second swing
+        }
+        if (adjustSettling(chr)) {
+            return true; // a reposition step is still walking out - let it land before swinging
         }
         if (needsTurnBeat(chr, t)) {
             doTurnBeat(chr, t); // mob is on our other side -> turn + small step this beat, swing next beat
             return true;
         }
         if (b.style == MovementStyle.RANGED && kiteIfTooClose(chr, t)) {
-            return true; // a mob closed the gap -> step back firing (kiteIfTooClose swings mid-retreat)
+            return true; // a mob closed the gap -> step back this beat, fire as soon as the step lands
         }
         return aoeRepositionIfWorthwhile(chr); // stepped/blinked into the pack -> swing next beat centred
     }
 
-    // Plant (or hop) and swing. Handles the engage flourish once per engagement, fires the attack,
-    // and does the shared bookkeeping (heartbeat, walk lock, kill target-drop). Returns the attack
-    // result so a strategy can add its own post-kill behavior (roam clears `engaged`, camp doesn't).
+    // True while the last broadcast attack still owns the body. The movement layer enforces the same
+    // window (it refuses walks/jumps/blinks); reading it here is what keeps the engage beat from
+    // starting a second swing on top of a live animation.
+    static boolean midSwingPlant(Character chr) {
+        return GCMovement.isAttackActionLocked(chr);
+    }
+
+    // True while an adjust step is still in flight: the bot has a live move goal from the step and
+    // the settle deadline has not passed. A step that was never armed (no move started) is not
+    // "settling", so a refused adjust falls straight through to the swing.
+    private boolean adjustSettling(Character chr) {
+        if (adjustSettleUntilMs == 0L) {
+            return false;
+        }
+        if (now() >= adjustSettleUntilMs || !GCMovement.isMoving(chr)) {
+            adjustSettleUntilMs = 0L; // landed / abandoned / out of patience -> the swing may go
+            return false;
+        }
+        return true;
+    }
+
+    // Arm the settle window after an adjust actually committed to a move. Anything the adjust only
+    // nudged in place (a turn step that was clamped, a blink that landed instantly) reports false
+    // from isMoving on the next beat and settles immediately.
+    private void armAdjustSettle(Character chr) {
+        adjustSettleUntilMs = GCMovement.isMoving(chr) ? now() + ADJUST_SETTLE_MAX_MS : 0L;
+    }
+
+    // Plant (or hop) and swing. Handles the engage flourish once per engagement and fires the
+    // attack. The body lock that follows is armed by the movement layer at the broadcast itself
+    // (GCMovement.markAttackAction), so a swing the driver refuses (on cooldown, no target) never
+    // freezes the bot for a second for nothing. Returns the attack result so a strategy can add its
+    // own post-kill behavior (roam clears `engaged`, camp doesn't).
     BotAttackDriver.AttackResult engageAndSwing(Character chr, Monster t) {
         if (!b.engaged) {
             if (jumpsToAttack() && b.rng.nextDouble() < JUMP_ATTACK_CHANCE) {
@@ -129,7 +175,6 @@ final class EngageBeat {
         BotAttackDriver.AttackResult r = BotAttackDriver.botAttack(chr);
         if (r != null && (r.hit() || r.killed())) {
             b.markProgress(); // landed hit/kill -> not stuck
-            b.attackWalkLockUntil = now() + ATTACK_WALK_LOCK_MS; // hold position through the swing before walking
         }
         if (r != null && r.killed()) {
             b.targetOid = -1; // re-acquire the next mob
@@ -287,8 +332,9 @@ final class EngageBeat {
             GCMovement.move(chr, tx, ty);
             b.lastMoveTargetX = tx;
         }
-        b.engaged = true; // the re-center rides the swing beat - fire now, don't re-plant next tick
-        BotAttackDriver.botAttack(chr); // nuke as the blink lands (a mage blinks into the pack and casts)
+        // No swing on the step's own beat: the animation lock armed by a swing would freeze the very
+        // walk/blink just issued. The swing goes on the first beat the step has landed.
+        armAdjustSettle(chr);
         return true;
     }
 
@@ -332,7 +378,10 @@ final class EngageBeat {
         nextKiteMs = now() + KITE_COOLDOWN_MS;
         // Re-arm only after the mob has closed back within KITE_MIN_PX - MARGIN of us.
         kiteReenterAtDx = KITE_MIN_PX - KITE_RETRIGGER_MARGIN_PX;
-        BotAttackDriver.botAttack(chr); // kites shoot on the move: fire the in-reach swing mid-retreat
+        // The retreat is this beat's action. Swinging here would arm the animation lock and freeze
+        // the step just issued (shoot-freeze-shoot-freeze, never moving); the shot goes as soon as
+        // the retreat has landed - see preSwingAdjust.
+        armAdjustSettle(chr);
         return true;
     }
 
@@ -378,8 +427,10 @@ final class EngageBeat {
         b.lastMoveTargetX = tx;
         nextTurnBeatOkMs = now() + TURN_BEAT_THROTTLE_MS;
         b.markProgress();                 // turning to engage is productive, not stuck
-        b.engaged = true;                 // the turn rides the swing beat - fire now, don't re-plant next tick
-        BotAttackDriver.botAttack(chr);
+        b.engaged = false;                // the tap moves the body: re-plant before the next swing
+        // The turn is this beat's action; the swing goes once the tap has landed (the attack packet
+        // carries its own facing byte, so the aim is already correct either way).
+        armAdjustSettle(chr);
     }
 
     private static long now() {

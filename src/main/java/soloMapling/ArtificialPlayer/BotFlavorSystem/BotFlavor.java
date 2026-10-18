@@ -167,12 +167,12 @@ public final class BotFlavor {
     }
 
     // Swing one of the bot's job attack skills at the air (Brandish, an AoE, a spell cast). No targets,
-    // no damage. markAlerted keeps the pose from being cancelled by the next idle-refresh packet.
+    // no damage. markAttackAction keeps the pose from being cancelled by the next idle-refresh packet.
     private static void doSkillSwing(Character chr) {
         WeaponType weapon = BotAttack.resolveEquippedWeaponType(chr);
         BotAttackConfig.JobAttacks atk = BotAttackConfig.resolve(chr.getJob(), weapon);
         BotAttackProfile profile = pickProfile(atk);
-        GCMovement.markAlerted(chr);
+        GCMovement.markAttackAction(chr);
         if (profile == null) {
             BotAttack.basicSwing(chr);
             return;
