@@ -219,6 +219,14 @@ class BotMovementState {
     // blocked / bug) instead of trying forever. Reset whenever a new moveTarget is issued.
     int moveBestDist = Integer.MAX_VALUE;
     long moveProgressAtMs = 0L;
+    // Second progress measure, used only while a nav edge is committed: the closest distance
+    // reached toward that edge's own waypoint. A route may legitimately walk AWAY from moveTarget
+    // first (the Tower's Maze rope climb up to a jump-off anchor, a detour to a portal), and
+    // closing on the waypoint is real progress. moveProgressGoal remembers which waypoint the
+    // measure belongs to; a swap re-baselines navProgressBestDist without renewing the clock.
+    Point moveProgressGoal = null;
+    int navProgressBestDist = Integer.MAX_VALUE;
+
     Point farmAnchor = null;
     int farmAnchorMapId = -1;
 

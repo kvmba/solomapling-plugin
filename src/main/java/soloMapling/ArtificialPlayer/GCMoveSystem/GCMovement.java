@@ -278,6 +278,8 @@ public final class GCMovement {
         if (changed) {
             st.moveBestDist = Integer.MAX_VALUE;
             st.moveProgressAtMs = MovementClock.nowMs();
+            st.moveProgressGoal = null;
+            st.navProgressBestDist = Integer.MAX_VALUE;
         }
         if (onArrival != null) {
             ARRIVAL_CALLBACKS.put(st.bot.getId(), onArrival);

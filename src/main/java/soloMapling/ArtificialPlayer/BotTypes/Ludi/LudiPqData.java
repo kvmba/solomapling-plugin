@@ -164,6 +164,25 @@ public final class LudiPqData {
     public static final int CRATES_TO_STAND_ON = 5;
 
     /**
+     * The crates the bots stand on while {@link #COMBO_PROPERTY} does not exist yet.
+     *
+     * <p>Stage 8's script generates its combination lazily, inside the branch it only enters
+     * once five bodies already stand on crate areas ({@code 2040043.js}: "if (playersOnCombo
+     * == 5 ...) { comboStr = generateCombo(); ... }"). A bot that waited for the property
+     * therefore waited for a precondition only it could create - the reported "stage 8 bots
+     * do nothing at all". The set is deterministic (no shuffle) so a cohort spreads over five
+     * DIFFERENT areas; the leader's next conversation then generates the real combination and
+     * the following tick re-seats the bots on it (a wrong guess only costs the script's own
+     * {@code showWrongEffect}, and the property persists for the retry).
+     *
+     * <p>Deliberately the LAST five of the nine, mirroring {@link #myCrate}'s tail-first
+     * allocation, so the head slots stay free when a party has more players than bots.
+     */
+    public static List<Point> guessCrates() {
+        return CRATE_SPOTS.subList(CRATE_SPOTS.size() - CRATES_TO_STAND_ON, CRATE_SPOTS.size());
+    }
+
+    /**
      * The crate this body should stand on, or null when this body is not one of the five.
      *
      * <p>The quest counts every player in the instance, the real one included, so the bots
@@ -172,7 +191,14 @@ public final class LudiPqData {
      * head for whoever else is filling the pattern.
      */
     public static Point myCrate(String combo, int bodyIndex) {
-        List<Point> wanted = cratesIn(combo);
+        return crateAt(cratesIn(combo), bodyIndex);
+    }
+
+    /**
+     * The same tail-first allocation over an explicit crate list - the pre-combination guess uses
+     * it too, so both paths share one indexing rule (and neither can drift from the other).
+     */
+    public static Point crateAt(List<Point> wanted, int bodyIndex) {
         if (bodyIndex < 0 || bodyIndex >= wanted.size()) {
             return null;
         }

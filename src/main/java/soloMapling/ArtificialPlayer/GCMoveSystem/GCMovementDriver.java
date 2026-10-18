@@ -589,6 +589,8 @@ final class GCMovementDriver {
         entry.moveTarget = null;
         entry.moveTargetPrecise = false;
         entry.moveBestDist = Integer.MAX_VALUE;
+        entry.moveProgressGoal = null;
+        entry.navProgressBestDist = Integer.MAX_VALUE;
         BotMovementManager.clearNavigationState(entry);
         GCMovement.fireArrival(entry);
     }
@@ -616,6 +618,13 @@ final class GCMovementDriver {
      * MOVE_NO_PROGRESS_MS, abandon the move (clear target + nav, drop the callback) so an
      * unreachable / blocked / buggy goal can't loop forever. Any real progress resets the clock, so
      * long legitimate walks are never cut off. Follow/farm without a moveTarget are unaffected.
+     *
+     * <p>One extra measure while a nav edge is committed: closing on that edge's own waypoint.
+     * A route may legitimately walk AWAY from moveTarget first (the Tower's Maze rope climb up
+     * to a jump-off anchor, a detour to a portal); measuring only the final goal read that as a
+     * stall and dismounted the climber mid-rope - beside the long rope there is no landable
+     * column, so that dismount is jumpOffRope(dx=0), the reported "only lets go and drops
+     * straight down".
      */
     private static boolean giveUpStalledMove(BotMovementState entry) {
         if (entry.moveTarget == null) {
@@ -630,13 +639,39 @@ final class GCMovementDriver {
         // multiple of a hop, not the 8s grounded one; any tick that DOES bring the bot measurably
         // closer to the goal still resets the clock below, so long legitimate arcs are untouched.
         Point bp = entry.bot.getPosition();
-        int dist = Math.abs(bp.x - entry.moveTarget.x) + Math.abs(bp.y - entry.moveTarget.y);
         long now = MovementClock.nowMs();
         if (entry.moveProgressAtMs == 0L) {
             entry.moveProgressAtMs = now;
         }
-        if (dist < entry.moveBestDist - MOVE_PROGRESS_EPS_PX) {
-            entry.moveBestDist = dist;
+        // Progress has two honest measures. The first is the one this watchdog always used: the
+        // distance to moveTarget itself, so a route that closes on the final goal is never cut
+        // off. The second is needed because a committed nav edge may legitimately walk AWAY from
+        // moveTarget first - the Tower's Maze rope walk climbs to the authored jump-off anchor
+        // before it can cross to a side ledge, and a detour to a portal does the same. While an
+        // edge is committed, closing on that edge's own waypoint therefore counts as progress
+        // too. The clock is shared, so a stall has to fail BOTH measures before the move is
+        // abandoned; a new waypoint only re-baselines its distance and never renews the clock,
+        // so a route that merely churns between edges still runs out of time as before.
+        int distTarget = Math.abs(bp.x - entry.moveTarget.x) + Math.abs(bp.y - entry.moveTarget.y);
+        boolean progressed = distTarget < entry.moveBestDist - MOVE_PROGRESS_EPS_PX;
+        if (progressed) {
+            entry.moveBestDist = distTarget;
+        }
+        Point waypoint = (entry.navEdge != null && entry.navTargetPos != null) ? entry.navTargetPos : null;
+        if (waypoint == null) {
+            entry.moveProgressGoal = null;      // no committed edge: the target measure alone owns the verdict
+            entry.navProgressBestDist = Integer.MAX_VALUE;
+        } else {
+            int distWaypoint = Math.abs(bp.x - waypoint.x) + Math.abs(bp.y - waypoint.y);
+            if (!waypoint.equals(entry.moveProgressGoal)) {
+                entry.moveProgressGoal = new Point(waypoint);
+                entry.navProgressBestDist = distWaypoint; // baseline, NOT progress: a swap buys no time
+            } else if (distWaypoint < entry.navProgressBestDist - MOVE_PROGRESS_EPS_PX) {
+                entry.navProgressBestDist = distWaypoint;
+                progressed = true;
+            }
+        }
+        if (progressed) {
             entry.moveProgressAtMs = now;
             return false;
         }
@@ -659,6 +694,8 @@ final class GCMovementDriver {
         entry.moveTarget = null;
         entry.moveTargetPrecise = false;
         entry.moveBestDist = Integer.MAX_VALUE;
+        entry.moveProgressGoal = null;
+        entry.navProgressBestDist = Integer.MAX_VALUE;
         BotMovementManager.clearNavigationState(entry);
         GCMovement.abandonMove(entry);
         return true;

@@ -561,6 +561,21 @@ public final class LudiStages {
             workStage4FromMainRoom(bot);
             return;
         }
+        // The stage was turned in while this bot was still inside a room: the room and its
+        // boxes are worthless now, and the party is already one map on. Leave at once through
+        // the room's own out portal instead of waiting for the room to go quiet. Without this
+        // the bot stayed in a room whose mobs a teammate had already killed for as long as the
+        // stage's remaining time - the reported "stage advances, one bot only shows up minutes
+        // later". (The same gate exitTrapRoom has carried for the stage-2 trap room.)
+        //
+        // The leader must have left first, exactly as in the normal exit: while he is still in
+        // the room the follow beat walks this bot straight back in behind him, which would turn
+        // the two rules into a ping-pong.
+        if (stageCleared(bot, LudiPqData.roomStage(mapId)) && !leaderInRoom(bot)) {
+            markRoomCleared(bot, mapId);
+            exitDoorRoom(bot);
+            return;
+        }
         // Inside a room: fight the box mobs and sweep the passes they drop.
         PqActions.seekAndAttack(bot);
         PqActions.loot(bot, bot.getPosition(), LOOT_RADIUS_PX, new int[]{LudiPqData.PASS});
@@ -633,6 +648,18 @@ public final class LudiStages {
             workStage5FromMainRoom(bot);
             return;
         }
+        // The stage was turned in while this bot was still inside the maze: every box it could
+        // still break is worthless, and the party has already moved on. Leave at once through
+        // the room's own out portal. This must come FIRST - before the hide, the box search and
+        // the loot - because the old exit condition required a pass in the pocket, so a bot sent
+        // into a room a teammate had already emptied stood there until some unrelated drop
+        // wandered into its loot radius (the reported "stage advances, one bot appears minutes
+        // later"). A maze room has no next00, so nothing else could ever move it.
+        if (stageCleared(bot, 5)) {
+            markRoomCleared(bot, mapId);
+            exitDoorRoom(bot);
+            return;
+        }
         // Re-show every tick while inside: the strike cancels the hide (an attack action),
         // so the next tick's show re-stealths - one box per tick, the honest sneak pace.
         // Only hide-carrying kits are ever routed into the guard room (the posting table);
@@ -651,11 +678,13 @@ public final class LudiStages {
         PqActions.recoverUngatheredHandoffs(bot, LudiPqData.PASS);
         // All four boxes broken: the room's work is done. Remember it as cleared, then slip
         // out the door and deliver on the main map's stage-NPC post - the leader turns the
-        // stage in there, not at this room's mouth. Leaving while a box stands (or with
-        // nothing pocketed, or while the leader is still in the room - the follow beat would
-        // walk the bot back in behind him) keeps the sneak inside its room.
-        if (box >= 0 || PqActions.countItem(bot, LudiPqData.PASS) <= 0
-                || leaderInRoom(bot)) {
+        // stage in there, not at this room's mouth. Leaving while a box stands (or while the
+        // leader is still in the room - the follow beat would walk the bot back in behind him)
+        // keeps the sneak inside its room. The pocket is NOT part of this test: whether the bot
+        // personally carries a pass says nothing about whether the room is finished, and the
+        // drop itself is already protected - loot() above either picks it up or arms a pickup
+        // walk, and exitDoorRoom stands down while a live walk owns the driver.
+        if (box >= 0 || leaderInRoom(bot)) {
             return;
         }
         markRoomCleared(bot, mapId);
@@ -1064,20 +1093,29 @@ public final class LudiStages {
      * a bot that filled his crate would make the count come out at five on the wrong boxes.
      * The bots therefore take from the far end of the list and leave the near end free.
      *
-     * @return how many crates the plan wants, or -1 when the quest has not picked yet
+     * <p>The combination does not exist yet when the bots first arrive: {@code 2040043.js}
+     * generates {@code stage8combo} only inside its {@code playersOnCombo == 5} branch, i.e.
+     * only after five bodies are ALREADY standing on crates. Waiting for the property (the old
+     * behaviour) was a hard deadlock - the bots waited for a combination that the combination
+     * itself was waiting for them to produce. Before it exists the bots therefore take a
+     * deterministic guess set; the leader's conversation then generates the real combination,
+     * and the next tick re-reads it and moves the bots onto the real five.
+     *
+     * @return how many crates the plan wants, or -1 when the quest's plan is unusable
      */
     public static int takeCrate(Character bot, int bodyIndex) {
         String combo = PqActions.readEimString(bot, LudiPqData.COMBO_PROPERTY);
-        if (combo == null) {
-            return -1;
-        }
-        List<Point> wanted = LudiPqData.cratesIn(combo);
+        List<Point> wanted = combo == null
+                ? LudiPqData.guessCrates()
+                : LudiPqData.cratesIn(combo);
         if (wanted.size() != LudiPqData.CRATES_TO_STAND_ON) {
             // The quest builds its combination as exactly five of nine; anything else means
             // the property was written by something other than the stage script.
             return -1;
         }
-        Point mine = LudiPqData.myCrate(combo, bodyIndex);
+        // Tail-first, so two bots never pick the same crate and the head slots stay free for
+        // whoever else fills the pattern (the same rule for a real combination and a guess).
+        Point mine = LudiPqData.crateAt(wanted, bodyIndex);
         if (mine != null) {
             PqActions.holdArea(bot, mine, 1_200);
         }
