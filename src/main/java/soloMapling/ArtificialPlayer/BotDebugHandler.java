@@ -84,7 +84,10 @@ public class BotDebugHandler {
      * with this check and pays one id lookup instead of a Formatter run.
      */
     public boolean loggingConsumed() {
-        return useChalkDebug || logInteractors || (chr != null && isLoggingBot(chr.getId()));
+        // Deliberately NO null guard on chr: the original debugLoggingFull dereferenced it
+        // unguarded too, and every caller is a BotSM tick that has already returned for a null
+        // character. A guard here would silently swallow a real construction bug.
+        return useChalkDebug || logInteractors || isLoggingBot(chr.getId());
     }
 
     public void logCurrentRespondantsAndInquirers(BotSM botSM) {

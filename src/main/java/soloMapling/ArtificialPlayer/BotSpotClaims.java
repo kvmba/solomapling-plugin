@@ -89,7 +89,7 @@ public final class BotSpotClaims {
     public static int holders(int mapId, int spotId) {
         MapClaims claims = CLAIMS.get(mapId);
         if (claims == null) {
-            return 0; // never claimed on this map (read-only path: do not create an entry)
+            return 0; // never claimed on this map (read-only: same get(), no entry creation)
         }
         synchronized (claims) {
             Map<Integer, Integer> slots = claims.bySpot.get(spotId);

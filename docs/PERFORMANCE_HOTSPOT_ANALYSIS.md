@@ -512,3 +512,59 @@ int reachY = reach.reachY;
   6.8.2 收敛为一次 `reachProfile`。
 
 验证：`mvn -o test` → **1691 run, 0 failures, 0 errors, 2 skipped**。
+
+---
+
+## 6.11 第六轮复核：日志守卫的 NPE 语义、注释与事实、以及一个"查实但不改"的热点
+
+### 6.11.1 日志守卫把一处 NPE 静默化了（已修正）
+
+`debugLoggingFull` 的原始首行是 `isLoggingBot(chr.getId())`，**不判空**。我新增的
+`loggingConsumed()` 却写成 `chr != null && isLoggingBot(chr.getId())`——这不是等价改写，
+而是把"构造异常时立刻 NPE"变成"静默跳过所有日志"。
+
+核实：`BotDebugHandler` 只从 `BotSM(Character)` 构造，18 个调用点全部在
+`chr == null` / `checkIfNotRunningOrPaused()` 之后，`chr` 恒非 null。因此已按原语义去掉
+这个守卫（AGENTS.md 第 6 条：内部不加不可能触发的空值检查，更不能掩盖 bug）。
+
+### 6.11.2 一处注释与事实不符（已修正）
+
+`BotSpotClaims.holders()` 的注释原写"read-only path: **do not create** an entry"，暗示旧实现
+会创建。查证旧实现用的也是 `CLAIMS.get(mapId)`，同样不创建——注释本身没问题，但"不再创建"
+的暗示会误导，已改为 `same get(), no entry creation`。
+
+### 6.11.3 查实但**不改**的热点：`GrindLoot.grabLootAtFeet` 的无掉落路径
+
+这是本轮新发现的一个**真实**热点，与我的改动无关，也不在之前的报告里：
+
+```java
+void grabLootAtFeet(Character chr) {
+    if (now() < lootNextMs) return;                 // 节流
+    MapItem drop = nearestCollectableDrop(...);     // 全图 getMapObjectsInRange + 新建 LinkedList
+    if (drop != null) {
+        ...;
+        lootNextMs = now() + lootGapMs();           // ← 只有拾取成功才更新节流
+    }
+}
+```
+
+**脚边没有掉落是绝对常态**，此时 `lootNextMs` 不推进，于是每个 250ms 战斗 tick 都会
+对整张图做一次对象扫描。三个 grind 策略（CAMP/ROAM/STACK）的 FIGHT 分支每 tick 都调它。
+
+实测该扫描成本（隔离复刻宿主 `getMapObjectsInRange`：读锁 + 遍历 + `types.contains` +
+`distanceSq` + `LinkedList` 追加）：
+
+| 地图对象数 | 单次扫描 | 每 bot 每秒（4Hz） |
+|---:|---:|---:|
+| 50 | 158–209 ns | 0.63 µs/s |
+| 150 | 341–485 ns | 1.36 µs/s |
+| 400 | 937–1098 ns | 3.75 µs/s |
+
+按 1000 个被观察的 grinder 全部同时扫：**0.1%–0.4% 单核**。
+
+**裁决：不改。** 理由是收益上限只有千分之几核，而"给空扫描也加节流"会直接改变
+拾取响应（掉落出现到被捡起的延迟从"下一 tick"变成"最多一个节流窗口"），这是在用
+可感知的手感去换不可测量的 CPU——违反"最小改动 / 禁止过度设计"。已记录在此，
+供未来若地图对象数显著增长时复查。
+
+验证：`mvn -o test` → **1691 run, 0 failures, 0 errors, 2 skipped**。
