@@ -3,6 +3,8 @@ package soloMapling.ArtificialPlayer.SkillShowSystem;
 import org.gms.client.Character;
 import org.gms.client.Skill;
 import org.gms.client.SkillFactory;
+import org.gms.client.status.MonsterStatus;
+import org.gms.client.status.MonsterStatusEffect;
 import org.gms.constants.skills.FPMage;
 import org.gms.constants.skills.Hermit;
 import org.gms.server.StatEffect;
@@ -10,6 +12,7 @@ import org.gms.server.life.Monster;
 import org.gms.server.maps.Mist;
 import org.gms.util.PacketCreator;
 import soloMapling.ArtificialPlayer.BotAttackSystem.BotAttackData;
+import soloMapling.ArtificialPlayer.BotAttackSystem.BotAttackEffects;
 import soloMapling.ArtificialPlayer.BotAttackSystem.BotAuraState;
 import soloMapling.ArtificialPlayer.BotAttackSystem.BotDamageModel;
 import soloMapling.ArtificialPlayer.BotAttackSystem.BotEnergyCharge;
@@ -18,15 +21,17 @@ import soloMapling.ArtificialPlayer.BotMountSystem.BotMount;
 
 import java.awt.Point;
 import java.awt.Rectangle;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
 /**
  * 木桩条件技的表演函数：复刻各 beat 系统在 AUTO 回合的真实出招路径
- * （同款发包、同款 Mist/反击帧），但跳过实战里才成立的条件门（Own
- * Pickpocket 钱袋存量、能量条已充满、目标须被移动扫描触到），让 GM 在
- * 站桩场景看到一次完整演出。木桩不在场时全部返回 false，步骤零耗时跳过。
+ * （同款发包、同款 Mist/反击帧、同款 {@code applyExternalHit} 真实扣血），
+ * 但跳过实战里才成立的条件门（Own Pickpocket 钱袋存量、能量条已充满、
+ * 目标须被移动扫描触到），让 GM 在站桩场景看到一次完整演出。木桩不在场时
+ * 全部返回 false，步骤零耗时跳过。
  */
 public final class SkillShowEffects {
 
@@ -114,6 +119,9 @@ public final class SkillShowEffects {
                 BotAttackData.actionFor(FPMage.POISON_MIST, null), 0), false);
         bot.getMap().spawnMist(new Mist(box, bot, effect, levelOf(FPMage.POISON_MIST)),
                 effect.getDuration(), true, false, false);
+        // 发包只是视觉：真实伤害必须落地，否则木桩血条不动、数字与血量不一致
+        // （与 BotGroundMists.tryCast 同一路径）。
+        BotAttackEffects.applyExternalHit(bot, mob, dmg.get(mob.getObjectId()).get(0));
         return true;
     }
 
@@ -136,6 +144,15 @@ public final class SkillShowEffects {
                 Hermit.SHADOW_WEB, levelOf(Hermit.SHADOW_WEB), facingMask(left),
                 (dmg.size() << 4) | 1, dmg, BotAttackData.DEFAULT_ATTACK_SPEED,
                 BotAttackData.actionFor(Hermit.SHADOW_WEB, null), 0), false);
+        // 与 BotShadowWeb.tryCast 同序：先按 WZ prop 掷网住状态，再落地伤害。
+        StatEffect effect = resolveEffect(Hermit.SHADOW_WEB);
+        if (effect.makeChanceResult()) {
+            mob.applyStatus(bot, new MonsterStatusEffect(
+                    Collections.singletonMap(MonsterStatus.SHADOW_WEB, 1),
+                    SkillFactory.getSkill(Hermit.SHADOW_WEB), null, false),
+                    false, effect.getDuration());
+        }
+        BotAttackEffects.applyExternalHit(bot, mob, dmg.get(mob.getObjectId()).get(0));
         return true;
     }
 
@@ -159,6 +176,7 @@ public final class SkillShowEffects {
                 (dmg.size() << 4) | 1, /* projectile */ 0, dmg,
                 BotAttackData.DEFAULT_ATTACK_SPEED,
                 BotAttackData.actionFor(Hermit.SHADOW_MESO, null), 0), false);
+        BotAttackEffects.applyExternalHit(bot, mob, dmg.get(mob.getObjectId()).get(0));
         return true;
     }
 

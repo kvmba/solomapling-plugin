@@ -9,9 +9,13 @@ import org.gms.constants.skills.Hermit;
 import org.gms.server.life.Monster;
 import org.gms.server.maps.MapleMap;
 import soloMapling.ArtificialPlayer.BotAttackSystem.BotAttackConfig;
+import soloMapling.ArtificialPlayer.BotAttackSystem.BotAttackData;
+import soloMapling.ArtificialPlayer.BotAttackSystem.BotAttackEffects;
 import soloMapling.ArtificialPlayer.BotAttackSystem.BotAttackProfile;
+import soloMapling.ArtificialPlayer.BotAttackSystem.BotAuraState;
 import soloMapling.ArtificialPlayer.BotAttackSystem.BotBuffConfig;
 import soloMapling.ArtificialPlayer.BotAttackSystem.BotBuffDriver;
+import soloMapling.ArtificialPlayer.BotMountSystem.BotMount;
 import soloMapling.ArtificialPlayer.BotCommandsPack.BotAttack;
 import soloMapling.ArtificialPlayer.BotCommandsPack.SocialCommands;
 import soloMapling.ArtificialPlayer.BotGeneration;
@@ -27,9 +31,12 @@ import soloMapling.server.MethodScheduler;
 import java.awt.Point;
 import java.util.ArrayList;
 import java.util.Deque;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ThreadLocalRandom;
 
 /**
  * GM 技能观测表演：4 转 bot 逐个登场（job id 升序），把自己的职业体系技能
@@ -39,8 +46,11 @@ import java.util.Set;
  * 由本控制器外部驱动。技能来源是插件既有注册表 —— {@link BotBuffConfig}（增益）、
  * {@link BotAttackConfig#resolve}（攻击三槽）、{@link BotSummonTable}（召唤兽）——
  * 即 bot 实战会用的全部技能。表演动作走与实战相同的广播函数
- * （{@link BotBuffDriver#castSkill} / {@link BotAttack} 的空挥族 /
+ * （{@link BotBuffDriver#castSkill} / {@link BotAttackEffects} 的真打击路径 /
  * {@link BotSummonSystem#showSummon}），观众看到的与实战一致。</p>
+ *
+ * <p>攻击技在木桩在场时走 {@link BotAttackEffects} 的三条打击路径（发包带伤害行 +
+ * {@code applyExternalHit} 真实扣血），木桩缺席时才退回 {@link BotAttack} 的空挥族。</p>
  *
  * <p>拍子链（MethodScheduler）的每一拍（含就绪轮询）都是 synchronized 且携带代际号
  * {@link #generation}：stop()/重新 start 使旧 token 立即作废，过期续拍与过期轮询既不会
@@ -94,12 +104,57 @@ public final class SkillShowController {
     private record AttackStep(int skillId, BotAttackProfile profile) implements Step {
         @Override
         public long perform(Character bot) {
-            switch (profile.route) {
-                case CLOSE -> BotAttack.skillSwing(bot, skillId);
-                case RANGED -> BotAttack.rangedSwing(bot, skillId);
-                case MAGIC -> BotAttack.magicSwing(bot, skillId);
+            // 木桩在场：走实战同款的真打击路径（BotAttackEffects.*Strike）—— 发包带伤害行、
+            // 木桩真实扣血（10 亿血桩，整场打不死），观众看到的是与实战一致的命中特效。
+            // 木桩缺席（WZ 缺怪 / 已退场）：退回原来的空挥，表演不中断。
+            Monster staged = SkillShowTarget.find(bot.getMapId());
+            if (staged != null && staged.isAlive()) {
+                strikeStagedTarget(bot, staged, profile);
+            } else {
+                switch (profile.route) {
+                    case CLOSE -> BotAttack.skillSwing(bot, skillId);
+                    case RANGED -> BotAttack.rangedSwing(bot, skillId);
+                    case MAGIC -> BotAttack.magicSwing(bot, skillId);
+                }
             }
             return PERFORM_MS;
+        }
+    }
+
+    /**
+     * 对木桩打出一次「有伤害」的表演攻击：滚出该 profile 的伤害行，走
+     * {@link BotAttackEffects} 的近/远/法三条发包路径 —— 与
+     * {@code BotAttackDriver.attack} 同一份代码（含 crit 负值编码与真实扣血）。
+     * 打包失败（bot/木桩状态异常）时静默：表演是视觉，不值得为一次发包中断整场。
+     */
+    private static void strikeStagedTarget(Character bot, Monster staged, BotAttackProfile profile) {
+        // 与 BotAttackDriver.attack 发包前完全一致的两个动作：一个攻击动作绝不在坐骑上
+        // 打出，且按下攻击键的瞬间就破掉橡木伪装/隐身术。Brawler/Marauder/Buccaneer 的
+        // 增益段含橡木伪装，少了这两步，攻击会在伪装状态下打出。
+        BotMount.cancelForAction(bot);
+        BotAuraState.cancelHidesForAction(bot);
+
+        WeaponType weapon = BotAttack.resolveEquippedWeaponType(bot);
+        int skill = profile.skillFor(weapon);
+        int lines = profile.numDamage;
+        int facingMask = MovementCommands.facingLeft(bot) ? BotAttackData.FACING_LEFT_MASK : BotAttackData.FACING_RIGHT_MASK;
+        int bodyActionId = BotAttackData.actionFor(skill, weapon);
+        List<Integer> damage = new ArrayList<>(lines);
+        for (int i = 0; i < lines; i++) {
+            int dmg = profile.rollDamage(bot.getLevel(), bot.getJob());
+            damage.add(ThreadLocalRandom.current().nextDouble() < BotAttackConfig.critChanceFor(bot.getJob())
+                    ? BotAttackData.encodeCritLine(dmg) : dmg);
+        }
+        Map<Monster, List<Integer>> hits = new LinkedHashMap<>();
+        hits.put(staged, damage);
+        switch (profile.route) {
+            case CLOSE -> BotAttackEffects.meleeStrike(bot, hits, skill, profile.skillLevel,
+                    bodyActionId, facingMask, profile.speed, profile.hitDelayMs);
+            case RANGED -> BotAttackEffects.rangedStrike(bot, hits, skill, profile.skillLevel,
+                    BotAttackData.projectileFor(weapon, bot), bodyActionId, facingMask,
+                    BotAttackData.speedFor(weapon, profile.speed), profile.hitDelayMs);
+            case MAGIC -> BotAttackEffects.magicStrike(bot, hits, skill, profile.skillLevel,
+                    bodyActionId, facingMask, profile.speed, profile.hitDelayMs);
         }
     }
 
@@ -536,13 +591,16 @@ public final class SkillShowController {
     // ---- 表演序列构建 ----
 
     /**
-     * 对刚登场的表演 bot 展开序列：增益（{@link BotBuffConfig#buffsForJob}
+     * 表演序列构建：增益 → 攻击 → 召唤兽 → 木桩条件技。攻击步在木桩在场时
+     * 打出真实伤害（{@link #strikeStagedTarget}），木桩缺席时为空挥。
+     *
+     * <p>对刚登场的表演 bot 展开序列：增益（{@link BotBuffConfig#buffsForJob}
      * 谱系并集，低转在前）→ 攻击（{@link BotAttackConfig#resolve} 的
      * single/aoe/ultimate 三槽，即 bot 实战真正会出的招；按 skillId 去重）→
      * 召唤兽（谱系并集）。enabler 门控技（金手指/潜龙出渊/战舰炮击…）的
      * enabler（超级变身/变身/海盗船）都在增益段先演，天然满足攻击门控。
      * 斗气集中（COMBO）不进序列：球环是 {@code BotComboOrb} 专属线格式，
-     * 通用光环帧会打碎观察者的球环（与 BotBuffDriver 周期扫描同一豁免）。
+     * 通用光环帧会打碎观察者的球环（与 BotBuffDriver 周期扫描同一豁免）。</p>
      */
     static List<Step> buildSteps(Character showBot) {
         Job job = showBot.getJob();
