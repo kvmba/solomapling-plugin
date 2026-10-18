@@ -436,11 +436,16 @@ final class BotNavigationGraph implements Serializable {
     }
 
     int findRegionId(MapleMap map, Point position) {
-        if (position == null || map.getFootholds() == null) {
+        return position == null || map.getFootholds() == null ? -1 : findRegionId(map, position.x, position.y);
+    }
+
+    /* Allocation-free core of findRegionId (hot: every ledge query on every combat tick). */
+    int findRegionId(MapleMap map, int x, int y) {
+        if (map.getFootholds() == null) {
             return -1;
         }
 
-        Foothold foothold = BotPhysicsEngine.findGroundFoothold(map, position);
+        Foothold foothold = BotPhysicsEngine.findGroundFoothold(map, x, y);
         if (foothold != null) {
             int regionId = regionIdByFootholdId.getOrDefault(foothold.getId(), -1);
             if (regionId >= 0) {
@@ -448,17 +453,21 @@ final class BotNavigationGraph implements Serializable {
             }
         }
 
-        return findRopeRegionId(position);
+        return findRopeRegionId(x, y);
     }
 
     int findRopeRegionId(Point position) {
+        return position == null ? -1 : findRopeRegionId(position.x, position.y);
+    }
+
+    int findRopeRegionId(int x, int y) {
         for (Region region : regions) {
             if (!region.isRopeRegion) {
                 continue;
             }
-            if (Math.abs(position.x - region.minX) <= BotPhysicsEngine.cfg.ROPE_GRAB_X
-                    && position.y >= region.minY
-                    && position.y <= region.maxY) {
+            if (Math.abs(x - region.minX) <= BotPhysicsEngine.cfg.ROPE_GRAB_X
+                    && y >= region.minY
+                    && y <= region.maxY) {
                 return region.id;
             }
         }

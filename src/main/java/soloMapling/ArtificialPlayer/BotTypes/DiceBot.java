@@ -69,7 +69,9 @@ public class DiceBot extends BotSM {
             return;
         }
 
-        getDebugger().debugLoggingFull(String.format("%s DiceBotState: %s", getChr().getName(), diceBotState), String.format("%s", diceBotState));
+        if (getDebugger().loggingConsumed()) {
+            getDebugger().debugLoggingFull(String.format("%s DiceBotState: %s", getChr().getName(), diceBotState), String.format("%s", diceBotState));
+        }
         switch (diceBotState) {
             case RESET:
                 resetDiceBotState();

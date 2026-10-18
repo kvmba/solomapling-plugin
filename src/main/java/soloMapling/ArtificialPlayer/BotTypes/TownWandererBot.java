@@ -80,8 +80,10 @@ public class TownWandererBot extends BotSM {
         if (chr == null || chr.getMap() == null) {
             return;
         }
-        getDebugger().debugLoggingFull(
-                String.format("%s TownWandererBot: %s", chr.getName(), wanderState), String.format("%s", wanderState));
+        if (getDebugger().loggingConsumed()) {
+            getDebugger().debugLoggingFull(
+                    String.format("%s TownWandererBot: %s", chr.getName(), wanderState), String.format("%s", wanderState));
+        }
 
         processQueuedEvents(); // drain any LEVEL_UP congrats events buffered since the last tick
 

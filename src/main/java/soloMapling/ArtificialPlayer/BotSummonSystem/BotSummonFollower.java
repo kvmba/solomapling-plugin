@@ -326,7 +326,11 @@ public final class BotSummonFollower {
     private static void tick() {
         BotSummonConfig cfg = config;
         regrantIfDue(cfg);
-        for (Integer botId : new ArrayList<>(TRACKED.keySet())) {
+        // TRACKED is a ConcurrentHashMap key set: its iterator is weakly consistent, so a
+        // registry mutation during this sweep is safe to observe (register/despawnAll hold the
+        // lifecycle lock and tickBot re-checks identity). The old keySet() copy allocated a
+        // fresh ArrayList on every 300ms tick for no additional safety.
+        for (Integer botId : TRACKED.keySet()) {
             try {
                 tickBot(botId, cfg);
             } catch (Throwable t) {
@@ -659,7 +663,8 @@ public final class BotSummonFollower {
         }
         Point cur = summon.getPosition();
         Point owner = bot.getPosition();
-        boolean facingLeft = CharacterStance.isFacingLeft(bot.getStance());
+        int stance = bot.getStance();
+        boolean facingLeft = CharacterStance.isFacingLeft(stance);
         long tickMs = Math.max(100L, cfg.moveTickMs());
         double elapsedSec = System.currentTimeMillis() / 1000.0;
         // The bob-free slot is what the dead zone and the re-seat threshold judge (judging the
@@ -679,7 +684,7 @@ public final class BotSummonFollower {
             }
             return;
         }
-        if (!CharacterStance.isWalking(bot.getStance())
+        if (!CharacterStance.isWalking(stance)
                 && Math.abs(base.x - cur.x) < FOLLOW_DEAD_ZONE_PX
                 && Math.abs(base.y - cur.y) < FOLLOW_DEAD_ZONE_PX) {
             // Inside the pet's dead zone with the owner not walking: hold position, but keep the

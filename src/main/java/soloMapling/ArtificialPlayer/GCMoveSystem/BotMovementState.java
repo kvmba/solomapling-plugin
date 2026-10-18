@@ -36,7 +36,9 @@ class BotMovementState {
     // 0 = not rolled yet.
     volatile int followOffsetPx = 0;
     ScheduledFuture<?> task;              // this bot's 50ms tick handle (set by GCMovementDriver)
-    BotMovementProfile movementProfile = BotMovementProfile.base();
+    // volatile: written by the movement driver on its refresh cadence while the GM diagnostics
+    // (GCMovement.movementStateReport, on a command thread) read it.
+    volatile BotMovementProfile movementProfile = BotMovementProfile.base();
     long lastProfileRefreshMs = 0L;       // throttles the driver's periodic profile recompute (party Haste)
 
     // ── Physics integrator state (float "shadow" position the engine advances) ──

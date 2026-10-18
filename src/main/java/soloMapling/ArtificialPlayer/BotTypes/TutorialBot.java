@@ -128,7 +128,9 @@ public class TutorialBot extends BotSM {
         if (checkIfNotRunningOrPaused()) {
             return;
         }
-        getDebugger().debugLoggingFull(String.format("%s TutorialBotState: %s", this.getChr().getName(), tutorialBotState), String.format("%s", tutorialBotState));
+        if (getDebugger().loggingConsumed()) {
+            getDebugger().debugLoggingFull(String.format("%s TutorialBotState: %s", this.getChr().getName(), tutorialBotState), String.format("%s", tutorialBotState));
+        }
         switch (tutorialBotState) {
             case RESET:
                 resetTutorialBotState();

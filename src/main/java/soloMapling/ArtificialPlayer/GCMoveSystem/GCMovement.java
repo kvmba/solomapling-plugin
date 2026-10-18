@@ -1050,7 +1050,7 @@ public final class GCMovement {
     /* The ledge (region id) under (x,y), or -1 if none. */
     public static int regionIdAt(MapleMap map, int x, int y) {
         BotNavigationGraph g = BotNavigationGraphProvider.getGraph(map);
-        return g == null ? -1 : g.findRegionId(map, new Point(x, y));
+        return g == null ? -1 : g.findRegionId(map, x, y);
     }
 
     /*
@@ -1067,9 +1067,25 @@ public final class GCMovement {
         if (g == null) {
             return false;
         }
-        int ra = g.findRegionId(map, new Point(ax, ay));
-        int rb = g.findRegionId(map, new Point(bx, by));
+        int ra = g.findRegionId(map, ax, ay);
+        int rb = g.findRegionId(map, bx, by);
         return ra >= 0 && rb >= 0 && ra != rb;
+    }
+
+    /**
+     * As {@link #onDifferentLedge(MapleMap, int, int, int, int)}, with the anchor's region already
+     * resolved through {@link #peekRegionIdAt}. Scans that compare a CONSTANT anchor against many
+     * candidates (mob target scans run over the whole map every combat tick) resolved that anchor
+     * once per candidate — two ground probes each time. The verdict is identical: -1 ("on no
+     * ledge") and {@link #UNBAKED_REGION} both answer "can't tell, don't filter", exactly as the
+     * four-argument form does when the graph is missing or a point is off every ledge.
+     */
+    public static boolean onDifferentLedge(MapleMap map, int anchorRegion, int bx, int by) {
+        if (anchorRegion < 0) {
+            return false;
+        }
+        int rb = peekRegionIdAt(map, bx, by);
+        return rb >= 0 && anchorRegion != rb;
     }
 
     /*
@@ -1090,7 +1106,7 @@ public final class GCMovement {
         if (g == null) {
             return UNBAKED_REGION;
         }
-        return g.findRegionId(map, new Point(x, y));
+        return g.findRegionId(map, x, y);
     }
 
     /* Sentinel from peekRegionIdAt: the map has no baked nav graph, so no ledge is answerable. */
@@ -1133,7 +1149,7 @@ public final class GCMovement {
         if (g == null) {
             return java.util.Set.of();
         }
-        int start = g.findRegionId(map, new Point(fromX, fromY));
+        int start = g.findRegionId(map, fromX, fromY);
         if (start < 0) {
             return java.util.Set.of();
         }
@@ -1183,7 +1199,7 @@ public final class GCMovement {
         if (g == null) {
             return null;
         }
-        int regionId = g.findRegionId(map, new Point(x, y));
+        int regionId = g.findRegionId(map, x, y);
         if (regionId < 0) {
             return null;
         }
@@ -1277,6 +1293,11 @@ public final class GCMovement {
     /** The owner's movement profile with both walk and jump stats reduced by {@code statReduction}
      *  (floored at the base stat) — the follower equivalent of {@link BotMovementProfile#fromCharacter}. */
     private static BotMovementProfile followerProfile(Character owner, int statReduction) {
+        // Deliberately re-derived per call: the follower's hop reach must track the owner's CURRENT
+        // speed/jump (party Haste joining, mount/dismount, a map whose fieldLimit forces base
+        // stats) on the same tick the owner gets it. The driver's cached st.movementProfile is
+        // refreshed on its own 20s cadence, so reusing it here would let a pet trail a stale profile
+        // for up to that window - a fidelity regression for a micro-optimisation.
         return BotMovementProfile.fromCharacter(owner).reducedBy(statReduction);
     }
 
@@ -1304,6 +1325,11 @@ public final class GCMovement {
      */
     public static Foothold groundFoothold(MapleMap map, Point p) {
         return BotPhysicsEngine.findGroundFoothold(map, p);
+    }
+
+    /** As {@link #groundFoothold(MapleMap, Point)}, without building a {@link Point} per probe. */
+    public static Foothold groundFoothold(MapleMap map, int x, int y) {
+        return BotPhysicsEngine.findGroundFoothold(map, x, y);
     }
 
     /**

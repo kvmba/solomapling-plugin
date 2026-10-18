@@ -61,7 +61,9 @@ public class Dispatcher implements Runnable {
             if (message == null) {
                 return false;
             }
-            Collection<Character> chars_on_map = message.getMap().getCharacters();
+            // Snapshot: findCharacterName walks this collection on the Dispatcher pool while
+            // players may join/leave the map (which mutates the host's set under its write lock).
+            Collection<Character> chars_on_map = message.getMap().getAllPlayers();
             final int[] botToCall = new int[1];  // Using an array to hold the bot ID
 
             boolean characterFound = checkIfCharacterOnMap(chars_on_map, message, botToCall);

@@ -65,7 +65,10 @@ public abstract class BotSM implements EventSubscriber {
     // dispatcher, the movement layers, the removal guard) consult it to decide whether this
     // bot is still live. Volatile so those reads see the stop the writer recorded.
     private volatile boolean running;
-    protected BotState state;
+    // Written on the FSM tick (virtual thread) and read from the chat dispatcher / command
+    // threads (busy checks, retype guards). Non-volatile it could serve a stale state for an
+    // unbounded time, which is exactly how "the bot is busy" checks misfire across threads.
+    protected volatile BotState state;
     private BotDebugHandler debugger;
     private BotInteractorsHandler interactors = new BotInteractorsHandler();
     private BotTradeHandler tradeHandler;
@@ -611,7 +614,11 @@ public abstract class BotSM implements EventSubscriber {
         if (LodCounts.trackerRunning()) {
             return LodCounts.isMapFull(character.getMapId());
         }
-        Collection<Character> charsOnMap = character.getMap().getCharacters();
+        // Snapshot, not the live view: this runs on the bot's FSM thread while players can join
+        // or leave the map (which mutates the host's LinkedHashSet under its write lock). The
+        // live view is only safe to iterate under that lock, which getCharacters() releases
+        // before returning.
+        Collection<Character> charsOnMap = character.getMap().getAllPlayers();
         for (Character chrs : charsOnMap) {
             if (!isBot(chrs)) {
                 return true;

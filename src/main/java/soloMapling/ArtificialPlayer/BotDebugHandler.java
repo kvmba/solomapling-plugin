@@ -75,6 +75,21 @@ public class BotDebugHandler {
 
     }
 
+    /**
+     * Whether any consumer of {@link #debugLoggingFull(String, String)} is attached right now.
+     *
+     * <p>State-machine tick bodies hand it `String.format(...)` arguments, which are evaluated
+     * BEFORE the call no matter what the method does. With no console/chalkboard consumer those
+     * strings were pure garbage on every macro tick of every bot, so tick code gates the call
+     * with this check and pays one id lookup instead of a Formatter run.
+     */
+    public boolean loggingConsumed() {
+        // Deliberately NO null guard on chr: the original debugLoggingFull dereferenced it
+        // unguarded too, and every caller is a BotSM tick that has already returned for a null
+        // character. A guard here would silently swallow a real construction bug.
+        return useChalkDebug || logInteractors || isLoggingBot(chr.getId());
+    }
+
     public void logCurrentRespondantsAndInquirers(BotSM botSM) {
         if (!isLogInteractors()) {
             return;

@@ -181,7 +181,9 @@ public class ScrollingBot extends BotSM {
         if (getState() == BotState.TRADING) { // getTradeHandler().verifyTradePartner()
             return;
         }
-        getDebugger().debugLoggingFull(String.format("%s ScrollingBotState: %s", this.getChr().getName(), scrollingBotState), String.format("%s", scrollingBotState));
+        if (getDebugger().loggingConsumed()) {
+            getDebugger().debugLoggingFull(String.format("%s ScrollingBotState: %s", this.getChr().getName(), scrollingBotState), String.format("%s", scrollingBotState));
+        }
 
         switch (scrollingBotState) {
             case RESET:

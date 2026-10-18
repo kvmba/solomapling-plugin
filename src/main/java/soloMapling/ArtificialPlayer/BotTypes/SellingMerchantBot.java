@@ -242,9 +242,11 @@ public class SellingMerchantBot extends BotSM {
         if (getState() == BotState.TRADING) {
             return;
         }
-        getDebugger().debugLoggingFull(
-                String.format("%s SellingMerchantBot: %s", getChr().getName(), sellingState),
-                String.format("%s", sellingState));
+        if (getDebugger().loggingConsumed()) {
+            getDebugger().debugLoggingFull(
+                    String.format("%s SellingMerchantBot: %s", getChr().getName(), sellingState),
+                    String.format("%s", sellingState));
+        }
 
         switch (sellingState) {
             case RESET:

@@ -103,7 +103,9 @@ public class HenesysBot extends BotSM {
         if (checkIfNotRunningOrPaused()) {
             return;
         }
-        getDebugger().debugLoggingFull(String.format("%s HenesysBotState: %s", this.getChr().getName(), henesysBotState), String.format("%s", henesysBotState));
+        if (getDebugger().loggingConsumed()) {
+            getDebugger().debugLoggingFull(String.format("%s HenesysBotState: %s", this.getChr().getName(), henesysBotState), String.format("%s", henesysBotState));
+        }
 
         switch (henesysBotState) {
             case RESET:

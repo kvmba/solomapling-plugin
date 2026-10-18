@@ -232,7 +232,9 @@ public class GachaBot extends BotSM {
             nudgePending = false;
             GCMovement.disable(getChr());
         }
-        getDebugger().debugLoggingFull(String.format("%s GachaBotState: %s", this.getChr().getName(), gachaBotState), String.format("%s", gachaBotState));
+        if (getDebugger().loggingConsumed()) {
+            getDebugger().debugLoggingFull(String.format("%s GachaBotState: %s", this.getChr().getName(), gachaBotState), String.format("%s", gachaBotState));
+        }
 
         switch (gachaBotState) {
             case RESET:

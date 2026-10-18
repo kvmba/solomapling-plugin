@@ -79,7 +79,9 @@ public class HenesysJQBot extends BotSM {
     public void updateState() {
         super.updateState();
         if (checkIfNotRunningOrPaused()) return;
-        getDebugger().debugLoggingFull(String.format("%s JQState: %s", getChr().getName(), jqState), String.format("%s", jqState));
+        if (getDebugger().loggingConsumed()) {
+            getDebugger().debugLoggingFull(String.format("%s JQState: %s", getChr().getName(), jqState), String.format("%s", jqState));
+        }
 
         switch (jqState) {
             case RESET:

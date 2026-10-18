@@ -559,6 +559,9 @@ public final class SpotFinder {
         boolean filter = !reach.isEmpty();
         long now = System.currentTimeMillis();
         List<Spot> spots = p.spots();
+        // One hostile snapshot for the whole sweep: liveHostilesWithin would rebuild the map's
+        // monster list per spot otherwise (see snapshotHostiles).
+        List<Monster> hostiles = snapshotHostiles(map);
         Spot best = null;
         double bestScore = -Double.MAX_VALUE;
         for (int i = 0; i < spots.size(); i++) {
@@ -573,7 +576,7 @@ public final class SpotFinder {
             double score = SPAWN_DENSITY_W * s.sameLedgeSpawnCount()
                     + TIGHTNESS_W * (100.0 * s.sameLedgeSpawnCount() / Math.max(1, 2 * s.radius()))
                     + LEDGE_EXTENT_W * (Math.min(s.ledgeSpanPx(), LEDGE_EXTENT_CAP_PX) / 100.0)
-                    + LIVE_MOB_W * liveHostilesWithin(map, s.anchor(), s.radius())
+                    + LIVE_MOB_W * liveHostilesWithin(map, s, hostiles)
                     - DISTANCE_W * pos.distance(s.anchor())
                     - CROWDING_W * holders
                     - OVER_CAP_PENALTY * Math.max(0, holders - s.shareCap() + 1)
@@ -767,6 +770,9 @@ public final class SpotFinder {
             return null;
         }
         Point ref = (from != null) ? from : anchor;
+        // The anchor's region is constant across the band scan (this runs on every FIGHT/WAIT
+        // tick); resolving it once saves a probe per candidate mob.
+        int anchorRegion = GCMovement.peekRegionIdAt(map, anchor.x, anchor.y);
         List<Monster> band = new ArrayList<>();
         for (Monster m : map.getAllMonsters()) {
             if (!isHostile(m)) {
@@ -776,7 +782,7 @@ public final class SpotFinder {
             if (mp == null || mp.x < x0 || mp.x > x1 || Math.abs(mp.y - anchor.y) > radius) {
                 continue;
             }
-            if (GCMovement.onDifferentLedge(map, anchor.x, anchor.y, mp.x, mp.y)) {
+            if (GCMovement.onDifferentLedge(map, anchorRegion, mp.x, mp.y)) {
                 continue;
             }
             band.add(m);
@@ -821,6 +827,7 @@ public final class SpotFinder {
         long sumY = 0;
         int n = 0;
         long rSq = (long) radius * radius;
+        int centerRegion = GCMovement.peekRegionIdAt(map, center.x, center.y);
         for (Monster m : map.getAllMonsters()) {
             if (!isHostile(m)) {
                 continue;
@@ -829,7 +836,7 @@ public final class SpotFinder {
             if (mp == null || center.distanceSq(mp) > rSq) {
                 continue;
             }
-            if (GCMovement.onDifferentLedge(map, center.x, center.y, mp.x, mp.y)) {
+            if (GCMovement.onDifferentLedge(map, centerRegion, mp.x, mp.y)) {
                 continue;
             }
             sumX += mp.x;
@@ -844,17 +851,47 @@ public final class SpotFinder {
         return spot == null ? 0 : liveHostilesWithin(map, spot.anchor(), spot.radius());
     }
 
-    private static int liveHostilesWithin(MapleMap map, Point anchor, int radius) {
-        int count = 0;
-        for (Monster m : map.getAllMonsters()) {
-            if (!isHostile(m)) {
-                continue;
+    /*
+     * A hostile snapshot for a whole sweep (pickBest / the WAIT crowd-bails scan EVERY spot).
+     * map.getAllMonsters() rebuilds a fresh linked list under the host's read lock on every
+     * call, so probing per spot paid that list build once per spot; the crowd-bail runs on the
+     * 4Hz combat tick for every waiting bot. One snapshot per sweep keeps the scan linear.
+     */
+    static List<Monster> snapshotHostiles(MapleMap map) {
+        if (map == null) {
+            return List.of();
+        }
+        List<Monster> all = map.getAllMonsters();
+        List<Monster> hostiles = new ArrayList<>(all.size());
+        for (Monster m : all) {
+            if (isHostile(m)) {
+                hostiles.add(m);
             }
+        }
+        return hostiles;
+    }
+
+    static int liveHostilesWithin(MapleMap map, Spot spot, List<Monster> hostiles) {
+        return spot == null ? 0 : liveHostilesWithin(map, spot.anchor(), spot.radius(), hostiles);
+    }
+
+    private static int liveHostilesWithin(MapleMap map, Point anchor, int radius) {
+        return liveHostilesWithin(map, anchor, radius, snapshotHostiles(map));
+    }
+
+    // The same-ledge gate resolved once for the anchor (it is constant across the sweep) and
+    // once per mob, instead of twice per mob through onDifferentLedge. acceptsSameLedge is the
+    // exact De Morgan of that predicate, and both UNBAKED_REGION and "no ledge" (-1) read as
+    // "can't tell, don't filter" exactly as before.
+    private static int liveHostilesWithin(MapleMap map, Point anchor, int radius, List<Monster> hostiles) {
+        int anchorRegion = GCMovement.peekRegionIdAt(map, anchor.x, anchor.y);
+        int count = 0;
+        for (Monster m : hostiles) {
             Point mp = m.getPosition();
             if (mp == null || Math.abs(mp.x - anchor.x) > radius || Math.abs(mp.y - anchor.y) > radius) {
                 continue;
             }
-            if (GCMovement.onDifferentLedge(map, anchor.x, anchor.y, mp.x, mp.y)) {
+            if (!acceptsSameLedge(anchorRegion, GCMovement.peekRegionIdAt(map, mp.x, mp.y))) {
                 continue; // count only same-ledge mobs so a spot's "fight now" score reflects its own platform
             }
             count++;

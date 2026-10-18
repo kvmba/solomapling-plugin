@@ -119,9 +119,11 @@ public class GameZoneHostBot extends BotSM {
 
         processQueuedEvents();
 
-        getDebugger().debugLoggingFull(
-                String.format("%s HostBotState: %s", getChr().getName(), hostBotState),
-                String.format("%s", hostBotState));
+        if (getDebugger().loggingConsumed()) {
+            getDebugger().debugLoggingFull(
+                    String.format("%s HostBotState: %s", getChr().getName(), hostBotState),
+                    String.format("%s", hostBotState));
+        }
 
         switch (hostBotState) {
             case RESET:

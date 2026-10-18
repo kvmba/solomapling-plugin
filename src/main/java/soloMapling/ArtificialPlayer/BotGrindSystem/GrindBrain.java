@@ -4,6 +4,7 @@ import org.gms.client.Character;
 import org.gms.server.life.Monster;
 import org.gms.server.maps.MapObject;
 import soloMapling.ArtificialPlayer.BotAttackSystem.BotAttackDriver;
+import soloMapling.ArtificialPlayer.BotAttackSystem.BotAttackProfile;
 import soloMapling.ArtificialPlayer.BotStatusSystem.BotDebuffState;
 import soloMapling.ArtificialPlayer.GCMoveSystem.GCMovement;
 
@@ -233,17 +234,22 @@ public final class GrindBrain {
         if (rid == lastSwingMapId) {
             return null; // already stopped for a travel-clear on this map this episode — keep walking
         }
-        int reachX = BotAttackDriver.attackReachX(chr);
-        int reachY = BotAttackDriver.attackReachY(chr);
-        if (reachX <= 0) {
+        // One profile resolution for both axes: the two single-axis getters would each redo the
+        // weapon lookup + resolve, and this gate runs on every combat tick.
+        BotAttackProfile reach = BotAttackDriver.reachProfile(chr);
+        if (reach == null || reach.reachX <= 0) {
             return null; // no configured attack (or the aura-gated slot is down right now)
         }
+        int reachX = reach.reachX;
+        int reachY = reach.reachY;
         Point pos = chr.getPosition();
         if (pos == null || chr.getMap() == null) {
             return null;
         }
         Monster best = null;
         int bestAbsDx = Integer.MAX_VALUE;
+        // Resolve the bot's region once: the same-ledge gate is otherwise two probes per mob.
+        int botRegion = GCMovement.peekRegionIdAt(chr.getMap(), pos.x, pos.y);
         for (Monster m : chr.getMap().getAllMonsters()) {
             if (!SpotFinder.isHostile(m)) {
                 continue;
@@ -252,7 +258,7 @@ public final class GrindBrain {
             if (mp == null || Math.abs(mp.x - pos.x) > reachX || Math.abs(mp.y - pos.y) > reachY) {
                 continue;
             }
-            if (GCMovement.onDifferentLedge(chr.getMap(), pos.x, pos.y, mp.x, mp.y)) {
+            if (GCMovement.onDifferentLedge(chr.getMap(), botRegion, mp.x, mp.y)) {
                 continue; // one platform over is someone else's fight, not a roadblock
             }
             int absDx = Math.abs(mp.x - pos.x);

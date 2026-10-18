@@ -287,3 +287,284 @@ for (Character player : bot.getWorldServer().getPlayerStorage().getAllCharacters
 - 基准文件：`/tmp/perfbench/Bench.java`~`Bench5.java`、`Pq.java`（Harness 用 `volatile SINK` 防死代码消除，取中位数）。
 - 运行：`export JAVA_HOME=/opt/graalvm-jdk-21.0.7+8.1; export PATH="$JAVA_HOME/bin:$PATH"; javac BenchN.java && java -XX:+UseParallelGC BenchN`
 - 关键结论速记：`currentTimeMillis≈24ns`、`LongAdder 4.5×>AtomicLong`、`String.format 8×>concat`、`new Random 10×>TLR`、`isBot(List.copyOf) ~8×>flag`、`全排序 1.5–1.7×>min追踪`、`synchronized≈21ns`。
+
+---
+
+## 6. 第二轮实施（分支 `perf/runtime-hotpaths`，独立复核）
+
+> 本轮不改行为语义，只改"同一结果的更便宜写法"与**跨线程可见性/并发正确性**。
+> 验证：`mvn -o test` → **1676 run, 0 failures, 0 errors, 2 skipped**（与改动前基线一致；
+> `BotPartyQueueTest.entryInsideTheHostsInviteWindowStillAnswers` 是既有偶发失败，
+> 在未改动的基线上同样可复现，见下）。
+
+### 6.1 热点写法（单次调用成本）
+
+| 位置 | 改动 | 实测/论证 |
+|---|---|---|
+| `BotHelpers.isBot(int)` | **已回退**（见 §6.6）。曾改为"先走 `isArtificial(id)` 就地遍历、判否后再查 `classifiers().isEmpty()`"，以避开每次调用的 `List.copyOf` 快照 | 用真实 classifier 体重测后收益仅 10–35%，但**注册表为空时慢 50%**（pre-onLoad / 裸 dev 路径），且多一次注册表读取。收益与风险不成比例，恢复原实现 |
+| `BotAttackConfig.resolve(job, weapon)` | 纯函数结果按 `Job`→`WeaponType` 序数做行缓存（`ConcurrentHashMap<Job, JobAttacks[]>`） | 每次挥砍原本要扫全表 + 多次 `isA()` 并新建 record；现在命中后无分配、无锁 |
+| `BotBuffConfig.buffsForJob(job)` | 每个 job 缓存一份不可变列表（`AtomicReferenceArray` 原子发布） | 移动 tick 的 dash 探测、buff 轮询、flavor 每 tick 都在调；`EnumMap` 迭代顺序固定，缓存顺序与原结果一致。调用方只读（`contains`/遍历/自我拷贝） |
+| `GCMovement.onDifferentLedge(map, anchorRegion, bx, by)`（新增） | 恒定锚点的区域只解析一次，候选怪每只只探一次 | 战斗 tick 的怪扫描里原来**每只怪**都要重探锚点（两次地面探测）。隔离微基准（含真实斜率三角链）：64 只怪 **5.4–11 µs → 4.3–5.3 µs**，1.2–2.5× |
+| `BotAttackDriver` 的 `seek()` / `SeekScan` | 一次 `getMapObjectsInRange` 同时给出"最近可打怪"和"可达候选集"，reach 查询复用 | 原来一次挥砍要扫 3 遍地图对象（nearest、pack 探测、最终目标列表）。行为等价：候选集就是旧 `nearestMob`/`onAttackableSurface` 接受的那批怪，box 判定仍按 profile 各自计算 |
+| `SpotFinder.snapshotHostiles()` + `liveHostilesWithin(map, spot, hostiles)` | 每个 sweep 只建一次 hostile 快照 | `map.getAllMonsters()` 每次调用都在宿主读锁下重建 `LinkedList`；`pickBest` 与 WAIT 的"别处有怪吗"对**每个 spot** 各调一次。快照后扫描线性化 |
+| `BotPhysicsEngine.findGroundFoothold/findGroundPoint` | 直接用已解析到的 `Foothold` 读表面 y（`surfaceY`），不再走 `pointBelowIndexed` 重走同一 bucket | 旧实现在两个 foothold 都存在时**再多 2 次地面探测**取同一个值 |
+| `findBelowIndexed` / `findGroundFoothold` / `findGroundPoint` / `BotNavigationGraph.findRegionId` | 新增 `(int x, int y)` 无分配重载；热调用方改用 | 地面探测在图形烘焙/宠物/召唤物上是千万级调用，逐次 `new Point` 是真实 GC 压力 |
+| `BotSM.checkMainPlayersOnMap`、`Dispatcher`、`BotBuffEffects`、`BotBuffRequestHandler`、`CompanionBot`(×2)、`ArtificialPlayerCommand`(×2) | `map.getCharacters()` → `map.getAllPlayers()`（快照） | 见 §6.3：**并发正确性**，不是微优化 |
+| 各 bot 类型的 `debugLoggingFull(String.format(...))` | 加 `getDebugger().loggingConsumed()` 守卫（18 个类型） | 实参在调用前求值：没有 console/chalkboard 消费者时，每次宏 tick 每条 `String.format` 都是纯垃圾（§1.7：~700ns + Formatter 分配） |
+| `BotMount.tick` | `ownsMount`（纯整数 hash）提前到类型查询之前 | ~65% 的 bot 不拥有坐骑，一次比较即返回，不再查 `CharacterStorage` |
+| `BotContactDamage` | 每次扫描只解析一次 bot 的 swept box；先做便宜的 `box.contains` 再做 boss 膨胀判定 | 原来每个候选怪都重建一次 bot 的 AABB |
+| `BotSummonFollower.tick` | 去掉 `new ArrayList<>(TRACKED.keySet())` | `ConcurrentHashMap` key set 的迭代器本身弱一致，复制不提供额外安全性，只是每 300ms 一次分配 |
+
+### 6.2 跨线程可见性（真实缺陷）
+
+| 位置 | 问题 | 修法 |
+|---|---|---|
+| `BotSM.state` | FSM 线程写、聊天 Dispatcher / GM 命令线程读（`getState()` 40 处），非 volatile → 可能长期读到旧状态 | `volatile` |
+| `BotMovementState.movementProfile` | 移动线程每 20s 重写，宠物/召唤物 tick（共享调度线程）读它匹配步速 | `volatile` + `GCMovement.ownerProfile()` 读已发布 profile，避免每次重新推导（含 party roster 扫描与 snowshoes WZ 查询） |
+| `SocialChatSessionStore` 的 `ArrayDeque` | `computeIfAbsent` 后无锁 `addLast`，`whenComplete` 回调线程与 tick 线程并发；`new ArrayList<>(deque)` 会抛 `ConcurrentModificationException`/窗口错乱 | 每个会话 deque 独立 monitor（会话粒度，不跨玩家串行化） |
+| `ConversationManager.lastConversationPerMap` | tick 线程与 GM 命令线程并发读写 `HashMap` | `ConcurrentHashMap` |
+| `ConversationManager.allScripts` | 由命令线程 `loadScripts()` 整体替换，tick 线程读 | `volatile` |
+| `BotSpotClaims` | 全局 `synchronized`：每个战斗 tick 每个 bot 对**每个候选 spot** 调 `holders()`，全服 tick 在这把锁上串行 | 改为**按地图**监视器（`MapClaims`）；容量约束仍按 spot 校验，同一地图内不一致性不变；`holders()` 只读路径不再创建条目 |
+
+### 6.3 为什么 `getCharacters()` 必须换掉（并发正确性）
+
+宿主 `MapleMap.getCharacters()` 在读锁内返回 `Collections.unmodifiableCollection(this.characters)`，**随后释放锁**；底层是 `LinkedHashSet`，玩家进出图在写锁下 `add/remove`。插件在多处**锁外**遍历它：
+
+- `BotSM.checkMainPlayersOnMap`（FSM 线程，每秒/每 tick）
+- `Dispatcher.processMessages`（8 线程池）
+- `BotBuffRequestHandler` / `BotBuffEffects`（伙伴 buff 路径）
+- `CompanionBot`（规划线程）
+- GM 命令（executor 池，且 `removeBotFromServer` 自己会改这个集合）
+
+后果是 `ConcurrentModificationException`（插件里被兜底 `catch` 吞掉 → 少算/漏发）或读到半更新的集合。全部改为 `map.getAllPlayers()`（宿主已有的快照 API，读锁内 `new ArrayList<>(characters)`）。
+
+### 6.4 明确不做
+
+- `GCMovementDriver` 的 `synchronized(entry)`、`EventStore` 的写锁、A* 的 `PriorityQueue`：正确性 > 微优化（与 §3 一致）。
+- `isBot` 的改写：见 §6.6，实测收益不足且有变慢子路径，**已回退**。
+- `BotSpotClaims` 的 `isFull()` 仍走 `holders()`：语义一致，读路径已无全局锁。
+
+### 6.5 基准源码
+
+`/tmp/perfbench-codex/HotPathBench.java`（隔离复刻 `isBot` 与 ledge 门控两种写法，`java -XX:+UseParallelGC`，取 5 轮）。
+
+---
+
+## 6.6 自我审计与回退（`isBot` 优化）
+
+上一版本轮把 `isBot` 改成"先问分类器、再判断注册表是否为空"。复核后**回退**，原因如下（均为实测，非推测）：
+
+| 场景（median of 9，classifier 体模拟插件自己的 roster/companion/id 判定） | 旧写法 | 新写法 | 差异 |
+|---|---:|---:|---:|
+| bot id，注册表已绑定 | 103.5 ns | 88.4 ns | **-14.6%** |
+| 真玩家 id，注册表已绑定 | 55.0 ns | 49.9 ns | -9.1% |
+| 混合（宿主 broadcast 形状） | 72.4 ns | 46.9 ns | -35.3% |
+| 混合，注册表**为空**（pre-onLoad / 裸 dev） | 28.2 ns | 42.4 ns | **+50.7%** |
+
+关键判断：
+
+1. **收益比我原先写的"2–20×"小得多**。第一版基准用 `List.copyOf` 去对比一个 `Boolean` 分类器，且每轮只跑固定次数、无中位数，系统性放大了差异。用真实 classifier 体 + 中位数重测后，稳态收益只有 10–35%。
+2. **存在一个明确变慢的子路径**：注册表为空时（插件尚未 onLoad，或裸 dev 环境），新写法要先走一遍分类器再退回 id 约定，慢 50%。
+3. **多花一次注册表读取**。两种写法都要读两次，但顺序不同；注册表只在插件 load/unload 时变化（`register` 在 `onLoad`，`clear` 在 `ExtensionLoader.unloadAll` 且在所有扩展 `onUnload` 之后），所以稳态语义一致（真值表已用 5 个用例锁死）。但窗口期内的分歧方向会随顺序改变，这种"只在对端生命周期抖动时才可能不同"的歧义，不值得用 10–35% 的常数收益去换。
+4. 结论：**保持原实现**，把实测数据写进注释与本文档，避免下一个人重复这次尝试。
+
+新增 `BotHelpersIsBotTest`（5 个用例）锁定原写法的真值表：999 哨兵、无分类器的 id 约定、已绑定分类器时"未命中不得回退到 id>20000"、以及 `clear()` 后恢复 id 约定。这比性能收益更有价值——它防的是**语义回归**。
+
+### 6.7 其余经复核后修正的问题
+
+| 位置 | 我引入的问题 | 修正 |
+|---|---|---|
+| `GCMovement.followerProfile` | 改为读 `st.movementProfile` 缓存，会把宠物/召唤物的步速与跳跃上限**冻结在最长 20 秒旧值**（party Haste 加入、上下坐骑、fieldLimit 强制基础属性都要即时生效） | 回退为每次 `BotMovementProfile.fromCharacter`，并在注释里写明原因；`BotMovementState.movementProfile` 保留 `volatile`（GM 诊断在命令线程读它，是独立的可见性问题） |
+| `BotAttackDriver.mobsInReach` | 把 `isAlive()` / `position == null` 检查前移进了 `seek()`。两次读取之间怪物可能死亡或被移除，`test.contains(null)` 会 **NPE** | 在目标循环内恢复两个检查（与原实现一致），`seek` 只做候选集 |
+| `BotAttackDriver.SeekScan` | `new Point(botPos)` 多复制一次（宿主 `getPosition()` 本已返回新对象） | 直接存 `botPos` |
+| `ConversationManager.loadScripts` | `allScripts` 改为 `volatile` 后，先赋值空表再填充，tick 可能读到**半成品脚本包** | 先在局部构建，最后一次性发布；异常路径也发布（保持"永不为 null"） |
+| `StackStrategy.pickBestStack` | 遗漏：仍按每个会员 spot 调用 `liveHostilesWithin(map, spot)`，每次重建整图怪物表 | 与 `pickBest`/WAIT 路径一致，改为每轮一次 `snapshotHostiles` |
+| `BotPetFollower` 每宠 t ick 的footing探测 | 热路径仍走 `(Point)` 重载 | 直接传 `petPos.x/y`，走无分配重载 |
+| `BotContactDamage` | 同一 tick 内重复构造 bot 触摸盒两次 | 只构造一次，`query` 复制后 grow |
+
+验证：`mvn -o test` → **1684 run, 0 failures, 0 errors, 2 skipped**。
+
+---
+
+## 6.8 第三轮复核：修正两处"描述与事实不符"与一处过度防御
+
+前两轮的复核又发现三处问题，均已在代码里改正。这里记录的是**判断失误**本身，避免后人重复。
+
+### 6.8.1 `BotBuffConfig.buffsForJob` 的收益被高估
+
+我原先把"每个移动 tick 都会调"写进注释与提交信息。核实后发现
+`BotAuraState.dashSkillFor`（唯一每移动 tick 的调用方）**已经按 bot 缓存**了结果：
+
+```java
+Integer cached = DASH_SKILL.get(bot.getId());
+if (cached != null) return cached;   // 命中后不再进 buffsForJob
+```
+
+真实调用频率是：每次挥砍的 `shadowDoubled`（仅 Shadow Partner 判定）、登场的
+buff sweep、flavor flex、Ludi hide 判定、GM 命令。缓存本身仍然正确、零风险，
+但**收益远小于我写的量级**，注释已按事实改正。
+
+### 6.8.2 `BotAttackConfig.resolve` 的调用频率
+
+`BotAttackDriver.attackReachX()` / `attackReachY()` 各自会 `resolve` 一次，而
+`GrindBrain.bestInReachInterloper` 在**每个战斗 tick** 成对调用这两者
+（`GrindBrain.inAttackRange` 则是惰性缓存的，不在此列）。上一轮只把锚点区域提到
+循环外，**没有**消除这对重复解析。本轮新增 `BotAttackDriver.reachProfile(bot)`，
+让该调用点用一次 profile 解析同时取两个轴：
+
+```java
+BotAttackProfile reach = BotAttackDriver.reachProfile(chr);
+int reachX = reach.reachX;
+int reachY = reach.reachY;
+```
+
+`BotAttackProfile` 所有字段都是 `public final`、构造器私有，实例不可变，因此暴露它
+不破坏封装，也不产生新分配。
+
+### 6.8.3 回退一处过度防御
+
+`findBelowIndexed(MapleMap, Point)` 我加了 `p == null ? null : ...`。内部调用点不可能
+传 null（AGENTS.md 第 6 条明确禁止这种"内部不可能触发的空值检查"），而且这会把本来
+会暴露的 NPE 变成静默 null，让探针失效更难诊断。已回退为直接解引用。
+
+### 6.8.4 测试节奏
+
+本轮新增的两个测试文件都**不依赖调度时序**：
+`BotHelpersIsBotTest` 只读写进程内静态注册表，`BotAttackMemoisationSourceTest` 只读源码。
+`pom.xml` 未配置 surefire 并行（仅 `maven-surefire-plugin` 版本号），因此不存在
+"并行测试共享全局注册表"的污染风险。
+
+验证：`mvn -o test` → **1686 run, 0 failures, 0 errors, 2 skipped**。
+
+---
+
+## 6.9 第四轮复核：死参数与死字段
+
+前三轮都是"看行为"，这轮换成"看签名"——把每处改动的方法体与形参对照，找重构后
+遗留的、不再被任何代码消费的东西。结果两处，都在 `BotAttackDriver`：
+
+| 位置 | 问题 | 修正 |
+|---|---|---|
+| `reachDiagnostic(SeekScan, Character, …)` | `SeekScan` 重构后，这个方法只用到 `botPos` / `nearest` / profile，**`Character bot` 参数已完全未使用**；`SeekScan` 包装也只是为了取两个字段 | 签名收窄为 `(Point botPos, Monster nearest, BotAttackProfile, WeaponType, boolean)`，调用点直接传已有的两个值 |
+| `SeekScan` record | 新增的 `botRegion` 组件写入后**无人读取**（`mobsInReach` 只用 `botPos` / `candidates`），是重构留下的死字段 | 从 record 删除 |
+
+顺带删掉了只为 `reachDiagnostic` 存在的一行 `reachBox(SeekScan, …)` 包装重载。
+
+### 6.9.1 一处"看起来该删、实际不该删"
+
+`seek()`（原 `nearestMob` / `mobsInReach`）里有 `botPos == null` 的守卫。核对宿主
+`AbstractMapObject.getPosition()`（`return new Point(position)`，`position` 初始化为
+`new Point()`）与 `nullifyPosition()`（全仓**无调用点**）后可知它实际不可达，一度删除；
+但**基线代码在同一位置本来就有这个守卫**（`BotAttackDriver` 旧 448/573 行）。删它等于
+擅自改变既有健壮性约定，因此恢复。判定准则：不可达但“与基线一致”的守卫，属于既有风格，
+不在性能优化里顺手改。
+
+验证：`mvn -o test` → **1686 run, 0 failures, 0 errors, 2 skipped**。
+
+---
+
+## 6.10 第五轮复核：把"读代码论证等价"换成"真实数据对照执行"
+
+前四轮的等价性论证都停在"我读了 diff，数学看起来一样"。这轮补上唯一有说服力的证据：
+**把改动前的实现原样抄进测试，和改动后的实现逐点对跑**。
+
+### 6.10.1 地面探测：6 张真实地图、>10 万探测点、0 分歧
+
+`GroundProbeEquivalenceTest` 在 `100000000 / 101000000 / 104000000 / 200000000 / 220000000 /
+922010300` 六张真实地图上，以 7px×23px 的密度扫过每张图的 VR 范围（含地图边界外 20/40px），
+对每个点同时调用：
+
+- `legacyFindGroundFoothold`（逐字复刻改动前实现：`findBelowIndexed` ×2 +
+  `pointBelowIndexed` ×2 取表面 y）
+- `BotPhysicsEngine.findGroundFoothold`（改动后：直接读已解析 foothold 的 `surfaceY`）
+
+以及 `findGroundPoint` 的同样对照。断言两点：
+
+1. 返回的 foothold 必须**同一个**（按 id + 几何比对）；
+2. 返回的落点 `Point` 必须**逐像素相同**。
+
+结果：**0 分歧**，探测点数 > 100 000。这条测试直接把"斜率三角链 + int 截断"这些最容易
+差 1px 的地方钉死了。
+
+### 6.10.2 `BotSpotClaims`：并发不变量 + slot 分配顺序
+
+`BotSpotClaimsConcurrencyTest` 覆盖三件 per-map 锁唯一可能破坏的事：
+
+| 用例 | 断言 |
+|---|---|
+| 16 线程同时抢同一 map+spot（cap=4），全部持锁到峰值再释放 | 恰好 4 个成功；`holders()` = 4；**4 个 slot 索引互不相同**（两个不同 bot 拿同一 slot 是最隐蔽的坏法） |
+| 两个 map 各自填满 | 各自到自己的 cap，互不影响 |
+| 固定顺序 claim / 中间 release / 再 claim | **复用最低空闲索引**（0,1,2 → 释放 1 → 下一个拿 1），与旧全局锁的扫描顺序一致 |
+
+另有 50 轮 claim/release 循环，验证读取 `holders()` 不会创建 map 条目、释放后不会残留。
+
+> 过程中该测试自己失败过一次：我在工作线程里只 claim 没 release，却断言最终清零——是**测试**
+> 的 bug，不是产品的 bug，修正后连跑 3 次稳定通过。
+
+### 6.10.3 顺带确认的两处"不是热点"
+
+复核时顺手验证了几个我**没有**改的地方是否该改：
+
+- `BotMesoBomb` / `BotShadowMeso` / `BotGroundMists` / `BotShadowWeb` 的额外
+  `getMapObjectsInRange` 都在 job + 冷却门（`NEXT_*_BY_BOT`）之后，只对特定职业在冷却到期时
+  触发，不是普遍每 tick 路径——不改。
+- `attackReachX/Y` 的重复解析只影响 travel-clear 门（`inAttackRange` 已惰性缓存），已在
+  6.8.2 收敛为一次 `reachProfile`。
+
+验证：`mvn -o test` → **1691 run, 0 failures, 0 errors, 2 skipped**。
+
+---
+
+## 6.11 第六轮复核：日志守卫的 NPE 语义、注释与事实、以及一个"查实但不改"的热点
+
+### 6.11.1 日志守卫把一处 NPE 静默化了（已修正）
+
+`debugLoggingFull` 的原始首行是 `isLoggingBot(chr.getId())`，**不判空**。我新增的
+`loggingConsumed()` 却写成 `chr != null && isLoggingBot(chr.getId())`——这不是等价改写，
+而是把"构造异常时立刻 NPE"变成"静默跳过所有日志"。
+
+核实：`BotDebugHandler` 只从 `BotSM(Character)` 构造，18 个调用点全部在
+`chr == null` / `checkIfNotRunningOrPaused()` 之后，`chr` 恒非 null。因此已按原语义去掉
+这个守卫（AGENTS.md 第 6 条：内部不加不可能触发的空值检查，更不能掩盖 bug）。
+
+### 6.11.2 一处注释与事实不符（已修正）
+
+`BotSpotClaims.holders()` 的注释原写"read-only path: **do not create** an entry"，暗示旧实现
+会创建。查证旧实现用的也是 `CLAIMS.get(mapId)`，同样不创建——注释本身没问题，但"不再创建"
+的暗示会误导，已改为 `same get(), no entry creation`。
+
+### 6.11.3 查实但**不改**的热点：`GrindLoot.grabLootAtFeet` 的无掉落路径
+
+这是本轮新发现的一个**真实**热点，与我的改动无关，也不在之前的报告里：
+
+```java
+void grabLootAtFeet(Character chr) {
+    if (now() < lootNextMs) return;                 // 节流
+    MapItem drop = nearestCollectableDrop(...);     // 全图 getMapObjectsInRange + 新建 LinkedList
+    if (drop != null) {
+        ...;
+        lootNextMs = now() + lootGapMs();           // ← 只有拾取成功才更新节流
+    }
+}
+```
+
+**脚边没有掉落是绝对常态**，此时 `lootNextMs` 不推进，于是每个 250ms 战斗 tick 都会
+对整张图做一次对象扫描。三个 grind 策略（CAMP/ROAM/STACK）的 FIGHT 分支每 tick 都调它。
+
+实测该扫描成本（隔离复刻宿主 `getMapObjectsInRange`：读锁 + 遍历 + `types.contains` +
+`distanceSq` + `LinkedList` 追加）：
+
+| 地图对象数 | 单次扫描 | 每 bot 每秒（4Hz） |
+|---:|---:|---:|
+| 50 | 158–209 ns | 0.63 µs/s |
+| 150 | 341–485 ns | 1.36 µs/s |
+| 400 | 937–1098 ns | 3.75 µs/s |
+
+按 1000 个被观察的 grinder 全部同时扫：**0.1%–0.4% 单核**。
+
+**裁决：不改。** 理由是收益上限只有千分之几核，而"给空扫描也加节流"会直接改变
+拾取响应（掉落出现到被捡起的延迟从"下一 tick"变成"最多一个节流窗口"），这是在用
+可感知的手感去换不可测量的 CPU——违反"最小改动 / 禁止过度设计"。已记录在此，
+供未来若地图对象数显著增长时复查。
+
+验证：`mvn -o test` → **1691 run, 0 failures, 0 errors, 2 skipped**。

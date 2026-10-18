@@ -491,6 +491,9 @@ class CampStrategy implements GrindStrategy {
         Set<Integer> reach = GCMovement.reachableRegions(map, pos.x, pos.y);
         boolean filter = !reach.isEmpty();
         List<Spot> spots = p.spots();
+        // One hostile snapshot for the sweep: this probe runs on every WAIT tick and used to
+        // rebuild the map's monster list per candidate spot.
+        List<Monster> hostiles = SpotFinder.snapshotHostiles(map);
         for (int i = 0; i < spots.size(); i++) {
             Spot s = spots.get(i);
             if (s == current) {
@@ -502,7 +505,7 @@ class CampStrategy implements GrindStrategy {
             if (BotSpotClaims.holders(map.getId(), i) >= s.shareCap()) {
                 continue; // already full — leaving our spot for it would just move us from lull to queue
             }
-            if (SpotFinder.liveHostilesWithin(map, s) > 0) {
+            if (SpotFinder.liveHostilesWithin(map, s, hostiles) > 0) {
                 return true;
             }
         }

@@ -156,9 +156,11 @@ public class NXMerchantBot extends BotSM {
             nxState = NXState.DELIVER_CODE;
         }
 
-        getDebugger().debugLoggingFull(
-                String.format("%s NXMerchantBot: %s", getChr().getName(), nxState),
-                String.format("%s", nxState));
+        if (getDebugger().loggingConsumed()) {
+            getDebugger().debugLoggingFull(
+                    String.format("%s NXMerchantBot: %s", getChr().getName(), nxState),
+                    String.format("%s", nxState));
+        }
 
         switch (nxState) {
             case SETUP:
