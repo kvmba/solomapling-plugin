@@ -10,6 +10,7 @@ import org.gms.server.life.Monster;
 import org.gms.server.maps.Mist;
 import org.gms.util.PacketCreator;
 import soloMapling.ArtificialPlayer.BotAttackSystem.BotAttackData;
+import soloMapling.ArtificialPlayer.BotAttackSystem.BotAttackEffects;
 import soloMapling.ArtificialPlayer.BotAttackSystem.BotAuraState;
 import soloMapling.ArtificialPlayer.BotAttackSystem.BotDamageModel;
 import soloMapling.ArtificialPlayer.BotAttackSystem.BotEnergyCharge;
@@ -24,9 +25,10 @@ import java.util.Map;
 
 /**
  * 木桩条件技的表演函数：复刻各 beat 系统在 AUTO 回合的真实出招路径
- * （同款发包、同款 Mist/反击帧），但跳过实战里才成立的条件门（Own
- * Pickpocket 钱袋存量、能量条已充满、目标须被移动扫描触到），让 GM 在
- * 站桩场景看到一次完整演出。木桩不在场时全部返回 false，步骤零耗时跳过。
+ * （同款发包、同款 Mist/反击帧、同款 {@code applyExternalHit} 真实扣血），
+ * 但跳过实战里才成立的条件门（Own Pickpocket 钱袋存量、能量条已充满、
+ * 目标须被移动扫描触到），让 GM 在站桩场景看到一次完整演出。木桩不在场时
+ * 全部返回 false，步骤零耗时跳过。
  */
 public final class SkillShowEffects {
 
@@ -114,6 +116,9 @@ public final class SkillShowEffects {
                 BotAttackData.actionFor(FPMage.POISON_MIST, null), 0), false);
         bot.getMap().spawnMist(new Mist(box, bot, effect, levelOf(FPMage.POISON_MIST)),
                 effect.getDuration(), true, false, false);
+        // 发包只是视觉：真实伤害必须落地，否则木桩血条不动、数字与血量不一致
+        // （与 BotGroundMists.tryCast 同一路径）。
+        BotAttackEffects.applyExternalHit(bot, mob, dmg.get(mob.getObjectId()).get(0));
         return true;
     }
 
@@ -136,6 +141,7 @@ public final class SkillShowEffects {
                 Hermit.SHADOW_WEB, levelOf(Hermit.SHADOW_WEB), facingMask(left),
                 (dmg.size() << 4) | 1, dmg, BotAttackData.DEFAULT_ATTACK_SPEED,
                 BotAttackData.actionFor(Hermit.SHADOW_WEB, null), 0), false);
+        BotAttackEffects.applyExternalHit(bot, mob, dmg.get(mob.getObjectId()).get(0));
         return true;
     }
 
@@ -159,6 +165,7 @@ public final class SkillShowEffects {
                 (dmg.size() << 4) | 1, /* projectile */ 0, dmg,
                 BotAttackData.DEFAULT_ATTACK_SPEED,
                 BotAttackData.actionFor(Hermit.SHADOW_MESO, null), 0), false);
+        BotAttackEffects.applyExternalHit(bot, mob, dmg.get(mob.getObjectId()).get(0));
         return true;
     }
 
