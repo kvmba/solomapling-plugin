@@ -772,6 +772,22 @@ class BotMovementManager {
                 return;
             }
             if (entry.downJumpPending) {
+                // Ours: the crouch beat. Hold the prone pose until it elapses, then take off on the
+                // next grounded tick. A single 50ms frame read as a twitch rather than a deliberate
+                // Down-then-Alt, so the beat is worth seeing.
+                if (entry.downJumpCrouchTicks > 0) {
+                    // The hold is deliberate, so the stuck watchdog must not read the stillness as a
+                    // wedge and rescue-hop the bot off the row it is lined up to drop from (the same
+                    // contract the drop-cadence hold uses - see BotNavigationManager.tryExecuteDrop).
+                    entry.launchReadyAwaiting = true;
+                    // NOT proneOnGround: it clears downJumpPending, which would cancel this very drop.
+                    // idleOnGround keeps the pose honest without touching the pending flag.
+                    BotPhysicsEngine.idleOnGround(entry, bot);
+                    entry.crouching = true;
+                    broadcastMovement(entry);
+                    return;
+                }
+                entry.downJumpCrouchTicks = 0;
                 performDownJump(entry);
                 return;
             }

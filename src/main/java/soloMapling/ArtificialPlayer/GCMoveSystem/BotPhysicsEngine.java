@@ -89,6 +89,14 @@ final class BotPhysicsEngine {
         public int MAX_SNAP_DROP = 16;
         public int MAX_SLOPE_UP = 26;
         public int DOWN_JUMP_GRACE_MS = 350;
+        // Ours: how many ticks the bot holds the prone (crouch) pose before a CROUCH-sourced straight
+        // down-jump takes off. A player presses Down, lets the crouch read, then presses Alt. The tick
+        // cadence alone gave a single 50ms frame - a twitch, not a crouch. Expressed in TICKS (not ms)
+        // so the beat is deterministic for every execution sim; 16 ticks = 800ms at TICK_MS 50, which
+        // matches the cadence beat's own 1000ms order of magnitude. The hold arms launchReadyAwaiting
+        // for its duration (see BotMovementManager.tickGrounded) so the stuck watchdog never reads the
+        // deliberate stillness as a wedge and rescue-hops the bot off the row it is about to drop from.
+        public int DOWN_JUMP_CROUCH_TICKS = 16;
         // Ours: humanlike pause between two straight down-jumps. A player stands back up out of the
         // crouch, re-orients and re-presses Down+Alt — about a second before the next down-jump. Without
         // this beat the engine can re-fire a DROP within a couple of ticks of landing, which on
@@ -843,6 +851,11 @@ final class BotPhysicsEngine {
         idleOnGround(entry, bot);
         entry.downJumpPending = true;
         entry.crouching = true;
+        // Ours: hold the prone pose for the crouch beat. 0 (the default) means every caller that did
+        // not ask for a crouch - tryExecuteDrop, the warmup fallback - launches on the very next
+        // grounded tick exactly as before, so the beat is opt-in per entry point and cannot slow a
+        // drop that never showed a crouch.
+        entry.downJumpCrouchTicks = Math.max(0, cfg.DOWN_JUMP_CROUCH_TICKS);
         syncCharacterState(entry);
     }
 
@@ -934,6 +947,7 @@ final class BotPhysicsEngine {
                 || (!swim && !hasDownJumpLanding(bot.getMap(), bot.getPosition()))) {
             entry.downJumpPending = false;
             entry.downJumpGracePeriodMS = 0L;
+            entry.downJumpCrouchTicks = 0;
             entry.crouching = false;
             syncCharacterState(entry);
             return;
@@ -1163,6 +1177,11 @@ final class BotPhysicsEngine {
     static void tickMotionTimers(BotMovementState entry) {
         if (entry.downJumpGracePeriodMS > 0L) {
             entry.downJumpGracePeriodMS = Math.max(0L, entry.downJumpGracePeriodMS - cfg.TICK_MS);
+        }
+        // The crouch beat counts ticks for the same reason grace does: a tick-driven hold is
+        // deterministic, a wall-clock one would stall a bot whose ticks run faster than real time.
+        if (entry.downJumpCrouchTicks > 0) {
+            entry.downJumpCrouchTicks--;
         }
     }
 
@@ -2294,6 +2313,7 @@ final class BotPhysicsEngine {
         entry.navFlightEdge = null; // teleports / map changes / death end any committed flight
         entry.downJumpPending = false;
         entry.downJumpGracePeriodMS = 0L;
+        entry.downJumpCrouchTicks = 0;
         clearRopeEntryIntent(entry);
         setMovementVelocity(entry, 0, 0);
     }
