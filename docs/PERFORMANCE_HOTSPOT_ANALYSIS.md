@@ -435,3 +435,28 @@ int reachY = reach.reachY;
 "并行测试共享全局注册表"的污染风险。
 
 验证：`mvn -o test` → **1686 run, 0 failures, 0 errors, 2 skipped**。
+
+---
+
+## 6.9 第四轮复核：死参数与死字段
+
+前三轮都是"看行为"，这轮换成"看签名"——把每处改动的方法体与形参对照，找重构后
+遗留的、不再被任何代码消费的东西。结果两处，都在 `BotAttackDriver`：
+
+| 位置 | 问题 | 修正 |
+|---|---|---|
+| `reachDiagnostic(SeekScan, Character, …)` | `SeekScan` 重构后，这个方法只用到 `botPos` / `nearest` / profile，**`Character bot` 参数已完全未使用**；`SeekScan` 包装也只是为了取两个字段 | 签名收窄为 `(Point botPos, Monster nearest, BotAttackProfile, WeaponType, boolean)`，调用点直接传已有的两个值 |
+| `SeekScan` record | 新增的 `botRegion` 组件写入后**无人读取**（`mobsInReach` 只用 `botPos` / `candidates`），是重构留下的死字段 | 从 record 删除 |
+
+顺带删掉了只为 `reachDiagnostic` 存在的一行 `reachBox(SeekScan, …)` 包装重载。
+
+### 6.9.1 一处"看起来该删、实际不该删"
+
+`seek()`（原 `nearestMob` / `mobsInReach`）里有 `botPos == null` 的守卫。核对宿主
+`AbstractMapObject.getPosition()`（`return new Point(position)`，`position` 初始化为
+`new Point()`）与 `nullifyPosition()`（全仓**无调用点**）后可知它实际不可达，一度删除；
+但**基线代码在同一位置本来就有这个守卫**（`BotAttackDriver` 旧 448/573 行）。删它等于
+擅自改变既有健壮性约定，因此恢复。判定准则：不可达但“与基线一致”的守卫，属于既有风格，
+不在性能优化里顺手改。
+
+验证：`mvn -o test` → **1686 run, 0 failures, 0 errors, 2 skipped**。

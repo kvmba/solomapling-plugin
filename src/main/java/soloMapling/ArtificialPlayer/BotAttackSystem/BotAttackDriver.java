@@ -309,7 +309,7 @@ public final class BotAttackDriver {
         }
         if (targets.isEmpty()) {
             return AttackResult.miss(healUndead ? "no undead in heal range"
-                    : reachDiagnostic(seek, bot, profile, weapon, facingLeft));
+                    : reachDiagnostic(seek.botPos(), seek.nearest(), profile, weapon, facingLeft));
         }
 
         // The 独行客 bank-and-spend beat: enough own Pickpocket bags inside Money Explosion's WZ
@@ -464,13 +464,13 @@ public final class BotAttackDriver {
      * target list) for the same candidates. One scan now feeds all of them; the box test stays
      * per-profile and the ledge gate is resolved once for the bot.
      */
-    private record SeekScan(Point botPos, int botRegion, List<Monster> candidates, Monster nearest) {
+    private record SeekScan(Point botPos, List<Monster> candidates, Monster nearest) {
     }
 
     private static SeekScan seek(Character bot) {
         Point botPos = bot.getPosition();
         if (botPos == null) {
-            return new SeekScan(new Point(), Integer.MIN_VALUE, List.of(), null);
+            return new SeekScan(null, List.of(), null);
         }
         MapleMap map = bot.getMap();
         int botRegion = GCMovement.peekRegionIdAt(map, botPos.x, botPos.y);
@@ -499,7 +499,7 @@ public final class BotAttackDriver {
                 nearest = m;
             }
         }
-        return new SeekScan(botPos, botRegion, candidates, nearest);
+        return new SeekScan(botPos, candidates, nearest);
     }
 
     /* Alive mobs inside the attack's reach box, nearest first. */
@@ -547,9 +547,6 @@ public final class BotAttackDriver {
      * Forward attacks are clipped to the bot's facing side; surround attacks (a box centred on the
      * character - mage AoE, Dragon Roar, Heaven's Hammer) keep both sides.
      */
-    private static Rectangle reachBox(SeekScan seek, BotAttackProfile profile, WeaponType weapon, boolean facingLeft) {
-        return reachBox(seek.botPos(), profile, weapon, facingLeft);
-    }
 
     private static Rectangle reachBox(Point p, BotAttackProfile profile, WeaponType weapon, boolean facingLeft) {
         int skillId = profile.skillFor(weapon);
@@ -636,13 +633,11 @@ public final class BotAttackDriver {
      * Human-readable hint for the GM command when nothing was in reach: where the nearest mob
      * sits relative to the bot and the reach box it fell outside. Only walked on the miss path.
      */
-    private static String reachDiagnostic(SeekScan seek, Character bot, BotAttackProfile profile, WeaponType weapon, boolean facingLeft) {
-        Point botPos = seek.botPos();
-        Monster nearest = seek.nearest();
+    private static String reachDiagnostic(Point botPos, Monster nearest, BotAttackProfile profile, WeaponType weapon, boolean facingLeft) {
         if (nearest == null) {
             return "no targetable mobs within " + SEEK_RANGE + "px (none, or all on a separate ledge)";
         }
-        Rectangle box = reachBox(seek, profile, weapon, facingLeft);
+        Rectangle box = reachBox(botPos, profile, weapon, facingLeft);
         Point np = nearest.getPosition();
         return "nearest '" + nearest.getName() + "' at dx=" + (np.x - botPos.x) + " dy=" + (np.y - botPos.y)
                 + " outside reach x[" + box.x + ".." + (box.x + box.width) + "] y[" + box.y + ".." + (box.y + box.height)
