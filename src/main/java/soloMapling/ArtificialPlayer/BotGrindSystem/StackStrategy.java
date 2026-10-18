@@ -252,6 +252,9 @@ final class StackStrategy implements GrindStrategy {
         SpotStack best = null;
         double bestScore = -Double.MAX_VALUE;
         MapleMap map = chr.getMap();
+        // One hostile snapshot per selection: liveHostilesWithin would otherwise rebuild the map's
+        // whole monster list once per member spot of every candidate stack.
+        List<Monster> hostiles = SpotFinder.snapshotHostiles(map);
         for (SpotStack st : p.stacks()) {
             if (!GrindStylePolicy.canTraverse(b.style, st)) {
                 continue;
@@ -269,7 +272,7 @@ final class StackStrategy implements GrindStrategy {
             // SpotFinder.LIVE_MOB_W), so the relocate walks to the visible fight.
             double live = 0;
             for (int idx : st.spotIndices()) {
-                live += SpotFinder.liveHostilesWithin(map, p.spots().get(idx));
+                live += SpotFinder.liveHostilesWithin(map, p.spots().get(idx), hostiles);
             }
             double score = LIVE_MOB_W * live
                     + FEED_W * st.totalFeed()

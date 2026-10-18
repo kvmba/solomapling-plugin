@@ -45,22 +45,26 @@ public class BotHelpers {
     /**
      * Prefers the host {@link ArtificialCharacters} registry (registered in onLoad).
      * Falls back to the historical SoloMapling id convention when no classifier is bound.
+     *
+     * <p><b>Measured, and deliberately left alone.</b> {@code classifiers()} allocates a
+     * {@code List.copyOf} snapshot per call, so the tempting "ask the classifier first, then check
+     * whether any is bound" rewrite removes that allocation from the common bot answer. It was
+     * benchmarked (median of 9, classifier body shaped like the plugin's own roster lookup):
+     * about 10-35% faster on a bound registry, but <b>50% slower</b> when no classifier is bound
+     * yet (plugin pre-onLoad, bare dev spawns) because it then walks the registry before taking
+     * the id rule. It also spends a second registry read, which changes which side of a concurrent
+     * registry flip the two formulations can disagree on. For a call that costs tens of
+     * nanoseconds at a few thousand calls per second, that trade is not worth the extra branching
+     * and the reasoning burden - see docs/PERFORMANCE_HOTSPOT_ANALYSIS.md §6.6.
      */
     public static boolean isBot(int id) {
         if (id == 999) {
             return true;
         }
-        // Ask the classifiers FIRST: isArtificial iterates the registry in place, while
-        // classifiers() allocates a full List.copyOf snapshot on every call. Scans over the
-        // world storage (observer poll, level-up notice, chat bridges) are overwhelmingly bots,
-        // so the common answer returns here without an allocation. The fallback order is
-        // unchanged and provably equivalent: with no classifier bound isArtificial is always
-        // false, so the id convention answers exactly as before; with one bound the old code
-        // returned isArtificial(id) and so does this.
-        if (ArtificialCharacters.isArtificial(id)) {
-            return true;
+        if (!ArtificialCharacters.classifiers().isEmpty()) {
+            return ArtificialCharacters.isArtificial(id);
         }
-        return ArtificialCharacters.classifiers().isEmpty() && id > 20000;
+        return id > 20000;
     }
 
     /**

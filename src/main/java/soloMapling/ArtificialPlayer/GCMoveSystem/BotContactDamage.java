@@ -170,10 +170,10 @@ final class BotContactDamage {
                 retaliateWhileInvulnerable(entry, bot);
                 return;
             }
-            Rectangle query = new Rectangle(getBotTouchBounds(entry, bot));
-            // The un-grown foot box is what the contact report/log prints; the query above grows it
-            // only to catch wide mobs. Keep the original rather than rebuilding it per candidate.
-            Rectangle touchBounds = new Rectangle(query);
+            // The un-grown foot box is what the contact report/log prints; the query grows a COPY
+            // of it only to catch wide mobs, so the box is built once per scan.
+            Rectangle touchBounds = getBotTouchBounds(entry, bot);
+            Rectangle query = new Rectangle(touchBounds);
             query.grow(MOB_QUERY_MARGIN, MOB_QUERY_MARGIN);
             Monster nearby = null;
             for (MapObject obj : bot.getMap().getMapObjectsInRect(query, MONSTER_TYPES)) {
@@ -216,9 +216,9 @@ final class BotContactDamage {
         if (!BotEnergyCharge.claimRetaliationBeat(bot)) {
             return;
         }
-        Rectangle query = new Rectangle(getBotTouchBounds(entry, bot));
-        query.grow(MOB_QUERY_MARGIN, MOB_QUERY_MARGIN);
         Rectangle touchBounds = getBotTouchBounds(entry, bot);
+        Rectangle query = new Rectangle(touchBounds);
+        query.grow(MOB_QUERY_MARGIN, MOB_QUERY_MARGIN);
         for (MapObject obj : bot.getMap().getMapObjectsInRect(query, MONSTER_TYPES)) {
             Monster mob = (Monster) obj;
             if (!isHostileLivingMonster(mob) || !isMobTouchingBot(mob, touchBounds)) {

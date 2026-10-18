@@ -489,7 +489,7 @@ public final class BotAttackDriver {
                 nearest = m;
             }
         }
-        return new SeekScan(new Point(botPos), botRegion, candidates, nearest);
+        return new SeekScan(botPos, botRegion, candidates, nearest);
     }
 
     /* Alive mobs inside the attack's reach box, nearest first. */
@@ -499,7 +499,17 @@ public final class BotAttackDriver {
 
         List<Monster> found = new ArrayList<>();
         for (Monster m : seek.candidates()) {
+            // Re-validate: the scan above ran a moment earlier, and a mob can die or be removed
+            // from the map between the two reads (other bots' hits land on their own threads).
+            // The original in-loop checks are kept so the target list is exactly what it was;
+            // in particular test.contains(null) would throw.
+            if (!m.isAlive()) {
+                continue;
+            }
             Point mp = m.getPosition();
+            if (mp == null) {
+                continue;
+            }
             // Bosses are big and multi-bodied: test their part positions against a vertically
             // padded box so e.g. Zakum's elevated arms still register as in-reach.
             Rectangle test = m.isBoss()

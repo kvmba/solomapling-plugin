@@ -301,7 +301,7 @@ for (Character player : bot.getWorldServer().getPlayerStorage().getAllCharacters
 
 | 位置 | 改动 | 实测/论证 |
 |---|---|---|
-| `BotHelpers.isBot(int)` | 先用 `ArtificialCharacters.isArtificial(id)` 就地遍历，只有判否时才 `classifiers().isEmpty()` 决定是否回落 id 约定。原来**每次**都先 `classifiers()`（`List.copyOf` 快照） | 微基准（隔离复刻形态）：**63→12 / 36→18 / 24→1.5 ns**，2–20×。语义等价：无 classifier 时 `isArtificial` 恒 false，回落分支与旧版一致；有 classifier 时旧版就返回 `isArtificial` |
+| `BotHelpers.isBot(int)` | **已回退**（见 §6.6）。曾改为"先走 `isArtificial(id)` 就地遍历、判否后再查 `classifiers().isEmpty()`"，以避开每次调用的 `List.copyOf` 快照 | 用真实 classifier 体重测后收益仅 10–35%，但**注册表为空时慢 50%**（pre-onLoad / 裸 dev 路径），且多一次注册表读取。收益与风险不成比例，恢复原实现 |
 | `BotAttackConfig.resolve(job, weapon)` | 纯函数结果按 `Job`→`WeaponType` 序数做行缓存（`ConcurrentHashMap<Job, JobAttacks[]>`） | 每次挥砍原本要扫全表 + 多次 `isA()` 并新建 record；现在命中后无分配、无锁 |
 | `BotBuffConfig.buffsForJob(job)` | 每个 job 缓存一份不可变列表（`AtomicReferenceArray` 原子发布） | 移动 tick 的 dash 探测、buff 轮询、flavor 每 tick 都在调；`EnumMap` 迭代顺序固定，缓存顺序与原结果一致。调用方只读（`contains`/遍历/自我拷贝） |
 | `GCMovement.onDifferentLedge(map, anchorRegion, bx, by)`（新增） | 恒定锚点的区域只解析一次，候选怪每只只探一次 | 战斗 tick 的怪扫描里原来**每只怪**都要重探锚点（两次地面探测）。隔离微基准（含真实斜率三角链）：64 只怪 **5.4–11 µs → 4.3–5.3 µs**，1.2–2.5× |
@@ -341,9 +341,45 @@ for (Character player : bot.getWorldServer().getPlayerStorage().getAllCharacters
 ### 6.4 明确不做
 
 - `GCMovementDriver` 的 `synchronized(entry)`、`EventStore` 的写锁、A* 的 `PriorityQueue`：正确性 > 微优化（与 §3 一致）。
-- `isBot` 的宿主侧 `hasClassifiers()` API：本轮改用"先遍历再判空"，不再需要该 API，也无缓存过期风险。
+- `isBot` 的改写：见 §6.6，实测收益不足且有变慢子路径，**已回退**。
 - `BotSpotClaims` 的 `isFull()` 仍走 `holders()`：语义一致，读路径已无全局锁。
 
 ### 6.5 基准源码
 
 `/tmp/perfbench-codex/HotPathBench.java`（隔离复刻 `isBot` 与 ledge 门控两种写法，`java -XX:+UseParallelGC`，取 5 轮）。
+
+---
+
+## 6.6 自我审计与回退（`isBot` 优化）
+
+上一版本轮把 `isBot` 改成"先问分类器、再判断注册表是否为空"。复核后**回退**，原因如下（均为实测，非推测）：
+
+| 场景（median of 9，classifier 体模拟插件自己的 roster/companion/id 判定） | 旧写法 | 新写法 | 差异 |
+|---|---:|---:|---:|
+| bot id，注册表已绑定 | 103.5 ns | 88.4 ns | **-14.6%** |
+| 真玩家 id，注册表已绑定 | 55.0 ns | 49.9 ns | -9.1% |
+| 混合（宿主 broadcast 形状） | 72.4 ns | 46.9 ns | -35.3% |
+| 混合，注册表**为空**（pre-onLoad / 裸 dev） | 28.2 ns | 42.4 ns | **+50.7%** |
+
+关键判断：
+
+1. **收益比我原先写的"2–20×"小得多**。第一版基准用 `List.copyOf` 去对比一个 `Boolean` 分类器，且每轮只跑固定次数、无中位数，系统性放大了差异。用真实 classifier 体 + 中位数重测后，稳态收益只有 10–35%。
+2. **存在一个明确变慢的子路径**：注册表为空时（插件尚未 onLoad，或裸 dev 环境），新写法要先走一遍分类器再退回 id 约定，慢 50%。
+3. **多花一次注册表读取**。两种写法都要读两次，但顺序不同；注册表只在插件 load/unload 时变化（`register` 在 `onLoad`，`clear` 在 `ExtensionLoader.unloadAll` 且在所有扩展 `onUnload` 之后），所以稳态语义一致（真值表已用 5 个用例锁死）。但窗口期内的分歧方向会随顺序改变，这种"只在对端生命周期抖动时才可能不同"的歧义，不值得用 10–35% 的常数收益去换。
+4. 结论：**保持原实现**，把实测数据写进注释与本文档，避免下一个人重复这次尝试。
+
+新增 `BotHelpersIsBotTest`（5 个用例）锁定原写法的真值表：999 哨兵、无分类器的 id 约定、已绑定分类器时"未命中不得回退到 id>20000"、以及 `clear()` 后恢复 id 约定。这比性能收益更有价值——它防的是**语义回归**。
+
+### 6.7 其余经复核后修正的问题
+
+| 位置 | 我引入的问题 | 修正 |
+|---|---|---|
+| `GCMovement.followerProfile` | 改为读 `st.movementProfile` 缓存，会把宠物/召唤物的步速与跳跃上限**冻结在最长 20 秒旧值**（party Haste 加入、上下坐骑、fieldLimit 强制基础属性都要即时生效） | 回退为每次 `BotMovementProfile.fromCharacter`，并在注释里写明原因；`BotMovementState.movementProfile` 保留 `volatile`（GM 诊断在命令线程读它，是独立的可见性问题） |
+| `BotAttackDriver.mobsInReach` | 把 `isAlive()` / `position == null` 检查前移进了 `seek()`。两次读取之间怪物可能死亡或被移除，`test.contains(null)` 会 **NPE** | 在目标循环内恢复两个检查（与原实现一致），`seek` 只做候选集 |
+| `BotAttackDriver.SeekScan` | `new Point(botPos)` 多复制一次（宿主 `getPosition()` 本已返回新对象） | 直接存 `botPos` |
+| `ConversationManager.loadScripts` | `allScripts` 改为 `volatile` 后，先赋值空表再填充，tick 可能读到**半成品脚本包** | 先在局部构建，最后一次性发布；异常路径也发布（保持"永不为 null"） |
+| `StackStrategy.pickBestStack` | 遗漏：仍按每个会员 spot 调用 `liveHostilesWithin(map, spot)`，每次重建整图怪物表 | 与 `pickBest`/WAIT 路径一致，改为每轮一次 `snapshotHostiles` |
+| `BotPetFollower` 每宠 t ick 的footing探测 | 热路径仍走 `(Point)` 重载 | 直接传 `petPos.x/y`，走无分配重载 |
+| `BotContactDamage` | 同一 tick 内重复构造 bot 触摸盒两次 | 只构造一次，`query` 复制后 grow |
+
+验证：`mvn -o test` → **1684 run, 0 failures, 0 errors, 2 skipped**。

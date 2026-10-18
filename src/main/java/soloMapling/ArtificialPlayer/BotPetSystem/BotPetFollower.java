@@ -460,7 +460,9 @@ public final class BotPetFollower {
             // One footing probe per pet per tick, shared by the swim decision and the land walk
             // (it used to be probed twice on a swim map). Skipped entirely while the owner swims —
             // every pet swims then, so the surface under it is not consulted.
-            Foothold standing = ownerSwimming ? null : findStandingFoothold(map, pet.getPos());
+            Point petPos = pet.getPos();
+            Foothold standing = ownerSwimming ? null
+                    : findStandingFoothold(map, petPos.x, petPos.y);
             boolean swim = ownerSwimming || (swimMap && standing == null);
             if (swim) {
                 followSwim(chr, pet, idx, followX[idx], config, observed);

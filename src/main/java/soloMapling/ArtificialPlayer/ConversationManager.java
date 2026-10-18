@@ -372,12 +372,18 @@ public class ConversationManager {
 
     @SuppressWarnings("unchecked")
     private void loadScripts() {
-        allScripts = new ArrayList<>();
+        // Build into a local and publish once: the tick reads allScripts concurrently (and the GM
+        // command thread can reload it), so assigning the empty list first would let a reader
+        // observe a half-filled script pack.
+        List<ConversationScript> loaded = new ArrayList<>();
         try {
             YamlReader reader = new YamlReader(DialoguePackPaths.openDialogueReader(DIALOGUE_YAML));
             Map<String, Object> root = (Map<String, Object>) reader.read();
             Map<String, Object> conversations = (Map<String, Object>) root.get("conversations");
-            if (conversations == null) return;
+            if (conversations == null) {
+                allScripts = loaded;
+                return;
+            }
 
             for (Map.Entry<String, Object> entry : conversations.entrySet()) {
                 String id = entry.getKey();
@@ -397,13 +403,18 @@ public class ConversationManager {
                     parsedLines.add(new ConversationScript.ConversationLine(speaker, text, emote, delay));
                 }
 
-                allScripts.add(new ConversationScript(id, participants, parsedLines));
+                loaded.add(new ConversationScript(id, participants, parsedLines));
             }
 
-            log("[ConversationManager] Loaded " + allScripts.size() + " conversation scripts.");
+            allScripts = loaded;
+            log("[ConversationManager] Loaded " + loaded.size() + " conversation scripts.");
         } catch (Exception e) {
             log("[ConversationManager] Failed to load conversation scripts: " + e.getMessage());
             e.printStackTrace();
+            // Publish what parsed (possibly nothing) so allScripts is never null: the GM trigger
+            // reaches pickScript() even when the pack is missing, and the old code always left a
+            // (possibly empty) list behind rather than null.
+            allScripts = loaded;
         }
     }
 

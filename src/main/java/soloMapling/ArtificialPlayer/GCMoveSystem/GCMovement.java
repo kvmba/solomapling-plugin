@@ -1293,22 +1293,12 @@ public final class GCMovement {
     /** The owner's movement profile with both walk and jump stats reduced by {@code statReduction}
      *  (floored at the base stat) — the follower equivalent of {@link BotMovementProfile#fromCharacter}. */
     private static BotMovementProfile followerProfile(Character owner, int statReduction) {
-        return ownerProfile(owner).reducedBy(statReduction);
-    }
-
-    /**
-     * The owner's effective movement profile, without re-deriving it on every follower call.
-     *
-     * <p>A pet tick asks for the owner's walk speed and jump profile once per pet (and again inside
-     * the ground step), and deriving them means a party-roster scan plus an equip/WZ lookup for
-     * snowshoes every time. For an owner under dynamic control the driver already holds exactly
-     * that profile, refreshed on its own 20s cadence — read it instead. Bots outside dynamic
-     * control (town idlers, recorded-path movers) still pay the derivation, which is their own
-     * cadence rather than every follower tick.
-     */
-    static BotMovementProfile ownerProfile(Character owner) {
-        BotMovementState st = owner == null ? null : STATES.get(owner.getId());
-        return st != null ? st.movementProfile : BotMovementProfile.fromCharacter(owner);
+        // Deliberately re-derived per call: the follower's hop reach must track the owner's CURRENT
+        // speed/jump (party Haste joining, mount/dismount, a map whose fieldLimit forces base
+        // stats) on the same tick the owner gets it. The driver's cached st.movementProfile is
+        // refreshed on its own 20s cadence, so reusing it here would let a pet trail a stale profile
+        // for up to that window - a fidelity regression for a micro-optimisation.
+        return BotMovementProfile.fromCharacter(owner).reducedBy(statReduction);
     }
 
     /**
