@@ -460,3 +460,55 @@ int reachY = reach.reachY;
 不在性能优化里顺手改。
 
 验证：`mvn -o test` → **1686 run, 0 failures, 0 errors, 2 skipped**。
+
+---
+
+## 6.10 第五轮复核：把"读代码论证等价"换成"真实数据对照执行"
+
+前四轮的等价性论证都停在"我读了 diff，数学看起来一样"。这轮补上唯一有说服力的证据：
+**把改动前的实现原样抄进测试，和改动后的实现逐点对跑**。
+
+### 6.10.1 地面探测：6 张真实地图、>10 万探测点、0 分歧
+
+`GroundProbeEquivalenceTest` 在 `100000000 / 101000000 / 104000000 / 200000000 / 220000000 /
+922010300` 六张真实地图上，以 7px×23px 的密度扫过每张图的 VR 范围（含地图边界外 20/40px），
+对每个点同时调用：
+
+- `legacyFindGroundFoothold`（逐字复刻改动前实现：`findBelowIndexed` ×2 +
+  `pointBelowIndexed` ×2 取表面 y）
+- `BotPhysicsEngine.findGroundFoothold`（改动后：直接读已解析 foothold 的 `surfaceY`）
+
+以及 `findGroundPoint` 的同样对照。断言两点：
+
+1. 返回的 foothold 必须**同一个**（按 id + 几何比对）；
+2. 返回的落点 `Point` 必须**逐像素相同**。
+
+结果：**0 分歧**，探测点数 > 100 000。这条测试直接把"斜率三角链 + int 截断"这些最容易
+差 1px 的地方钉死了。
+
+### 6.10.2 `BotSpotClaims`：并发不变量 + slot 分配顺序
+
+`BotSpotClaimsConcurrencyTest` 覆盖三件 per-map 锁唯一可能破坏的事：
+
+| 用例 | 断言 |
+|---|---|
+| 16 线程同时抢同一 map+spot（cap=4），全部持锁到峰值再释放 | 恰好 4 个成功；`holders()` = 4；**4 个 slot 索引互不相同**（两个不同 bot 拿同一 slot 是最隐蔽的坏法） |
+| 两个 map 各自填满 | 各自到自己的 cap，互不影响 |
+| 固定顺序 claim / 中间 release / 再 claim | **复用最低空闲索引**（0,1,2 → 释放 1 → 下一个拿 1），与旧全局锁的扫描顺序一致 |
+
+另有 50 轮 claim/release 循环，验证读取 `holders()` 不会创建 map 条目、释放后不会残留。
+
+> 过程中该测试自己失败过一次：我在工作线程里只 claim 没 release，却断言最终清零——是**测试**
+> 的 bug，不是产品的 bug，修正后连跑 3 次稳定通过。
+
+### 6.10.3 顺带确认的两处"不是热点"
+
+复核时顺手验证了几个我**没有**改的地方是否该改：
+
+- `BotMesoBomb` / `BotShadowMeso` / `BotGroundMists` / `BotShadowWeb` 的额外
+  `getMapObjectsInRange` 都在 job + 冷却门（`NEXT_*_BY_BOT`）之后，只对特定职业在冷却到期时
+  触发，不是普遍每 tick 路径——不改。
+- `attackReachX/Y` 的重复解析只影响 travel-clear 门（`inAttackRange` 已惰性缓存），已在
+  6.8.2 收敛为一次 `reachProfile`。
+
+验证：`mvn -o test` → **1691 run, 0 failures, 0 errors, 2 skipped**。
