@@ -47,8 +47,25 @@ record BotMovementProfile(int totalSpeedStat, int totalJumpStat, boolean snowSho
     static final int THIEF_SPEED = 120;                        // thieves: the Haste class
     static final int HASTE_MAX_JUMP = MAX_EFFECTIVE_JUMP_STAT; // 123
     static final int HASTE_SELF_MAX_LEVEL = 55;                // haste-thief at/above this = max speed+jump
-    static final int PARTY_HASTE_THIEF_LEVEL = 60;             // a haste-thief party member at/above this grants party Haste
+    static final int PARTY_HASTE_THIEF_LEVEL = 30;             // Haste is a 2nd-job skill (level 30+); Ludi PQ runs parties from 35
     static final int YOUNG_THIEF_JUMP = 115;
+
+    /**
+     * What the Haste buff itself adds to a body's jump stat, in points.
+     *
+     * <p>WZ {@code Skill.wz/410.img} for 4101004 (轻功 / Haste) carries BOTH {@code speed} AND
+     * {@code jump}, rising together per skill level: level 1 = speed 2 / jump 1, level 20 =
+     * speed 40 / jump 20 (the maxed value a 2nd-job thief has by level ~35). The buff is the
+     * reason a party without any mobility gear can still reach ledges that are 100px above a
+     * floor - which is exactly stage 5's top door in Ludi PQ, a room the stage cannot be cleared
+     * without (six rooms x four pass boxes = the 24 passes it asks for).
+     *
+     * <p>Speed needs no separate constant here: {@link #THIEF_SPEED} already models a hasted
+     * body's walk pace from the same skill, and the speed stat is CLASS-based by design. The jump
+     * side was missing entirely, which is what made a hasted party read as "everyone leaps like
+     * an unhasted warrior" and left the top door physically unreachable for the whole run.
+     */
+    static final int HASTE_JUMP_BONUS = 20;
 
     // Riding bonus (movement profile only; see mounted()). v83's own riding grants speed/jump but
     // this server carries none in WZ/StatEffect, so the bot's effective movement adds it here so
@@ -101,15 +118,24 @@ record BotMovementProfile(int totalSpeedStat, int totalJumpStat, boolean snowSho
         } else {
             jumpBaseline = levelJumpStat(level);
         }
-        // Party Haste (immersion): a bot partied with a high-level haste-thief inherits max SPEED (not
-        // jump). Pure roster logic — the thief never travels to cast it. max() so a young thief still
-        // gets the full Haste speed rather than being dragged down to it.
-        if (partyGrantsHaste(character)) {
+        // Party Haste (immersion): a bot partied with a haste-thief inherits the buff, exactly as a
+        // real party member would. Pure roster logic - the thief never travels to cast it. max() so
+        // a young thief still gets the full Haste speed rather than being dragged down to it.
+        boolean partyHaste = partyGrantsHaste(character);
+        if (partyHaste) {
             speedBaseline = Math.max(speedBaseline, THIEF_SPEED);
         }
 
         int totalSpeed = speedBaseline + (character.getTotalMoveSpeedStat() - BASE_TOTAL_STAT);
         int totalJump = jumpBaseline + (character.getTotalJumpStat() - BASE_TOTAL_STAT);
+        // Party Haste is a real buff: the skill's WZ row carries speed AND jump, and both apply to
+        // every body in the party. Speed is already modelled by the class baseline above; the jump
+        // half is added here, because without it a hasted party still cannot make the 100px step
+        // Ludi PQ's stage-5 top room sits behind. Only to a body that does not already carry the
+        // skill itself - a thief's own Haste is already its baseline.
+        if (partyHaste && !hasHasteSkill(job)) {
+            totalJump += HASTE_JUMP_BONUS;
+        }
         // A rider walks faster & leaps higher — the visible mount should move like one. This server
         // ships no mount speed data (skill 1004 has no `speed`, every TamingMob item's incSpeed/
         // incJump is 0), so the bonus is added here, on the movement profile only: the graph/physics
@@ -142,8 +168,13 @@ record BotMovementProfile(int totalSpeedStat, int totalJumpStat, boolean snowSho
         return job != null && (job.isA(Job.ASSASSIN) || job.isA(Job.BANDIT));
     }
 
-    // True if the bot shares an active party with an online, level-PARTY_HASTE_THIEF_LEVEL+ haste-thief —
-    // the bot is treated as receiving that thief's party Haste. Roster-only; no map/proximity requirement.
+    // True if the bot shares an active party with an online thief who has learned Haste — the bot
+    // is treated as receiving that thief's party Haste. Roster-only; no map/proximity requirement.
+    //
+    // The level gate is the SKILL's own: Haste (4101004 / 4201004) is a 2nd-job skill, i.e. learned
+    // from level 30, and the quests that need it (Ludi PQ's stage-5 top room) run parties as low as
+    // 35. The old 60 level gate made party Haste unreachable in exactly the level band that needs
+    // it, while the real skill is available a whole job tier earlier.
     private static boolean partyGrantsHaste(Character character) {
         Party party = character.getParty();
         if (party == null) {

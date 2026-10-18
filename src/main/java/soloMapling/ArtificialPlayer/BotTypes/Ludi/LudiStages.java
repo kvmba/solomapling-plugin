@@ -694,51 +694,25 @@ public final class LudiStages {
      * Whether this bot's kit is eligible to claim {@code room} in stage 5 - the posting table
      * above (top = mobility, bottom = hide, the rest = anyone).
      *
-     * <p>The top room's gate is a PHYSICAL one, not a job label: its door (in01) hangs on a ledge
-     * 100px above the row the bot stands on, and no WZ foothold/rope/portal bridges that step -
-     * only a jump whose apex clears 100px does. WZ Physics.img gives gravity 2000 px/s² and a
-     * 555 px/s base jump, so 100 jump stat = ~77px (cannot), 110 = ~93px (cannot, and 110 is the
-     * whole 35-50 LPQ band), 114 = ~100.1px (the physical boundary), 123 = full Haste (clears it).
-     * A job with 快速移动 blinks the same gap; a 轻功 carrier's own Haste is the jump that clears
-     * it. Everything else is refused BEFORE the claim, so it never walks to a door it cannot
-     * possibly enter (the reported "stands at the top door forever").
-     *
-     * <p>Reading the bot's own movement profile rather than only its job matters because the
-     * profile is what the physics actually runs: a low-level thief (110 jump, no Haste learned
-     * yet) and a levelled one (123) are the same job but not the same body.
+     * <p>The top room's door (in01 of 922010500) hangs on a ledge a full 100px above the row
+     * beneath it, with no WZ foothold / rope / portal bridging the step; WZ Physics.img
+     * (gravity 2000, jumpSpeed 555) makes that a jump of ~115% jump stat or a blink. The room is
+     * NOT optional - all six stage-5 rooms hold four pass boxes and the stage asks for 24, so
+     * refusing the top room to a body that cannot make the step starves the turn-in. The answer
+     * is therefore not "skip the room" but "the party's Haste must be modelled": see
+     * {@link BotMovementProfile#fromCharacter}, where a haste-thief in the party raises the
+     * jump stat it grants (the real skill grants speed AND jump).
      */
     static boolean stage5RoomAdmits(Character bot, int room) {
         if (room == LudiPqData.STAGE5_ROOM_FIRST) {
             Job job = bot.getJob();
-            if (job != null && MovementStylePolicy.hasTeleportSkill(job.getId())) {
-                return true; // blinks the 100px step outright
-            }
-            if (!MovementStylePolicy.hasHasteSkill(job)) {
-                return false; // no mobility skill at all
-            }
-            return jumpClearsTheTopDoor(bot);
+            return MovementStylePolicy.hasTeleportSkill(job == null ? 0 : job.getId())
+                    || MovementStylePolicy.hasHasteSkill(job);
         }
         if (room == LudiPqData.STAGE5_ROOM_LAST) {
             return hideSkillFor(bot) != 0; // guards: 隐身术 / 橡木伪装 only
         }
         return true;
-    }
-
-    /**
-     * The vertical step the stage-5 top room's door hangs above the row below it, in px
-     * (WZ: fh420 y=-1291 over fh415/416 y=-1276 over the fh405/408 row y=-1176).
-     */
-    static final int STAGE5_TOP_DOOR_STEP_PX = 100;
-
-    /**
-     * Whether this bot's jump profile clears {@link #STAGE5_TOP_DOOR_STEP_PX}.
-     *
-     * <p>Delegates to the engine's own jump profile ({@code GCMovement.jumpProfile}), the same
-     * {@code v²/2g} of the same movement profile the physics drives this character with, so the
-     * answer cannot drift from what a jump attempt would actually do.
-     */
-    static boolean jumpClearsTheTopDoor(Character bot) {
-        return GCMovement.jumpProfile(bot).risePx() >= STAGE5_TOP_DOOR_STEP_PX;
     }
 
     /**
