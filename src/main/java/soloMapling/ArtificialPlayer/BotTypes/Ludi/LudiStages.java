@@ -1157,18 +1157,19 @@ public final class LudiStages {
      * Fight the boss stage.
      *
      * <p>The stage ends when the leader brings an Alishar trophy to the Violet Balloon
-     * ({@code 2040044.js}), whose turn-in wipes the boss map's props and calls
-     * {@code eim.clearPQ()}: the event then warps the whole registered team to the BONUS map
-     * and starts a fresh one-minute timer. The bot therefore only has to add damage and collect
-     * the trophy if it is the one that killed him - the delivery run belongs to the leader.
+     * ({@code 2040044.js}), whose turn-in calls {@code eim.clearPQ()}. That is synchronous:
+     * the event stops its timer, marks itself cleared and warps the whole registered team to
+     * the BONUS map right there, so a bot in this room is normally already in the reward room
+     * by the next tick. The bot therefore only has to add damage; the trophy delivery belongs
+     * to the leader.
      *
-     * <p>Once {@code 9stageclear} is set the fight is over for every body in the room, so the
-     * combat beat must stop chasing the controller's last spawns and stand still for the warp.
-     * That is the one moment the room must NOT keep swinging: nothing left has to die.
+     * <p>The cleared check is the once-per-tick guard for the window between the flag being
+     * set and the warp landing: nothing in this room has to die any more, so the bot must not
+     * start another chase on the controller's last spawns.
      */
     public static void fightBoss(Character bot) {
         if (stageCleared(bot, 9)) {
-            return; // the fight is over: stand still for the event's warp to the bonus stage
+            return; // nothing left to kill here - clearPQ has already warped the team on
         }
         PqActions.seekAndAttack(bot);
     }
@@ -1197,10 +1198,9 @@ public final class LudiStages {
         if (LudiPqData.BONUS_MAP != bot.getMapId()) {
             return;
         }
-        // The bonus stage's timer is one minute; everything else in the run is complete, so
-        // there is no state to preserve. Recover the pass stock first (a pickup walk the
-        // previous stage left in flight belongs to the old map and is dropped there).
-        PqActions.recoverUngatheredHandoffs(bot, LudiPqData.PASS);
+        // The bonus stage is a reward room: there is no stage turn-in and nothing to preserve.
+        // Any pass still pocketed from stage 9 is dead weight the run never asks for again - the
+        // reward boxes are the only work here.
         int box = nearestBoxOid(bot, LudiPqData.BONUS_BOX);
         if (box >= 0) {
             hitReactorRotate(bot, box, LudiPqData.BONUS_BOX);

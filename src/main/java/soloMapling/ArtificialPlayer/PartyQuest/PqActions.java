@@ -1593,7 +1593,6 @@ public final class PqActions {
         // the drops' own despawn - a wide sweep can no longer freeze a busy stage tick.
         List<MapObject> lone = found.stream()
                 .filter(o -> o instanceof MapItem drop && isFloorLoot(drop))
-                .filter(o -> DropCommands.botCanLoot(bot, (MapItem) o))
                 .limit(LOOT_INLINE_MAX)
                 .toList();
         if (lone.isEmpty()) {
