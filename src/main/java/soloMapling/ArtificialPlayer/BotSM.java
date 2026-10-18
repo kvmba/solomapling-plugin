@@ -801,6 +801,14 @@ public abstract class BotSM implements EventSubscriber {
         return 2000 + random.nextInt(4000); // 2000 to 3000 ms
     }
 
+    /**
+     * The normal (observed) macro beat, exposed so a bot type whose work must never fall back
+     * to the background cadence can re-assert it - see {@code PartyQuestBot#lowPriorityDelayMs}.
+     */
+    protected final long getNormalDelayMs() {
+        return getRandomDelay();
+    }
+
     // Method to stop the scheduled task. An in-flight tick is allowed to finish
     // (the old cancel(true) interrupt is gone); the wheel entry is simply removed.
     public synchronized void stopScheduledTask() {

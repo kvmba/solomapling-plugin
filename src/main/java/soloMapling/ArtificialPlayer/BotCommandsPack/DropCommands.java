@@ -354,12 +354,11 @@ public class DropCommands {
         }
     }
 
-    // Owner-protected drops (drop type != 2) become free-for-all after this long; matches vanilla.
-    private static final long FFA_OWNER_PROTECT_MS = 15000;
-
-    // True when a bot is entitled to loot this drop: its own drops, or a free-for-all drop (spawned with
-    // no owner, or whose owner-protection window has expired). Lets bots grab their kills plus loot a real
-    // player left on the floor, without stealing another player's still-protected drop.
+    // True when a bot is entitled to loot this drop. Delegates to the HOST's own rule
+    // (MapItem.canBePickedBy) instead of restating a narrower one: a party-owned drop is
+    // lootable by the whole party immediately (that is what a real client does), and the
+    // owner-protection window still gates strangers. Reading and writing party ownership is
+    // the host's item-lock contract, hence the lock.
     public static boolean botCanLoot(Character fakechar, MapItem mapItem) {
         if (mapItem == null || mapItem.isPickedUp() || mapItem.getPosition() == null) {
             return false;
@@ -370,8 +369,12 @@ public class DropCommands {
         if (isPermanentOwnerLocked(mapItem)) {
             return false; // somebody's addressed hand-off (a PQ leader's pile) - not floor loot
         }
-        return mapItem.getDropType() == 2
-                || System.currentTimeMillis() - mapItem.getDropTime() >= FFA_OWNER_PROTECT_MS;
+        mapItem.lockItem();
+        try {
+            return mapItem.canBePickedBy(fakechar);
+        } finally {
+            mapItem.unlockItem();
+        }
     }
 
     // Pick up one specific drop (organic single-item loot, paced by the caller for a natural look).

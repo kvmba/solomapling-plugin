@@ -381,11 +381,20 @@ public final class LudiStages {
         }
         PqActions.seekAndAttack(bot);
         PqActions.loot(bot, bot.getPosition(), CRATE_LOOT_RADIUS_PX, new int[]{LudiPqData.PASS});
+        // A kill's pass lands under the mob, which is up to a platform away from where the bot
+        // ended its swing: the fight's own `loot` above is a flat re-scan of the bot's feet, and
+        // the 250ms combat beat only scoops inside 60px. The stage's pass is what clears it, so
+        // this walk deliberately ranges wider than the sweep and is issued from the macro tick
+        // (steering is the macro tick's job - the sweep never steers).
+        PqActions.walkToNearestDrop(bot, CRATE_LOOT_RADIUS_PX, LudiPqData.PASS);
         // No crates left and nothing alive to fight: the stage's work is done. Hold the
         // stage-NPC post and deliver the stock only when the leader comes for the turn-in,
         // instead of throwing passes the moment he passes by mid-fight.
         if (crate < 0
                 && bot.getMap().getAllMonsters().stream().noneMatch(m -> m.isAlive())) {
+            // Nothing left to kill: release the chase's own move goal so the delivery walk /
+            // the ready ring is not gated behind a walk to a corpse (see PqActions.finishFight).
+            PqActions.finishFight(bot);
             int stageNpc = LudiPqData.stageNpcId(3);
             if (PqActions.handItemsToLeaderAfterStage(bot, LudiPqData.PASS, stageNpc) > 0) {
                 PqActions.say(bot, BotMessages.get("pq.passes_dropped"));
@@ -580,6 +589,16 @@ public final class LudiStages {
         PqActions.seekAndAttack(bot);
         PqActions.loot(bot, bot.getPosition(), LOOT_RADIUS_PX, new int[]{LudiPqData.PASS});
         PqActions.recoverUngatheredHandoffs(bot, LudiPqData.PASS);
+        // A door room holds ONE box mob (two in 922010404), all of them placed at spawn. The
+        // "room is quiet" test below is the only cue that the room is finished, and it used to
+        // be evaluated while the chase's own move goal was still live: a kill that landed while
+        // the driver was mid-walk left the bot walking to the corpse's floor, and every exit
+        // path stands down for a live move - so the bot sat in the room until the driver's
+        // no-progress watchdog dropped the goal. Finishing the fight episode the instant the
+        // room is quiet releases that goal, and the exit walk then owns the driver at once.
+        if (!killableMobPresent(bot)) {
+            PqActions.finishFight(bot);
+        }
         // Room quiet (all the room's killable mobs dead): the work is done. Remember it as
         // cleared, then slip out the door and deliver on the main map's stage-NPC post -
         // the stage NPC lives there, so that is where the leader comes for the turn-in.
@@ -665,9 +684,7 @@ public final class LudiStages {
         // Only hide-carrying kits are ever routed into the guard room (the posting table);
         // a bot in 501-505 without a hide is simply on its own honest legs there - those
         // rooms are WZ-empty of guards.
-        if (hideSkillFor(bot) != 0 && !BotAuraState.isMonsterImmune(bot)) {
-            soloMapling.ArtificialPlayer.BotAttackSystem.BotBuffEffects.showBuff(bot, hideSkillFor(bot));
-        }
+        stayHidden(bot);
         // Boxes while hidden: the strike cancels the hide, so re-show happens next tick.
         // The beat is off: a swing mid-walk would break the hide in a PAD-999 room.
         int box = nearestBoxOid(bot, LudiPqData.BOX_STAGE5);
@@ -716,7 +733,36 @@ public final class LudiStages {
             deliverAndPark(bot, 5);
             return;
         }
+        // Stealth BEFORE the door, not after it. The maze's rooms are entered by walking a
+        // script-less portal from 922010500, and 922010500 itself seats two invincible guards
+        // (9300013, PAD 999) on the floor the bot has to cross to reach in06. The hide was only
+        // ever shown inside a sub-room, so a 飞侠 walking to the bottom room crossed the guards
+        // bare - one touch is a death - which is exactly the reported "the thief went down to
+        // the invincible-mob area without hiding". A hide-carrying kit now raises it before the
+        // walk to the door; the walk does not break it (only an attack or a mount does), and
+        // entering a portal does not either.
+        holdHideWhileCrossing(bot, room);
         enterDoorRoom(bot, room, LudiPqData.STAGE5_ROOM_FIRST);
+    }
+
+    /**
+     * Raise this bot's hide BEFORE it crosses the stage-5 main room, for the kits that route
+     * into (or past) a guarded room.
+     *
+     * <p>The main map 922010500 seats two invincible 9300013 guards on its ground floor and the
+     * bottom room's door (in06, x=-123 y=251) sits below them, so the walk to that door crosses
+     * their touch box. The guard room 922010506 has seven of them. A 飞侠 / Brawler that owns
+     * 隐身术 / 橡木伪装 must therefore be hidden for the crossing AND for the room - the old
+     * code only hid once the bot was already inside a sub-room.
+     */
+    private static void holdHideWhileCrossing(Character bot, int targetRoom) {
+        if (hideSkillFor(bot) == 0) {
+            return;
+        }
+        boolean guardedTarget = targetRoom == LudiPqData.STAGE5_ROOM_LAST;
+        if (guardedTarget || nearbyGuardCount(bot) > 0) {
+            stayHidden(bot);
+        }
     }
 
     /**
@@ -1129,10 +1175,130 @@ public final class LudiStages {
     /**
      * Fight the boss stage.
      *
-     * <p>The stage ends when one Alishar trophy is in hand, and that drop belongs to whoever
-     * killed him, so the bot only has to add damage.
+     * <p>The stage ends when the leader brings an Alishar trophy to the Violet Balloon
+     * ({@code 2040044.js}), whose turn-in wipes the boss map's props and calls
+     * {@code eim.clearPQ()}: the event then warps the whole registered team to the BONUS map
+     * and starts a fresh one-minute timer. The bot therefore only has to add damage and collect
+     * the trophy if it is the one that killed him - the delivery run belongs to the leader.
+     *
+     * <p>Once {@code 9stageclear} is set the fight is over for every body in the room, so the
+     * combat beat must stop chasing the controller's last spawns and stand still for the warp.
+     * That is the one moment the room must NOT keep swinging: nothing left has to die.
      */
     public static void fightBoss(Character bot) {
+        if (stageCleared(bot, 9)) {
+            PqActions.finishFight(bot);
+            return;
+        }
         PqActions.seekAndAttack(bot);
+    }
+
+    // =========================================================================
+    // The post-boss stages
+    // =========================================================================
+
+    /**
+     * Work the bonus stage: break the reward boxes and scoop what they spray.
+     *
+     * <p>{@code 922011000} is seeded with 34 reward reactors ({@code 2202004}, script
+     * {@code ludiquest4} -> {@code rm.sprayItems(true, 1, 30, 60, 15)}), each of which sprays
+     * meso and one item. A player's own share is whatever they pick up before the one-minute
+     * timer hands the team to the exit stage, so the bot does the same thing a player does:
+     * hit every box it can reach and pick the spray up. The boxes are not stage-gated - there
+     * is no turn-in here - so the work is purely "more boxes, then leave".
+     *
+     * <p>Leaving is the Pink Balloon ({@code 2040045.js}, {@code cm.warp(922011100, "st00")}):
+     * the bot takes that warp as soon as the boxes are spent, so the run reaches the reward
+     * stage instead of standing in an empty room until the event's one-minute timer fires.
+     * Only the leader's {@code 9stageclear} turn-in puts the party here, so the room is never
+     * "not ready" - it is only ever "not finished yet".
+     */
+    public static void workBonusStage(Character bot) {
+        if (LudiPqData.BONUS_MAP != bot.getMapId()) {
+            return;
+        }
+        // The bonus stage's timer is one minute; everything else in the run is complete, so
+        // there is no state to preserve. Recover the pass stock first (a pickup walk the
+        // previous stage left in flight belongs to the old map and is dropped there).
+        PqActions.recoverUngatheredHandoffs(bot, LudiPqData.PASS);
+        int box = nearestBoxOid(bot, LudiPqData.BONUS_BOX);
+        if (box >= 0) {
+            hitReactorRotate(bot, box, LudiPqData.BONUS_BOX);
+        }
+        // The reward spray is the whole point of the room: the boxes drop RANDOM items, so
+        // there is no id to filter on - scoop everything this bot is entitled to, at a reach
+        // that covers a box's spray without dragging the bot across the whole room.
+        PqActions.lootAll(bot, bot.getPosition(), BONUS_LOOT_RADIUS_PX);
+        if (box < 0 && !PqActions.hasPickupWalk(bot)) {
+            // Every box is broken and nothing is left to walk to: talk to the Pink Balloon,
+            // who warps the body on to the exit stage. The event's own one-minute timer is the
+            // backstop, but a player does not stand in an empty reward room for a minute - and
+            // the exit stage is where the reward is actually collected, so waiting here delays
+            // the whole run.
+            PqActions.finishFight(bot);
+            goToExitStage(bot);
+        }
+    }
+
+    /** Wide enough for a reward box's spray (it scatters across the ledge) and no wider. */
+    private static final double BONUS_LOOT_RADIUS_PX = 420;
+
+    /** How close a body must stand to an NPC before its dialogue can be opened, squared. */
+    private static final double NPC_TALK_REACH_SQ = 250.0 * 250.0;
+
+    /**
+     * Walk to the bonus stage's Pink Balloon and take his warp to the exit stage.
+     *
+     * <p>{@code 2040045.js}: {@code start()} only resets {@code status}; the FIRST action shows
+     * "Would you like to leave the bonus stage?" and the SECOND one ({@code status == 1}) warps
+     * to {@code 922011100}. Both must be driven - one action only renders the prompt, and the
+     * bot would then stand in front of a dialogue nobody answers.
+     */
+    private static void goToExitStage(Character bot) {
+        org.gms.server.life.NPC balloon = bot.getMap().getNPCById(LudiPqData.BONUS_NPC);
+        if (balloon == null || balloon.getPosition() == null) {
+            return; // no balloon in this room: the event timer is the only way on
+        }
+        if (bot.getPosition().distanceSq(balloon.getPosition()) > NPC_TALK_REACH_SQ) {
+            PqActions.walkTo(bot, balloon.getPosition());
+            return;
+        }
+        if (!PqActions.talkingTo(bot, LudiPqData.BONUS_NPC)) {
+            PqActions.talkTo(bot, LudiPqData.BONUS_NPC, 0, 0);
+        }
+    }
+
+    /**
+     * Work the exit stage: collect the reward from Arturo, then let the run end.
+     *
+     * <p>{@code 922011100} holds only Arturo ({@code 2040035.js}) and a portal-less flat ledge.
+     * His script hands the body its event reward and warps it to the quest's recruit map
+     * ({@code 221024500}, this bot's own lobby) in one conversation. That warp is the run's
+     * real end - not the boss room, and not the bonus map.
+     *
+     * <p>The bot talks to him itself (the reward is per body, so it cannot ride the leader's
+     * conversation) and the {@link PartyQuestBot#returnToLobby} path takes over on the next
+     * tick, when the warp has already put the bot in the lobby.
+     */
+    public static void workExitStage(Character bot) {
+        if (LudiPqData.EXIT_MAP != bot.getMapId()) {
+            return;
+        }
+        org.gms.server.life.NPC arturo = bot.getMap().getNPCById(LudiPqData.EXIT_NPC);
+        if (arturo == null || arturo.getPosition() == null) {
+            return;
+        }
+        // Walk onto him first: a client cannot open a dialogue across the room, and the reward
+        // warp is the only thing that ends the run.
+        if (bot.getPosition().distanceSq(arturo.getPosition()) > NPC_TALK_REACH_SQ) {
+            PqActions.walkTo(bot, arturo.getPosition());
+            return;
+        }
+        if (!PqActions.talkingTo(bot, LudiPqData.EXIT_NPC)) {
+            // Arturo's start() already invokes action(1,...) once (status -1 -> 0), which sends
+            // the "here take this prize" line. One further action (status 0 -> 1) runs the
+            // reward + warp branch. Two actions would over-run it.
+            PqActions.talkTo(bot, LudiPqData.EXIT_NPC, 0);
+        }
     }
 }

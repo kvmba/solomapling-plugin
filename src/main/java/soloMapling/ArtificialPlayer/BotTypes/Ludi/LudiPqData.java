@@ -44,6 +44,25 @@ public final class LudiPqData {
     public static final int STAGE_8 = 922010800; // the crate combination
     public static final int STAGE_9 = 922010900; // the boss
 
+    /**
+     * The two maps after the boss. They are NOT reachable from the boss room by a portal: the
+     * boss-turn-in NPC's script ({@code 2040044.js} -> {@code eim.clearPQ()}) has the event warp
+     * the whole team to the bonus stage, and the bonus stage's own NPC ({@code 2040045.js})
+     * warps each body that talks to it into the exit stage, where {@code 2040035.js} hands out
+     * the reward and warps the body to the recruit map. A bot that treats "outside
+     * {@code 922010900}" as "the run is over" therefore skipped BOTH stages and vanished to the
+     * lobby the moment the boss died.
+     */
+    public static final int BONUS_MAP = 922011000;
+    public static final int EXIT_MAP  = 922011100;
+
+    /** The bonus stage's reward boxes ({@code 2202004}, script {@code ludiquest4}). */
+    public static final int BONUS_BOX = 2202004;
+    /** The Pink Balloon (bonus stage) - warps a body on to {@link #EXIT_MAP}. */
+    public static final int BONUS_NPC = 2040045;
+    /** Arturo (exit stage) - hands out the reward and warps the body to the recruit map. */
+    public static final int EXIT_NPC = 2040035;
+
     /** Stage 4's five door rooms (in01..in05 lead in; each holds box mobs that drop passes). */
     public static final int STAGE4_ROOM_FIRST = 922010401;
     public static final int STAGE4_ROOM_LAST  = 922010405;

@@ -103,6 +103,26 @@ public abstract class PartyQuestBot extends BotSM implements GrindTickRegistry.P
         super(character);
     }
 
+    /**
+     * Quest work never drops to the background cadence.
+     *
+     * <p>The 36-48s unobserved beat is a grinder's economy: its rewards accrue by elapsed
+     * time. A quest bot's rewards accrue by ACTIONS - a portal walked, a box struck, a drop
+     * scooped - and every one of those actions is on the critical path of a party with a real
+     * player waiting on it. The bot's own map is usually unobserved during a transition (the
+     * party has already moved to the next room), so the throttle turned every follow/move-out
+     * into "the bot shows up a minute late". Inside a run the observed cadence therefore
+     * applies; the lobby keeps the cheap background beat, where a recruited crowd waits for a
+     * player and its strolling cadence is deadline-driven either way.
+     */
+    @Override
+    protected long lowPriorityDelayMs() {
+        Character bot = getChr();
+        return bot != null && bot.getMap() != null && isInsideQuest(bot.getMapId())
+                ? getNormalDelayMs()
+                : super.lowPriorityDelayMs();
+    }
+
     @Override
     public synchronized void startScheduledTask(long initialDelayMs) {
         // Both engine sessions span the FSM's RUNNING lifetime, not the object's - the same rule

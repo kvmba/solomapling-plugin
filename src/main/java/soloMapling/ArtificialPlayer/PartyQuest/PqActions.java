@@ -198,6 +198,7 @@ public final class PqActions {
         SeekState control = seekStates.computeIfAbsent(bot.getId(), ignored -> new SeekState());
         synchronized (control) {
             if (!movementShielded(bot.getId()) && !reactorBeatArmed(bot)) {
+                pickupWalkByBot.add(bot.getId());
                 GCMovement.move(bot, at.x, at.y, () -> nudgeStageTick(bot));
             }
         }
@@ -1529,6 +1530,65 @@ public final class PqActions {
         stageWalkShieldUntilByBot.remove(botId);
         SEEK_TRACE_UNTIL.remove(botId);
         nextSteppedOnPickupAtByBot.remove(botId);
+        pickupWalkByBot.remove(botId);
+    }
+
+    /**
+     * End this bot's fight episode and release the chase's driver goal.
+     *
+     * <p>A room whose last mob died still holds the chase's move target: the seek state is
+     * cleared on the next beat, but {@code GCMovement} keeps walking to the corpse until it
+     * arrives (or the driver's no-progress watchdog abandons it, up to 8s later). Every room
+     * transition stands down for a live move - that gate is what protects a pending pickup
+     * walk - so the stale chase goal is what made a finished room take so long to leave: the
+     * exit was gated on "no live move" and the live move was a walk to a corpse. A stage that
+     * KNOWS the room is done calls this, and the transition owns the driver from that instant.
+     *
+     * <p>A stage walk or an armed box is never cancelled here: those are the macro tick's own
+     * steering, and both are positional commitments (a portal approach, a box approach).
+     */
+    public static void finishFight(Character bot) {
+        if (bot == null) {
+            return;
+        }
+        // A pickup walk is a stage-required drop in flight, never a leftover of the fight.
+        if (hasPickupWalk(bot)) {
+            return;
+        }
+        SeekState state = seekStates.get(bot.getId());
+        if (state != null) {
+            synchronized (state) {
+                state.targetOid = -1;
+                state.clearGoal();
+            }
+        }
+        if (!movementShielded(bot.getId()) && !reactorBeatArmed(bot)) {
+            GCMovement.stop(bot);
+        }
+    }
+
+    /**
+     * The bots whose CURRENT driver goal is a walk to a drop that has not been picked up yet.
+     *
+     * <p>A room transition must not cut a pending pickup (the drop is stage-required and would be
+     * orphaned), but it must not be blocked by the CHASE's leftover goal either: when the room's
+     * last mob dies, the combat beat has already issued a walk to its floor, and that goal stays
+     * live until it arrives or the driver's no-progress watchdog drops it. Gating the exit on
+     * "the driver holds a goal" therefore made a finished stage-4 room wait for a corpse walk
+     * (plus the watchdog) before the bot could leave. This flag is the honest question: is the
+     * goal we must protect a pickup, or is it the fight we just finished?
+     */
+    private static final java.util.Set<Integer> pickupWalkByBot = java.util.concurrent.ConcurrentHashMap.newKeySet();
+
+    /** Whether a pickup walk (a walk whose arrival collects a drop) currently owns the driver. */
+    public static boolean hasPickupWalk(Character bot) {
+        return bot != null && pickupWalkByBot.contains(bot.getId()) && GCMovement.hasMoveTarget(bot);
+    }
+
+    private static void clearPickupWalk(Character bot) {
+        if (bot != null) {
+            pickupWalkByBot.remove(bot.getId());
+        }
     }
 
     /** Whether this mob is a legitimate chase target from {@code pos}: hostile and in the seek box. */
@@ -1544,8 +1604,65 @@ public final class PqActions {
                 && Math.abs(mp.y - pos.y) <= SEEK_STACK_RANGE_Y;
     }
 
+    /**
+     * Walk to the nearest matching floor drop, when one is farther than pickup reach.
+     *
+     * <p>This is the macro tick's deliberate complement to the combat beat's at-feet sweep: a
+     * kill lands its pass at the mob's feet, the bot's swing can carry it a platform away, and
+     * waiting for the next macro tick in a room where the party's other members keep killing
+     * means the pass sits there until the despawn clock. Deliberately a WALK (proximity-honest
+     * - the engine's pickupItem has no distance check, so a grab from here would teleport the
+     * item) and gated on the same entitlement rules as every other pickup.
+     */
+    public static void walkToNearestDrop(Character bot, double radiusPx, int itemId) {
+        if (bot == null || bot.getMap() == null || bot.getPosition() == null) {
+            return;
+        }
+        List<MapObject> found = BotLogic.checkForItemsOnFloor(bot, bot.getPosition(), radiusPx, new int[]{itemId});
+        Point pos = bot.getPosition();
+        Point nearest = null;
+        double bestSq = PICKUP_REACH_SQ;
+        for (MapObject obj : found) {
+            if (!(obj instanceof MapItem drop) || !isFloorLoot(drop)
+                    || !DropCommands.botCanLoot(bot, drop)) {
+                continue;
+            }
+            Point at = drop.getPosition();
+            if (at == null) {
+                continue;
+            }
+            double dsq = pos.distanceSq(at);
+            if (dsq < bestSq) {
+                bestSq = dsq;
+                nearest = at;
+            }
+        }
+        if (nearest != null) {
+            walkForPickup(bot, nearest);
+        }
+    }
+
     /** Pick up matching drops near a point. Returns how many items were gathered. */
     public static int loot(Character bot, Point at, double radiusPx, int[] itemIds) {
+        return lootMatching(bot, at, radiusPx, itemIds);
+    }
+
+    /**
+     * Pick up EVERY floor drop this bot is entitled to near a point, whatever its item id.
+     *
+     * <p>Only for rooms whose own mechanic is "the floor is the reward": the Ludi bonus stage
+     * sprays a RANDOM item out of each reward box ({@code ludiquest4} ->
+     * {@code rm.sprayItems(true, 1, 30, 60, 15)}), so an id filter has nothing to match. The
+     * entitlement rules are unchanged ({@code botCanLoot} + {@code isFloorLoot}), which is what
+     * keeps this from eating another mechanic's identity-matched pile.
+     *
+     * @return how many drops were picked up
+     */
+    public static int lootAll(Character bot, Point at, double radiusPx) {
+        return lootMatching(bot, at, radiusPx, null);
+    }
+
+    private static int lootMatching(Character bot, Point at, double radiusPx, int[] itemIds) {
         if (bot == null || at == null) {
             return 0;
         }
@@ -1574,6 +1691,7 @@ public final class PqActions {
         // the drops' own despawn - a wide sweep can no longer freeze a busy stage tick.
         List<MapObject> lone = found.stream()
                 .filter(o -> o instanceof MapItem drop && isFloorLoot(drop))
+                .filter(o -> DropCommands.botCanLoot(bot, (MapItem) o))
                 .limit(LOOT_INLINE_MAX)
                 .toList();
         if (lone.isEmpty()) {
@@ -1607,10 +1725,12 @@ public final class PqActions {
             // is in flight (a loot walk issued over it would yank the bot off its chase).
             // The re-issue replans from the CURRENT pixel once the driver is idle.
             if (nearestOutOfReach != null && !GCMovement.isMoving(bot)) {
+                pickupWalkByBot.add(bot.getId());
                 walkForPickup(bot, nearestOutOfReach);
             }
             return 0;
         }
+        clearPickupWalk(bot);
         int before = 0;
         for (int id : itemIds) {
             before += countItem(bot, id);

@@ -51,7 +51,13 @@ public class LudiPQBot extends PartyQuestBot {
 
     @Override
     protected boolean isInsideQuest(int mapId) {
-        return mapId >= LudiPqData.ENTRY_MAP && mapId <= LudiPqData.STAGE_9;
+        // The run does not end at the boss. 922010900 is followed by the BONUS stage
+        // (922011000, the reward-box map the event warps the team to) and the EXIT stage
+        // (922011100, where Arturo hands out the reward and warps each body to town). Both
+        // belong to the same event instance, so treating them as "outside the quest" is what
+        // used to send every bot home the moment the boss died: the lobby branch in
+        // tickPartyQuest fired before any stage work could see the bonus room.
+        return mapId >= LudiPqData.ENTRY_MAP && mapId <= LudiPqData.EXIT_MAP;
     }
 
     @Override
@@ -66,6 +72,18 @@ public class LudiPQBot extends PartyQuestBot {
 
     @Override
     protected boolean workStage() {
+        // The two maps after the boss are not stages: the event warps the team into the bonus
+        // room (clearPQ) and the bonus room's own NPC warps each body on to the exit room. Both
+        // are part of the run, and both have their own work - the reward boxes, then Arturo.
+        int here = getChr().getMapId();
+        if (here == LudiPqData.BONUS_MAP) {
+            LudiStages.workBonusStage(getChr());
+            return false;
+        }
+        if (here == LudiPqData.EXIT_MAP) {
+            LudiStages.workExitStage(getChr());
+            return false;
+        }
         // The door rooms (stages 4 and 5) sit just past their stage's main map, which the
         // stage arithmetic reads as stage 302+ - route them first, by room id. Both stages
         // explore autonomously: a bot in the main room claims a room and walks in through
@@ -116,7 +134,13 @@ public class LudiPQBot extends PartyQuestBot {
                 PqActions.say(getChr(), BotMessages.get("pq.passes_dropped"));
             }
             PqActions.waitNearStageNpc(getChr(), LudiPqData.stageNpcId(stage));
-            return stage >= 9;
+            // Stage 9 cleared does NOT end the run: the leader's trophy turn-in has the event
+            // warp the whole team to the bonus stage (922011000), and the bonus stage's NPC
+            // warps each body on to the exit stage (922011100). Reporting the run over here is
+            // what made every bot vanish to the lobby the instant the boss died instead of
+            // taking its reward. The run ends only when the exit stage's own reward warp puts
+            // the bot back in the lobby, where isInsideQuest answers false.
+            return false;
         }
 
         switch (stage) {
@@ -153,6 +177,13 @@ public class LudiPQBot extends PartyQuestBot {
     @Override
     protected boolean isFollowingLeader() {
         int mapId = getChr().getMapId();
+        // The post-boss maps move by the EVENT's own warps (clearPQ sends the team to the bonus
+        // room; the bonus NPC sends each body on), not by the leader walking a portal a bot can
+        // follow through. There is no door to walk here, and the follow beat's forward-portal
+        // fallback would have nothing to do - so let the stage work own these rooms.
+        if (mapId == LudiPqData.BONUS_MAP || mapId == LudiPqData.EXIT_MAP) {
+            return false;
+        }
         if (mapId == LudiPqData.TRAP_ROOM) {
             // The trap room is a self-contained errand: the bot works its four pass boxes and
             // takes its own gated exit (exitTrapRoom) back to the tower. The follow beat must
@@ -174,12 +205,18 @@ public class LudiPQBot extends PartyQuestBot {
         // - one PAD-999 touch kills it - and the leaders' door scripts admit any party
         // member, so the bot must not follow there; the quest's own next00 warp carries it
         // along instead. The leader's CURRENT room is the room the party is in.
+        //
+        // The hide goes up BEFORE the follow walk, not after arrival: the walk crosses
+        // 922010500's own floor, which seats two invincible guards, and the room's door sits
+        // below them. A kit that can hide and is being carried into (or across) the guarded
+        // floor must be hidden for the whole crossing.
         if (roomStage == 5 || (stage == 5 && roomStage < 0)) {
             Character leader = partyLeader();
             int leaderStage = (leader != null) ? stageOf(leader.getMapId()) : -1;
             if (leaderStage == 5 && !LudiStages.stage5AdmitsTo(getChr(), leader.getMapId())) {
                 return false;
             }
+            LudiStages.stayHidden(getChr());
         }
         int roomFirst = roomStage == 5 ? LudiPqData.STAGE5_ROOM_FIRST : LudiPqData.STAGE4_ROOM_FIRST;
         int roomLast = roomStage == 5 ? LudiPqData.STAGE5_ROOM_LAST : LudiPqData.STAGE4_ROOM_LAST;
