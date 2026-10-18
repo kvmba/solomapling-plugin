@@ -1546,25 +1546,6 @@ public final class PqActions {
 
     /** Pick up matching drops near a point. Returns how many items were gathered. */
     public static int loot(Character bot, Point at, double radiusPx, int[] itemIds) {
-        return lootMatching(bot, at, radiusPx, itemIds);
-    }
-
-    /**
-     * Pick up EVERY floor drop this bot is entitled to near a point, whatever its item id.
-     *
-     * <p>Only for rooms whose own mechanic is "the floor is the reward": the Ludi bonus stage
-     * sprays a RANDOM item out of each reward box ({@code ludiquest4} ->
-     * {@code rm.sprayItems(true, 1, 30, 60, 15)}), so an id filter has nothing to match. The
-     * entitlement rules are unchanged ({@code botCanLoot} + {@code isFloorLoot}), which is what
-     * keeps this from eating another mechanic's identity-matched pile.
-     *
-     * @return how many drops were picked up
-     */
-    public static int lootAll(Character bot, Point at, double radiusPx) {
-        return lootMatching(bot, at, radiusPx, null);
-    }
-
-    private static int lootMatching(Character bot, Point at, double radiusPx, int[] itemIds) {
         if (bot == null || at == null) {
             return 0;
         }
@@ -1631,17 +1612,13 @@ public final class PqActions {
             return 0;
         }
         int before = 0;
-        if (itemIds != null) {
-            for (int id : itemIds) {
-                before += countItem(bot, id);
-            }
+        for (int id : itemIds) {
+            before += countItem(bot, id);
         }
         DropCommands.lootItemListOnFloor(bot, reachable);
         int after = 0;
-        if (itemIds != null) {
-            for (int id : itemIds) {
-                after += countItem(bot, id);
-            }
+        for (int id : itemIds) {
+            after += countItem(bot, id);
         }
         return after - before;
     }
@@ -1899,13 +1876,11 @@ public final class PqActions {
     private static final double ORPHAN_PROBE_SLACK_PX = 25;
 
     /**
-     * Whether a floor drop is ordinary loot a bot may pocket: not a meso pile (whose
-     * {@code item} is null), a single piece (reactor stacks are matched by identity) and not
-     * an addressed hand-off pile (permanent owner).
+     * Whether a floor drop is ordinary loot a bot may pocket: a single piece (reactor stacks
+     * are matched by identity) and not an addressed hand-off pile (permanent owner).
      */
     static boolean isFloorLoot(MapItem drop) {
-        return drop.getItem() != null && drop.getItem().getQuantity() <= 1
-                && !DropCommands.isPermanentOwnerLocked(drop);
+        return drop.getItem().getQuantity() <= 1 && !DropCommands.isPermanentOwnerLocked(drop);
     }
 
     // =========================================================================

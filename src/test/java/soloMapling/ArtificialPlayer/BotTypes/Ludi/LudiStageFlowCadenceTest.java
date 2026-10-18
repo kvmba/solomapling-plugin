@@ -82,20 +82,6 @@ class LudiStageFlowCadenceTest {
     }
 
     /**
-     * A meso pile is a floor drop whose {@code item} is null - the bonus stage's reward boxes
-     * spray meso as well as items, so the shared floor-loot predicate must not dereference it.
-     */
-    @Test
-    void aMesoPileIsNotTreatedAsAnItemStack() throws Exception {
-        String pq = javaSource(PQ_ACTIONS);
-        int start = pq.indexOf("static boolean isFloorLoot");
-        assertTrue(start > 0, "the floor-loot predicate must exist");
-        String body = pq.substring(start, pq.indexOf("\n    }", start));
-        assertTrue(body.contains("drop.getItem() != null"),
-                "a meso drop has no Item - the predicate must guard it (NPE otherwise)");
-    }
-
-    /**
      * Stage 5's hide: the guards stand in the MAIN room, on the way to every sub-room door, so
      * a thief that only hides after entering the room crosses them bare. Both ways in - the
      * bot's own door walk and following the leader - must be covered, and the aura has to be up

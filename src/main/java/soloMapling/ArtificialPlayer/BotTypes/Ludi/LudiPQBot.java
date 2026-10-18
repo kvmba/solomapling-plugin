@@ -30,6 +30,23 @@ public class LudiPQBot extends PartyQuestBot {
     /** The stage whose plan was last announced, so the party is not spammed with it. */
     private int announcedStage = -1;
 
+    /**
+     * When this bot started waiting in the exit stage, or 0 while it is not there.
+     *
+     * <p>Arturo refuses to warp a body whose inventory has no room for the reward
+     * ({@code 2040035.js}: the {@code else} branch only prints "make some room"), and the
+     * event never ends after {@code 9stageclear} - its one-minute timer just moves the team
+     * {@code 922011000 -> 922011100}. A bot that keeps retrying the conversation with a full
+     * inventory would therefore sit in that room for the rest of the instance. Waiting is
+     * still the right first answer (the player may be clearing a slot), so the retry is
+     * bounded instead of removed: past {@link #EXIT_STAGE_GIVE_UP_MS} the bot leaves through
+     * the normal lobby path, exactly as a body that walked out would.
+     */
+    private long exitStageSinceMs = 0L;
+
+    /** How long the exit stage may refuse (a full inventory) before the bot gives up and leaves. */
+    private static final long EXIT_STAGE_GIVE_UP_MS = 30_000L;
+
     public LudiPQBot(Character character) {
         super(character);
         dialoguePath = "LudiPQBotDialogue.yaml";
@@ -93,8 +110,17 @@ public class LudiPQBot extends PartyQuestBot {
         }
         if (here == LudiPqData.EXIT_MAP) {
             LudiStages.workExitStage(getChr());
+            long now = System.currentTimeMillis();
+            if (exitStageSinceMs == 0L) {
+                exitStageSinceMs = now;
+            } else if (now - exitStageSinceMs >= EXIT_STAGE_GIVE_UP_MS) {
+                // Arturo will not warp a full inventory and the event never ends by itself
+                // after 9stageclear - see EXIT_STAGE_GIVE_UP_MS.
+                return true;
+            }
             return false;
         }
+        exitStageSinceMs = 0L; // left the exit stage (or never reached it in this run)
         // The door rooms (stages 4 and 5) sit just past their stage's main map, which the
         // stage arithmetic reads as stage 302+ - route them first, by room id. Both stages
         // explore autonomously: a bot in the main room claims a room and walks in through

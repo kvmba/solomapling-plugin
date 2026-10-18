@@ -87,7 +87,7 @@ public class BotLogic {
      */
     public static List<MapObject> checkForItemsOnFloor(Character chr, Point location, double rangePx, int[] itemIds) {
         List<MapObject> itemsOnFloor = readItemOnFloor(chr, location, rangeSq(rangePx));
-        return itemIds == null ? itemsOnFloor : filterDroppedItems(itemsOnFloor, itemIds);
+        return filterDroppedItems(itemsOnFloor, itemIds);
     }
 
     public static List<MapObject> checkForItemOnFloor(Character chr, Point location, int itemId) {

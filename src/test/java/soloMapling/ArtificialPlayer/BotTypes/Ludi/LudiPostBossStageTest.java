@@ -101,10 +101,9 @@ class LudiPostBossStageTest {
         String stages = javaSource(STAGES);
         int method = stages.indexOf("public static void workBonusStage");
         String body = stages.substring(method, stages.indexOf("\n    }", method));
-        assertTrue(body.contains("PqActions.lootAll"),
-                "the reward boxes spray RANDOM items - an id-filtered sweep would pick up nothing");
-        assertFalse(body.contains("ludiLootIds"),
-                "an id filter cannot cover a random reward spray");
+        assertFalse(body.contains("PqActions.loot("),
+                "the bonus room is the PARTY's reward: the bot breaks the boxes but must never "
+                        + "pick the spray up - those drops belong to the player and the leader");
         assertTrue(body.contains("goToExitStage"),
                 "once the boxes are spent the bot must take the Pink Balloon's warp on, not "
                         + "stand in an empty room until the timer");

@@ -1171,30 +1171,24 @@ public final class LudiStages {
         if (LudiPqData.BONUS_MAP != bot.getMapId()) {
             return;
         }
-        // The bonus stage is a reward room: there is no stage turn-in and nothing to preserve.
-        // Any pass still pocketed from stage 9 is dead weight the run never asks for again - the
-        // reward boxes are the only work here.
+        // The bonus stage is a shared reward room and the bot is a guest in it: it breaks the
+        // boxes (that is the work a body does here) but NEVER picks the spray up. Each box is
+        // owned by whoever struck it and the drops are party-shared, so a bot scooping them is
+        // a bot taking the player's and the leader's reward - the same reason the rest of this
+        // class never sweeps a pile it did not earn. Deliberately no loot sweep here.
         int box = nearestBoxOid(bot, LudiPqData.BONUS_BOX);
         if (box >= 0) {
             hitReactorRotate(bot, box, LudiPqData.BONUS_BOX);
+            return; // keep breaking boxes; the room is the party's to loot
         }
-        // The reward spray is the whole point of the room: the boxes drop RANDOM items, so
-        // there is no id to filter on - scoop everything this bot is entitled to, at a reach
-        // that covers a box's spray without dragging the bot across the whole room.
-        PqActions.lootAll(bot, bot.getPosition(), BONUS_LOOT_RADIUS_PX);
-        if (box < 0 && !standsDownForLiveMove(bot)) {
-            // Every box is broken and no pickup walk is in flight: talk to the Pink Balloon,
-            // who warps the body on to the exit stage. The event's own one-minute timer is the
-            // backstop, but a player does not stand in an empty reward room for a minute - and
-            // the exit stage is where the reward is actually collected, so waiting here delays
-            // the whole run. A live move is a drop in flight and must not be cut (the same
-            // contract the room exits follow); the next tick leaves once it has landed.
+        if (!standsDownForLiveMove(bot)) {
+            // Every box is broken: take the Pink Balloon's warp on to the exit stage, where
+            // each body collects its OWN reward. The event's one-minute timer only moves the
+            // team 922011000 -> 922011100, so standing in this now-empty room just delays the
+            // run; a live move is a walk in flight and must not be cut.
             goToExitStage(bot);
         }
     }
-
-    /** Wide enough for a reward box's spray (it scatters across the ledge) and no wider. */
-    private static final double BONUS_LOOT_RADIUS_PX = 420;
 
     /** How close a body must stand to an NPC before its dialogue can be opened, squared. */
     private static final double NPC_TALK_REACH_SQ = 250.0 * 250.0;
