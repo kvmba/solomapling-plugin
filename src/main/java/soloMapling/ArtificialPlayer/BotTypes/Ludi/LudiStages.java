@@ -381,20 +381,11 @@ public final class LudiStages {
         }
         PqActions.seekAndAttack(bot);
         PqActions.loot(bot, bot.getPosition(), CRATE_LOOT_RADIUS_PX, new int[]{LudiPqData.PASS});
-        // A kill's pass lands under the mob, which is up to a platform away from where the bot
-        // ended its swing: the fight's own `loot` above is a flat re-scan of the bot's feet, and
-        // the 250ms combat beat only scoops inside 60px. The stage's pass is what clears it, so
-        // this walk deliberately ranges wider than the sweep and is issued from the macro tick
-        // (steering is the macro tick's job - the sweep never steers).
-        PqActions.walkToNearestDrop(bot, CRATE_LOOT_RADIUS_PX, LudiPqData.PASS);
         // No crates left and nothing alive to fight: the stage's work is done. Hold the
         // stage-NPC post and deliver the stock only when the leader comes for the turn-in,
         // instead of throwing passes the moment he passes by mid-fight.
         if (crate < 0
                 && bot.getMap().getAllMonsters().stream().noneMatch(m -> m.isAlive())) {
-            // Nothing left to kill: release the chase's own move goal so the delivery walk /
-            // the ready ring is not gated behind a walk to a corpse (see PqActions.finishFight).
-            PqActions.finishFight(bot);
             int stageNpc = LudiPqData.stageNpcId(3);
             if (PqActions.handItemsToLeaderAfterStage(bot, LudiPqData.PASS, stageNpc) > 0) {
                 PqActions.say(bot, BotMessages.get("pq.passes_dropped"));
@@ -589,16 +580,6 @@ public final class LudiStages {
         PqActions.seekAndAttack(bot);
         PqActions.loot(bot, bot.getPosition(), LOOT_RADIUS_PX, new int[]{LudiPqData.PASS});
         PqActions.recoverUngatheredHandoffs(bot, LudiPqData.PASS);
-        // A door room holds ONE box mob (two in 922010404), all of them placed at spawn. The
-        // "room is quiet" test below is the only cue that the room is finished, and it used to
-        // be evaluated while the chase's own move goal was still live: a kill that landed while
-        // the driver was mid-walk left the bot walking to the corpse's floor, and every exit
-        // path stands down for a live move - so the bot sat in the room until the driver's
-        // no-progress watchdog dropped the goal. Finishing the fight episode the instant the
-        // room is quiet releases that goal, and the exit walk then owns the driver at once.
-        if (!killableMobPresent(bot)) {
-            PqActions.finishFight(bot);
-        }
         // Room quiet (all the room's killable mobs dead): the work is done. Remember it as
         // cleared, then slip out the door and deliver on the main map's stage-NPC post -
         // the stage NPC lives there, so that is where the leader comes for the turn-in.
@@ -1187,8 +1168,7 @@ public final class LudiStages {
      */
     public static void fightBoss(Character bot) {
         if (stageCleared(bot, 9)) {
-            PqActions.finishFight(bot);
-            return;
+            return; // the fight is over: stand still for the event's warp to the bonus stage
         }
         PqActions.seekAndAttack(bot);
     }
@@ -1229,13 +1209,13 @@ public final class LudiStages {
         // there is no id to filter on - scoop everything this bot is entitled to, at a reach
         // that covers a box's spray without dragging the bot across the whole room.
         PqActions.lootAll(bot, bot.getPosition(), BONUS_LOOT_RADIUS_PX);
-        if (box < 0 && !PqActions.hasPickupWalk(bot)) {
-            // Every box is broken and nothing is left to walk to: talk to the Pink Balloon,
+        if (box < 0 && !standsDownForLiveMove(bot)) {
+            // Every box is broken and no pickup walk is in flight: talk to the Pink Balloon,
             // who warps the body on to the exit stage. The event's own one-minute timer is the
             // backstop, but a player does not stand in an empty reward room for a minute - and
             // the exit stage is where the reward is actually collected, so waiting here delays
-            // the whole run.
-            PqActions.finishFight(bot);
+            // the whole run. A live move is a drop in flight and must not be cut (the same
+            // contract the room exits follow); the next tick leaves once it has landed.
             goToExitStage(bot);
         }
     }

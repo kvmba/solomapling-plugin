@@ -67,42 +67,34 @@ class LudiStageFlowCadenceTest {
                 "the addressed hand-off guard still outranks the host's rule");
     }
 
-    /** Stage 3's own loop walks to the pass its kill left, instead of waiting for the sweep. */
+    /**
+     * Stage 3's pass must be reachable by the macro tick's own sweep: the stage work scans a
+     * kill-neighbourhood radius and the shared pickup path WALKS to an out-of-reach drop
+     * (the combat beat only scoops at feet). The regression this pins is the entitlement gate
+     * below, not a second walking helper.
+     */
     @Test
-    void theCrateStageWalksToItsDrops() throws Exception {
+    void theCrateStageLootsItsNeighbourhood() throws Exception {
         String stages = javaSource(STAGES);
         int method = stages.indexOf("public static void breakCratesAndHunt");
         String body = stages.substring(method, stages.indexOf("\n    }", method));
-        assertTrue(body.contains("walkToNearestDrop"),
-                "a crate kill's drop can land beyond the at-feet sweep; the macro tick must "
-                        + "walk to it");
+        assertTrue(body.contains("PqActions.loot("),
+                "the crate stage must run the pickup sweep on its macro tick");
+        assertTrue(body.contains("LudiPqData.PASS"), "and it must be sweeping for the pass");
     }
 
     /**
-     * A finished room must not be held by the chase's leftover goal: stage 4's exit and the
-     * delivery post both stand down for a live move, and the live move was a walk to a corpse.
+     * A meso pile is a floor drop whose {@code item} is null - the bonus stage's reward boxes
+     * spray meso as well as items, so the shared floor-loot predicate must not dereference it.
      */
     @Test
-    void aQuietRoomReleasesTheChase() throws Exception {
-        String stages = javaSource(STAGES);
-        int doorRooms = stages.indexOf("public static void workDoorRooms");
-        String body = stages.substring(doorRooms, stages.indexOf("\n    }", doorRooms));
-        int finish = body.indexOf("PqActions.finishFight");
-        assertTrue(finish > 0, "the door-room loop must end the fight once the room is quiet");
-        // The cleared-stage branch at the top has its own exit; the QUIET-ROOM exit is the one
-        // after the fight, and that is the one this release must precede.
-        int quietExit = body.indexOf("exitDoorRoom(bot)", finish);
-        assertTrue(quietExit > finish,
-                "and it must do so BEFORE the quiet-room exit, which stands down for a live move");
-
+    void aMesoPileIsNotTreatedAsAnItemStack() throws Exception {
         String pq = javaSource(PQ_ACTIONS);
-        int finishStart = pq.indexOf("public static void finishFight");
-        assertTrue(finishStart > 0, "the shared release seam must exist");
-        String finishBody = pq.substring(finishStart, pq.indexOf("\n    }", finishStart));
-        assertTrue(finishBody.contains("hasPickupWalk"),
-                "a pending pickup is stage-required and must never be cancelled by this");
-        assertTrue(finishBody.contains("movementShielded") && finishBody.contains("reactorBeatArmed"),
-                "a stage walk or an armed box owns the steering and is not the fight's to cancel");
+        int start = pq.indexOf("static boolean isFloorLoot");
+        assertTrue(start > 0, "the floor-loot predicate must exist");
+        String body = pq.substring(start, pq.indexOf("\n    }", start));
+        assertTrue(body.contains("drop.getItem() != null"),
+                "a meso drop has no Item - the predicate must guard it (NPE otherwise)");
     }
 
     /**

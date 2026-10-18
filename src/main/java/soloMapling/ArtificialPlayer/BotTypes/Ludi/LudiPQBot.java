@@ -205,18 +205,12 @@ public class LudiPQBot extends PartyQuestBot {
         // - one PAD-999 touch kills it - and the leaders' door scripts admit any party
         // member, so the bot must not follow there; the quest's own next00 warp carries it
         // along instead. The leader's CURRENT room is the room the party is in.
-        //
-        // The hide goes up BEFORE the follow walk, not after arrival: the walk crosses
-        // 922010500's own floor, which seats two invincible guards, and the room's door sits
-        // below them. A kit that can hide and is being carried into (or across) the guarded
-        // floor must be hidden for the whole crossing.
         if (roomStage == 5 || (stage == 5 && roomStage < 0)) {
             Character leader = partyLeader();
             int leaderStage = (leader != null) ? stageOf(leader.getMapId()) : -1;
             if (leaderStage == 5 && !LudiStages.stage5AdmitsTo(getChr(), leader.getMapId())) {
                 return false;
             }
-            LudiStages.stayHidden(getChr());
         }
         int roomFirst = roomStage == 5 ? LudiPqData.STAGE5_ROOM_FIRST : LudiPqData.STAGE4_ROOM_FIRST;
         int roomLast = roomStage == 5 ? LudiPqData.STAGE5_ROOM_LAST : LudiPqData.STAGE4_ROOM_LAST;
