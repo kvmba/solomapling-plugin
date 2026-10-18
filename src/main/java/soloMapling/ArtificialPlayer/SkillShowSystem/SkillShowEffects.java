@@ -3,6 +3,8 @@ package soloMapling.ArtificialPlayer.SkillShowSystem;
 import org.gms.client.Character;
 import org.gms.client.Skill;
 import org.gms.client.SkillFactory;
+import org.gms.client.status.MonsterStatus;
+import org.gms.client.status.MonsterStatusEffect;
 import org.gms.constants.skills.FPMage;
 import org.gms.constants.skills.Hermit;
 import org.gms.server.StatEffect;
@@ -19,6 +21,7 @@ import soloMapling.ArtificialPlayer.BotMountSystem.BotMount;
 
 import java.awt.Point;
 import java.awt.Rectangle;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -141,6 +144,14 @@ public final class SkillShowEffects {
                 Hermit.SHADOW_WEB, levelOf(Hermit.SHADOW_WEB), facingMask(left),
                 (dmg.size() << 4) | 1, dmg, BotAttackData.DEFAULT_ATTACK_SPEED,
                 BotAttackData.actionFor(Hermit.SHADOW_WEB, null), 0), false);
+        // 与 BotShadowWeb.tryCast 同序：先按 WZ prop 掷网住状态，再落地伤害。
+        StatEffect effect = resolveEffect(Hermit.SHADOW_WEB);
+        if (effect.makeChanceResult()) {
+            mob.applyStatus(bot, new MonsterStatusEffect(
+                    Collections.singletonMap(MonsterStatus.SHADOW_WEB, 1),
+                    SkillFactory.getSkill(Hermit.SHADOW_WEB), null, false),
+                    false, effect.getDuration());
+        }
         BotAttackEffects.applyExternalHit(bot, mob, dmg.get(mob.getObjectId()).get(0));
         return true;
     }
