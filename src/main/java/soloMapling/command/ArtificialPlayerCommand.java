@@ -1053,7 +1053,7 @@ public class ArtificialPlayerCommand extends Command {
             if (player == null || player.getMap() == null) {
                 return;
             }
-            for (Character chr : player.getMap().getCharacters()) {
+            for (Character chr : player.getMap().getAllPlayers()) { // snapshot: command runs off the map lock
                 if (CharacterStorage.getBotById(chr.getId()) instanceof TrainingBot tb) {
                     targets.add(tb);
                 }
@@ -1133,7 +1133,7 @@ public class ArtificialPlayerCommand extends Command {
         }
         // Snapshot first: removeBotFromServer mutates the map's live character collection.
         List<Character> bots = new ArrayList<>();
-        for (Character chr : player.getMap().getCharacters()) {
+        for (Character chr : player.getMap().getAllPlayers()) {
             if (BotHelpers.isBot(chr)) {
                 bots.add(chr);
             }

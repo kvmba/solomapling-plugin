@@ -287,3 +287,63 @@ for (Character player : bot.getWorldServer().getPlayerStorage().getAllCharacters
 - 基准文件：`/tmp/perfbench/Bench.java`~`Bench5.java`、`Pq.java`（Harness 用 `volatile SINK` 防死代码消除，取中位数）。
 - 运行：`export JAVA_HOME=/opt/graalvm-jdk-21.0.7+8.1; export PATH="$JAVA_HOME/bin:$PATH"; javac BenchN.java && java -XX:+UseParallelGC BenchN`
 - 关键结论速记：`currentTimeMillis≈24ns`、`LongAdder 4.5×>AtomicLong`、`String.format 8×>concat`、`new Random 10×>TLR`、`isBot(List.copyOf) ~8×>flag`、`全排序 1.5–1.7×>min追踪`、`synchronized≈21ns`。
+
+---
+
+## 6. 第二轮实施（分支 `perf/runtime-hotpaths`，独立复核）
+
+> 本轮不改行为语义，只改"同一结果的更便宜写法"与**跨线程可见性/并发正确性**。
+> 验证：`mvn -o test` → **1676 run, 0 failures, 0 errors, 2 skipped**（与改动前基线一致；
+> `BotPartyQueueTest.entryInsideTheHostsInviteWindowStillAnswers` 是既有偶发失败，
+> 在未改动的基线上同样可复现，见下）。
+
+### 6.1 热点写法（单次调用成本）
+
+| 位置 | 改动 | 实测/论证 |
+|---|---|---|
+| `BotHelpers.isBot(int)` | 先用 `ArtificialCharacters.isArtificial(id)` 就地遍历，只有判否时才 `classifiers().isEmpty()` 决定是否回落 id 约定。原来**每次**都先 `classifiers()`（`List.copyOf` 快照） | 微基准（隔离复刻形态）：**63→12 / 36→18 / 24→1.5 ns**，2–20×。语义等价：无 classifier 时 `isArtificial` 恒 false，回落分支与旧版一致；有 classifier 时旧版就返回 `isArtificial` |
+| `BotAttackConfig.resolve(job, weapon)` | 纯函数结果按 `Job`→`WeaponType` 序数做行缓存（`ConcurrentHashMap<Job, JobAttacks[]>`） | 每次挥砍原本要扫全表 + 多次 `isA()` 并新建 record；现在命中后无分配、无锁 |
+| `BotBuffConfig.buffsForJob(job)` | 每个 job 缓存一份不可变列表（`AtomicReferenceArray` 原子发布） | 移动 tick 的 dash 探测、buff 轮询、flavor 每 tick 都在调；`EnumMap` 迭代顺序固定，缓存顺序与原结果一致。调用方只读（`contains`/遍历/自我拷贝） |
+| `GCMovement.onDifferentLedge(map, anchorRegion, bx, by)`（新增） | 恒定锚点的区域只解析一次，候选怪每只只探一次 | 战斗 tick 的怪扫描里原来**每只怪**都要重探锚点（两次地面探测）。隔离微基准（含真实斜率三角链）：64 只怪 **5.4–11 µs → 4.3–5.3 µs**，1.2–2.5× |
+| `BotAttackDriver` 的 `seek()` / `SeekScan` | 一次 `getMapObjectsInRange` 同时给出"最近可打怪"和"可达候选集"，reach 查询复用 | 原来一次挥砍要扫 3 遍地图对象（nearest、pack 探测、最终目标列表）。行为等价：候选集就是旧 `nearestMob`/`onAttackableSurface` 接受的那批怪，box 判定仍按 profile 各自计算 |
+| `SpotFinder.snapshotHostiles()` + `liveHostilesWithin(map, spot, hostiles)` | 每个 sweep 只建一次 hostile 快照 | `map.getAllMonsters()` 每次调用都在宿主读锁下重建 `LinkedList`；`pickBest` 与 WAIT 的"别处有怪吗"对**每个 spot** 各调一次。快照后扫描线性化 |
+| `BotPhysicsEngine.findGroundFoothold/findGroundPoint` | 直接用已解析到的 `Foothold` 读表面 y（`surfaceY`），不再走 `pointBelowIndexed` 重走同一 bucket | 旧实现在两个 foothold 都存在时**再多 2 次地面探测**取同一个值 |
+| `findBelowIndexed` / `findGroundFoothold` / `findGroundPoint` / `BotNavigationGraph.findRegionId` | 新增 `(int x, int y)` 无分配重载；热调用方改用 | 地面探测在图形烘焙/宠物/召唤物上是千万级调用，逐次 `new Point` 是真实 GC 压力 |
+| `BotSM.checkMainPlayersOnMap`、`Dispatcher`、`BotBuffEffects`、`BotBuffRequestHandler`、`CompanionBot`(×2)、`ArtificialPlayerCommand`(×2) | `map.getCharacters()` → `map.getAllPlayers()`（快照） | 见 §6.3：**并发正确性**，不是微优化 |
+| 各 bot 类型的 `debugLoggingFull(String.format(...))` | 加 `getDebugger().loggingConsumed()` 守卫（18 个类型） | 实参在调用前求值：没有 console/chalkboard 消费者时，每次宏 tick 每条 `String.format` 都是纯垃圾（§1.7：~700ns + Formatter 分配） |
+| `BotMount.tick` | `ownsMount`（纯整数 hash）提前到类型查询之前 | ~65% 的 bot 不拥有坐骑，一次比较即返回，不再查 `CharacterStorage` |
+| `BotContactDamage` | 每次扫描只解析一次 bot 的 swept box；先做便宜的 `box.contains` 再做 boss 膨胀判定 | 原来每个候选怪都重建一次 bot 的 AABB |
+| `BotSummonFollower.tick` | 去掉 `new ArrayList<>(TRACKED.keySet())` | `ConcurrentHashMap` key set 的迭代器本身弱一致，复制不提供额外安全性，只是每 300ms 一次分配 |
+
+### 6.2 跨线程可见性（真实缺陷）
+
+| 位置 | 问题 | 修法 |
+|---|---|---|
+| `BotSM.state` | FSM 线程写、聊天 Dispatcher / GM 命令线程读（`getState()` 40 处），非 volatile → 可能长期读到旧状态 | `volatile` |
+| `BotMovementState.movementProfile` | 移动线程每 20s 重写，宠物/召唤物 tick（共享调度线程）读它匹配步速 | `volatile` + `GCMovement.ownerProfile()` 读已发布 profile，避免每次重新推导（含 party roster 扫描与 snowshoes WZ 查询） |
+| `SocialChatSessionStore` 的 `ArrayDeque` | `computeIfAbsent` 后无锁 `addLast`，`whenComplete` 回调线程与 tick 线程并发；`new ArrayList<>(deque)` 会抛 `ConcurrentModificationException`/窗口错乱 | 每个会话 deque 独立 monitor（会话粒度，不跨玩家串行化） |
+| `ConversationManager.lastConversationPerMap` | tick 线程与 GM 命令线程并发读写 `HashMap` | `ConcurrentHashMap` |
+| `ConversationManager.allScripts` | 由命令线程 `loadScripts()` 整体替换，tick 线程读 | `volatile` |
+| `BotSpotClaims` | 全局 `synchronized`：每个战斗 tick 每个 bot 对**每个候选 spot** 调 `holders()`，全服 tick 在这把锁上串行 | 改为**按地图**监视器（`MapClaims`）；容量约束仍按 spot 校验，同一地图内不一致性不变；`holders()` 只读路径不再创建条目 |
+
+### 6.3 为什么 `getCharacters()` 必须换掉（并发正确性）
+
+宿主 `MapleMap.getCharacters()` 在读锁内返回 `Collections.unmodifiableCollection(this.characters)`，**随后释放锁**；底层是 `LinkedHashSet`，玩家进出图在写锁下 `add/remove`。插件在多处**锁外**遍历它：
+
+- `BotSM.checkMainPlayersOnMap`（FSM 线程，每秒/每 tick）
+- `Dispatcher.processMessages`（8 线程池）
+- `BotBuffRequestHandler` / `BotBuffEffects`（伙伴 buff 路径）
+- `CompanionBot`（规划线程）
+- GM 命令（executor 池，且 `removeBotFromServer` 自己会改这个集合）
+
+后果是 `ConcurrentModificationException`（插件里被兜底 `catch` 吞掉 → 少算/漏发）或读到半更新的集合。全部改为 `map.getAllPlayers()`（宿主已有的快照 API，读锁内 `new ArrayList<>(characters)`）。
+
+### 6.4 明确不做
+
+- `GCMovementDriver` 的 `synchronized(entry)`、`EventStore` 的写锁、A* 的 `PriorityQueue`：正确性 > 微优化（与 §3 一致）。
+- `isBot` 的宿主侧 `hasClassifiers()` API：本轮改用"先遍历再判空"，不再需要该 API，也无缓存过期风险。
+- `BotSpotClaims` 的 `isFull()` 仍走 `holders()`：语义一致，读路径已无全局锁。
+
+### 6.5 基准源码
+
+`/tmp/perfbench-codex/HotPathBench.java`（隔离复刻 `isBot` 与 ledge 门控两种写法，`java -XX:+UseParallelGC`，取 5 轮）。

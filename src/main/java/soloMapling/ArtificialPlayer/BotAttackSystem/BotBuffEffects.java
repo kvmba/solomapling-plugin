@@ -518,7 +518,7 @@ public final class BotBuffEffects {
 
         Point botPos = bot.getPosition();
         List<Character> result = new ArrayList<>();
-        for (Character chr : bot.getMap().getCharacters()) {
+        for (Character chr : bot.getMap().getAllPlayers()) { // snapshot: safe off the map lock
             if (chr == bot) continue;
             Party other = chr.getParty();
             if (other == null || other.getId() != party.getId()) continue;

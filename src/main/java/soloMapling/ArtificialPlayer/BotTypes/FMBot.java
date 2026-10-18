@@ -425,7 +425,9 @@ public class FMBot extends BotSM {
         if (checkIfNotRunningOrPaused()) {
             return;
         }
-        getDebugger().debugLoggingFull(String.format("%s TutorialBotState: %s", this.getChr().getName(), fmBotState), String.format("%s", fmBotState));
+        if (getDebugger().loggingConsumed()) {
+            getDebugger().debugLoggingFull(String.format("%s TutorialBotState: %s", this.getChr().getName(), fmBotState), String.format("%s", fmBotState));
+        }
 
         switch (fmBotState) {
             case RESET:

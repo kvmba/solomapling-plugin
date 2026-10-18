@@ -39,6 +39,8 @@ public final class BotLevelUpNotice {
         }
         String msg = I18nUtil.getMessage("Character.levelUp.globalNotice",
                 bot.getName(), bot.getMap().getMapName(), bot.getLevel());
+        // One isBot() per character is the whole cost of this scan (thousands of characters on a
+        // levelling world, and isBot used to copy the classifier list per call).
         for (Character player : bot.getWorldServer().getPlayerStorage().getAllCharacters()) {
             if (BotHelpers.isBot(player)) {
                 continue; // real players only; a bot would just drop the packet

@@ -14,6 +14,7 @@ import java.awt.*;
 import java.io.Reader;
 import java.util.*;
 import java.util.List;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 
@@ -40,7 +41,10 @@ public class ConversationManager {
     private static final int SMALL_MAP_MAX_INTERVAL_MS = 100_000;
     private static final int SMALL_MAP_THRESHOLD = 20;
 
-    private final Map<Integer, Long> lastConversationPerMap = new HashMap<>();
+    // Read/written from two thread families: the ambient tick (virtual thread) and the GM
+    // command path (executor pool). Plain fields were racy; the map is tiny and read rarely, so
+    // a concurrent map is the least intrusive correct form.
+    private final Map<Integer, Long> lastConversationPerMap = new ConcurrentHashMap<>();
 
     private static final double CLUSTER_RANGE_X = 250;
     private static final int CLUSTER_RANGE_Y = 30;
@@ -62,10 +66,12 @@ public class ConversationManager {
     private static final String DIALOGUE_YAML = "ConversationDialogue.yaml";
 
     private final Set<Integer> botsInConversation = Collections.synchronizedSet(new HashSet<>());
+    // Script history, read/written only where a conversation starts (the tick and the GM trigger
+    // both reach startConversation through the manager's own flow), so it needs no extra guard.
     private final LinkedList<String> recentScriptIds = new LinkedList<>();
     private static final int RECENT_HISTORY_SIZE = 20;
 
-    private List<ConversationScript> allScripts;
+    private volatile List<ConversationScript> allScripts;
 
     private ConversationManager() {}
 

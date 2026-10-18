@@ -309,7 +309,7 @@ public final class CompanionBot extends BotSM implements
             return;
         }
         nextProactiveScanAt = nowMillis + 30_000L;
-        List<Character> players = getChr().getMap().getCharacters().stream()
+        List<Character> players = getChr().getMap().getAllPlayers().stream() // snapshot, not the live set
                 .filter(candidate -> candidate != null && !isBot(candidate)
                         && candidate.getMapId() == getChr().getMapId())
                 .sorted(java.util.Comparator.comparingInt(Character::getId))
@@ -736,7 +736,7 @@ public final class CompanionBot extends BotSM implements
         Character companion = getChr();
         int mapId = companion.getMapId();
         Map<Integer, Character> allowedPlayers = new HashMap<>();
-        for (Character candidate : companion.getMap().getCharacters()) {
+        for (Character candidate : companion.getMap().getAllPlayers()) { // snapshot: safe on the plan thread
             if (candidate != null && !isBot(candidate) && candidate.getMapId() == mapId) {
                 allowedPlayers.put(candidate.getId(), candidate);
             }

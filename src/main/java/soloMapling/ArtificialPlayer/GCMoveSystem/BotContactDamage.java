@@ -171,6 +171,9 @@ final class BotContactDamage {
                 return;
             }
             Rectangle query = new Rectangle(getBotTouchBounds(entry, bot));
+            // The un-grown foot box is what the contact report/log prints; the query above grows it
+            // only to catch wide mobs. Keep the original rather than rebuilding it per candidate.
+            Rectangle touchBounds = new Rectangle(query);
             query.grow(MOB_QUERY_MARGIN, MOB_QUERY_MARGIN);
             Monster nearby = null;
             for (MapObject obj : bot.getMap().getMapObjectsInRect(query, MONSTER_TYPES)) {
@@ -179,8 +182,8 @@ final class BotContactDamage {
                     continue;
                 }
                 nearby = mob;
-                if (isMobTouchingBot(entry, bot, mob)) {
-                    diagnose(bot, mob, "CONTACT", getBotTouchBounds(entry, bot));
+                if (isMobTouchingBot(mob, touchBounds)) {
+                    diagnose(bot, mob, "CONTACT", touchBounds);
                     // A mob in touch range may also land a debuff (stun/seal/slow/weaken/darkness/poison).
                     // Its WZ skills are rolled here; the bot's headless client can never trigger the
                     // engine's own mob-skill path, so the plugin drives it - see BotDebuffApplier.
@@ -194,8 +197,7 @@ final class BotContactDamage {
                     return;
                 }
             }
-            diagnose(bot, nearby, nearby == null ? "NO_NEARBY_MOB" : "NO_OVERLAP",
-                    getBotTouchBounds(entry, bot));
+            diagnose(bot, nearby, nearby == null ? "NO_NEARBY_MOB" : "NO_OVERLAP", touchBounds);
         } finally {
             rememberMobTouchCheck(entry, bot, botPos);
         }
@@ -216,9 +218,10 @@ final class BotContactDamage {
         }
         Rectangle query = new Rectangle(getBotTouchBounds(entry, bot));
         query.grow(MOB_QUERY_MARGIN, MOB_QUERY_MARGIN);
+        Rectangle touchBounds = getBotTouchBounds(entry, bot);
         for (MapObject obj : bot.getMap().getMapObjectsInRect(query, MONSTER_TYPES)) {
             Monster mob = (Monster) obj;
-            if (!isHostileLivingMonster(mob) || !isMobTouchingBot(entry, bot, mob)) {
+            if (!isHostileLivingMonster(mob) || !isMobTouchingBot(mob, touchBounds)) {
                 continue;
             }
             BotEnergyCharge.strike(bot, mob);
@@ -494,9 +497,10 @@ final class BotContactDamage {
     record MobHitDamage(int broadcastDamage, int hpDamage, boolean lethal) {
     }
 
-    // Swept-AABB touch detection (anti-tunnel; lower-half mob box only).
-    private static boolean isMobTouchingBot(BotMovementState entry, Character bot, Monster mob) {
-        Rectangle botBounds = getBotTouchBounds(entry, bot);
+    // Swept-AABB touch detection (anti-tunnel; lower-half mob box only). The bot's own swept box
+    // is resolved once per scan by the caller: rebuilding it per candidate was pure arithmetic
+    // repeated N times on every observed-map tick.
+    private static boolean isMobTouchingBot(Monster mob, Rectangle botBounds) {
         Rectangle mobBounds = BotMobHitboxProvider.getMobBounds(mob);
         if (mobBounds == null) {
             return false;

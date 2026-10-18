@@ -813,8 +813,13 @@ public final class BotPetFollower {
      * it. Null when the pet is over a gap, or its floor is too far to be its footing.
      */
     private static Foothold findStandingFoothold(MapleMap map, Point p) {
-        Foothold fh = GCMovement.groundFoothold(map, p);
-        return fh != null && Math.abs(p.y - fh.calculateFooting(p.x)) <= GROUND_STEP_PX ? fh : null;
+        return findStandingFoothold(map, p.x, p.y);
+    }
+
+    /* Allocation-free form of findStandingFoothold for callers that only hold raw coordinates. */
+    private static Foothold findStandingFoothold(MapleMap map, int x, int y) {
+        Foothold fh = GCMovement.groundFoothold(map, x, y);
+        return fh != null && Math.abs(y - fh.calculateFooting(x)) <= GROUND_STEP_PX ? fh : null;
     }
 
     /**
@@ -1323,7 +1328,7 @@ public final class BotPetFollower {
                 // strand the pet in mid-air. No footing within a step (the slot is over a ledge/gap)
                 // leaves the pet where it is; the observed tick's lost-ground fall handles it.
                 int footing = pet.getPos().y;
-                Foothold below = findStandingFoothold(map, new Point(x, footing));
+                Foothold below = findStandingFoothold(map, x, footing);
                 if (below != null) {
                     y = below.calculateFooting(x);
                     fh = below.getId();

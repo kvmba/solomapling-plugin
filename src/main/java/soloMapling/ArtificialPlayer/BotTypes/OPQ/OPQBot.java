@@ -197,9 +197,11 @@ public class OPQBot extends BotSM {
             return;
         }
         bindRun();
-        getDebugger().debugLoggingFull(
-                String.format("%s OPQBotState: %s", this.getChr().getName(), opqBotState),
-                String.format("%s", opqBotState));
+        if (getDebugger().loggingConsumed()) {
+            getDebugger().debugLoggingFull(
+                    String.format("%s OPQBotState: %s", this.getChr().getName(), opqBotState),
+                    String.format("%s", opqBotState));
+        }
 
         if (isInsidePQ() && !isInParty()) {
             handlePQAbandoned();

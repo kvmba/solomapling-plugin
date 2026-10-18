@@ -156,6 +156,14 @@ public final class BotBuffConfig {
      */
     public static List<Integer> buffsForJob(Job job) {
         if (job == null) return Collections.emptyList();
+        // Called from the movement tick (dash-skill probe), the buff sweep and the flavor layer;
+        // the table is a static initializer, so the union is a pure function of the job. Cache one
+        // immutable list per job instead of rebuilding (and re-scanning every entry with isA) each
+        // call. EnumMap iteration order is fixed, so the cached order matches the old result.
+        List<Integer> cached = CACHE.get(job.ordinal());
+        if (cached != null) {
+            return cached;
+        }
 
         List<Integer> result = new ArrayList<>();
         for (Map.Entry<Job, int[]> entry : BUFFS_BY_JOB.entrySet()) {
@@ -165,6 +173,14 @@ public final class BotBuffConfig {
                 }
             }
         }
-        return result;
+        List<Integer> frozen = result.isEmpty()
+                ? Collections.emptyList()
+                : Collections.unmodifiableList(result);
+        CACHE.set(job.ordinal(), frozen); // atomic publish: readers always see a complete list
+        return frozen;
     }
+
+    // Lazily filled on first use per job (the table itself is only complete after the static block).
+    private static final java.util.concurrent.atomic.AtomicReferenceArray<List<Integer>> CACHE =
+            new java.util.concurrent.atomic.AtomicReferenceArray<>(Job.values().length);
 }

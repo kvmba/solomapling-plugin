@@ -210,7 +210,9 @@ public class SocialBot extends BotSM {
     public void updateState() {
         super.updateState();
         if (checkIfNotRunningOrPaused()) return;
-        getDebugger().debugLoggingFull(String.format("%s SocialBotState: %s", getChr().getName(), socialState), String.format("%s", socialState));
+        if (getDebugger().loggingConsumed()) {
+            getDebugger().debugLoggingFull(String.format("%s SocialBotState: %s", getChr().getName(), socialState), String.format("%s", socialState));
+        }
 
         checkPrioritySpeed();
 

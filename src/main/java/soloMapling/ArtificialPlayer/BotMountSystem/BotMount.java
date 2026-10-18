@@ -166,7 +166,10 @@ public final class BotMount {
         if (bot == null || bot.getMap() == null) {
             return;
         }
-        if (bot.getLevel() < MIN_LEVEL || !allowsMount(bot) || !ownsMount(bot) || mapForbidsMounts(bot)) {
+        // Cheapest gates first: ownership is a pure integer hash, so the ~65% of bots that own no
+        // mount leave after one compare. This runs on every macro tick of every bot; the type
+        // lookup (allowsMount -> CharacterStorage) used to be paid even by non-owners.
+        if (!ownsMount(bot) || bot.getLevel() < MIN_LEVEL || !allowsMount(bot) || mapForbidsMounts(bot)) {
             if (isRiding(bot)) {
                 dismount(bot);
             }

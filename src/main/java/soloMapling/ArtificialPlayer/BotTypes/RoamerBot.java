@@ -155,8 +155,10 @@ public class RoamerBot extends BotSM implements GrindTickRegistry.Participant {
         if (chr == null || chr.getMap() == null) {
             return;
         }
-        getDebugger().debugLoggingFull(
-                String.format("%s RoamerBot phase: %s", chr.getName(), phase), String.format("%s", phase));
+        if (getDebugger().loggingConsumed()) {
+            getDebugger().debugLoggingFull(
+                    String.format("%s RoamerBot phase: %s", chr.getName(), phase), String.format("%s", phase));
+        }
 
         potionSim.tick(chr);
 

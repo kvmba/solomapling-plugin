@@ -244,6 +244,8 @@ public final class GrindBrain {
         }
         Monster best = null;
         int bestAbsDx = Integer.MAX_VALUE;
+        // Resolve the bot's region once: the same-ledge gate is otherwise two probes per mob.
+        int botRegion = GCMovement.peekRegionIdAt(chr.getMap(), pos.x, pos.y);
         for (Monster m : chr.getMap().getAllMonsters()) {
             if (!SpotFinder.isHostile(m)) {
                 continue;
@@ -252,7 +254,7 @@ public final class GrindBrain {
             if (mp == null || Math.abs(mp.x - pos.x) > reachX || Math.abs(mp.y - pos.y) > reachY) {
                 continue;
             }
-            if (GCMovement.onDifferentLedge(chr.getMap(), pos.x, pos.y, mp.x, mp.y)) {
+            if (GCMovement.onDifferentLedge(chr.getMap(), botRegion, mp.x, mp.y)) {
                 continue; // one platform over is someone else's fight, not a roadblock
             }
             int absDx = Math.abs(mp.x - pos.x);

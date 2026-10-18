@@ -410,39 +410,65 @@ final class BotPhysicsEngine {
         if (map == null || map.getFootholds() == null || position == null) {
             return null;
         }
+        return findGroundFoothold(map, position.x, position.y);
+    }
 
-        Foothold exact = findBelowIndexed(map, position);
-        Foothold offset = findBelowIndexed(map, new Point(position.x, position.y - cfg.MAX_SLOPE_UP));
+    /*
+     * Allocation-free core of findGroundFoothold (see the Point overload's notes). Callers that
+     * already hold raw coordinates - the pet/summon follower and the ground-step previews - use
+     * this so a probe costs no garbage.
+     */
+    static Foothold findGroundFoothold(MapleMap map, int x, int y) {
+        if (map == null || map.getFootholds() == null) {
+            return null;
+        }
+
+        Foothold exact = findBelowIndexed(map, x, y);
+        Foothold offset = findBelowIndexed(map, x, y - cfg.MAX_SLOPE_UP);
         if (exact == null) return offset;
         if (offset == null) return exact;
 
-        // On sloped footholds, integer truncation of the interpolated Y can make the foothold's
-        // computed Y fall 1px above the player's stored position, causing findBelow to skip it
-        // and return a distant platform instead. Mirror findGroundPoint: pick the closer result.
-        Point exactGround = pointBelowIndexed(map, position);
-        Point offsetGround = pointBelowIndexed(map, new Point(position.x, position.y - cfg.MAX_SLOPE_UP));
-        if (exactGround == null) return offset;
-        if (offsetGround == null) return exact;
-        return Math.abs(offsetGround.y - position.y) < Math.abs(exactGround.y - position.y) ? offset : exact;
+        // Both footholds exist: pick the one whose surface is closer to the probe. The surface y is
+        // read directly off the foothold instead of through pointBelowIndexed, which would re-walk
+        // the SAME bucket and return exactly this foothold's surface (findBelowIndexed already
+        // resolved it) - two extra probes per call for a value we already hold.
+        int exactSurfaceY = surfaceY(exact, x);
+        int offsetSurfaceY = surfaceY(offset, x);
+        return Math.abs(offsetSurfaceY - y) < Math.abs(exactSurfaceY - y) ? offset : exact;
+    }
+
+    /* The slope-aware surface y of {@code fh} at column {@code x} (same math as findBelowIndexed). */
+    private static int surfaceY(Foothold fh, int x) {
+        return fh.getY1() != fh.getY2() ? slopeYAt(fh, x) : fh.getY1();
     }
 
     static Point findGroundPoint(MapleMap map, Point position) {
         if (map == null || position == null) {
             return null;
         }
+        return findGroundPoint(map, position.x, position.y);
+    }
 
-        Point exactGround = pointBelowIndexed(map, position);
-        Point offsetGround = pointBelowIndexed(map, new Point(position.x, position.y - cfg.MAX_SLOPE_UP));
-        if (exactGround == null) {
-            return offsetGround;
-        }
-        if (offsetGround == null) {
-            return exactGround;
+    /* Allocation-free core of findGroundPoint (see findGroundFoothold(MapleMap, int, int)). */
+    static Point findGroundPoint(MapleMap map, int x, int y) {
+        if (map == null) {
+            return null;
         }
 
-        int exactDistance = Math.abs(exactGround.y - position.y);
-        int offsetDistance = Math.abs(offsetGround.y - position.y);
-        return offsetDistance < exactDistance ? offsetGround : exactGround;
+        Foothold exact = findBelowIndexed(map, x, y);
+        Foothold offset = findBelowIndexed(map, x, y - cfg.MAX_SLOPE_UP);
+        if (exact == null) {
+            return offset == null ? null : new Point(x, surfaceY(offset, x));
+        }
+        if (offset == null) {
+            return new Point(x, surfaceY(exact, x));
+        }
+
+        int exactSurfaceY = surfaceY(exact, x);
+        int offsetSurfaceY = surfaceY(offset, x);
+        int exactDistance = Math.abs(exactSurfaceY - y);
+        int offsetDistance = Math.abs(offsetSurfaceY - y);
+        return new Point(x, offsetDistance < exactDistance ? offsetSurfaceY : exactSurfaceY);
     }
 
     // Canonical walk-connectivity rule shared by graph region merging and runtime ground traversal.
@@ -2878,20 +2904,29 @@ final class BotPhysicsEngine {
      * airborne integrator issue tens of millions of these probes on big maps.
      */
     static Foothold findBelowIndexed(MapleMap map, Point p) {
+        return p == null ? null : findBelowIndexed(map, p.x, p.y);
+    }
+
+    /*
+     * Allocation-free core of findBelowIndexed. Hot probes (ground snap, pet/summon follow, the
+     * airborne sweep) call this directly with raw coordinates: at tens of millions of calls the
+     * per-call Point allocation is a real share of the garbage rate.
+     */
+    static Foothold findBelowIndexed(MapleMap map, int x, int y) {
         if (map == null || map.getFootholds() == null) {
             return null;
         }
         FootholdCollisionIndex index = collisionIndex(map);
         if (index == UNINDEXABLE) {
-            return map.getFootholds().findBelow(p); // stubbed tree — original query path
+            return map.getFootholds().findBelow(new Point(x, y)); // stubbed tree — original query path
         }
-        for (Foothold fh : index.groundBucketAt(p.x)) {
-            if (fh.getX1() <= p.x && fh.getX2() >= p.x) {
+        for (Foothold fh : index.groundBucketAt(x)) {
+            if (fh.getX1() <= x && fh.getX2() >= x) {
                 if (fh.getY1() != fh.getY2()) {
-                    if (slopeYAt(fh, p.x) >= p.y) {
+                    if (slopeYAt(fh, x) >= y) {
                         return fh;
                     }
-                } else if (fh.getY1() >= p.y) {
+                } else if (fh.getY1() >= y) {
                     return fh;
                 }
             }

@@ -50,10 +50,17 @@ public class BotHelpers {
         if (id == 999) {
             return true;
         }
-        if (!ArtificialCharacters.classifiers().isEmpty()) {
-            return ArtificialCharacters.isArtificial(id);
+        // Ask the classifiers FIRST: isArtificial iterates the registry in place, while
+        // classifiers() allocates a full List.copyOf snapshot on every call. Scans over the
+        // world storage (observer poll, level-up notice, chat bridges) are overwhelmingly bots,
+        // so the common answer returns here without an allocation. The fallback order is
+        // unchanged and provably equivalent: with no classifier bound isArtificial is always
+        // false, so the id convention answers exactly as before; with one bound the old code
+        // returned isArtificial(id) and so does this.
+        if (ArtificialCharacters.isArtificial(id)) {
+            return true;
         }
-        return id > 20000;
+        return ArtificialCharacters.classifiers().isEmpty() && id > 20000;
     }
 
     /**

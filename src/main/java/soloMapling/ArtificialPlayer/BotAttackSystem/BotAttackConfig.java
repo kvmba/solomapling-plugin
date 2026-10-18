@@ -224,6 +224,15 @@ public final class BotAttackConfig {
         if (job == null) {
             return new JobAttacks(null, null, null);
         }
+        // resolve runs several times per combat tick (nearest-mob gate, primary reach, hasAoe,
+        // the swing itself) and the table walk below scans every registered job with isA().
+        // The result is a pure function of (job, weapon) - the table is a static initializer -
+        // so it is memoized per pair in a per-job row indexed by the weapon ordinal, which
+        // keeps the lookup allocation-free and lock-free after the first hit.
+        JobAttacks cached = cacheValue(job, weapon);
+        if (cached != null) {
+            return cached;
+        }
 
         BotAttackProfile single = null, aoe = null, ultimate = null;
         int bestSingleId = -1, bestAoeId = -1, bestUltId = -1;
@@ -264,6 +273,26 @@ public final class BotAttackConfig {
         if (single == null && aoe == null && ultimate == null) {
             single = BotAttackProfile.basicSwing();
         }
-        return new JobAttacks(single, aoe, ultimate);
+        JobAttacks resolved = new JobAttacks(single, aoe, ultimate);
+        cachePut(job, weapon, resolved);
+        return resolved;
+    }
+
+    private static final java.util.Map<Job, JobAttacks[]> CACHE = new java.util.concurrent.ConcurrentHashMap<>();
+    private static final int WEAPON_TYPES = WeaponType.values().length;
+
+    private static JobAttacks cacheValue(Job job, WeaponType WEAPON) {
+        JobAttacks[] row = CACHE.get(job);
+        return row == null || WEAPON == null ? null : row[WEAPON.ordinal()];
+    }
+
+    private static void cachePut(Job job, WeaponType WEAPON, JobAttacks attacks) {
+        if (WEAPON == null) {
+            return; // unarmed is a rare probe; there is no slot to key it on
+        }
+        // computeIfAbsent publishes the row safely; the element store is idempotent (the same
+        // immutable value is recomputed on a race), and JobAttacks is a record, so a reader that
+        // sees the reference also sees its final fields.
+        CACHE.computeIfAbsent(job, ignored -> new JobAttacks[WEAPON_TYPES])[WEAPON.ordinal()] = attacks;
     }
 }

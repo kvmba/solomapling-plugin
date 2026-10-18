@@ -195,9 +195,11 @@ public class DropGameBot extends BotSM {
             rejectOtherTradeRequests();
         }
 
-        getDebugger().debugLoggingFull(
-                String.format("%s DropGameState: %s", getChr().getName(), dropGameState),
-                String.format("%s", dropGameState));
+        if (getDebugger().loggingConsumed()) {
+            getDebugger().debugLoggingFull(
+                    String.format("%s DropGameState: %s", getChr().getName(), dropGameState),
+                    String.format("%s", dropGameState));
+        }
 
         switch (dropGameState) {
             case RESET:

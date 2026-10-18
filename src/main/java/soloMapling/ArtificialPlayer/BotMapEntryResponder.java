@@ -151,7 +151,8 @@ public final class BotMapEntryResponder implements EventSubscriber {
 
     private void nudgeBotsOnMap(MapleMap map, Character entering) {
         try {
-            for (Character chr : map.getAllPlayers()) { // snapshot copy - safe to iterate off-thread
+            // getAllPlayers is a snapshot: this runs off the map's lock while players may join.
+            for (Character chr : map.getAllPlayers()) {
                 if (chr != null && isBot(chr)) {
                     nudge(chr);
                 }

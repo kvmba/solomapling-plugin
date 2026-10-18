@@ -9,6 +9,13 @@ import java.util.concurrent.ConcurrentMap;
 
 /**
  * In-memory sliding window of user/assistant turns for one bot↔player conversation.
+ *
+ * <p>Threading: the appends come from the bot's tick / the LLM completion callback, while reads
+ * happen when a request is assembled - both may sit on different virtual threads, and the
+ * completion callback is an arbitrary provider thread. A plain ArrayDeque under computeIfAbsent is
+ * NOT safe for that (concurrent addLast + the copy in {@link #toMessages} can throw or corrupt the
+ * window), so each session's deque is guarded by its own monitor. Sessions are per (bot, player), so
+ * this never serializes unrelated conversations.
  */
 public final class SocialChatSessionStore {
 
@@ -30,10 +37,16 @@ public final class SocialChatSessionStore {
 
     public static List<LlmMessage> toMessages(int botId, int playerId, int maxTurns) {
         Deque<Turn> turns = SESSIONS.get(key(botId, playerId));
-        if (turns == null || turns.isEmpty() || maxTurns <= 0) {
+        if (turns == null || maxTurns <= 0) {
             return List.of();
         }
-        List<Turn> slice = new ArrayList<>(turns);
+        List<Turn> slice;
+        synchronized (turns) {
+            if (turns.isEmpty()) {
+                return List.of();
+            }
+            slice = new ArrayList<>(turns);
+        }
         int from = Math.max(0, slice.size() - maxTurns);
         List<LlmMessage> messages = new ArrayList<>();
         for (Turn turn : slice.subList(from, slice.size())) {
@@ -55,10 +68,12 @@ public final class SocialChatSessionStore {
             return;
         }
         Deque<Turn> deque = SESSIONS.computeIfAbsent(key(botId, playerId), k -> new ArrayDeque<>());
-        deque.addLast(new Turn(role, content.trim()));
         int cap = Math.max(2, SocialLlmConfig.historyTurns() * 2);
-        while (deque.size() > cap) {
-            deque.removeFirst();
+        synchronized (deque) {
+            deque.addLast(new Turn(role, content.trim()));
+            while (deque.size() > cap) {
+                deque.removeFirst();
+            }
         }
     }
 

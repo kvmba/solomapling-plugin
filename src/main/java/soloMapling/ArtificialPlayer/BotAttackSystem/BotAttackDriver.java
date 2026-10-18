@@ -234,8 +234,11 @@ public final class BotAttackDriver {
         }
 
         // Face the nearest mob BEFORE measuring reach, so directional attacks are oriented
-        // toward the fight (the reach box is built relative to the bot's facing).
-        Monster nearest = nearestMob(bot);
+        // toward the fight (the reach box is built relative to the bot's facing). One seek scan
+        // serves both this and the reach queries below: the old path re-scanned every map object
+        // once in nearestMob and again per mobsInReach call, on every swing attempt.
+        SeekScan seek = seek(bot);
+        Monster nearest = seek.nearest();
         if (nearest == null) {
             return AttackResult.miss("no targetable mobs within " + SEEK_RANGE + "px (none, or all on a separate ledge)");
         }
@@ -268,7 +271,7 @@ public final class BotAttackDriver {
             BotAttackProfile packAttack = ultReady ? ultimate : aoe;
             List<Monster> packInReach = packAttack == null
                     ? List.of()
-                    : mobsInReach(bot, packAttack, weapon, facingLeft);
+                    : mobsInReach(seek, packAttack, weapon, facingLeft);
             if (packInReach.size() >= 2) {
                 profile = packAttack;
                 reachCache = packInReach; // same inputs scanned once - reuse for the target list
@@ -289,14 +292,14 @@ public final class BotAttackDriver {
                     : BotAttackProfile.melee(Warrior.POWER_STRIKE, 1);
         }
 
-        List<Monster> targets = cap(reachCache != null ? reachCache : mobsInReach(bot, profile, weapon, facingLeft),
+        List<Monster> targets = cap(reachCache != null ? reachCache : mobsInReach(seek, profile, weapon, facingLeft),
                 profile.numAttacked);
         if (healUndead) {
             targets = undeadOnly(targets); // Heal must not damage a living mob caught in the box
         }
         if (targets.isEmpty()) {
             return AttackResult.miss(healUndead ? "no undead in heal range"
-                    : reachDiagnostic(bot, profile, weapon, facingLeft));
+                    : reachDiagnostic(seek, bot, profile, weapon, facingLeft));
         }
 
         // The 独行客 bank-and-spend beat: enough own Pickpocket bags inside Money Explosion's WZ
@@ -442,16 +445,29 @@ public final class BotAttackDriver {
         return out;
     }
 
-    /* Alive mobs inside the attack's reach box, nearest first. */
-    private static List<Monster> mobsInReach(Character bot, BotAttackProfile profile, WeaponType weapon, boolean facingLeft) {
+    /*
+     * The reachable-mob candidate set for one swing decision.
+     *
+     * <p>Every attack attempt needs two views of the same neighbourhood: the nearest attackable
+     * mob (to face) and the mobs inside a skill's reach box. Each used to build its own map-object
+     * list, so a swing cost three full scans of the map's objects (nearest, pack probe, final
+     * target list) for the same candidates. One scan now feeds all of them; the box test stays
+     * per-profile and the ledge gate is resolved once for the bot.
+     */
+    private record SeekScan(Point botPos, int botRegion, List<Monster> candidates, Monster nearest) {
+    }
+
+    private static SeekScan seek(Character bot) {
         Point botPos = bot.getPosition();
         if (botPos == null) {
-            return List.of();
+            return new SeekScan(new Point(), Integer.MIN_VALUE, List.of(), null);
         }
-        Rectangle box = reachBox(bot, profile, weapon, facingLeft);
-
-        List<Monster> found = new ArrayList<>();
-        for (MapObject mo : bot.getMap().getMapObjectsInRange(botPos, SEEK_RANGE_SQ, MONSTER_TYPES)) {
+        MapleMap map = bot.getMap();
+        int botRegion = GCMovement.peekRegionIdAt(map, botPos.x, botPos.y);
+        List<Monster> candidates = new ArrayList<>();
+        Monster nearest = null;
+        double bestSq = Double.MAX_VALUE;
+        for (MapObject mo : map.getMapObjectsInRange(botPos, SEEK_RANGE_SQ, MONSTER_TYPES)) {
             Monster m = (Monster) mo;
             if (!m.isAlive()) {
                 continue;
@@ -460,15 +476,36 @@ public final class BotAttackDriver {
             if (mp == null) {
                 continue;
             }
+            // Skip mobs on a separate ledge so the bot faces (and later swings at) a mob it can
+            // actually reach, instead of fixating up at a platform overhead. Bosses are exempt,
+            // exactly as onAttackableSurface states (multi-bodied parts sit on their own footholds).
+            if (!m.isBoss() && GCMovement.onDifferentLedge(map, botRegion, mp.x, mp.y)) {
+                continue;
+            }
+            candidates.add(m);
+            double dsq = botPos.distanceSq(mp);
+            if (dsq < bestSq) {
+                bestSq = dsq;
+                nearest = m;
+            }
+        }
+        return new SeekScan(new Point(botPos), botRegion, candidates, nearest);
+    }
+
+    /* Alive mobs inside the attack's reach box, nearest first. */
+    private static List<Monster> mobsInReach(SeekScan seek, BotAttackProfile profile, WeaponType weapon, boolean facingLeft) {
+        Point botPos = seek.botPos();
+        Rectangle box = reachBox(botPos, profile, weapon, facingLeft);
+
+        List<Monster> found = new ArrayList<>();
+        for (Monster m : seek.candidates()) {
+            Point mp = m.getPosition();
             // Bosses are big and multi-bodied: test their part positions against a vertically
             // padded box so e.g. Zakum's elevated arms still register as in-reach.
             Rectangle test = m.isBoss()
                     ? new Rectangle(box.x, box.y - BOSS_Y_PAD, box.width, box.height + 2 * BOSS_Y_PAD)
                     : box;
-            // The reach box is a flat rectangle with no terrain sense, so a tall box would let the bot
-            // hit a mob standing on a separate platform overhead/below. Drop mobs on a different ledge
-            // than the bot (bosses exempt). Cheap (peek-only) and only run for box-passing mobs.
-            if (test.contains(mp) && onAttackableSurface(bot.getMap(), botPos, m)) {
+            if (test.contains(mp)) {
                 found.add(m);
             }
         }
@@ -490,8 +527,11 @@ public final class BotAttackDriver {
      * Forward attacks are clipped to the bot's facing side; surround attacks (a box centred on the
      * character - mage AoE, Dragon Roar, Heaven's Hammer) keep both sides.
      */
-    private static Rectangle reachBox(Character bot, BotAttackProfile profile, WeaponType weapon, boolean facingLeft) {
-        Point p = bot.getPosition();
+    private static Rectangle reachBox(SeekScan seek, BotAttackProfile profile, WeaponType weapon, boolean facingLeft) {
+        return reachBox(seek.botPos(), profile, weapon, facingLeft);
+    }
+
+    private static Rectangle reachBox(Point p, BotAttackProfile profile, WeaponType weapon, boolean facingLeft) {
         int skillId = profile.skillFor(weapon);
         Rectangle wz = wzBox(skillId, profile.skillLevel, p, facingLeft);
 
@@ -567,47 +607,6 @@ public final class BotAttackDriver {
         return MovementCommands.facingLeft(bot);
     }
 
-    /* The closest live mob within the seek radius (any direction), or null. */
-    private static Monster nearestMob(Character bot) {
-        Point botPos = bot.getPosition();
-        if (botPos == null) {
-            return null;
-        }
-        Monster nearest = null;
-        double bestSq = Double.MAX_VALUE;
-        for (MapObject mo : bot.getMap().getMapObjectsInRange(botPos, SEEK_RANGE_SQ, MONSTER_TYPES)) {
-            Monster m = (Monster) mo;
-            if (!m.isAlive() || m.getPosition() == null) {
-                continue;
-            }
-            // Skip mobs on a separate ledge so the bot faces (and later swings at) a mob it can
-            // actually reach, instead of fixating up at a platform overhead.
-            if (!onAttackableSurface(bot.getMap(), botPos, m)) {
-                continue;
-            }
-            double dsq = botPos.distanceSq(m.getPosition());
-            if (dsq < bestSq) {
-                bestSq = dsq;
-                nearest = m;
-            }
-        }
-        return nearest;
-    }
-
-    /*
-     * A mob on a surface the bot can actually strike: not standing on a separate walkable ledge
-     * above or below the bot. Bosses are exempt - large, multi-bodied, with parts on their own
-     * footholds (and already handled by the padded reach box). Degrades to "true" (no filtering)
-     * when the map's nav graph isn't baked, so it never silently blanks a bot's targets.
-     */
-    private static boolean onAttackableSurface(MapleMap map, Point botPos, Monster m) {
-        if (m.isBoss()) {
-            return true;
-        }
-        Point mp = m.getPosition();
-        return mp == null || !GCMovement.onDifferentLedge(map, botPos.x, botPos.y, mp.x, mp.y);
-    }
-
     /* First max of a nearest-first list (the whole list if it's already small enough). */
     private static List<Monster> cap(List<Monster> mobs, int max) {
         return mobs.size() <= max ? mobs : new ArrayList<>(mobs.subList(0, max));
@@ -617,13 +616,13 @@ public final class BotAttackDriver {
      * Human-readable hint for the GM command when nothing was in reach: where the nearest mob
      * sits relative to the bot and the reach box it fell outside. Only walked on the miss path.
      */
-    private static String reachDiagnostic(Character bot, BotAttackProfile profile, WeaponType weapon, boolean facingLeft) {
-        Point botPos = bot.getPosition();
-        Monster nearest = nearestMob(bot);
+    private static String reachDiagnostic(SeekScan seek, Character bot, BotAttackProfile profile, WeaponType weapon, boolean facingLeft) {
+        Point botPos = seek.botPos();
+        Monster nearest = seek.nearest();
         if (nearest == null) {
             return "no targetable mobs within " + SEEK_RANGE + "px (none, or all on a separate ledge)";
         }
-        Rectangle box = reachBox(bot, profile, weapon, facingLeft);
+        Rectangle box = reachBox(seek, profile, weapon, facingLeft);
         Point np = nearest.getPosition();
         return "nearest '" + nearest.getName() + "' at dx=" + (np.x - botPos.x) + " dy=" + (np.y - botPos.y)
                 + " outside reach x[" + box.x + ".." + (box.x + box.width) + "] y[" + box.y + ".." + (box.y + box.height)

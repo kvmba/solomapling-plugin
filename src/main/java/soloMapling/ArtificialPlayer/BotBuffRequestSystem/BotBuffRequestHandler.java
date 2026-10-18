@@ -176,7 +176,7 @@ public final class BotBuffRequestHandler {
         // Scan everyone on the asker's map, not the active-bot registry: inert "!bot spawn"
         // bots live on the map but were never registered (no bot type assigned), so they'd
         // otherwise be invisible here. isBot is id-based, so it catches registered + inert alike.
-        for (Character chr : map.getCharacters()) {
+        for (Character chr : map.getAllPlayers()) { // snapshot: iterated off the map lock
             if (chr == null || !BotHelpers.isBot(chr)) {
                 continue;
             }

@@ -82,7 +82,9 @@ public class BlackjackDealerBot extends BotSM {
             return;
         }
 
-        getDebugger().debugLoggingFull(String.format("%s BlackjackPhase: %s", getChr().getName(), table.getPhase()), String.format("%s", table.getPhase()));
+        if (getDebugger().loggingConsumed()) {
+            getDebugger().debugLoggingFull(String.format("%s BlackjackPhase: %s", getChr().getName(), table.getPhase()), String.format("%s", table.getPhase()));
+        }
         boolean firstTickOfPhase = (lastLoggedPhase != table.getPhase());
         if (firstTickOfPhase) {
             dprint("PHASE " + lastLoggedPhase + " -> " + table.getPhase()
