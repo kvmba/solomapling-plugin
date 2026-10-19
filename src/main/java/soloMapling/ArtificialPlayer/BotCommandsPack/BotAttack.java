@@ -8,6 +8,7 @@ import org.gms.client.inventory.InventoryType;
 import org.gms.client.inventory.WeaponType;
 import org.gms.server.ItemInformationProvider;
 import soloMapling.ArtificialPlayer.BotAttackSystem.BotAttackData;
+import soloMapling.ArtificialPlayer.BotAttackSystem.BotAttackAction;
 import soloMapling.ArtificialPlayer.BotAttackSystem.BotAuraState;
 import org.gms.util.PacketCreator;
 import soloMapling.ArtificialPlayer.BotMountSystem.BotMount;
@@ -51,13 +52,13 @@ public final class BotAttack {
      * application (e.g. reactor hit). The animation is selected based on the
      * bot's currently equipped weapon class.
      *
-     * <p>Every broadcast in this class arms the movement layer's attack-action lock
-     * (GCMovement.markAttackAction) right after the packet hits the wire, so a swing
-     * issued on a raw beat (the reactor chase, a flavour expression) cannot be truncated
-     * by a walk/jump/turn packet issued right after it - by this thread or any other.
+     * @return whether a swing was broadcast; callers must not advance a reactor on refusal
      */
-    public static void basicSwing(Character chr) {
-        if (chr == null || GCMovement.isClimbing(chr)) return;
+    public static boolean basicSwing(Character chr) {
+        return BotAttackAction.tryRun(chr, false, false, () -> basicSwingNow(chr));
+    }
+
+    private static boolean basicSwingNow(Character chr) {
         BotMount.cancelForAction(chr); // an attack is never made from the saddle
         BotAuraState.cancelHidesForAction(chr); // 伪装/隐身术 break on the attack key
 
@@ -82,6 +83,7 @@ public final class BotAttack {
                 /* repeatToSource */ false
         );
         GCMovement.markAttackAction(chr); // the packet is on the wire: take the body for the animation
+        return true;
     }
 
     /**
@@ -94,6 +96,10 @@ public final class BotAttack {
     public static void skillSwing(Character chr, int skillId) {
         if (chr == null || chr.getMap() == null) return;
         if (skillId <= 0) { basicSwing(chr); return; }
+        BotAttackAction.tryRun(chr, false, false, () -> skillSwingNow(chr, skillId));
+    }
+
+    private static boolean skillSwingNow(Character chr, int skillId) {
         BotMount.cancelForAction(chr); // an attack is never made from the saddle
         BotAuraState.cancelHidesForAction(chr); // 伪装/隐身术 break on the attack key
 
@@ -110,6 +116,7 @@ public final class BotAttack {
                 false
         );
         GCMovement.markAttackAction(chr); // the packet is on the wire: take the body for the animation
+        return true;
     }
 
     /**
@@ -123,6 +130,10 @@ public final class BotAttack {
      */
     public static void rangedSwing(Character chr, int skillId) {
         if (chr == null || chr.getMap() == null || skillId <= 0) return;
+        BotAttackAction.tryRun(chr, false, false, () -> rangedSwingNow(chr, skillId));
+    }
+
+    private static boolean rangedSwingNow(Character chr, int skillId) {
         BotMount.cancelForAction(chr); // an attack is never made from the saddle
         BotAuraState.cancelHidesForAction(chr); // 伪装/隐身术 break on the attack key
 
@@ -140,6 +151,7 @@ public final class BotAttack {
                 false
         );
         GCMovement.markAttackAction(chr); // the packet is on the wire: take the body for the animation
+        return true;
     }
 
     /**
@@ -150,6 +162,10 @@ public final class BotAttack {
      */
     public static void magicSwing(Character chr, int skillId) {
         if (chr == null || chr.getMap() == null || skillId <= 0) return;
+        BotAttackAction.tryRun(chr, false, false, () -> magicSwingNow(chr, skillId));
+    }
+
+    private static boolean magicSwingNow(Character chr, int skillId) {
         BotMount.cancelForAction(chr); // an attack is never made from the saddle
         BotAuraState.cancelHidesForAction(chr); // 伪装/隐身术 break on the attack key
 
@@ -166,6 +182,7 @@ public final class BotAttack {
                 false
         );
         GCMovement.markAttackAction(chr); // the packet is on the wire: take the body for the animation
+        return true;
     }
 
     // The skill's max level, so the fanciest form of the effect renders. Bots don't learn skills, so

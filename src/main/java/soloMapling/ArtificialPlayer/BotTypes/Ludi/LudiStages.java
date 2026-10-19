@@ -412,14 +412,8 @@ public final class LudiStages {
     private static final Map<Integer, DoorClaim> DOOR_ROOM_CLAIMS = new java.util.concurrent.ConcurrentHashMap<>();
 
     /**
-     * The door rooms this bot has personally cleared, keyed by bot id. The room ids repeat
-     * across runs, so the set has to be empty when a fresh run begins - that is guaranteed by
-     * the run-exit paths: every plugin-driven exit from the quest (stage done, party lost,
-     * bot stopped) goes through {@link PartyQuestBot#returnToLobby} or
-     * {@code stopScheduledTask}, and both call {@link #releaseRoomState} before warping, so
-     * the set is dropped whole. (A GM/script warp straight into the lobby would skip the
-     * release; the worst case is one bot skipping a room it had cleared in a previous run,
-     * which self-corrects on the next release and is not worth instance-keying the set for.)
+     * The door rooms this bot has personally cleared, keyed by bot id. PartyQuestBot
+     * releases these on every run transition, including NPC exits and instance replacement.
      */
     private static final Map<Integer, java.util.Set<Integer>> CLEARED_DOOR_ROOMS = new java.util.concurrent.ConcurrentHashMap<>();
 
@@ -922,7 +916,7 @@ public final class LudiStages {
      * and eleven boxes crawled. The swings still land in one visit so the box does not
      * straddle macro beats, but each beat waits the driver's swing cadence out rather than a
      * fixed 250ms machine-gun: a player's repeat rate is the weapon's attack speed, which
-     * the attack driver models at 720-900ms.
+     * the movement layer holds for at least one second.
      */
     private static void breakBoxInPlace(Character bot, int oid) {
         for (int swings = 0; swings < BOX_SWING_CAP; swings++) {
@@ -940,7 +934,7 @@ public final class LudiStages {
     private static final int BOX_SWING_CAP = 6;
 
     /** The floor between a combo's swings, so the swing animation reads before the next one. */
-    private static final long BOX_SWING_BEAT_MIN_MS = 600;
+    private static final long BOX_SWING_BEAT_MIN_MS = GCMovement.ATTACK_ACTION_LOCK_MS;
     /** Jitter on the beat so a cohort does not swing in lockstep. */
     private static final long BOX_SWING_BEAT_JITTER_MS = 250;
 

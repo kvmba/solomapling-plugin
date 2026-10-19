@@ -409,6 +409,22 @@ public final class GCMovement {
      */
     public static final long ATTACK_ACTION_LOCK_MS = 1_000L;
 
+    /** Keep the decision, attack packet and action stamp atomic with the physics tick. */
+    public static <T> T runAttackAction(Character bot, boolean force, T refused,
+                                      java.util.function.Supplier<T> attack) {
+        BotMovementState st = STATES.get(bot.getId());
+        if (st == null) {
+            return attack.get();
+        }
+        synchronized (st) {
+            if (st.tickStopped || STATES.get(bot.getId()) != st || st.climbing
+                    || (!force && attackActionLocked(st))) {
+                return refused;
+            }
+            return attack.get();
+        }
+    }
+
     /**
      * Flag a broadcast attack and take the body for {@link #ATTACK_ACTION_LOCK_MS}.
      *
@@ -539,6 +555,9 @@ public final class GCMovement {
             st.moveTarget = null;
             st.moveTargetMap = null;
             st.moveTargetPrecise = false;
+            st.downJumpPending = false;
+            st.downJumpCrouchUntilMs = 0L;
+            st.crouching = false;
             st.farmAnchor = null;
             st.farmAnchorMapId = -1;
             BotMovementManager.clearNavigationState(st);

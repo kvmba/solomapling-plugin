@@ -161,7 +161,7 @@ public class FollowerBot extends BotSM {
         }
         Character inviter = entry.getInviter();
         if (inviter != null && inviter.getId() == leaderId && chr.getParty() == null) {
-            if (BotPartyCommands.botAcceptPartyInvite(chr)) {
+            if (BotPartyCommands.botAcceptPartyInvite(chr, leaderId)) {
                 wasPartied = true;
                 sayNode("PartyJoined", inviter);
             }
@@ -174,11 +174,7 @@ public class FollowerBot extends BotSM {
         // every tick would notice-bomb that player for the whole window.
         boolean cooldown = inviter != null
                 && BotRecruitManager.declinedByThisBot(chr.getId(), inviter.getId());
-        if (cooldown) {
-            BotPartyCommands.botRejectPartyInviteSilently(chr);
-        } else {
-            BotPartyCommands.botRejectPartyInvite(chr);
-        }
+        BotPartyCommands.botRejectPartyInvite(chr, entry, !cooldown);
     }
 
     // ── Phases ───────────────────────────────────────────────────────────────

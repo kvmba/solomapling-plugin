@@ -12,6 +12,7 @@ import org.gms.server.life.Monster;
 import org.gms.server.maps.Mist;
 import org.gms.util.PacketCreator;
 import soloMapling.ArtificialPlayer.BotAttackSystem.BotAttackData;
+import soloMapling.ArtificialPlayer.BotAttackSystem.BotAttackAction;
 import soloMapling.ArtificialPlayer.BotAttackSystem.BotAttackEffects;
 import soloMapling.ArtificialPlayer.BotAttackSystem.BotAuraState;
 import soloMapling.ArtificialPlayer.BotAttackSystem.BotDamageModel;
@@ -49,11 +50,10 @@ public final class SkillShowEffects {
         return mob != null && mob.isAlive() ? mob : null;
     }
 
-    /** 表演公共前置：下坐骑、破隐身、markAttackAction。 */
+    /** 表演公共前置；动作锁由实际攻击发包登记。 */
     private static void preCast(Character bot) {
         BotMount.cancelForAction(bot);
         BotAuraState.cancelHidesForAction(bot);
-        GCMovement.markAttackAction(bot);
     }
 
     /** 技能级（SP 预算推导，封顶 maxLevel）：表演 bot 固定 180 级 → 全部满级。 */
@@ -97,6 +97,10 @@ public final class SkillShowEffects {
      * 每秒扣血、到期消失全部是宿主代码，表演里不重写。
      */
     public static boolean castMist(Character bot) {
+        return BotAttackAction.tryRun(bot, false, false, () -> castMistNow(bot));
+    }
+
+    private static boolean castMistNow(Character bot) {
         Monster mob = target(bot);
         if (mob == null) {
             return false;
@@ -117,6 +121,7 @@ public final class SkillShowEffects {
                 (dmg.size() << 4) | 1, dmg, BotAttackData.magicChargeFor(FPMage.POISON_MIST),
                 BotAttackData.DEFAULT_ATTACK_SPEED,
                 BotAttackData.actionFor(FPMage.POISON_MIST, null), 0), false);
+        GCMovement.markAttackAction(bot);
         bot.getMap().spawnMist(new Mist(box, bot, effect, levelOf(FPMage.POISON_MIST)),
                 effect.getDuration(), true, false, false);
         // 发包只是视觉：真实伤害必须落地，否则木桩血条不动、数字与血量不一致
@@ -130,6 +135,10 @@ public final class SkillShowEffects {
      * {@code BotShadowWeb.tryCast} 同款帧；网住怪物的状态由宿主管。
      */
     public static boolean castWeb(Character bot) {
+        return BotAttackAction.tryRun(bot, false, false, () -> castWebNow(bot));
+    }
+
+    private static boolean castWebNow(Character bot) {
         Monster mob = target(bot);
         if (mob == null) {
             return false;
@@ -144,6 +153,7 @@ public final class SkillShowEffects {
                 Hermit.SHADOW_WEB, levelOf(Hermit.SHADOW_WEB), facingMask(left),
                 (dmg.size() << 4) | 1, dmg, BotAttackData.DEFAULT_ATTACK_SPEED,
                 BotAttackData.actionFor(Hermit.SHADOW_WEB, null), 0), false);
+        GCMovement.markAttackAction(bot);
         // 与 BotShadowWeb.tryCast 同序：先按 WZ prop 掷网住状态，再落地伤害。
         StatEffect effect = resolveEffect(Hermit.SHADOW_WEB);
         if (effect.makeChanceResult()) {
@@ -161,6 +171,10 @@ public final class SkillShowEffects {
      * 与 {@code BotShadowMeso.tryThrow} 同款；实战的钱包价格在表演里免了。
      */
     public static boolean throwShadowMeso(Character bot) {
+        return BotAttackAction.tryRun(bot, false, false, () -> throwShadowMesoNow(bot));
+    }
+
+    private static boolean throwShadowMesoNow(Character bot) {
         Monster mob = target(bot);
         if (mob == null) {
             return false;
@@ -176,6 +190,7 @@ public final class SkillShowEffects {
                 (dmg.size() << 4) | 1, /* projectile */ 0, dmg,
                 BotAttackData.DEFAULT_ATTACK_SPEED,
                 BotAttackData.actionFor(Hermit.SHADOW_MESO, null), 0), false);
+        GCMovement.markAttackAction(bot);
         BotAttackEffects.applyExternalHit(bot, mob, dmg.get(mob.getObjectId()).get(0));
         return true;
     }

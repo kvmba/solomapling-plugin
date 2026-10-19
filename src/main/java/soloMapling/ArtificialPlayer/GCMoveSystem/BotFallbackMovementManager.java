@@ -87,7 +87,7 @@ final class BotFallbackMovementManager {
         }
 
         if (shouldUseDownJump(entry, botPos, targetPos, rope)) {
-            BotPhysicsEngine.queueDownJump(entry, bot, false); // walked into the window: no crouch to show
+            BotPhysicsEngine.queueDownJump(entry, bot);
             BotMovementManager.broadcastMovement(entry);
             return true;
         }

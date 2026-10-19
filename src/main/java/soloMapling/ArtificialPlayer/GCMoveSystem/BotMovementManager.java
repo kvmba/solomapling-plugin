@@ -775,7 +775,7 @@ class BotMovementManager {
                 // Ours: the crouch beat. Hold the prone pose until it elapses, then take off on the
                 // next grounded tick. A single 50ms frame read as a twitch rather than a deliberate
                 // Down-then-Alt, so the beat is worth seeing.
-                if (entry.downJumpCrouchTicks > 0) {
+                if (MovementClock.nowMs() < entry.downJumpCrouchUntilMs) {
                     // The hold is deliberate, so the stuck watchdog must not read the stillness as a
                     // wedge and rescue-hop the bot off the row it is lined up to drop from (the same
                     // contract the drop-cadence hold uses - see BotNavigationManager.tryExecuteDrop).
@@ -787,7 +787,8 @@ class BotMovementManager {
                     broadcastMovement(entry);
                     return;
                 }
-                entry.downJumpCrouchTicks = 0;
+                entry.launchReadyAwaiting = false;
+                entry.downJumpCrouchUntilMs = 0L;
                 performDownJump(entry);
                 return;
             }

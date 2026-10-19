@@ -91,6 +91,9 @@ public class LudiPQBot extends PartyQuestBot {
     @Override
     protected void releaseRoomState() {
         LudiStages.releaseRoomState(getChr().getId());
+        climbFloorY = Integer.MIN_VALUE;
+        announcedStage = -1;
+        exitStageSinceMs = 0L;
     }
 
     @Override

@@ -111,17 +111,8 @@ class BotMovementState {
     // Armed by BotPhysicsEngine.beginDownJump at takeoff, consumed by the three down-jump entry points
     // (tryExecuteDrop / shouldUseDownJump / CROUCH) and never reset elsewhere, so it always fires once.
     long downJumpCadenceUntilMs = 0L;
-    // Ours: the crouch beat the CROUCH ground action arms - the bot holds the prone pose for this
-    // many TICKS, then takes off. Counted in ticks (decremented by BotPhysicsEngine.tickMotionTimers,
-    // exactly like downJumpGracePeriodMS) rather than wall-clock, so the hold is deterministic: every
-    // execution sim and every test driving the tick directly see the same beat production does. A
-    // wall-clock hold would stall a bot whose ticks run faster than real time. 0 means "launch on the
-    // next grounded tick", which is what every walk-into down-jump entry (tryExecuteDrop / the warmup
-    // fallback, via queueDownJump's uncrouched form) wants: they have already walked into the window
-    // and there is no crouch to show. Only the CROUCH ground action pays the beat. Holding a crouch
-    // for one 50ms tick rendered as a one-frame twitch; GCFidget's own DUCK_MIN_MS (900) is the house
-    // rule for how long a prone pose must read as deliberate.
-    int downJumpCrouchTicks = 0;
+    // Absolute deadline: LOD scheduling must not stretch the crouch into seconds of waiting.
+    long downJumpCrouchUntilMs = 0L;
     boolean ropeEntryPending = false;
     Rope ropeEntryRope = null;
     int ropeEntryY = 0;

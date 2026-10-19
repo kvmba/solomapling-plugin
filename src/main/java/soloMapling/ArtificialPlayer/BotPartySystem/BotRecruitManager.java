@@ -134,7 +134,7 @@ public class BotRecruitManager {
         boolean armedMatch = armed != null && inviter != null
                 && inviter.getId() == armed.inviterId();
         if (armedMatch) {
-            boolean joined = BotPartyCommands.botAcceptPartyInvite(botChr);
+            boolean joined = BotPartyCommands.botAcceptPartyInvite(botChr, inviter.getId());
             if (joined) {
                 ARMED.remove(botChr.getId());
                 return InvitePoll.JOINED;
@@ -145,12 +145,9 @@ public class BotRecruitManager {
         // the coordinator's per-target slot (its putIfAbsent refuses every later invite, whatever
         // the inviter, until this one is answered) and the queue entry. Only the inviter-facing
         // declined notice is held back: re-answering every tick would notice-bomb that player.
-        if (inviter != null && declinedByThisBot(botChr.getId(), inviter.getId())) {
-            BotPartyCommands.botRejectPartyInviteSilently(botChr);
-            return InvitePoll.REJECTED;
-        }
-        BotPartyCommands.botRejectPartyInvite(botChr);
-        return InvitePoll.REJECTED;
+        boolean notify = inviter == null || !declinedByThisBot(botChr.getId(), inviter.getId());
+        return BotPartyCommands.botRejectPartyInvite(botChr, entry, notify)
+                ? InvitePoll.REJECTED : InvitePoll.NONE;
     }
 
     /**

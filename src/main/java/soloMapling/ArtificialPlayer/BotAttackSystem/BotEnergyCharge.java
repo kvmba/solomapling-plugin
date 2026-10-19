@@ -166,13 +166,17 @@ public final class BotEnergyCharge {
 
     /*
      * Land the claimed retaliation on one mob: a real hit that can kill it and drop its loot like any
-     * other bot hit. Ungated - the caller has already claimed the beat via
-     * {@link #claimRetaliationBeat(Character)}.
+     * other bot hit. The scan claimed the retaliation cadence; the shared attack owner
+     * still has to admit the strike atomically with regular swings and movement.
      */
     public static boolean strike(Character bot, Monster mob) {
         if (bot == null || bot.getMap() == null || mob == null) {
             return false;
         }
+        return BotAttackAction.tryRun(bot, false, false, () -> strikeNow(bot, mob));
+    }
+
+    private static boolean strikeNow(Character bot, Monster mob) {
         // The touch strike is a swing like any other, so it drops the hide auras too. The contact
         // scan already skips hidden bots entirely, so this can only matter on the narrow
         // cross-thread edge where a cast landed between the scan and this strike - and it then

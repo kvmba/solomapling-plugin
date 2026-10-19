@@ -105,4 +105,8 @@ public class BotPartyQueue {
     public synchronized void removePartyInvite(Character fakechar) {
         queues.remove(fakechar);
     }
+
+    public synchronized boolean removePartyInvite(Character fakechar, PartyInviteEntry expected) {
+        return queues.remove(fakechar, expected);
+    }
 }

@@ -9,6 +9,7 @@ import org.gms.constants.skills.Hermit;
 import org.gms.server.life.Monster;
 import org.gms.server.maps.MapleMap;
 import soloMapling.ArtificialPlayer.BotAttackSystem.BotAttackConfig;
+import soloMapling.ArtificialPlayer.BotAttackSystem.BotAttackAction;
 import soloMapling.ArtificialPlayer.BotAttackSystem.BotAttackData;
 import soloMapling.ArtificialPlayer.BotAttackSystem.BotAttackEffects;
 import soloMapling.ArtificialPlayer.BotAttackSystem.BotAttackProfile;
@@ -128,6 +129,13 @@ public final class SkillShowController {
      * 打包失败（bot/木桩状态异常）时静默：表演是视觉，不值得为一次发包中断整场。
      */
     private static void strikeStagedTarget(Character bot, Monster staged, BotAttackProfile profile) {
+        BotAttackAction.tryRun(bot, false, false, () -> {
+            strikeStagedTargetNow(bot, staged, profile);
+            return true;
+        });
+    }
+
+    private static void strikeStagedTargetNow(Character bot, Monster staged, BotAttackProfile profile) {
         // 与 BotAttackDriver.attack 发包前完全一致的两个动作：一个攻击动作绝不在坐骑上
         // 打出，且按下攻击键的瞬间就破掉橡木伪装/隐身术。Brawler/Marauder/Buccaneer 的
         // 增益段含橡木伪装，少了这两步，攻击会在伪装状态下打出。

@@ -199,7 +199,7 @@ final class GCMovementDriver {
         // step-based, so at 1s per tick a bot hangs in the air for ~20 seconds before it lands -
         // which is what "stuck in the jump pose" and "standing in mid-air" are. It also keeps
         // isMoving() true, so the bot never reaches the idle branch that would clear the stance.
-        if (entry.inAir || entry.climbing) {
+        if (entry.inAir || entry.climbing || entry.downJumpPending) {
             return BotPhysicsEngine.cfg.TICK_MS;
         }
         if (bot != null
@@ -450,6 +450,14 @@ final class GCMovementDriver {
             // bot is standing still BY DESIGN, so the 8s/2s/3s stall nets must not abandon its goal
             // (the goal stays armed and simply resumes when the swing finishes).
             entry.moveProgressAtMs = MovementClock.nowMs();
+            return;
+        }
+
+        // A queued drop owns its launch pose; neither a newly baked graph nor coarse
+        // movement may replace it while the crouch is playing.
+        if (entry.downJumpPending && !entry.inAir && !entry.climbing) {
+            entry.moveProgressAtMs = MovementClock.nowMs();
+            BotMovementManager.tickGrounded(entry, bot.getPosition());
             return;
         }
 

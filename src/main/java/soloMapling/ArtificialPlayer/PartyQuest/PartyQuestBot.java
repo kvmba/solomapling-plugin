@@ -2,6 +2,7 @@ package soloMapling.ArtificialPlayer.PartyQuest;
 
 import org.gms.client.Character;
 import org.gms.server.maps.Portal;
+import org.gms.scripting.event.EventInstanceManager;
 import soloMapling.ArtificialPlayer.BotCommandsPack.SocialCommands;
 import soloMapling.ArtificialPlayer.BotCommandsPack.WarpCommands;
 import soloMapling.ArtificialPlayer.BotDialogueHandler;
@@ -70,6 +71,7 @@ public abstract class PartyQuestBot extends BotSM implements GrindTickRegistry.P
 
     /** Whether the previous tick saw this bot inside the quest - the run-start edge. */
     private boolean wasInsideQuest;
+    private EventInstanceManager questInstance;
 
     /** The stage or room whose clear already celebrated this run, so one milestone speaks once. */
     private int celebratedClearKey = Integer.MIN_VALUE;
@@ -152,9 +154,7 @@ public abstract class PartyQuestBot extends BotSM implements GrindTickRegistry.P
         // stopped or converted away, so the next bot type on this character starts clean.
         GrindTickRegistry.getInstance().unregister(this);
         GCMovement.disable(getChr());
-        PqActions.clearSeekState(getChr().getId());
-        PqActions.clearReactorBeat(getChr().getId());
-        releaseRoomState(); // a stopped bot holds no wait spots or box claims
+        clearRunState();
         super.stopScheduledTask();
     }
 
@@ -311,15 +311,16 @@ public abstract class PartyQuestBot extends BotSM implements GrindTickRegistry.P
         }
 
         if (!isInsideQuest(bot.getMapId())) {
-            // Outside the quest the run's edge flags reset, so a bot that leaves and comes
-            // back gets its run-start line again - and its stage-clear milestones - on the
-            // next run.
-            wasInsideQuest = false;
-            celebratedClearKey = Integer.MIN_VALUE;
+            if (wasInsideQuest) {
+                clearRunState(); // NPC/script exits must clean up just like returnToLobby
+            }
             tickLobby(bot);
             return;
         }
-        if (!wasInsideQuest) {
+        EventInstanceManager instance = bot.getEventInstance();
+        if (!wasInsideQuest || questInstance != instance) {
+            clearRunState(); // also covers a new run entered between two macro ticks
+            questInstance = instance;
             wasInsideQuest = true;
             noteEnteredQuest();
         }
@@ -355,6 +356,15 @@ public abstract class PartyQuestBot extends BotSM implements GrindTickRegistry.P
      * Quests that keep none override this to a no-op; the Ludi rooms hold both.
      */
     protected void releaseRoomState() {
+    }
+
+    private void clearRunState() {
+        releaseRoomState();
+        PqActions.clearSeekState(getChr().getId());
+        PqActions.clearReactorBeat(getChr().getId());
+        wasInsideQuest = false;
+        questInstance = null;
+        celebratedClearKey = Integer.MIN_VALUE;
     }
 
     /**
@@ -813,7 +823,7 @@ public abstract class PartyQuestBot extends BotSM implements GrindTickRegistry.P
         if (bot == null) {
             return;
         }
-        releaseRoomState(); // the run is over - give up the room's wait spots and claims
+        clearRunState();
         if (bot.getMapId() == lobbyMapId()) {
             leaveInstance();
             return;

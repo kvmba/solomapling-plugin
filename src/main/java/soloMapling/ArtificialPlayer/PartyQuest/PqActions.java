@@ -414,7 +414,7 @@ public final class PqActions {
         }
         // Play the swing, or the reactor breaks by itself while the bot stands idle - the
         // player watches boxes pop open with nobody touching them. basicSwing also breaks hides.
-        BotAttack.basicSwing(bot);
+        if (!BotAttack.basicSwing(bot)) return false;
         CustomReactor.hitReactorWithScript(bot.getMap(), reactorOid, bot);
         return true;
     }
@@ -537,7 +537,7 @@ public final class PqActions {
     /**
      * The swing beat for reactor work: ~{@link #REACTOR_SWING_MIN_MS} between hits, per bot.
      * The 250ms burst read as machine-gun swings; a player's repeat rate is the weapon's
-     * attack cadence, which the attack driver already models at 720-900ms.
+     * attack cadence, never shorter than the body's attack-action lock.
      */
     private static boolean reactorSwingReady(Character bot, long now) {
         return now >= nextReactorSwingAtByBot.getOrDefault(bot.getId(), 0L);
@@ -554,9 +554,9 @@ public final class PqActions {
      * back on its own.
      */
     private static void strikeReactorOnBeat(Character bot, int oid, long now) {
+        if (!hitReactor(bot, oid)) return;
         nextReactorSwingAtByBot.put(bot.getId(), now + REACTOR_SWING_MIN_MS
                 + ThreadLocalRandom.current().nextLong(REACTOR_SWING_JITTER_MS));
-        hitReactor(bot, oid);
         var reactor = bot.getMap().getReactorByOid(oid);
         if (reactor == null || !reactor.isActive()) {
             beatBoxByBot.remove(bot.getId());
@@ -614,7 +614,7 @@ public final class PqActions {
     }
 
     /** Floor between two reactor swings: a player's repeat rate, not a machine-gun burst. */
-    private static final long REACTOR_SWING_MIN_MS = 600;
+    private static final long REACTOR_SWING_MIN_MS = GCMovement.ATTACK_ACTION_LOCK_MS;
     /** Jitter on that floor so a cohort does not swing in lockstep. */
     private static final long REACTOR_SWING_JITTER_MS = 250;
 

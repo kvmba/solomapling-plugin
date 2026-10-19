@@ -89,17 +89,8 @@ final class BotPhysicsEngine {
         public int MAX_SNAP_DROP = 16;
         public int MAX_SLOPE_UP = 26;
         public int DOWN_JUMP_GRACE_MS = 350;
-        // Ours: how many ticks the bot holds the prone (crouch) pose before a CROUCH-sourced straight
-        // down-jump takes off. A player presses Down, lets the crouch read, then presses Alt. The tick
-        // cadence alone gave a single 50ms frame - a twitch, not a crouch. Expressed in TICKS (not ms)
-        // so the beat is deterministic for every execution sim; 16 ticks = 800ms at TICK_MS 50, which
-        // matches the cadence beat's own 1000ms order of magnitude. The hold arms launchReadyAwaiting
-        // for its duration (see BotMovementManager.tickGrounded) so the stuck watchdog never reads the
-        // deliberate stillness as a wedge and rescue-hops the bot off the row it is about to drop from.
-        // Paid ONLY by the CROUCH ground action (queueDownJump's crouched form) - edges the bot walked
-        // into launch immediately, or every graph DROP edge would tax 16 driver ticks (16s on an
-        // unobserved map's 1s cadence).
-        public int DOWN_JUMP_CROUCH_TICKS = 16;
+        // Down-then-Alt: every straight down-jump shows a deliberate crouch, independent of LOD.
+        public int DOWN_JUMP_CROUCH_MS = 800;
         // Ours: humanlike pause between two straight down-jumps. A player stands back up out of the
         // crouch, re-orients and re-presses Down+Alt — about a second before the next down-jump. Without
         // this beat the engine can re-fire a DROP within a couple of ticks of landing, which on
@@ -877,25 +868,10 @@ final class BotPhysicsEngine {
     }
 
     static void queueDownJump(BotMovementState entry, Character bot) {
-        queueDownJump(entry, bot, true);
-    }
-
-    /**
-     * Arm a straight down-jump; the bot holds the prone pose for the crouch beat first.
-     *
-     * @param crouched true for the CROUCH ground action - a player pressing Down-then-Alt, where
-     *                 the crouch is the visible intent and pays the full beat. false for edges the
-     *                 bot WALKED into (tryExecuteDrop, the warmup fallback): the walk IS the intent,
-     *                 a crouch there is dead latency, so launch on the next grounded tick. This is
-     *                 the per-entry-point split the field comments describe - it used to be uniform,
-     *                 which taxed every graph DROP edge 16 driver ticks (16s on an unobserved map's
-     *                 1s cadence) and armed launchReadyAwaiting for the whole hold.
-     */
-    static void queueDownJump(BotMovementState entry, Character bot, boolean crouched) {
         idleOnGround(entry, bot);
         entry.downJumpPending = true;
         entry.crouching = true;
-        entry.downJumpCrouchTicks = crouched ? Math.max(0, cfg.DOWN_JUMP_CROUCH_TICKS) : 0;
+        entry.downJumpCrouchUntilMs = MovementClock.nowMs() + cfg.DOWN_JUMP_CROUCH_MS;
         syncCharacterState(entry);
     }
 
@@ -987,7 +963,7 @@ final class BotPhysicsEngine {
                 || (!swim && !hasDownJumpLanding(bot.getMap(), bot.getPosition()))) {
             entry.downJumpPending = false;
             entry.downJumpGracePeriodMS = 0L;
-            entry.downJumpCrouchTicks = 0;
+            entry.downJumpCrouchUntilMs = 0L;
             entry.crouching = false;
             syncCharacterState(entry);
             return;
@@ -1217,11 +1193,6 @@ final class BotPhysicsEngine {
     static void tickMotionTimers(BotMovementState entry) {
         if (entry.downJumpGracePeriodMS > 0L) {
             entry.downJumpGracePeriodMS = Math.max(0L, entry.downJumpGracePeriodMS - cfg.TICK_MS);
-        }
-        // The crouch beat counts ticks for the same reason grace does: a tick-driven hold is
-        // deterministic, a wall-clock one would stall a bot whose ticks run faster than real time.
-        if (entry.downJumpCrouchTicks > 0) {
-            entry.downJumpCrouchTicks--;
         }
     }
 
@@ -2353,7 +2324,7 @@ final class BotPhysicsEngine {
         entry.navFlightEdge = null; // teleports / map changes / death end any committed flight
         entry.downJumpPending = false;
         entry.downJumpGracePeriodMS = 0L;
-        entry.downJumpCrouchTicks = 0;
+        entry.downJumpCrouchUntilMs = 0L;
         clearRopeEntryIntent(entry);
         setMovementVelocity(entry, 0, 0);
     }

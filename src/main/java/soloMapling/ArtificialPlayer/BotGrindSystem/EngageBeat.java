@@ -108,8 +108,10 @@ final class EngageBeat {
         if (midSwingPlant(chr)) {
             return true; // the attack animation still owns the body: stand it out, no second swing
         }
-        if (adjustSettling(chr)) {
-            return true; // a reposition step is still walking out - let it land before swinging
+        if (adjustSettleUntilMs != 0L) {
+            // A committed adjustment must be followed by an attack attempt, not another
+            // adjustment. Keep that debt until engageAndSwing actually gets its turn.
+            return now() < adjustSettleUntilMs && GCMovement.isMoving(chr);
         }
         if (needsTurnBeat(chr, t)) {
             doTurnBeat(chr, t); // mob is on our other side -> turn + small step this beat, swing next beat
@@ -128,25 +130,9 @@ final class EngageBeat {
         return GCMovement.isAttackActionLocked(chr);
     }
 
-    // True while an adjust step is still in flight: the bot has a live move goal from the step and
-    // the settle deadline has not passed. A step that was never armed (no move started) is not
-    // "settling", so a refused adjust falls straight through to the swing.
-    private boolean adjustSettling(Character chr) {
-        if (adjustSettleUntilMs == 0L) {
-            return false;
-        }
-        if (now() >= adjustSettleUntilMs || !GCMovement.isMoving(chr)) {
-            adjustSettleUntilMs = 0L; // landed / abandoned / out of patience -> the swing may go
-            return false;
-        }
-        return true;
-    }
-
-    // Arm the settle window after an adjust actually committed to a move. Anything the adjust only
-    // nudged in place (a turn step that was clamped, a blink that landed instantly) reports false
-    // from isMoving on the next beat and settles immediately.
-    private void armAdjustSettle(Character chr) {
-        adjustSettleUntilMs = GCMovement.isMoving(chr) ? now() + ADJUST_SETTLE_MAX_MS : 0L;
+    // Instant blinks and clamped turns also owe an attack on the next beat.
+    private void armAdjustSettle() {
+        adjustSettleUntilMs = now() + ADJUST_SETTLE_MAX_MS;
     }
 
     // Plant (or hop) and swing. Handles the engage flourish once per engagement and fires the
@@ -155,6 +141,11 @@ final class EngageBeat {
     // freezes the bot for a second for nothing. Returns the attack result so a strategy can add its
     // own post-kill behavior (roam clears `engaged`, camp doesn't).
     BotAttackDriver.AttackResult engageAndSwing(Character chr, Monster t) {
+        if (adjustSettleUntilMs != 0L) {
+            GCMovement.stop(chr); // a timed-out adjustment must not resume behind the shot
+            b.lastMoveTargetX = Integer.MIN_VALUE;
+        }
+        adjustSettleUntilMs = 0L;
         if (!b.engaged) {
             if (jumpsToAttack() && b.rng.nextDouble() < JUMP_ATTACK_CHANCE) {
                 int dir = jumpAttackDir(chr, t);
@@ -334,7 +325,7 @@ final class EngageBeat {
         }
         // No swing on the step's own beat: the animation lock armed by a swing would freeze the very
         // walk/blink just issued. The swing goes on the first beat the step has landed.
-        armAdjustSettle(chr);
+        armAdjustSettle();
         return true;
     }
 
@@ -381,7 +372,7 @@ final class EngageBeat {
         // The retreat is this beat's action. Swinging here would arm the animation lock and freeze
         // the step just issued (shoot-freeze-shoot-freeze, never moving); the shot goes as soon as
         // the retreat has landed - see preSwingAdjust.
-        armAdjustSettle(chr);
+        armAdjustSettle();
         return true;
     }
 
@@ -430,7 +421,7 @@ final class EngageBeat {
         b.engaged = false;                // the tap moves the body: re-plant before the next swing
         // The turn is this beat's action; the swing goes once the tap has landed (the attack packet
         // carries its own facing byte, so the aim is already correct either way).
-        armAdjustSettle(chr);
+        armAdjustSettle();
     }
 
     private static long now() {

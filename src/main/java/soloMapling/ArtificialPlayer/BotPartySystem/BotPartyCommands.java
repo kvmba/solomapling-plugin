@@ -126,14 +126,27 @@ public class BotPartyCommands {
     }
 
     private static boolean botRejectPartyInvite(Character fakechar, boolean notify) {
-        BotPartyQueue.PartyInviteEntry entry = BotPartyQueue.getInstance().getPartyInvite(fakechar);
+        BotPartyQueue queue = BotPartyQueue.getInstance();
+        return botRejectPartyInvite(fakechar, queue.getPartyInvite(fakechar), notify);
+    }
+
+    /** Answer only the invitation that the caller inspected, never its replacement. */
+    public static boolean botRejectPartyInvite(Character fakechar, BotPartyQueue.PartyInviteEntry entry,
+                                               boolean notify) {
+        BotPartyQueue queue = BotPartyQueue.getInstance();
         if (entry == null) {
             debugprint("botRejectPartyInvite: no pending invite, no-op.");
             return false;
         }
 
-        InviteResult res = InviteCoordinator.answerInvite(InviteType.PARTY, fakechar.getId(), entry.getPartyId(), false);
-        BotPartyQueue.getInstance().removePartyInvite(fakechar);
+        InviteResult res;
+        synchronized (queue) {
+            if (queue.getPartyInvite(fakechar) != entry) {
+                return false; // the decision belonged to an invitation that was replaced
+            }
+            res = InviteCoordinator.answerInvite(InviteType.PARTY, fakechar.getId(), entry.getPartyId(), false);
+            queue.removePartyInvite(fakechar, entry);
+        }
 
         // Only tell the inviter the bot declined when the coordinator entry actually existed and was
         // denied (DENIED). A NOT_FOUND means the invite was already gone/superseded, so the notice
