@@ -96,6 +96,9 @@ final class BotPhysicsEngine {
         // matches the cadence beat's own 1000ms order of magnitude. The hold arms launchReadyAwaiting
         // for its duration (see BotMovementManager.tickGrounded) so the stuck watchdog never reads the
         // deliberate stillness as a wedge and rescue-hops the bot off the row it is about to drop from.
+        // Paid ONLY by the CROUCH ground action (queueDownJump's crouched form) - edges the bot walked
+        // into launch immediately, or every graph DROP edge would tax 16 driver ticks (16s on an
+        // unobserved map's 1s cadence).
         public int DOWN_JUMP_CROUCH_TICKS = 16;
         // Ours: humanlike pause between two straight down-jumps. A player stands back up out of the
         // crouch, re-orients and re-presses Down+Alt — about a second before the next down-jump. Without
@@ -874,14 +877,25 @@ final class BotPhysicsEngine {
     }
 
     static void queueDownJump(BotMovementState entry, Character bot) {
+        queueDownJump(entry, bot, true);
+    }
+
+    /**
+     * Arm a straight down-jump; the bot holds the prone pose for the crouch beat first.
+     *
+     * @param crouched true for the CROUCH ground action - a player pressing Down-then-Alt, where
+     *                 the crouch is the visible intent and pays the full beat. false for edges the
+     *                 bot WALKED into (tryExecuteDrop, the warmup fallback): the walk IS the intent,
+     *                 a crouch there is dead latency, so launch on the next grounded tick. This is
+     *                 the per-entry-point split the field comments describe - it used to be uniform,
+     *                 which taxed every graph DROP edge 16 driver ticks (16s on an unobserved map's
+     *                 1s cadence) and armed launchReadyAwaiting for the whole hold.
+     */
+    static void queueDownJump(BotMovementState entry, Character bot, boolean crouched) {
         idleOnGround(entry, bot);
         entry.downJumpPending = true;
         entry.crouching = true;
-        // Ours: hold the prone pose for the crouch beat. 0 (the default) means every caller that did
-        // not ask for a crouch - tryExecuteDrop, the warmup fallback - launches on the very next
-        // grounded tick exactly as before, so the beat is opt-in per entry point and cannot slow a
-        // drop that never showed a crouch.
-        entry.downJumpCrouchTicks = Math.max(0, cfg.DOWN_JUMP_CROUCH_TICKS);
+        entry.downJumpCrouchTicks = crouched ? Math.max(0, cfg.DOWN_JUMP_CROUCH_TICKS) : 0;
         syncCharacterState(entry);
     }
 

@@ -141,13 +141,13 @@ public class BotRecruitManager {
             }
             return InvitePoll.NONE; // coordinator-side expiry; queue already cleared by the accept call
         }
-        // A (bot, player) pair still inside its decline cooldown keeps its queue entry: the answer
-        // is already known ("not now"), so re-answering it every tick only spams the inviter with
-        // the declined notice. The entry is last-wins, so a NEW inviter still displaces it and is
-        // answered in its own right; the coordinator's own 3-minute timeout finally expires a stale
-        // one, exactly as the armed-match path above already relies on.
+        // An answer was already given ("not now"): reject to release BOTH sides of the invite -
+        // the coordinator's per-target slot (its putIfAbsent refuses every later invite, whatever
+        // the inviter, until this one is answered) and the queue entry. Only the inviter-facing
+        // declined notice is held back: re-answering every tick would notice-bomb that player.
         if (inviter != null && declinedByThisBot(botChr.getId(), inviter.getId())) {
-            return InvitePoll.NONE;
+            BotPartyCommands.botRejectPartyInviteSilently(botChr);
+            return InvitePoll.REJECTED;
         }
         BotPartyCommands.botRejectPartyInvite(botChr);
         return InvitePoll.REJECTED;

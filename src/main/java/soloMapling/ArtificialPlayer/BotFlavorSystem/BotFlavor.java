@@ -167,14 +167,14 @@ public final class BotFlavor {
     }
 
     // Swing one of the bot's job attack skills at the air (Brandish, an AoE, a spell cast). No targets,
-    // no damage. markAttackAction keeps the pose from being cancelled by the next idle-refresh packet.
+    // no damage. The broadcast itself arms the attack-action lock (see BotAttack), which keeps
+    // the pose from being cancelled by the next idle-refresh packet.
     private static void doSkillSwing(Character chr) {
         WeaponType weapon = BotAttack.resolveEquippedWeaponType(chr);
         BotAttackConfig.JobAttacks atk = BotAttackConfig.resolve(chr.getJob(), weapon);
         BotAttackProfile profile = pickProfile(atk);
-        GCMovement.markAttackAction(chr);
         if (profile == null) {
-            BotAttack.basicSwing(chr);
+            BotAttack.basicSwing(chr); // arms the attack-action lock itself
             return;
         }
         int skillId = profile.skillFor(weapon);
@@ -182,7 +182,7 @@ public final class BotFlavor {
         // town fidgeter never is, so it falls back to the plain weapon swing like a no-skill job.
         if (BotAuraState.isAttackEnablerSkill(skillId)
                 && !BotAuraState.isMorphedAs(chr, BotAuraState.enablerSkillFor(chr, skillId))) {
-            BotAttack.basicSwing(chr);
+            BotAttack.basicSwing(chr); // arms the attack-action lock itself
             return;
         }
         // Each route has its own packet: melee -> CLOSE_RANGE_ATTACK, ranged -> RANGED_ATTACK (plus a

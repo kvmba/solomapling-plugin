@@ -1152,14 +1152,14 @@ public final class LudiStages {
     // =========================================================================
 
     /**
-     * Work the bonus stage: break the reward boxes and scoop what they spray.
+     * Work the bonus stage: break the reward boxes, take nothing from the spray.
      *
      * <p>{@code 922011000} is seeded with 34 reward reactors ({@code 2202004}, script
      * {@code ludiquest4} -> {@code rm.sprayItems(true, 1, 30, 60, 15)}), each of which sprays
-     * meso and one item. A player's own share is whatever they pick up before the one-minute
-     * timer hands the team to the exit stage, so the bot does the same thing a player does:
-     * hit every box it can reach and pick the spray up. The boxes are not stage-gated - there
-     * is no turn-in here - so the work is purely "more boxes, then leave".
+     * meso and one item. What the bot does NOT do here is loot: the room is a shared reward
+     * stage and the bot is a guest in it, so the spray is the party's to scoop (see the method
+     * body). The boxes are not stage-gated - there is no turn-in here - so the work is purely
+     * "more boxes, then leave".
      *
      * <p>Leaving is the Pink Balloon ({@code 2040045.js}, {@code cm.warp(922011100, "st00")}):
      * the bot takes that warp as soon as the boxes are spent, so the run reaches the reward

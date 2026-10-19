@@ -156,7 +156,10 @@ public class FollowerBot extends BotSM {
             return;
         }
         BotPartyQueue.PartyInviteEntry entry = BotPartyQueue.getInstance().getPartyInvite(chr);
-        Character inviter = entry == null ? null : entry.getInviter();
+        if (entry == null) {
+            return; // TTL-expired in the read above; nothing left to answer
+        }
+        Character inviter = entry.getInviter();
         if (inviter != null && inviter.getId() == leaderId && chr.getParty() == null) {
             if (BotPartyCommands.botAcceptPartyInvite(chr)) {
                 wasPartied = true;
@@ -164,15 +167,18 @@ public class FollowerBot extends BotSM {
             }
             return;
         }
-        // An invite from a player this bot has already refused keeps its queue entry rather than
-        // being answered again: the shared decline cooldown (BotRecruitManager.declinedByThisBot,
-        // written by rollPartyAsk) is what decides, and re-answering every tick would notice-bomb
-        // that player for the whole window. A genuinely unwanted inviter is still displaced by the
-        // next invite, and the coordinator's own 3-minute timeout expires a stale one.
-        if (inviter == null || BotRecruitManager.declinedByThisBot(chr.getId(), inviter.getId())) {
-            return;
+        // Everyone else gets the same rejection the recruit drains give: declining releases the
+        // coordinator's per-target slot (its putIfAbsent holds it against every later invite until
+        // this one is answered) AND the queue entry. An inviter already inside its decline cooldown
+        // gets the silent form - the answer ("not now") was already delivered once; re-sending it
+        // every tick would notice-bomb that player for the whole window.
+        boolean cooldown = inviter != null
+                && BotRecruitManager.declinedByThisBot(chr.getId(), inviter.getId());
+        if (cooldown) {
+            BotPartyCommands.botRejectPartyInviteSilently(chr);
+        } else {
+            BotPartyCommands.botRejectPartyInvite(chr);
         }
-        BotPartyCommands.botRejectPartyInvite(chr);
     }
 
     // ── Phases ───────────────────────────────────────────────────────────────

@@ -50,6 +50,11 @@ public final class BotAttack {
      * no targets, no skill. Caller is responsible for any follow-up damage
      * application (e.g. reactor hit). The animation is selected based on the
      * bot's currently equipped weapon class.
+     *
+     * <p>Every broadcast in this class arms the movement layer's attack-action lock
+     * (GCMovement.markAttackAction) right after the packet hits the wire, so a swing
+     * issued on a raw beat (the reactor chase, a flavour expression) cannot be truncated
+     * by a walk/jump/turn packet issued right after it - by this thread or any other.
      */
     public static void basicSwing(Character chr) {
         if (chr == null || GCMovement.isClimbing(chr)) return;
@@ -76,6 +81,7 @@ public final class BotAttack {
                 ),
                 /* repeatToSource */ false
         );
+        GCMovement.markAttackAction(chr); // the packet is on the wire: take the body for the animation
     }
 
     /**
@@ -103,6 +109,7 @@ public final class BotAttack {
                         bodyActionId, /* display */ 0),
                 false
         );
+        GCMovement.markAttackAction(chr); // the packet is on the wire: take the body for the animation
     }
 
     /**
@@ -132,6 +139,7 @@ public final class BotAttack {
                         BotAttackData.speedFor(weaponType, BotAttackData.DEFAULT_ATTACK_SPEED), bodyActionId, /* display */ 0),
                 false
         );
+        GCMovement.markAttackAction(chr); // the packet is on the wire: take the body for the animation
     }
 
     /**
@@ -157,6 +165,7 @@ public final class BotAttack {
                         BotAttackData.DEFAULT_ATTACK_SPEED, bodyActionId, /* display */ 0),
                 false
         );
+        GCMovement.markAttackAction(chr); // the packet is on the wire: take the body for the animation
     }
 
     // The skill's max level, so the fanciest form of the effect renders. Bots don't learn skills, so

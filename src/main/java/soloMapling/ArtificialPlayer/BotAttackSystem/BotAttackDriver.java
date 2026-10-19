@@ -52,10 +52,13 @@ public final class BotAttackDriver {
     // either wrote it: a double swing on one beat, plus a last-write cooldown that shortens the next
     // interval. The single-threaded grinders never contended, which is why this only showed up on PQ.
     //
-    // Deliberately NOT held while calling into GCMovement: nothing here takes the movement monitor
-    // (BotMovementState) while this lock is held, so the lock order can never invert against the
-    // driver tick or the stop path - the AB-BA that PqActions.nudgeStageTick documents. The swing
-    // itself (packets, face, damage) runs inside, exactly where it did.
+    // Lock order: attack() DOES take the movement monitor (BotMovementState) while this lock is held -
+    // isClimbing / isAttackActionLocked read it, face() takes it, and the strike broadcast's
+    // markAttackAction writes under it. That is one-way and short: nothing that holds the movement
+    // monitor ever comes back into this driver (GCMoveSystem never calls BotAttackDriver), so the
+    // order is always SWING_LOCK -> movement monitor, never the reverse, and the AB-BA PqActions
+    // .nudgeStageTick documents cannot form. Do not call back into anything that acquires SWING_LOCK
+    // from under a movement-monitor hold.
     //
     // Never evicted from the map. The cooldown timers beside it are cleared on despawn, but the lock
     // object must survive: a swing in flight on the sweep thread still holds it, and dropping the

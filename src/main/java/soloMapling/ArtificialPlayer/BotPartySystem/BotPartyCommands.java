@@ -112,6 +112,20 @@ public class BotPartyCommands {
     }
 
     public static boolean botRejectPartyInvite(Character fakechar) {
+        return botRejectPartyInvite(fakechar, true);
+    }
+
+    /**
+     * Reject without the inviter-facing declined notice - for a drain that already KNOWS the
+     * answer ("not now" while the decline cooldown runs). The rejection itself must still go
+     * through: declining is what releases the coordinator's per-target slot, which its
+     * putIfAbsent holds against EVERY later invite until this one is answered.
+     */
+    public static boolean botRejectPartyInviteSilently(Character fakechar) {
+        return botRejectPartyInvite(fakechar, false);
+    }
+
+    private static boolean botRejectPartyInvite(Character fakechar, boolean notify) {
         BotPartyQueue.PartyInviteEntry entry = BotPartyQueue.getInstance().getPartyInvite(fakechar);
         if (entry == null) {
             debugprint("botRejectPartyInvite: no pending invite, no-op.");
@@ -125,11 +139,12 @@ public class BotPartyCommands {
         // denied (DENIED). A NOT_FOUND means the invite was already gone/superseded, so the notice
         // would be misleading - clear the queue entry either way.
         Character inviter = entry.getInviter();
-        if (inviter != null && res.result == InviteResultType.DENIED) {
+        if (notify && inviter != null && res.result == InviteResultType.DENIED) {
             inviter.sendPacket(PacketCreator.serverNotice(5,
                     BotMessages.get("party.declined", fakechar.getName())));
         }
-        debugprint("botRejectPartyInvite: result=" + res.result + " inviter=" + (inviter == null ? "?" : inviter.getName()));
+        debugprint("botRejectPartyInvite: result=" + res.result + " notify=" + notify
+                + " inviter=" + (inviter == null ? "?" : inviter.getName()));
         return true;
     }
 

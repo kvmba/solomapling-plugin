@@ -297,4 +297,47 @@ public class AttackActionLockExecutionSimTest {
         assertTrue(GCMovement.ATTACK_ACTION_LOCK_MS >= 820L,
                 "lock must cover the longest basic swing pose in the WZ body data");
     }
+
+    @Test
+    void everyBroadcastSwingInTheCosmeticAttackPackArmsTheLock() throws Exception {
+        // Structural guard, same shape as theAttackBroadcastIsTheOnlyArmingSeam: BotAttack's four
+        // broadcast methods (basic/skill/ranged/magic swing) put attack packets on the wire too -
+        // the reactor chase (PqActions.hitReactor -> basicSwing) and the flavour expressions live
+        // here. A swing this pack broadcasts without arming is exactly the hole that let the
+        // combat sweep stamp a real strike packet over a live box-breaking animation. Counted per
+        // INVOKE instruction (the constant pool dedupes the method reference, so a string count
+        // would always read 1); byte-buddy's shaded ASM is on the test classpath.
+        String res = soloMapling.ArtificialPlayer.BotCommandsPack.BotAttack.class
+                .getName().replace('.', '/') + ".class";
+        try (var in = soloMapling.ArtificialPlayer.BotCommandsPack.BotAttack.class
+                .getClassLoader().getResourceAsStream(res)) {
+            int[] armings = {0};
+            new net.bytebuddy.jar.asm.ClassReader(in.readAllBytes()).accept(
+                    new net.bytebuddy.jar.asm.ClassVisitor(net.bytebuddy.jar.asm.Opcodes.ASM9) {
+                        @Override
+                        public net.bytebuddy.jar.asm.MethodVisitor visitMethod(
+                                int access, String name, String descriptor,
+                                String signature, String[] exceptions) {
+                            net.bytebuddy.jar.asm.MethodVisitor mv =
+                                    super.visitMethod(access, name, descriptor, signature, exceptions);
+                            return new net.bytebuddy.jar.asm.MethodVisitor(
+                                    net.bytebuddy.jar.asm.Opcodes.ASM9, mv) {
+                                @Override
+                                public void visitMethodInsn(int opcode, String owner,
+                                                            String mname, String mdescriptor,
+                                                            boolean isInterface) {
+                                    if ("markAttackAction".equals(mname)
+                                            && owner.endsWith("GCMovement")) {
+                                        armings[0]++;
+                                    }
+                                    super.visitMethodInsn(opcode, owner, mname, mdescriptor, isInterface);
+                                }
+                            };
+                        }
+                    }, 0);
+            assertTrue(armings[0] >= 4,
+                    "each of basicSwing/skillSwing/rangedSwing/magicSwing must arm the attack "
+                            + "action lock at its broadcast (found " + armings[0] + ")");
+        }
+    }
 }

@@ -676,7 +676,7 @@ final class BotNavigationManager {
 
         entry.lastEdgeBlockReason = null;
         setEdgeExecutionTarget(entry, edge);
-        BotPhysicsEngine.queueDownJump(entry, bot);
+        BotPhysicsEngine.queueDownJump(entry, bot, false); // walked into the window: no crouch to show
         BotMovementManager.broadcastMovement(entry);
         return new NavigationDirective(rawTargetPos, true);
     }
