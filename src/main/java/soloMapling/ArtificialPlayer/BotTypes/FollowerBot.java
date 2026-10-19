@@ -164,6 +164,14 @@ public class FollowerBot extends BotSM {
             }
             return;
         }
+        // An invite from a player this bot has already refused keeps its queue entry rather than
+        // being answered again: the shared decline cooldown (BotRecruitManager.declinedByThisBot,
+        // written by rollPartyAsk) is what decides, and re-answering every tick would notice-bomb
+        // that player for the whole window. A genuinely unwanted inviter is still displaced by the
+        // next invite, and the coordinator's own 3-minute timeout expires a stale one.
+        if (inviter == null || BotRecruitManager.declinedByThisBot(chr.getId(), inviter.getId())) {
+            return;
+        }
         BotPartyCommands.botRejectPartyInvite(chr);
     }
 

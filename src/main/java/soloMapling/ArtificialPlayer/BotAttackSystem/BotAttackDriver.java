@@ -26,6 +26,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.concurrent.locks.ReentrantLock;
 
 /*
  * Targeting and route-dispatch model adapted from GreenCatMS bot combat. Credit: NutNNut.
@@ -40,6 +41,32 @@ public final class BotAttackDriver {
 
     // botId -> absolute epoch-ms before which this bot may not swing again.
     private static final Map<Integer, Long> nextAttackByBot = new ConcurrentHashMap<>();
+
+    // One non-reentrant swing lock per bot. Held for the whole of attack() so the tempo decision
+    // (cooldown read + action-lock read + the writes that claim both) is ONE step.
+    //
+    // Why this is needed: the same bot's botAttack() is reachable from two thread families that hold
+    // DIFFERENT monitors - the PQ combat beat (GrindTickRegistry's single sweep thread, via
+    // PqActions.attack) and the stage macro tick (a virtual thread, via PqActions.seekAndAttack under
+    // the SeekState monitor). Neither excludes the other, so both could pass the cooldown check before
+    // either wrote it: a double swing on one beat, plus a last-write cooldown that shortens the next
+    // interval. The single-threaded grinders never contended, which is why this only showed up on PQ.
+    //
+    // Deliberately NOT held while calling into GCMovement: nothing here takes the movement monitor
+    // (BotMovementState) while this lock is held, so the lock order can never invert against the
+    // driver tick or the stop path - the AB-BA that PqActions.nudgeStageTick documents. The swing
+    // itself (packets, face, damage) runs inside, exactly where it did.
+    //
+    // Never evicted from the map. The cooldown timers beside it are cleared on despawn, but the lock
+    // object must survive: a swing in flight on the sweep thread still holds it, and dropping the
+    // entry would let a bot that reused the character id acquire a DIFFERENT lock and swing beside
+    // that one. One small lock object per bot id is bounded by the bot population, and the timers it
+    // guards are what actually needed releasing.
+    private static final Map<Integer, ReentrantLock> SWING_LOCK = new ConcurrentHashMap<>();
+
+    private static ReentrantLock swingLock(int botId) {
+        return SWING_LOCK.computeIfAbsent(botId, k -> new ReentrantLock());
+    }
 
     // Full-map ultimates (Dragon Roar / Genesis / Blizzard / Meteor Shower) clear the entire map in
     // one cast, so a grinding bot shouldn't fire one every swing. On top of the normal per-swing
@@ -109,28 +136,60 @@ public final class BotAttackDriver {
      * single). Cheap and safe to call every tick; most ticks do nothing. The FSM entry point.
      */
     public static AttackResult botAttack(Character bot) {
-        return attack(bot, false, Choice.AUTO);
+        if (bot == null) {
+            return AttackResult.miss("bot is null");
+        }
+        // Serialise the whole swing per bot (see SWING_LOCK). tryLock, not lock: a bot already
+        // mid-swing is not worth waiting for, so the caller simply gets this beat's "no swing" and
+        // the next beat tries again - the same outcome the tempo cooldown would have produced, without
+        // ever parking a sweep thread behind another bot's swing.
+        ReentrantLock lock = swingLock(bot.getId());
+        if (!lock.tryLock()) {
+            return AttackResult.miss("swing already in progress");
+        }
+        try {
+            return attack(bot, false, Choice.AUTO);
+        } finally {
+            lock.unlock();
+        }
     }
 
     /* Force the SINGLE-target attack now, ignoring cooldown (backs !bot attack <id>). */
     public static AttackResult forceSingle(Character bot) {
-        return attack(bot, true, Choice.SINGLE);
+        return forced(bot, Choice.SINGLE);
     }
 
     /* Force the sustained AoE attack now, ignoring cooldown (backs !bot attackaoe <id>). */
     public static AttackResult forceAoe(Character bot) {
-        return attack(bot, true, Choice.AOE);
+        return forced(bot, Choice.AOE);
     }
 
     /* Force the full-map ultimate now, ignoring both cooldowns (backs !bot attackult <id>). */
     public static AttackResult forceUltimate(Character bot) {
-        return attack(bot, true, Choice.ULTIMATE);
+        return forced(bot, Choice.ULTIMATE);
+    }
+
+    private static AttackResult forced(Character bot, Choice choice) {
+        if (bot == null) {
+            return AttackResult.miss("bot is null");
+        }
+        ReentrantLock lock = swingLock(bot.getId());
+        if (!lock.tryLock()) {
+            return AttackResult.miss("swing already in progress");
+        }
+        try {
+            return attack(bot, true, choice);
+        } finally {
+            lock.unlock();
+        }
     }
 
     /* Release a despawned bot's cooldown timers so the maps don't grow unbounded. */
     public static void clearBot(int botId) {
         nextAttackByBot.remove(botId);
         nextUltimateByBot.remove(botId);
+        // SWING_LOCK is deliberately NOT evicted: a swing in flight still holds its lock, and
+        // reusing the id must not hand a second thread a different one (see the field's comment).
         BotMesoBomb.clearBot(botId); // release the Pickpocket bag register + detonation cooldown
         BotShadowMeso.clearBot(botId); // release the Shadow Meso throw cooldown
         BotGroundMists.clearBot(botId); // release the Poison Mist recast timer

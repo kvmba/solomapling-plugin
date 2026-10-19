@@ -141,8 +141,32 @@ public class BotRecruitManager {
             }
             return InvitePoll.NONE; // coordinator-side expiry; queue already cleared by the accept call
         }
+        // A (bot, player) pair still inside its decline cooldown keeps its queue entry: the answer
+        // is already known ("not now"), so re-answering it every tick only spams the inviter with
+        // the declined notice. The entry is last-wins, so a NEW inviter still displaces it and is
+        // answered in its own right; the coordinator's own 3-minute timeout finally expires a stale
+        // one, exactly as the armed-match path above already relies on.
+        if (inviter != null && declinedByThisBot(botChr.getId(), inviter.getId())) {
+            return InvitePoll.NONE;
+        }
         BotPartyCommands.botRejectPartyInvite(botChr);
         return InvitePoll.REJECTED;
+    }
+
+    /**
+     * Whether this bot refused this player recently enough that the refusal still stands.
+     *
+     * <p>The drain used to reject unconditionally, so the (bot, player) cooldown
+     * {@link #rollPartyAsk} records on a decline was never honoured on the invite path: the player
+     * re-invited inside the 3-minute window and got an instant "declined" notice instead of the
+     * bot simply not answering yet.
+     *
+     * <p>Public because the follower has its own invite drain ({@code FollowerBot#pollLeaderInvite})
+     * and must ask the same question rather than keep a second copy of the rule.
+     */
+    public static boolean declinedByThisBot(int botId, int playerId) {
+        Long until = DECLINED_UNTIL.get(pairKey(botId, playerId));
+        return until != null && System.currentTimeMillis() < until;
     }
 
     // A party invite for this bot just landed in the queue. Wake its macro brain so the next tick
