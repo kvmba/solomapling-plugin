@@ -59,7 +59,17 @@ public class LpqShelfChaseExecutionReproTest {
         setter.invoke(new ServerManager(), ctx);
         GameConfig.add(config("server", "update_interval", "100"));
         org.gms.net.server.Server.getInstance();
+        // Drive every GCMoveSystem wall-clock gate off a virtual clock (advanced one TICK_MS per
+        // tick by tickN) instead of real time: the down-jump crouch beat is a wall-clock deadline,
+        // and a fast-forward sim without the seam would out-run it and read the deliberate crouch
+        // hold as a wedged chase. Reset in restoreClock.
+        MovementClock.useVirtual(1_000_000L);
         org.junit.jupiter.api.Assumptions.assumeTrue(mapWzAvailable(), "Map.wz needed");
+    }
+
+    @org.junit.jupiter.api.AfterAll
+    static void restoreClock() {
+        MovementClock.reset();
     }
 
     static boolean mapWzAvailable() {
@@ -135,6 +145,7 @@ public class LpqShelfChaseExecutionReproTest {
             } catch (ReflectiveOperationException e) {
                 throw new RuntimeException(e.getCause() != null ? e.getCause() : e);
             }
+            MovementClock.advance(BotPhysicsEngine.cfg.TICK_MS);
             BotMovementState st = sim.st();
             if (i % 5 == 0) {
                 sim.trace().append(String.format("t=%4d pos=%s nav=%-16s edge=%s block=%s air=%b climb=%b mt=%s%n",
@@ -153,7 +164,7 @@ public class LpqShelfChaseExecutionReproTest {
         st.moveTargetPrecise = true;
         st.moveTargetSource = "gcmove";
         st.moveBestDist = Integer.MAX_VALUE;
-        st.moveProgressAtMs = System.currentTimeMillis();
+        st.moveProgressAtMs = MovementClock.nowMs();
     }
 
     /** The chase legs the v67 repair promised are executable, from the GROUND (the reported

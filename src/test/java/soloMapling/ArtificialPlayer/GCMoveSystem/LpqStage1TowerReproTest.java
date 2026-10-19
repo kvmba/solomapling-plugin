@@ -51,8 +51,17 @@ public class LpqStage1TowerReproTest {
         setter.invoke(new ServerManager(), ctx);
         GameConfig.add(config("server", "update_interval", "100"));
         org.gms.net.server.Server.getInstance();
+        // Drive every GCMoveSystem wall-clock gate off a virtual clock (advanced one TICK_MS per
+        // tick by tickN): the down-jump crouch beat is a wall-clock deadline, and this fast-forward
+        // sim would otherwise out-run it and stall at the first straight DROP. Reset in restoreClock.
+        MovementClock.useVirtual(1_000_000L);
         org.junit.jupiter.api.Assumptions.assumeTrue(mapWzAvailable(),
                 "Map.wz not resolvable from this working directory (sim needs the real WZ)");
+    }
+
+    @org.junit.jupiter.api.AfterAll
+    static void restoreClock() {
+        MovementClock.reset();
     }
 
     static boolean mapWzAvailable() {
@@ -129,6 +138,7 @@ public class LpqStage1TowerReproTest {
             } catch (ReflectiveOperationException e) {
                 throw new RuntimeException(e.getCause() != null ? e.getCause() : e);
             }
+            MovementClock.advance(BotPhysicsEngine.cfg.TICK_MS);
             BotMovementState st = sim.st();
             if (i % 5 == 0) {
                 sim.trace().append(String.format("t=%4d pos=%s nav=%-18s edge=%s block=%s air=%b climb=%b warmup=%b mt=%s%n",
@@ -151,7 +161,7 @@ public class LpqStage1TowerReproTest {
         st.moveTargetPrecise = true;
         st.moveTargetSource = "gcmove";
         st.moveBestDist = Integer.MAX_VALUE;
-        st.moveProgressAtMs = System.currentTimeMillis();
+        st.moveProgressAtMs = MovementClock.nowMs();
     }
 
     private void report(String label, Sim sim) {

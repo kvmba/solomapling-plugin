@@ -32,6 +32,12 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * the bot, and no summon-owning line (archer / mage / dark knight / pirate turret) can hold a hide
  * aura (橡木伪装 is brawler-line, 隐身术 is thief-line) - nor does the official client cancel a
  * player's hide when the summon strikes.</p>
+ *
+ * <p>A site that routes its swing through {@code BotAttackAction.tryRun} inherits the cancel from
+ * the {@code *Now} body that runs inside it - the same inheritance rule as the {@code BotAttack.}
+ * delegation below, since the ownership gate wraps the same swing (and the audited {@code *Now}
+ * bodies are themselves covered: {@code BotAttack.basicSwingNow} and friends carry the cancel
+ * directly, asserted by the Now-body audit in {@link #theNowBodiesStillCancelTheHideAuras()}).</p>
  */
 class HideCancelAuditTest {
 
@@ -64,13 +70,34 @@ class HideCancelAuditTest {
             }
             if (!body.contains("cancelHidesForAction")
                     && !body.contains("cancelDisguiseForAction")
-                    && !body.contains("BotAttack.")) {
+                    && !body.contains("BotAttack.")
+                    && !body.contains("BotAttackAction.tryRun")) {
                 // A site that routes the swing through a BotAttack helper inherits that helper's
-                // cancel (e.g. a stage script that swings before hitting the reactor).
+                // cancel (e.g. a stage script that swings before hitting the reactor); a site that
+                // routes it through the BotAttackAction ownership gate inherits the cancel from the
+                // *Now body it wraps (see the Now-body audit below).
                 missing.add(site.file() + " " + site.method + " broadcasts a swing without a hide cancel");
             }
         }
         assertTrue(missing.isEmpty(), "every attack site must cancel the hide auras: " + missing);
+    }
+
+    @Test
+    void theNowBodiesStillCancelTheHideAuras() throws IOException {
+        // The ownership gate moved the cancel out of the public swing wrappers into the *Now
+        // bodies that run inside it. This pins those bodies so the inheritance rule above can
+        // never mask a cancel that silently disappeared: each BotAttack swing Now-body must still
+        // break the auras at the attack key, as must the touch-retaliation strike body.
+        String attack = read(SRC.resolve("soloMapling/ArtificialPlayer/BotCommandsPack/BotAttack.java"));
+        for (String now : new String[]{"basicSwingNow", "skillSwingNow", "rangedSwingNow", "magicSwingNow"}) {
+            String body = methodBody(attack, "private static boolean " + now + "(");
+            assertTrue(body != null && body.contains("cancelHidesForAction"),
+                    now + " must still cancel the hide auras - the ownership gate inherits from it");
+        }
+        String energy = read(SRC.resolve("soloMapling/ArtificialPlayer/BotAttackSystem/BotEnergyCharge.java"));
+        String strikeNow = methodBody(energy, "private static boolean strikeNow(");
+        assertTrue(strikeNow != null && strikeNow.contains("cancelHidesForAction"),
+                "the touch-retaliation strike body must still cancel the hide auras");
     }
 
     @Test
