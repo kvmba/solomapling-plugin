@@ -323,7 +323,7 @@ final class StackStrategy implements GrindStrategy {
             return;
         }
         // 行走途中：刚挥完手站桩一拍；否则走分配平台的活怪脚下（顺手清路），平台没怪才走锚点。
-        if (b.midSwingPlant()) {
+        if (b.midSwingPlant(chr)) {
             return;
         }
         Point gp = b.travelApproachPoint(chr, dest);
@@ -579,7 +579,7 @@ final class StackStrategy implements GrindStrategy {
         if (b.engage.skillMoveToward(chr, tx, ty)) {
             return; // blinked/dashed toward it (vertical blinks included)
         }
-        if (now() < b.attackWalkLockUntil) {
+        if (b.midSwingPlant(chr)) {
             return;
         }
         if (Math.abs(tx - b.lastMoveTargetX) < GrindBrain.ROAM_RETARGET_EPS) {

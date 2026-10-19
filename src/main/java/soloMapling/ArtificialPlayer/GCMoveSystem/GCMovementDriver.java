@@ -430,6 +430,29 @@ final class GCMovementDriver {
         // when no real player shares the bot's map) and on the i-frame window.
         BotContactDamage.tickMobDamage(entry, bot);
 
+        // Attack action hold: an attack packet owns the body for its full animation (see
+        // GCMovement.ATTACK_ACTION_LOCK_MS). This is the ONE place the rule is enforced, so no
+        // strategy, loot sweep, PQ chase or town walk can issue a walk/jump/blink over a live swing —
+        // which was the reported "attacks, then instantly walks/jumps" defect. It sits AFTER the
+        // contact-damage call on purpose: a mob hit lands first and may launch a knockback, and an
+        // airborne bot must fall through to the integrator (freezing one is the "hangs in the jump
+        // pose" failure the surrounding guards warn about).
+        //
+        // Deliberately NO broadcast here. The dedup snapshot would emit one STAND frame on the first
+        // held tick after a walk (the bot stopped to swing), and a movement frame resets the client's
+        // remote-character action — i.e. it cancels the very attack animation this hold exists to
+        // protect. Standing still has nothing to say to the wire; the next real move after the swing
+        // broadcasts the position as usual.
+        if (!entry.inAir && !entry.climbing && !entry.swimming
+                && MovementClock.nowMs() < entry.attackActionUntilMs) {
+            BotPhysicsEngine.idleOnGround(entry, bot); // plant, keep the swing pose on the wire
+            // Beats the no-progress watchdog exactly like the stun and stop-reaction holds do: the
+            // bot is standing still BY DESIGN, so the 8s/2s/3s stall nets must not abandon its goal
+            // (the goal stays armed and simply resumes when the swing finishes).
+            entry.moveProgressAtMs = MovementClock.nowMs();
+            return;
+        }
+
         boolean active = ObserverTracker.isActiveMap(bot.getMapId());
 
         // LOD promotion (M2): the bot was moving analytically (coarse) and a player just arrived —

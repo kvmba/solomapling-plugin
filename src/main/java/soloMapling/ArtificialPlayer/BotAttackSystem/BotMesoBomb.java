@@ -293,7 +293,7 @@ public final class BotMesoBomb {
                 ChiefBandit.MESO_EXPLOSION, level, facingMask, (mobDamage.size() << 4) | maxLines,
                 mobDamage, BotAttackData.DEFAULT_ATTACK_SPEED,
                 BotAttackData.actionFor(ChiefBandit.MESO_EXPLOSION, null), 0), false);
-        GCMovement.markAlerted(bot);
+        GCMovement.markAttackAction(bot);
 
         int total = 0;
         boolean killed = false;

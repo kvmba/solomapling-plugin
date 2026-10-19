@@ -485,8 +485,9 @@ final class BotContactDamage {
     }
 
     // Cancel the current walk/nav action so a knockback recoil isn't immediately overridden.
+    // Deliberately does NOT touch attackActionUntilMs: the hit itself is what launches the recoil,
+    // and an airborne bot is exempt from the swing lock anyway (see GCMovementDriver.tick).
     private static void clearActionState(BotMovementState entry) {
-        entry.attackCooldownMs = 0;
         BotMovementManager.clearNavigationState(entry);
         entry.movementBroadcastValid = false;
     }
@@ -551,8 +552,9 @@ final class BotContactDamage {
                 && (monster.getStats() == null || !monster.getStats().isFriendly());
     }
 
-    // Package-visible so the attack layer can flag the pose after a swing (via GCMovement.markAlerted),
-    // not just mob-touch/fall damage. Absolute reset to now+5s; the reset task keeps the wire stance honest.
+    // Package-visible so the attack layer can flag the pose after a swing (via
+    // GCMovement.markAttackAction), not just mob-touch/fall damage. Absolute reset to now+5s; the
+    // reset task keeps the wire stance honest.
     static void markAlerted(BotMovementState entry) {
         entry.alertedUntilMs = MovementClock.nowMs() + ALERT_DURATION_MS;
         scheduleAlertReset(entry);

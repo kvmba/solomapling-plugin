@@ -139,7 +139,7 @@ public final class BotAttackEffects {
     private static boolean broadcastAndApply(Character bot, Packet packet,
                                              Map<Monster, List<Integer>> hits, int skillId, short hitDelay) {
         bot.getMap().broadcastMessage(bot, packet, /* repeatToSource */ false);
-        GCMovement.markAlerted(bot); // hold the 5s ALERT pose so the bot's own idle/move broadcasts don't cancel it
+        GCMovement.markAttackAction(bot); // ALERT pose + the 1s attack action lock (the body owns the swing)
         boolean anyKilled = false;
         for (Map.Entry<Monster, List<Integer>> hit : hits.entrySet()) {
             int total = 0;
@@ -196,6 +196,7 @@ public final class BotAttackEffects {
                 skill, skillLevel, facingMask,
                 /* numAttackedAndDamage */ (1 << 4) | 1,
                 targets, BotAttackData.DEFAULT_ATTACK_SPEED, bodyActionId, /* display */ 0), false);
+        GCMovement.markAttackAction(bot); // a real strike: the body is locked for the animation
         return applyDamageAndLoot(bot, mob, damage, (short) 0);
     }
 

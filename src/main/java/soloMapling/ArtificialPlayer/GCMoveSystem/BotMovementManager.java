@@ -188,7 +188,7 @@ class BotMovementManager {
 
     private static void clearTransientState(BotMovementState entry) {
         // GCMoveSystem: grindTarget / fidget are out of scope (pure movement) — dropped.
-        entry.attackCooldownMs = 0;
+        entry.attackActionUntilMs = 0L; // a teleport/warp ends any swing that owned the old body
         entry.graphWarmupFallback = false;
         entry.observedOwnerStepX = 0;
         entry.observedOwnerStepY = 0;
@@ -598,7 +598,7 @@ class BotMovementManager {
         // CUserLocal::IsAttacking is true. Mirror that here: during animation
         // lock the integrator still ticks (drag + gravity, collision) but no
         // intent is set, so the bot just floats in place.
-        if (entry.attackCooldownMs > 0) {
+        if (MovementClock.nowMs() < entry.attackActionUntilMs) {
             return;
         }
 

@@ -321,9 +321,9 @@ class CampStrategy implements GrindStrategy {
             state = State.FIGHT;
             return;
         }
-        // 行走途中的战斗节拍：上拍刚挥完手（attackWalkLock）→ 本拍原地站桩，下拍继续赶路；
+        // 行走途中的战斗节拍：上拍刚挥完手（攻击动作锁）→ 本拍原地站桩，下拍继续赶路；
         // 否则走向锚点平台上的活怪脚下（顺手清路的移动轨迹），平台没怪才走锚点本身。
-        if (b.midSwingPlant()) {
+        if (b.midSwingPlant(chr)) {
             return; // just swung mid-walk: hold the plant, resume next beat
         }
         Point gp = b.travelApproachPoint(chr, s);
@@ -644,7 +644,7 @@ class CampStrategy implements GrindStrategy {
         if (b.engage.skillMoveToward(chr, tx, ty)) {
             return; // mage blinked / hermit dashed toward the mob instead of walking
         }
-        if (now() < b.attackWalkLockUntil) {
+        if (b.midSwingPlant(chr)) {
             return; // just swung — a walking class can't move mid-attack; hold, then approach the next mob
         }
         if (Math.abs(tx - b.lastMoveTargetX) < GrindBrain.ROAM_RETARGET_EPS) {

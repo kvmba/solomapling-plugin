@@ -76,7 +76,6 @@ public final class GrindBrain {
     private int approachY = -1;
     MovementStyle style = MovementStyle.PLANTED;
     float fjCap = 1f;                        // level-tier flash-jump dash cap (FlashJumpTiers)
-    long attackWalkLockUntil = 0L;           // hold walking until this time after a swing (bypassed by blink/dash)
     long lastKillMs = 0L;
 
     // ── Travel-clear beat (途经清怪) ──
@@ -230,6 +229,9 @@ public final class GrindBrain {
         if (BotAttackDriver.nextAttackEpochMs(chr.getId()) > now()) {
             return null; // swing still cooling — walk on (the driver re-gates at swing time anyway)
         }
+        if (midSwingPlant(chr)) {
+            return null; // animation still playing — a second swing would cut it off (the driver re-gates too)
+        }
         int rid = chr.getMapId();
         if (rid == lastSwingMapId) {
             return null; // already stopped for a travel-clear on this map this episode — keep walking
@@ -271,14 +273,14 @@ public final class GrindBrain {
     }
 
     // Shared settle-and-swing tail for the travel-clear beat: plant, fire the AUTO swing, and
-    // bookkeep the beat (attack walk lock + progress heartbeats).
+    // bookkeep the beat (progress heartbeat). The walk hold that follows is the movement layer's
+    // attack action lock, armed by the broadcast itself - see GCMovement.markAttackAction.
     private void engageAndSwingShared(Character chr) {
         GCMovement.stop(chr);
         engaged = true;
         lastMoveTargetX = Integer.MIN_VALUE;
         lastSwingMapId = chr.getMapId();
         BotAttackDriver.botAttack(chr); // driver's own cooldown/debuff gates still apply
-        attackWalkLockUntil = now() + EngageBeat.ATTACK_WALK_LOCK_MS;
         markProgress(); // the en-route clear is productive, not a wedge
     }
 
@@ -328,12 +330,15 @@ public final class GrindBrain {
             return false;
         }
         if (inAttackRange(chr, m)) {
+            if (midSwingPlant(chr)) {
+                return true; // last swing is still playing: hold the vendetta, swing next beat
+            }
             retaliateSwing(chr, m);
         } else {
             if (engage.skillMoveToward(chr, mp.x, mp.y)) {
                 return true; // mage blinked / hermit dashed at the attacker this beat
             }
-            if (now() < attackWalkLockUntil) {
+            if (midSwingPlant(chr)) {
                 return true; // mid-swing beat: hold the plant, keep the vendetta
             }
             if (Math.abs(mp.x - lastMoveTargetX) >= ROAM_RETARGET_EPS) {
@@ -480,10 +485,11 @@ public final class GrindBrain {
     }
 
     // True while a just-fired swing (the shared travel-clear beat, or the walk-out swing FIGHT
-    // leaves behind) holds the bot planted: an attack animation cannot walk mid-swing. The beat is
-    // spent standing; the walk resumes next tick and the claim keeps its regular re-acquire flow.
-    boolean midSwingPlant() {
-        return now() < attackWalkLockUntil;
+    // leaves behind) holds the bot planted: an attack animation cannot walk mid-swing. The rule and
+    // its duration live in the movement layer (GCMovement.ATTACK_ACTION_LOCK_MS), so every movement
+    // path - not just this class's approach helpers - obeys the same window.
+    boolean midSwingPlant(Character chr) {
+        return GCMovement.isAttackActionLocked(chr);
     }
 
     void markProgress() {

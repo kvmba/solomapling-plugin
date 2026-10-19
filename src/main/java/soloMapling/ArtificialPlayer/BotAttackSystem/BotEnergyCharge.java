@@ -10,6 +10,7 @@ import org.gms.server.maps.MapleMap;
 import org.gms.util.PacketCreator;
 import org.gms.util.Pair;
 import soloMapling.ArtificialPlayer.BotStatusSystem.BotDebuffState;
+import soloMapling.ArtificialPlayer.GCMoveSystem.GCMovement;
 import soloMapling.server.MethodScheduler;
 
 import java.util.Collections;
@@ -152,6 +153,11 @@ public final class BotEnergyCharge {
         // only place that keeps a stunned brawler from retaliating.
         BotDebuffState status = BotDebuffState.of(bot);
         if (status != null && status.blocksAttack()) {
+            return false;
+        }
+        // A charged brawler cannot swing mid-animation either (the touch strike plays the same body
+        // pose). Without this the retaliation would cut the tail off the bot's own last swing.
+        if (GCMovement.isAttackActionLocked(bot)) {
             return false;
         }
         nextRetaliationByBot.put(bot.getId(), now + RETALIATION_COOLDOWN_MS);

@@ -1,24 +1,26 @@
 package soloMapling.ArtificialPlayer.BotGrindSystem;
 
 import org.junit.jupiter.api.Test;
-import soloMapling.ArtificialPlayer.BotAttackSystem.BotAttackDriver;
+import soloMapling.ArtificialPlayer.GCMoveSystem.GCMovement;
 
 import java.lang.reflect.Field;
-import java.lang.reflect.Method;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /*
- * Guards the swing-first engage ordering that fixes the "bot keeps adjusting, never attacks" report.
+ * Guards the engage beat's ordering against the two reports it exists to prevent:
  *
- * preSwingAdjust runs every in-range beat before engageAndSwing. Its adjusts (turn / kite / AoE
- * re-center) each fire on trigger conditions a moving mob satisfies repeatedly, so without the
- * swing-ready gate in front of the block they outrank the attack itself: the driver's per-swing
- * cooldown is the same order of magnitude as the adjust throttles, and a chasing mob keeps every
- * trigger hot. The fix: when the attack would land, swing this beat; adjusts happen in the
- * cooldown gap. The kite loop additionally gained hysteresis (a retreat must be re-earned by the
- * mob re-entering the comfort band) and fires the swing mid-retreat (shoot-on-move).
+ *  1. "keeps adjusting, never attacks" - adjusts (turn / kite / AoE re-centre) must never outrank the
+ *     swing indefinitely. Each adjust either changes the condition that triggered it or refuses to
+ *     act, and the settle window is bounded, so the swing always comes back.
+ *  2. "attacks, then instantly walks/jumps" - the beat must never start a second swing (or a
+ *     reposition) on top of a live attack animation. The window and its enforcement live in the
+ *     movement layer; the beat only has to consult it.
+ *
+ * The old version of this test pinned a 500ms self-owned walk lock and asserted the adjusts fired
+ * their own swing ("shoot-on-move"). Both are gone: 500ms is shorter than the WZ swing itself, and a
+ * swing fired on an adjust beat arms the animation lock over the step it just issued.
  */
 class EngageBeatSwingPriorityTest {
 
@@ -26,6 +28,12 @@ class EngageBeatSwingPriorityTest {
         Field f = EngageBeat.class.getDeclaredField(name);
         f.setAccessible(true);
         return f.getInt(null);
+    }
+
+    private static long longConstant(String name) throws Exception {
+        Field f = EngageBeat.class.getDeclaredField(name);
+        f.setAccessible(true);
+        return f.getLong(null);
     }
 
     /** The class-file constant pool, a proxy for "this method reference exists in the bytecode". */
@@ -37,14 +45,23 @@ class EngageBeatSwingPriorityTest {
     }
 
     @Test
-    void swingGateConsultsTheDriverCooldownSeam() throws Exception {
-        // The gate must read the attack driver's own cooldown, not a parallel guess.
-        Method seam = BotAttackDriver.class.getDeclaredMethod("nextAttackEpochMs", int.class);
-        seam.setAccessible(true);
-        assertEquals(0L, seam.invoke(null, 999_999_999),
-                "an unknown bot must read as swing-ready (cooldown epoch 0)");
-        assertTrue(constantPool().contains("nextAttackEpochMs"),
-                "preSwingAdjust must consult the driver's cooldown seam for its swing-first gate");
+    void swingGateConsultsTheMovementLayerAttackLock() throws Exception {
+        assertTrue(constantPool().contains("isAttackActionLocked"),
+                "preSwingAdjust must consult the movement layer's attack action lock, not keep a "
+                        + "second, shorter copy of the window");
+        assertEquals(false, GCMovement.isAttackActionLocked(null),
+                "an unknown/uncontrolled bot must never read as mid-swing");
+    }
+
+    @Test
+    void attackActionLockOutlastsEveryBasicSwingTheBotsPlay() {
+        // The longest basic body pose the bot profiles use is shoot2 (820ms); swingO/T/P and stabO
+        // are 800ms, the finisher forms 700ms (wz/Character.wz/00002000.img.xml). The lock must cover
+        // the whole animation or the next walk packet truncates its last frames.
+        assertTrue(GCMovement.ATTACK_ACTION_LOCK_MS >= 820L,
+                "the attack action lock must cover the longest basic swing (820ms)");
+        assertTrue(GCMovement.ATTACK_ACTION_LOCK_MS >= 1_000L,
+                "the reported bot-perception floor is a full second between a swing and its next move");
     }
 
     @Test
@@ -57,12 +74,11 @@ class EngageBeatSwingPriorityTest {
     }
 
     @Test
-    void adjustsFireTheAttackOnTheirOwnBeat() throws Exception {
-        // kiteIfTooClose / doTurnBeat / aoeRepositionIfWorthwhile all swing on the adjust beat
-        // (shoot-on-move) instead of spending a beat and deferring the swing to the next one.
-        assertTrue(constantPool().contains("botAttack"),
-                "the engage adjusts must fire the in-reach swing on their own beat - a move-only beat "
-                        + "is the 'steps around without attacking' behavior under fix");
+    void aRepositionStepCannotHoldTheSwingForever() throws Exception {
+        long cap = longConstant("ADJUST_SETTLE_MAX_MS");
+        assertTrue(cap > 0 && cap <= 3_000L,
+                "a reposition whose move never lands must stop holding the swing back within a few "
+                        + "beats, else the bot returns to 'keeps repositioning, never fires'");
     }
 
     @Test

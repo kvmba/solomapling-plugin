@@ -142,7 +142,7 @@ public final class BotShadowMeso {
                 Hermit.SHADOW_MESO, level, facingMask, (mobDamage.size() << 4) | 1,
                 0, mobDamage, BotAttackData.DEFAULT_ATTACK_SPEED,
                 BotAttackData.actionFor(Hermit.SHADOW_MESO, weapon), 0), false);
-        GCMovement.markAlerted(bot);
+        GCMovement.markAttackAction(bot);
 
         boolean killed = false;
         for (Monster mob : targets) {
