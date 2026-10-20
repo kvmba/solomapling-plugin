@@ -133,6 +133,11 @@ public final class PqBotSpawner {
             case "BossRushPQ" -> BotTypeManager.BotType.BOSS_RUSH_PQ_BOT;
             case "Pyramid" -> BotTypeManager.BotType.PYRAMID_PQ_BOT;
             case "Dojo" -> BotTypeManager.BotType.DOJO_PQ_BOT;
+            // AmoriaPQ deliberately has NO row: the quest's own getEligibleParty requires every
+            // member to be married (AmoriaPQ.js onlyMarriedPlayers + isMarried), and no marriage
+            // system exists for a bot - so a lobby crowd of APQ bots could never start a run and
+            // would only advertise a party the quest refuses. The bot type itself stays (usable
+            // by hand on a married party), it is just not placed to be recruited.
             default -> null;
         };
     }

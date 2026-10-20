@@ -1,6 +1,7 @@
 package soloMapling.ArtificialPlayer.BotTypes.Magatia;
 
 import org.gms.client.Character;
+import org.gms.server.maps.Portal;
 import soloMapling.ArtificialPlayer.BotGeneration;
 import soloMapling.ArtificialPlayer.PartyQuest.PartyQuestBot;
 import soloMapling.ArtificialPlayer.PartyQuest.PqActions;
@@ -61,6 +62,27 @@ public class MagatiaPQBot extends PartyQuestBot {
     @Override
     protected int lobbyMapId() {
         return lobbyMap;
+    }
+
+    /**
+     * The chain door the quest advances by: the stage rooms' turn-in portals ({@code pt00},
+     * {@code out00}, {@code jnr6_out}'s {@code out00}) are script gates ({@code jnrN_*}, target
+     * 999999999) whose scripts warp into the next room once the room's stage flag is set. The
+     * scripts re-check their own gate, so a bot arriving early is refused and retries. The
+     * {@code in00/in01} sub-room doors are deliberately NOT declared: those are the maze the
+     * party splits through, not the chain.
+     */
+    @Override
+    protected Portal scriptedForwardPortal() {
+        var map = getChr().getMap();
+        if (map == null) {
+            return null;
+        }
+        // The stage-room exit is named pt00 in the puzzle rooms (jnr4_rN, jnr12_in) and out00 in
+        // the fight rooms (jnr1_out, jnr2_out, jnr3_out); both families are the chain.
+        Portal door = PartyQuestBot.scriptedPortalOf(map.getPortals(), "pt00", null);
+        return door != null ? door
+                : PartyQuestBot.scriptedPortalOf(map.getPortals(), "out00", null);
     }
 
     @Override

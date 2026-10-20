@@ -33,14 +33,21 @@ public final class KerningStages {
     // =========================================================================
 
     /**
-     * Gather coupons and answer Cloto if the bot is one of the question-holders.
+     * Gather the exact coupon count this bot's question asks for, then answer Cloto.
      *
      * <p>Stage 1 is the ladder every later stage stands on, and only the members can climb
-     * it: Cloto hands a question to each member who talks to her and gives a pass only to
-     * the member whose coupon count matches it - the leader gets told "tell your party
-     * members to solve the questions", and the leader's own talk can only hand in the
-     * passes. So the bot asks for a question, counts its coupons against the table, and,
-     * on the pass, drops it at the leader's feet - he is the one Cloto counts them for.
+     * it: Cloto hands a question to each member who talks to her (kept in the instance's grid
+     * so it does not change on a re-visit) and gives a pass only to the member whose coupon
+     * count matches it - the leader gets told "tell your party members to solve the questions",
+     * and the leader's own talk can only hand in the passes.
+     *
+     * <p>The count must be EXACT at the moment of the answer, which is why the question is
+     * read from the grid (the same slot Cloto grades against) rather than guessed: a bot that
+     * clicked her while holding one coupon got a question, stopped hunting, and every later
+     * click re-graded that same short count - the stage never cleared. The order below is
+     * therefore: take the question first (one talk with no coupons), hunt to precisely the
+     * asked count, drop the surplus, only then take the grading talk. A surplus pile dropped
+     * on the floor is re-lootable by the party, so over-hunting wastes nothing.
      *
      * @return true when the leader has the passes he needs, which is the stage's real bar
      */
@@ -57,15 +64,46 @@ public final class KerningStages {
             PqActions.say(bot, BotMessages.get("pq.kerning.pass_dropped"));
             return false;
         }
-        int coupons = PqActions.countItem(bot, KerningPqData.COUPON);
-        if (coupons > 0) {
-            // Holding a question means spending coupons on the answer; holding none means
-            // the bot is either unanswered or already passed - the conversation tells which.
+        int asked = askedCoupons(bot);
+        int held = PqActions.countItem(bot, KerningPqData.COUPON);
+        if (asked > 0 && held > asked) {
+            // Over the answer: the surplus would fail the grade. Drop it before the talk -
+            // unaddressed so any party member can re-loot it.
+            PqActions.dropSurplus(bot, KerningPqData.COUPON, held - asked);
+            held = asked;
+        }
+        if (asked > 0 && held == asked) {
+            // The exact count the question wants: take the grading talk.
+            answerCloto(bot);
+            return false;
+        }
+        if (asked == 0 && held > 0) {
+            // Holding coupons but no question yet - take the question talk first (Cloto reads
+            // the count only from the second status onward; carrying nothing keeps the grade
+            // from firing short).
             answerCloto(bot);
             return false;
         }
         huntCoupons(bot);
         return false;
+    }
+
+    /**
+     * How many coupons this bot's assigned question asks for, or 0 when Cloto has not yet given
+     * the bot a question (grid slot -1).
+     *
+     * <p>The slot is the instance grid's own - the same map Cloto inserts on the first visit and
+     * re-grades on every later one - so the count derived from it is the count she wants, not a
+     * guess. A slot out of the question table's range (a script change) reads as unanswered
+     * rather than inventing a count.
+     */
+    static int askedCoupons(Character bot) {
+        int slot = PqActions.readEimGrid(bot);
+        int[] answers = KerningPqData.QUESTION_ANSWERS;
+        if (slot < 1 || slot > answers.length) {
+            return 0;
+        }
+        return answers[slot - 1];
     }
 
     /**
@@ -75,9 +113,9 @@ public final class KerningStages {
      * own {@code start()}, which itself calls {@code action(1,0,0)} - so the first talk only
      * reaches status 0, and the question/answer exchange needs one more.
      *
-     * <p>Only done while the bot actually carries coupons, so an unanswered bot keeps hunting
-     * first - and never once it holds a pass, because every further click is graded against the
-     * coupon count again and would spend the coupons the answer needs.
+     * <p>The caller owns the count discipline: this is called either with no coupons (to take a
+     * question) or with exactly the asked count (to be graded). Clicking with any other count
+     * re-grades that count and short-changes the stage - the bug this conversation path replaced.
      */
     private static void answerCloto(Character bot) {
         if (PqActions.talkingTo(bot, KerningPqData.NPC_CLOTO)) {

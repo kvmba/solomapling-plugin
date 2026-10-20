@@ -1,6 +1,7 @@
 package soloMapling.ArtificialPlayer.BotTypes.Ellin;
 
 import org.gms.client.Character;
+import org.gms.server.maps.Portal;
 import soloMapling.ArtificialPlayer.BotGeneration;
 import soloMapling.ArtificialPlayer.PartyQuest.PartyQuestBot;
 import soloMapling.ArtificialPlayer.PartyQuest.PqActions;
@@ -52,6 +53,19 @@ public class EllinPQBot extends PartyQuestBot {
     @Override
     protected int lobbyMapId() {
         return EllinPqData.RECRUIT_MAP;
+    }
+
+    /**
+     * The chain door the quest advances by: every room's {@code east00} is the script gate
+     * {@code party6_stage} (target 999999999), whose script warps into the next room once the
+     * room's own condition holds (clear mobs, the broken spine). The script re-checks that
+     * condition itself, so a bot arriving early is refused and retries.
+     */
+    @Override
+    protected Portal scriptedForwardPortal() {
+        var map = getChr().getMap();
+        return map == null ? null
+                : PartyQuestBot.scriptedPortalOf(map.getPortals(), "east00", "party6_stage");
     }
 
     @Override
