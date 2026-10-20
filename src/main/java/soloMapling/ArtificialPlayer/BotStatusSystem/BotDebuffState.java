@@ -239,7 +239,7 @@ public final class BotDebuffState {
     // ── Internals ──────────────────────────────────────────────────────────────
 
     private void applyPoison(double maxHpFraction) {
-        if (chr == null || maxHpFraction <= 0) {
+        if (chr == null) {
             return;
         }
         int damage = (int) Math.round(chr.getCurrentMaxHp() * maxHpFraction);
