@@ -39,6 +39,10 @@ public final class BotDebuffState {
 
     private final Character chr;
     private final Map<Disease, Entry> active = new ConcurrentHashMap<>();
+    // Post-expiry immunity window per disease (the engine's Character.debuffImmuneUntil): epoch ms
+    // until which the same disease cannot land again. Stamped only when an entry naturally expires in
+    // tick(), never by clearAll - the engine's cancelAllDebuffs (map change / death) arms no window.
+    private final Map<Disease, Long> immuneUntil = new ConcurrentHashMap<>();
 
     public BotDebuffState(Character chr) {
         this.chr = chr;
@@ -129,6 +133,23 @@ public final class BotDebuffState {
 
     // ── Mutation ──────────────────────────────────────────────────────────────
 
+    /**
+     * True while this disease is inside its post-expiry immunity window ({@code now} is already in
+     * hand from the caller). Lazily drops the stale window, exactly as the engine's
+     * {@code Character.isDebuffImmune} does. Package-visible: used by tests to pin the window.
+     */
+    boolean isImmune(Disease disease, long now) {
+        Long until = immuneUntil.get(disease);
+        if (until == null) {
+            return false;
+        }
+        if (until <= now) {
+            immuneUntil.remove(disease, until);
+            return false;
+        }
+        return true;
+    }
+
     /** Entry point from the applier: applies a disease using the WZ skill's own duration/x value. */
     public boolean apply(Disease disease, MobSkill skill) {
         if (skill == null) {
@@ -155,6 +176,9 @@ public final class BotDebuffState {
             return false; // matches Character.giveDebuff's cap
         }
         long now = System.currentTimeMillis();
+        if (isImmune(disease, now)) {
+            return false; // matches Character.giveDebuff's isDebuffImmune gate
+        }
         long duration = durationMs > 0 ? durationMs : BotDebuffTable.DEFAULT_DURATION_MS;
         long poisonFirstAt = BotDebuffTable.poisons(disease) ? now + BotDebuffTable.POISON_TICK_MS : 0L;
         Entry prior = active.putIfAbsent(disease, new Entry(now + duration, skill, poisonFirstAt));
@@ -172,10 +196,10 @@ public final class BotDebuffState {
      * tick when its period elapses. Called once per bot tick.
      */
     public void tick() {
-        if (active.isEmpty() || chr == null) {
+        if (active.isEmpty()) {
             return;
         }
-        if (chr.getMap() == null || chr.getHp() <= 0) {
+        if (chr != null && (chr.getMap() == null || chr.getHp() <= 0)) {
             clearAll(); // leaving the world / already a corpse: the packets no longer matter
             return;
         }
@@ -185,6 +209,7 @@ public final class BotDebuffState {
             Entry entry = e.getValue();
             if (now >= entry.expiresAtMs) {
                 if (active.remove(disease, entry)) {
+                    immuneUntil.put(disease, now + BotDebuffTable.EXPIRY_IMMUNE_MS);
                     broadcastCancel(disease);
                 }
                 continue;

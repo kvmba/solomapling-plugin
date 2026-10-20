@@ -133,4 +133,39 @@ class BotDebuffStateTest {
         assertFalse(s.isFrozen());
         assertEquals(1.0, s.moveFactor());
     }
+
+    @Test
+    void sameDiseaseIsRefusedDuringItsPostExpiryImmunity() throws Exception {
+        BotDebuffState s = new BotDebuffState(null);
+        assertTrue(s.apply(Disease.STUN, 1, 1, null)); // 1 ms disease so the next tick lapses it
+        Thread.sleep(5);
+        s.tick(); // natural expiry stamps the 5 s window
+
+        assertFalse(s.has(Disease.STUN));
+        assertFalse(s.apply(Disease.STUN, LONG, 1, null)); // immune - the re-application is refused
+        assertTrue(s.isImmune(Disease.STUN, System.currentTimeMillis()));
+    }
+
+    @Test
+    void postExpiryImmunityIsPerDiseaseAndLapses() throws Exception {
+        BotDebuffState s = new BotDebuffState(null);
+        assertTrue(s.apply(Disease.STUN, 1, 1, null));
+        Thread.sleep(5);
+        s.tick();
+        long now = System.currentTimeMillis();
+
+        assertFalse(s.isImmune(Disease.SLOW, now)); // another disease is unaffected
+        assertFalse(s.isImmune(Disease.STUN, now + BotDebuffTable.EXPIRY_IMMUNE_MS + 1)); // window lapses
+        assertTrue(s.apply(Disease.STUN, LONG, 1, null)); // ...and the disease can land again
+    }
+
+    @Test
+    void clearAllArmsNoImmunity() {
+        // Engine semantics: cancelAllDebuffs (map change / death) never arms the window.
+        BotDebuffState s = new BotDebuffState(null);
+        s.apply(Disease.STUN, LONG, 1, null);
+
+        s.clearAll();
+        assertTrue(s.apply(Disease.STUN, LONG, 1, null));
+    }
 }

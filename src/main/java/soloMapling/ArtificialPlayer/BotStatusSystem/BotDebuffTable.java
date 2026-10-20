@@ -38,6 +38,12 @@ public final class BotDebuffTable {
     // How long a bot-side disease lasts when the engine skill has no resolvable duration.
     public static final long DEFAULT_DURATION_MS = 5_000L;
 
+    // Post-expiry immunity: for this long after a disease has ended the bot cannot catch the same
+    // disease again. Mirrors the engine's Character.debuffImmuneUntil / DEBUFF_IMMUNE_DURATION - the
+    // window the engine stamps in dispelDebuff, which its natural-expiry diseaseExpireTask also
+    // passes through.
+    public static final long EXPIRY_IMMUNE_MS = 5_000L;
+
     // Mirrors Character.giveDebuff's cap: a bot carries at most this many diseases at once.
     public static final int MAX_ACTIVE = 2;
 
