@@ -186,9 +186,11 @@ public class LudiPQBot extends PartyQuestBot {
         switch (stage) {
             case 1 -> workEntryRoom();
             case 2 -> {
-                // The trap box warps the whole party into 922010201 - its four boxes carry
-                // four of the stage's fifteen passes, so a bot trapped there works that room
-                // (break, loot, exit back) instead of standing in it.
+                // The trap box (2200002) is popped by breakTowerBoxes once the tower's eleven
+                // pass boxes are spent - its script warps the whole party into 922010201,
+                // whose four boxes carry the stage from 11 passes to the 15 the turn-in wants.
+                // A bot that lands there works that room (break, loot, exit back) instead of
+                // standing in it.
                 if (getChr().getMapId() == LudiPqData.TRAP_ROOM) {
                     LudiStages.workTrapRoom(getChr());
                 } else {

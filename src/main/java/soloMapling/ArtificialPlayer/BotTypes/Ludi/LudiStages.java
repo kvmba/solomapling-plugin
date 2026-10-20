@@ -149,14 +149,17 @@ public final class LudiStages {
     // Stage 2 - the box tower
 
     /**
-     * Break every pass box on the stage-2 tower. The room's eleven boxes (2202003) are the
-     * party's only pass source in this room - there are no mobs to hunt here - so the stage
-     * is a climb past each box, breaking it on the way.
+     * Break every pass box on the stage-2 tower, then pop the trap box. The room's eleven
+     * boxes (2202003) are the party's main pass source in this room - there are no mobs to
+     * hunt here - so the stage is a climb past each box, breaking it on the way.
      *
-     * <p>The room's twelfth box, the trap (2200002), is left strictly alone: its script
-     * warps the whole party into the trap room (922010201), where four more of the fifteen
-     * passes wait behind {@link #workTrapRoom}. A bot that pops it "for free mesos" drags
-     * the run sideways instead.
+     * <p>The room's twelfth box, the trap (2200002), is popped LAST, and it must be popped:
+     * its script warps the whole party into the trap room (922010201), whose four boxes hold
+     * the passes that carry the stage from 11 to the 15 the turn-in wants - with only the
+     * tower's eleven the stage can never be turned in. Strictly after the last tower box:
+     * the warp yanks every party member at once, and a box still standing would mean a bot
+     * warped away from its own climb (the trap room's work re-homes the party anyway, so
+     * once the tower is spent nothing is left behind).
      *
      * <p>The tower is one vertical room: its boxes hang on floors between the spawn at the
      * top (y -2521) and the ground floor at the bottom (y +129), and the floors between them
@@ -174,6 +177,20 @@ public final class LudiStages {
         if (box >= 0 && hitReactorDescendRotate(bot, box, LudiPqData.BOX_STAGE2)) {
             PqActions.loot(bot, bot.getPosition(), LOOT_RADIUS_PX, new int[]{LudiPqData.PASS});
             return;
+        }
+        // Tower boxes all GONE (the isEmpty gate, not box < 0: a standing box merely claimed
+        // by a teammate must not spring the warp on the workers). The trap box warps the whole
+        // party into the trap room, whose four boxes carry the stage from 11 passes to the 15
+        // the turn-in wants - so whoever's bot finds the tower spent pops it. Worked with the
+        // same claim/approach/beat machinery as the pass boxes; the claim keeps two bots from
+        // racing it (the loser's swings are voided by the warp anyway), and the room change
+        // re-homes every bot into workTrapRoom on the next beat.
+        if (PqActions.findAllReactorOids(bot, LudiPqData.BOX_STAGE2).isEmpty()) {
+            int trap = nearestOwnedBoxOid(bot, LudiPqData.BOX_STAGE2_TRAP);
+            if (trap >= 0 && hitReactorDescendRotate(bot, trap, LudiPqData.BOX_STAGE2_TRAP)) {
+                PqActions.loot(bot, bot.getPosition(), LOOT_RADIUS_PX, new int[]{LudiPqData.PASS});
+                return;
+            }
         }
         // Boxes all gone: the stage's work is done and the leader still has to turn the
         // passes in. Hold the stage-NPC post and deliver only when HE comes into range

@@ -72,6 +72,14 @@ public final class LudiPqData {
 
     /** The pass boxes: stage 2's tower, stage 3's mob crates, stage 5's guarded rooms. */
     public static final int BOX_STAGE2 = 2202003;
+    /**
+     * Stage 2's twelfth tower box, the trap: its script ({@code reactor/2200002.js}) runs
+     * {@code rm.warpMap(922010201)}, carrying the whole party into {@link #TRAP_ROOM}. The
+     * stage's turn-in wants 15 passes and the server drop table gives exactly one per box
+     * (reactordrops: 2202003 → 4001022, chance 1) - eleven tower boxes + four trap-room
+     * boxes - so this box MUST be popped or the turn-in can never be met.
+     */
+    public static final int BOX_STAGE2_TRAP = 2200002;
     public static final int BOX_STAGE3 = 2201001;
     public static final int BOX_STAGE5 = 2202003;
     /**
