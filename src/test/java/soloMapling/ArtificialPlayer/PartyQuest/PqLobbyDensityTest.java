@@ -49,5 +49,6 @@ class PqLobbyDensityTest {
         assertEquals(15, PqRecruitPoints.byName("LudiPQ").botsToOffer(1) * EXPECTED_MULTIPLE);
         assertEquals(15, PqRecruitPoints.byName("HorntailPQ").botsToOffer(1) * EXPECTED_MULTIPLE);
         assertEquals(9, PqRecruitPoints.byName("MagatiaPQ").botsToOffer(1) * EXPECTED_MULTIPLE);
+        assertEquals(15, PqRecruitPoints.byName("PapulatusBattle").botsToOffer(1) * EXPECTED_MULTIPLE);
     }
 }

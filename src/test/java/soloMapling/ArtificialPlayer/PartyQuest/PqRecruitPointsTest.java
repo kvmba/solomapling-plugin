@@ -28,7 +28,7 @@ class PqRecruitPointsTest {
         for (String name : new String[]{
                 "HenesysPQ", "KerningPQ", "LudiPQ", "PiratePQ", "AmoriaPQ",
                 "EllinPQ", "MagatiaPQ", "MagatiaPQ_Z", "ZakumPQ", "HorntailPQ",
-                "BossRushPQ", "OrbisPQ", "Pyramid", "Dojo"}) {
+                "BossRushPQ", "PapulatusBattle", "OrbisPQ", "Pyramid", "Dojo"}) {
             assertNotNull(PqRecruitPoints.byName(name), name + " has no recruit point");
         }
     }
@@ -78,6 +78,7 @@ class PqRecruitPointsTest {
         assertEquals(211042300, PqRecruitPoints.byName("ZakumPQ").recruitMap());
         assertEquals(240050000, PqRecruitPoints.byName("HorntailPQ").recruitMap());
         assertEquals(970030000, PqRecruitPoints.byName("BossRushPQ").recruitMap());
+        assertEquals(220080000, PqRecruitPoints.byName("PapulatusBattle").recruitMap());
         assertEquals(200080101, PqRecruitPoints.byName("OrbisPQ").recruitMap());
     }
 
@@ -91,6 +92,8 @@ class PqRecruitPointsTest {
         assertEquals(71, PqRecruitPoints.byName("MagatiaPQ").minLevel());
         assertEquals(85, PqRecruitPoints.byName("MagatiaPQ").maxLevel());
         assertEquals(120, PqRecruitPoints.byName("HorntailPQ").minLevel());
+        assertEquals(80, PqRecruitPoints.byName("PapulatusBattle").minLevel());
+        assertEquals(160, PqRecruitPoints.byName("PapulatusBattle").maxLevel());
         assertEquals(51, PqRecruitPoints.byName("OrbisPQ").minLevel());
         assertEquals(70, PqRecruitPoints.byName("OrbisPQ").maxLevel());
     }

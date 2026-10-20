@@ -77,6 +77,13 @@ public final class PqRecruitPoints {
             new Point("ZakumPQ",      211042300,  50, 255, 1, 6),
             new Point("HorntailPQ",   240050000, 120, 255, 6, 6),
             new Point("BossRushPQ",   970030000,   1, 255, 1, 6),
+            // Papulatus's lobby (the clocktower's hidden hall). The event script itself allows
+            // levels 1-255, but a floor of 1 would spawn sub-10 bots the party system refuses to
+            // arm invites for, so the band is drawn from the piece quest's own gate (7103,
+            // lvmin 80) - the level a player must be to make the summon possible at all. The
+            // eligibility check has NO member-to-member level test (unlike the Dojo's spread),
+            // so a player of any level can carry these bots in. See PAPULATUS_LOBBY_BOT_PLAN.md.
+            new Point("PapulatusBattle", 220080000, 80, 160, 1, 6),
             // Duarte's menu map (the Pyramid Dunes), where Nett's Pyramid is applied for. The
             // party version needs two members standing here, so a bot has to be one of them.
             // Level band 40-60 is Duarte's own; the spawn's low-third draw leaves bots 40-49.

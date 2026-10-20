@@ -131,6 +131,7 @@ public final class PqBotSpawner {
             case "ZakumPQ" -> BotTypeManager.BotType.ZAKUM_PQ_BOT;
             case "HorntailPQ" -> BotTypeManager.BotType.HORNTAIL_PQ_BOT;
             case "BossRushPQ" -> BotTypeManager.BotType.BOSS_RUSH_PQ_BOT;
+            case "PapulatusBattle" -> BotTypeManager.BotType.PAPULATUS_PQ_BOT;
             case "Pyramid" -> BotTypeManager.BotType.PYRAMID_PQ_BOT;
             case "Dojo" -> BotTypeManager.BotType.DOJO_PQ_BOT;
             default -> null;
