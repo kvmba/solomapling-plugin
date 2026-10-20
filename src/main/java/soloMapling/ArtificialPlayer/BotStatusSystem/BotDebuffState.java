@@ -216,7 +216,7 @@ public final class BotDebuffState {
             }
             if (BotDebuffTable.poisons(disease) && now >= entry.nextPoisonAtMs) {
                 entry.nextPoisonAtMs = now + BotDebuffTable.POISON_TICK_MS;
-                applyPoison((int) Math.round(chr.getCurrentMaxHp() * BotDebuffTable.POISON_MAX_HP_FRACTION));
+                applyPoison(BotDebuffTable.POISON_MAX_HP_FRACTION);
             }
         }
     }
@@ -238,10 +238,11 @@ public final class BotDebuffState {
 
     // ── Internals ──────────────────────────────────────────────────────────────
 
-    private void applyPoison(int damage) {
-        if (chr == null || damage <= 0) {
+    private void applyPoison(double maxHpFraction) {
+        if (chr == null || maxHpFraction <= 0) {
             return;
         }
+        int damage = (int) Math.round(chr.getCurrentMaxHp() * maxHpFraction);
         // Same floor semantics as contact damage: poison never kills - it pins the bot at the health
         // floor. Actual death stays the damage layer's / BotDeath's job, so a bot cannot die to a
         // side-effect with nobody standing it back up.

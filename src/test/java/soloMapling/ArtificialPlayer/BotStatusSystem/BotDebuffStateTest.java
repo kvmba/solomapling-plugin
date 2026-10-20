@@ -168,4 +168,15 @@ class BotDebuffStateTest {
         s.clearAll();
         assertTrue(s.apply(Disease.STUN, LONG, 1, null));
     }
+
+    @Test
+    void poisonTickWithoutACharacterDoesNotThrow() throws Exception {
+        BotDebuffState s = new BotDebuffState(null);
+        assertTrue(s.apply(Disease.POISON, LONG, 1, null));
+        Thread.sleep(BotDebuffTable.POISON_TICK_MS + 100); // past the first poison tick
+
+        s.tick(); // the poison branch used to NPE on the absent chr at the call site
+
+        assertTrue(s.has(Disease.POISON)); // still live - only the damage side-effect is chr-bound
+    }
 }
