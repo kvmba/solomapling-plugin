@@ -568,6 +568,8 @@ public class BotGeneration {
         // registry (holding its last player Character references) for the life of the process.
         soloMapling.ArtificialPlayer.BotMessagingSystem.MessageQueue.getInstance()
                 .forgetBot(fakechar.getId());
+        soloMapling.ArtificialPlayer.BotPartySystem.BotPartyQueue.getInstance().removePartyInvite(fakechar);
+        soloMapling.ArtificialPlayer.BotFlavorSystem.BotFlavor.forget(fakechar);
         // A removed bot never converts back out, so its recruit handoffs would linger in the
         // static maps forever (and a reused character id could inherit them).
         BotRecruitManager.clearHandoffs(fakechar.getId());

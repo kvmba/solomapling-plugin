@@ -4,6 +4,7 @@ import org.gms.client.Character;
 import org.gms.extension.api.HostRuntime;
 import org.gms.extension.event.PartyInviteEvent;
 import soloMapling.ArtificialPlayer.BotMessagingSystem.CharacterStorage;
+import soloMapling.ArtificialPlayer.BotSM;
 import soloMapling.ArtificialPlayer.BotTypes.CompanionBot;
 
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -34,14 +35,18 @@ public final class BotPartyInviteBridge {
         if (invited == null || inviter == null) {
             return;
         }
-        // Invites to real players keep going through their client; only plugin-owned bots need this.
-        if (CharacterStorage.getBotById(invited.getId()) == null) {
-            return;
+        // Serialize admission with removal's queue cleanup, so a late host event cannot reinsert
+        // a removed character after its final drain. Retyping keeps the same Character eligible.
+        BotPartyQueue queue = BotPartyQueue.getInstance();
+        BotSM bot;
+        synchronized (queue) {
+            bot = CharacterStorage.getBotById(invited.getId());
+            if (bot == null || bot.getChr() != invited) return;
+            queue.addPartyInvite(invited, inviter, event.partyId());
         }
         debugprint("BotPartyInviteBridge: " + inviter.getName() + " invited bot " + invited.getName()
                 + " to partyId=" + event.partyId());
-        BotPartyQueue.getInstance().addPartyInvite(invited, inviter, event.partyId());
-        if (CharacterStorage.getBotById(invited.getId()) instanceof CompanionBot companion) {
+        if (bot instanceof CompanionBot companion) {
             companion.onPartyInvite(inviter, event.partyId());
         }
     }

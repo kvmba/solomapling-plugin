@@ -99,7 +99,7 @@ public class BotPartyQueue {
     }
 
     public synchronized boolean hasPendingInvite(Character fakechar) {
-        return queues.containsKey(fakechar);
+        return getPartyInvite(fakechar) != null;
     }
 
     public synchronized void removePartyInvite(Character fakechar) {

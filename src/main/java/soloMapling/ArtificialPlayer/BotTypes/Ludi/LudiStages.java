@@ -919,14 +919,19 @@ public final class LudiStages {
      * the movement layer holds for at least one second.
      */
     private static void breakBoxInPlace(Character bot, int oid) {
+        var map = bot.getMap();
+        var owner = CharacterStorage.getBotById(bot.getId());
+        if (owner == null) return;
         for (int swings = 0; swings < BOX_SWING_CAP; swings++) {
-            var reactor = bot.getMap().getReactorByOid(oid);
+            if (bot.getMap() != map || !bot.isAlive() || !owner.getRunning()
+                    || CharacterStorage.getBotById(bot.getId()) != owner) return;
+            var reactor = map.getReactorByOid(oid);
             if (reactor == null || !reactor.isActive()) {
                 PqActions.boxFinishedPullTick(bot); // pull the next box's tick forward
                 return; // broken (or being reset) - no further transition to walk
             }
-            if (!PqActions.hitReactor(bot, oid)) return;
-            blockingSleep(reactorSwingBeatMs());
+            PqActions.hitReactor(bot, oid); // a temporary refusal retries on the next paced attempt
+            if (!blockingSleep(reactorSwingBeatMs())) return;
         }
     }
 

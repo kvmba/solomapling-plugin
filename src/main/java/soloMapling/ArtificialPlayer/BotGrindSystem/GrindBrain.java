@@ -32,7 +32,6 @@ public final class GrindBrain {
     // this grace beat, so a kill inside our own spot's radius (a mob walking home to us, or a spawn
     // landing mid-check) isn't read as "empty here, mobs there" the instant the last one died.
     static final long NEARBY_MOB_GRACE_MS = 1_500;
-    private static final double APPROACH_REACH_FRAC = 0.80;  // stop at this fraction of attack reach
     static final int ROAM_RETARGET_EPS = 16;         // skip re-issuing move for tiny shifts
     private static final long TARGET_RETARGET_TIMEOUT = 4_000; // give up walking to an unreachable target/spot after this
     private static final int APPROACH_PROGRESS_EPS = 20;     // bot must move at least this far to count as progress
@@ -72,8 +71,6 @@ public final class GrindBrain {
     private int noProgressAnchorY = 0;
     boolean engaged = false;
     int lastMoveTargetX = Integer.MIN_VALUE;
-    private int approachX = -1;              // lazy attack-reach cache
-    private int approachY = -1;
     MovementStyle style = MovementStyle.PLANTED;
     float fjCap = 1f;                        // level-tier flash-jump dash cap (FlashJumpTiers)
     long lastKillMs = 0L;
@@ -250,8 +247,9 @@ public final class GrindBrain {
         }
         Monster best = null;
         int bestAbsDx = Integer.MAX_VALUE;
-        // Resolve the bot's region once: the same-ledge gate is otherwise two probes per mob.
-        int botRegion = GCMovement.peekRegionIdAt(chr.getMap(), pos.x, pos.y);
+        // Only melee needs a surface probe; projectiles/spells may clear a neighbouring ledge.
+        int botRegion = reach.route == BotAttackProfile.Route.CLOSE
+                ? GCMovement.peekRegionIdAt(chr.getMap(), pos.x, pos.y) : -1;
         for (Monster m : chr.getMap().getAllMonsters()) {
             if (!SpotFinder.isHostile(m)) {
                 continue;
@@ -260,7 +258,8 @@ public final class GrindBrain {
             if (mp == null || Math.abs(mp.x - pos.x) > reachX || Math.abs(mp.y - pos.y) > reachY) {
                 continue;
             }
-            if (GCMovement.onDifferentLedge(chr.getMap(), botRegion, mp.x, mp.y)) {
+            if (reach.route == BotAttackProfile.Route.CLOSE && !m.isBoss()
+                    && GCMovement.onDifferentLedge(chr.getMap(), botRegion, mp.x, mp.y)) {
                 continue; // one platform over is someone else's fight, not a roadblock
             }
             int absDx = Math.abs(mp.x - pos.x);
@@ -537,17 +536,9 @@ public final class GrindBrain {
         return (mo instanceof Monster m && SpotFinder.isHostile(m)) ? m : null;
     }
 
-    // Lazily derive (and cache) the stop-and-swing distance from this bot's attack reach so ranged/magic
-    // bots fire from afar. Floored at the melee values for short attacks.
+    // Stop approaching only where the attack driver can actually hit, including melee's surface gate.
     boolean inAttackRange(Character chr, Monster mob) {
-        if (approachX < 0) {
-            approachX = Math.max(APPROACH_X, (int) (BotAttackDriver.attackReachX(chr) * APPROACH_REACH_FRAC));
-            approachY = Math.max(APPROACH_Y, (int) (BotAttackDriver.attackReachY(chr) * APPROACH_REACH_FRAC));
-        }
-        Point pos = chr.getPosition();
-        Point mp = mob.getPosition();
-        return pos != null && mp != null
-                && Math.abs(mp.x - pos.x) <= approachX && Math.abs(mp.y - pos.y) <= approachY;
+        return BotAttackDriver.isInAttackRange(chr, mob);
     }
 
     // ── Approach-progress tracking (no-progress give-up on an unreachable target/spot) ──

@@ -89,7 +89,8 @@ public final class BotFlavor {
 
         long span = Math.max(1, FLAVOR_COOLDOWN_MAX_MS - FLAVOR_COOLDOWN_MIN_MS);
         long cd = FLAVOR_COOLDOWN_MIN_MS + (long) (ThreadLocalRandom.current().nextDouble() * span);
-        cooldownUntil.put(chr.getId(), now + cd);
+        // Teardown may stop this bot while dispatch is in flight. Serialize publication with forget.
+        cooldownUntil.compute(chr.getId(), (id, previous) -> bot.getRunning() ? Long.valueOf(now + cd) : previous);
     }
 
     // Drop a bot's cooldown record when it's torn down / converted, so the map doesn't leak entries.

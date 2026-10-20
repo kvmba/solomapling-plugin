@@ -7,7 +7,6 @@ import org.gms.client.SkillFactory;
 import org.gms.client.inventory.WeaponType;
 import org.gms.constants.skills.Cleric;
 import org.gms.constants.skills.Hermit;
-import org.gms.constants.skills.Warrior;
 import org.gms.server.StatEffect;
 import org.gms.server.life.Monster;
 import org.gms.server.maps.MapObject;
@@ -87,6 +86,16 @@ public final class BotAttackDriver {
         }
         int enabler = BotAuraState.enablerSkillFor(bot, profile.skillFor(weapon));
         return (enabler != 0 && BotAuraState.isMorphedAs(bot, enabler)) ? profile : null;
+    }
+
+    private static BotAttackProfile autoProfile(Character bot, BotAttackProfile profile, WeaponType weapon) {
+        profile = gateProfile(bot, profile, weapon);
+        if (profile != null && BotComboOrb.isFinisher(profile.skillFor(weapon))
+                && !BotComboOrb.finisherReady(bot)) {
+            BotAttackConfig.JobAttacks base = BotAttackConfig.resolve(Job.WARRIOR, weapon);
+            return profile.numAttacked > 1 ? base.aoe() : base.single();
+        }
+        return profile;
     }
 
     private BotAttackDriver() {}
@@ -178,16 +187,35 @@ public final class BotAttackDriver {
         return primaryProfile(bot);
     }
 
+    /** Geometry and surface admission shared by attacks and the grind brain's approach gate. */
+    public static boolean isInAttackRange(Character bot, Monster mob) {
+        WeaponType weapon = BotAttack.resolveEquippedWeaponType(bot);
+        BotAttackProfile profile = primaryProfile(bot, weapon);
+        Point from = bot.getPosition();
+        Point target = mob.getPosition();
+        if (profile == null || from == null || target == null) return false;
+        if (from.distanceSq(target) > SEEK_RANGE_SQ) return false;
+        if (profile.route == BotAttackProfile.Route.CLOSE && !mob.isBoss()
+                && GCMovement.onDifferentLedge(bot.getMap(), from.x, from.y, target.x, target.y)) {
+            return false;
+        }
+        return containsTarget(reachBox(from, profile, weapon, target.x < from.x), mob, target);
+    }
+
     private static BotAttackProfile primaryProfile(Character bot) {
         if (bot == null) {
             return null;
         }
         WeaponType weapon = BotAttack.resolveEquippedWeaponType(bot);
+        return primaryProfile(bot, weapon);
+    }
+
+    private static BotAttackProfile primaryProfile(Character bot, WeaponType weapon) {
         BotAttackConfig.JobAttacks atks = BotAttackConfig.resolve(bot.getJob(), weapon);
-        if (atks.single() != null) {
-            return atks.single();
-        }
-        return atks.aoe() != null ? atks.aoe() : atks.ultimate();
+        BotAttackProfile single = autoProfile(bot, atks.single(), weapon);
+        if (single != null) return single;
+        BotAttackProfile aoe = autoProfile(bot, atks.aoe(), weapon);
+        return aoe != null ? aoe : gateProfile(bot, atks.ultimate(), weapon);
     }
 
     /* True if this bot's class has any configured AoE swing (sustained or ultimate) - roaming callers use
@@ -220,8 +248,10 @@ public final class BotAttackDriver {
         // AUTO, `!bot attack` and `!bot attackaoe` all read one consistent picture of "which
         // attacks does this bot have RIGHT NOW". The forced-choice checks below turn a null slot
         // into an honest miss report instead of an illegal cast.
-        BotAttackProfile single = gateProfile(bot, atks.single(), weapon);
-        BotAttackProfile aoe = gateProfile(bot, atks.aoe(), weapon);
+        BotAttackProfile single = choice == Choice.AUTO ? autoProfile(bot, atks.single(), weapon)
+                : gateProfile(bot, atks.single(), weapon);
+        BotAttackProfile aoe = choice == Choice.AUTO ? autoProfile(bot, atks.aoe(), weapon)
+                : gateProfile(bot, atks.aoe(), weapon);
         BotAttackProfile ultimate = gateProfile(bot, atks.ultimate(), weapon); // throttled full-map nuke, or null
 
         // Forced slots must exist; AUTO needs at least one configured attack.
@@ -245,7 +275,13 @@ public final class BotAttackDriver {
         // toward the fight (the reach box is built relative to the bot's facing). One seek scan
         // serves both this and the reach queries below: the old path re-scanned every map object
         // once in nearestMob and again per mobsInReach call, on every swing attempt.
-        SeekScan seek = seek(bot);
+        BotAttackProfile seekProfile = switch (choice) {
+            case SINGLE -> single;
+            case AOE -> aoe;
+            case ULTIMATE -> ultimate;
+            case AUTO -> single != null ? single : (aoe != null ? aoe : ultimate);
+        };
+        SeekScan seek = seek(bot, seekProfile, weapon);
         Monster nearest = seek.nearest();
         if (nearest == null) {
             return AttackResult.miss("no targetable mobs within " + SEEK_RANGE + "px (none, or all on a separate ledge)");
@@ -286,18 +322,6 @@ public final class BotAttackDriver {
             } else {
                 profile = single != null ? single : (aoe != null ? aoe : ultimate);
             }
-        }
-
-        // 斗气必杀技节流 (Panic / Coma consume the whole orb ring): while the finisher's 60s cadence
-        // runs, swap the plan back to the warrior-lineage base attacks (Power Strike / Slash Blast)
-        // so the ring keeps growing instead of being wiped every few swings - the bank-and-spend
-        // rhythm a real combo player plays at. The base profiles share the finisher's reach box and
-        // cooldown, so only the rendered skill changes. Forced GM choices stay on the finisher.
-        if (choice == Choice.AUTO && !BotComboOrb.finisherReady(bot)
-                && BotComboOrb.isFinisher(profile.skillFor(weapon))) {
-            profile = profile.numAttacked > 1
-                    ? BotAttackProfile.meleeAoe(Warrior.SLASH_BLAST, 1)
-                    : BotAttackProfile.melee(Warrior.POWER_STRIKE, 1);
         }
 
         List<Monster> targets = cap(reachCache != null ? reachCache : mobsInReach(seek, profile, weapon, facingLeft),
@@ -465,16 +489,21 @@ public final class BotAttackDriver {
     private record SeekScan(Point botPos, List<Monster> candidates, Monster nearest) {
     }
 
-    private static SeekScan seek(Character bot) {
+    private static SeekScan seek(Character bot, BotAttackProfile profile, WeaponType weapon) {
         Point botPos = bot.getPosition();
         if (botPos == null) {
             return new SeekScan(null, List.of(), null);
         }
         MapleMap map = bot.getMap();
-        int botRegion = GCMovement.peekRegionIdAt(map, botPos.x, botPos.y);
+        boolean sameLedge = profile.route == BotAttackProfile.Route.CLOSE;
+        int botRegion = sameLedge ? GCMovement.peekRegionIdAt(map, botPos.x, botPos.y) : -1;
         List<Monster> candidates = new ArrayList<>();
         Monster nearest = null;
+        Monster nearestInReach = null;
         double bestSq = Double.MAX_VALUE;
+        double bestReachSq = Double.MAX_VALUE;
+        Rectangle leftBox = reachBox(botPos, profile, weapon, true);
+        Rectangle rightBox = reachBox(botPos, profile, weapon, false);
         for (MapObject mo : map.getMapObjectsInRange(botPos, SEEK_RANGE_SQ, MONSTER_TYPES)) {
             Monster m = (Monster) mo;
             if (!m.isAlive()) {
@@ -484,10 +513,8 @@ public final class BotAttackDriver {
             if (mp == null) {
                 continue;
             }
-            // Skip mobs on a separate ledge so the bot faces (and later swings at) a mob it can
-            // actually reach, instead of fixating up at a platform overhead. Bosses are exempt,
-            // exactly as onAttackableSurface states (multi-bodied parts sit on their own footholds).
-            if (!m.isBoss() && GCMovement.onDifferentLedge(map, botRegion, mp.x, mp.y)) {
+            // Melee stays on its walk surface; projectiles/spells use their attack box across ledges.
+            if (sameLedge && !m.isBoss() && GCMovement.onDifferentLedge(map, botRegion, mp.x, mp.y)) {
                 continue;
             }
             candidates.add(m);
@@ -496,8 +523,13 @@ public final class BotAttackDriver {
                 bestSq = dsq;
                 nearest = m;
             }
+            if (dsq < bestReachSq && containsTarget(mp.x < botPos.x ? leftBox : rightBox, m, mp)) {
+                bestReachSq = dsq;
+                nearestInReach = m;
+            }
         }
-        return new SeekScan(botPos, candidates, nearest);
+        // A closer off-range mob must not turn a directional shot away from a hittable one.
+        return new SeekScan(botPos, candidates, nearestInReach != null ? nearestInReach : nearest);
     }
 
     /* Alive mobs inside the attack's reach box, nearest first. */
@@ -520,15 +552,18 @@ public final class BotAttackDriver {
             }
             // Bosses are big and multi-bodied: test their part positions against a vertically
             // padded box so e.g. Zakum's elevated arms still register as in-reach.
-            Rectangle test = m.isBoss()
-                    ? new Rectangle(box.x, box.y - BOSS_Y_PAD, box.width, box.height + 2 * BOSS_Y_PAD)
-                    : box;
-            if (test.contains(mp)) {
+            if (containsTarget(box, m, mp)) {
                 found.add(m);
             }
         }
         found.sort((a, b) -> Double.compare(botPos.distanceSq(a.getPosition()), botPos.distanceSq(b.getPosition())));
         return found;
+    }
+
+    private static boolean containsTarget(Rectangle box, Monster mob, Point target) {
+        return mob.isBoss()
+                ? new Rectangle(box.x, box.y - BOSS_Y_PAD, box.width, box.height + 2 * BOSS_Y_PAD).contains(target)
+                : box.contains(target);
     }
 
     /*

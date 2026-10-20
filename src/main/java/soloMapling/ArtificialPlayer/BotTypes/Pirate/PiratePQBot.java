@@ -57,15 +57,10 @@ public class PiratePQBot extends PartyQuestBot {
         // the fight starts. findReactorOid returns the first one still alive, so this walks
         // the room's boxes one at a time until none are left.
         for (int boxId : PiratePqData.boxesIn(map.getId())) {
-            for (int guard = 0; guard < BOXES_PER_ROOM_LIMIT; guard++) {
-                int oid = PqActions.findReactorOid(getChr(), boxId);
-                if (oid < 0) {
-                    break; // no more of this kind standing
-                }
-                if (!PqActions.hitReactor(getChr(), oid)) return false;
-                if (!stillAlive(oid)) {
-                    break; // this one is spent; the next pass finds the following one
-                }
+            int oid = PqActions.findReactorOid(getChr(), boxId);
+            if (oid >= 0 && PqActions.approachReactor(getChr(), oid, true, true)
+                    != PqActions.Approach.STUCK) {
+                return false; // the combat sweep owns the body until this box is finished
             }
         }
 
@@ -81,11 +76,4 @@ public class PiratePQBot extends PartyQuestBot {
         return false;
     }
 
-    /** How many of one box kind to keep hitting before giving the tick back. */
-    private static final int BOXES_PER_ROOM_LIMIT = 24;
-
-    private boolean stillAlive(int reactorOid) {
-        var reactor = getChr().getMap().getReactorByOid(reactorOid);
-        return reactor != null && reactor.isAlive();
-    }
 }

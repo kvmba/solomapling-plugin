@@ -6,6 +6,7 @@ import org.gms.dao.entity.GameConfigDO;
 import org.gms.manager.ServerManager;
 import org.gms.property.ServiceProperty;
 import org.gms.service.ConfigService;
+import org.gms.extension.event.PartyInviteEvent;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.springframework.context.ApplicationContext;
@@ -13,11 +14,15 @@ import org.springframework.context.MessageSource;
 
 import java.util.List;
 import java.util.concurrent.TimeUnit;
+import soloMapling.ArtificialPlayer.BotMessagingSystem.CharacterStorage;
+import soloMapling.ArtificialPlayer.BotSM;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
@@ -104,6 +109,42 @@ class BotPartyQueueTest {
         assertNotNull(entry, "one millisecond inside the window must still answer");
         assertEquals(500, entry.getPartyId());
         queue.removePartyInvite(bot);
+    }
+
+    @Test
+    void pendingQueryExpiresInvitesWithoutAConsumerTick() {
+        BotPartyQueue queue = BotPartyQueue.getInstance();
+        Character bot = bot("Stopped");
+        Character inviter = bot("Inviter");
+        queue.addPartyInvite(bot, inviter, 600);
+        assertTrue(queue.hasPendingInvite(bot));
+        queue.addPartyInvite(bot, new BotPartyQueue.PartyInviteEntry(
+                inviter, 600, System.currentTimeMillis() - TimeUnit.MINUTES.toMillis(4)));
+        assertFalse(queue.hasPendingInvite(bot));
+        assertNull(queue.getPartyInvite(bot));
+    }
+
+    @Test
+    void inviteBridgeDoesNotReinsertARemovedCharacter() throws Exception {
+        BotPartyQueue queue = BotPartyQueue.getInstance();
+        Character bot = bot("Removed");
+        Character inviter = bot("Inviter");
+        BotSM owner = mock(BotSM.class);
+        when(owner.getChr()).thenReturn(bot);
+        CharacterStorage.addActiveBot(bot.getId(), owner);
+        var receive = BotPartyInviteBridge.class.getDeclaredMethod("onPartyInvite", PartyInviteEvent.class);
+        receive.setAccessible(true);
+        try {
+            receive.invoke(null, new PartyInviteEvent(bot, inviter, 700));
+            assertTrue(queue.hasPendingInvite(bot));
+            CharacterStorage.removeActiveBot(bot.getId());
+            queue.removePartyInvite(bot);
+            receive.invoke(null, new PartyInviteEvent(bot, inviter, 700));
+            assertFalse(queue.hasPendingInvite(bot));
+        } finally {
+            CharacterStorage.removeActiveBot(bot.getId());
+            queue.removePartyInvite(bot);
+        }
     }
 
     private static Character bot(String name) {

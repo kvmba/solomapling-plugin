@@ -18,9 +18,6 @@ import soloMapling.ArtificialPlayer.PartyQuest.PqActions;
  */
 public class ZakumPQBot extends PartyQuestBot {
 
-    /** How many crates to work through in one tick before handing the thread back. */
-    private static final int CRATE_PASSES = 24;
-
     public ZakumPQBot(Character character) {
         super(character);
         dialoguePath = "ZakumPQBotDialogue.yaml";
@@ -52,17 +49,11 @@ public class ZakumPQBot extends PartyQuestBot {
 
     @Override
     protected boolean workStage() {
-        // Break what crates are standing, taking the first of each kind in turn. The mine's
-        // crates carry no scripts, so a hit is just a state change and there is nothing to
-        // wait for beyond the crate disappearing.
-        for (int pass = 0; pass < CRATE_PASSES; pass++) {
-            int oid = firstStandingCrate();
-            if (oid < 0) {
-                break;
-            }
-            if (!PqActions.hitReactor(getChr(), oid)) break;
-        }
-        if (firstStandingCrate() < 0) {
+        // The combat sweep keeps retrying at the swing cadence, including body-lock refusals.
+        int oid = firstStandingCrate();
+        if (oid >= 0) {
+            PqActions.approachReactor(getChr(), oid, true, true);
+        } else {
             // The room's crates are all broken and the ore is in hand or on the floor:
             // this room's work is done even though the run goes on until Aura forges.
             sayStageClearOnce(getChr().getMapId());
