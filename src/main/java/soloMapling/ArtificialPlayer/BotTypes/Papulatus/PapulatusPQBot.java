@@ -2,6 +2,7 @@ package soloMapling.ArtificialPlayer.BotTypes.Papulatus;
 
 import org.gms.client.Character;
 import soloMapling.ArtificialPlayer.BotGeneration;
+import soloMapling.ArtificialPlayer.BotPetSystem.BotPetFollower;
 import soloMapling.ArtificialPlayer.PartyQuest.PartyQuestBot;
 import soloMapling.ArtificialPlayer.PartyQuest.PqActions;
 
@@ -9,8 +10,14 @@ import soloMapling.ArtificialPlayer.PartyQuest.PqActions;
  * Plays PapulatusBattle with a real player leading.
  *
  * <p>The whole run is "fight what the leader summoned, until the leader leaves". The summon
- * piece is the leader's (quest 7103 or the T-1337 shop; a bot can neither hold nor drop one),
- * and the exit is an NPC the leader talks to - the event never warps the team out on a clear.
+ * piece is the leader's (quest 7103 or the T-1337 shop; a bot can neither hold nor drop one)
+ * and the rewards are the leader's too — the bot neither drops the piece on the Time Sphere
+ * nor lets its pets sweep the boss's drops, so both bans are enforced structurally:
+ * {@code workStage} contains no reactor-feed call at all, and the pet pickup ban below is
+ * armed for as long as the bot stands in the fight map (the pet system sweeps "monster drops
+ * the owner's party is entitled to", which in this room is exactly the boss's loot).
+ *
+ * <p>The exit is an NPC the leader talks to - the event never warps the team out on a clear.
  * So the bot's only real decision is when the run is over: the moment the leader is no longer
  * standing in the fight map. Every way that happens is terminal - he walked out through the
  * Machine (no exit door exists to come back through), died (respawn carries him to town and
@@ -38,6 +45,15 @@ public class PapulatusPQBot extends PartyQuestBot {
         super.updateState();
         if (checkIfNotRunningOrPaused()) {
             return;
+        }
+        // The pet-pickup ban is re-armed every tick from the bot's own map: armed in the boss
+        // room (no pet may touch the boss's drops), lifted in the lobby, where ordinary floor
+        // loot is nobody's reward. stopScheduledTask -> BotPetFollower.forget also clears it,
+        // so a converted-away bot never leaves a stale ban behind.
+        if (PapulatusPqData.isQuestRoom(getChr().getMapId())) {
+            BotPetFollower.banPetPickup(getChr().getId());
+        } else {
+            BotPetFollower.allowPetPickup(getChr().getId());
         }
         tickPartyQuest();
     }

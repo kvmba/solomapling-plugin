@@ -193,7 +193,9 @@ public class PapulatusPQBot extends PartyQuestBot {
 1. **不改宿主 GMS083 任何代码**——EIM 准入已放行 bot；`registerParty` 链路是 13 个现有大厅验证过的。
 2. **不改 `PapulatusBattle.js` / `Populatus00.js`**。
 3. **不给 `BotScriptedWarp`/GCTravel 加 220080001 的边**——进本靠事件拉人；bot 走不进也不该走进 `in00`（脚本只放队长），`followLeaderIntoNextRoom` 在本图两个方向都找不到可走门（`tm` 均为哨兵），天然不误触。
-4. **bot 不参与召唤**——碎片是玩家任务物品/商城货；触发反应器由投放者 client 驱动，bot 无从代劳。
+4. **bot 不参与召唤，也不碰 Boss 掉落**（2026-10-20 用户硬性要求，已固化为结构约束）：
+   - **禁丢碎片**：`workStage` 无任何 `feedReactor`/`dropStack` 调用——碎片只来自玩家任务链/商城，bot 结构上拿不到，也无丢弃路径；
+   - **禁拾 Boss 掉落**：bot 本体无拾取路径（`steppedOnLootIds` 默认空、无 `loot` 调用）；但**宠物**会扫"本队有权拾取的怪物掉落"（`BotPetFollower.collectLoot`，120px 范围、同队放行）——本战斗图唯一的怪物掉落就是 Boss 奖励，故 `BotPetFollower` 新增按 bot 的拾取封禁寄存器（`banPetPickup`/`allowPetPickup`/`PICKUP_BANNED`），`PapulatusPQBot` 每 tick 按地图派生：战斗图=封、大厅=放、`forget`/`stop` 清除。封禁是任务地理约束而非全局策略——同一只宠物在其它地图照常拾取。
 5. **不写 bot 主动退出战斗图的捷径**——退场必须走 NPC（玩家）或 `returnToLobby`（bot 自身判定），两态之外没有第三种合法路径。
 6. **不加"队长离开宽限期"**——已核实"队长不在 220080001"三种成因均不可逆且判定读的是活体 `Character.getMapId()`，无瞬态误报窗口；宽限期属过度防御。
 
@@ -218,7 +220,8 @@ public class PapulatusPQBot extends PartyQuestBot {
 - [ ] `BotMessages-zh-CN.yaml`：同上（zh，同 key 同数量）
 - [ ] `PqRecruitPointsTest` / `PqLobbyDensityTest` 补断言
 - [ ] `mvn test`（重点：PqStageChatTest / PqRecruitMessagesTest / PqRecruitPointsTest / PqLobbyDensityTest）
-- [ ] 实机：lv100 玩家在 220080000 招 2 bot → 全队进图 → 丢碎片 → 三段 Boss → NPC 退场 → bot 回大厅
+- [x] 实机前约束已固化：bot 无丢碎片路径、宠物在战斗图被禁拾取（见 §五-4）
+- [ ] 实机：lv100 玩家在 220080000 招 2 bot → 全队进图 → 玩家丢碎片 → 三段 Boss → **确认 bot 全程不丢碎片、bot 及其宠物不碰任何 Boss 掉落** → NPC 退场 → bot 回大厅
 
 ---
 

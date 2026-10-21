@@ -53,4 +53,15 @@ class PapulatusPqDataTest {
         assertTrue(PapulatusPqData.MIN_LEVEL <= PapulatusPqData.MAX_LEVEL,
                 "the level band must be non-empty");
     }
+
+    @Test
+    void petPickupBanTracksTheBossRoomAndOnlyIt() {
+        // The pet system's own unit (BotPetFollower) is host-bound; what this test can lock is
+        // the GEOGRAPHY the ban keys on: the ban applies exactly when the bot stands in the
+        // fight map, never in the lobby - the lobby's floor items are ordinary loot.
+        boolean banInBossRoom = PapulatusPqData.isQuestRoom(PapulatusPqData.BOSS_MAP);
+        boolean banInLobby = PapulatusPqData.isQuestRoom(PapulatusPqData.LOBBY_MAP);
+        assertTrue(banInBossRoom, "pets must be banned in the boss room");
+        assertFalse(banInLobby, "pets must be free in the lobby");
+    }
 }
