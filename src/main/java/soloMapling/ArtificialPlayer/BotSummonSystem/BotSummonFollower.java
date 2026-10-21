@@ -30,6 +30,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.locks.ReentrantLock;
 
 /**
  * Drives every bot's summons: one shared tick that moves hovering summons the way the owning
@@ -117,16 +118,34 @@ public final class BotSummonFollower {
         return FOLLOW_MIN_PX + ThreadLocalRandom.current().nextInt(FOLLOW_MAX_PX - FOLLOW_MIN_PX + 1);
     }
 
-    // botId -> that bot's live summons.
+    // botId -> that bot's live summons. The list is guarded by that bot's own lock; the map
+    // itself is concurrent, so a bot's list reference is published safely the moment it is
+    // registered and never mutated in place afterwards (retire = map.remove under the lock).
     private static final Map<Integer, List<BotSummon>> TRACKED = new ConcurrentHashMap<>();
 
-    // One lock serialises the lifecycle of every bot's summon list: register / despawnAll / stop /
-    // the tick's snapshot and re-home. A summon torn down by the bot's own thread and a summon
-    // re-homed by the tick can therefore never interleave - under the lock, exactly one side wins,
-    // so a re-home can never resurrect an entity the teardown just retired (a ghost). The lock may
-    // span the remove + spawn broadcasts of a single re-home; both are rare lifecycle events and
-    // the sends just queue to sockets, so the hold is brief and bounded.
-    private static final Object LIFECYCLE_LOCK = new Object();
+    // Per-bot lifecycle lock. One lock per bot serialises that bot's summon list lifecycle:
+    // register / despawnAll / stop / the tick's snapshot and re-home. A summon torn down by the
+    // bot's own thread and a summon re-homed by the tick can therefore never interleave - under
+    // the lock, exactly one side wins, so a re-home can never resurrect an entity the teardown
+    // just retired (a ghost). The lock may span the remove + spawn broadcasts of a single
+    // re-home; both are rare lifecycle events and every send is a non-blocking Netty
+    // writeAndFlush (or a no-op for the headless bot clients), so the hold is brief and bounded.
+    //
+    // A j.u.c. lock, NOT a synchronized monitor, is deliberate: the spawn wave runs on virtual
+    // threads, and on JDK 21 a virtual thread inside a synchronized block - waiting or holding -
+    // is pinned to its carrier. Wave 7 funnels ~200 creation threads through this lock; with a
+    // monitor, every waiter pins its carrier, four carriers freeze, and the holder blocked on a
+    // map's fair RW lock behind a queued writer never runs again - the whole wave (and the host
+    // respawn task parked on that same fair read lock) stalls forever. ReentrantLock park does
+    // not pin, so waiters unmount and the carrier pool stays alive. The lock is fair so the
+    // exactly-once handoff between racing spawn beats stays FIFO.
+    private static final ConcurrentHashMap<Integer, ReentrantLock> LIFECYCLE_LOCKS =
+            new ConcurrentHashMap<>();
+
+    /** That bot's lifecycle lock, created on first use and left for the process lifetime. */
+    private static ReentrantLock lifecycleLock(int botId) {
+        return LIFECYCLE_LOCKS.computeIfAbsent(botId, k -> new ReentrantLock(true));
+    }
 
     // skillId -> the skill's WZ buff time in ms (0 = none). Memoized: the same Skill.wz row the
     // strike cadence and the host's own buff timer read, and like them read once per skill.
@@ -175,7 +194,7 @@ public final class BotSummonFollower {
         }
         REGRANT_DUE_AT.clear();
         // Best-effort teardown of everything still tracked, so a reload never leaves ghosts. Each
-        // bot's list is retired under the lifecycle lock before its entities are removed: an
+        // bot's list is retired under its own lifecycle lock before its entities are removed: an
         // in-flight tick that later sees such a summon finds the list gone (the identity check in
         // tickBot) and does not re-spawn it. A bot that cannot be looked up still gets its entity
         // removed (removeEntity tolerates a null bot): the entity is plugin-owned and the host
@@ -184,10 +203,16 @@ public final class BotSummonFollower {
         while (true) {
             Integer botId = null;
             List<BotSummon> summons = null;
-            synchronized (LIFECYCLE_LOCK) {
-                for (Integer id : TRACKED.keySet()) {
-                    botId = id;
+            for (Integer id : TRACKED.keySet()) {
+                ReentrantLock lock = lifecycleLock(id);
+                lock.lock();
+                try {
                     summons = TRACKED.remove(id);
+                } finally {
+                    lock.unlock();
+                }
+                if (summons != null) {
+                    botId = id;
                     break;
                 }
             }
@@ -229,8 +254,12 @@ public final class BotSummonFollower {
                     * Math.max(0L, config.lifetimeRefreshWindowMs()));
             s.expireAtMs = System.currentTimeMillis() + buffMs + jitter;
         }
-        synchronized (LIFECYCLE_LOCK) {
+        ReentrantLock lock = lifecycleLock(botId);
+        lock.lock();
+        try {
             TRACKED.computeIfAbsent(botId, k -> new ArrayList<>()).add(s);
+        } finally {
+            lock.unlock();
         }
     }
 
@@ -248,12 +277,16 @@ public final class BotSummonFollower {
      * @return whether a summon is tracked for this bot afterwards (the recast's own success rule)
      */
     static boolean spawnIfAbsent(int botId, Runnable spawn) {
-        synchronized (LIFECYCLE_LOCK) {
+        ReentrantLock lock = lifecycleLock(botId);
+        lock.lock();
+        try {
             if (isTracked(botId)) {
                 return true;
             }
             spawn.run();
             return isTracked(botId);
+        } finally {
+            lock.unlock();
         }
     }
 
@@ -283,8 +316,12 @@ public final class BotSummonFollower {
         }
         REGRANT_DUE_AT.remove(bot.getId()); // an armed recast must never resurrect a torn-down bot
         List<BotSummon> summons;
-        synchronized (LIFECYCLE_LOCK) {
+        ReentrantLock lock = lifecycleLock(bot.getId());
+        lock.lock();
+        try {
             summons = TRACKED.remove(bot.getId());
+        } finally {
+            lock.unlock();
         }
         if (summons == null) {
             return;
@@ -411,8 +448,12 @@ public final class BotSummonFollower {
             // them directly), so the host's own leave-map path never removed them - tear them down
             // here rather than leave ghosts on the bot's last map, then drop our state.
             List<BotSummon> gone;
-            synchronized (LIFECYCLE_LOCK) {
+            ReentrantLock lock = lifecycleLock(botId);
+            lock.lock();
+            try {
                 gone = TRACKED.remove(botId);
+            } finally {
+                lock.unlock();
             }
             if (gone != null) {
                 for (BotSummon s : gone) {
@@ -426,8 +467,12 @@ public final class BotSummonFollower {
         MapleMap botMap = bot.getMap();
         // Snapshot: register/despawnAll may touch the list on the bot's own lifecycle thread.
         List<BotSummon> snapshot;
-        synchronized (LIFECYCLE_LOCK) {
+        ReentrantLock lock = lifecycleLock(botId);
+        lock.lock();
+        try {
             snapshot = new ArrayList<>(summons);
+        } finally {
+            lock.unlock();
         }
         // Player-parity lifetime (an expiry armed by register, not the host buff pipeline this
         // system deliberately bypasses): when the clock runs out the summon ends the way a
@@ -439,10 +484,14 @@ public final class BotSummonFollower {
         if (observed) {
             for (BotSummon s : snapshot) {
                 if (s.expireAtMs > 0 && now() >= s.expireAtMs) {
-                    synchronized (LIFECYCLE_LOCK) {
+                    ReentrantLock expiryLock = lifecycleLock(botId);
+                    expiryLock.lock();
+                    try {
                         if (TRACKED.get(botId) == summons) {
                             despawnSummons(bot, botId, snapshot);
                         }
+                    } finally {
+                        expiryLock.unlock();
                     }
                     REGRANT_DUE_AT.put(botId,
                             now() + ThreadLocalRandom.current().nextLong(
@@ -463,10 +512,14 @@ public final class BotSummonFollower {
             // nobody tracks (a ghost). Holding the lock across the check makes exactly one side win -
             // either the tick re-homes a still-tracked summon, or the teardown tears it down.
             if (s.summon == null || s.map != botMap) {
-                synchronized (LIFECYCLE_LOCK) {
+                ReentrantLock rehomeLock = lifecycleLock(botId);
+                rehomeLock.lock();
+                try {
                     if (TRACKED.get(botId) == summons) {
                         handleMapChange(bot, s);
                     }
+                } finally {
+                    rehomeLock.unlock();
                 }
                 continue;
             }
@@ -492,12 +545,16 @@ public final class BotSummonFollower {
      * it is about to arm itself).
      */
     private static void despawnSummons(Character bot, int botId, List<BotSummon> summons) {
-        synchronized (LIFECYCLE_LOCK) {
+        ReentrantLock lock = lifecycleLock(botId);
+        lock.lock();
+        try {
             if (TRACKED.remove(botId, summons)) {
                 for (BotSummon s : summons) {
                     removeEntity(bot, s);
                 }
             }
+        } finally {
+            lock.unlock();
         }
     }
 
@@ -616,7 +673,9 @@ public final class BotSummonFollower {
             return; // no mobs near the owner either (a town, or between packs): stand fast
         }
         try {
-            synchronized (LIFECYCLE_LOCK) {
+            ReentrantLock lock = lifecycleLock(s.botId);
+            lock.lock();
+            try {
                 // The teardown check from the tick's own re-home: a despawnAll that ran meanwhile
                 // retired this summon - resurrecting it would spawn a ghost nobody tracks.
                 if (TRACKED.get(s.botId) == null || !TRACKED.get(s.botId).contains(s)) {
@@ -630,6 +689,8 @@ public final class BotSummonFollower {
                 } else {
                     s.summon = null; // retried by the tick's own re-home path, like a failed spawn
                 }
+            } finally {
+                lock.unlock();
             }
         } catch (Throwable t) {
             log.warn("turret re-seat failed cid={} skill={}: {}", bot.getId(), s.skillId, t.toString());
