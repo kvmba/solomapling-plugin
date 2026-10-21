@@ -76,6 +76,17 @@ public final class PqActions {
         return eim == null ? null : eim.getProperty(key);
     }
 
+    /**
+     * This bot's slot in the instance's question grid, or -1 when the instance has not assigned
+     * one. The quest scripts use the grid to hand each member a stable question number (Cloto
+     * inserts on the first visit, re-reads on every later one); a bot answering Cloto must read
+     * the same slot so its answer matches the question she is grading against.
+     */
+    public static int readEimGrid(Character bot) {
+        EventInstanceManager eim = instanceOf(bot);
+        return eim == null ? -1 : eim.gridCheck(bot);
+    }
+
     public static boolean inInstance(Character bot) {
         return instanceOf(bot) != null;
     }
@@ -730,6 +741,21 @@ public final class PqActions {
     /** How many of an item the bot is carrying. */
     public static int countItem(Character bot, int itemId) {
         return bot == null ? 0 : bot.getItemQuantity(itemId, false);
+    }
+
+    /**
+     * Drop {@code qty} of an item at the bot's feet, unaddressed so any party member can pick
+     * it up. The one caller is the coupon-count discipline: a bot holding more of a question's
+     * answer than the question asks for drops the surplus rather than failing the grade.
+     */
+    public static void dropSurplus(Character bot, int itemId, int qty) {
+        if (bot == null || qty <= 0 || countItem(bot, itemId) < qty) {
+            return;
+        }
+        BotClientBinding.runWithBoundPlayer(bot, () ->
+                InventoryManipulator.removeById(bot.getClient(),
+                        ItemConstants.getInventoryType(itemId), itemId, qty, true, false));
+        DropCommands.botThrowItemQty(bot, itemId, qty, bot.getPosition());
     }
 
     /**

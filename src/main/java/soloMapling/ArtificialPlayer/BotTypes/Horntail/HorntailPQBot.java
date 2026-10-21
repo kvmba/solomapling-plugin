@@ -1,6 +1,7 @@
 package soloMapling.ArtificialPlayer.BotTypes.Horntail;
 
 import org.gms.client.Character;
+import org.gms.server.maps.Portal;
 import soloMapling.ArtificialPlayer.BotGeneration;
 import soloMapling.ArtificialPlayer.PartyQuest.PartyQuestBot;
 import soloMapling.ArtificialPlayer.PartyQuest.PqActions;
@@ -47,6 +48,25 @@ public class HorntailPQBot extends PartyQuestBot {
     @Override
     protected int lobbyMapId() {
         return HorntailPqData.RECRUIT_MAP;
+    }
+
+    /**
+     * The chain door the quest advances by. The entry room's door is {@code hontale_BtoB1}
+     * (240050100 → 101, which refuses the LAST player on the map - the party's own guard, which
+     * a bot trailing its leader is never the target of - and refuses anyone holding the room's
+     * key, which this bot hands to the leader first); the key rooms' doors are
+     * {@code hontale_Bopen} (101..105, gated on the room's {@code Nstageclear} flag). The
+     * scripts re-check their own gates, so a bot arriving early is refused and retries.
+     */
+    @Override
+    protected Portal scriptedForwardPortal() {
+        var map = getChr().getMap();
+        if (map == null) {
+            return null;
+        }
+        Portal exit = PartyQuestBot.scriptedPortalOf(map.getPortals(), "in00", "hontale_BtoB1");
+        return exit != null ? exit
+                : PartyQuestBot.scriptedPortalOf(map.getPortals(), "in00", "hontale_Bopen");
     }
 
     @Override

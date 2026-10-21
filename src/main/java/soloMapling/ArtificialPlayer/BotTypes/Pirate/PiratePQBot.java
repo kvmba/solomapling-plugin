@@ -1,6 +1,7 @@
 package soloMapling.ArtificialPlayer.BotTypes.Pirate;
 
 import org.gms.client.Character;
+import org.gms.server.maps.Portal;
 import soloMapling.ArtificialPlayer.BotGeneration;
 import soloMapling.ArtificialPlayer.PartyQuest.PartyQuestBot;
 import soloMapling.ArtificialPlayer.PartyQuest.PqActions;
@@ -47,6 +48,19 @@ public class PiratePQBot extends PartyQuestBot {
     @Override
     protected int lobbyMapId() {
         return PiratePqData.RECRUIT_MAP;
+    }
+
+    /**
+     * The chain door the quest advances by: every stage room's {@code next00} is a script gate
+     * ({@code davy_nextN}, target 999999999) whose script warps into the next room once the
+     * boxes are broken and the mobs are down. It re-checks that gate itself, so a bot arriving
+     * early is refused and retries - the same contract the {@code next00} chain doors give.
+     */
+    @Override
+    protected Portal scriptedForwardPortal() {
+        var map = getChr().getMap();
+        return map == null ? null
+                : PartyQuestBot.scriptedPortalOf(map.getPortals(), "next00", null);
     }
 
     @Override

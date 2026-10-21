@@ -679,7 +679,7 @@ public abstract class PartyQuestBot extends BotSM implements GrindTickRegistry.P
         }
         Portal exit = portalTo(leaderMap);
         if (exit == null) {
-            // No door from here to there. Two very different situations hide behind that null,
+            // No door from here to there. Three very different situations hide behind that null,
             // and telling them apart is what the catch-up walk below is for:
             //
             //  - the rooms are not directly connected because the party is MORE THAN ONE ROOM
@@ -690,9 +690,15 @@ public abstract class PartyQuestBot extends BotSM implements GrindTickRegistry.P
             //    run: the reported "one bot never comes back, so every later stage is a body
             //    short". Its script re-checks the stage gate, so a bot that is refused simply
             //    stands at the door and retries - it can never skip ahead of the leader.
+            //  - the room's stage door is a SCRIPT gate (target 999999999): the quest declares
+            //    which portal advances the chain and the script re-checks the gate itself, so
+            //    walking it is as safe as the next00 case - the same refused-and-retry contract.
             //  - there is no forward door at all (the leader was warped by a script, or this is
             //    the run's last room): leave it to the quest's own team warp next tick.
             exit = forwardPortal();
+            if (exit == null) {
+                exit = scriptedForwardPortal();
+            }
         }
         if (exit == null) {
             return false;
@@ -722,6 +728,28 @@ public abstract class PartyQuestBot extends BotSM implements GrindTickRegistry.P
     }
 
     /**
+     * The quest's scripted stage door, overriding the {@code next00} default.
+     *
+     * <p>Several quests advance through portals whose WZ target is the no-map sentinel
+     * ({@code 999999999}) and whose effect lives entirely in the portal script - Pirate's
+     * {@code next00/davy_nextN}, Ellin's {@code east00/party6_stage}, Magatia's {@code pt00/jnrN},
+     * Boss Rush's {@code clear/raid_stage}, Horntail's {@code in00/hontale_Bopen}. Those doors are
+     * invisible to {@link #portalTo destination matching} and excluded from
+     * {@link #forwardPortalOf the next00 rule}, so without a per-quest declaration a bot in them
+     * never attempts a room change at all: it stands in the finished stage while the party moves
+     * on - not refused at the door (the catch-up case) but never trying it.
+     *
+     * <p>The declaration is safe to walk blind the same way {@code next00} is: the script behind
+     * the door re-checks its own stage gate (a clear room, a broken reactor, a stage flag), so a
+     * bot that arrives early is refused and simply retries - it can never skip ahead of the
+     * leader. Each declaration names ONE portal; a room with several script doors (Magatia's
+     * sub-room maze) names the one that advances the chain.
+     */
+    protected Portal scriptedForwardPortal() {
+        return null;
+    }
+
+    /**
      * The pure form of {@link #forwardPortal()}: the {@code next00} door in a map's portal list
      * that actually leads somewhere, or null when the room has none. Kept collection-taking so the
      * rule is unit-testable against the engine's own portal type (a real {@code MapleMap} cannot
@@ -748,6 +776,32 @@ public abstract class PartyQuestBot extends BotSM implements GrindTickRegistry.P
 
     /** The engine's "no map" portal target ({@code 999999999}): spawns and script-only gates. */
     private static final int NO_MAP_SENTINEL = 999999999;
+
+    /**
+     * The pure form of {@link #scriptedForwardPortal()}: the named door in a map's portal list,
+     * provided it really is a script gate (target the no-map sentinel) and carries the expected
+     * script. Kept collection-taking so the rule is unit-testable against the engine's own portal
+     * type (a real {@code MapleMap} cannot be constructed in a test).
+     *
+     * <p>Both conditions guard against a renamed room: a {@code party6_stage} door that has been
+     * re-pointed at a real map is no longer the script gate the declaration was written for, and
+     * a door whose script was relinked to another stage's handler would take the bot somewhere
+     * its own quest never intended. Falling back to {@code forwardPortalOf} first (the caller's
+     * order) means a genuine {@code next00} chain door always wins when a room has both.
+     */
+    public static Portal scriptedPortalOf(java.util.Collection<Portal> portals, String name, String script) {
+        if (portals == null || name == null) {
+            return null;
+        }
+        for (Portal portal : portals) {
+            if (portal != null && name.equals(portal.getName())
+                    && portal.getTargetMapId() == NO_MAP_SENTINEL
+                    && (script == null || script.equals(portal.getScriptName()))) {
+                return portal;
+            }
+        }
+        return null;
+    }
 
     /**
      * Whether this bot should trail the leader's room changes. The default is always:

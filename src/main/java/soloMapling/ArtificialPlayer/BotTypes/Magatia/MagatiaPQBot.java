@@ -1,6 +1,7 @@
 package soloMapling.ArtificialPlayer.BotTypes.Magatia;
 
 import org.gms.client.Character;
+import org.gms.server.maps.Portal;
 import soloMapling.ArtificialPlayer.BotGeneration;
 import soloMapling.ArtificialPlayer.PartyQuest.PartyQuestBot;
 import soloMapling.ArtificialPlayer.PartyQuest.PqActions;
@@ -61,6 +62,32 @@ public class MagatiaPQBot extends PartyQuestBot {
     @Override
     protected int lobbyMapId() {
         return lobbyMap;
+    }
+
+    /**
+     * The chain door the quest advances by, per room family:
+     * <ul>
+     *   <li>the fight sub-rooms and the stage-6 towers' exits are {@code out00} under a script
+     *       gate ({@code jnr6_out} in 203, open to 400 in 301..304), so {@code out00} is
+     *       preferred wherever the room has one;</li>
+     *   <li>the linear stage rooms advance by {@code pt00} ({@code jnr1_pt00} out of the entry,
+     *       {@code jnr1_out}, {@code jnr2_out}, {@code jnr3_out}).</li>
+     * </ul>
+     * Deliberately NOT declared: the maze's {@code in00/in01} (sub-room split, not the chain),
+     * room 926110300's {@code pt00..pt03} ({@code jnr4_rN} - a four-way claim of side rooms,
+     * not a chain advance), and the towers' climbing gates ({@code jnr5_rp}, a solo puzzle the
+     * script's own per-portal checks own). All scripts re-check their own gate, so a bot
+     * arriving early is refused and retries.
+     */
+    @Override
+    protected Portal scriptedForwardPortal() {
+        var map = getChr().getMap();
+        if (map == null || getChr().getMapId() == MagatiaPqData.SPLIT_ROOM) {
+            return null; // the split room's pt00..pt03 are claims on side rooms, not the chain
+        }
+        Portal exit = PartyQuestBot.scriptedPortalOf(map.getPortals(), "out00", null);
+        return exit != null ? exit
+                : PartyQuestBot.scriptedPortalOf(map.getPortals(), "pt00", null);
     }
 
     @Override

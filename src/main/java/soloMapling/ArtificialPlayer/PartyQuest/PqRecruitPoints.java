@@ -67,7 +67,8 @@ public final class PqRecruitPoints {
             new Point("KerningPQ",    103000000,  21,  30, 3, 4),
             new Point("LudiPQ",       221024500,  35,  50, 5, 6),
             new Point("PiratePQ",     251010404,  55, 100, 3, 6),
-            new Point("AmoriaPQ",     670010100,  40, 255, 6, 6),
+            // AmoriaPQ has no row on purpose - see PqBotSpawner.botTypeFor: the quest demands
+            // married members, which no bot can satisfy, so a lobby crowd would never start.
             new Point("EllinPQ",      300030100,  44,  55, 4, 6),
             // Magatia runs two parallel versions that recruit in different towns: Alcadno and
             // Zenumist. Same mechanics, same bot, different lobby and map range, so both towns

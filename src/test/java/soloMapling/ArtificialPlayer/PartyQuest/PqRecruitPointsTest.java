@@ -6,6 +6,7 @@ import soloMapling.ArtificialPlayer.BotTypes.Magatia.MagatiaPqData;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -26,10 +27,23 @@ class PqRecruitPointsTest {
     @Test
     void everyQuestWithABotHasARecruitPoint() {
         for (String name : new String[]{
-                "HenesysPQ", "KerningPQ", "LudiPQ", "PiratePQ", "AmoriaPQ",
+                "HenesysPQ", "KerningPQ", "LudiPQ", "PiratePQ",
                 "EllinPQ", "MagatiaPQ", "MagatiaPQ_Z", "ZakumPQ", "HorntailPQ",
                 "BossRushPQ", "PapulatusBattle", "OrbisPQ", "Pyramid", "Dojo"}) {
             assertNotNull(PqRecruitPoints.byName(name), name + " has no recruit point");
+        }
+    }
+
+    /**
+     * AmoriaPQ is deliberately absent from the table: its {@code getEligibleParty} requires
+     * every member to be married, which no bot can satisfy - a lobby crowd of APQ bots would
+     * never start a run and would only advertise a party the quest refuses.
+     */
+    @Test
+    void amoriaIsNotOfferedToBeRecruited() {
+        assertNull(PqRecruitPoints.byName("AmoriaPQ"));
+        for (PqRecruitPoints.Point point : PqRecruitPoints.ALL) {
+            assertNotEquals("AmoriaPQ", point.name());
         }
     }
 
@@ -72,7 +86,6 @@ class PqRecruitPointsTest {
         assertEquals(103000000, PqRecruitPoints.byName("KerningPQ").recruitMap());
         assertEquals(221024500, PqRecruitPoints.byName("LudiPQ").recruitMap());
         assertEquals(251010404, PqRecruitPoints.byName("PiratePQ").recruitMap());
-        assertEquals(670010100, PqRecruitPoints.byName("AmoriaPQ").recruitMap());
         assertEquals(300030100, PqRecruitPoints.byName("EllinPQ").recruitMap());
         assertEquals(261000021, PqRecruitPoints.byName("MagatiaPQ").recruitMap());
         assertEquals(211042300, PqRecruitPoints.byName("ZakumPQ").recruitMap());

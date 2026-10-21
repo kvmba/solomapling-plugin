@@ -1,6 +1,7 @@
 package soloMapling.ArtificialPlayer.BotTypes.BossRush;
 
 import org.gms.client.Character;
+import org.gms.server.maps.Portal;
 import soloMapling.ArtificialPlayer.BotGeneration;
 import soloMapling.ArtificialPlayer.PartyQuest.PartyQuestBot;
 import soloMapling.ArtificialPlayer.PartyQuest.PqActions;
@@ -47,6 +48,19 @@ public class BossRushPQBot extends PartyQuestBot {
     @Override
     protected int lobbyMapId() {
         return BossRushPqData.HOST_MAP;
+    }
+
+    /**
+     * The chain door the quest advances by: every room's {@code clear} is the script gate
+     * {@code raid_stage} (target 999999999), whose script warps into the next room once the room
+     * is empty. The script re-checks that gate itself, so a bot arriving early is refused and
+     * retries - which is exactly this quest's "fight until nothing is standing" loop.
+     */
+    @Override
+    protected Portal scriptedForwardPortal() {
+        var map = getChr().getMap();
+        return map == null ? null
+                : PartyQuestBot.scriptedPortalOf(map.getPortals(), "clear", "raid_stage");
     }
 
     @Override
