@@ -196,23 +196,64 @@ public final class PqActions {
     }
 
     /**
-     * The pickup walk: a bare driver move to a drop, plus the arrival nudge. Deliberately NOT
-     * {@link #walkTo} - a pickup may fire from the combat beat's flow (seekAndAttack callers),
-     * where the stage-walk shield would black out the fight and the bounded block would freeze
-     * the tick behind a 260-400px walk. The nudge is the whole point: it re-runs the owning
-     * stage sweep promptly on arrival (decisive in a bot-only room whose macro ticks are
-     * 36-48s apart), and that re-run picks the drop up close or re-arms this walk for the
+     * The pickup walk: a driver move to a drop, under the STAGE-WALK SHIELD, plus the arrival
+     * nudge. Deliberately NOT {@link #walkTo} - a pickup may fire from the combat beat's flow
+     * (seekAndAttack callers), where a bounded block would freeze the tick behind a 260-400px
+     * walk. The shield is not optional: without it the next 250ms combat beat re-seeks the
+     * next mob and moveIfTargetChanged overwrites this walk mid-flight (a pickup walk that
+     * never got to run - the reported "bots kill, never loot"), so the walk must own the
+     * steering while it lives. The shield expires with the walk itself (arrival, or the
+     * driver's own no-progress abandonment firing onFailure), so a dropped walk cannot pin
+     * the fight: the seek beat re-takes the steering on the next tick. The nudge re-runs the
+     * owning stage sweep promptly on arrival (decisive in a bot-only room whose macro ticks
+     * are 36-48s apart), and that re-run picks the drop up close or re-arms this walk for the
      * next out-of-reach one. Callers only reach here with the drop already past
      * {@link #PICKUP_REACH_SQ}, so no arrival re-check is needed.
      */
     private static void walkForPickup(Character bot, Point at) {
         SeekState control = seekStates.computeIfAbsent(bot.getId(), ignored -> new SeekState());
         synchronized (control) {
-            if (!movementShielded(bot.getId()) && !reactorBeatArmed(bot)) {
-                GCMovement.move(bot, at.x, at.y, () -> nudgeStageTick(bot));
+            if (movementShielded(bot.getId()) || reactorBeatArmed(bot)) {
+                return; // a stage walk / box approach owns the steering; it re-loots on arrival
             }
+            StageWalkShield shield = armStageWalkShield(bot);
+            GCMovement.move(bot, at.x, at.y, () -> {
+                stageWalkShieldUntilByBot.remove(bot.getId(), shield);
+                nudgeStageTick(bot);
+            }, () -> stageWalkShieldUntilByBot.remove(bot.getId(), shield));
         }
     }
+
+    /**
+     * Whether a PICKUP walk may take the driver away from a live chase this beat. The loot
+     * path calls this instead of the old bare {@code !GCMovement.isMoving}: a chase in
+     * flight re-issues its own goal every combat beat, so a walk armed under it died on the
+     * next seek tick - loot starved for the whole fight. But the player reads the same room
+     * as "loot first, then keep fighting", and the seek beat re-takes the steering the
+     * moment the pickup walk lands, so a paced seizure is safe: one pickup walk per
+     * {@link #PICKUP_SEIZURE_GAP_MS} per bot, and never while a shielded stage walk or an
+     * armed box approach owns the bot. The throttle is what keeps an UNREACHABLE drop from
+     * turning into a loot/seek ping-pong (the 317bfbc shape the old isMoving gate existed
+     * for): at worst the bot spends one short walk per window on it.
+     */
+    private static boolean pickupMaySeizeDriver(Character bot) {
+        if (movementShielded(bot.getId()) || reactorBeatArmed(bot)) {
+            return false;
+        }
+        long now = movementNowMs();
+        Long last = pickupSeizedAtByBot.get(bot.getId());
+        if (last != null && now - last < PICKUP_SEIZURE_GAP_MS) {
+            return false; // the chase keeps the driver inside the window
+        }
+        pickupSeizedAtByBot.put(bot.getId(), now);
+        return true;
+    }
+
+    /** botId -> the last moment a pickup walk took the driver off a live chase. */
+    private static final Map<Integer, Long> pickupSeizedAtByBot = new java.util.concurrent.ConcurrentHashMap<>();
+
+    /** How long a chase keeps the driver after a pickup walk has taken it once (see pickupMaySeizeDriver). */
+    private static final long PICKUP_SEIZURE_GAP_MS = 6_000L;
 
     /**
      * Whether {@link #walkTo} must release the stage-walk shield when it stops waiting: only when
@@ -1552,6 +1593,7 @@ public final class PqActions {
             }
         }
         orphanProbeAtByBot.remove(botId);
+        pickupSeizedAtByBot.remove(botId);
         stageWalkShieldUntilByBot.remove(botId);
         SEEK_TRACE_UNTIL.remove(botId);
         nextSteppedOnPickupAtByBot.remove(botId);
@@ -1629,10 +1671,16 @@ public final class PqActions {
             }
         }
         if (reachable.isEmpty()) {
-            // No live move to override: seekAndAttack/approachUnder own the walk while one
-            // is in flight (a loot walk issued over it would yank the bot off its chase).
-            // The re-issue replans from the CURRENT pixel once the driver is idle.
-            if (nearestOutOfReach != null && !GCMovement.isMoving(bot)) {
+            // A drop past reach arms the WALK to it. The old gate refused while the bot was
+            // moving at all, which during a fight is always - the chase re-issues its goal
+            // every combat beat, so the pickup walk armed under it died on the next seek
+            // tick and the drop sat through the whole fight (the "bots kill, never loot"
+            // report). pickupMaySeizeDriver instead takes the driver off a live CHASE at a
+            // paced cadence - the seek beat re-takes the steering once the walk lands - and
+            // keeps refusing for the origins that must never be interrupted (a shielded
+            // stage walk, a box approach). The re-issue replans from the CURRENT pixel once
+            // the walk lands or the driver abandons it.
+            if (nearestOutOfReach != null && pickupMaySeizeDriver(bot)) {
                 walkForPickup(bot, nearestOutOfReach);
             }
             return 0;
@@ -1792,13 +1840,14 @@ public final class PqActions {
      * the walk is proximity-honest like every pickup in this class) and it NEVER takes an
      * addressed pile or another bot's still-protected drop (the same entitlement
      * {@link DropCommands#botCanLoot} enforces for the sweep paths, which is what stopped the
-     * pass ping-pong). The walk is only armed when the driver is idle - seekAndAttack and
-     * approachUnder own a live move, and a loot walk issued over it would yank the bot off
-     * its chase (the 317bfbc guard).
+     * pass ping-pong). The walk arms through {@link #pickupMaySeizeDriver}: it takes the
+     * driver off a live chase at the paced cadence (the old bare isMoving gate starved loot
+     * for a whole fight - the chase is always "moving"), and refuses outright for the
+     * origins that must never be interrupted (a shielded stage walk, a box approach).
      */
     private static void sweepOrphanDropOutside(Character bot, double radiusPx, int[] itemIds) {
-        if (GCMovement.isMoving(bot)) {
-            return; // a live chase/approach walk owns the bot; never re-target it mid-flight
+        if (!pickupMaySeizeDriver(bot)) {
+            return; // a stage walk / box approach owns the bot, or a chase holds it inside the window
         }
         long now = movementNowMs();
         Long last = orphanProbeAtByBot.get(bot.getId());

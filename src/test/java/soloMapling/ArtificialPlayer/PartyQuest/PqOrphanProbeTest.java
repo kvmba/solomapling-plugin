@@ -112,6 +112,15 @@ class PqOrphanProbeTest {
         Field throttle = PqActions.class.getDeclaredField("orphanProbeAtByBot");
         throttle.setAccessible(true);
         ((Map<?, ?>) throttle.get(null)).remove(BOT_ID);
+        // The pickup walk now arms a stage-walk shield (and stamps the seizure window) under
+        // the shared BOT_ID: without these drops the next test inherits a live shield and its
+        // loot tick silently refuses to arm a walk.
+        Field seizure = PqActions.class.getDeclaredField("pickupSeizedAtByBot");
+        seizure.setAccessible(true);
+        ((Map<?, ?>) seizure.get(null)).remove(BOT_ID);
+        Field shield = PqActions.class.getDeclaredField("stageWalkShieldUntilByBot");
+        shield.setAccessible(true);
+        ((Map<?, ?>) shield.get(null)).remove(BOT_ID);
     }
 
     /** The live move goal of the bot's entry, read through the same-package test seam. */
@@ -284,6 +293,48 @@ class PqOrphanProbeTest {
 
         assertFalse(GCMovement.hasMoveTarget(bot),
                 "the party's stock posted for the leader must stay untouched - the ping-pong guard");
+    }
+
+    @Test
+    void aMidFightDropIsWalkedToEvenWhileTheChaseHoldsTheDriver() throws Exception {
+        // The reported "bots kill, never loot": a drop lands outside the loot radius mid-fight,
+        // the driver holds the chase's live goal, and the old bare !isMoving gate refused the
+        // pickup walk on every macro tick of the whole fight - the chase re-issues its goal
+        // every combat beat, so the bot never stops moving and the drop despawns. The seizure
+        // gate takes the driver at a paced cadence instead (the seek beat re-takes the
+        // steering the moment the walk lands).
+        MapleMap map = roomWithDropAt(new Point(0, 0), false);
+        Character bot = botOn(map, new Point(600, 0));
+
+        // The chase in flight: a live driver goal that is NOT the drop (the seek beat's shape).
+        GCMovement.move(bot, 700, 0);
+        assertNotNull(moveTargetOf(BOT_ID), "precondition: the chase holds the driver");
+
+        PqActions.loot(bot, bot.getPosition(), 260, new int[]{PASS});
+
+        assertEquals(new Point(0, 0), moveTargetOf(BOT_ID),
+                "a mid-fight drop must be walked to - the paced seizure takes the driver off the chase");
+        assertEquals(0, PqActions.countItem(bot, PASS), "visibility only - nothing picked up");
+    }
+
+    @Test
+    void theSeizureIsPacedSoAnUnreachableDropCannotPingPongTheDriver() throws Exception {
+        // The 317bfbc shape the old isMoving gate existed for: an unreachable drop must not
+        // turn the driver into a loot/seek tug-of-war. After one seizure the chase keeps the
+        // driver for the whole window - the very next loot tick must NOT re-arm the walk.
+        MapleMap map = roomWithDropAt(new Point(0, 0), false);
+        Character bot = botOn(map, new Point(600, 0));
+
+        GCMovement.move(bot, 700, 0); // the chase holds the driver
+        PqActions.loot(bot, bot.getPosition(), 260, new int[]{PASS});
+        assertEquals(new Point(0, 0), moveTargetOf(BOT_ID), "first tick: the seizure lands");
+
+        // The walk is abandoned (unreachable target), the seek re-arms the chase...
+        GCMovement.move(bot, 700, 0);
+        PqActions.loot(bot, bot.getPosition(), 260, new int[]{PASS});
+
+        assertEquals(new Point(700, 0), moveTargetOf(BOT_ID),
+                "inside the window the chase keeps the driver - no loot/seek ping-pong");
     }
 
     @Test
