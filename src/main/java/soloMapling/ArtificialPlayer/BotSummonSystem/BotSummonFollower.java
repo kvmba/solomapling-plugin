@@ -132,13 +132,14 @@ public final class BotSummonFollower {
     // writeAndFlush (or a no-op for the headless bot clients), so the hold is brief and bounded.
     //
     // A j.u.c. lock, NOT a synchronized monitor, is deliberate: the spawn wave runs on virtual
-    // threads, and on JDK 21 a virtual thread inside a synchronized block - waiting or holding -
-    // is pinned to its carrier. Wave 7 funnels ~200 creation threads through this lock; with a
-    // monitor, every waiter pins its carrier, four carriers freeze, and the holder blocked on a
-    // map's fair RW lock behind a queued writer never runs again - the whole wave (and the host
-    // respawn task parked on that same fair read lock) stalls forever. ReentrantLock park does
-    // not pin, so waiters unmount and the carrier pool stays alive. The lock is fair so the
-    // exactly-once handoff between racing spawn beats stays FIFO.
+    // threads, and on JDK 21 a virtual thread inside a synchronized block - entering, waiting or
+    // holding - is pinned to its carrier and cannot unmount. Wave 7 funnelled ~200 creation
+    // threads through this one monitor: every waiter pinned its carrier, and once all carriers
+    // were pinned, virtual threads still queued to start - including any thread that had to run
+    // to release the map fair-RW locks the holder was parked behind - were never scheduled, so
+    // the convoy stopped draining and the host respawn task parked on the same fair read lock
+    // froze with it. ReentrantLock park unmounts, so every waiter frees its carrier and those
+    // queues always drain again. Fair mode keeps the racing beats' handoff FIFO.
     private static final ConcurrentHashMap<Integer, ReentrantLock> LIFECYCLE_LOCKS =
             new ConcurrentHashMap<>();
 
@@ -146,6 +147,12 @@ public final class BotSummonFollower {
     private static ReentrantLock lifecycleLock(int botId) {
         return LIFECYCLE_LOCKS.computeIfAbsent(botId, k -> new ReentrantLock(true));
     }
+
+    // A summary of the invariant every lock site below preserves: exactly one side may act on a
+    // given bot's summon list per interleaving - either the tick's re-home/expiry (which only
+    // acts when TRACKED.get(botId) is still the very list reference the snapshot came from) or
+    // the teardown (which removes the list under the same lock first). Per-bot scope narrows the
+    // old global lock's server-wide convoy to one bot; the discipline itself is unchanged.
 
     // skillId -> the skill's WZ buff time in ms (0 = none). Memoized: the same Skill.wz row the
     // strike cadence and the host's own buff timer read, and like them read once per skill.
