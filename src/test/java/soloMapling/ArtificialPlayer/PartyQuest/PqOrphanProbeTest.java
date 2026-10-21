@@ -338,6 +338,35 @@ class PqOrphanProbeTest {
     }
 
     @Test
+    void aThrottledOrEmptyProbeDoesNotBurnTheSeizureWindow() throws Exception {
+        // The window is burned only when a walk ACTUALLY replaces the chase: a probe refused
+        // by its own throttle (or a scan that finds nothing) must leave the window free, or a
+        // drop that lands seconds later would be locked out of a walk for the rest of it.
+        MapleMap map = roomWithDropAt(new Point(0, 0), false);
+        Character bot = botOn(map, new Point(600, 0));
+
+        GCMovement.move(bot, 700, 0); // the chase holds the driver
+
+        // The probe runs first (its throttle is empty on a fresh bot) and burns its own
+        // 6s probe throttle but NOT the seizure window...
+        PqActions.loot(bot, bot.getPosition(), 260, new int[]{PASS});
+        assertEquals(new Point(0, 0), moveTargetOf(BOT_ID),
+                "the first loot tick arms the walk (the probe path)");
+        Field throttle = PqActions.class.getDeclaredField("orphanProbeAtByBot");
+        throttle.setAccessible(true);
+        Long stamped = ((Map<Integer, Long>) throttle.get(null)).get(BOT_ID);
+        assertNotNull(stamped, "precondition: the probe actually ran this tick");
+        GCMovement.move(bot, 700, 0); // ...then the seek re-arms the chase
+
+        // Now the probe is throttled: this tick must NOT re-walk (the probe skips), but the
+        // seizure window must stay free - pinning it here so a future stamp-on-probe
+        // regression is caught, not silently shipped.
+        PqActions.loot(bot, bot.getPosition(), 260, new int[]{PASS});
+        assertEquals(new Point(700, 0), moveTargetOf(BOT_ID),
+                "the throttled probe skips (the walk stays the chase) - and the window was not burned");
+    }
+
+    @Test
     void anotherBotsStillProtectedDropIsNeverTheProbeTarget() throws Exception {
         // The second entitlement half: botCanLoot refuses another bot's owner-protected
         // (dropType 0) drop inside its 15s FFA window - isFloorLoot does NOT (qty 1, no

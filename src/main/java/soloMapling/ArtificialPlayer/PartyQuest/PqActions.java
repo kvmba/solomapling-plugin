@@ -216,6 +216,7 @@ public final class PqActions {
             if (movementShielded(bot.getId()) || reactorBeatArmed(bot)) {
                 return; // a stage walk / box approach owns the steering; it re-loots on arrival
             }
+            stampPickupSeizure(bot); // a real move is taking the driver; start the chase-keeps window
             StageWalkShield shield = armStageWalkShield(bot);
             GCMovement.move(bot, at.x, at.y, () -> {
                 stageWalkShieldUntilByBot.remove(bot.getId(), shield);
@@ -235,18 +236,27 @@ public final class PqActions {
      * armed box approach owns the bot. The throttle is what keeps an UNREACHABLE drop from
      * turning into a loot/seek ping-pong (the 317bfbc shape the old isMoving gate existed
      * for): at worst the bot spends one short walk per window on it.
+     *
+     * <p>The stamp is NOT burned here - a refusal elsewhere (the orphan probe's own 6s
+     * throttle, a scan that finds nothing) would otherwise consume the window and leave a
+     * drop that appears seconds later locked out for the rest of it. {@link
+     * #stampPickupSeizure} fires only from {@link #walkForPickup}, when a move actually
+     * replaces the chase.
      */
     private static boolean pickupMaySeizeDriver(Character bot) {
-        if (movementShielded(bot.getId()) || reactorBeatArmed(bot)) {
-            return false;
-        }
-        long now = movementNowMs();
+        return !movementShielded(bot.getId()) && !reactorBeatArmed(bot)
+                && !pickupSeizureInWindow(bot);
+    }
+
+    /** Whether this bot's last pickup seizure is still inside its chase-keeps-driver window. */
+    private static boolean pickupSeizureInWindow(Character bot) {
         Long last = pickupSeizedAtByBot.get(bot.getId());
-        if (last != null && now - last < PICKUP_SEIZURE_GAP_MS) {
-            return false; // the chase keeps the driver inside the window
-        }
-        pickupSeizedAtByBot.put(bot.getId(), now);
-        return true;
+        return last != null && movementNowMs() - last < PICKUP_SEIZURE_GAP_MS;
+    }
+
+    /** Burn the window: a pickup walk has just taken the driver off a live chase. */
+    private static void stampPickupSeizure(Character bot) {
+        pickupSeizedAtByBot.put(bot.getId(), movementNowMs());
     }
 
     /** botId -> the last moment a pickup walk took the driver off a live chase. */
