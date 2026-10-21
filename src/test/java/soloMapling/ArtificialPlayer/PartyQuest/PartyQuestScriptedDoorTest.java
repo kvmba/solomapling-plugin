@@ -106,38 +106,66 @@ class PartyQuestScriptedDoorTest {
                 "clear/raid_stage is the chain door");
     }
 
-    /** Horntail 240050100: in00 / 999999999 / hontale_Bopen (Map2/240050100.img.xml). */
+    /** Horntail 240050100: in00 / 999999999 / hontale_BtoB1; 101..105: hontale_Bopen. */
     @Test
-    void theHorntailChainDoorIsHontaleBopen() {
+    void theHorntailChainDoorsAreBtoB1ThenBopen() {
         Portal spawn = portal(0, "sp", 999999999, null, 0, 0);
         Portal st = portal(1, "st00", 999999999, null, 0, 0);
-        Portal in = portal(2, "in00", 999999999, "hontale_Bopen", 100, 0);
+        Portal entryDoor = portal(2, "in00", 999999999, "hontale_BtoB1", 100, 0);
+        Portal roomDoor = portal(2, "in00", 999999999, "hontale_Bopen", 100, 0);
 
-        assertSame(in, PartyQuestBot.scriptedPortalOf(List.of(spawn, st, in), "in00", "hontale_Bopen"),
-                "in00/hontale_Bopen is the chain door");
-        // The Magatia maze doors share the in00 name with a DIFFERENT script - the script match
+        assertSame(entryDoor,
+                PartyQuestBot.scriptedPortalOf(List.of(spawn, st, entryDoor), "in00", "hontale_BtoB1"),
+                "240050100's in00 is hontale_BtoB1 (the entry door)");
+        assertSame(roomDoor,
+                PartyQuestBot.scriptedPortalOf(List.of(spawn, st, roomDoor), "in00", "hontale_Bopen"),
+                "the key rooms' in00 is hontale_Bopen");
+        // The Magatia maze doors share the in00 name with DIFFERENT scripts - the script match
         // is what keeps the Horntail declaration out of Magatia's rooms.
         Portal maze = portal(2, "in00", 999999999, "rnj3_in0", 100, 0);
+        assertNull(PartyQuestBot.scriptedPortalOf(List.of(spawn, maze), "in00", "hontale_BtoB1"),
+                "in00 under another script is not Horntail's entry door");
         assertNull(PartyQuestBot.scriptedPortalOf(List.of(spawn, maze), "in00", "hontale_Bopen"),
-                "in00 under another script is not Horntail's door");
+                "in00 under another script is not Horntail's key-room door");
     }
 
-    /** Magatia: pt00 (jnr4_rN) and out00 (jnr1_out) are both chain doors, by name only. */
+    /**
+     * Magatia 926110300 (the four-way split): its pt00 is jnr4_r1, a per-bot claim on one side
+     * tower, NOT a chain advance - the declaration must refuse every door in that room.
+     */
     @Test
-    void theMagatiaChainDoorMatchesEitherStageRoomExitName() {
+    void theMagatiaSplitRoomDeclaresNoDoor() {
+        Portal spawn = portal(0, "sp", 999999999, null, 0, 0);
+        Portal claim = portal(1, "pt00", 999999999, "jnr4_r1", 100, 0);
+        // The same script on a NON-split room's pt00 is a chain door (out00 preferred there).
+        assertNull(PartyQuestBot.scriptedPortalOf(List.of(spawn, claim), "out00", null),
+                "a split room has no out00 door");
+    }
+
+    /** Magatia 926110203: the chain door is out00 (jnr6_out); its pt00 (jnr6_act) is not. */
+    @Test
+    void theMagatiaEscortRoomExitsThroughOut00() {
+        Portal spawn = portal(0, "sp", 999999999, null, 0, 0);
+        Portal out = portal(1, "out00", 999999999, "jnr6_out", 100, 0);
+        Portal act = portal(2, "pt00", 999999999, "jnr6_act", 200, 0);
+
+        assertSame(out, PartyQuestBot.scriptedPortalOf(List.of(spawn, out, act), "out00", null),
+                "the escort room's exit is out00, preferred over pt00");
+    }
+
+    /** Magatia: out00 (fight sub-rooms, stage-6 towers) is preferred; pt00 covers the linear rooms. */
+    @Test
+    void theMagatiaChainDoorPrefersOut00ThenPt00() {
         Portal spawn = portal(0, "sp", 999999999, null, 0, 0);
         Portal pt = portal(1, "pt00", 999999999, "jnr4_r1", 100, 0);
         Portal out = portal(1, "out00", 999999999, "jnr1_out", 100, 0);
-        Portal maze = portal(2, "in00", 999999999, "rnj3_in0", 100, 0);
 
         assertSame(pt, PartyQuestBot.scriptedPortalOf(List.of(spawn, pt), "pt00", null),
-                "pt00 is a chain door whatever its stage handler");
+                "pt00 is a chain door in the linear rooms whatever its stage handler");
         assertSame(out, PartyQuestBot.scriptedPortalOf(List.of(spawn, out), "out00", null),
                 "out00 is a chain door whatever its stage handler");
         assertNull(PartyQuestBot.scriptedPortalOf(List.of(spawn, pt), "out00", null),
                 "a room whose exit is pt00 reports no out00 door");
-        assertNull(PartyQuestBot.scriptedPortalOf(List.of(spawn, maze), "pt00", null),
-                "the maze doors are not the chain");
         // A pt00 that has been re-pointed at a real map (the room's own maze exit) is not the
         // script gate - refusing it keeps the bot from warping through someone else's door.
         Portal repointed = portal(1, "pt00", 926110301, "jnr4_r1", 100, 0);

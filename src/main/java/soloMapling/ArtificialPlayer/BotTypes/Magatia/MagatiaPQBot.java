@@ -65,24 +65,29 @@ public class MagatiaPQBot extends PartyQuestBot {
     }
 
     /**
-     * The chain door the quest advances by: the stage rooms' turn-in portals ({@code pt00},
-     * {@code out00}, {@code jnr6_out}'s {@code out00}) are script gates ({@code jnrN_*}, target
-     * 999999999) whose scripts warp into the next room once the room's stage flag is set. The
-     * scripts re-check their own gate, so a bot arriving early is refused and retries. The
-     * {@code in00/in01} sub-room doors are deliberately NOT declared: those are the maze the
-     * party splits through, not the chain.
+     * The chain door the quest advances by, per room family:
+     * <ul>
+     *   <li>the fight sub-rooms and the stage-6 towers' exits are {@code out00} under a script
+     *       gate ({@code jnr6_out} in 203, open to 400 in 301..304), so {@code out00} is
+     *       preferred wherever the room has one;</li>
+     *   <li>the linear stage rooms advance by {@code pt00} ({@code jnr1_pt00} out of the entry,
+     *       {@code jnr1_out}, {@code jnr2_out}, {@code jnr3_out}).</li>
+     * </ul>
+     * Deliberately NOT declared: the maze's {@code in00/in01} (sub-room split, not the chain),
+     * room 926110300's {@code pt00..pt03} ({@code jnr4_rN} - a four-way claim of side rooms,
+     * not a chain advance), and the towers' climbing gates ({@code jnr5_rp}, a solo puzzle the
+     * script's own per-portal checks own). All scripts re-check their own gate, so a bot
+     * arriving early is refused and retries.
      */
     @Override
     protected Portal scriptedForwardPortal() {
         var map = getChr().getMap();
-        if (map == null) {
-            return null;
+        if (map == null || getChr().getMapId() == MagatiaPqData.SPLIT_ROOM) {
+            return null; // the split room's pt00..pt03 are claims on side rooms, not the chain
         }
-        // The stage-room exit is named pt00 in the puzzle rooms (jnr4_rN, jnr12_in) and out00 in
-        // the fight rooms (jnr1_out, jnr2_out, jnr3_out); both families are the chain.
-        Portal door = PartyQuestBot.scriptedPortalOf(map.getPortals(), "pt00", null);
-        return door != null ? door
-                : PartyQuestBot.scriptedPortalOf(map.getPortals(), "out00", null);
+        Portal exit = PartyQuestBot.scriptedPortalOf(map.getPortals(), "out00", null);
+        return exit != null ? exit
+                : PartyQuestBot.scriptedPortalOf(map.getPortals(), "pt00", null);
     }
 
     @Override

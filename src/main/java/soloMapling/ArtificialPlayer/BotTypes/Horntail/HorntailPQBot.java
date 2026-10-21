@@ -51,18 +51,21 @@ public class HorntailPQBot extends PartyQuestBot {
     }
 
     /**
-     * The chain door the quest advances by: each key room's {@code in00} is the script gate
-     * {@code hontale_Bopen} (target 999999999), whose script warps into the next room once that
-     * room's {@code Nstageclear} flag is set. The first door ({@code hontale_BtoB1} out of
-     * 240050100) additionally refuses the LAST player on the map - the party's own guard, which
+     * The chain door the quest advances by. The entry room's door is {@code hontale_BtoB1}
+     * (240050100 → 101, which refuses the LAST player on the map - the party's own guard, which
      * a bot trailing its leader is never the target of - and refuses anyone holding the room's
-     * key, which this bot hands to the leader first (see {@link #workStage}). The scripts
-     * re-check their own gates, so a bot arriving early is refused and retries.
+     * key, which this bot hands to the leader first); the key rooms' doors are
+     * {@code hontale_Bopen} (101..105, gated on the room's {@code Nstageclear} flag). The
+     * scripts re-check their own gates, so a bot arriving early is refused and retries.
      */
     @Override
     protected Portal scriptedForwardPortal() {
         var map = getChr().getMap();
-        return map == null ? null
+        if (map == null) {
+            return null;
+        }
+        Portal exit = PartyQuestBot.scriptedPortalOf(map.getPortals(), "in00", "hontale_BtoB1");
+        return exit != null ? exit
                 : PartyQuestBot.scriptedPortalOf(map.getPortals(), "in00", "hontale_Bopen");
     }
 
