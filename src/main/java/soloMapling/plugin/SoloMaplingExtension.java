@@ -26,6 +26,12 @@ import soloMapling.ArtificialPlayer.BotMessagingSystem.PlayerChatBridge;
 import soloMapling.ArtificialPlayer.BotPartySystem.BotPartyInviteBridge;
 import soloMapling.ArtificialPlayer.BotTradeSystem.BotTradeInviteBridge;
 import soloMapling.ArtificialPlayer.BotTradeSystem.SoloMaplingTradeParticipantHook;
+import soloMapling.ArtificialPlayer.BotDecoratorSystem.BotDecorationQueue;
+import soloMapling.ArtificialPlayer.BotDecoratorSystem.BotEquipChecker;
+import soloMapling.ArtificialPlayer.BotGrindSystem.GrindTickRegistry;
+import soloMapling.ArtificialPlayer.ConversationManager;
+import soloMapling.ArtificialPlayer.GCMoveSystem.GCMovement;
+import soloMapling.ArtificialPlayer.SocialHotPotatoManager;
 import soloMapling.ArtificialPlayer.LlmSystem.SocialLlmService;
 import soloMapling.ArtificialPlayer.SocialPersonaConfig;
 import soloMapling.ArtificialPlayer.BotDetailSystem.BotMedalBook;
@@ -55,11 +61,13 @@ import soloMapling.companion.provisioning.CompanionProvisioningInput;
 import soloMapling.companion.provisioning.CompanionProvisioningService;
 import soloMapling.companion.provisioning.HostRuntimeCompanionProvisioner;
 import soloMapling.companion.provisioning.SecureCompanionIdentityGenerator;
+import soloMapling.Environment.OpqLobbyRotation;
 import soloMapling.FreeMarket.FMShopDescGen;
 import soloMapling.itemPool.DesirableEquipList;
 import soloMapling.itemPool.EquipMetadataCache;
 import soloMapling.itemPool.ShopEquipPool;
 import soloMapling.server.MethodScheduler;
+import soloMapling.server.BotTickService;
 
 import java.time.Clock;
 import java.util.concurrent.ScheduledFuture;
@@ -100,10 +108,13 @@ public final class SoloMaplingExtension implements ServerExtension {
 
     private final CompanionLifecycleAccess companionLifecycleAccess =
             new CompanionLifecycleAccess();
-    private HostRuntime runtime;
-    private CompanionLifecycleCoordinator companionLifecycle;
-    private CompanionIntakeService companionIntake;
-    private ScheduledFuture<?> environmentStartupTask;
+    // Written on the host's startup thread (onLoad / onServerReady) and read on its shutdown
+    // thread. Plain fields would be a data race by the JMM, with the worst failure being a null
+    // read that skips stopping a coordinator whose companions are still online.
+    private volatile HostRuntime runtime;
+    private volatile CompanionLifecycleCoordinator companionLifecycle;
+    private volatile CompanionIntakeService companionIntake;
+    private volatile ScheduledFuture<?> environmentStartupTask;
 
     @Override
     public String id() {
@@ -398,6 +409,27 @@ public final class SoloMaplingExtension implements ServerExtension {
     @Override
     public void onUnload() {
         log.info("SoloMapling plugin onUnload");
+        // Disarm a still-pending wave first: it would otherwise fire while the rest of this method
+        // is tearing the world down. The cancel covers only a task that has not started yet; a wave
+        // already running is bounded by the guards below, which stop its tickers.
+        ScheduledFuture<?> startupTask = environmentStartupTask;
+        environmentStartupTask = null;
+        if (startupTask != null) {
+            startupTask.cancel(false);
+        }
+        // Everything below arms a self-renewing task. All of it has to be stopped here, or the
+        // task keeps driving characters in a world whose roster, classifier and runtime are gone.
+        // The environment stop comes first: it flips the wave/spawn guards, so an in-flight wave
+        // stops adding bots instead of racing the teardown below.
+        EnvironmentManager.stop();
+        ConversationManager.getInstance().stop();
+        SocialHotPotatoManager.getInstance().stop();
+        BotDecorationQueue.stop();
+        BotEquipChecker.stop();
+        OpqLobbyRotation.stop();
+        GrindTickRegistry.getInstance().shutdown();
+        BotTickService.shutdown();
+        GCMovement.shutdown();
         try {
             soloMapling.ArtificialPlayer.BotPetSystem.BotPetSystem.shutdown();
         } catch (Throwable ignored) {
@@ -423,13 +455,6 @@ public final class SoloMaplingExtension implements ServerExtension {
         CompanionRuntimeCapabilities.clear();
         ArtificialCharacters.unregister(BOT_IDS);
         CompanionRoster.clear();
-        // Disarm a still-pending wave: it would otherwise fire after this point and
-        // spawn bots into a torn-down plugin.
-        ScheduledFuture<?> startupTask = environmentStartupTask;
-        environmentStartupTask = null;
-        if (startupTask != null) {
-            startupTask.cancel(false);
-        }
         runtime = null;
     }
 }

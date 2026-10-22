@@ -89,7 +89,9 @@ public class PlatformPlacement {
 
     private static String platformKey(int mapId, String platformId) {
         return mapId + "/" + platformId;
-    }    /** Claim a free point on the platform: live occupants and in-flight claims both count. */
+    }
+
+    /** Claim a free point on the platform: live occupants and in-flight claims both count. */
     private static Point claimSpawnPoint(int mapId, String key, Platform platform,
                                          Point center, int radius) {
         Set<Point> pending = PENDING_SPAWN_POINTS.computeIfAbsent(

@@ -216,6 +216,22 @@ public class BotGeneration {
         return createBotOn(pos, map, baseClass, minLevel, maxLevel, forcedJobId, resolved);
     }
 
+    /**
+     * Set while the plugin is unloading. Flipped before the world is torn down so a spawn that is
+     * already past the wave-level guard cannot add another bot to a closing plugin.
+     */
+    private static volatile boolean shutdown = false;
+
+    /** Stop accepting new bots (plugin unload). One-way: the host never re-loads a plugin in-process. */
+    public static void shutdown() {
+        shutdown = true;
+    }
+
+    /** False once {@link #shutdown()} ran, for spawn-like work that builds characters itself. */
+    public static boolean spawningAllowed() {
+        return !shutdown;
+    }
+
     private static int createBotOn(Point pos, MapleMap map, int baseClass, int minLevel,
                                    int maxLevel, int forcedJobId, int channel) {
         // NONE means every channel is at capacity - skip the spawn rather than
@@ -225,7 +241,10 @@ public class BotGeneration {
         // spawn_rate_per_second, and a bot that is about to be skipped must not pay that wait.
         // Once the channels are full a whole wave would otherwise spend its permits - and its
         // seconds - queueing for spawns that are then thrown away, which reads as a hang.
-        if (channel == BotChannelRouter.NONE) {
+        if (channel == BotChannelRouter.NONE || shutdown) {
+            if (channel != BotChannelRouter.NONE) {
+                BotChannelRouter.release(channel); // reserved, but refused: hand the slot back
+            }
             return -1;
         }
 

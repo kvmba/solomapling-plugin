@@ -115,6 +115,9 @@ public class ArtificialFreeMarket {
         if (calculateSkippedSpot(mapId)) {
             return;
         }
+        if (!BotGeneration.spawningAllowed()) {
+            return; // the plugin is unloading; do not build shops for a world that is going away
+        }
 
         int world = 0;
         int channel = 1;

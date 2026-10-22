@@ -111,6 +111,13 @@ public class EnvironmentManager {
     /** See {@link #environmentLoadStartup()}: one world startup per process. */
     private static final AtomicBoolean STARTED = new AtomicBoolean(false);
 
+    /**
+     * Set by {@link #stop()}: an in-flight startup wave must wind down instead of spawning into a
+     * plugin that is already being unloaded. A plain ScheduledFuture.cancel() cannot reach this -
+     * the delayed task hands its body to a virtual thread long before the wave finishes.
+     */
+    private static final AtomicBoolean STOPPED = new AtomicBoolean(false);
+
     /** Warm channel-1 MapManager for hubs bots stampede first (avoids cold-load + DB under lock). */
     private static void preloadStartupMaps() {
         int[] hubs = {
@@ -156,11 +163,11 @@ public class EnvironmentManager {
         if (!STARTED.compareAndSet(false, true)) {
             return false;
         }
+        STOPPED.set(false);
         // EquipMetadataCache + DesirableEquipList are server data, loaded during
         // Server.init() alongside the other WZ-derived data - guaranteed ready
         // before any player can trigger this.
         long startupStart = System.currentTimeMillis();
-
         // Wake bots instantly (movement + macro brain) whenever a real player shares their map, in both
         // directions - a player entering a populated map, or a bot returning to the player's map.
         BotMapEntryResponder.register();
@@ -391,6 +398,20 @@ public class EnvironmentManager {
         return true;
     }
 
+    /**
+     * Wind the environment down for plugin unload.
+     *
+     * <p>Must run before the roster and the artificial-character classifier are cleared: an
+     * in-flight spawn wave checks these flags between waves and refuses new bots, and the
+     * periodically-armed tickers are cancelled by the caller. Without the flags, a startup wave
+     * that is still running would keep creating characters after unload, and the host would treat
+     * them as real players because the classifier is already gone.
+     */
+    public static void stop() {
+        STOPPED.set(true);
+        BotGeneration.shutdown();
+    }
+
     // Spawn one town's training-bot cohort: n job-coherent roaming grinders at the town's spawn
     // portal, each a random non-pirate explorer class (1..4) with a coherent level (lo..hi) + job +
     // gear set together by the decorator. They self-discover nearby level-appropriate field maps and
@@ -586,6 +607,11 @@ public class EnvironmentManager {
      * to a later wave's count.
      */
     private static void runWave(int number, String name, List<Runnable> tasks) {
+        if (STOPPED.get()) {
+            System.out.println(String.format(
+                    "[EnvironmentManager] === Wave %d (%s) skipped: environment unloading ===", number, name));
+            return;
+        }
         System.out.println(String.format(
                 "[EnvironmentManager] === Wave %d (%s) starting ===", number, name));
         long start = System.currentTimeMillis();
