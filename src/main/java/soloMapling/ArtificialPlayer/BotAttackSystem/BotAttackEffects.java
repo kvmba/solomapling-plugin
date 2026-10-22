@@ -138,8 +138,7 @@ public final class BotAttackEffects {
     /* Broadcast once, then apply each mob's summed damage + loot. True if any mob died. */
     private static boolean broadcastAndApply(Character bot, Packet packet,
                                              Map<Monster, List<Integer>> hits, int skillId, short hitDelay) {
-        bot.getMap().broadcastMessage(bot, packet, /* repeatToSource */ false);
-        GCMovement.markAttackAction(bot); // ALERT pose + the 1s attack action lock (the body owns the swing)
+        GCMovement.broadcastAttackAction(bot, packet);
         boolean anyKilled = false;
         for (Map.Entry<Monster, List<Integer>> hit : hits.entrySet()) {
             int total = 0;
@@ -192,11 +191,10 @@ public final class BotAttackEffects {
         int facingMask = bot.isFacingLeft() ? BotAttackData.FACING_LEFT_MASK : BotAttackData.FACING_RIGHT_MASK;
         Map<Integer, List<Integer>> targets = new HashMap<>();
         targets.put(mob.getObjectId(), List.of(damage));
-        bot.getMap().broadcastMessage(bot, PacketCreator.energyAttack(bot,
+        GCMovement.broadcastAttackAction(bot, PacketCreator.energyAttack(bot,
                 skill, skillLevel, facingMask,
                 /* numAttackedAndDamage */ (1 << 4) | 1,
-                targets, BotAttackData.DEFAULT_ATTACK_SPEED, bodyActionId, /* display */ 0), false);
-        GCMovement.markAttackAction(bot); // a real strike: the body is locked for the animation
+                targets, BotAttackData.DEFAULT_ATTACK_SPEED, bodyActionId, /* display */ 0));
         return applyDamageAndLoot(bot, mob, damage, (short) 0);
     }
 

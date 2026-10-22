@@ -115,12 +115,11 @@ public final class BotGroundMists {
 
         int facingMask = facingLeft ? BotAttackData.FACING_LEFT_MASK : BotAttackData.FACING_RIGHT_MASK;
         // The host's own magic writer - the same frame a real F/P mage's mist cast produces.
-        bot.getMap().broadcastMessage(bot, PacketCreator.magicAttack(bot,
+        GCMovement.broadcastAttackAction(bot, PacketCreator.magicAttack(bot,
                 FPMage.POISON_MIST, level, facingMask, (mobDamage.size() << 4) | 1,
                 mobDamage, BotAttackData.magicChargeFor(FPMage.POISON_MIST),
                 BotAttackData.DEFAULT_ATTACK_SPEED,
-                BotAttackData.actionFor(FPMage.POISON_MIST, null), 0), false);
-        GCMovement.markAttackAction(bot);
+                BotAttackData.actionFor(FPMage.POISON_MIST, null), 0));
 
         // The cloud: the host's own Mist object through the host's own spawnMist - the poison
         // scheduler (2.5s prop rolls, the per-second drain, the expiry broadcast) is the host's

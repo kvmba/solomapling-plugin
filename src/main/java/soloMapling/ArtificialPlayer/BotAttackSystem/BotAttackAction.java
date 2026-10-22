@@ -16,6 +16,20 @@ public final class BotAttackAction {
     }
 
     public static <T> T tryRun(Character bot, boolean force, T refused, Supplier<T> attack) {
+        return tryOwn(bot, force, refused, () -> {
+            if (!force && BotBuffDriver.hasPendingCast(bot.getId())
+                    && (!GCMovement.isEnabled(bot) || GCMovement.isGrounded(bot))) {
+                return refused; // reserve the next castable beat, not airborne/swimming combat
+            }
+            return attack.get();
+        });
+    }
+
+    static <T> T tryCast(Character bot, T refused, Supplier<T> cast) {
+        return tryOwn(bot, false, refused, cast);
+    }
+
+    private static <T> T tryOwn(Character bot, boolean force, T refused, Supplier<T> attack) {
         if (bot == null || bot.getMap() == null || !ACTIVE.add(bot.getId())) {
             return refused;
         }

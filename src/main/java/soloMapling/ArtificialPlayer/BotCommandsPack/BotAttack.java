@@ -67,7 +67,7 @@ public final class BotAttack {
         int bodyActionId = BotAttackData.randomActionFor(weaponType);
 
         Map<Integer, List<Integer>> emptyTargets = Collections.emptyMap();
-        chr.getMap().broadcastMessage(
+        GCMovement.broadcastAttackAction(
                 chr,
                 PacketCreator.closeRangeAttack(
                         chr,
@@ -79,10 +79,8 @@ public final class BotAttack {
                         /* speed        */ BotAttackData.DEFAULT_ATTACK_SPEED,
                         /* direction    */ bodyActionId,
                         /* display      */ 0
-                ),
-                /* repeatToSource */ false
+                )
         );
-        GCMovement.markAttackAction(chr); // the packet is on the wire: take the body for the animation
         return true;
     }
 
@@ -108,14 +106,12 @@ public final class BotAttack {
         int bodyActionId = BotAttackData.actionFor(skillId, weaponType);
 
         Map<Integer, List<Integer>> emptyTargets = Collections.emptyMap();
-        chr.getMap().broadcastMessage(
+        GCMovement.broadcastAttackAction(
                 chr,
                 PacketCreator.closeRangeAttack(chr, skillId, resolveSkillLevel(skillId), facingMask,
                         /* numAttackedAndDamage */ 0, emptyTargets, BotAttackData.DEFAULT_ATTACK_SPEED,
-                        bodyActionId, /* display */ 0),
-                false
+                        bodyActionId, /* display */ 0)
         );
-        GCMovement.markAttackAction(chr); // the packet is on the wire: take the body for the animation
         return true;
     }
 
@@ -143,14 +139,12 @@ public final class BotAttack {
         int projectile = BotAttackData.projectileFor(weaponType, chr);
 
         Map<Integer, List<Integer>> emptyTargets = Collections.emptyMap();
-        chr.getMap().broadcastMessage(
+        GCMovement.broadcastAttackAction(
                 chr,
                 PacketCreator.rangedAttack(chr, skillId, resolveSkillLevel(skillId), facingMask,
                         /* numAttackedAndDamage */ 0, projectile, emptyTargets,
-                        BotAttackData.speedFor(weaponType, BotAttackData.DEFAULT_ATTACK_SPEED), bodyActionId, /* display */ 0),
-                false
+                        BotAttackData.speedFor(weaponType, BotAttackData.DEFAULT_ATTACK_SPEED), bodyActionId, /* display */ 0)
         );
-        GCMovement.markAttackAction(chr); // the packet is on the wire: take the body for the animation
         return true;
     }
 
@@ -174,14 +168,12 @@ public final class BotAttack {
         int bodyActionId = BotAttackData.actionFor(skillId, weaponType);
 
         Map<Integer, List<Integer>> emptyTargets = Collections.emptyMap();
-        chr.getMap().broadcastMessage(
+        GCMovement.broadcastAttackAction(
                 chr,
                 PacketCreator.magicAttack(chr, skillId, resolveSkillLevel(skillId), facingMask,
                         /* numAttackedAndDamage */ 0, emptyTargets, BotAttackData.magicChargeFor(skillId),
-                        BotAttackData.DEFAULT_ATTACK_SPEED, bodyActionId, /* display */ 0),
-                false
+                        BotAttackData.DEFAULT_ATTACK_SPEED, bodyActionId, /* display */ 0)
         );
-        GCMovement.markAttackAction(chr); // the packet is on the wire: take the body for the animation
         return true;
     }
 

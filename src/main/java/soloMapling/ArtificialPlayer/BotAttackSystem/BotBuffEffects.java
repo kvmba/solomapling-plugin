@@ -16,7 +16,10 @@ import org.gms.net.packet.Packet;
 import org.gms.net.server.Server;
 import org.gms.net.server.world.Party;
 import org.gms.server.StatEffect;
+import org.gms.server.maps.MapleMap;
 import soloMapling.ArtificialPlayer.BotHelpers;
+import soloMapling.ArtificialPlayer.GCMoveSystem.GCMovement;
+import soloMapling.server.MethodScheduler;
 import org.gms.util.PacketCreator;
 import org.gms.util.Pair;
 
@@ -58,8 +61,22 @@ public final class BotBuffEffects {
      * buffed (the aura is simply there), not be caught mid-cast playing a buff animation for the
      * new arrival. The periodic re-buff keeps the default (animated) path - a grinder topping
      * itself up mid-session is normal and reads as organic.
+     * Returns -1 when the body is busy; callers may retry without consuming the recast timer.
      */
     public static int showBuff(Character bot, int skillId, boolean silent) {
+        if (bot == null || bot.getMap() == null || bot.getHp() <= 0) return 0;
+        if (silent) {
+            return showBuffNow(bot, skillId, true);
+        }
+        return BotAttackAction.tryCast(bot, -1, () -> {
+            if (GCMovement.isEnabled(bot) && !GCMovement.isGrounded(bot)) {
+                return -1; // an async cast must re-check the body when it actually runs
+            }
+            return showBuffNow(bot, skillId, false);
+        });
+    }
+
+    private static int showBuffNow(Character bot, int skillId, boolean silent) {
         if (bot == null || bot.getMap() == null) return 0;
 
         // Casting a skill is never done from the saddle - drop the mount first so the
@@ -79,8 +96,8 @@ public final class BotBuffEffects {
         // exists in Skill.wz but has no StatEffect at max level should still play its cast (the aura
         // below is the only part that needs the stat list). Skipped only for the silent on-arrival show.
         if (!silent) {
-            bot.getMap().broadcastMessage(bot,
-                    PacketCreator.showBuffEffect(bot.getId(), skillId, CAST_EFFECT_ID), false);
+            GCMovement.broadcastAttackAction(bot,
+                    PacketCreator.showBuffEffect(bot.getId(), skillId, CAST_EFFECT_ID));
         }
 
         // The persistent aura needs the buff's stat list (cheap memoized lookup,
@@ -413,7 +430,9 @@ public final class BotBuffEffects {
     /* As {@link #castBuff(Character, int)} but with the silent on-arrival re-show semantics of
      * {@link #showBuff(Character, int, boolean)}: no cast animation, only the aura (+ party spread). */
     public static int castBuff(Character bot, int skillId, boolean silent) {
-        showBuff(bot, skillId, silent);
+        if (bot == null || bot.getMap() == null || bot.getHp() <= 0) return 0;
+        int shown = showBuff(bot, skillId, silent);
+        if (shown < 0) return -1; // busy: do not grant a party buff from a refused cast
 
         Skill skill = SkillFactory.getSkill(skillId);
         if (skill == null) return 0;
@@ -433,7 +452,13 @@ public final class BotBuffEffects {
      * Used by the !bot givebuff command.
      */
     public static void givePartyBuff(Character bot, int skillId, Collection<Character> targets) {
-        showBuff(bot, skillId);
+        if (bot == null || bot.getMap() == null || bot.getHp() <= 0) return;
+        if (targets != null && !targets.isEmpty() && targets.stream().noneMatch(
+                target -> target != null && target.getMap() != null && target.getMap() == bot.getMap())) return;
+        if (showBuff(bot, skillId) < 0) {
+            retryCast(bot, () -> givePartyBuff(bot, skillId, targets));
+            return;
+        }
         if (targets == null || targets.isEmpty()) return;
 
         Skill skill = SkillFactory.getSkill(skillId);
@@ -446,9 +471,10 @@ public final class BotBuffEffects {
 
     private static void applyToTargets(Character bot, StatEffect effect, int skillId, Collection<Character> targets) {
         for (Character target : targets) {
-            if (target == null || target == bot) continue;
+            if (target == null || target == bot || target.getMap() == null
+                    || target.getMap() != bot.getMap()) continue;
             if (BotHelpers.isBot(target)) {
-                showBuff(target, skillId);            // party-member bots stay cosmetic
+                showBuff(target, skillId, true);      // receiving a buff is not a second cast
             } else {
                 effect.applyToTarget(bot, target);    // real player gets the working buff
                 showReceivedBuff(target, skillId);    // + the "received a party buff" particle
@@ -475,7 +501,13 @@ public final class BotBuffEffects {
      * cosmetic. Useful for extending key party buffs (Holy Symbol, Maple Warrior, ...).
      */
     public static void giveExtendedBuff(Character bot, int skillId, Collection<Character> targets, int durationMs) {
-        showBuff(bot, skillId);
+        if (bot == null || bot.getMap() == null || bot.getHp() <= 0) return;
+        if (targets != null && !targets.isEmpty() && targets.stream().noneMatch(
+                target -> target != null && target.getMap() != null && target.getMap() == bot.getMap())) return;
+        if (showBuff(bot, skillId) < 0) {
+            retryCast(bot, () -> giveExtendedBuff(bot, skillId, targets, durationMs));
+            return;
+        }
         if (targets == null || targets.isEmpty()) return;
 
         Skill skill = SkillFactory.getSkill(skillId);
@@ -484,13 +516,25 @@ public final class BotBuffEffects {
         if (effect == null) return;
 
         for (Character target : targets) {
-            if (target == null || target == bot) continue;
+            if (target == null || target == bot || target.getMap() == null
+                    || target.getMap() != bot.getMap()) continue;
             if (BotHelpers.isBot(target)) {
-                showBuff(target, skillId);                       // party-member bots stay cosmetic
+                showBuff(target, skillId, true);                 // receiving never owns the body
             } else {
                 applyBuffWithDuration(target, effect, skillId, durationMs);
             }
         }
+    }
+
+    private static void retryCast(Character bot, Runnable cast) {
+        if (bot == null || bot.getMap() == null || bot.getHp() <= 0) return;
+        MapleMap map = bot.getMap();
+        MethodScheduler.runAfterDelay(() -> {
+            // removePlayer leaves Character.map intact; membership, not just the map pointer,
+            // prevents a delayed request from casting forever after this bot despawns.
+            if (bot.getMap() == map && bot.getHp() > 0
+                    && map.getCharacterById(bot.getId()) == bot) cast.run();
+        }, 250L);
     }
 
     /*

@@ -121,11 +121,10 @@ public final class BotShadowWeb {
 
         int facingMask = facingLeft ? BotAttackData.FACING_LEFT_MASK : BotAttackData.FACING_RIGHT_MASK;
         // The host's own melee writer with the web's swingO1 pose.
-        map.broadcastMessage(bot, PacketCreator.closeRangeAttack(bot,
+        GCMovement.broadcastAttackAction(bot, PacketCreator.closeRangeAttack(bot,
                 Hermit.SHADOW_WEB, level, facingMask, (mobDamage.size() << 4) | 1,
                 mobDamage, BotAttackData.DEFAULT_ATTACK_SPEED,
-                BotAttackData.actionFor(Hermit.SHADOW_WEB, null), 0), false);
-        GCMovement.markAttackAction(bot);
+                BotAttackData.actionFor(Hermit.SHADOW_WEB, null), 0));
 
         // Per-mob status roll, the host's generic attack branch: chance first (the WZ prop,
         // 42-46% by level), then applyStatus with the effect's own monster statuses. The web

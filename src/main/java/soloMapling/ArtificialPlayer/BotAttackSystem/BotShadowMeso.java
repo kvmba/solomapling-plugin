@@ -138,11 +138,10 @@ public final class BotShadowMeso {
         int facingMask = facingLeft ? BotAttackData.FACING_LEFT_MASK : BotAttackData.FACING_RIGHT_MASK;
         // The host's own ranged writer with projectile 0 - the same frame a real Hermit's
         // throw produces (the client draws the coin sprites; no star is consumed or rendered).
-        bot.getMap().broadcastMessage(bot, PacketCreator.rangedAttack(bot,
+        GCMovement.broadcastAttackAction(bot, PacketCreator.rangedAttack(bot,
                 Hermit.SHADOW_MESO, level, facingMask, (mobDamage.size() << 4) | 1,
                 0, mobDamage, BotAttackData.DEFAULT_ATTACK_SPEED,
-                BotAttackData.actionFor(Hermit.SHADOW_MESO, weapon), 0), false);
-        GCMovement.markAttackAction(bot);
+                BotAttackData.actionFor(Hermit.SHADOW_MESO, weapon), 0));
 
         boolean killed = false;
         for (Monster mob : targets) {

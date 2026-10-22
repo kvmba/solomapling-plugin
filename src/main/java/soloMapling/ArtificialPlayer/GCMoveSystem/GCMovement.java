@@ -2,6 +2,7 @@ package soloMapling.ArtificialPlayer.GCMoveSystem;
 
 import org.gms.client.Character;
 import org.gms.constants.game.CharacterStance;
+import org.gms.net.packet.Packet;
 import org.gms.server.maps.Foothold;
 import org.gms.server.maps.MapleMap;
 import org.gms.server.maps.Portal;
@@ -426,11 +427,33 @@ public final class GCMovement {
     }
 
     /**
+     * Commit a real body action: stop on the wire BEFORE the action, never on the next tick.
+     * Admission/targeting belongs to BotAttackAction; refused decisions never reach this seam.
+     * Air attacks retain their arc, and a follow-up inside the same action must not inject a
+     * movement packet that cancels the first swing. Keep pending navigation goals for after it.
+     */
+    public static void broadcastAttackAction(Character bot, Packet packet) {
+        BotMovementState st = STATES.get(bot.getId());
+        if (st == null) {
+            bot.getMap().broadcastMessage(bot, packet, false);
+            return;
+        }
+        synchronized (st) {
+            if (isGrounded(st) && !attackActionLocked(st)) {
+                BotContactDamage.markAlerted(st);
+                BotPhysicsEngine.idleOnGround(st, bot);
+                BotMovementManager.broadcastMovement(st);
+            }
+            bot.getMap().broadcastMessage(bot, packet, false);
+            markAttackAction(bot);
+        }
+    }
+
+    /**
      * Flag a broadcast attack and take the body for {@link #ATTACK_ACTION_LOCK_MS}.
      *
-     * <p>This is the ONE arming point for the attack-action lock, called from the seams that
-     * actually put an attack packet on the wire ({@link soloMapling.ArtificialPlayer.BotAttackSystem.BotAttackEffects},
-     * the meso/mist/web casts, the flavour swings and the skill show). A decision that never
+     * <p>This is the ONE arming point for the attack-action lock, called by
+     * {@link #broadcastAttackAction} after the packet is sent. A decision that never
      * reaches a packet (driver cooldown, no target, sealed) must not call it — otherwise a miss
      * would freeze the bot for a second for nothing.
      *

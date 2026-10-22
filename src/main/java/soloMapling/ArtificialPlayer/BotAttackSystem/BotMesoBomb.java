@@ -289,11 +289,10 @@ public final class BotMesoBomb {
         // The host's own close-range writer: addAttackBody special-cases 4211006 with the
         // per-entry bag-count byte, so this frame is byte-identical to a real player's explosion,
         // prone2 pose included (BotAttackData.actionFor resolves it).
-        bot.getMap().broadcastMessage(bot, PacketCreator.closeRangeAttack(bot,
+        GCMovement.broadcastAttackAction(bot, PacketCreator.closeRangeAttack(bot,
                 ChiefBandit.MESO_EXPLOSION, level, facingMask, (mobDamage.size() << 4) | maxLines,
                 mobDamage, BotAttackData.DEFAULT_ATTACK_SPEED,
-                BotAttackData.actionFor(ChiefBandit.MESO_EXPLOSION, null), 0), false);
-        GCMovement.markAttackAction(bot);
+                BotAttackData.actionFor(ChiefBandit.MESO_EXPLOSION, null), 0));
 
         int total = 0;
         boolean killed = false;

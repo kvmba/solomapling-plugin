@@ -268,8 +268,8 @@ public class AttackActionLockExecutionSimTest {
         try (var in = soloMapling.ArtificialPlayer.BotAttackSystem.BotAttackEffects.class
                 .getClassLoader().getResourceAsStream(res)) {
             String pool = new String(in.readAllBytes(), java.nio.charset.StandardCharsets.ISO_8859_1);
-            assertTrue(pool.contains("markAttackAction"),
-                    "the strike broadcast must arm the attack action lock");
+            assertTrue(pool.contains("broadcastAttackAction"),
+                    "the strike must use the ordered stop/action/lock broadcast");
         }
     }
 
@@ -326,7 +326,7 @@ public class AttackActionLockExecutionSimTest {
                                 public void visitMethodInsn(int opcode, String owner,
                                                             String mname, String mdescriptor,
                                                             boolean isInterface) {
-                                    if ("markAttackAction".equals(mname)
+                                    if ("broadcastAttackAction".equals(mname)
                                             && owner.endsWith("GCMovement")) {
                                         armings[0]++;
                                     }
