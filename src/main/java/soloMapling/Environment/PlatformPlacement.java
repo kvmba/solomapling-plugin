@@ -14,9 +14,12 @@ import java.awt.*;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.Random;
 import java.util.stream.Collectors;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
@@ -29,7 +32,6 @@ import static soloMapling.ArtificialPlayer.BotMessagingSystem.CharacterStorage.g
 import static soloMapling.DebugUtilities.debugprint;
 import static soloMapling.DebugUtilities.fmt;
 import static soloMapling.Environment.PlatformSpawner.findUnoccupiedPoint;
-import static soloMapling.Environment.PlatformSpawner.findUnoccupiedPoints;
 import static soloMapling.server.SoloMaplingUtilities.getMapleMapById;
 
 // The platform-placement utility library extracted from EnvironmentManager: spawning bot batches
@@ -67,6 +69,78 @@ public class PlatformPlacement {
     // is created, so it lands on open ground instead.
     private static final int LADDER_CLEAR_X = 18;  // px clear of the rope's x axis
     private static final int LADDER_CLEAR_Y = 24;  // px past the rope's ends (sprite overhang)
+
+    /*
+     * Spawn placement must see the platform as it really is, not as this call imagines it.
+     *
+     * The old code built a private `occupied` list per call, so two spawners hitting the same map
+     * and platform in the same startup wave - wave 5 runs spawnHenesysBotsBatch(park) and
+     * spawnFillerBotsHenesysPark() concurrently on 100000200 - each started from "nothing here"
+     * and scattered the same bots over the same pixels. The same thing happened sequentially
+     * whenever one platform was filled three times over (spawnMerchBotsBatch calls the spawner
+     * once per bot type).
+     *
+     * Occupancy is therefore: the characters standing on that platform right now, plus the points
+     * a concurrent spawn has already picked but not yet registered. The pending entry is dropped
+     * as soon as that one spawn attempt settles, so nothing accumulates across the session and a
+     * point freed by a failed spawn is immediately available again.
+     */
+    private static final Map<String, Set<Point>> PENDING_SPAWN_POINTS = new ConcurrentHashMap<>();
+
+    private static String platformKey(int mapId, String platformId) {
+        return mapId + "/" + platformId;
+    }    /** Claim a free point on the platform: live occupants and in-flight claims both count. */
+    private static Point claimSpawnPoint(int mapId, String key, Platform platform,
+                                         Point center, int radius) {
+        Set<Point> pending = PENDING_SPAWN_POINTS.computeIfAbsent(
+                key, k -> ConcurrentHashMap.newKeySet());
+        synchronized (pending) {
+            List<Point> occupied = new ArrayList<>(livePointsOn(mapId, platform));
+            occupied.addAll(pending);
+            Point spot = radius > 0
+                    ? findUnoccupiedPointInRadius(platform, occupied, center, radius)
+                    : findUnoccupiedPoint(platform, occupied);
+            if (spot == null) {
+                return null;
+            }
+            // Keep the spawn off any rope/ladder column so the bot lands on open floor (see
+            // avoidLadderColumn) instead of rendering a standing pose on a ladder. FLAT only: a
+            // flat platform's y is constant, so moving x never leaves the surface, whereas on a
+            // SLOPED platform the recorded y belongs to its own x. The nudge happens BEFORE the
+            // claim is recorded, so the pending point is the point that will actually be spawned.
+            if (platform.isFlat()) {
+                MapleMap map = getMapleMapById(mapId);
+                List<Rope> ropes = map == null ? List.of() : map.getRopes();
+                spot = avoidLadderColumn(ropes, spot, platform.getMinX(), platform.getMaxX());
+            }
+            pending.add(spot);
+            return spot;
+        }
+    }
+
+    /** Where characters actually stand on this platform right now. */
+    private static List<Point> livePointsOn(int mapId, Platform platform) {
+        MapleMap map = getMapleMapById(mapId);
+        if (map == null) {
+            return List.of();
+        }
+        List<Point> out = new ArrayList<>();
+        for (Character chr : map.getAllPlayers()) {
+            Point position = chr.getPosition();
+            if (isPositionOnPlatform(position, platform)) {
+                out.add(position);
+            }
+        }
+        return out;
+    }
+
+    /** Release a claim once the spawn it was taken for has settled. */
+    private static void settleSpawnPoint(String key, Point spot) {
+        Set<Point> pending = PENDING_SPAWN_POINTS.get(key);
+        if (pending != null && spot != null) {
+            pending.remove(spot);
+        }
+    }
 
     /**
      * Shift {@code spawn} clear of every rope/ladder column in {@code ropes} (keeps its y, clamps x
@@ -115,31 +189,23 @@ public class PlatformPlacement {
 
     public static List<Integer> spawnBotsOnMapOnPlatform(int numBots, int mapId, String platform_id) {
         Platform flatPlatform = PlatformParser.parsePlatform(mapId, platform_id);
-        List<Point> occupied = Collections.synchronizedList(new ArrayList<>());
         ConcurrentLinkedQueue<Integer> characterIds = new ConcurrentLinkedQueue<>();
         AtomicInteger failureCount = new AtomicInteger(0);
 
         debugprint(fmt("Spawning {} bots on {} at platform: {}", numBots, mapId, platform_id));
 
-        MapleMap spawnMap = getMapleMapById(mapId);
-        List<Rope> ropes = spawnMap == null ? List.of() : spawnMap.getRopes();
         // Pre-generate all spawn points (must be sequential to avoid overlaps)
         List<Point> spawnPoints = new ArrayList<>();
         for (int i = 0; i < numBots; i++) {
-            Point spawn = findUnoccupiedPoint(flatPlatform, occupied);
-            // Keep the spawn off any rope/ladder column so the bot lands on open floor
-            // (see avoidLadderColumn) instead of rendering a standing pose on a ladder.
-            // FLAT only: a flat platform's y is constant, so moving x never leaves the surface,
-            // whereas on a SLOPED platform the recorded y belongs to its own x.
-            if (flatPlatform.isFlat()) {
-                spawn = avoidLadderColumn(ropes, spawn, flatPlatform.getMinX(), flatPlatform.getMaxX());
+            Point spawn = claimSpawnPoint(mapId, platformKey(mapId, platform_id), flatPlatform, null, 0);
+            if (spawn == null) {
+                continue; // the platform is genuinely full; do not stack on top of someone
             }
-            occupied.add(spawn);
             spawnPoints.add(spawn);
         }
 
         // Use CountDownLatch to wait for all spawns to complete
-        CountDownLatch latch = new CountDownLatch(numBots);
+        CountDownLatch latch = new CountDownLatch(spawnPoints.size());
 
         for (Point spawn : spawnPoints) {
             ExecutorServiceManager.runAsync(() -> {
@@ -155,6 +221,7 @@ public class PlatformPlacement {
                     failureCount.incrementAndGet();
                     debugprint(fmt("Exception creating bot at {}: {}", spawn, e.getMessage()));
                 } finally {
+                    settleSpawnPoint(platformKey(mapId, platform_id), spawn);
                     latch.countDown();
                 }
             });
@@ -165,7 +232,7 @@ public class PlatformPlacement {
             boolean completed = latch.await(120, TimeUnit.SECONDS);
             if (!completed) {
                 debugprint(fmt("Timeout waiting for bot spawns. Completed: {}/{}",
-                        characterIds.size(), numBots));
+                        characterIds.size(), spawnPoints.size()));
             }
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
@@ -183,7 +250,6 @@ public class PlatformPlacement {
 
     public static List<Integer> spawnBotsOnMapOnPlatformInRadius(int numBots, int mapId, String platform_id, Point center, int radius) {
         Platform flatPlatform = PlatformParser.parsePlatform(mapId, platform_id);
-        List<Point> occupied = Collections.synchronizedList(new ArrayList<>());
         ConcurrentLinkedQueue<Integer> characterIds = new ConcurrentLinkedQueue<>();
         AtomicInteger failureCount = new AtomicInteger(0);
 
@@ -193,12 +259,11 @@ public class PlatformPlacement {
         // Pre-generate all spawn points within radius
         List<Point> spawnPoints = new ArrayList<>();
         for (int i = 0; i < numBots; i++) {
-            Point spawn = findUnoccupiedPointInRadius(flatPlatform, occupied, center, radius);
+            Point spawn = claimSpawnPoint(mapId, platformKey(mapId, platform_id), flatPlatform, center, radius);
             if (spawn == null) {
                 debugprint(fmt("Could not find unoccupied point for bot {} within radius", i));
                 continue;
             }
-            occupied.add(spawn);
             spawnPoints.add(spawn);
         }
 
@@ -218,6 +283,7 @@ public class PlatformPlacement {
                     failureCount.incrementAndGet();
                     debugprint(fmt("Exception creating bot at {}: {}", spawn, e.getMessage()));
                 } finally {
+                    settleSpawnPoint(platformKey(mapId, platform_id), spawn);
                     latch.countDown();
                 }
             });
@@ -247,16 +313,24 @@ public class PlatformPlacement {
         int maxX = Math.max(p1.x, p2.x);
         int baseY = p1.y;
         Platform adHocPlatform = new Platform(minX, maxX, baseY, List.of(p1, p2), Platform.Type.FLAT);
+        // Ad-hoc spans have no platform id; key them by the span itself so two fillers that
+        // overlap on the same map share one claim table instead of stacking on each other.
+        String key = platformKey(mapId, minX + ":" + maxX + "@" + baseY);
 
-        List<Point> occupied = Collections.synchronizedList(new ArrayList<>());
         ConcurrentLinkedQueue<Integer> characterIds = new ConcurrentLinkedQueue<>();
         AtomicInteger failureCount = new AtomicInteger(0);
 
         debugprint(fmt("Spawning {} filler bots between ({},{}) and ({},{}) on map {}",
                 numBots, p1.x, p1.y, p2.x, p2.y, mapId));
 
-        List<Point> spawnPoints = findUnoccupiedPoints(adHocPlatform, occupied, numBots);
-        occupied.addAll(spawnPoints);
+        List<Point> spawnPoints = new ArrayList<>();
+        for (int i = 0; i < numBots; i++) {
+            Point spawn = claimSpawnPoint(mapId, key, adHocPlatform, null, 0);
+            if (spawn == null) {
+                break; // the span is genuinely full; do not stack on top of someone
+            }
+            spawnPoints.add(spawn);
+        }
 
         CountDownLatch latch = new CountDownLatch(spawnPoints.size());
         double chairChance = 0.20;
@@ -281,6 +355,7 @@ public class PlatformPlacement {
                     failureCount.incrementAndGet();
                     debugprint(fmt("Exception creating filler bot at {}: {}", spawn, e.getMessage()));
                 } finally {
+                    settleSpawnPoint(key, spawn);
                     latch.countDown();
                 }
             });
@@ -311,19 +386,22 @@ public class PlatformPlacement {
         int maxX = Math.max(p1.x, p2.x);
         int baseY = p1.y;
         Platform adHocPlatform = new Platform(minX, maxX, baseY, List.of(p1, p2), Platform.Type.FLAT);
+        String key = platformKey(mapId, minX + ":" + maxX + "@" + baseY);
 
-        List<Point> occupied = Collections.synchronizedList(new ArrayList<>());
         ConcurrentLinkedQueue<Integer> characterIds = new ConcurrentLinkedQueue<>();
         AtomicInteger failureCount = new AtomicInteger(0);
 
         debugprint(fmt("Spawning {} filler bots (locked Y={}) between x={} and x={} on map {}",
                 numBots, baseY, minX, maxX, mapId));
 
-        List<Point> spawnPoints = findUnoccupiedPoints(adHocPlatform, occupied, numBots);
-        for (Point sp : spawnPoints) {
-            sp.y = baseY;
+        List<Point> spawnPoints = new ArrayList<>();
+        for (int i = 0; i < numBots; i++) {
+            Point spawn = claimSpawnPoint(mapId, key, adHocPlatform, null, 0);
+            if (spawn == null) {
+                break; // the span is genuinely full; do not stack on top of someone
+            }
+            spawnPoints.add(spawn);
         }
-        occupied.addAll(spawnPoints);
 
         CountDownLatch latch = new CountDownLatch(spawnPoints.size());
         double chairChance = 0.20;
@@ -348,6 +426,7 @@ public class PlatformPlacement {
                     failureCount.incrementAndGet();
                     debugprint(fmt("Exception creating filler bot at {}: {}", spawn, e.getMessage()));
                 } finally {
+                    settleSpawnPoint(key, spawn);
                     latch.countDown();
                 }
             });
