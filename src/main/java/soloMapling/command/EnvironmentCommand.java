@@ -320,7 +320,9 @@ public class EnvironmentCommand extends Command {
                 printHelp();
                 break;
             case "loadenv":
-                environmentLoadStartup();
+                if (!environmentLoadStartup()) {
+                    player.yellowMessage("Environment startup already ran; nothing was spawned again.");
+                }
                 break;
             case "spawnfmbots":
                 spawnBotsInFMEntrance();

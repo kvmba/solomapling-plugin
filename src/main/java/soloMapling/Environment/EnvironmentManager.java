@@ -66,6 +66,7 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.stream.Collectors;
@@ -107,6 +108,9 @@ public class EnvironmentManager {
     private static final int MAPLE_ISLAND_TUTORIAL = 10000;
     private static final int OPQ_LOBBY = 200080101;
 
+    /** See {@link #environmentLoadStartup()}: one world startup per process. */
+    private static final AtomicBoolean STARTED = new AtomicBoolean(false);
+
     /** Warm channel-1 MapManager for hubs bots stampede first (avoids cold-load + DB under lock). */
     private static void preloadStartupMaps() {
         int[] hubs = {
@@ -136,7 +140,22 @@ public class EnvironmentManager {
                 ok, hubs.length, (System.currentTimeMillis() - t0) / 1000.0));
     }
 
-    public static void environmentLoadStartup() {
+    /**
+     * One world startup at a time, ever.
+     *
+     * <p>The startup is not just a sequence of spawns: it also arms the self-renewing tickers
+     * below (ConversationManager / SocialHotPotato) and re-runs every spawn wave. Two entrants -
+     * the delayed startup task and the {@code !env loadenv} command running on the command pool -
+     * would therefore double the population and leave a second, uncancellable tick chain behind.
+     * The guard is a CAS rather than a lock because the losing caller must not queue up and then
+     * repeat the whole load: it must be told the environment is already up.
+     *
+     * @return false when the environment was already started by an earlier call; nothing is done.
+     */
+    public static boolean environmentLoadStartup() {
+        if (!STARTED.compareAndSet(false, true)) {
+            return false;
+        }
         // EquipMetadataCache + DesirableEquipList are server data, loaded during
         // Server.init() alongside the other WZ-derived data - guaranteed ready
         // before any player can trigger this.
@@ -369,6 +388,7 @@ public class EnvironmentManager {
         System.out.println(String.format(
                 "[EnvironmentManager] === All bots initialized: %d bots in %.1fs ===",
                 BotGeneration.getBotsCreatedCount(), totalSeconds));
+        return true;
     }
 
     // Spawn one town's training-bot cohort: n job-coherent roaming grinders at the town's spawn
