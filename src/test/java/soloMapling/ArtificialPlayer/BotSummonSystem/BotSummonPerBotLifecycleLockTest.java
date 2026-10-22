@@ -8,7 +8,8 @@ import org.gms.property.ServiceProperty;
 import org.gms.server.maps.MapleMap;
 import org.gms.server.maps.Summon;
 import org.gms.service.ConfigService;
-import org.junit.jupiter.api.AfterAll;
+import soloMapling.ArtificialPlayer.BotHelpers;
+import soloMapling.ArtificialPlayer.GCMoveSystem.GCMovement;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
@@ -31,6 +32,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.RETURNS_DEEP_STUBS;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.mockStatic;
 
 /**
  * The lifecycle lock is PER BOT and a {@code java.util.concurrent.locks.ReentrantLock}, and the
@@ -85,13 +87,6 @@ class BotSummonPerBotLifecycleLockTest {
         org.gms.net.server.Server.getInstance();
     }
 
-    @AfterAll
-    static void releaseLocks() throws Exception {
-        var locks = BotSummonFollower.class.getDeclaredField("LIFECYCLE_LOCKS");
-        locks.setAccessible(true);
-        ((java.util.concurrent.ConcurrentHashMap<?, ?>) locks.get(null)).clear();
-    }
-
     @AfterEach
     void releaseTracking() {
         for (int botId : new int[]{BOT_A, BOT_B}) {
@@ -106,21 +101,101 @@ class BotSummonPerBotLifecycleLockTest {
     private static final int BOT_B = 987_102;
 
     @Test
-    void theLifecycleLockIsAPerBotJucLockNotAMonitor() throws Exception {
+    void aStaleRecastCannotResurrectATornDownLease() throws Exception {
+        Character bot = mock(Character.class);
+        when(bot.getId()).thenReturn(BOT_A);
+        var field = BotSummonFollower.class.getDeclaredField("REGRANT_DUE_AT");
+        field.setAccessible(true);
+        @SuppressWarnings("unchecked")
+        var leases = (java.util.Map<Integer, Long>) field.get(null);
+        leases.put(BOT_A, 0L);
+        BotSummonFollower.despawnAll(bot);
+        var recast = BotSummonFollower.class.getDeclaredMethod("regrantFor",
+                Integer.class, BotSummonConfig.class, long.class, long.class);
+        recast.setAccessible(true);
+        try (var controller = mockStatic(BotSummonController.class)) {
+            recast.invoke(null, BOT_A, BotSummonConfig.defaults(), System.currentTimeMillis(), generation());
+            controller.verifyNoInteractions();
+        }
+        assertFalse(leases.containsKey(BOT_A));
+    }
+
+    @Test
+    void anExpiredSummonIsNotRehomedOrAttackedFromItsRetiredList() throws Exception {
+        Character bot = mock(Character.class);
+        MapleMap map = mock(MapleMap.class);
+        when(bot.getId()).thenReturn(BOT_A);
+        when(bot.getMap()).thenReturn(map);
+        Summon entity = mock(Summon.class, RETURNS_DEEP_STUBS);
+        BotSummonFollower.register(BOT_A, SPEC, entity, map);
+        var tracked = BotSummonFollower.class.getDeclaredField("TRACKED");
+        tracked.setAccessible(true);
+        @SuppressWarnings("unchecked")
+        var lists = (java.util.Map<Integer, List<BotSummon>>) tracked.get(null);
+        lists.get(BOT_A).get(0).expireAtMs = 1;
+        var tick = BotSummonFollower.class.getDeclaredMethod("tickBot", int.class, BotSummonConfig.class, long.class);
+        tick.setAccessible(true);
+        try (var helpers = mockStatic(BotHelpers.class); var movement = mockStatic(GCMovement.class)) {
+            helpers.when(() -> BotHelpers.getCharFromChannelStorage(BOT_A)).thenReturn(bot);
+            movement.when(() -> GCMovement.isMapObserved(0)).thenReturn(true);
+            tick.invoke(null, BOT_A, BotSummonConfig.defaults(), generation());
+        }
+        assertFalse(BotSummonFollower.isTracked(BOT_A));
+        org.mockito.Mockito.verify(map).removeMapObject(entity);
+    }
+
+    @Test
+    void anOldServiceTickCannotRetireTheNewServicesSummon() throws Exception {
+        Character bot = mock(Character.class);
+        MapleMap map = mock(MapleMap.class);
+        when(bot.getId()).thenReturn(BOT_A);
+        when(bot.getMap()).thenReturn(map);
+        BotSummonFollower.register(BOT_A, SPEC, mock(Summon.class, RETURNS_DEEP_STUBS), map);
+        var tick = BotSummonFollower.class.getDeclaredMethod("tickBot", int.class, BotSummonConfig.class, long.class);
+        tick.setAccessible(true);
+        try (var helpers = mockStatic(BotHelpers.class); var movement = mockStatic(GCMovement.class)) {
+            helpers.when(() -> BotHelpers.getCharFromChannelStorage(BOT_A)).thenReturn(bot);
+            tick.invoke(null, BOT_A, BotSummonConfig.defaults(), generation() - 1);
+            movement.verifyNoInteractions();
+        }
+        assertTrue(BotSummonFollower.isTracked(BOT_A));
+        org.mockito.Mockito.verifyNoInteractions(map);
+    }
+
+    @Test
+    void anOldServiceRecastCannotConsumeTheNewServicesLease() throws Exception {
+        var field = BotSummonFollower.class.getDeclaredField("REGRANT_DUE_AT");
+        field.setAccessible(true);
+        @SuppressWarnings("unchecked")
+        var leases = (java.util.Map<Integer, Long>) field.get(null);
+        leases.put(BOT_A, 0L);
+        var recast = BotSummonFollower.class.getDeclaredMethod("regrantFor",
+                Integer.class, BotSummonConfig.class, long.class, long.class);
+        recast.setAccessible(true);
+        try (var helpers = mockStatic(BotHelpers.class)) {
+            recast.invoke(null, BOT_A, BotSummonConfig.defaults(), System.currentTimeMillis(), generation() - 1);
+            helpers.verifyNoInteractions();
+        }
+        assertEquals(0L, leases.get(BOT_A));
+    }
+
+    private static long generation() throws Exception {
+        var field = BotSummonFollower.class.getDeclaredField("generation");
+        field.setAccessible(true);
+        return field.getLong(null);
+    }
+
+    @Test
+    void lifecycleStripesAreBoundedAndStableAcrossRetiredBotIds() throws Exception {
         var field = BotSummonFollower.class.getDeclaredField("LIFECYCLE_LOCKS");
         field.setAccessible(true);
-        Object map = field.get(null);
-        assertTrue(map instanceof java.util.concurrent.ConcurrentHashMap<?, ?>,
-                "the lifecycle locks must live in a concurrent map");
-
-        @SuppressWarnings("unchecked")
-        java.util.concurrent.ConcurrentHashMap<Integer, Object> locks =
-                (java.util.concurrent.ConcurrentHashMap<Integer, Object>) map;
-        BotSummonFollower.spawnIfAbsent(BOT_A, () -> { }); // force one lock into existence
-        Object lock = locks.get(BOT_A);
-        assertTrue(lock instanceof java.util.concurrent.locks.ReentrantLock,
-                "the per-bot lock must be a j.u.c. lock: a synchronized monitor pins virtual "
-                        + "threads on JDK 21 and froze the whole spawn wave");
+        var locks = (java.util.concurrent.locks.ReentrantLock[]) field.get(null);
+        var before = locks.clone();
+        for (int id = 1; id <= 10_000; id++) {
+            BotSummonFollower.spawnIfAbsent(id, () -> { });
+        }
+        assertTrue(locks.length > 1 && locks.length <= 1024);
+        for (int i = 0; i < locks.length; i++) assertTrue(locks[i] == before[i]);
     }
 
     @Test

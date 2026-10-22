@@ -54,6 +54,8 @@ public final class HorntailPqData {
      */
     public static final int KEY_FIRST = 4001087;
     public static final int KEY_COUNT = 5;
+    public static final int[] CRYSTAL_KEYS = {4001087, 4001088, 4001089, 4001090, 4001091};
+    public static final int[] FINAL_KEYS = {4001092, 4001093};
     /**
      * The carrier per room index (drop_data rows): 9300066->4001087, 9300067->4001088,
      * 9300069->4001089, 9300071->4001090, 9300073->4001091. An explicit table because the

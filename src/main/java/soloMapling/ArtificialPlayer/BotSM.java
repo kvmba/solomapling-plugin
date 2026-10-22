@@ -293,6 +293,11 @@ public abstract class BotSM implements EventSubscriber {
         return false;
     }
 
+    /** Live pickup policy, queried by the pet follower rather than copied into tick-owned state. */
+    public boolean allowsPetPickup(int itemId) {
+        return true;
+    }
+
     public void setRunning(boolean bool) {
         this.running = bool;
     }

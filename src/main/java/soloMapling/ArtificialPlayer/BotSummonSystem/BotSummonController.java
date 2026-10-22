@@ -115,7 +115,7 @@ public final class BotSummonController {
 
     /** GM 技能观测表演：按指定技能强制召唤（showSummon 的内部通道）。 */
     static void spawnForShow(Character bot, int skillId) {
-        spawn(bot, skillId);
+        BotSummonFollower.spawnIfAbsent(bot.getId(), () -> spawn(bot, skillId));
     }
 
     private static void spawn(Character bot, int skillId) {

@@ -1,13 +1,12 @@
 package soloMapling.ArtificialPlayer.BotTypes.Kerning;
 
 import org.gms.client.Character;
+import soloMapling.ArtificialPlayer.BotClientBinding;
 import soloMapling.ArtificialPlayer.PartyQuest.PqActions;
 import soloMapling.Environment.BotMessages;
 
 import java.awt.Point;
 import java.util.List;
-
-import static soloMapling.ArtificialPlayer.BotHelpers.blockingSleep;
 
 /**
  * What a bot does in each Kerning PQ stage.
@@ -46,8 +45,8 @@ public final class KerningStages {
      * clicked her while holding one coupon got a question, stopped hunting, and every later
      * click re-graded that same short count - the stage never cleared. The order below is
      * therefore: take the question first (one talk with no coupons), hunt to precisely the
-     * asked count, drop the surplus, only then take the grading talk. A surplus pile dropped
-     * on the floor is re-lootable by the party, so over-hunting wastes nothing.
+     * asked count, drop the surplus, only then take the grading talk. The host's grid=0
+     * completion state then keeps this bot out of the other members' coupon supply.
      *
      * @return true when the leader has the passes he needs, which is the stage's real bar
      */
@@ -55,33 +54,25 @@ public final class KerningStages {
         if (PqActions.readEimString(bot, "1stageclear") != null) {
             return true;
         }
-        // Already holding a pass: stop talking to Cloto. Every further click is graded against
-        // the coupon count again, and a bot that keeps clicking spends the coupons it needs for
-        // the answer (and, once a pass is in hand, keeps re-opening a conversation that can only
-        // repeat itself). Hand the pass over and wait.
+        PqActions.recoverUngatheredHandoffs(bot, KerningPqData.PASS);
         if (PqActions.countItem(bot, KerningPqData.PASS) > 0) {
-            PqActions.handItemsToLeader(bot, KerningPqData.PASS);
-            PqActions.say(bot, BotMessages.get("pq.kerning.pass_dropped"));
+            handPassToLeader(bot);
             return false;
         }
         int asked = askedCoupons(bot);
         int held = PqActions.countItem(bot, KerningPqData.COUPON);
-        if (asked > 0 && held > asked) {
-            // Over the answer: the surplus would fail the grade. Drop it before the talk -
-            // unaddressed so any party member can re-loot it.
-            PqActions.dropSurplus(bot, KerningPqData.COUPON, held - asked);
-            held = asked;
-        }
-        if (asked > 0 && held == asked) {
-            // The exact count the question wants: take the grading talk.
-            answerCloto(bot);
+        if (asked < 0) {
+            answerCloto(bot, asked); // claim the question before collecting anything
             return false;
         }
-        if (asked == 0 && held > 0) {
-            // Holding coupons but no question yet - take the question talk first (Cloto reads
-            // the count only from the second status onward; carrying nothing keeps the grade
-            // from firing short).
-            answerCloto(bot);
+        if (asked == 0) {
+            // grid=0 is COMPLETE, not unanswered. Return any late coupons to the party.
+            PqActions.dropSurplus(bot, KerningPqData.COUPON, held);
+            PqActions.waitNearStageNpc(bot, KerningPqData.NPC_CLOTO);
+            return false;
+        }
+        if (held >= asked) {
+            answerCloto(bot, asked);
             return false;
         }
         huntCoupons(bot);
@@ -89,43 +80,40 @@ public final class KerningStages {
     }
 
     /**
-     * How many coupons this bot's assigned question asks for, or 0 when Cloto has not yet given
-     * the bot a question (grid slot -1).
-     *
-     * <p>The slot is the instance grid's own - the same map Cloto inserts on the first visit and
-     * re-grades on every later one - so the count derived from it is the count she wants, not a
-     * guess. A slot out of the question table's range (a script change) reads as unanswered
-     * rather than inventing a count.
+     * The host's three states: -1 unanswered, a positive coupon target, 0 completed.
      */
     static int askedCoupons(Character bot) {
         int slot = PqActions.readEimGrid(bot);
         int[] answers = KerningPqData.QUESTION_ANSWERS;
-        if (slot < 1 || slot > answers.length) {
-            return 0;
+        if (slot <= 0) return slot;
+        if (slot > answers.length) {
+            throw new IllegalStateException("Unknown Cloto question: " + slot);
         }
         return answers[slot - 1];
     }
 
     /**
-     * Take Cloto's question and answer it, walking the conversation one click at a time.
-     *
-     * <p>Two clicks in one visit are needed: {@code NPCScriptManager.start} runs the script's
-     * own {@code start()}, which itself calls {@code action(1,0,0)} - so the first talk only
-     * reaches status 0, and the question/answer exchange needs one more.
-     *
-     * <p>The caller owns the count discipline: this is called either with no coupons (to take a
-     * question) or with exactly the asked count (to be graded). Clicking with any other count
-     * re-grades that count and short-changes the stage - the bug this conversation path replaced.
+     * Cloto claims/grades at status 0 and disposes immediately. Starting once is the entire
+     * exchange; starting again would reopen a different conversation against a changed grid.
      */
-    private static void answerCloto(Character bot) {
-        if (PqActions.talkingTo(bot, KerningPqData.NPC_CLOTO)) {
-            return; // a prompt is already open; let it finish before re-clicking
-        }
-        PqActions.talkTo(bot, KerningPqData.NPC_CLOTO, 0);
-        blockingSleep(1_000);
-        PqActions.talkTo(bot, KerningPqData.NPC_CLOTO, 0);
-        if (PqActions.countItem(bot, KerningPqData.PASS) > 0) {
-            PqActions.handItemsToLeader(bot, KerningPqData.PASS);
+    private static void answerCloto(Character bot, int asked) {
+        BotClientBinding.runWithBoundPlayer(bot, () -> {
+            if (PqActions.talkingTo(bot, KerningPqData.NPC_CLOTO)) return;
+            // The pet pickup uses this same client lock: it cannot add a late coupon
+            // between trimming the count and the script's exact-quantity grade.
+            if (asked > 0) {
+                int held = PqActions.countItem(bot, KerningPqData.COUPON);
+                if (held < asked) return;
+                PqActions.dropSurplus(bot, KerningPqData.COUPON, held - asked);
+                if (PqActions.countItem(bot, KerningPqData.COUPON) != asked) return;
+            }
+            PqActions.talkTo(bot, KerningPqData.NPC_CLOTO);
+        });
+        handPassToLeader(bot);
+    }
+
+    private static void handPassToLeader(Character bot) {
+        if (PqActions.handItemsToLeader(bot, KerningPqData.PASS) > 0) {
             PqActions.say(bot, BotMessages.get("pq.kerning.pass_dropped"));
         }
     }

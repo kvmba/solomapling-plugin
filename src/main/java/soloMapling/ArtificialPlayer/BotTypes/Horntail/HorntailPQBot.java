@@ -3,21 +3,16 @@ package soloMapling.ArtificialPlayer.BotTypes.Horntail;
 import org.gms.client.Character;
 import org.gms.server.maps.Portal;
 import soloMapling.ArtificialPlayer.BotGeneration;
+import soloMapling.ArtificialPlayer.BotMessagingSystem.CharacterStorage;
 import soloMapling.ArtificialPlayer.PartyQuest.PartyQuestBot;
 import soloMapling.ArtificialPlayer.PartyQuest.PqActions;
 
 /**
  * Plays Horntail PQ ("Cave of Trial") with a real player leading.
  *
- * <p>Five rooms, one key each, and the same loop in all of them: kill until this room's key
- * drops, take it, move on. Which key that is comes from the room number, and which monster
- * carries it comes from the drop table, so the bot knows what it is waiting for instead of
- * killing everything and hoping.
- *
- * <p>It does not gather the keys into the party's hands beyond its own: Aura checks the
- * inventory of whoever talks to him and wants all five at once, so the leader turns them in.
- * The bot's share of that is whatever it happens to have picked up, which is why it still
- * collects them rather than leaving them on the floor.
+ * <p>The entry keeps one guard. Each inner cave feeds its key to passKeyN, which sends that
+ * key back to the entry and opens the next cave. The entry guard gathers all five keys for
+ * the leader's NPC turn-in; the last cave's red key opens the leader's return door.
  */
 public class HorntailPQBot extends PartyQuestBot {
 
@@ -50,14 +45,13 @@ public class HorntailPQBot extends PartyQuestBot {
         return HorntailPqData.RECRUIT_MAP;
     }
 
-    /**
-     * The chain door the quest advances by. The entry room's door is {@code hontale_BtoB1}
-     * (240050100 → 101, which refuses the LAST player on the map - the party's own guard, which
-     * a bot trailing its leader is never the target of - and refuses anyone holding the room's
-     * key, which this bot hands to the leader first); the key rooms' doors are
-     * {@code hontale_Bopen} (101..105, gated on the room's {@code Nstageclear} flag). The
-     * scripts re-check their own gates, so a bot arriving early is refused and retries.
-     */
+    /** The last entry occupant is a guard, not a failed follower. */
+    @Override
+    protected boolean isFollowingLeader() {
+        int mapId = getChr().getMapId();
+        return mapId < HorntailPqData.ENTRY_MAP || mapId > HorntailPqData.LAST_ROOM;
+    }
+
     @Override
     protected Portal scriptedForwardPortal() {
         var map = getChr().getMap();
@@ -71,36 +65,76 @@ public class HorntailPQBot extends PartyQuestBot {
 
     @Override
     protected boolean workStage() {
-        int index = HorntailPqData.roomIndexOf(getChr().getMapId());
-        if (index < 0) {
-            // Past the key rooms: the light/dark choice and the boss are the leader's to make
-            // and the attack path's to fight. Keep hitting whatever is here.
-            PqActions.seekAndAttack(getChr());
+        Character bot = getChr();
+        int room = bot.getMapId() - HorntailPqData.ENTRY_MAP;
+        if (room == 0) {
+            boolean returning = PqActions.readEimString(bot, "5stageclear") != null;
+            if (!isEntryGuard()) {
+                if (!returning && bot.getMap().countPlayers() > 1) enterNextCave();
+                return false;
+            }
+            PqActions.seekAndAttack(bot);
+            PqActions.loot(bot, bot.getPosition(), 1_200, HorntailPqData.CRYSTAL_KEYS);
+            for (int key : HorntailPqData.CRYSTAL_KEYS) {
+                PqActions.recoverUngatheredHandoffs(bot, key);
+                // The first key blocks the leader's ENTRY door. Hand the collection over
+                // only after his red-key return has opened the last cave's door.
+                if (returning) PqActions.handItemsToLeader(bot, key);
+            }
             return false;
         }
-
-        int key = HorntailPqData.keyForRoom(index);
-        if (PqActions.countItem(getChr(), key) > 0) {
-            // The key is in hand - hand it on: Aura checks the inventory of whoever talks
-            // to him (the leader) and wants all five at once, so a bot holding its room's
-            // key starves the turn-in and the run stalls at the last door.
-            PqActions.handItemsToLeader(getChr(), key);
-            return false; // the leader walks the party on once all five reach him
+        if (room >= 1 && room <= 4) {
+            if (PqActions.readEimString(bot, room + "stageclear") != null) {
+                enterNextCave();
+                return false;
+            }
+            int key = HorntailPqData.keyForRoom(room);
+            PqActions.seekAndAttack(bot);
+            PqActions.loot(bot, bot.getPosition(), 1_200, new int[]{key});
+            var reactor = bot.getMap().getReactorByName("passKey" + room);
+            if (reactor != null) PqActions.feedReactor(bot, reactor.getObjectId(), key);
+            return false;
         }
-
-        // Kill this room's monsters, then sweep for the key. The room holds a pair and only
-        // one of them carries it, so one seek beat plus a loot sweep per macro tick is the
-        // whole job - the swings land on the shared combat sweep; the loot sweep must stay
-        // on this bounded macro tick or a key that never reaches the inventory (inventory
-        // full, drop uncollected) would spin here forever.
-        if (PqActions.countItem(getChr(), key) == 0) {
-            PqActions.seekAndAttack(getChr());
-            PqActions.loot(getChr(), getChr().getPosition(), 1_200, new int[]{key});
+        PqActions.seekAndAttack(bot);
+        if (room == 5 || bot.getMapId() == HorntailPqData.LIGHT_ROOM
+                || bot.getMapId() == HorntailPqData.DARK_ROOM) {
+            PqActions.loot(bot, bot.getPosition(), 1_200, HorntailPqData.FINAL_KEYS);
+            for (int key : HorntailPqData.FINAL_KEYS) {
+                PqActions.recoverUngatheredHandoffs(bot, key);
+                PqActions.handItemsToLeader(bot, key);
+            }
+            if (room == 5 && PqActions.readEimString(bot, "5stageclear") != null) enterNextCave();
         }
-        // A key the leader missed on the floor despawns with the room's other drops; take it
-        // back and offer it again next tick.
-        PqActions.recoverUngatheredHandoffs(getChr(), key);
-        PqActions.handItemsToLeader(getChr(), key);
         return false;
+    }
+
+    private void enterNextCave() {
+        Portal exit = scriptedForwardPortal();
+        if (exit != null && PqActions.walkTo(getChr(), exit.getPosition())) {
+            PqActions.enterPortal(getChr(), exit);
+        }
+    }
+
+    private boolean isEntryGuard() {
+        int guardId = getChr().getId();
+        var party = getChr().getParty();
+        if (party == null) return true;
+        for (var member : party.getMembers()) {
+            var teammate = CharacterStorage.getBotById(member.getId());
+            if (teammate instanceof HorntailPQBot
+                    && teammate.getChr().getEventInstance() == getChr().getEventInstance()) {
+                guardId = Math.max(guardId, member.getId());
+            }
+        }
+        return guardId == getChr().getId();
+    }
+
+    @Override
+    public boolean allowsPetPickup(int itemId) {
+        int room = getChr().getMapId() - HorntailPqData.ENTRY_MAP;
+        // Item-triggered passKey reactors consume these exact ground piles after a delay.
+        if (room >= 1 && room <= 4 && itemId == HorntailPqData.keyForRoom(room)) return false;
+        return room != 0 || itemId < HorntailPqData.KEY_FIRST
+                || itemId >= HorntailPqData.KEY_FIRST + HorntailPqData.KEY_COUNT || isEntryGuard();
     }
 }

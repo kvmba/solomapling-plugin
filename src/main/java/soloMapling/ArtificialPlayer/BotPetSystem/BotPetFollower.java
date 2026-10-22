@@ -268,15 +268,6 @@ public final class BotPetFollower {
      *  the pet's life, so a resting bot's pets simply stand (the leash closes distance only when the
      *  owner has drawn further than this; see {@link #followTargetX}). */
     private static final Map<Integer, Integer> followDistanceByPet = new ConcurrentHashMap<>();
-    /**
-     * Bots whose pets must not loot anything right now — a per-bot pickup ban the owner bot type
-     * arms and disarms from its own tick. Added for the Papulatus boss room: the only monster
-     * drops on that map are the BOSS REWARDS, and a pet sweeping "monster drops it is entitled to"
-     * (same party) walks off with the loot the leader is meant to pick. A bot-owned set (not a
-     * config flag) because the ban is quest-geography, not server policy — the same pet loots
-     * normally on every other map.
-     */
-    private static final Set<Integer> PICKUP_BANNED = ConcurrentHashMap.newKeySet();
     private static ScheduledFuture<?> task;
 
     private BotPetFollower() {
@@ -308,7 +299,6 @@ public final class BotPetFollower {
         lastMapIdByBot.clear();
         lastOwnerClimbingByBot.clear();
         followDistanceByPet.clear();
-        PICKUP_BANNED.clear();
     }
 
     /**
@@ -335,23 +325,8 @@ public final class BotPetFollower {
     /** Forget a bot's state (called when its pets are removed or it leaves the world). */
     public static void forget(int botId) {
         TRACKED.remove(botId);
-        PICKUP_BANNED.remove(botId);
         lastMapIdByBot.remove(botId);
         lastOwnerClimbingByBot.remove(botId);
-    }
-
-    /**
-     * Ban this bot's pets from picking anything up, until the matching
-     * {@link #allowPetPickup} call. Used by boss-room bot types (Papulatus) whose
-     * fight map's only monster drops are the rewards the player is meant to loot.
-     */
-    public static void banPetPickup(int botId) {
-        PICKUP_BANNED.add(botId);
-    }
-
-    /** Lift a pickup ban set by {@link #banPetPickup}. */
-    public static void allowPetPickup(int botId) {
-        PICKUP_BANNED.remove(botId);
     }
 
     private static void tick(BotPetConfig config) {
@@ -1537,9 +1512,6 @@ public final class BotPetFollower {
      * kills, exactly like a real player's pet.
      */
     private static void collectLoot(Character chr, MapleMap map, Pet[] pets, BotPetConfig config) {
-        if (PICKUP_BANNED.contains(chr.getId())) {
-            return; // a boss room's drops are the player's reward - this bot's pets stand off
-        }
         long now = System.currentTimeMillis();
         for (int idx = 0; idx < pets.length; idx++) {
             Pet pet = pets[idx];
@@ -1587,8 +1559,17 @@ public final class BotPetFollower {
                 if (!isMeso && !items) {
                     continue;
                 }
-                BotClientBinding.runWithBoundPlayer(chr, () -> chr.pickupItem(mapItem, petIndex));
-                picked++;
+                boolean pickedUp = BotClientBinding.withBoundPlayer(chr, () -> {
+                    var owner = soloMapling.ArtificialPlayer.BotMessagingSystem.CharacterStorage
+                            .getBotById(chr.getId());
+                    int itemId = isMeso ? 0 : mapItem.getItem().getItemId();
+                    if (chr.getMap() == map && (owner == null || owner.allowsPetPickup(itemId))) {
+                        chr.pickupItem(mapItem, petIndex);
+                        return true;
+                    }
+                    return false;
+                });
+                if (pickedUp) picked++;
             }
             if (picked > 0) {
                 nextPickupAtMs.put(pet.getUniqueId(), now + config.pickupCooldownMs());

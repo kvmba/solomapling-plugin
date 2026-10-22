@@ -131,6 +131,7 @@ class BotSummonTableTest {
 
     /** The host's SUMMON switch block: from its opening comment to the MONSTER STATUS block after it. */
     private static String summonBlock(String src) {
+        src = src.replace("\r\n", "\n");
         int from = src.indexOf("// SUMMON\n");
         assertTrue(from >= 0, "the host must still carry a SUMMON statup block");
         int to = src.indexOf("MONSTER STATUS", from);

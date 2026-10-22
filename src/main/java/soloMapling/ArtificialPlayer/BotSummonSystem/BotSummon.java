@@ -8,8 +8,7 @@ import org.gms.server.maps.Summon;
  * spec, the map the entity currently lives on so an owner warp can be detected, and the bob phase
  * that de-syncs a summon's float from its owner's other summons).
  *
- * <p>Mutable on purpose and only ever touched from the single follower tick plus the grant/remove
- * callers on the bot's own lifecycle thread, so no locking is required.</p>
+ * <p>Mutable state is guarded by the owner's lifecycle stripe in BotSummonFollower.</p>
  */
 final class BotSummon {
 

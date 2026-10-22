@@ -758,17 +758,22 @@ public final class PqActions {
         MapleMap map = bot.getMap();
         Reactor reactor = map.getReactorByOid(reactorOid);
         if (reactor == null) return false;
-        // Bots share this monitor for the check-and-drop; the host's trigger owns its own locks.
-        synchronized (reactor) {
+        // Read the same state the host's delayed item trigger protects. Never take movement
+        // locks while holding the reactor lock: approach first, then re-check before dropping.
+        reactor.lockReactor();
+        try {
             if (!reactor.isAlive() || reactor.getReactorType() != 100) return false;
             var required = reactor.getReactItem(reactor.getEventState());
-            // getReactorType() reports the CURRENT state's type while getReactItem() indexes the
-            // EVENT state, so the two are not guaranteed to agree - and the host's
-            // ReactorStats.getReactItem dereferences stateInfo.get(state).get(index) with no
-            // guard, returning null (or throwing) when that chain is empty. Today's five OPQ
-            // reactors all have a single state-0 event so it cannot happen, but the moment any
-            // script calls setEventState(>0) on one it would. required.getRight() is dereferenced
-            // three times below, so the guard goes here rather than at each use.
+            if (required == null || required.getLeft() != itemId) return false;
+        } finally {
+            reactor.unlockReactor();
+        }
+        Approach approach = countItem(bot, itemId) > 0
+                ? approachUnder(bot, reactor.getPosition()) : Approach.STUCK;
+        reactor.lockReactor();
+        try {
+            if (bot.getMap() != map || !reactor.isAlive() || reactor.getReactorType() != 100) return false;
+            var required = reactor.getReactItem(reactor.getEventState());
             if (required == null || required.getLeft() != itemId) return false;
             for (MapObject object : map.getMapObjectsInRect(reactor.getArea(),
                     List.of(org.gms.server.maps.MapObjectType.ITEM))) {
@@ -783,9 +788,10 @@ public final class PqActions {
                 }
             }
             if (countItem(bot, itemId) < required.getRight()) return false;
-            Approach approach = approachUnder(bot, reactor.getPosition());
             if (approach != Approach.IN_POSITION) return approach == Approach.TRAVELLING;
             return dropStack(bot, itemId, required.getRight(), reactor.getPosition());
+        } finally {
+            reactor.unlockReactor();
         }
     }
 
@@ -803,10 +809,7 @@ public final class PqActions {
         if (bot == null || qty <= 0 || countItem(bot, itemId) < qty) {
             return;
         }
-        BotClientBinding.runWithBoundPlayer(bot, () ->
-                InventoryManipulator.removeById(bot.getClient(),
-                        ItemConstants.getInventoryType(itemId), itemId, qty, true, false));
-        DropCommands.botThrowItemQty(bot, itemId, qty, bot.getPosition());
+        dropStack(bot, itemId, qty, bot.getPosition());
     }
 
     /**
@@ -1642,19 +1645,22 @@ public final class PqActions {
             sweepOrphanDropOutside(bot, radiusPx, itemIds);
             return 0;
         }
-        // Never take a multi-piece stack: the item-triggered reactors read their stack five
-        // seconds after it lands and match it by identity, so picking one up cancels it.
+        // Leave reactor-feed stacks and armed single-item piles alone. Coupons are the
+        // explicit stack exception: their surplus is ordinary loot, never reactor feed.
         // Never take an addressed pile either: a drop flagged permanent-owner is somebody's
         // hand-off (the leader's), not floor loot - the same rule botCanLoot enforces for the
         // sweep paths; without it a qty-1 hand-off is read as a pass and the party's stock
         // ping-pongs between the bots. At most LOOT_INLINE_MAX pickups run inline (each
         // carries a 100ms stagger): an overflow pile waits for the next macro tick, far below
         // the drops' own despawn - a wide sweep can no longer freeze a busy stage tick.
+        List<Reactor> reactors = bot.getMap().getAllReactors();
         List<MapObject> lone = found.stream()
-                .filter(o -> o instanceof MapItem drop && isFloorLoot(drop))
+                .filter(o -> o instanceof MapItem drop && isFloorLoot(drop)
+                        && DropCommands.botCanLoot(bot, drop) && !isReactorFeed(reactors, drop))
                 .limit(LOOT_INLINE_MAX)
                 .toList();
         if (lone.isEmpty()) {
+            sweepOrphanDropOutside(bot, radiusPx, itemIds);
             return 0;
         }
         // Pickup must be proximity-honest: the engine's pickupItem has no distance check (a
@@ -1791,9 +1797,10 @@ public final class PqActions {
         }
         MapItem nearest = null;
         double bestSq = STEPPED_ON_REACH_SQ;
+        List<Reactor> reactors = bot.getMap().getAllReactors();
         for (MapObject o : found) {
             if (!(o instanceof MapItem drop) || !isFloorLoot(drop)
-                    || !DropCommands.botCanLoot(bot, drop)) {
+                    || !DropCommands.botCanLoot(bot, drop) || isReactorFeed(reactors, drop)) {
                 continue;
             }
             Point ip = drop.getPosition();
@@ -1875,6 +1882,7 @@ public final class PqActions {
         double callerReachSq = radiusPx * radiusPx;
         Point nearest = null;
         double bestSq = Double.MAX_VALUE;
+        List<Reactor> reactors = bot.getMap().getAllReactors();
         for (MapObject o : anywhere) {
             // botCanLoot already refuses picked-up drops, addressed hand-off piles,
             // still-protected drops AND position-less drops; isFloorLoot additionally
@@ -1882,7 +1890,7 @@ public final class PqActions {
             // identity).
             if (!(o instanceof MapItem drop)
                     || !DropCommands.botCanLoot(bot, drop)
-                    || !isFloorLoot(drop)) {
+                    || !isFloorLoot(drop) || isReactorFeed(reactors, drop)) {
                 continue;
             }
             Point ip = drop.getPosition();
@@ -1965,7 +1973,28 @@ public final class PqActions {
      * are matched by identity) and not an addressed hand-off pile (permanent owner).
      */
     static boolean isFloorLoot(MapItem drop) {
-        return drop.getItem().getQuantity() <= 1 && !DropCommands.isPermanentOwnerLocked(drop);
+        // KPQ coupons are never reactor feed. Surplus is returned as one real stack, and
+        // must remain collectible without relaxing the seed/crystal reactor-stack guard.
+        return (drop.getItem().getQuantity() <= 1 || drop.getItem().getItemId() == 4001007)
+                && !DropCommands.isPermanentOwnerLocked(drop);
+    }
+
+    /** Leave the exact piles armed item reactors are waiting to consume on the floor. */
+    private static boolean isReactorFeed(List<Reactor> reactors, MapItem drop) {
+        for (Reactor reactor : reactors) {
+            reactor.lockReactor();
+            try {
+                if (reactor.isAlive() && reactor.getReactorType() == 100
+                        && reactor.getArea().contains(drop.getPosition())) {
+                    var required = reactor.getReactItem(reactor.getEventState());
+                    if (required != null && required.getLeft() == drop.getItem().getItemId()
+                            && required.getRight() == drop.getItem().getQuantity()) return true;
+                }
+            } finally {
+                reactor.unlockReactor();
+            }
+        }
+        return false;
     }
 
     // =========================================================================

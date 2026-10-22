@@ -50,13 +50,6 @@ public final class MagatiaPqData {
     public static final int SUB_ROOM_202 = 926110202;
     public static final int SUB_ROOM_203 = 926110203;
 
-    /**
-     * The four-way split room (stage 5): its {@code pt00..pt03} portals are per-bot claims on
-     * the four side towers ({@code jnr4_rN} flips one bit of {@code statusStg5} each), not a
-     * chain advance - the bot must not walk one to "follow the leader".
-     */
-    public static final int SPLIT_ROOM = 926110300;
-
     public static final int MIN_PLAYERS = 4;
     public static final int MAX_PLAYERS = 4;
     /** The host events' own level band ({@code MagatiaPQ_A.js} / {@code MagatiaPQ_Z.js}: 71-85). */

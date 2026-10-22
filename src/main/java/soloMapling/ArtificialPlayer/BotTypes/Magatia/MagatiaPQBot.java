@@ -7,6 +7,8 @@ import soloMapling.ArtificialPlayer.PartyQuest.PartyQuestBot;
 import soloMapling.ArtificialPlayer.PartyQuest.PqActions;
 import soloMapling.Environment.BotMessages;
 
+import java.util.concurrent.locks.ReentrantLock;
+
 /**
  * Plays Magatia PQ ("Romeo and Juliet") with a real player leading.
  *
@@ -24,6 +26,10 @@ import soloMapling.Environment.BotMessages;
  * works out of whichever lobby it was placed in.
  */
 public class MagatiaPQBot extends PartyQuestBot {
+
+    // Serialise the scripts' non-atomic read/claim/write across the four different doors.
+    // Do not use the EIM monitor: the host takes it while holding character/map locks.
+    private static final ReentrantLock TOWER_ENTRY_LOCK = new ReentrantLock();
 
     /**
      * The town this bot was recruited from, captured at construction (it is built while standing
@@ -64,34 +70,46 @@ public class MagatiaPQBot extends PartyQuestBot {
         return lobbyMap;
     }
 
-    /**
-     * The chain door the quest advances by, per room family:
-     * <ul>
-     *   <li>the fight sub-rooms and the stage-6 towers' exits are {@code out00} under a script
-     *       gate ({@code jnr6_out} in 203, open to 400 in 301..304), so {@code out00} is
-     *       preferred wherever the room has one;</li>
-     *   <li>the linear stage rooms advance by {@code pt00} ({@code jnr1_pt00} out of the entry,
-     *       {@code jnr1_out}, {@code jnr2_out}, {@code jnr3_out}).</li>
-     * </ul>
-     * Deliberately NOT declared: the maze's {@code in00/in01} (sub-room split, not the chain),
-     * room 926110300's {@code pt00..pt03} ({@code jnr4_rN} - a four-way claim of side rooms,
-     * not a chain advance), and the towers' climbing gates ({@code jnr5_rp}, a solo puzzle the
-     * script's own per-portal checks own). All scripts re-check their own gate, so a bot
-     * arriving early is refused and retries.
-     */
+    /** Exact room routes for both versions; puzzle/claim doors are never catch-up exits. */
     @Override
-    protected Portal scriptedForwardPortal() {
+    protected Portal forwardPortal() {
         var map = getChr().getMap();
-        if (map == null || getChr().getMapId() == MagatiaPqData.SPLIT_ROOM) {
-            return null; // the split room's pt00..pt03 are claims on side rooms, not the chain
+        if (map == null) return null;
+        int base = getChr().getMapId() >= MagatiaPqData.ENTRY_MAP_A
+                ? MagatiaPqData.ENTRY_MAP_A : MagatiaPqData.ENTRY_MAP_Z;
+        int room = getChr().getMapId() - base;
+        if (room >= 301 && room <= 304) {
+            Portal exit = map.getPortal("out00");
+            return exit != null && exit.getTargetMapId() == base + 400 ? exit : null;
         }
-        Portal exit = PartyQuestBot.scriptedPortalOf(map.getPortals(), "out00", null);
-        return exit != null ? exit
-                : PartyQuestBot.scriptedPortalOf(map.getPortals(), "pt00", null);
+        String script = switch (room) {
+            case 0 -> "1_pt00";
+            case 1 -> "1_out";
+            case 100 -> "2_out";
+            case 200 -> "3_out";
+            case 201 -> "_201_0";
+            case 202 -> "_202";
+            case 203 -> "6_out";
+            case 400 -> "12_in";
+            default -> null; // includes BOTH split rooms (300) and terminal/NPC-only rooms
+        };
+        if (script == null) return null;
+        String prefix = base == MagatiaPqData.ENTRY_MAP_A ? "jnr" : "rnj";
+        return PartyQuestBot.scriptedPortalOf(map.getPortals(),
+                room >= 201 && room <= 203 ? "out00" : "pt00", prefix + script);
     }
 
     @Override
     protected boolean workStage() {
+        int room = getChr().getMapId() % 1000;
+        if (room == 300) {
+            enterUnclaimedTower();
+            return false;
+        }
+        if (room >= 301 && room <= 304) {
+            climbTower(room - 300);
+            return false;
+        }
         int stage = currentStage();
 
         // The escort's own switch: once Yulete has been dealt with, the run is decided, and
@@ -105,6 +123,59 @@ public class MagatiaPQBot extends PartyQuestBot {
             default -> fightAndBreak();
         }
         return false;
+    }
+
+    /** Each split door claims one tower, so never follow the leader into his claimed room. */
+    private void enterUnclaimedTower() {
+        var map = getChr().getMap();
+        var instance = getChr().getEventInstance();
+        if (instance == null) return;
+        int occupied = PqActions.readEimInt(getChr(), "statusStg5", 0);
+        for (int offset = 0; offset < MagatiaPqData.STAGE_6_SLOTS; offset++) {
+            int slot = Math.floorMod(getChr().getId() + offset, MagatiaPqData.STAGE_6_SLOTS);
+            if ((occupied & (1 << slot)) != 0) continue;
+            Portal door = map.getPortal("pt0" + slot);
+            if (door != null && PqActions.walkTo(getChr(), door.getPosition())) {
+                TOWER_ENTRY_LOCK.lock();
+                try {
+                    if (getChr().getMap() == map && getChr().getEventInstance() == instance
+                            && (instance.getIntProperty("statusStg5") & (1 << slot)) == 0) {
+                        PqActions.enterPortal(getChr(), door);
+                    }
+                } finally {
+                    TOWER_ENTRY_LOCK.unlock();
+                }
+            }
+            return;
+        }
+    }
+
+    /** Walk the script's ten rows; the first probe also works when its answer is unpublished. */
+    private void climbTower(int slot) {
+        var map = getChr().getMap();
+        Portal exit = map.getPortal("out00");
+        int row = 0;
+        for (int candidate = 0; candidate < 10; candidate++) {
+            Portal floor = map.getPortal("pt" + candidate + "0");
+            if (floor != null && getChr().getPosition().y <= floor.getPosition().y + 100) row = candidate;
+        }
+        // The success landing is above the final puzzle row; only then may out00 be walked.
+        if (exit != null && getChr().getPosition().y <= exit.getPosition().y + 100) {
+            if (PqActions.walkTo(getChr(), exit.getPosition())) PqActions.enterPortal(getChr(), exit);
+            return;
+        }
+        String answer = PqActions.readEimString(getChr(), MagatiaPqData.stage6Key(slot - 1));
+        int column = answer == null ? 0 : answer.charAt(row) - '0';
+        Portal door = map.getPortal("pt" + row + column);
+        if (door != null && PqActions.walkTo(getChr(), door.getPosition())) {
+            PqActions.enterPortal(getChr(), door);
+        }
+    }
+
+    @Override
+    protected boolean isFollowingLeader() {
+        int room = getChr().getMapId() % 1000;
+        return room < 300 || room > 304; // finish the bot's own tower before catching up
     }
 
     /**

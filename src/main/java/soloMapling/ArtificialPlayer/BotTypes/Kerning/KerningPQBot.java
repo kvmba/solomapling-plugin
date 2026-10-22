@@ -84,6 +84,15 @@ public class KerningPQBot extends PartyQuestBot {
     }
 
     @Override
+    public boolean allowsPetPickup(int itemId) {
+        if (getChr().getMapId() != KerningPqData.STAGE_1 || itemId != KerningPqData.COUPON) {
+            return true;
+        }
+        int asked = KerningStages.askedCoupons(getChr());
+        return asked > 0 && PqActions.countItem(getChr(), itemId) < asked;
+    }
+
+    @Override
     protected boolean workStage() {
         int stage = stageOf(getChr().getMapId());
         if (stage < 0) {

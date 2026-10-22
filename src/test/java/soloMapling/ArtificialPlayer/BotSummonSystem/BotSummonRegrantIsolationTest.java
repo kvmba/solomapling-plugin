@@ -38,13 +38,13 @@ class BotSummonRegrantIsolationTest {
         String java = source("src/main/java/soloMapling/ArtificialPlayer/BotSummonSystem/BotSummonFollower.java");
 
         Method step = BotSummonFollower.class.getDeclaredMethod("regrantFor",
-                Integer.class, BotSummonConfig.class, long.class);
+                Integer.class, BotSummonConfig.class, long.class, long.class);
         assertTrue(Modifier.isStatic(step.getModifiers()),
                 "regrantFor is the per-bot recast step the sweep isolates");
 
         // The sweep must CALL the isolated step (folding the body back into the loop would drop
         // this call and leave the scheduler unprotected again).
-        assertTrue(java.contains("regrantFor(botId, cfg, nowMs)"),
+        assertTrue(java.contains("regrantFor(botId, cfg, nowMs, token)"),
                 "regrantIfDue must delegate each bot to the isolated regrantFor step");
     }
 
@@ -68,11 +68,11 @@ class BotSummonRegrantIsolationTest {
         String java = source("src/main/java/soloMapling/ArtificialPlayer/BotSummonSystem/BotSummonFollower.java");
         // The move tick calls the sweep at its head; the dedicated task calls it directly. Both
         // must keep going through the guarded method rather than re-inlining per-bot work.
-        int tick = java.indexOf("private static void tick() {");
+        int tick = java.indexOf("private static void tick(long token) {");
         assertTrue(tick >= 0);
-        assertTrue(java.substring(tick, tick + 200).contains("regrantIfDue(cfg)"),
+        assertTrue(java.substring(tick, tick + 200).contains("regrantIfDue(cfg, token)"),
                 "the move tick still runs the recast beat through the guarded sweep");
-        assertTrue(java.contains("scheduleAtFixedRate(() -> regrantIfDue(config)"),
+        assertTrue(java.contains("scheduleAtFixedRate(() -> regrantIfDue(config, token)"),
                 "the dedicated regrant task still runs the guarded sweep");
     }
 }
