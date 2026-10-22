@@ -321,7 +321,8 @@ public class EnvironmentCommand extends Command {
                 break;
             case "loadenv":
                 if (!environmentLoadStartup()) {
-                    player.yellowMessage("Environment startup already ran; nothing was spawned again.");
+                    c.getPlayer().yellowMessage(
+                            "Environment startup already ran; nothing was spawned again.");
                 }
                 break;
             case "spawnfmbots":

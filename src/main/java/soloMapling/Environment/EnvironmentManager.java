@@ -163,7 +163,6 @@ public class EnvironmentManager {
         if (!STARTED.compareAndSet(false, true)) {
             return false;
         }
-        STOPPED.set(false);
         // EquipMetadataCache + DesirableEquipList are server data, loaded during
         // Server.init() alongside the other WZ-derived data - guaranteed ready
         // before any player can trigger this.

@@ -76,14 +76,14 @@ public class PlatformPlacement {
      * The old code built a private `occupied` list per call, so two spawners hitting the same map
      * and platform in the same startup wave - wave 5 runs spawnHenesysBotsBatch(park) and
      * spawnFillerBotsHenesysPark() concurrently on 100000200 - each started from "nothing here"
-     * and scattered the same bots over the same pixels. The same thing happened sequentially
-     * whenever one platform was filled three times over (spawnMerchBotsBatch calls the spawner
-     * once per bot type).
+     * and scattered the same bots over the same pixels.
      *
-     * Occupancy is therefore: the characters standing on that platform right now, plus the points
-     * a concurrent spawn has already picked but not yet registered. The pending entry is dropped
-     * as soon as that one spawn attempt settles, so nothing accumulates across the session and a
-     * point freed by a failed spawn is immediately available again.
+     * What is shared is therefore only the points a CONCURRENT spawn has already picked but not
+     * yet registered. Characters already standing on the map are deliberately NOT counted: the
+     * population config accumulates - waves 1, 3 and 5 each ask for `main: 10` of Henesys, and
+     * the intent is 30 bots, not "the first wave wins and the rest see a full map". A pending
+     * entry is dropped as soon as its spawn settles, so nothing accumulates across the session
+     * and a point freed by a failed spawn is immediately available again.
      */
     private static final Map<String, Set<Point>> PENDING_SPAWN_POINTS = new ConcurrentHashMap<>();
 
@@ -91,13 +91,16 @@ public class PlatformPlacement {
         return mapId + "/" + platformId;
     }
 
-    /** Claim a free point on the platform: live occupants and in-flight claims both count. */
-    private static Point claimSpawnPoint(int mapId, String key, Platform platform,
+    /**
+     * Claim a free point on the platform. {@code claimed} is this call's own working set;
+     * {@code key} identifies the platform so concurrent spawners do not pick the same pixels.
+     */
+    private static Point claimSpawnPoint(String key, Platform platform, List<Point> claimed,
                                          Point center, int radius) {
         Set<Point> pending = PENDING_SPAWN_POINTS.computeIfAbsent(
                 key, k -> ConcurrentHashMap.newKeySet());
         synchronized (pending) {
-            List<Point> occupied = new ArrayList<>(livePointsOn(mapId, platform));
+            List<Point> occupied = new ArrayList<>(claimed);
             occupied.addAll(pending);
             Point spot = radius > 0
                     ? findUnoccupiedPointInRadius(platform, occupied, center, radius)
@@ -111,36 +114,42 @@ public class PlatformPlacement {
             // SLOPED platform the recorded y belongs to its own x. The nudge happens BEFORE the
             // claim is recorded, so the pending point is the point that will actually be spawned.
             if (platform.isFlat()) {
-                MapleMap map = getMapleMapById(mapId);
-                List<Rope> ropes = map == null ? List.of() : map.getRopes();
-                spot = avoidLadderColumn(ropes, spot, platform.getMinX(), platform.getMaxX());
+                spot = avoidLadderColumn(ropesFor(key), spot, platform.getMinX(), platform.getMaxX());
             }
             pending.add(spot);
+            claimed.add(spot);
             return spot;
         }
     }
 
-    /** Where characters actually stand on this platform right now. */
-    private static List<Point> livePointsOn(int mapId, Platform platform) {
-        MapleMap map = getMapleMapById(mapId);
-        if (map == null) {
-            return List.of();
-        }
-        List<Point> out = new ArrayList<>();
-        for (Character chr : map.getAllPlayers()) {
-            Point position = chr.getPosition();
-            if (isPositionOnPlatform(position, platform)) {
-                out.add(position);
-            }
-        }
-        return out;
+    /** The ropes of the map the key belongs to (the key is {@code mapId + "/" + platformId}). */
+    private static List<Rope> ropesFor(String key) {
+        int slash = key.indexOf('/');
+        MapleMap map = getMapleMapById(Integer.parseInt(key.substring(0, slash)));
+        return map == null ? List.of() : map.getRopes();
     }
 
-    /** Release a claim once the spawn it was taken for has settled. */
+    /**
+     * Release a claim once the spawn it was taken for has settled.
+     *
+     * <p>Drops the whole platform entry when its last claim leaves: the map is keyed by
+     * map+platform, so keeping empty sets around would grow one entry per platform ever spawned
+     * on, for the life of the process. Removed under the same set monitor that
+     * {@link #claimSpawnPoint} takes, so a claim cannot be added to a set this call is discarding.
+     */
     private static void settleSpawnPoint(String key, Point spot) {
+        if (spot == null) {
+            return;
+        }
         Set<Point> pending = PENDING_SPAWN_POINTS.get(key);
-        if (pending != null && spot != null) {
+        if (pending == null) {
+            return;
+        }
+        synchronized (pending) {
             pending.remove(spot);
+            if (pending.isEmpty()) {
+                PENDING_SPAWN_POINTS.remove(key, pending);
+            }
         }
     }
 
@@ -198,8 +207,9 @@ public class PlatformPlacement {
 
         // Pre-generate all spawn points (must be sequential to avoid overlaps)
         List<Point> spawnPoints = new ArrayList<>();
+        String key = platformKey(mapId, platform_id);
         for (int i = 0; i < numBots; i++) {
-            Point spawn = claimSpawnPoint(mapId, platformKey(mapId, platform_id), flatPlatform, null, 0);
+            Point spawn = claimSpawnPoint(key, flatPlatform, spawnPoints, null, 0);
             if (spawn == null) {
                 continue; // the platform is genuinely full; do not stack on top of someone
             }
@@ -223,7 +233,7 @@ public class PlatformPlacement {
                     failureCount.incrementAndGet();
                     debugprint(fmt("Exception creating bot at {}: {}", spawn, e.getMessage()));
                 } finally {
-                    settleSpawnPoint(platformKey(mapId, platform_id), spawn);
+                    settleSpawnPoint(key, spawn);
                     latch.countDown();
                 }
             });
@@ -260,8 +270,9 @@ public class PlatformPlacement {
 
         // Pre-generate all spawn points within radius
         List<Point> spawnPoints = new ArrayList<>();
+        String key = platformKey(mapId, platform_id);
         for (int i = 0; i < numBots; i++) {
-            Point spawn = claimSpawnPoint(mapId, platformKey(mapId, platform_id), flatPlatform, center, radius);
+            Point spawn = claimSpawnPoint(key, flatPlatform, spawnPoints, center, radius);
             if (spawn == null) {
                 debugprint(fmt("Could not find unoccupied point for bot {} within radius", i));
                 continue;
@@ -285,7 +296,7 @@ public class PlatformPlacement {
                     failureCount.incrementAndGet();
                     debugprint(fmt("Exception creating bot at {}: {}", spawn, e.getMessage()));
                 } finally {
-                    settleSpawnPoint(platformKey(mapId, platform_id), spawn);
+                    settleSpawnPoint(key, spawn);
                     latch.countDown();
                 }
             });
@@ -327,7 +338,7 @@ public class PlatformPlacement {
 
         List<Point> spawnPoints = new ArrayList<>();
         for (int i = 0; i < numBots; i++) {
-            Point spawn = claimSpawnPoint(mapId, key, adHocPlatform, null, 0);
+            Point spawn = claimSpawnPoint(key, adHocPlatform, spawnPoints, null, 0);
             if (spawn == null) {
                 break; // the span is genuinely full; do not stack on top of someone
             }
@@ -398,7 +409,7 @@ public class PlatformPlacement {
 
         List<Point> spawnPoints = new ArrayList<>();
         for (int i = 0; i < numBots; i++) {
-            Point spawn = claimSpawnPoint(mapId, key, adHocPlatform, null, 0);
+            Point spawn = claimSpawnPoint(key, adHocPlatform, spawnPoints, null, 0);
             if (spawn == null) {
                 break; // the span is genuinely full; do not stack on top of someone
             }
