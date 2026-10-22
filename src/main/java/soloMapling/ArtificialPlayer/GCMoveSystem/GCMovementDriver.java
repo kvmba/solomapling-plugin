@@ -123,6 +123,11 @@ final class GCMovementDriver {
         }
     }
 
+    /** Shut the tick pool down, once the per-bot sessions have been stopped. */
+    static void shutdown() {
+        POOL.shutdownNow();
+    }
+
     private static void cancelScheduledTick(BotMovementState entry) {
         if (entry.task != null) {
             entry.task.cancel(false);

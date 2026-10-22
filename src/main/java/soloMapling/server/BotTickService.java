@@ -2,6 +2,7 @@ package soloMapling.server;
 
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
@@ -48,6 +49,8 @@ public final class BotTickService {
 
     private static final Map<Integer, Entry> ENTRIES = new ConcurrentHashMap<>();
     private static final AtomicBoolean DRIVER_STARTED = new AtomicBoolean(false);
+    /** The wheel's scheduled driver, so {@link #shutdown()} can cancel it. */
+    private static volatile ScheduledFuture<?> driverTask;
 
     // ── Governor v1 (Fable Phase 5): self-regulating degrade ────────────────
     // If the wheel falls behind (sustained avg dispatch lag over a 5s window above
@@ -157,8 +160,27 @@ public final class BotTickService {
         if (!DRIVER_STARTED.compareAndSet(false, true)) {
             return;
         }
-        ExecutorServiceManager.getScheduledExecutorService().scheduleWithFixedDelay(
+        driverTask = ExecutorServiceManager.getScheduledExecutorService().scheduleWithFixedDelay(
                 BotTickService::safeDrive, DRIVER_PERIOD_MS, DRIVER_PERIOD_MS, TimeUnit.MILLISECONDS);
+    }
+
+    /**
+     * Stop the wheel and forget every registered tick, so a later registration starts a fresh
+     * driver instead of silently joining a dead one.
+     *
+     * <p>Every bot FSM arms its tick through this wheel. Leaving the driver running past an
+     * unload keeps those FSMs ticking against characters the plugin already tore down; leaving
+     * {@code DRIVER_STARTED} set after cancelling it would leave the survivors with no driver at
+     * all.
+     */
+    public static void shutdown() {
+        ScheduledFuture<?> task = driverTask;
+        driverTask = null;
+        if (task != null) {
+            task.cancel(false);
+        }
+        ENTRIES.clear();
+        DRIVER_STARTED.set(false);
     }
 
     private static void safeDrive() {

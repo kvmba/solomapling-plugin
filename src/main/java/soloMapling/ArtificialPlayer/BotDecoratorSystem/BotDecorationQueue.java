@@ -51,7 +51,7 @@ public class BotDecorationQueue {
      * Start the background decoration scheduler.
      * Call once after environment initialization.
      */
-    public static void start() {
+    public static synchronized void start() {
         if (!ENABLED) return;
         if (scheduler != null && !scheduler.isShutdown()) return;
 
@@ -73,10 +73,14 @@ public class BotDecorationQueue {
 
     /**
      * Stop the decoration scheduler.
+     *
+     * <p>{@code shutdownNow} rather than {@code shutdown}: the queued task is the periodic
+     * {@code processTick}, which would otherwise keep decorating bots for as long as the pool
+     * takes to drain - after the plugin's roster is already gone.
      */
-    public static void stop() {
+    public static synchronized void stop() {
         if (scheduler != null) {
-            scheduler.shutdown();
+            scheduler.shutdownNow();
             scheduler = null;
         }
     }

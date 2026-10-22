@@ -34,7 +34,7 @@ public class SocialHotPotatoManager {
     private ScheduledFuture<?> scheduledTask;
     private ScheduledFuture<?> megaScheduledTask;
     private final Random random = new Random();
-    private boolean running = false;
+    private volatile boolean running = false;
 
     private static final int MIN_INTERVAL_MS = 8_000;
     private static final int MAX_INTERVAL_MS = 20_000;
@@ -117,7 +117,7 @@ public class SocialHotPotatoManager {
         return instance;
     }
 
-    public void start() {
+    public synchronized void start() {
         if (running) return;
         running = true;
         refreshMapScope();
@@ -142,13 +142,15 @@ public class SocialHotPotatoManager {
         return ids;
     }
 
-    public void stop() {
+    public synchronized void stop() {
         running = false;
         if (scheduledTask != null) {
             scheduledTask.cancel(false);
+            scheduledTask = null;
         }
         if (megaScheduledTask != null) {
             megaScheduledTask.cancel(false);
+            megaScheduledTask = null;
         }
         log("[SocialHotPotato] Stopped.");
     }

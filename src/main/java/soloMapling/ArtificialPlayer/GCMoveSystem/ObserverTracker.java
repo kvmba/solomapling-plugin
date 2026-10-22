@@ -62,6 +62,9 @@ final class ObserverTracker {
 
     private static final AtomicBoolean STARTED = new AtomicBoolean(false);
 
+    /** The poll's own daemon pool; null until {@link #ensureStarted()} runs. */
+    private static volatile ScheduledExecutorService pool;
+
     // Transient promotion override: when a bot ENTERS a map that already has a real player, we mark
     // that map observed immediately so FULL behaviour (visible spawn, broadcast, combat) starts the
     // same tick instead of waiting up to one poll. Short TTL (> POLL_MS) so the poll takes back over.
@@ -103,12 +106,29 @@ final class ObserverTracker {
         if (!STARTED.compareAndSet(false, true)) {
             return;
         }
-        ScheduledExecutorService pool = Executors.newSingleThreadScheduledExecutor(r -> {
+        ScheduledExecutorService created = Executors.newSingleThreadScheduledExecutor(r -> {
             Thread t = new Thread(r, "gcmove-observer");
             t.setDaemon(true);
             return t;
         });
-        pool.scheduleAtFixedRate(ObserverTracker::safeRefresh, 0, POLL_MS, TimeUnit.MILLISECONDS);
+        pool = created;
+        created.scheduleAtFixedRate(ObserverTracker::safeRefresh, 0, POLL_MS, TimeUnit.MILLISECONDS);
+    }
+
+    /**
+     * Stop the poll for good.
+     *
+     * <p>The tracker decides which maps are rendered at full fidelity, so a poll that outlives the
+     * plugin keeps reading the world after the roster and the classifier are gone. It also holds
+     * its own executor, which nothing else would ever shut down. Deliberately does not reset
+     * {@code STARTED}: a re-enable from a late tick would arm a second poll.
+     */
+    static void stop() {
+        ScheduledExecutorService stopped = pool;
+        pool = null;
+        if (stopped != null) {
+            stopped.shutdownNow();
+        }
     }
 
     /* Whether the observer poll is running (started by the first GCMovement.enable). */

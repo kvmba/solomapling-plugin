@@ -12,6 +12,7 @@ import soloMapling.server.ExecutorServiceManager;
 
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -73,6 +74,9 @@ public final class OpqLobbyRotation {
      */
     private static final Map<Integer, Long> joinedAtMs = new ConcurrentHashMap<>();
 
+    /** The running rotation, so {@link #stop()} can cancel it; null when not rotating. */
+    private static volatile ScheduledFuture<?> rotationTask;
+
     public static void start() {
         if (!STARTED.compareAndSet(false, true)) {
             return;
@@ -84,8 +88,25 @@ public final class OpqLobbyRotation {
             return;
         }
         long firstDelay = ROTATE_INTERVAL_MS / 2 + ThreadLocalRandom.current().nextLong(JITTER_MS);
-        ExecutorServiceManager.getScheduledExecutorService().scheduleWithFixedDelay(
-                OpqLobbyRotation::safeTick, firstDelay, ROTATE_INTERVAL_MS, TimeUnit.MILLISECONDS);
+        ScheduledFuture<?> task = ExecutorServiceManager.getScheduledExecutorService()
+                .scheduleWithFixedDelay(OpqLobbyRotation::safeTick, firstDelay, ROTATE_INTERVAL_MS,
+                        TimeUnit.MILLISECONDS);
+        rotationTask = task;
+    }
+
+    /**
+     * Stop rotating.
+     *
+     * <p>Without this the task keeps spawning and retiring lobby bots after the plugin has been
+     * unloaded, into a world whose roster and classifier are already gone: the replacement bot is
+     * no longer recognised as artificial, so the host treats it as a real player.
+     */
+    public static void stop() {
+        ScheduledFuture<?> task = rotationTask;
+        rotationTask = null;
+        if (task != null) {
+            task.cancel(false);
+        }
     }
 
     private static void safeTick() {

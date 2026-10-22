@@ -188,6 +188,26 @@ public final class GCMovement {
         return new java.util.ArrayList<>(STATES.values());
     }
 
+    /**
+     * Tear the whole dynamic-movement layer down: stop every per-bot driver, release every lease
+     * and the driver pool itself.
+     *
+     * <p>Called from the extension's unload. Each session owns a self-rescheduling tick and a
+     * movement lease on its bot; a plugin that unloads without this leaves both behind, and the
+     * ticks then steer characters in a world the plugin no longer owns.
+     */
+    public static void shutdown() {
+        for (BotMovementState st : new java.util.ArrayList<>(STATES.values())) {
+            GCMovementDriver.stop(st);
+            MovementCommands.releaseMovementLock(st.bot, st);
+        }
+        STATES.clear();
+        ARRIVAL_CALLBACKS.clear();
+        FAILURE_CALLBACKS.clear();
+        ObserverTracker.stop();
+        GCMovementDriver.shutdown();
+    }
+
     // ── Commands ────────────────────────────────────────────────────────────
 
     /* Walk/jump/climb to (x,y) on the bot's current map, then idle. */

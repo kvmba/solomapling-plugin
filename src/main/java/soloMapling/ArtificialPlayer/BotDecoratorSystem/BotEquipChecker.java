@@ -41,6 +41,20 @@ public class BotEquipChecker {
         System.out.println("[BotEquipChecker] Started — interval=" + (INTERVAL_MS / 60000) + "min");
     }
 
+    /**
+     * Stop the periodic scan and allow a later {@link #start()} to arm a new one.
+     *
+     * <p>The scan walks the world's whole player storage and repairs equipment on every bot, so a
+     * scan that outlives the plugin keeps mutating characters after the roster is gone.
+     */
+    public static synchronized void stop() {
+        if (task != null) {
+            task.cancel(false);
+            task = null;
+            System.out.println("[BotEquipChecker] Stopped.");
+        }
+    }
+
     private static void check() {
         try {
             long startMs = System.currentTimeMillis();

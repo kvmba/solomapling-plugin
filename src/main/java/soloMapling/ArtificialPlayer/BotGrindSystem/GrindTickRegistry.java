@@ -114,6 +114,18 @@ public final class GrindTickRegistry {
         }
     }
 
+    /**
+     * Stop the shared sweep and let a later registration arm a new one.
+     *
+     * <p>Every grinder registers here. A sweep that outlives the plugin keeps calling
+     * {@code grindTick()} on combat brains whose characters the unload already removed.
+     */
+    public void shutdown() {
+        started.set(false);
+        participants.clear();
+        nextFailureLogAt.clear();
+    }
+
     void sweep() {
         long sweepStart = System.currentTimeMillis();
         for (Participant participant : participants) {

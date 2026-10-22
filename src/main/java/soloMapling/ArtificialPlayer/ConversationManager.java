@@ -32,7 +32,7 @@ public class ConversationManager {
     private static ConversationManager instance;
     private ScheduledFuture<?> scheduledTask;
     private final Random random = new Random();
-    private boolean running = false;
+    private volatile boolean running = false;
 
     private static final int MIN_INTERVAL_MS = 20_000;
     private static final int MAX_INTERVAL_MS = 40_000;
@@ -82,7 +82,7 @@ public class ConversationManager {
         return instance;
     }
 
-    public void start() {
+    public synchronized void start() {
         if (running) return;
         running = true;
         loadScripts();
@@ -107,10 +107,11 @@ public class ConversationManager {
         return ids;
     }
 
-    public void stop() {
+    public synchronized void stop() {
         running = false;
         if (scheduledTask != null) {
             scheduledTask.cancel(false);
+            scheduledTask = null;
         }
         botsInConversation.clear();
         log("[ConversationManager] Stopped.");
