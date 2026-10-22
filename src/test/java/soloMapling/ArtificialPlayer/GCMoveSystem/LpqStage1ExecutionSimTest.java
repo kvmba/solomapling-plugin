@@ -231,12 +231,20 @@ public class LpqStage1ExecutionSimTest {
      * summed into a phantom 500ms stall (idle beats never ran the watchdog, so it never reset)
      * and tickUnstuck hopped the bot OFF the fh325 perch it had just reached - the observed
      * reach -> hop-off -> climb back loop. An arrival now resets the stuck window, so the bot
-     * holds the perch across re-issued beats forever. 40 beats x 30 ticks = 60s on the perch.
+     * holds the perch across re-issued beats.
+     *
+     * <p>The matrix is the axis that can actually break this, not every input that can reach it:
+     * 4 movement profiles (the profile drives the step/arrival bands) x 3 kill spots (both ends
+     * and the middle of the y=-450 row) x 15 beats. 15 beats = 450 ticks = 22.5s on the perch,
+     * i.e. 45 stuck windows and 4+ unstuck-cooldown cycles - the regression fired one 500ms
+     * phantom stall in, so a hold that survives this has nothing left to trip over. Climbing TO
+     * the perch from every kill spot is a separate contract, covered by
+     * {@link #simKillSpotMatrixClimbsToSecondRatz} over all eight columns.
      */
     @Test
     void simMacroBeatReissuesNeverHopTheBotOffThePerch() {
         int[][] profiles = {{105, 110}, {120, 115}, {105, 100}, {110, 120}};
-        int[] spawnXs = {30, 60, 88, 120, 136, 160, 200, 240};
+        int[] spawnXs = {30, 88, 240};
         for (int[] stat : profiles) {
             BotMovementProfile profile = new BotMovementProfile(stat[0], stat[1]);
             for (int sx : spawnXs) {
@@ -244,7 +252,7 @@ public class LpqStage1ExecutionSimTest {
                 sim.pos().set(new Point(sx, -450));
                 BotPhysicsEngine.teleportTo(sim.st(), sim.st().bot, new Point(sx, -450));
                 BotMovementManager.resetEntryStateAfterTeleport(sim.st());
-                for (int burst = 0; burst < 40; burst++) {
+                for (int burst = 0; burst < 15; burst++) {
                     move(sim.st(), 136, -572);
                     tickN(sim, 30, true);
                 }

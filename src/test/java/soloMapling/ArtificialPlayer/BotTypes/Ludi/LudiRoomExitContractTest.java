@@ -71,8 +71,32 @@ class LudiRoomExitContractTest {
     @Test
     void theMazeExitAwayFromAClearedStageStillWaitsForTheLeader() throws Exception {
         String body = methodBody("public static void sneakDoorRooms");
-        assertTrue(body.contains("box >= 0 || leaderInRoom(bot)"),
-                "while the stage is open, leaving mid-box or ahead of the leader must stay blocked");
+        // Assert the EXIT GATE, not the literal source text: this condition legitimately grows
+        // (collectRemainingLoot was added between these two arms) and a substring match would
+        // break on every such addition even though the contract never changed. What must hold is
+        // that the `if` which precedes the room exit blocks on BOTH the standing-box arm and the
+        // leader arm, in whatever order / company the condition carries them.
+        String exitGate = conditionBefore(body, "markRoomCleared(bot, mapId)");
+        assertTrue(exitGate.contains("box >= 0"),
+                "while the stage is open, leaving with a box still standing must stay blocked");
+        assertTrue(exitGate.contains("leaderInRoom(bot)"),
+                "while the stage is open, leaving ahead of the leader must stay blocked");
+    }
+
+    /** The full parenthesised condition of the {@code if} that guards {@code statement}. */
+    private static String conditionBefore(String body, String statement) {
+        int open = body.lastIndexOf("if (", body.lastIndexOf(statement));
+        assertTrue(open > 0, "no `if` precedes " + statement);
+        int depth = 0;
+        for (int i = open + 3; i < body.length(); i++) {
+            char c = body.charAt(i);
+            if (c == '(') {
+                depth++;
+            } else if (c == ')' && --depth == 0) {
+                return body.substring(open, i + 1);
+            }
+        }
+        throw new AssertionError("unbalanced condition before " + statement);
     }
 
     private static String methodBody(String signature) throws Exception {

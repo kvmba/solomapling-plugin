@@ -1,6 +1,7 @@
 package soloMapling.ArtificialPlayer;
 
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 
@@ -24,9 +25,23 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  */
 class BotSpawnThrottleTest {
 
+    /*
+     * Drive the window gates from a virtual clock. The throttle's gate only reads nowMs(), so a
+     * test that wants "the next window opened" advances the clock instead of sleeping a real
+     * second - these cases used to spend ~14s of wall time waiting. The assertions below are
+     * about the ORDER of events (how many permits a window handed out, how many windows a burst
+     * had to span), which is what the rate limit actually promises; wall-clock elapsed time on a
+     * loaded machine measures the machine, not the throttle.
+     */
+    @BeforeEach
+    void useVirtualClock() {
+        BotSpawnThrottle.useVirtualClockForTest(1_000_000L);
+    }
+
     @AfterEach
     void restoreConfiguredLimit() {
         BotSpawnThrottle.setLimitForTest(null);
+        BotSpawnThrottle.resetClockForTest();
     }
 
     @Test
@@ -78,13 +93,12 @@ class BotSpawnThrottleTest {
         }
         assertEquals(0, BotSpawnThrottle.remaining());
 
-        long start = System.currentTimeMillis();
+        long start = BotSpawnThrottle.nowMs();
         BotSpawnThrottle.acquire();
-        long elapsed = System.currentTimeMillis() - start;
+        long elapsed = BotSpawnThrottle.nowMs() - start;
 
-        // Must have blocked for roughly the rest of the window, and must not
-        // have waited two windows.
-        assertTrue(elapsed >= 500, "expected to block for the remainder of the window, took " + elapsed + "ms");
+        // Must have waited out the rest of the window, and must not have waited two windows.
+        assertTrue(elapsed >= 500, "expected to wait out the remainder of the window, took " + elapsed + "ms");
         assertTrue(elapsed <= 1900, "waited too long: " + elapsed + "ms");
         assertEquals(9, BotSpawnThrottle.remaining(), "a fresh window should follow the blocking acquire");
     }
@@ -102,7 +116,7 @@ class BotSpawnThrottleTest {
         AtomicInteger completed = new AtomicInteger();
         List<Thread> workers = new ArrayList<>();
 
-        long t0 = System.nanoTime();
+        long t0 = BotSpawnThrottle.nowMs();
         for (int t = 0; t < threads; t++) {
             Thread worker = new Thread(() -> {
                 try {
@@ -124,11 +138,11 @@ class BotSpawnThrottleTest {
 
         start.countDown();
         assertTrue(done.await(20, TimeUnit.SECONDS), "throttle deadlocked under concurrency");
-        long elapsedMs = (System.nanoTime() - t0) / 1_000_000;
+        long elapsedMs = BotSpawnThrottle.nowMs() - t0;
 
         assertEquals(threads * perThread, completed.get());
-        // 40 permits at 20/s needs at least one window boundary (~1s). Allow
-        // slack for scheduling, but catch a throttle that let everything through.
+        // 40 permits at 20/s cannot fit in one window: the cohort must have crossed at least one
+        // boundary. (Virtual clock, so this is the throttle's own wait, not the machine's.)
         assertTrue(elapsedMs >= 800,
                 "40 bots at 20/s must span a window boundary, took " + elapsedMs + "ms");
         assertTrue(elapsedMs <= 5000,
@@ -167,12 +181,12 @@ class BotSpawnThrottleTest {
             });
         }
 
-        long t0 = System.nanoTime();
+        long t0 = BotSpawnThrottle.nowMs();
         start.countDown();
         assertTrue(done.await(25, TimeUnit.SECONDS), "spawn throttle deadlocked");
-        long elapsedMs = (System.nanoTime() - t0) / 1_000_000;
+        long elapsedMs = (BotSpawnThrottle.nowMs() - t0);
 
-        // 60 bots at 10/s needs ~5s (the first 10 are immediate, then 5 more windows).
+        // 60 bots at 10/s needs 5 window boundaries (the first 10 are immediate, then 5 more).
         assertTrue(elapsedMs >= 4000,
                 "60 bots at 10/s must span ~5 windows, but finished in " + elapsedMs
                         + "ms - the limit is not being enforced");
@@ -293,7 +307,7 @@ class BotSpawnThrottleTest {
 
         BotSpawnThrottle.acquire();
 
-        long behindMs = System.currentTimeMillis() - BotSpawnThrottle.windowStartMsForTest();
+        long behindMs = BotSpawnThrottle.nowMs() - BotSpawnThrottle.windowStartMsForTest();
         assertTrue(behindMs < 1_000L,
                 "after an idle the anchor must land on the current boundary (it sat " + behindMs
                         + "ms behind): a single-window step per call leaves it N windows back and"

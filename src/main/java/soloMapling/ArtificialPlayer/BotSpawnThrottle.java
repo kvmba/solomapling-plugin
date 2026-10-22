@@ -54,6 +54,43 @@ public final class BotSpawnThrottle {
     // code never sets it, so the configured value always wins at runtime.
     private static volatile Integer overrideLimit;
 
+    /*
+     * The wall clock this throttle reads. Production is plain currentTimeMillis; the rate-limit
+     * tests swap in a virtual clock, because the real one forces them to actually sleep through
+     * every window. Same contract as GCMoveSystem.MovementClock - virtual only under test.
+     *
+     * <p>Virtual time only ever moves FORWARD to a waiter's deadline ({@link #advanceToForTest}),
+     * never by a relative step: several threads park on the same window boundary, and a relative
+     * step per waiter would advance the clock once per thread and open windows that should not
+     * have opened yet - the very burst this class exists to prevent.
+     */
+    private static volatile Long virtualNowMs;
+
+    static long nowMs() {
+        Long virtual = virtualNowMs;
+        return virtual != null ? virtual : System.currentTimeMillis();
+    }
+
+    /** Test seam: freeze the clock at {@code startMs}. */
+    static void useVirtualClockForTest(long startMs) {
+        virtualNowMs = startMs;
+    }
+
+    /** Test seam: move the virtual clock forward to {@code atMs} (never backwards). Real clock: no-op. */
+    static void advanceToForTest(long atMs) {
+        synchronized (LOCK) {
+            Long virtual = virtualNowMs;
+            if (virtual != null && atMs > virtual) {
+                virtualNowMs = atMs;
+            }
+        }
+    }
+
+    /** Test seam: restore the real clock. */
+    static void resetClockForTest() {
+        virtualNowMs = null;
+    }
+
     /** How many bots may be created per second. {@code <= 0} means unlimited. */
     public static int limitPerSecond() {
         Integer override = overrideLimit;
@@ -132,7 +169,7 @@ public final class BotSpawnThrottle {
      * a wave of {@code limit} spawns go back-to-back inside its window.
      */
     private static void rollWindowIfDue() {
-        long now = System.currentTimeMillis();
+        long now = nowMs();
         if (windowStartMs == 0L) {
             windowStartMs = now;
             usedInWindow.set(0);
@@ -182,7 +219,7 @@ public final class BotSpawnThrottle {
         }
         synchronized (LOCK) {
             if (windowStartMs == 0L) {
-                windowStartMs = System.currentTimeMillis();
+                windowStartMs = nowMs();
             }
             windowStartMs -= ms;
         }
@@ -227,7 +264,7 @@ public final class BotSpawnThrottle {
             return Integer.MAX_VALUE;
         }
         synchronized (LOCK) {
-            long now = System.currentTimeMillis();
+            long now = nowMs();
             boolean expired = windowStartMs == 0L
                     || (now - windowStartMs >= WINDOW_MS);
             if (expired) {
@@ -249,7 +286,17 @@ public final class BotSpawnThrottle {
         return Math.max(0.0, (count - remaining()) / (double) limit);
     }
 
+    /*
+     * Wait out the window. On the real clock this sleeps; under the virtual test clock it moves
+     * the clock to the deadline instead, which is exactly what the sleep is FOR - the quota check
+     * only ever reads nowMs(), so both paths leave the caller in the same state, one of them with
+     * no real waiting.
+     */
     private static void sleepUntil(long deadlineMs) {
+        if (virtualNowMs != null) {
+            advanceToForTest(deadlineMs);
+            return;
+        }
         long remainingMs = deadlineMs - System.currentTimeMillis();
         while (remainingMs > 0) {
             try {

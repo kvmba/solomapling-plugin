@@ -1,6 +1,8 @@
 package soloMapling.ArtificialPlayer.BotStatusSystem;
 
 import org.gms.client.Disease;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -15,6 +17,20 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class BotDebuffStateTest {
 
     private static final long LONG = 60_000L;
+
+    /*
+     * Drive the disease timers from a virtual clock: an expiry or a poison tick is reached by
+     * advancing time, not by sleeping it (the poison case alone used to sleep 3.1s).
+     */
+    @BeforeEach
+    void useVirtualClock() {
+        BotDebuffState.useVirtualClockForTest(1_000_000L);
+    }
+
+    @AfterEach
+    void restoreClock() {
+        BotDebuffState.resetClockForTest();
+    }
 
     @Test
     void freshStateHasNoEffects() {
@@ -138,21 +154,21 @@ class BotDebuffStateTest {
     void sameDiseaseIsRefusedDuringItsPostExpiryImmunity() throws Exception {
         BotDebuffState s = new BotDebuffState(null);
         assertTrue(s.apply(Disease.STUN, 1, 1, null)); // 1 ms disease so the next tick lapses it
-        Thread.sleep(5);
+        BotDebuffState.advanceClockForTest(5);
         s.tick(); // natural expiry stamps the 5 s window
 
         assertFalse(s.has(Disease.STUN));
         assertFalse(s.apply(Disease.STUN, LONG, 1, null)); // immune - the re-application is refused
-        assertTrue(s.isImmune(Disease.STUN, System.currentTimeMillis()));
+        assertTrue(s.isImmune(Disease.STUN, BotDebuffState.nowMs()));
     }
 
     @Test
     void postExpiryImmunityIsPerDiseaseAndLapses() throws Exception {
         BotDebuffState s = new BotDebuffState(null);
         assertTrue(s.apply(Disease.STUN, 1, 1, null));
-        Thread.sleep(5);
+        BotDebuffState.advanceClockForTest(5);
         s.tick();
-        long now = System.currentTimeMillis();
+        long now = BotDebuffState.nowMs();
 
         assertFalse(s.isImmune(Disease.SLOW, now)); // another disease is unaffected
         assertFalse(s.isImmune(Disease.STUN, now + BotDebuffTable.EXPIRY_IMMUNE_MS + 1)); // window lapses
@@ -173,7 +189,7 @@ class BotDebuffStateTest {
     void poisonTickWithoutACharacterDoesNotThrow() throws Exception {
         BotDebuffState s = new BotDebuffState(null);
         assertTrue(s.apply(Disease.POISON, LONG, 1, null));
-        Thread.sleep(BotDebuffTable.POISON_TICK_MS + 100); // past the first poison tick
+        BotDebuffState.advanceClockForTest(BotDebuffTable.POISON_TICK_MS + 100); // past the first poison tick
 
         s.tick(); // the poison branch used to NPE on the absent chr at the call site
 

@@ -6,6 +6,7 @@ import org.gms.server.maps.Foothold;
 import org.gms.server.maps.FootholdTree;
 import org.gms.server.maps.MapleMap;
 import org.gms.service.ConfigService;
+import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.springframework.context.ApplicationContext;
@@ -79,6 +80,17 @@ class SmallPlatformSwayTest {
         org.gms.config.GameConfig.add(cfg("server", "update_interval", "100"));
         map = BotNavigationMapLoader.loadMapGeometry(MAP_ID);
         BotNavigationGraphProvider.getGraph(map, BotMovementProfile.base());
+        // Drive the wall-clock gates (the down-jump crouch beat, the inter-down-jump cadence,
+        // the stuck window) from a virtual clock: the loop below runs ticks as fast as the CPU
+        // allows, so on the real clock a 800ms crouch hold would never elapse within 800
+        // iterations and a DROP goal would park in the window forever. Same contract as
+        // DownJumpCrouchBeatTest / TowerMazeExecutionSimTest.
+        MovementClock.useVirtual(1_000_000L);
+    }
+
+    @AfterAll
+    static void restoreClock() {
+        MovementClock.reset();
     }
 
     static org.gms.dao.entity.GameConfigDO cfg(String t, String k, String v) {
@@ -111,7 +123,7 @@ class SmallPlatformSwayTest {
         st.moveTargetPrecise = true;
         st.moveTargetSource = "test";
         st.moveBestDist = Integer.MAX_VALUE;
-        st.moveProgressAtMs = System.currentTimeMillis();
+        st.moveProgressAtMs = MovementClock.nowMs();
     }
 
     // Mirrors StairFullLoopSwayTest.productionTick (same tick order as GCMovementDriver).
@@ -187,6 +199,7 @@ class SmallPlatformSwayTest {
         for (int t = 0; t < TICKS; t++) {
             int prevX = st.bot.getPosition().x;
             productionTick(st, t % 2 == 0);
+            MovementClock.advance(BotPhysicsEngine.cfg.TICK_MS);
             Point p = st.bot.getPosition();
             if (st.moveTarget == null) { // arrived
                 arrivalTick = t;

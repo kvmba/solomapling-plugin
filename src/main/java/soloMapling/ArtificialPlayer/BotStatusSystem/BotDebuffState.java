@@ -48,6 +48,37 @@ public final class BotDebuffState {
         this.chr = chr;
     }
 
+    /*
+     * The wall clock the disease timers read. Production is plain currentTimeMillis; the
+     * debuff tests swap in a virtual clock so an expiry / poison tick can be reached by
+     * advancing time instead of sleeping the real duration (a single poison case used to
+     * sleep 3.1s). Virtual only under test - the same seam GCMoveSystem.MovementClock uses.
+     */
+    private static volatile Long virtualNowMs;
+
+    static long nowMs() {
+        Long virtual = virtualNowMs;
+        return virtual != null ? virtual : System.currentTimeMillis();
+    }
+
+    /** Test seam: freeze the clock at {@code startMs}. */
+    static void useVirtualClockForTest(long startMs) {
+        virtualNowMs = startMs;
+    }
+
+    /** Test seam: move the virtual clock forward. Real clock: no-op. */
+    static void advanceClockForTest(long ms) {
+        Long virtual = virtualNowMs;
+        if (virtual != null) {
+            virtualNowMs = virtual + ms;
+        }
+    }
+
+    /** Test seam: restore the real clock. */
+    static void resetClockForTest() {
+        virtualNowMs = null;
+    }
+
     /**
      * The debuff state belonging to this character's running bot behaviour, or null when it has none
      * (a bare artificial character, or one mid-retype). Lets the damage layer reach a bot's status
@@ -175,7 +206,7 @@ public final class BotDebuffState {
         if (active.size() >= BotDebuffTable.MAX_ACTIVE) {
             return false; // matches Character.giveDebuff's cap
         }
-        long now = System.currentTimeMillis();
+        long now = nowMs();
         if (isImmune(disease, now)) {
             return false; // matches Character.giveDebuff's isDebuffImmune gate
         }
@@ -203,7 +234,7 @@ public final class BotDebuffState {
             clearAll(); // leaving the world / already a corpse: the packets no longer matter
             return;
         }
-        long now = System.currentTimeMillis();
+        long now = nowMs();
         for (Map.Entry<Disease, Entry> e : active.entrySet()) {
             Disease disease = e.getKey();
             Entry entry = e.getValue();
