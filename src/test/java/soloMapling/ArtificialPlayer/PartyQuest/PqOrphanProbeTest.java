@@ -109,18 +109,22 @@ class PqOrphanProbeTest {
         // entry also clears the live move target, so no test inherits one. The probe throttle is
         // keyed by the shared BOT_ID too, so it is dropped here.
         soloMapling.ArtificialPlayer.GCMoveSystem.DriverlessMovementState.remove(BOT_ID);
-        Field throttle = PqActions.class.getDeclaredField("orphanProbeAtByBot");
-        throttle.setAccessible(true);
-        ((Map<?, ?>) throttle.get(null)).remove(BOT_ID);
-        // The pickup walk now arms a stage-walk shield (and stamps the seizure window) under
-        // the shared BOT_ID: without these drops the next test inherits a live shield and its
-        // loot tick silently refuses to arm a walk.
-        Field seizure = PqActions.class.getDeclaredField("pickupSeizedAtByBot");
-        seizure.setAccessible(true);
-        ((Map<?, ?>) seizure.get(null)).remove(BOT_ID);
-        Field shield = PqActions.class.getDeclaredField("stageWalkShieldUntilByBot");
-        shield.setAccessible(true);
-        ((Map<?, ?>) shield.get(null)).remove(BOT_ID);
+        clearProbeAndShield();
+        // The pickup walk also stamps the seizure window under the shared BOT_ID: without this
+        // drop the next test inherits a live window and its loot tick silently refuses a walk.
+        removePerBotEntry("pickupSeizedAtByBot");
+    }
+
+    /** Drop the probe throttle and the stage-walk shield, leaving the seizure window untouched. */
+    private static void clearProbeAndShield() throws Exception {
+        removePerBotEntry("orphanProbeAtByBot");
+        removePerBotEntry("stageWalkShieldUntilByBot");
+    }
+
+    private static void removePerBotEntry(String fieldName) throws Exception {
+        Field field = PqActions.class.getDeclaredField(fieldName);
+        field.setAccessible(true);
+        ((Map<?, ?>) field.get(null)).remove(BOT_ID);
     }
 
     /** The live move goal of the bot's entry, read through the same-package test seam. */
@@ -329,41 +333,47 @@ class PqOrphanProbeTest {
         PqActions.loot(bot, bot.getPosition(), 260, new int[]{PASS});
         assertEquals(new Point(0, 0), moveTargetOf(BOT_ID), "first tick: the seizure lands");
 
+        // The pickup walk armed an 8s stage-walk shield, which would short-circuit
+        // pickupMaySeizeDriver before the 6s seizure window is read. Drop it (and the probe
+        // throttle) here so this assertion pins the seizure pacing itself, not the shield.
+        clearProbeAndShield();
+
         // The walk is abandoned (unreachable target), the seek re-arms the chase...
         GCMovement.move(bot, 700, 0);
         PqActions.loot(bot, bot.getPosition(), 260, new int[]{PASS});
 
         assertEquals(new Point(700, 0), moveTargetOf(BOT_ID),
-                "inside the window the chase keeps the driver - no loot/seek ping-pong");
+                "inside the seizure window the chase keeps the driver - no loot/seek ping-pong");
     }
 
     @Test
-    void aThrottledOrEmptyProbeDoesNotBurnTheSeizureWindow() throws Exception {
-        // The window is burned only when a walk ACTUALLY replaces the chase: a probe refused
-        // by its own throttle (or a scan that finds nothing) must leave the window free, or a
-        // drop that lands seconds later would be locked out of a walk for the rest of it.
-        MapleMap map = roomWithDropAt(new Point(0, 0), false);
+    void anEmptyProbeDoesNotBurnTheSeizureWindow() throws Exception {
+        // The window is burned only when a walk ACTUALLY replaces the chase: an empty probe
+        // walks nowhere and arms no shield, so it must leave the window free. Otherwise a
+        // drop that lands inside the caller's radius seconds later stays locked out.
+        MapleMap map = wzRoom(); // no drop yet
         Character bot = botOn(map, new Point(600, 0));
 
         GCMovement.move(bot, 700, 0); // the chase holds the driver
 
-        // The probe runs first (its throttle is empty on a fresh bot) and burns its own
-        // 6s probe throttle but NOT the seizure window...
-        PqActions.loot(bot, bot.getPosition(), 260, new int[]{PASS});
-        assertEquals(new Point(0, 0), moveTargetOf(BOT_ID),
-                "the first loot tick arms the walk (the probe path)");
-        Field throttle = PqActions.class.getDeclaredField("orphanProbeAtByBot");
-        throttle.setAccessible(true);
-        Long stamped = ((Map<Integer, Long>) throttle.get(null)).get(BOT_ID);
-        assertNotNull(stamped, "precondition: the probe actually ran this tick");
-        GCMovement.move(bot, 700, 0); // ...then the seek re-arms the chase
-
-        // Now the probe is throttled: this tick must NOT re-walk (the probe skips), but the
-        // seizure window must stay free - pinning it here so a future stamp-on-probe
-        // regression is caught, not silently shipped.
+        // Empty probe: the old code stamped the seizure window here despite walking nowhere.
         PqActions.loot(bot, bot.getPosition(), 260, new int[]{PASS});
         assertEquals(new Point(700, 0), moveTargetOf(BOT_ID),
-                "the throttled probe skips (the walk stays the chase) - and the window was not burned");
+                "precondition: the empty probe leaves the chase alone and arms no shield");
+
+        // The drop lands inside the next loot's own radius (loot sees it directly) but beyond
+        // pickup reach (it must be walked to) - the shape an empty probe used to lock out.
+        Character owner = mock(Character.class, RETURNS_DEEP_STUBS);
+        when(owner.getId()).thenReturn(1);
+        when(owner.getPartyId()).thenReturn(-1);
+        map.addMapObject(new MapItem(new Item(PASS, (short) 0, (short) 1),
+                new Point(0, 0), null, owner, null, (byte) 2, false));
+
+        PqActions.loot(bot, bot.getPosition(), 700, new int[]{PASS});
+
+        assertEquals(new Point(0, 0), moveTargetOf(BOT_ID),
+                "an empty probe must not burn the 6s window: the in-radius, out-of-reach "
+                        + "drop is walked to");
     }
 
     @Test
