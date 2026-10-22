@@ -489,6 +489,17 @@ public final class BotAttackDriver {
     private record SeekScan(Point botPos, List<Monster> candidates, Monster nearest) {
     }
 
+    /*
+     * Friendly monsters (WZ {@code damagedByMob=1}: the HPQ Moon Bunny, and the escorts other
+     * quests spawn as mobs) are scenery: they take damage like any other monster, but killing one
+     * is what the quest scripts read as a FAILURE - HPQ's {@code friendlyKilled} ends the instance
+     * 5s later. So no swing may even consider one, and the scan below is where every swing path
+     * (the PQ combat sweep, the grind brain, the GM attack commands) draws its candidates from.
+     */
+    private static boolean isFriendly(Monster monster) {
+        return monster.getStats() != null && monster.getStats().isFriendly();
+    }
+
     private static SeekScan seek(Character bot, BotAttackProfile profile, WeaponType weapon) {
         Point botPos = bot.getPosition();
         if (botPos == null) {
@@ -506,7 +517,7 @@ public final class BotAttackDriver {
         Rectangle rightBox = reachBox(botPos, profile, weapon, false);
         for (MapObject mo : map.getMapObjectsInRange(botPos, SEEK_RANGE_SQ, MONSTER_TYPES)) {
             Monster m = (Monster) mo;
-            if (!m.isAlive()) {
+            if (!m.isAlive() || isFriendly(m)) {
                 continue;
             }
             Point mp = m.getPosition();

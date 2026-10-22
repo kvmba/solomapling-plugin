@@ -37,6 +37,26 @@ public final class EllinPqData {
     /** The frog room past the maze, whose guardians are caught rather than killed. */
     public static final int FROG_ROOM = 930000400;
 
+    /**
+     * The two rooms past the frog room, and the two reactors that carry them.
+     *
+     * <p>{@code 930000500} holds the Purple Stone of Magic inside box reactors; the stone is what
+     * the exit NPC ({@code 2133004}) demands from the LEADER before warping the team on to
+     * {@code 930000600}. There, the altar reactor is what actually spawns the Poison Golem - and
+     * killing the golem is what clears the run ({@code EllinPQ.monsterKilled}).
+     *
+     * <p>Sources: {@code wz/Map.wz/Map/Map9/930000500.img.xml} (reactor 3002001),
+     * {@code 930000600.img.xml} (reactor 3001000), {@code scripts/reactor/3001000.js}
+     * ({@code spawnMonster(9300180)}), {@code scripts/npc/2133004.js} (the stone gate), and
+     * {@code reactordrops} V1.0.58 row 374 (3002001 → 4001163).
+     */
+    public static final int STONE_BOX_ROOM = 930000500;
+    public static final int STONE_BOX = 3002001;
+    public static final int PURPLE_STONE = 4001163;
+
+    public static final int ALTAR_ROOM = 930000600;
+    public static final int ALTAR = 3001000;
+
     public static final int MIN_PLAYERS = 4;
     public static final int MAX_PLAYERS = 6;
     public static final int MIN_LEVEL = 44;

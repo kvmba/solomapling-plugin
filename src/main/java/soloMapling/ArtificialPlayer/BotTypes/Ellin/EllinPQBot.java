@@ -88,6 +88,22 @@ public class EllinPQBot extends PartyQuestBot {
             return false;
         }
 
+        // The stone room's box yields the Purple Stone of Magic, and the leader cannot open the
+        // way on without it (2133004 checks HIS inventory). Break the box, pick the stone up and
+        // hand it to him - the same leader-checked transfer every other turn-in needs.
+        if (mapId == EllinPqData.STONE_BOX_ROOM) {
+            workStoneBox();
+            return false;
+        }
+
+        // The altar room: the altar reactor is what spawns the Poison Golem, and the golem's
+        // death is the run's clear condition. Both halves are needed - an altar nobody feeds
+        // spawns nothing, and the golem fights back while it is up.
+        if (mapId == EllinPqData.ALTAR_ROOM) {
+            workAltar();
+            return false;
+        }
+
         // The spine blocks the way until it is broken, in the room that has it. The guard
         // cap bounds a stuck state walk; the sleep between hits is the player's repeat rate,
         // the same beat breakBoxInPlace uses - eight back-to-back swings read as a machine gun.
@@ -120,6 +136,52 @@ public class EllinPQBot extends PartyQuestBot {
     @Override
     protected boolean fightsOnSweep() {
         return getChr().getMapId() != EllinPqData.FROG_ROOM;
+    }
+
+    /**
+     * Break the stone room's boxes, pick the Purple Stone up, and put it in the leader's hands.
+     *
+     * <p>The exit NPC ({@code 2133004}) checks {@code cm.haveItem(4001163)} on whoever talks to
+     * it, so the stone has to be in the leader's inventory - a bot that keeps it stops the whole
+     * party. The stone itself drops from the box reactors in this room.
+     */
+    private void workStoneBox() {
+        Character bot = getChr();
+        int box = PqActions.findReactorOid(bot, EllinPqData.STONE_BOX);
+        if (box >= 0) {
+            if (PqActions.approachReactor(bot, box, false, true) == PqActions.Approach.IN_POSITION) {
+                PqActions.hitReactor(bot, box);
+            }
+            return;
+        }
+        // Box gone (or not in this room's copy): sweep what it left and put it in his hands.
+        PqActions.loot(bot, bot.getPosition(), 2_000, new int[]{EllinPqData.PURPLE_STONE});
+        PqActions.handItemsToLeader(bot, EllinPqData.PURPLE_STONE);
+    }
+
+    /**
+     * Feed the altar if this bot happens to be holding the stone, then fight whatever is here.
+     *
+     * <p>The altar is an item reactor ({@code wz/Reactor.wz/3001000.img.xml}: type 100, wants
+     * {@code 4001163}x1) whose script spawns the Poison Golem - and the golem's death is the
+     * run's clear condition. The room has no other source of monsters, so an unfed altar means
+     * an empty room.</p>
+     *
+     * <p>The stone itself is the PARTY's single copy: {@code 930000500} holds one box reactor
+     * ({@code 3002001}, drop chance 1) and no more, and the leader has to be carrying it to get
+     * past {@code 2133004} at all. So in the normal flow he keeps it and drops it on the altar
+     * himself; the feed here is the fallback for the case where the hand-off could not complete
+     * (he was out of reach, or his inventory was full) and the bot arrived still holding it. A bot
+     * that kept the stone instead of handing it over would strand the party at the exit NPC, which
+     * is why {@code workStoneBox} gives it up first.
+     */
+    private void workAltar() {
+        Character bot = getChr();
+        int altar = PqActions.findReactorOid(bot, EllinPqData.ALTAR);
+        if (altar >= 0 && PqActions.countItem(bot, EllinPqData.PURPLE_STONE) > 0) {
+            PqActions.feedReactor(bot, altar, EllinPqData.PURPLE_STONE);
+        }
+        PqActions.seekAndAttack(bot);
     }
 
     /**

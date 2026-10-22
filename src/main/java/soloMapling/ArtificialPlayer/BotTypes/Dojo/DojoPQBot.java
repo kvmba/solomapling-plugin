@@ -1,6 +1,7 @@
 package soloMapling.ArtificialPlayer.BotTypes.Dojo;
 
 import org.gms.client.Character;
+import org.gms.server.maps.Portal;
 import soloMapling.ArtificialPlayer.BotGeneration;
 import soloMapling.ArtificialPlayer.PartyQuest.PartyQuestBot;
 import soloMapling.ArtificialPlayer.PartyQuest.PqActions;
@@ -52,12 +53,38 @@ public class DojoPQBot extends PartyQuestBot {
 
     @Override
     protected boolean workStage() {
-        var map = getChr().getMap();
+        Character bot = getChr();
+        var map = bot.getMap();
         // The dojo's rooms are one boss each and the door opens when it is down, so there is
         // nothing to read - just fight while anything is standing.
         if (!map.getMonsters().isEmpty()) {
-            PqActions.seekAndAttack(getChr());
+            PqActions.seekAndAttack(bot);
+            return false;
+        }
+        // Room clear. Take the door the SERVER moves a body through. The obvious one
+        // (out00/dojang_up) is a client animation: it only sends DOJO_WARP_UP and waits for the
+        // client's reply, which a bot never sends - so a bot walking it stands at the door
+        // forever. out001/dojang_next does the warp itself, and at a resting floor it moves the
+        // whole party standing in the five rooms below.
+        //
+        // Only climb while the party is not BELOW us. A room spawns its boss from
+        // onFirstUserEnter, which the host skips for artificial characters - so a bot that
+        // reaches an empty room alone would see "cleared" and run the whole tower on its own,
+        // leaving the party behind. Waiting there is the correct read: the leader's own entry
+        // raises the boss, and the room is only genuinely cleared once he has.
+        if (!partyIsBelow(bot)) {
+            Portal door = PartyQuestBot.scriptedPortalOf(map.getPortals(),
+                    DojoPqData.SERVER_DOOR, DojoPqData.SERVER_DOOR_SCRIPT);
+            if (door != null && PqActions.walkTo(bot, door.getPosition())) {
+                PqActions.enterPortal(bot, door);
+            }
         }
         return false;
+    }
+
+    /** Whether this bot has climbed past the party - the leader is in a lower room. */
+    private boolean partyIsBelow(Character bot) {
+        Character leader = partyLeader();
+        return leader != null && leader != bot && leader.getMapId() < bot.getMapId();
     }
 }

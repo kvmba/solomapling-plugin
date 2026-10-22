@@ -68,6 +68,30 @@ public final class DojoPqData {
         return org.gms.constants.id.MapId.isPartyDojo(mapId);
     }
 
+    // =========================================================================
+    // The door that actually moves a body
+    // =========================================================================
+
+    /**
+     * The two script doors every dojo room carries, and why only one of them can move a bot.
+     *
+     * <p>{@code out00}/{@code dojang_up} is the client's own "climb" animation: the script only
+     * sends {@code DOJO_WARP_UP} and resets the door reactor - the actual room change is the
+     * client's reply packet, which a socketless bot never sends. {@code out001}/{@code
+     * dojang_next} is the server-side door: the script itself checks the room and warps the body
+     * ({@code pi.warp(mapId + 100)}), and at a resting floor it warps the whole party that is
+     * standing in the five rooms below. That difference is the whole reason the bot walks
+     * {@code out001} and not the door a player would use.
+     *
+     * <p>Sources: {@code scripts/portal/dojang_up.js}, {@code scripts/portal/dojang_next.js}, and
+     * the portals of {@code wz/Map.wz/Map/Map9/925020100.img.xml} (which the party rooms
+     * {@code 9250301xx} link to).
+     */
+    public static final String SERVER_DOOR = "out001";
+
+    /** The script that door runs; named so the selection cannot drift from the WZ data. */
+    public static final String SERVER_DOOR_SCRIPT = "dojang_next";
+
     /**
      * Whether a bot's level would keep a given party from entering - the check worth running
      * before a bot is added rather than after a refused entry.
