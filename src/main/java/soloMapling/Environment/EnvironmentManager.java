@@ -167,6 +167,7 @@ public class EnvironmentManager {
         // Server.init() alongside the other WZ-derived data - guaranteed ready
         // before any player can trigger this.
         long startupStart = System.currentTimeMillis();
+
         // Wake bots instantly (movement + macro brain) whenever a real player shares their map, in both
         // directions - a player entering a populated map, or a bot returning to the player's map.
         BotMapEntryResponder.register();

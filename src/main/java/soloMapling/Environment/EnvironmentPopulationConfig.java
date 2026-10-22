@@ -188,12 +188,14 @@ public final class EnvironmentPopulationConfig {
     }
 
     public static PopulationPlan reload() {
+        Loaded fresh;
         synchronized (EnvironmentPopulationConfig.class) {
-            loaded = load();
+            fresh = load();
+            loaded = fresh;
         }
         // TownPresenceConfig reads the same YAML; drop its cache so the next towns() re-parses.
         TownPresenceConfig.invalidate();
-        return plan();
+        return fresh.plan();
     }
 
     public static Optional<String> lastLoadedFrom() {

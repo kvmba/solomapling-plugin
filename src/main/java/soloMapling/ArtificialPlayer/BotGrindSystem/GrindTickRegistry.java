@@ -60,6 +60,7 @@ public final class GrindTickRegistry {
         this(ticker -> ExecutorServiceManager.getScheduledExecutorService().scheduleAtFixedRate(
                 ticker, TICK_MS, TICK_MS, TimeUnit.MILLISECONDS));
     }
+
     GrindTickRegistry(TickerScheduler scheduler) {
         this.scheduler = java.util.Objects.requireNonNull(scheduler, "scheduler");
     }
