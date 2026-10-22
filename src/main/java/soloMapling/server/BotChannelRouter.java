@@ -7,14 +7,14 @@ import org.gms.net.server.world.World;
 
 
 /**
- * Picks the channel a newly created bot lives on.
+ * Picks the channel a newly created bot lives on, and reserves that channel's slot.
  *
  * <p>Two ways in, because there are two different questions:
  * <ul>
- *   <li>{@link #nextChannel(int)} — "put this bot on my preferred channel, usually ch1". The
+ *   <li>{@link #reservePreferred(int)} — "put this bot on my preferred channel, usually ch1". The
  *       ambient world (shops, merchants, town crowds) lives on channel 1, so every ambient bot
  *       asks for it by name.</li>
- *   <li>{@link #resolveChannel(int)} — "put this bot on that exact channel". The training
+ *   <li>{@link #reserveExact(int)} — "put this bot on that exact channel". The training
  *       cohorts use it: a cohort's {@code count} is a per-channel quota, so the spawn loop
  *       fills channel 1, then channel 2, and so on, and every channel ends up with its own
  *       full set of grinders.</li>
@@ -22,7 +22,10 @@ import org.gms.net.server.world.World;
  *
  * <p>Capacity is the only shared rule: a channel at {@code channel_capacity} takes no more.
  * A bot that cannot be placed is dropped rather than squeezed in past the cap, and a bot never
- * switches channels once created.
+ * switches channels once created. Both entry points are reservations, not lookups: the slot is
+ * claimed atomically with the decision, because a check followed by a later registration lets
+ * a whole parallel spawn wave pass the same check before any of it lands (see {@link #tryReserve}).
+ * A caller that fails after reserving must {@link #release(int)} the slot.
  *
  * <p>IMPORTANT - what {@code channel_capacity} counts: BOTS ONLY, not real players. It used to
  * be total headcount, but that required reading {@code PlayerStorage.getSize()} on every spawn,
@@ -78,8 +81,12 @@ public final class BotChannelRouter {
             new java.util.concurrent.ConcurrentHashMap<>();
 
     /**
-     * Record a bot arriving on a channel. Paired with {@link #noteBotRemoved}.
+     * Record a bot arriving on a channel. Paired with {@link #release(int)}.
      * Must be called from whichever channel the bot was actually placed on.
+     *
+     * <p>Spawn paths that came through {@link #reservePreferred(int)} /
+     * {@link #reserveExact(int)} already hold their slot and must NOT call this again - the
+     * reservation is the count.
      */
     public static void noteBotAdded(int channel) {
         if (channel > 0) {
@@ -89,36 +96,65 @@ public final class BotChannelRouter {
     }
 
     /**
-     * Undo {@link #noteBotAdded} for a bot that is leaving. Must be passed the same channel the
-     * bot was added on, or the count drifts upward and a channel eventually refuses new bots.
+     * Undo {@link #noteBotAdded} or a {@link #reservePreferred}/{@link #reserveExact}
+     * reservation. Must be passed the same channel the bot was added on, or the count drifts
+     * upward and a channel eventually refuses new bots.
      */
-    public static void noteBotRemoved(int channel) {
+    public static void release(int channel) {
         if (channel > 0) {
             java.util.concurrent.atomic.AtomicInteger c = BOTS_ON_CHANNEL.get(channel);
             if (c != null) {
-                c.decrementAndGet();
+                // Clamp at zero: an unmatched release must not push the counter negative, or
+                // the channel would then accept that many extra bots before it reads as full.
+                c.updateAndGet(current -> current > 0 ? current - 1 : 0);
             }
         }
     }
 
-    /** Bots currently placed on {@code channel}. Negative counts read as 0. */
-    private static int botsOnChannel(int channel) {
+    /** Bots currently placed on {@code channel}, including in-flight reservations. */
+    static int botsOnChannel(int channel) {
         java.util.concurrent.atomic.AtomicInteger c = BOTS_ON_CHANNEL.get(channel);
         return c == null ? 0 : Math.max(0, c.get());
     }
 
     /**
-     * The channel a caller explicitly asked for, or {@link #NONE} when it doesn't exist or is
-     * already at {@code channel_capacity}.
+     * Claim a slot on {@code channelId} for a spawn that is about to happen.
      *
-     * <p>Unlike {@link #nextChannel(int)} this never falls back to another channel: the caller
+     * <p>The claim is the count: there is no separate "commit" step. That is what closes the
+     * check-then-act hole this router used to have - selection and the headcount bump happen in
+     * one atomic operation, so N spawn threads racing for the last slot cannot all observe
+     * "below cap" and then all register. A caller that fails after reserving must hand the slot
+     * back with {@link #release(int)}.
+     *
+     * <p>{@code cap <= 0} means the operator disabled the cap; the bot is still counted, so the
+     * number stays honest if the cap is re-enabled at runtime.
+     */
+    private static boolean tryReserve(int channelId, int channelCount, int cap) {
+        if (channelId <= 0 || channelId > channelCount) {
+            return false;
+        }
+        java.util.concurrent.atomic.AtomicInteger counter = BOTS_ON_CHANNEL
+                .computeIfAbsent(channelId, k -> new java.util.concurrent.atomic.AtomicInteger());
+        int used = counter.incrementAndGet();
+        if (cap > 0 && used > cap) {
+            counter.decrementAndGet(); // lost the race for the last slot
+            return false;
+        }
+        return true;
+    }
+
+    /**
+     * The channel a caller explicitly asked for, or {@link #NONE} when it doesn't exist or is
+     * already at {@code channel_capacity}. Reserves the slot on success.
+     *
+     * <p>Unlike {@link #reservePreferred(int)} this never falls back to another channel: the caller
      * wants this specific one (the training cohorts spawn a full set per channel), so a channel
      * that cannot take it must report failure rather than quietly putting the bot somewhere else
      * and leaving this one short of its quota.
      *
      * @param channel 1-based channel id.
      */
-    public static int resolveChannel(int channel) {
+    public static int reserveExact(int channel) {
         try {
             World world = Server.getInstance().getWorld(WORLD);
             if (world == null || channel <= 0) {
@@ -128,11 +164,8 @@ public final class BotChannelRouter {
             if (n <= 0 || channel > n) {
                 return NONE;
             }
-            int cap = GameConfig.getServerInt("channel_capacity");
-            if (cap > 0 && !hasRoom(channel, n, cap)) {
-                return NONE; // at capacity - the caller skips this spawn
-            }
-            return channel;
+            return tryReserve(channel, n, GameConfig.getServerInt("channel_capacity"))
+                    ? channel : NONE;
         } catch (RuntimeException e) {
             return NONE; // never let routing break a spawn
         }
@@ -140,54 +173,50 @@ public final class BotChannelRouter {
 
     /**
      * The channel for the next created bot: the caller's preferred one when it has room,
-     * otherwise any channel that does.
+     * otherwise any channel that does. Reserves the slot on success.
      *
      * <p>Preference is not a "heaviest on ch1" split - it is just "the ambient world lives on
      * ch1, so send ambient bots there". When that channel is at {@code channel_capacity} the
      * bot goes to the first channel with headroom instead of being dropped, which is all the
      * spreading this needs: training cohorts are placed per-channel by
-     * {@link #resolveChannel(int)}.
+     * {@link #reserveExact(int)}.
      *
      * @param preferredChannel 1-based channel id, or {@code <= 0} for no preference.
      * @return a 1-based channel id, or {@link #NONE} when every channel is at the cap.
      */
-    public static int nextChannel(int preferredChannel) {
+    public static int reservePreferred(int preferredChannel) {
         try {
             World world = Server.getInstance().getWorld(WORLD);
             if (world == null) {
-                return DEFAULT_CHANNEL;
+                return reserveUncapped(DEFAULT_CHANNEL);
             }
             int n = world.getChannelsSize();
             int cap = GameConfig.getServerInt("channel_capacity");
             if (n <= 0 || cap <= 0) {
-                return DEFAULT_CHANNEL;
+                return reserveUncapped(DEFAULT_CHANNEL);
             }
-            if (preferredChannel > 0 && preferredChannel <= n
-                    && hasRoom(preferredChannel, n, cap)) {
+            if (tryReserve(preferredChannel, n, cap)) {
                 return preferredChannel;
             }
             for (int channelId = 1; channelId <= n; channelId++) {
-                if (hasRoom(channelId, n, cap)) {
+                if (tryReserve(channelId, n, cap)) {
                     return channelId;
                 }
             }
             return NONE;
         } catch (RuntimeException e) {
-            return DEFAULT_CHANNEL; // never let routing break a spawn
+            return reserveUncapped(DEFAULT_CHANNEL); // never let routing break a spawn
         }
     }
 
     /**
-     * True when the channel is up and below {@code channel_capacity}.
-     *
-     * <p>Touches no lock on the routing path. It reads the bot counter instead of
-     * {@code PlayerStorage} (see {@link #BOTS_ON_CHANNEL}), and it takes the channel COUNT the
-     * caller already fetched instead of calling {@code world.getChannel()} again - getChannel()
-     * takes World's own read lock, so using it per spawn would just move the contention from one
-     * lock to another. A channel id past the end is treated as missing, which means full.
+     * Fallback used when the topology or the cap cannot be read: still count the bot on the
+     * default channel, so the caller's "the returned channel is already reserved" contract holds
+     * and a later teardown's {@link #release(int)} stays balanced.
      */
-    private static boolean hasRoom(int channelId, int channelCount, int cap) {
-        return channelId > 0 && channelId <= channelCount && botsOnChannel(channelId) < cap;
+    private static int reserveUncapped(int channel) {
+        noteBotAdded(channel);
+        return channel;
     }
 
     /**

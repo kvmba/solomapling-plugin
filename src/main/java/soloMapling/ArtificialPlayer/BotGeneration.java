@@ -171,7 +171,9 @@ public class BotGeneration {
         // Console bot skips BotDecorate (fixed level/job, no decoration), so its
         // fame would otherwise stay at whatever the template character carries.
         BotFame.apply(consoleBot);
-        addBotToServer(consoleBot);
+        // Not routed through the capacity gate: the console bot is a single fixed id on
+        // channel 1, never spawned per channel, so it counts itself here.
+        addBotToServer(consoleBot, false);
         return consoleBot;
     }
 
@@ -191,7 +193,7 @@ public class BotGeneration {
     public static int createBot(Point pos, MapleMap map, int baseClass, int minLevel, int maxLevel,
                                 int forcedJobId) {
         return createBotOn(pos, map, baseClass, minLevel, maxLevel, forcedJobId,
-                BotChannelRouter.nextChannel(BotChannelRouter.DEFAULT_CHANNEL));
+                BotChannelRouter.reservePreferred(BotChannelRouter.DEFAULT_CHANNEL));
     }
 
     /**
@@ -210,7 +212,7 @@ public class BotGeneration {
      */
     public static int createBotOnChannel(Point pos, MapleMap map, int baseClass, int minLevel,
                                          int maxLevel, int forcedJobId, int channel) {
-        int resolved = BotChannelRouter.resolveChannel(channel);
+        int resolved = BotChannelRouter.reserveExact(channel);
         return createBotOn(pos, map, baseClass, minLevel, maxLevel, forcedJobId, resolved);
     }
 
@@ -248,46 +250,56 @@ public class BotGeneration {
         int nameCategory = BotNamePool.nameCategoryFor(effectiveBaseClass, nameMinLevel, forcedJobId);
 
         Character bot = null;
-        bot = Character.loadCharFromDB(cid, BotClientHandler.clientFor(channel), false);
-        int botId = SoloMaplingConstants.GameConstants.BOT_BASE_ID + currentBotCount.getAndIncrement();
-        bot = setBotStats(bot, botId, nameCategory); // Bot onDemandBot
-        addBotToServer(bot);
-        // Re-resolve the map on the bot's OWN channel. Callers pass a map instance taken from
-        // whichever channel they were on (a GM's, or channel 1's), and a map is a per-channel
-        // object: putting the bot in another channel's instance would broadcast it to that
-        // channel's players instead of the ones who should see it.
-        MapleMap ownMap = map;
-        if (map != null && bot.getClient() != null && bot.getClient().getChannelServer() != null) {
-            MapleMap resolved = bot.getClient().getChannelServer()
-                    .getMapFactory().getMap(map.getId());
-            if (resolved != null) {
-                ownMap = resolved;
+        boolean placed = false;
+        try {
+            bot = Character.loadCharFromDB(cid, BotClientHandler.clientFor(channel), false);
+            int botId = SoloMaplingConstants.GameConstants.BOT_BASE_ID + currentBotCount.getAndIncrement();
+            bot = setBotStats(bot, botId, nameCategory); // Bot onDemandBot
+            addBotToServer(bot, true); // the channel reservation taken by the caller becomes its count
+            placed = true;
+            // Re-resolve the map on the bot's OWN channel. Callers pass a map instance taken from
+            // whichever channel they were on (a GM's, or channel 1's), and a map is a per-channel
+            // object: putting the bot in another channel's instance would broadcast it to that
+            // channel's players instead of the ones who should see it.
+            MapleMap ownMap = map;
+            if (map != null && bot.getClient() != null && bot.getClient().getChannelServer() != null) {
+                MapleMap resolved = bot.getClient().getChannelServer()
+                        .getMapFactory().getMap(map.getId());
+                if (resolved != null) {
+                    ownMap = resolved;
+                }
+            }
+            placeBotOnMap(bot, pos, ownMap);
+            // Decorate before the drop-down plays so the bot arrives fully dressed
+            // (decoration is an in-memory cache lookup, takes microseconds). This mirrors the original
+            // branch exactly (baseClass<=0 -> the default 10..80 band), except the no-class path reuses
+            // effectiveBaseClass (already rolled above) instead of letting BotDecorate roll a second
+            // class - so the job matches the name category. A forced job still flows through the
+            // baseClass<=0 branch, where selectJobForClass ignores baseClass and uses the forced id.
+            if (baseClass <= 0) {
+                setBotVariables(bot, effectiveBaseClass, 10, 80, forcedJobId);
+            } else {
+                setBotVariables(bot, baseClass, minLevel, maxLevel, forcedJobId);
+            }
+            // Pets, if the policy grants them. Level/job/gear are settled above, and
+            // the bot is already on its map, so the pets can be shown right away.
+            soloMapling.ArtificialPlayer.BotPetSystem.BotPetSystem.grant(bot);
+            // Summon, if this job owns one and the roll says so. Same point as pets: level/job/gear
+            // are settled and the bot is on its map, so the entity can be shown right away.
+            soloMapling.ArtificialPlayer.BotSummonSystem.BotSummonSystem.grant(bot);
+            // Choreography sleeps ~2.5-6s in total; play it on a virtual thread so
+            // mass spawning isn't gated on each bot's arrival animation. Drop-down ->
+            // turn-around ordering is preserved because it's one sequential task.
+            Character finalBot = bot;
+            runAsync(() -> playSpawnChoreography(finalBot));
+            return botId;
+        } finally {
+            // The spawn failed before the bot reached the server: hand the reserved slot back,
+            // or every failed spawn would permanently consume a channel slot.
+            if (!placed) {
+                BotChannelRouter.release(channel);
             }
         }
-        placeBotOnMap(bot, pos, ownMap);
-        // Decorate before the drop-down plays so the bot arrives fully dressed
-        // (decoration is an in-memory cache lookup, takes microseconds). This mirrors the original
-        // branch exactly (baseClass<=0 -> the default 10..80 band), except the no-class path reuses
-        // effectiveBaseClass (already rolled above) instead of letting BotDecorate roll a second
-        // class - so the job matches the name category. A forced job still flows through the
-        // baseClass<=0 branch, where selectJobForClass ignores baseClass and uses the forced id.
-        if (baseClass <= 0) {
-            setBotVariables(bot, effectiveBaseClass, 10, 80, forcedJobId);
-        } else {
-            setBotVariables(bot, baseClass, minLevel, maxLevel, forcedJobId);
-        }
-        // Pets, if the policy grants them. Level/job/gear are settled above, and
-        // the bot is already on its map, so the pets can be shown right away.
-        soloMapling.ArtificialPlayer.BotPetSystem.BotPetSystem.grant(bot);
-        // Summon, if this job owns one and the roll says so. Same point as pets: level/job/gear
-        // are settled and the bot is on its map, so the entity can be shown right away.
-        soloMapling.ArtificialPlayer.BotSummonSystem.BotSummonSystem.grant(bot);
-        // Choreography sleeps ~2.5-6s in total; play it on a virtual thread so
-        // mass spawning isn't gated on each bot's arrival animation. Drop-down ->
-        // turn-around ordering is preserved because it's one sequential task.
-        Character finalBot = bot;
-        runAsync(() -> playSpawnChoreography(finalBot));
-        return botId;
     }
 
     /**
@@ -309,16 +321,27 @@ public class BotGeneration {
 
         // Companions are bots too: they get a channel of their own rather than every one of
         // them piling onto channel 1.
-        int channel = BotChannelRouter.nextChannel(0);
+        int channel = BotChannelRouter.reservePreferred(0);
         if (channel == BotChannelRouter.NONE) {
             throw new IllegalStateException("All channels are at capacity; cannot load companion "
                     + characterId);
         }
         Client companionClient = BotClientHandler.clientFor(channel);
-        Character companion =
-                Character.loadCharFromDB(characterId, companionClient, true);
-        if (companion == null) {
-            throw new IllegalStateException("Unable to load companion character " + characterId);
+        Character companion;
+        try {
+            companion = Character.loadCharFromDB(characterId, companionClient, true);
+            if (companion == null) {
+                throw new IllegalStateException("Unable to load companion character " + characterId);
+            }
+            // No map re-resolve here: loadCharFromDB was called with channelServer=true, so the
+            // host already resolved the map through this client's own channel (falling back to
+            // Henesys when the recorded map is missing).
+            if (companion.getMap() == null) {
+                throw new IllegalStateException("Companion has no valid map: " + characterId);
+            }
+        } catch (RuntimeException | Error failure) {
+            BotChannelRouter.release(channel); // the companion never reached the server
+            throw failure;
         }
         // Move onto a private client right away. clientFor() hands back the channel's SHARED
         // headless client, which carries exactly one player slot: loading a second companion on
@@ -328,14 +351,8 @@ public class BotGeneration {
         // corruption risk rather than a cosmetic one - and it is the same resource shape
         // adoptPrivateClient already exists for.
         adoptPrivateClient(companion);
-        // No map re-resolve here: loadCharFromDB was called with channelServer=true, so the
-        // host already resolved the map through this client's own channel (falling back to
-        // Henesys when the recorded map is missing).
-        if (companion.getMap() == null) {
-            throw new IllegalStateException("Companion has no valid map: " + characterId);
-        }
 
-        addBotToServer(companion);
+        addBotToServer(companion, true); // the reservation above becomes this companion's count
         try {
             companion.getMap().addPlayer(companion);
             // Character.loadCharFromDB creates a fresh Character instance, while an
@@ -560,9 +577,9 @@ public class BotGeneration {
             SoloMaplingUtilities.channel.removePlayer(fakechar);
         }
         world.getPlayerStorage().removePlayer(fakechar.getId());
-        // Paired with the noteBotAdded() in addBotToServer. Both take the channel the bot
-        // actually lives on, so the counter cannot drift.
-        BotChannelRouter.noteBotRemoved(channel);
+        // Paired with the reservation/noteBotAdded that put this bot on the channel. Both take
+        // the channel the bot actually lives on, so the counter cannot drift.
+        BotChannelRouter.release(channel);
         CharacterStorage.removeActiveBot(fakechar.getId());//
         // Addressed chat queues are per bot: a removed bot's queue would otherwise sit in the
         // registry (holding its last player Character references) for the life of the process.
@@ -585,7 +602,7 @@ public class BotGeneration {
         soloMapling.ArtificialPlayer.BotMountSystem.BotMount.forget(fakechar.getId()); // release mount cooldown state
     }
 
-    private static void addBotToServer(Character fakechar) {
+    private static void addBotToServer(Character fakechar, boolean channelAlreadyReserved) {
         // Mark bot as present in channel world so isLoggedInWorld() gates pass.
         // Avoid setEnteredChannelWorld() — it touches PartySearch / playerAway maps
         // and deadlocks under mass parallel spawn.
@@ -602,8 +619,11 @@ public class BotGeneration {
         world.getPlayerStorage().addPlayer(fakechar);
         // Capacity gate input. Counted here rather than read from PlayerStorage: the routing
         // path reads this counter on every spawn, and reading the storage instead is what
-        // deadlocked startup (see BotChannelRouter.BOTS_ON_CHANNEL).
-        BotChannelRouter.noteBotAdded(channel);
+        // deadlocked startup (see BotChannelRouter.BOTS_ON_CHANNEL). Spawn paths that reserved
+        // their slot up front (createBot / loadPersistentBot) already own this count.
+        if (!channelAlreadyReserved) {
+            BotChannelRouter.noteBotAdded(channel);
+        }
     }
 
     public static void spawnBotFm(Character fakechar, Point pt) {
