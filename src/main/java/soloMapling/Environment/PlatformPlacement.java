@@ -87,19 +87,42 @@ public class PlatformPlacement {
      */
     private static final Map<String, Set<Point>> PENDING_SPAWN_POINTS = new ConcurrentHashMap<>();
 
+    /*
+     * Serialises a claim against the settle that may unpublish the same platform's set.
+     *
+     * <p>{@code computeIfAbsent} used to run outside the per-set monitor, so a claimer could hold
+     * a set that a concurrent settle had already drained and removed from the map. The claimer
+     * then recorded its point into that orphaned set - invisible to every later claimer - and the
+     * next spawn could be handed the same pixel. Holding one lock across both the lookup and the
+     * publish is what makes "the set I am writing to is still the published one" true.
+     *
+     * <p>One lock for all platforms rather than a per-key one: a claim is a cheap in-memory scan
+     * of a short list, spawns are already paced per bot, and the alternative - a lock table keyed
+     * by platform - would need an entry per ad-hoc span (the filler line spawners key on arbitrary
+     * caller-supplied x ranges), which is unbounded.
+     */
+    private static final Object SPAWN_CLAIM_LOCK = new Object();
+
     private static String platformKey(int mapId, String platformId) {
         return mapId + "/" + platformId;
     }
 
     /**
-     * Claim a free point on the platform. {@code claimed} is this call's own working set;
-     * {@code key} identifies the platform so concurrent spawners do not pick the same pixels.
+     * Claim a free point on the platform. {@code claimed} is this call's own working set - the
+     * points this batch has already taken; {@code key} identifies the platform so concurrent
+     * spawners do not pick the same pixels.
+     *
+     * <p>The returned point is recorded in the shared pending set, not in {@code claimed}: the
+     * caller owns that list and adds the point to it (the same list it later iterates to spawn).
+     * Recording it here as well put every batch point into the batch's own occupancy list twice,
+     * so the "platform is full" scan saw a batch twice its real size and a full batch got only
+     * half the bots it asked for.
      */
-    private static Point claimSpawnPoint(String key, Platform platform, List<Point> claimed,
-                                         Point center, int radius) {
-        Set<Point> pending = PENDING_SPAWN_POINTS.computeIfAbsent(
-                key, k -> ConcurrentHashMap.newKeySet());
-        synchronized (pending) {
+    static Point claimSpawnPoint(String key, Platform platform, List<Point> claimed,
+                                 Point center, int radius) {
+        synchronized (SPAWN_CLAIM_LOCK) {
+            Set<Point> pending = PENDING_SPAWN_POINTS.computeIfAbsent(
+                    key, k -> ConcurrentHashMap.newKeySet());
             List<Point> occupied = new ArrayList<>(claimed);
             occupied.addAll(pending);
             Point spot = radius > 0
@@ -117,7 +140,6 @@ public class PlatformPlacement {
                 spot = avoidLadderColumn(ropesFor(key), spot, platform.getMinX(), platform.getMaxX());
             }
             pending.add(spot);
-            claimed.add(spot);
             return spot;
         }
     }
@@ -134,18 +156,19 @@ public class PlatformPlacement {
      *
      * <p>Drops the whole platform entry when its last claim leaves: the map is keyed by
      * map+platform, so keeping empty sets around would grow one entry per platform ever spawned
-     * on, for the life of the process. Removed under the same set monitor that
-     * {@link #claimSpawnPoint} takes, so a claim cannot be added to a set this call is discarding.
+     * on, for the life of the process. The lookup, the removal and the unpublish all happen under
+     * {@link #SPAWN_CLAIM_LOCK}, the lock a claim holds while it publishes - that is what stops a
+     * claim from landing in a set this method is discarding.
      */
-    private static void settleSpawnPoint(String key, Point spot) {
+    static void settleSpawnPoint(String key, Point spot) {
         if (spot == null) {
             return;
         }
-        Set<Point> pending = PENDING_SPAWN_POINTS.get(key);
-        if (pending == null) {
-            return;
-        }
-        synchronized (pending) {
+        synchronized (SPAWN_CLAIM_LOCK) {
+            Set<Point> pending = PENDING_SPAWN_POINTS.get(key);
+            if (pending == null) {
+                return;
+            }
             pending.remove(spot);
             if (pending.isEmpty()) {
                 PENDING_SPAWN_POINTS.remove(key, pending);
