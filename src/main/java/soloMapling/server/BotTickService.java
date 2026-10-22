@@ -165,13 +165,12 @@ public final class BotTickService {
     }
 
     /**
-     * Stop the wheel and forget every registered tick, so a later registration starts a fresh
-     * driver instead of silently joining a dead one.
+     * Stop the wheel and forget every registered tick.
      *
      * <p>Every bot FSM arms its tick through this wheel. Leaving the driver running past an
-     * unload keeps those FSMs ticking against characters the plugin already tore down; leaving
-     * {@code DRIVER_STARTED} set after cancelling it would leave the survivors with no driver at
-     * all.
+     * unload keeps those FSMs ticking against characters the plugin already tore down, so both
+     * the driver and every entry have to go. This registry is not re-armed: the host does not
+     * load a plugin twice in one process.
      */
     public static void shutdown() {
         ScheduledFuture<?> task = driverTask;
@@ -180,7 +179,7 @@ public final class BotTickService {
             task.cancel(false);
         }
         ENTRIES.clear();
-        DRIVER_STARTED.set(false);
+        DRIVER_STARTED.set(true); // latched: a late register must not arm a second wheel
     }
 
     private static void safeDrive() {

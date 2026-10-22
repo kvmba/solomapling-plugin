@@ -190,18 +190,29 @@ public final class GCMovement {
 
     /**
      * Tear the whole dynamic-movement layer down: stop every per-bot driver, release every lease
-     * and the driver pool itself.
+     * and shut the driver pool down.
      *
      * <p>Called from the extension's unload. Each session owns a self-rescheduling tick and a
      * movement lease on its bot; a plugin that unloads without this leaves both behind, and the
      * ticks then steer characters in a world the plugin no longer owns.
+     *
+     * <p>Each session is closed under its own monitor, the same one {@link #finishDisable} takes.
+     * That matters: a deferred disable can finish a session concurrently, and releasing the lease
+     * twice throws. Serializing on the monitor makes the STATE re-check authoritative, so a
+     * session that another thread already closed is simply skipped. An exception must not escape
+     * here either - the unload has to keep releasing the rest of the world.
      */
     public static void shutdown() {
         for (BotMovementState st : new java.util.ArrayList<>(STATES.values())) {
-            GCMovementDriver.stop(st);
-            MovementCommands.releaseMovementLock(st.bot, st);
+            synchronized (st) {
+                if (STATES.get(st.bot.getId()) != st) {
+                    continue; // already handed over by finishDisable
+                }
+                GCMovementDriver.stop(st);
+                STATES.remove(st.bot.getId(), st);
+                MovementCommands.releaseMovementLock(st.bot, st);
+            }
         }
-        STATES.clear();
         ARRIVAL_CALLBACKS.clear();
         FAILURE_CALLBACKS.clear();
         ObserverTracker.stop();

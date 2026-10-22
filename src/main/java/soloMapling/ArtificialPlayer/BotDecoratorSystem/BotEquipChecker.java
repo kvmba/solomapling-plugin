@@ -33,7 +33,7 @@ public class BotEquipChecker {
     /** 7-digit item id -> its 3-digit equip prefix (1052095 / 10000 == 105). */
     private static final int PREFIX_DIVISOR = 10000;
 
-    public static void start() {
+    public static synchronized void start() {
         if (task != null) return;
         task = ExecutorServiceManager.getScheduledExecutorService().scheduleAtFixedRate(
                 BotEquipChecker::check, INTERVAL_MS, INTERVAL_MS, TimeUnit.MILLISECONDS
@@ -42,7 +42,7 @@ public class BotEquipChecker {
     }
 
     /**
-     * Stop the periodic scan and allow a later {@link #start()} to arm a new one.
+     * Stop the periodic scan.
      *
      * <p>The scan walks the world's whole player storage and repairs equipment on every bot, so a
      * scan that outlives the plugin keeps mutating characters after the roster is gone.

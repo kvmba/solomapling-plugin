@@ -241,37 +241,39 @@ public class BotGeneration {
         // spawn_rate_per_second, and a bot that is about to be skipped must not pay that wait.
         // Once the channels are full a whole wave would otherwise spend its permits - and its
         // seconds - queueing for spawns that are then thrown away, which reads as a hang.
-        if (channel == BotChannelRouter.NONE || shutdown) {
-            if (channel != BotChannelRouter.NONE) {
-                BotChannelRouter.release(channel); // reserved, but refused: hand the slot back
-            }
-            return -1;
+        //
+        // The reservation is released in exactly one place - the finally below - so a refused or
+        // failed spawn can never hand back more than the one slot it took.
+        if (channel == BotChannelRouter.NONE) {
+            return -1; // nothing was reserved, nothing to release
         }
-
-        // Pace arrivals. Every spawn below is a full character load (~10+ SQL
-        // queries) plus an O(map population) spawn broadcast; an unpaced flood
-        // pins the CPU and starves the DB pool. Configured by
-        // spawn_rate_per_second in EnvironmentPopulation.yaml (<=0 = unlimited).
-        // Taken BEFORE the expensive work so the wait is the cheap part.
-        BotSpawnThrottle.acquire();
-
-        int cid = templateCharacterId();
-
-        // Resolve the job category once, up front, so the name and the job agree. The name must be
-        // set before the bot is broadcast onto its map (addBotToServer below), i.e. before
-        // BotDecorate rolls the job - so the base class is decided here and handed to both. The
-        // baseClass<=0 overload used to let BotDecorate roll its own rollBaseClass(); doing it here
-        // instead keeps the name category and the actual job on the same roll. A forced job pins the
-        // category to that job's class; a level band that can produce a beginner (min < 10, which
-        // selectJobForClass turns into the classless job 0) draws a neutral name instead.
-        int effectiveBaseClass = baseClass <= 0 ? BotDecorate.rollBaseClass() : baseClass;
-        int nameMinLevel = baseClass <= 0 ? 10 : minLevel;
-        int nameCategory = BotNamePool.nameCategoryFor(effectiveBaseClass, nameMinLevel, forcedJobId);
-
-        Character bot = null;
         boolean placed = false;
         try {
-            bot = Character.loadCharFromDB(cid, BotClientHandler.clientFor(channel), false);
+            if (shutdown) {
+                return -1;
+            }
+
+            // Pace arrivals. Every spawn below is a full character load (~10+ SQL
+            // queries) plus an O(map population) spawn broadcast; an unpaced flood
+            // pins the CPU and starves the DB pool. Configured by
+            // spawn_rate_per_second in EnvironmentPopulation.yaml (<=0 = unlimited).
+            // Taken BEFORE the expensive work so the wait is the cheap part.
+            BotSpawnThrottle.acquire();
+
+            int cid = templateCharacterId();
+
+            // Resolve the job category once, up front, so the name and the job agree. The name must be
+            // set before the bot is broadcast onto its map (addBotToServer below), i.e. before
+            // BotDecorate rolls the job - so the base class is decided here and handed to both. The
+            // baseClass<=0 overload used to let BotDecorate roll its own rollBaseClass(); doing it here
+            // instead keeps the name category and the actual job on the same roll. A forced job pins the
+            // category to that job's class; a level band that can produce a beginner (min < 10, which
+            // selectJobForClass turns into the classless job 0) draws a neutral name instead.
+            int effectiveBaseClass = baseClass <= 0 ? BotDecorate.rollBaseClass() : baseClass;
+            int nameMinLevel = baseClass <= 0 ? 10 : minLevel;
+            int nameCategory = BotNamePool.nameCategoryFor(effectiveBaseClass, nameMinLevel, forcedJobId);
+
+            Character bot = Character.loadCharFromDB(cid, BotClientHandler.clientFor(channel), false);
             int botId = SoloMaplingConstants.GameConstants.BOT_BASE_ID + currentBotCount.getAndIncrement();
             bot = setBotStats(bot, botId, nameCategory); // Bot onDemandBot
             addBotToServer(bot, true); // the channel reservation taken by the caller becomes its count
@@ -313,8 +315,8 @@ public class BotGeneration {
             runAsync(() -> playSpawnChoreography(finalBot));
             return botId;
         } finally {
-            // The spawn failed before the bot reached the server: hand the reserved slot back,
-            // or every failed spawn would permanently consume a channel slot.
+            // Exactly one release site: hand the slot back unless the bot reached the server,
+            // where the reservation itself becomes its channel count.
             if (!placed) {
                 BotChannelRouter.release(channel);
             }

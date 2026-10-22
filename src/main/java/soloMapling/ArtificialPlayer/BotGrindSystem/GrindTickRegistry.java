@@ -38,7 +38,12 @@ public final class GrindTickRegistry {
 
     @FunctionalInterface
     interface TickerScheduler {
-        void schedule(Runnable ticker);
+        /**
+         * Arm the sweep. Returns the scheduled task (or null when a test scheduler runs inline),
+         * so {@link #shutdown()} can actually cancel the periodic task instead of leaving it to
+         * wake up every {@link #TICK_MS} forever.
+         */
+        java.util.concurrent.ScheduledFuture<?> schedule(Runnable ticker);
     }
 
     private static final GrindTickRegistry INSTANCE = new GrindTickRegistry();
@@ -48,11 +53,13 @@ public final class GrindTickRegistry {
     private final AtomicBoolean started = new AtomicBoolean(false);
     private final TickerScheduler scheduler;
 
+    /** The armed sweep; cancelled by {@link #shutdown()} so it cannot outlive the plugin. */
+    private volatile java.util.concurrent.ScheduledFuture<?> sweepTask;
+
     private GrindTickRegistry() {
         this(ticker -> ExecutorServiceManager.getScheduledExecutorService().scheduleAtFixedRate(
                 ticker, TICK_MS, TICK_MS, TimeUnit.MILLISECONDS));
     }
-
     GrindTickRegistry(TickerScheduler scheduler) {
         this.scheduler = java.util.Objects.requireNonNull(scheduler, "scheduler");
     }
@@ -107,7 +114,7 @@ public final class GrindTickRegistry {
             return;
         }
         try {
-            scheduler.schedule(this::sweep);
+            sweepTask = scheduler.schedule(this::sweep);
         } catch (RuntimeException | Error failure) {
             started.set(false);
             throw failure;
@@ -115,13 +122,20 @@ public final class GrindTickRegistry {
     }
 
     /**
-     * Stop the shared sweep and let a later registration arm a new one.
+     * Stop the shared sweep for good.
      *
      * <p>Every grinder registers here. A sweep that outlives the plugin keeps calling
-     * {@code grindTick()} on combat brains whose characters the unload already removed.
+     * {@code grindTick()} on combat brains whose characters the unload already removed, and
+     * this registry never re-arms (the plugin is not loaded twice in one process), so the
+     * periodic task has to be cancelled rather than just emptied.
      */
-    public void shutdown() {
-        started.set(false);
+    public synchronized void shutdown() {
+        java.util.concurrent.ScheduledFuture<?> task = sweepTask;
+        sweepTask = null;
+        if (task != null) {
+            task.cancel(false);
+        }
+        started.set(true); // keep it latched: re-arming after an unload would leak a second sweep
         participants.clear();
         nextFailureLogAt.clear();
     }

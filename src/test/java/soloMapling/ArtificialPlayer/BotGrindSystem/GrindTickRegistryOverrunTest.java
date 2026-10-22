@@ -19,7 +19,7 @@ class GrindTickRegistryOverrunTest {
 
     private static GrindTickRegistry registry() {
         // The scheduler is never invoked; only sweep-time behaviour is under test.
-        return new GrindTickRegistry(scheduler -> { });
+        return new GrindTickRegistry(scheduler -> null);
     }
 
     @Test

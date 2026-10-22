@@ -126,8 +126,9 @@ public final class BotChannelRouter {
      * "below cap" and then all register. A caller that fails after reserving must hand the slot
      * back with {@link #release(int)}.
      *
-     * <p>{@code cap <= 0} means the operator disabled the cap; the bot is still counted, so the
-     * number stays honest if the cap is re-enabled at runtime.
+     * <p>{@code cap <= 0} never reaches here: the caller treats an unset cap as "no limit" and
+     * routes through {@link #reserveUncapped}, which still counts the bot so the number stays
+     * honest if the cap is re-enabled at runtime.
      */
     private static boolean tryReserve(int channelId, int channelCount, int cap) {
         if (channelId <= 0 || channelId > channelCount) {
