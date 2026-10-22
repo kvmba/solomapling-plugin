@@ -32,6 +32,7 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 /*
  * Lands a real bot hit (melee / ranged / magic): broadcast the attack packet with the
@@ -49,6 +50,16 @@ import java.util.Map;
 public final class BotAttackEffects {
 
     private static final Logger log = LoggerFactory.getLogger(BotAttackEffects.class);
+    private static final Map<MapleMap, Integer> PENDING_LOOT = new ConcurrentHashMap<>();
+
+    /** Includes in-flight lethal hits, so removing the last monster cannot hide its future drops. */
+    public static boolean hasPendingLoot(MapleMap map) {
+        return PENDING_LOOT.containsKey(map);
+    }
+
+    private static void finishLoot(MapleMap map) {
+        PENDING_LOOT.compute(map, (key, count) -> count == 1 ? null : count - 1);
+    }
 
     /*
      * Death animation id handed to MapleMap.killMonster: 1 = the vanilla fade-out
@@ -213,6 +224,16 @@ public final class BotAttackEffects {
     /* Apply HP damage; on death, credit EXP + the death broadcast (no vanilla drops) and spawn our own loot. */
     private static boolean applyDamageAndLoot(Character bot, Monster target, int damage, short hitDelay) {
         MapleMap map = bot.getMap();
+        PENDING_LOOT.merge(map, 1, Integer::sum);
+        try {
+            return applyTrackedDamageAndLoot(bot, target, damage, hitDelay, map);
+        } finally {
+            finishLoot(map);
+        }
+    }
+
+    private static boolean applyTrackedDamageAndLoot(Character bot, Monster target, int damage,
+                                                    short hitDelay, MapleMap map) {
         Map<Integer, Integer> expBefore = companionPartyExp(bot);
 
         // Snapshot BEFORE killMonster: its finally block runs dispatchMonsterKilled ->
@@ -243,17 +264,16 @@ public final class BotAttackEffects {
             // removed from the map, so the roll must not re-read live state off it.
             // Monster.map is never nulled, so a getMap() == null test would be dead code -
             // compare the bot's current map against the kill map instead.
-            final int killMapId = map.getId();
             final Point deathPos = new Point(target.getPosition());
             final Runnable lootTask = () -> {
                 // Use the captured Character directly rather than re-looking it up by id: a
                 // lookup is another chance to miss (the bot may already be despawned), and
                 // this reference stays valid regardless — Channel.removePlayer only drops the
                 // map entry, it does not invalidate the object.
-                if (bot.getMap() == null || bot.getMapId() != killMapId) {
+                if (bot.getMap() != map) {
                     return; // bot warped away or left - no loot at the corpse
                 }
-                dropMobLootAt(bot, target, killChRate, killDropType, killNoDrops, deathPos);
+                dropMobLootAt(map, bot, target, killChRate, killDropType, killNoDrops, deathPos);
             };
 
             // Vanilla only staggers loot when use_spawn_loot_on_animation is on, landing it
@@ -269,7 +289,19 @@ public final class BotAttackEffects {
             if (GameConfig.getServerBoolean("use_spawn_loot_on_animation")) {
                 int die1 = target.getAnimationTime("die1");   // reads WZ stats only - safe after death
                 long lootDelayMs = Math.min(Math.max((long) (0.42 * die1), 200L), 3000L);
-                MethodScheduler.runAfterDelay(lootTask, lootDelayMs);
+                PENDING_LOOT.merge(map, 1, Integer::sum);
+                try {
+                    MethodScheduler.runAfterDelay(() -> {
+                        try {
+                            lootTask.run();
+                        } finally {
+                            finishLoot(map);
+                        }
+                    }, lootDelayMs);
+                } catch (RuntimeException | Error e) {
+                    finishLoot(map);
+                    throw e;
+                }
             } else {
                 lootTask.run();
             }
@@ -333,10 +365,9 @@ public final class BotAttackEffects {
      * kill time: killMonster clears the mob's stati and removes it from the map, so the
      * delayed roll must not re-read live state off the Monster.
      */
-    private static void dropMobLootAt(Character bot, Monster mob, float chRate, byte dropType,
+    private static void dropMobLootAt(MapleMap map, Character bot, Monster mob, float chRate, byte dropType,
                                       boolean dropsDisabled, Point deathPos) {
-        final MapleMap map = bot.getMap();
-        if (map == null || dropsDisabled) {
+        if (dropsDisabled) {
             return;
         }
 
@@ -396,20 +427,19 @@ public final class BotAttackEffects {
 
         // One fan-out counter shared across every group, so loot spreads out instead of stacking.
         final int[] index = {1};
-        dropEntryGroup(bot, mob, normal, chRate, mesoRate, dropType, mobX, mobY, index);
+        dropEntryGroup(map, bot, mob, normal, chRate, mesoRate, dropType, mobX, mobY, index);
         if (hasItemDrop) {
-            dropGlobalGroup(bot, mob, globalEntry, dropType, mobX, mobY, index);
+            dropGlobalGroup(map, bot, mob, globalEntry, dropType, mobX, mobY, index);
         }
     }
 
     /* Rolls one MonsterDropEntry list (the mob's non-quest rows) at chRate. */
-    private static void dropEntryGroup(Character bot, Monster mob, List<MonsterDropEntry> entries,
+    private static void dropEntryGroup(MapleMap map, Character bot, Monster mob, List<MonsterDropEntry> entries,
                                        float chRate, float mesoRate, byte dropType,
                                        int mobX, int mobY, int[] index) {
         if (entries.isEmpty()) {
             return;
         }
-        MapleMap map = bot.getMap();
         ItemInformationProvider ii = ItemInformationProvider.getInstance();
 
         Collections.shuffle(entries);
@@ -433,12 +463,11 @@ public final class BotAttackEffects {
     }
 
     /* Global (continent-wide) drops: chance only, no chRate weighting, no quest split. */
-    private static void dropGlobalGroup(Character bot, Monster mob, List<MonsterGlobalDropEntry> entries,
+    private static void dropGlobalGroup(MapleMap map, Character bot, Monster mob, List<MonsterGlobalDropEntry> entries,
                                         byte dropType, int mobX, int mobY, int[] index) {
         if (entries.isEmpty()) {
             return;
         }
-        MapleMap map = bot.getMap();
         ItemInformationProvider ii = ItemInformationProvider.getInstance();
 
         List<MonsterGlobalDropEntry> shuffled = new ArrayList<>(entries); // cached/shared list: shuffle a copy

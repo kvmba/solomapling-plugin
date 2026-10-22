@@ -193,6 +193,7 @@ final class BotNavigationManager {
                 clearNavigation(entry);
             }
 
+            // Keep a valid ground approach until execution; competing routes can otherwise reverse it every AI tick.
             BotNavigationGraph.Edge edge = reuseCommittedEdge(graph, entry, startRegionId, targetRegionId);
             boolean edgeReused = (edge != null);
             if (edgeReused) {
@@ -201,14 +202,6 @@ final class BotNavigationManager {
                 if (refreshedEdge != edge) {
                     edge = refreshedEdge;
                     edgeReused = edge != null;
-                }
-                if (edgeReused) {
-                    BotNavigationGraph.Edge refreshedGroundEdge = refreshCommittedGroundEdge(
-                            graph, entry, bot, startRegionId, targetRegionId, pathTargetPos, edge, runAiTick);
-                    if (refreshedGroundEdge != edge) {
-                        edge = refreshedGroundEdge;
-                        edgeReused = edge != null;
-                    }
                 }
             }
             if (edge == null && runAiTick && startRegionId >= 0 && targetRegionId >= 0) {
@@ -358,39 +351,6 @@ final class BotNavigationManager {
 
         BotNavigationGraph.Edge bestEdge = findNextEdge(graph, bot, startRegionId, targetRegionId, targetPos);
         if (sameEdge(edge, bestEdge) || bestEdge == null) {
-            return edge;
-        }
-
-        entry.navEdge = bestEdge;
-        entry.navTargetRegionId = targetRegionId;
-        entry.navTargetPos = null;
-        entry.navPreciseTarget = false;
-        return bestEdge;
-    }
-
-    private static BotNavigationGraph.Edge refreshCommittedGroundEdge(BotNavigationGraph graph,
-                                                                      BotMovementState entry,
-                                                                      Character bot,
-                                                                      int startRegionId,
-                                                                      int targetRegionId,
-                                                                      Point targetPos,
-                                                                      BotNavigationGraph.Edge edge,
-                                                                      boolean runAiTick) {
-        if (!runAiTick
-                || edge == null
-                || entry.inAir
-                || entry.climbing
-                || startRegionId < 0
-                || targetRegionId < 0
-                || startRegionId == targetRegionId) {
-            return edge;
-        }
-
-        BotNavigationGraph.Edge bestEdge = findNextEdge(graph, bot, startRegionId, targetRegionId, targetPos);
-        if (bestEdge == null || sameEdge(edge, bestEdge)) {
-            return edge;
-        }
-        if (shouldRetainCommittedGroundEdge(edge, bestEdge)) {
             return edge;
         }
 
@@ -1052,13 +1012,16 @@ final class BotNavigationManager {
             return fromRegion.pointAt(targetX);
         }
 
-        if (hasReachedDirectionalDropRunway(botPos, edge)) {
-            return new Point(edge.endPoint);
-        }
-
         BotNavigationGraph.Region fromRegion = graph.getRegion(edge.fromRegionId);
         if (fromRegion == null || fromRegion.isRopeRegion) {
             return new Point(edge.endPoint);
+        }
+        int step = BotPhysicsEngine.walkStep(entry.bot.getMap(), entry.movementProfile);
+        Point walkOff = new Point(edge.launchStepX > 0 ? fromRegion.maxX + step : fromRegion.minX - step,
+                edge.endPoint.y);
+        // The landing may share the source lip's x; aiming there releases the key before falling.
+        if (hasReachedDirectionalDropRunway(botPos, edge)) {
+            return walkOff;
         }
 
         BotPhysicsEngine.WalkOffLanding liveOutcome = BotPhysicsEngine.simulateWalkOffLanding(
@@ -1069,7 +1032,7 @@ final class BotNavigationManager {
             // Like rope top step-offs, once the continuous-control exit is naturally executable
             // we stop targeting an intermediate anchor and just keep feeding the authored
             // direction until physics performs the dismount.
-            return new Point(edge.endPoint);
+            return walkOff;
         }
         return new Point(edge.startPoint);
     }
@@ -1473,23 +1436,6 @@ final class BotNavigationManager {
                 && left.ropeBottomY == right.ropeBottomY
                 && left.startPoint.equals(right.startPoint)
                 && left.endPoint.equals(right.endPoint));
-    }
-
-    static boolean shouldRetainCommittedGroundEdge(BotNavigationGraph.Edge current,
-                                                   BotNavigationGraph.Edge replacement) {
-        if (current == null || replacement == null) {
-            return false;
-        }
-        if (current.fromRegionId != replacement.fromRegionId
-                || current.toRegionId != replacement.toRegionId) {
-            return false;
-        }
-        // Equivalent first exits into the same downstream region can trade off a few pixels of
-        // approach cost as the bot shuffles on the source platform. Replacing the committed edge
-        // every AI tick creates oscillation loops like the John 2026-05-01 down-jump trace,
-        // where nav flips between a straight DROP and a nearby JUMP before either can execute.
-        return current.type != BotNavigationGraph.EdgeType.WALK
-                && replacement.type != BotNavigationGraph.EdgeType.WALK;
     }
 
     private static boolean isEdgeUsable(BotNavigationGraph graph, MapleMap map, BotNavigationGraph.Edge edge) {

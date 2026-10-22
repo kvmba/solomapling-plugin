@@ -49,7 +49,7 @@ final class BotNavigationGraphProvider {
     //     inside an 8.93 x fs px/s band (no walkSpeed air cap; counter-strafe pins at the
     //     band edge) and no-input flight drags 1 x fs (100 x fs at terminal fall). Committed
     //     arcs still fly the launch key held, so constant-stepX arc sims stay exact.
-    private static final int GRAPH_VERSION = 70; // Regions must describe a single surface height at each x.
+    private static final int GRAPH_VERSION = 71; // Walk-off edges include the actual grounded departure.
 
     // Drop caps for organic descent (re-added; v57 had removed the old single cap). A bot must
     // never plummet down a whole vertical map. Two distinct downward moves, treated differently:
@@ -1538,16 +1538,15 @@ final class BotNavigationGraphProvider {
             return;
         }
         Point startPoint = from.pointAt(launchX);
-        if (BotPhysicsEngine.isGroundRunwayBlockedByWall(map, startPoint, endpoint)) {
+        // A ballistic fall from the lip alone can clamp onto its wall and claim a
+        // landing that grounded movement cannot reach. Validate the departure too.
+        BotPhysicsEngine.WalkOffLanding outcome = BotPhysicsEngine.simulateWalkOffLanding(
+                map, startPoint, direction, movementProfile);
+        if (outcome == null) {
             return;
         }
-
-        // Ballistic fall from ledge at max walk velocity — single simulation call.
-        int stepX = BotPhysicsEngine.walkStep(map, movementProfile) * direction;
-        BotPhysicsEngine.JumpLanding landing = BotPhysicsEngine.simulateFallLanding(map, endpoint, stepX);
-        if (landing == null) {
-            return;
-        }
+        BotPhysicsEngine.JumpLanding landing = outcome.landing();
+        int stepX = outcome.launchStepX();
 
         int toRegionId = regionIdByFootholdId.getOrDefault(landing.foothold().getId(), -1);
         BotNavigationGraph.Region below = regionsById.get(toRegionId);
@@ -1562,18 +1561,12 @@ final class BotNavigationGraphProvider {
             return;
         }
 
-        // Reuse the landing we already simulated: estimateFallLandingTimeMs re-runs the identical
-        // simulateLanding(start, 0f, stepX, 0L) and returns landing.timeMs(), and `landing` is
-        // non-null here (null returned above), so the number is provably the same.
-        int travelMs = landing.timeMs()
-                + estimateHorizontalTravelTimeMs(actualRunway, movementProfile);
-
         addEdge(from.id, below.id, BotNavigationGraph.EdgeType.DROP,
                 startPoint,
                 landing.point(),
                 stepX,
                 0,
-                travelMs,
+                outcome.travelTimeMs(),
                 outgoing,
                 edgeKeys);
     }

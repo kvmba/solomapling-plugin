@@ -137,6 +137,10 @@ public final class PqActions {
      * reaching the wait deadline is NOT arrival.
      */
     public static boolean walkTo(Character bot, Point target) {
+        return walkTo(bot, target, false);
+    }
+
+    private static boolean walkTo(Character bot, Point target, boolean yieldToLiveWalk) {
         if (bot == null || target == null || bot.getMap() == null) {
             return false;
         }
@@ -145,6 +149,9 @@ public final class PqActions {
         java.util.concurrent.CountDownLatch arrived = new java.util.concurrent.CountDownLatch(1);
         StageWalkShield shield;
         synchronized (control) {
+            if (yieldToLiveWalk && yieldsToLiveWalk(bot, target)) {
+                return false;
+            }
             clearReactorBeat(bot.getId()); // stage walking supersedes box work
             stageWalkShieldUntilByBot.remove(bot.getId());
             Point here = bot.getPosition();
@@ -970,10 +977,7 @@ public final class PqActions {
             // for a live move like every other recurring origin (yieldsToLiveWalk) - a pickup/
             // reclaim walk armed earlier this tick would otherwise be overwritten and its
             // drop left orphaned. The next tick (or the walk's arrival nudge) re-arms this.
-            if (yieldsToLiveWalk(bot, post)) {
-                return 0;
-            }
-            walkTo(bot, post);
+            walkTo(bot, post, true);
             return 0;
         }
         Character leader = partyLeader(bot);
@@ -1655,6 +1659,25 @@ public final class PqActions {
             sweepOrphanDropOutside(bot, radiusPx, itemIds);
             return 0;
         }
+        return lootDrops(bot, lone, itemIds);
+    }
+
+    /** Complete a collection room before leaving; unlike the combat probe this is not throttled. */
+    public static boolean collectRemainingLoot(Character bot, int[] itemIds) {
+        List<Reactor> reactors = bot.getMap().getAllReactors();
+        List<MapObject> remaining = BotLogic.checkForItemsOnFloor(bot, bot.getPosition(),
+                        roomReachPx(bot.getMap()), itemIds).stream()
+                .filter(o -> o instanceof MapItem drop && isFloorLoot(drop)
+                        && DropCommands.botCanLoot(bot, drop) && !isReactorFeed(reactors, drop))
+                .toList();
+        if (remaining.isEmpty()) {
+            return false;
+        }
+        lootDrops(bot, remaining, itemIds);
+        return remaining.stream().anyMatch(o -> !((MapItem) o).isPickedUp());
+    }
+
+    private static int lootDrops(Character bot, List<MapObject> drops, int[] itemIds) {
         // Pickup must be proximity-honest: the engine's pickupItem has no distance check (a
         // real client walks to the item first), so an item outside the bot's pickup reach
         // teleports to it if grabbed from here - the reported vacuum pickup. Anything in
@@ -1665,14 +1688,14 @@ public final class PqActions {
         List<MapObject> reachable = new java.util.ArrayList<>();
         Point nearestOutOfReach = null;
         double walkSq = Double.MAX_VALUE;
-        for (MapObject o : lone) {
+        for (MapObject o : drops) {
             Point ip = o.getPosition();
             if (ip == null) {
                 continue;
             }
             double dsq = botPos.distanceSq(ip);
             if (dsq <= PICKUP_REACH_SQ) {
-                reachable.add(o);
+                if (reachable.size() < LOOT_INLINE_MAX) reachable.add(o);
             } else if (dsq < walkSq) {
                 walkSq = dsq;
                 nearestOutOfReach = ip; // the nearest out-of-reach drop is this tick's walk target
@@ -2077,10 +2100,7 @@ public final class PqActions {
         if (spot == null) {
             return;
         }
-        if (yieldsToLiveWalk(bot, spot)) {
-            return;
-        }
-        walkTo(bot, spot);
+        walkTo(bot, spot, true);
         // No shield here: parked-by-the-NPC is a wait, not a staged walk. The combat beat
         // may steer at whatever spawns nearby and - critically - the 250ms beat keeps the
         // bot's swings alive while it stands (a shield renewed every macro tick read as a
@@ -2166,10 +2186,7 @@ public final class PqActions {
             return; // no stage NPC and no next00 to gather by - nothing to spread around
         }
         Point target = claimNear(bot, npc);
-        if (yieldsToLiveWalk(bot, target)) {
-            return;
-        }
-        walkTo(bot, target);
+        walkTo(bot, target, true);
         // No shield: the ring is a park, not a puzzle hold (see waitNearStageNpc).
     }
 

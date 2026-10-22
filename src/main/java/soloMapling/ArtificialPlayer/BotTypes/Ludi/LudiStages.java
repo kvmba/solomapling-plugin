@@ -4,6 +4,7 @@ import org.gms.client.Character;
 import org.gms.client.Job;
 import org.gms.server.life.Monster;
 import soloMapling.ArtificialPlayer.BotAttackSystem.BotAuraState;
+import soloMapling.ArtificialPlayer.BotAttackSystem.BotAttackEffects;
 import soloMapling.ArtificialPlayer.GCMoveSystem.GCMovement;
 import org.gms.constants.skills.Brawler;
 import org.gms.constants.skills.Rogue;
@@ -592,14 +593,16 @@ public final class LudiStages {
         }
         // Inside a room: fight the box mobs and sweep the passes they drop.
         PqActions.seekAndAttack(bot);
-        PqActions.loot(bot, bot.getPosition(), LOOT_RADIUS_PX, new int[]{LudiPqData.PASS});
         PqActions.recoverUngatheredHandoffs(bot, LudiPqData.PASS);
-        // Room quiet (all the room's killable mobs dead): the work is done. Remember it as
-        // cleared, then slip out the door and deliver on the main map's stage-NPC post -
-        // the stage NPC lives there, so that is where the leader comes for the turn-in.
-        // The exit waits for the leader to have LEFT this room first: while he is still
-        // inside, the follow beat re-enters the room behind him and the bot ping-pongs.
-        if (killableMobPresent(bot) || leaderInRoom(bot)) {
+        if (killableMobPresent(bot)) {
+            PqActions.loot(bot, bot.getPosition(), LOOT_RADIUS_PX, new int[]{LudiPqData.PASS});
+            return;
+        }
+        // A dead last monster may still have a scheduled drop. Finish collecting the
+        // entire room before committing its exit, including drops outside the local sweep.
+        if (BotAttackEffects.hasPendingLoot(bot.getMap())
+                || PqActions.collectRemainingLoot(bot, new int[]{LudiPqData.PASS})
+                || leaderInRoom(bot)) {
             return;
         }
         markRoomCleared(bot, mapId);
@@ -662,6 +665,10 @@ public final class LudiStages {
         if (!prepareStage5Traversal(bot, mapId)) {
             return;
         }
+        if (mapId == LudiPqData.STAGE5_ROOM_LAST && hideSkillFor(bot) == 0) {
+            exitDoorRoom(bot);
+            return;
+        }
         // The stage was turned in while this bot was still inside the maze: every box it could
         // still break is worthless, and the party has already moved on. Leave at once through
         // the room's own out portal before searching for boxes or loot. The old exit condition
@@ -682,15 +689,8 @@ public final class LudiStages {
         }
         PqActions.loot(bot, bot.getPosition(), LOOT_RADIUS_PX, new int[]{LudiPqData.PASS});
         PqActions.recoverUngatheredHandoffs(bot, LudiPqData.PASS);
-        // All four boxes broken: the room's work is done. Remember it as cleared, then slip
-        // out the door and deliver on the main map's stage-NPC post - the leader turns the
-        // stage in there, not at this room's mouth. Leaving while a box stands (or while the
-        // leader is still in the room - the follow beat would walk the bot back in behind him)
-        // keeps the sneak inside its room. The pocket is NOT part of this test: whether the bot
-        // personally carries a pass says nothing about whether the room is finished, and the
-        // drop itself is already protected - loot() above either picks it up or arms a pickup
-        // walk, and exitDoorRoom stands down while a live walk owns the driver.
-        if (box >= 0 || leaderInRoom(bot)) {
+        if (box >= 0 || PqActions.collectRemainingLoot(bot, new int[]{LudiPqData.PASS})
+                || leaderInRoom(bot)) {
             return;
         }
         markRoomCleared(bot, mapId);
@@ -800,7 +800,12 @@ public final class LudiStages {
             return true;
         }
         int hide = hideSkillFor(bot);
-        if (hide != 0 && !BotAuraState.isMonsterImmune(bot)) {
+        if (hide == 0) {
+            // Admission protects the inward trip, never a retreat from an accidental fall/warp.
+            return here == LudiPqData.STAGE5_ROOM_LAST
+                    || destinationMap != LudiPqData.STAGE5_ROOM_LAST;
+        }
+        if (!BotAuraState.isMonsterImmune(bot)) {
             soloMapling.ArtificialPlayer.BotAttackSystem.BotBuffEffects.showBuff(bot, hide);
         }
         return BotAuraState.isMonsterImmune(bot);

@@ -256,8 +256,9 @@ public class LudiPQBot extends PartyQuestBot {
                 return false;
             }
         }
-        int roomFirst = roomStage == 5 ? LudiPqData.STAGE5_ROOM_FIRST : LudiPqData.STAGE4_ROOM_FIRST;
-        int roomLast = roomStage == 5 ? LudiPqData.STAGE5_ROOM_LAST : LudiPqData.STAGE4_ROOM_LAST;
+        boolean stage5 = roomStage == 5 || stage == 5;
+        int roomFirst = stage5 ? LudiPqData.STAGE5_ROOM_FIRST : LudiPqData.STAGE4_ROOM_FIRST;
+        int roomLast = stage5 ? LudiPqData.STAGE5_ROOM_LAST : LudiPqData.STAGE4_ROOM_LAST;
         if (!LudiStages.doorRoomsOutstanding(getChr(), roomFirst, roomLast)) {
             // This bot's door errand is done. The leader stepping into a sub-room is HIS
             // exploring, not a party move - trailing him there re-walks a cleared door and
