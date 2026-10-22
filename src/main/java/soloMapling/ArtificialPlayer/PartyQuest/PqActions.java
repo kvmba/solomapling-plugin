@@ -1129,12 +1129,6 @@ public final class PqActions {
     // beats, so closing on a mob and hammering it need no blocking sleeps - the "act, freeze,
     // act" the macro cadence produced came from waiting out cooldowns inline, and at 4Hz that
     // wait is simply the next beat.
-    private static final int SEEK_RANGE_X = 900;            // hunt a live mob within this |dx| (cross-ledge)
-    // LPQ stage 1 (922010100) seats its first Ratz 580px above the entry floor over a series of
-    // one-way ledges - a box tuned to the grind maps' floor stacks stops the chase before it starts
-    // and the room reads as quiet forever (the mobs are mobTime=-1 and never close the gap). The
-    // whole tower is ~3000px tall, so a bot standing anywhere in it sees the whole hunt.
-    static final int SEEK_STACK_RANGE_Y = 3_200;    // tall PQ towers are one vertical room
     private static final int RETARGET_EPS_PX = 16;          // skip re-issuing a move for tiny shifts
     private static final long RETARGET_TIMEOUT_MS = 4_000;  // give up an unreachable target after this
     private static final int PROGRESS_EPS_PX = 20;          // movement worth counting as chase progress
@@ -1522,7 +1516,7 @@ public final class PqActions {
         int sticky = state.targetOid;
         if (sticky >= 0) {
             MapObject mo = bot.getMap().getMapObject(sticky);
-            if (mo instanceof Monster m && isHuntTarget(m, pos) && isPathable(bot, m, state)) {
+            if (mo instanceof Monster m && isHuntTarget(m) && isPathable(bot, m, state)) {
                 return m;
             }
             state.targetOid = -1; // gone, out of the box, or unreachable
@@ -1534,7 +1528,7 @@ public final class PqActions {
         Monster bestPathable = null;
         double bestPathableSq = Double.MAX_VALUE;
         for (Monster m : bot.getMap().getAllMonsters()) {
-            if (!isHuntTarget(m, pos)) {
+            if (!isHuntTarget(m)) {
                 continue;
             }
             Point mp = m.getPosition();
@@ -1612,17 +1606,15 @@ public final class PqActions {
         nextSteppedOnPickupAtByBot.remove(botId);
     }
 
-    /** Whether this mob is a legitimate chase target from {@code pos}: hostile and in the seek box. */
-    private static boolean isHuntTarget(Monster m, Point pos) {
+    /** Hostile work anywhere in this quest room, not just inside an entrance-centred view box. */
+    private static boolean isHuntTarget(Monster m) {
         if (m == null || !m.isAlive()) {
             return false;
         }
         if (m.getStats() != null && m.getStats().isFriendly()) {
             return false; // Moon Bunny and friends are not targets
         }
-        Point mp = m.getPosition();
-        return mp != null && Math.abs(mp.x - pos.x) <= SEEK_RANGE_X
-                && Math.abs(mp.y - pos.y) <= SEEK_STACK_RANGE_Y;
+        return m.getPosition() != null;
     }
 
     /** Pick up matching drops near a point. Returns how many items were gathered. */
@@ -2202,7 +2194,9 @@ public final class PqActions {
      * climbing bot between moves is exactly when a re-arm is the RIGHT thing to re-issue.
      */
     private static boolean yieldsToLiveWalk(Character bot, Point rearmSpot) {
-        return standsDownForLiveWalk(GCMovement.hasMoveTarget(bot), bot.getPosition(), rearmSpot);
+        // Standing at the parking spot does not authorise cancelling a reserved pickup walk.
+        return movementShielded(bot.getId())
+                || standsDownForLiveWalk(GCMovement.hasMoveTarget(bot), bot.getPosition(), rearmSpot);
     }
 
     /**

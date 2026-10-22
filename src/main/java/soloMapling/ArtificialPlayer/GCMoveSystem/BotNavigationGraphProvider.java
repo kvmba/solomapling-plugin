@@ -49,7 +49,7 @@ final class BotNavigationGraphProvider {
     //     inside an 8.93 x fs px/s band (no walkSpeed air cap; counter-strafe pins at the
     //     band edge) and no-input flight drags 1 x fs (100 x fs at terminal fall). Committed
     //     arcs still fly the launch key held, so constant-stepX arc sims stay exact.
-    private static final int GRAPH_VERSION = 69; // 69: resolveAirCollision breaks a LAND/WALL progress TIE toward the LAND when that floor spans the wall's clamp pixel (the bot's own side) - a fall crossing a floor row at the wall's exact column used to clamp onto the wall face at (or past) the row's height and then fall through the row (LPQ stage 3's wall column x=-265 over the y=242 pit); a tie landing beyond the wall face still stops at the wall. Landing predictions change, so caches must rebuild. 68: JUMP edges carry the PRE-INSET validated launch span; the executor's ±walkStep launch phase is clamped to it (collapsed windows' phase band used to re-reach pixels the builder rejected — arcs landed two floors down, the LPQ stage-1 shelf chase fell and looped: "追怪但不跳上平台打"); 67: one-way-island repair - shelves with no inbound edge (the LPQ stage-1 tower's -2288/-1924 mob rows: >DOWN_JUMP_MAX_DROP_PX from above, jump-gap unsimulable, no rope) get an escapable-landing-gated straight-drop edge from the row above, so mobs on them stay pathable and the chase never degrades to pacing the floor above; 66: flight bound clamped to the standable foothold AABB (was max(VR, tree bounds)) - arcs that crossed the platform edge into a map's full-height no-foothold VR margin (Eos Tower 920010100's x=220..359 band) free-fell forever; the tightened boundary invalidates baked arcs that reached past the standable extent (old v65 caches parked in dead v65/); 65: dead-region arc prune - DROP/JUMP arcs landing in regions the bot can never leave are cut to a fixpoint (the escape-hatch deep drop must not land the bot in a one-way pit: LPQ stage 3's y-242 pit under a forbidFallDown stage row); 64: escape-hatch deep-drop edge (a region with no capped descent edge gets one full-descent straight drop to its deepest landing, dead ends like the 玩具塔 floor-1 R5 vanish); 51: kinetic slippery model + snowshoes; 52: brake-to-stop landings; 53: glide-unless-edge stop policy (slipperyStopDir); 56: uncap straight-drop launch windows (full droppable span, no +/-20 fragmentation); 57: remove the (empirically wrong) 300px down-jump drop cap - down-jumps fall until landing; 58: rope-grab reach counts descent below the ledge (mid-rope jump-grabs from adjacent platforms); 59: fall-sim caps to map height not 1500ms - long single-fall descents (tall shafts: Ellinia tree, Perion) now generate DROP/JUMP/ROPE edges; 60: re-cap drops for organic descent - walk-offs capped at MAX_DROP_PX, down-jumps at the tighter DOWN_JUMP_MAX_DROP_PX, and down-jumps carry DOWN_JUMP_COST_PENALTY_MS so the pathfinder prefers ropes/walk-offs over plummeting an entire vertical map; 61: widened rope top-exit probe (BotPhysicsEngine.findTopExitLanding) - accept a step-off foothold slightly above/below the rope top and a few px off-axis, so uneven/slanted ladder heads mint a clean CLIMB step-off edge instead of only ballistic top jump-offs; 62: cache filename now encodes snowShoes (the 4th key dimension) - old three-dimension filenames are unreadable by design, and the bump parks them in a dead v61/ directory that can be deleted wholesale; 63: inset every JUMP launch window by one walk step before stamping it on the edge - an edge-pressed window let the executor's +/-walkStep launch phase overfly a small platform and the bot fall to the bottom
+    private static final int GRAPH_VERSION = 70; // Regions must describe a single surface height at each x.
 
     // Drop caps for organic descent (re-added; v57 had removed the old single cap). A bot must
     // never plummet down a whole vertical map. Two distinct downward moves, treated differently:
@@ -1077,7 +1077,7 @@ final class BotNavigationGraphProvider {
                                      Map<Integer, Integer> regionIdByFootholdId) {
         UnionFind unionFind = new UnionFind();
         for (Foothold foothold : footholds) {
-            unionFind.add(foothold.getId());
+            unionFind.add(foothold);
         }
 
         for (Foothold foothold : footholds) {
@@ -2832,18 +2832,17 @@ final class BotNavigationGraphProvider {
     private static final class UnionFind {
         private final Map<Integer, Integer> parent = new HashMap<>();
         private final Map<Integer, Integer> rank = new HashMap<>();
+        private final Map<Integer, List<Foothold>> members = new HashMap<>();
 
-        void add(int value) {
+        void add(Foothold foothold) {
+            int value = foothold.getId();
             parent.putIfAbsent(value, value);
             rank.putIfAbsent(value, 0);
+            members.put(value, new ArrayList<>(List.of(foothold)));
         }
 
         int find(int value) {
-            Integer parentValue = parent.get(value);
-            if (parentValue == null) {
-                add(value);
-                return value;
-            }
+            int parentValue = parent.get(value);
             if (parentValue == value) {
                 return value;
             }
@@ -2859,20 +2858,40 @@ final class BotNavigationGraphProvider {
             if (firstRoot == secondRoot) {
                 return;
             }
+            // Connected switchbacks can overlap in x. They need WALK edges, not a
+            // shared region whose pointAt(x) silently selects the wrong floor.
+            for (Foothold a : members.get(firstRoot)) {
+                for (Foothold b : members.get(secondRoot)) {
+                    int lo = Math.max(Math.min(a.getX1(), a.getX2()), Math.min(b.getX1(), b.getX2()));
+                    int hi = Math.min(Math.max(a.getX1(), a.getX2()), Math.max(b.getX1(), b.getX2()));
+                    if (lo <= hi && (heightAt(a, lo) != heightAt(b, lo)
+                            || heightAt(a, hi) != heightAt(b, hi))) {
+                        return;
+                    }
+                }
+            }
 
             int firstRank = rank.getOrDefault(firstRoot, 0);
             int secondRank = rank.getOrDefault(secondRoot, 0);
             if (firstRank < secondRank) {
                 parent.put(firstRoot, secondRoot);
+                members.get(secondRoot).addAll(members.remove(firstRoot));
                 return;
             }
             if (firstRank > secondRank) {
                 parent.put(secondRoot, firstRoot);
+                members.get(firstRoot).addAll(members.remove(secondRoot));
                 return;
             }
 
             parent.put(secondRoot, firstRoot);
             rank.put(firstRoot, firstRank + 1);
+            members.get(firstRoot).addAll(members.remove(secondRoot));
+        }
+
+        private static double heightAt(Foothold foothold, int x) {
+            return foothold.getY1() + (double) (foothold.getY2() - foothold.getY1())
+                    * (x - foothold.getX1()) / (foothold.getX2() - foothold.getX1());
         }
     }
 }

@@ -81,33 +81,19 @@ class LudiStageFlowCadenceTest {
         assertTrue(body.contains("LudiPqData.PASS"), "and it must be sweeping for the pass");
     }
 
-    /**
-     * Stage 5's hide: the guards stand in the MAIN room, on the way to every sub-room door, so
-     * a thief that only hides after entering the room crosses them bare. Both ways in - the
-     * bot's own door walk and following the leader - must be covered, and the aura has to be up
-     * before the movement starts.
-     */
     @Test
-    void theHideIsRaisedBeforeCrossingTheGuardedFloor() throws Exception {
+    void guardedTraversalIsPreparedAtThePortalActionNotTheFollowPredicate() throws Exception {
         String bot = javaSource(BOT);
-        int update = bot.indexOf("public void updateState()");
-        assertTrue(update > 0, "updateState must exist");
-        String body = bot.substring(update, bot.indexOf("\n    }", update));
-        int hide = body.indexOf("LudiStages.stayHidden");
-        int work = body.indexOf("tickPartyQuest()");
-        assertTrue(hide > 0, "stage 5 must raise the hide on the macro tick");
-        assertTrue(work > hide,
-                "the hide must be raised BEFORE tickPartyQuest issues any walk (both the "
-                        + "claim-and-walk and the follow walk are issued from it)");
-        assertTrue(body.contains("roomStage(here) == 5") && body.contains("stageOf(here) == 5"),
-                "it must cover both a stage-5 sub-room and the stage-5 main map");
-
-        // The predicate must stay side-effect free: the follow decision is a query.
+        int prepare = bot.indexOf("protected boolean preparePortalWalk(");
+        String action = bot.substring(prepare, bot.indexOf("\n    }", prepare));
+        assertTrue(action.contains("prepareStage5Traversal(getChr(), portal.getTargetMapId())"));
+        String stages = javaSource(STAGES);
+        int enter = stages.indexOf("private static boolean enterDoorRoom(");
+        String door = stages.substring(enter, stages.indexOf("\n    }", enter));
+        assertTrue(door.indexOf("prepareStage5Traversal(bot, room)") < door.indexOf("PqActions.walkTo("));
         int follow = bot.indexOf("protected boolean isFollowingLeader()");
         String followBody = bot.substring(follow, bot.indexOf("\n    }", follow));
-        assertFalse(followBody.contains("stayHidden"),
-                "isFollowingLeader is a predicate; raising an aura from it is a side effect in "
-                        + "a query");
+        assertFalse(followBody.contains("prepareStage5Traversal("));
     }
 
     private static String javaSource(String path) throws Exception {

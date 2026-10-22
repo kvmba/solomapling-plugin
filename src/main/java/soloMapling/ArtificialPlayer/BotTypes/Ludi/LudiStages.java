@@ -528,6 +528,9 @@ public final class LudiStages {
         if (door == null || door.getPosition() == null) {
             return false;
         }
+        if (!prepareStage5Traversal(bot, room)) {
+            return false;
+        }
         if (PqActions.walkTo(bot, door.getPosition())) PqActions.enterPortal(bot, door);
         return bot.getMapId() == room;
     }
@@ -627,6 +630,9 @@ public final class LudiStages {
      *              so the post is that NPC and not the map-exit NPC standing on the same ledge
      */
     private static void deliverAndPark(Character bot, int stage) {
+        if (stage == 5 && !prepareStage5Traversal(bot, LudiPqData.STAGE_5)) {
+            return;
+        }
         int stageNpc = LudiPqData.stageNpcId(stage);
         PqActions.recoverUngatheredHandoffs(bot, LudiPqData.PASS);
         PqActions.loot(bot, bot.getPosition(), LOOT_RADIUS_PX, new int[]{LudiPqData.PASS});
@@ -637,14 +643,8 @@ public final class LudiStages {
     }
 
     /**
-     * Work the stage-5 door rooms in stealth: the rooms' four pass boxes can be guarded by
-     * invincible Block Golems (PAD 999 - a touch is a death sentence), so the bot shows
-     * 隐身术 for the whole visit. Only 922010500 (the main room, 2 golems) and 922010506
-     * (7) actually hold them - rooms 922010501-505 are empty in WZ - but the stealth stance
-     * is harmless where no guard stands, and it is re-evaluated per room, so a guard added
-     * by a future WZ edit is covered. The hide makes the bot untouchable (isMonsterImmune)
-     * and costs nothing: it is cancelled by the reactor strike itself, and re-shown next
-     * tick.
+     * Work the stage-5 pass boxes. Only the bottom room and the route through the
+     * main map's ground-floor guards require stealth; upper rooms stay visible.
      *
      * <p>Which bot enters WHICH room is the posting table ({@link #stage5RoomAdmits}): the
      * guard room (922010506) admits only a hide-carrying kit - 隐身术 (rogue lineage) or
@@ -659,10 +659,13 @@ public final class LudiStages {
             workStage5FromMainRoom(bot);
             return;
         }
+        if (!prepareStage5Traversal(bot, mapId)) {
+            return;
+        }
         // The stage was turned in while this bot was still inside the maze: every box it could
         // still break is worthless, and the party has already moved on. Leave at once through
-        // the room's own out portal. This must come FIRST - before the hide, the box search and
-        // the loot - because the old exit condition required a pass in the pocket, so a bot sent
+        // the room's own out portal before searching for boxes or loot. The old exit condition
+        // required a pass in the pocket, so a bot sent
         // into a room a teammate had already emptied stood there until some unrelated drop
         // wandered into its loot radius (the reported "stage advances, one bot appears minutes
         // later"). A maze room has no next00, so nothing else could ever move it.
@@ -671,12 +674,6 @@ public final class LudiStages {
             exitDoorRoom(bot);
             return;
         }
-        // Re-show every tick while inside: the strike cancels the hide (an attack action),
-        // so the next tick's show re-stealths - one box per tick, the honest sneak pace.
-        // Only hide-carrying kits are ever routed into the guard room (the posting table);
-        // a bot in 501-505 without a hide is simply on its own honest legs there - those
-        // rooms are WZ-empty of guards.
-        stayHidden(bot);
         // Boxes while hidden: the strike cancels the hide, so re-show happens next tick.
         // The beat is off: a swing mid-walk would break the hide in a PAD-999 room.
         int box = nearestBoxOid(bot, LudiPqData.BOX_STAGE5);
@@ -725,8 +722,6 @@ public final class LudiStages {
             deliverAndPark(bot, 5);
             return;
         }
-        // Stealth is already up: updateState() raises it for every stage-5 map before any
-        // movement, which covers both this door walk and following the leader through a door.
         enterDoorRoom(bot, room, LudiPqData.STAGE5_ROOM_FIRST);
     }
 
@@ -791,17 +786,24 @@ public final class LudiStages {
         return 0;
     }
 
-    /**
-     * Show this bot's own hide (隐身术 for rogue lineage, 橡木伪装 for a Brawler) and keep
-     * it up: the movement tick only retires the hide on an attack or a mount, so simply
-     * re-showing each tick while guards are near reads as one long stealth. A no-op for a
-     * bot whose kit carries neither - those never enter a guard room in the first place.
-     */
-    public static void stayHidden(Character bot) {
+    /** Prepare stealth only for the bottom-room route, and keep it until back above the guards. */
+    public static boolean prepareStage5Traversal(Character bot, int destinationMap) {
+        int here = bot.getMapId();
+        boolean guarded = here == LudiPqData.STAGE5_ROOM_LAST
+                || (here == LudiPqData.STAGE_5
+                    && (destinationMap == LudiPqData.STAGE5_ROOM_LAST
+                        || bot.getMap().getAllMonsters().stream().anyMatch(m -> m.isAlive()
+                            && m.getId() == LudiPqData.GUARD_MOB
+                            && bot.getPosition().y >= m.getPosition().y - 120)));
+        if (!guarded) {
+            BotAuraState.cancelHidesForAction(bot);
+            return true;
+        }
         int hide = hideSkillFor(bot);
         if (hide != 0 && !BotAuraState.isMonsterImmune(bot)) {
             soloMapling.ArtificialPlayer.BotAttackSystem.BotBuffEffects.showBuff(bot, hide);
         }
+        return BotAuraState.isMonsterImmune(bot);
     }
 
     /**

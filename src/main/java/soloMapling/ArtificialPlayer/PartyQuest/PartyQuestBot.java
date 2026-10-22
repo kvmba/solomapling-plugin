@@ -703,6 +703,9 @@ public abstract class PartyQuestBot extends BotSM implements GrindTickRegistry.P
         if (exit == null) {
             return false;
         }
+        if (!preparePortalWalk(exit)) {
+            return false;
+        }
         BotLogger.log("PQ bot " + getChr().getName() + " following the leader from "
                 + here + " to " + leaderMap + " through portal " + exit.getName());
         sayDoorLine();
@@ -710,6 +713,10 @@ public abstract class PartyQuestBot extends BotSM implements GrindTickRegistry.P
             PqActions.enterPortal(getChr(), exit);
         }
         return getChr().getMapId() != here;
+    }
+
+    protected boolean preparePortalWalk(Portal portal) {
+        return true;
     }
 
     /**

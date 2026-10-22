@@ -24,7 +24,6 @@ final class BotNavigationManager {
     private static final Logger log = LoggerFactory.getLogger(BotNavigationManager.class);
     private static final int JUMP_READY_X_TOLERANCE = 10;
     private static final int EDGE_READY_X_TOLERANCE = 14;
-    private static final int NO_MOVEMENT_WALK_TOLERANCE = 4;
     // Stale-edge give-up: after this many consecutive no-movement ticks blocked on a
     // committed edge's position gate ("*-pos"), drop the edge and replan from the live
     // position (6-10 ticks = 300-500ms, jittered per park spot).
@@ -250,7 +249,8 @@ final class BotNavigationManager {
     }
 
     static boolean tryExecuteCommittedEdgeAfterGroundMovement(BotMovementState entry, Point rawTargetPos) {
-        if (entry == null || entry.bot == null || entry.navEdge == null || entry.inAir || entry.climbing) {
+        if (entry == null || entry.bot == null || entry.navEdge == null || entry.inAir || entry.climbing
+                || entry.navEdge.type == BotNavigationGraph.EdgeType.WALK) {
             return false;
         }
 
@@ -491,6 +491,10 @@ final class BotNavigationManager {
                                                       Point rawTargetPos,
                                                       BotNavigationGraph.Edge edge,
                                                       boolean runAiTick) {
+        // Surface transitions belong to every physics step, not just the slower AI beat.
+        if (edge.type == BotNavigationGraph.EdgeType.WALK) {
+            return tryExecuteWalk(graph, entry, bot, botPos, rawTargetPos, edge);
+        }
         if (!runAiTick) {
             return null;
         }
@@ -502,6 +506,47 @@ final class BotNavigationManager {
             case PORTAL -> tryExecutePortalEdge(entry, bot, botPos, rawTargetPos, edge);
             default -> null;
         };
+    }
+
+    private static NavigationDirective tryExecuteWalk(BotNavigationGraph graph, BotMovementState entry,
+                                                       Character bot, Point botPos, Point rawTargetPos,
+                                                       BotNavigationGraph.Edge edge) {
+        if (entry.inAir || entry.climbing || !edge.startPoint.equals(edge.endPoint)) {
+            return null;
+        }
+        Point joint = edge.startPoint;
+        int step = BotPhysicsEngine.walkStep(bot.getMap(), entry.movementProfile);
+        Point surface = graph.getRegion(edge.fromRegionId).pointAt(botPos.x);
+        if (Math.abs(botPos.x - joint.x) > step || Math.abs(botPos.y - surface.y) > 2) {
+            return null;
+        }
+        if (botPos.x != joint.x) {
+            Foothold standing = BotPhysicsEngine.standingFoothold(entry);
+            int dir = Integer.signum(joint.x - botPos.x);
+            BotPhysicsEngine.GroundStepResult next = BotPhysicsEngine.simulateGroundMotion(bot.getMap(),
+                    botPos, standing, dir,
+                    new BotPhysicsEngine.GroundTravelState(entry.physX, entry.hspeed, entry.groundPhysicsCarryMs),
+                    entry.movementProfile);
+            if ((next.point().x - joint.x) * dir < 0) {
+                return null;
+            }
+            // Finish this ground step at the junction before reversing onto the next surface.
+            bot.setPosition(new Point(joint));
+            BotPhysicsEngine.idleOnGround(entry, bot);
+        } else {
+            BotNavigationGraph.Region to = graph.getRegion(edge.toRegionId);
+            int desiredDir = Integer.signum(rawTargetPos.x - joint.x);
+            BotNavigationGraph.Segment segment = to.segments.stream()
+                    .filter(s -> s.containsX(joint.x) && s.pointAt(joint.x).equals(joint))
+                    .min(Comparator.comparingInt(s -> (desiredDir > 0 ? s.maxX > joint.x
+                            : s.minX < joint.x) ? 0 : 1)).orElseThrow();
+            Foothold foothold = entry.fhIndex.get(segment.footholdId);
+            entry.moveDir = joint.x == segment.minX ? 1 : -1;
+            BotPhysicsEngine.applyGroundMotion(entry, bot, foothold);
+        }
+        entry.lastEdgeBlockReason = null;
+        BotMovementManager.broadcastMovement(entry);
+        return new NavigationDirective(rawTargetPos, true);
     }
 
     private static NavigationDirective tryExecuteJump(BotNavigationGraph graph,
@@ -1068,7 +1113,7 @@ final class BotNavigationManager {
         if (path == null || path.isEmpty()) {
             return null;
         }
-        return collapseLeadingWalkEdges(path);
+        return path.getFirst();
     }
 
     static List<BotNavigationGraph.Edge> findPath(BotNavigationGraph graph,
@@ -1409,38 +1454,6 @@ final class BotNavigationManager {
         return path;
     }
 
-    static BotNavigationGraph.Edge collapseLeadingWalkEdges(List<BotNavigationGraph.Edge> path) {
-        BotNavigationGraph.Edge first = path.get(0);
-        if (first.type != BotNavigationGraph.EdgeType.WALK) {
-            return first;
-        }
-
-        if (!isNoMovementWalk(first.startPoint, first.endPoint)) {
-            return first;
-        }
-
-        int totalCost = 0;
-        int walkCount = 0;
-        while (walkCount < path.size()) {
-            BotNavigationGraph.Edge edge = path.get(walkCount);
-            if (edge.type != BotNavigationGraph.EdgeType.WALK
-                    || !isNoMovementWalk(edge.startPoint, edge.endPoint)) {
-                break;
-            }
-            totalCost += edge.cost;
-            walkCount++;
-        }
-
-        if (walkCount >= path.size()) {
-            return null;
-        }
-
-        BotNavigationGraph.Edge next = path.get(walkCount);
-        return new BotNavigationGraph.Edge(first.fromRegionId, next.toRegionId, next.type,
-                next.startPoint, next.endPoint, next.launchMinX, next.launchMaxX, next.launchStepX, next.portalId,
-                next.ropeX, next.ropeTopY, next.ropeBottomY, totalCost + next.cost);
-    }
-
     private static boolean isEdgeUsable(BotNavigationGraph graph, Character bot, BotNavigationGraph.Edge edge) {
         return isEdgeUsable(graph, bot.getMap(), edge);
     }
@@ -1774,13 +1787,7 @@ final class BotNavigationManager {
 
     static boolean shouldUsePreciseWalkTarget(BotNavigationGraph.Edge edge) {
         return edge != null
-                && edge.type == BotNavigationGraph.EdgeType.WALK
-                && !isNoMovementWalk(edge.startPoint, edge.endPoint);
-    }
-
-    private static boolean isNoMovementWalk(Point start, Point end) {
-        return Math.abs(end.x - start.x) <= NO_MOVEMENT_WALK_TOLERANCE
-                && Math.abs(end.y - start.y) <= NO_MOVEMENT_WALK_TOLERANCE;
+                && edge.type == BotNavigationGraph.EdgeType.WALK;
     }
 
     private static boolean canGrabRopeAtCurrentPosition(Point botPos, Rope rope) {
@@ -1933,7 +1940,9 @@ final class BotNavigationManager {
             // edge even though the authored graph and ballistic landing simulation still agree.
             return -1;
         }
-        return graph.findRegionId(map, botPos);
+        Foothold standing = BotPhysicsEngine.standingFoothold(entry);
+        return standing != null ? graph.regionIdByFootholdId.getOrDefault(standing.getId(), -1)
+                : graph.findRegionId(map, botPos);
     }
 
     static int resolveTargetRegionId(BotNavigationGraph graph,

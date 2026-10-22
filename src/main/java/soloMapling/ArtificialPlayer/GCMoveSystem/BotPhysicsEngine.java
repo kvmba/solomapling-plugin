@@ -393,11 +393,22 @@ final class BotPhysicsEngine {
      */
     static Foothold syncAndDetectGround(BotMovementState entry, Character bot) {
         syncGroundPosition(entry, bot.getPosition().x);
-        Foothold fh = findGroundFoothold(bot.getMap(), bot.getPosition());
+        Foothold fh = standingFoothold(entry);
+        entry.groundFoothold = fh;
         if (fh == null) {
             beginFall(entry, bot, 0);
         }
         return fh;
+    }
+
+    static Foothold standingFoothold(BotMovementState entry) {
+        Point position = entry.bot.getPosition();
+        Foothold foothold = entry.groundFoothold;
+        if (foothold != null && position.x >= foothold.getX1() && position.x <= foothold.getX2()
+                && Math.abs(position.y - surfaceY(foothold, position.x)) <= 1) {
+            return foothold;
+        }
+        return findGroundFoothold(entry.bot.getMap(), position);
     }
 
     static Foothold findGroundFoothold(MapleMap map, Point position) {
@@ -1095,6 +1106,7 @@ final class BotPhysicsEngine {
                 : 0.0;
         bot.setPosition(position);
         entry.inAir = false;
+        entry.groundFoothold = foothold;
         entry.climbing = false;
         entry.climbRope = null;
         entry.crouching = false;
@@ -1262,6 +1274,7 @@ final class BotPhysicsEngine {
 
         Point position = step.point();
         bot.setPosition(position);
+        entry.groundFoothold = step.foothold();
         entry.inAir = false;
         entry.climbing = false;
         entry.climbRope = null;
@@ -2132,6 +2145,7 @@ final class BotPhysicsEngine {
                                        int airVelX,
                                        boolean climbUpIntent) {
         entry.climbPositionHeld = false;
+        entry.groundFoothold = null;
         entry.climbing = false;
         entry.climbRope = null;
         entry.inAir = true;
@@ -2267,6 +2281,7 @@ final class BotPhysicsEngine {
     }
 
     private static void setClimbPosition(BotMovementState entry, Character bot, Rope rope, int y) {
+        entry.groundFoothold = null;
         Point position = new Point(rope.x(), y);
         bot.setPosition(position);
         entry.climbing = true;
@@ -2294,6 +2309,7 @@ final class BotPhysicsEngine {
     }
 
     private static void clearMovementState(BotMovementState entry, Point position) {
+        entry.groundFoothold = null;
         entry.climbPositionHeld = false;
         entry.inAir = false;
         entry.climbing = false;

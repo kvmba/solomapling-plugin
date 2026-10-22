@@ -63,18 +63,18 @@ public class LudiPQBot extends PartyQuestBot {
         if (checkIfNotRunningOrPaused()) {
             return;
         }
-        // Stage 5 stealth, for the WHOLE tick and both ways a bot reaches a sub-room: its own
-        // claim-and-walk (workStage5FromMainRoom) and following the leader through a door
-        // (followLeaderIntoNextRoom). Both cross 922010500's floor, which seats two invincible
-        // 9300013 guards at y~54 while the bottom door (in06) sits at y=251 below them, and the
-        // guard room itself holds seven. Raising the aura here - an action method, before any
-        // movement - keeps it out of the isFollowingLeader() predicate, which only decides
-        // whether a follow is allowed. A no-op outside stage 5 and for kits with no hide.
         int here = getChr().getMapId();
-        if (LudiPqData.roomStage(here) == 5 || stageOf(here) == 5) {
-            LudiStages.stayHidden(getChr());
+        // Main-map stealth is decided by the destination before the walk is issued.
+        if ((here != LudiPqData.STAGE_5 || LudiStages.stageCleared(getChr(), 5))
+                && !LudiStages.prepareStage5Traversal(getChr(), here)) {
+            return;
         }
         tickPartyQuest();
+    }
+
+    @Override
+    protected boolean preparePortalWalk(org.gms.server.maps.Portal portal) {
+        return LudiStages.prepareStage5Traversal(getChr(), portal.getTargetMapId());
     }
 
     @Override
@@ -248,10 +248,7 @@ public class LudiPQBot extends PartyQuestBot {
         // member, so the bot must not follow there; the quest's own next00 warp carries it
         // along instead. The leader's CURRENT room is the room the party is in.
         //
-        // The stealth for this crossing is NOT raised here: this is a predicate, and the walk
-        // it authorises is issued by the caller right after. updateState() raises it for every
-        // stage-5 room before any movement happens, so both this follow walk and the bot's own
-        // walk to a door are covered.
+        // The action hook prepares stealth after the actual destination portal is selected.
         if (roomStage == 5 || (stage == 5 && roomStage < 0)) {
             Character leader = partyLeader();
             int leaderStage = (leader != null) ? stageOf(leader.getMapId()) : -1;
@@ -284,7 +281,7 @@ public class LudiPQBot extends PartyQuestBot {
     @Override
     protected boolean fightsOnSweep() {
         int mapId = getChr().getMapId();
-        if (LudiPqData.roomStage(mapId) == LudiPqData.STAGE5_ROOM_LAST) {
+        if (mapId == LudiPqData.STAGE5_ROOM_LAST) {
             return false; // the guard room: hide is the mechanic
         }
         return !(stageOf(mapId) == 5 && LudiStages.nearbyGuardCount(getChr()) > 0);

@@ -815,6 +815,10 @@ class BotMovementManager {
      * (CLIMB, PORTAL, non-windowed fallback cases) use 1px to reach the exact anchor.
      */
     static int preciseNavStopDist(BotNavigationGraph.Edge navEdge) {
+        if (navEdge != null && navEdge.type == BotNavigationGraph.EdgeType.WALK
+                && navEdge.startPoint.equals(navEdge.endPoint)) {
+            return 0; // cross the surface junction, do not settle short of it
+        }
         if (navEdge != null
                 && (navEdge.type == BotNavigationGraph.EdgeType.JUMP
                 || (navEdge.type == BotNavigationGraph.EdgeType.DROP && navEdge.launchStepX == 0))) {
@@ -1571,7 +1575,7 @@ class BotMovementManager {
         // Only a land pose pays for the ground lookup; every other pose resolves to 0/rope below.
         Foothold fh = (entry.climbing || entry.inAir || entry.swimming)
                 ? null
-                : BotPhysicsEngine.findGroundFoothold(bot.getMap(), bot.getPosition());
+                : BotPhysicsEngine.standingFoothold(entry);
         int groundFhId = fh != null ? fh.getId() : 0;
         return resolveWireFh(entry.climbing, entry.inAir, entry.swimming, ropeWireFh, groundFhId);
     }

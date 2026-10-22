@@ -47,6 +47,7 @@ class BotMovementState {
     double physX = 0.0;
     double physY = 0.0;
     double groundPhysicsCarryMs = 0.0;
+    Foothold groundFoothold;
     double fallPeakPhysY = Double.POSITIVE_INFINITY;
     boolean inAir = false;
     int jumpCooldownMs = 0;
