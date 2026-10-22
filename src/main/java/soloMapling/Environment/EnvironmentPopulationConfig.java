@@ -149,29 +149,51 @@ public final class EnvironmentPopulationConfig {
     }
 
     private static volatile String overridePath;
-    private static volatile PopulationPlan cached;
-    private static volatile Map<String, Object> cachedRoot;
+
+    /**
+     * The last successful parse, published as one immutable value.
+     *
+     * <p>{@code plan} and {@code rawTownsList} must always describe the SAME file. They used to be
+     * two independent volatile fields written at different moments, so a thread could read a plan
+     * from one load and the raw root from another - and during startup dozens of virtual threads
+     * call {@code plan()} for the first time at once (every {@code scaledAmbient()}), each
+     * re-parsing the YAML because the cache was still empty.
+     */
+    private record Loaded(PopulationPlan plan, Map<String, Object> root) {}
+
+    private static volatile Loaded loaded;
 
     public static void setConfigPath(String path) {
         overridePath = (path == null || path.isBlank()) ? null : path.trim();
-        cached = null;
-        cachedRoot = null;
+        loaded = null;
     }
 
     public static PopulationPlan plan() {
-        PopulationPlan local = cached;
-        if (local == null) {
-            local = load();
-            cached = local;
+        return snapshot().plan();
+    }
+
+    private static Loaded snapshot() {
+        Loaded local = loaded;
+        if (local != null) {
+            return local;
         }
-        return local;
+        synchronized (EnvironmentPopulationConfig.class) {
+            local = loaded;
+            if (local == null) {
+                local = load();
+                loaded = local;
+            }
+            return local;
+        }
     }
 
     public static PopulationPlan reload() {
-        cached = load();
+        synchronized (EnvironmentPopulationConfig.class) {
+            loaded = load();
+        }
         // TownPresenceConfig reads the same YAML; drop its cache so the next towns() re-parses.
         TownPresenceConfig.invalidate();
-        return cached;
+        return plan();
     }
 
     public static Optional<String> lastLoadedFrom() {
@@ -185,8 +207,7 @@ public final class EnvironmentPopulationConfig {
      */
     @SuppressWarnings("unchecked")
     public static List<?> rawTownsList() {
-        plan();
-        Map<String, Object> root = cachedRoot;
+        Map<String, Object> root = snapshot().root();
         if (root == null) {
             return List.of();
         }
@@ -205,26 +226,22 @@ public final class EnvironmentPopulationConfig {
     }
 
     @SuppressWarnings("unchecked")
-    private static PopulationPlan load() {
+    private static Loaded load() {
         try (Reader reader = openReader()) {
             if (reader == null) {
                 System.out.println("[EnvironmentPopulationConfig] no config found; using built-in defaults");
-                cachedRoot = null;
-                return defaults("(built-in)");
+                return new Loaded(defaults("(built-in)"), null);
             }
             YamlReader yaml = new YamlReader(reader);
             Map<String, Object> root = (Map<String, Object>) yaml.read();
             if (root == null) {
-                cachedRoot = null;
-                return defaults("(empty yaml)");
+                return new Loaded(defaults("(empty yaml)"), null);
             }
-            cachedRoot = root;
-            return parse(root, currentSourceLabel);
+            return new Loaded(parse(root, currentSourceLabel), root);
         } catch (Exception e) {
             System.out.println("[EnvironmentPopulationConfig] failed to load: " + e.getMessage()
                     + " — falling back to built-in defaults");
-            cachedRoot = null;
-            return defaults("(fallback after error)");
+            return new Loaded(defaults("(fallback after error)"), null);
         }
     }
 
