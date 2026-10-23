@@ -133,6 +133,30 @@ class DojoDoorReachabilityTest {
     }
 
     /**
+     * The placement the bot actually performs: aiming at the door's own pixel must snap onto the
+     * platform under it, inside {@code GCMovement.enterPortal}'s 8px reach. This is what makes
+     * {@code climb}'s {@code teleportTo(at.x, at.y)} correct without a hard-coded platform row -
+     * a hard-coded row would silently aim at empty air if a room's geometry ever moved.
+     */
+    @Test
+    void thePlacementLandsInsideTheDoorsEntranceReach() {
+        for (int stage = 1; stage <= DojoPqData.LAST_STAGE; stage++) {
+            int mapId = dojoPartyMap(stage);
+            MapleMap map = BotNavigationMapLoader.loadMapGeometry(mapId);
+            Portal door = PartyQuestBot.scriptedPortalOf(map.getPortals(),
+                    DojoPqData.SERVER_DOOR, DojoPqData.SERVER_DOOR_SCRIPT);
+            assertNotNull(door, mapId + " has no out001/dojang_next door");
+
+            Point at = door.getPosition();
+            Point landing = BotPhysicsEngine.findGroundPoint(map, at.x, at.y);
+            assertNotNull(landing, mapId + ": nothing to stand on under the door " + at);
+            assertTrue(Math.abs(landing.x - at.x) <= 8 && Math.abs(landing.y - at.y) <= 8,
+                    mapId + ": the platform under the door (" + landing + ") is outside the "
+                            + "engine's 8px portal reach of " + at);
+        }
+    }
+
+    /**
      * A resting floor has no door reactor and no climb door at all, which is why
      * {@code dojang_next} refuses there ({@code gate == null}) and the bot must reproduce the
      * script's party warp instead of walking {@code out001}.

@@ -53,12 +53,15 @@ class DojoBotStructureTest {
         String climb = methodBody(read(BOT), "private void climb(");
         assertTrue(climb.contains("setReactorState()"),
                 "dojang_next refuses while the door reactor is shut; only dojang_up opens it");
-        assertTrue(climb.contains("GCMovement.teleportTo("),
-                "the platform is unreachable on foot - the placement stands in for DOJO_WARP_UP");
-        assertFalse(climb.contains("PqActions.walkTo("),
+        assertTrue(climb.contains("GCMovement.teleportTo(bot, at.x, at.y)"),
+                "the placement must aim at the DOOR's own pixel - the ground probe snaps it onto "
+                        + "the platform, so a hard-coded platform row would only work by luck");
+        assertFalse(climb.contains("PqActions.walkTo(bot, at)"),
                 "walkTo can never report arrival on that platform (DojoDoorReachabilityTest)");
         assertTrue(climb.indexOf("setReactorState()") < climb.indexOf("enterPortal("),
                 "the door must be open BEFORE the script is invoked, or it refuses");
+        assertFalse(climb.matches("(?s).*teleportTo\\(bot, at\\.x,\\s*-?\\d+\\).*"),
+                "no hard-coded platform row: it silently aims at empty air when geometry moves");
     }
 
     /**
@@ -99,6 +102,27 @@ class DojoBotStructureTest {
         String stage = methodBody(read(BOT), "protected boolean workStage()");
         assertTrue(stage.contains("partyIsBelow("),
                 "a bot that climbed alone must not keep climbing: the room's boss is the party's fight");
+    }
+
+    /**
+     * {@code setDojoProgress} must not gate the spawn.
+     *
+     * <p>It is monotonic per tower SLOT, and a party's five rooms all share slot {@code mapId % 100}
+     * ({@code Channel.getDojoSlot}), so it answers true only for the FIRST room the party reaches.
+     * Using its return value as a spawn gate leaves every room above the first with no boss - the
+     * exact stall this fix removes. The room's own state (no living target, no clear marker) is the
+     * idempotence.
+     */
+    @Test
+    void theSpawnIsNotGatedOnTheTowersMonotonicStage() throws IOException {
+        String raise = methodBody(read(BOT), "private void raiseBoss(");
+        assertFalse(raise.contains("!channel.setDojoProgress("),
+                "setDojoProgress is per-slot and monotonic: as a gate it would spawn only the "
+                        + "first room of the tower and leave the rest empty");
+        assertTrue(raise.contains("setDojoProgress("),
+                "the call still belongs there: dojang_1st/dojang_next read the stage record it writes");
+        assertTrue(raise.contains("CLEAR_MARKER"),
+                "the per-room idempotence is the marker check, not the tower's stage");
     }
 
     private static String read(Path path) throws IOException {

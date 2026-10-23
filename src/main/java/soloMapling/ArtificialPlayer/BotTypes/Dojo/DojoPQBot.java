@@ -45,9 +45,6 @@ import java.awt.Point;
  */
 public class DojoPQBot extends PartyQuestBot {
 
-    /** The top platform {@code out001} stands on; {@code 9250201xx}, shared by every party room. */
-    private static final int DOOR_PLATFORM_Y = -365;
-
     /** {@code GCMovement.enterPortal} refuses a body further than this from the door. */
     private static final int DOOR_ARRIVAL_PX = 8;
 
@@ -126,21 +123,22 @@ public class DojoPQBot extends PartyQuestBot {
     /**
      * Raise this room's boss the way {@code dojang_1st} would have.
      *
-     * <p>Three gates, in the script's own order:
+     * <p>Two gates, both about THIS room:
      *
      * <ol>
      *   <li>nothing to raise on a resting floor - {@code dojang_1st} dismisses the timer there
      *       instead of spawning;</li>
      *   <li>the marker means the boss already died here; re-raising it would restart the fight
-     *       after the room was cleared;</li>
-     *   <li>{@code setDojoProgress} is the monotonic per-tower-slot gate the script itself calls,
-     *       so a bot and the human leader cannot both spawn. It is the reason this is safe to
-     *       attempt every tick.</li>
+     *       after the room was cleared.</li>
      * </ol>
      *
-     * <p>That gate is also why a bot that arrives in an ALREADY-advanced room (the leader went up
-     * first and the slot has moved on) cannot raise anything: the slot is ahead of this room, which
-     * only happens when someone else already handled it.
+     * <p>{@code setDojoProgress} is still called - it advances the tower's clock and stage record
+     * ({@code dojang_1st} and {@code dojang_next} both depend on it) - but its return value is NOT
+     * a spawn gate here. It is monotonic per tower SLOT, and a party's five rooms all share slot
+     * {@code mapId % 100}, so it answers true only for the first room the party reaches. Gating on
+     * it would leave every room above the first with no boss at all - the very stall this fix is
+     * for. The script can use it because its caller is already scoped to "a body just entered this
+     * one room, which was empty until now"; the bot's own scoping is the empty-room check above.
      */
     private void raiseBoss(Character bot, int mapId) {
         int bossId = DojoPqData.bossIdFor(mapId);
@@ -152,9 +150,10 @@ public class DojoPQBot extends PartyQuestBot {
             return; // already cleared here - the marker is the record of that kill
         }
         var channel = map.getChannelServer();
-        if (channel == null || !channel.setDojoProgress(mapId)) {
-            return; // another body already advanced this slot - the boss is its to raise
+        if (channel == null) {
+            return; // an instance map with no channel: nothing to raise the room against
         }
+        channel.setDojoProgress(mapId); // bookkeeping/clock, not a gate - see the note above
         Monster boss = LifeFactory.getMonster(bossId);
         if (boss == null) {
             return; // WZ without this row: nothing to spawn, the door's count check still passes
@@ -200,9 +199,9 @@ public class DojoPQBot extends PartyQuestBot {
             return;
         }
         if (Math.abs(pos.x - at.x) > DOOR_ARRIVAL_PX || Math.abs(pos.y - at.y) > DOOR_ARRIVAL_PX) {
-            // The platform is 372px up a wall with no rope: nothing can walk there. Placing the
-            // body is the server-side stand-in for the client's DOJO_WARP_UP animation.
-            GCMovement.teleportTo(bot, at.x, DOOR_PLATFORM_Y);
+            // Aim at the door's own pixel: the ground probe drops it onto the platform the door
+            // stands on, which is also the pixel enterPortal requires (DojoDoorReachabilityTest).
+            GCMovement.teleportTo(bot, at.x, at.y);
         }
         PqActions.enterPortal(bot, door);
     }
