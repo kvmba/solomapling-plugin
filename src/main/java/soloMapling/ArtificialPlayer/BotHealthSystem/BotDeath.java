@@ -91,14 +91,16 @@ public final class BotDeath {
      * hope; the overlap only ever meant a restarted lie-down.
      *
      * <p>The corpse teardown ({@link #stillTheCorpse}) deliberately runs AFTER the monitor is
-     * released. It reaches {@code GCMovement.stop}, which takes the bot's movement monitor, and the
-     * movement driver's tick holds that monitor while calling {@link #adoptIfZeroHp()} (the
-     * "became zero HP" gate in GCMovementDriver). Meanwhile the two other adopters — the bot's
-     * macro tick (BotSM.tickRunnable) and the 250 ms combat sweep (TrainingBot/RoamerBot
-     * grindTick) — are separate threads. Doing the teardown under this monitor is therefore a
-     * textbook AB-BA deadlock: driver holds movement → wants death, sweep/macro holds death →
-     * wants movement. It reads as a rare freeze because it needs a zero-HP bot and both paths to
-     * land in the same window, and the parked driver then owns the bot forever.
+     * released. It reaches {@code GCMovement.stop}, which takes the bot's movement monitor. Only
+     * one of the two arming paths already holds that monitor — the contact-damage kill, called
+     * from inside the movement tick — where the re-entry is harmless. The other lives on a
+     * different thread: the zero-HP gate in GCMovementDriver calls {@link #adoptIfZeroHp()} while
+     * holding the movement monitor, and so do the bot's macro tick (BotSM.tickRunnable) and the
+     * 250 ms combat sweep (TrainingBot/RoamerBot grindTick). Holding this monitor across the
+     * teardown therefore closes a textbook AB-BA cycle: driver holds movement → wants death,
+     * sweep/macro holds death → wants movement. It reads as a rare freeze because it needs a
+     * zero-HP bot and both paths to land in the same window, and the parked driver then owns the
+     * bot forever.
      */
     public void kill() {
         Character chr = this.chr;
