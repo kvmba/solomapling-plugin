@@ -121,13 +121,18 @@ public class ConversationManager {
         return botsInConversation.contains(characterId);
     }
 
-    private void scheduleNextTick() {
+    private synchronized void scheduleNextTick() {
         if (!running) return;
         int delay = MIN_INTERVAL_MS + random.nextInt(MAX_INTERVAL_MS - MIN_INTERVAL_MS);
         // Fable Phase 4: run the tick body on a virtual thread - conversation playback
         // sleeps between lines, and that used to pin one of the shared scheduled pool's
         // threads for the whole script. The next tick is still scheduled only after the
         // current one finishes, so conversations never overlap.
+        //
+        // Under the same monitor as start()/stop(): the flag check and the arm are one step.
+        // Read outside it, a tick that saw `running` just before stop() could arm the next one
+        // after stop() returned, leaving a chain nobody can cancel - the exact leak the unload
+        // path exists to prevent.
         scheduledTask = ExecutorServiceManager.getScheduledExecutorService().schedule(
                 () -> ExecutorServiceManager.runAsync(() -> {
                     try {

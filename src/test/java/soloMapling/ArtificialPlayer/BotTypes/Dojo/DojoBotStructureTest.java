@@ -85,13 +85,25 @@ class DojoBotStructureTest {
                 "dojang_next refuses on a rest floor (no door reactor) - the portal is a dead end");
     }
 
+    /**
+     * The spawn is gated on {@code setDojoProgress}, exactly as {@code dojang_1st} is.
+     *
+     * <p>The latch compares STAGES ({@code (mapId / 100) % 100}), not the party's slot
+     * ({@code mapId % 100}), so it answers true once per room and never blocks a higher floor -
+     * which is why gating on it is safe. It is also load-bearing: the host removes a killed boss
+     * from the map at once and spawns the revive marker only after {@code die1 + 500ms}, so a
+     * marker-only idempotence check would raise a second boss during the death animation.
+     */
     @Test
     void theBossIsRaisedBehindTheChannelsOwnProgressGate() throws IOException {
         String raise = methodBody(read(BOT), "private void raiseBoss(");
-        assertTrue(raise.contains("setDojoProgress("),
-                "dojang_1st's own gate: monotonic per tower slot, so the leader's entry cannot double-spawn");
+        assertTrue(raise.contains("!channel.setDojoProgress("),
+                "the spawn must be refused when the room's stage already advanced - that is the "
+                        + "script's own latch and the only guard during the death animation");
         assertTrue(raise.indexOf("setDojoProgress(") < raise.indexOf("spawnDojoMonster("),
                 "the gate has to be taken BEFORE spawning");
+        assertTrue(raise.contains("CLEAR_MARKER"),
+                "the marker check stays: it is the 'this room was cleared' record");
         assertTrue(raise.contains("bossIdFor("),
                 "the boss id is the script's arithmetic, not a per-room table");
     }
@@ -102,27 +114,6 @@ class DojoBotStructureTest {
         String stage = methodBody(read(BOT), "protected boolean workStage()");
         assertTrue(stage.contains("partyIsBelow("),
                 "a bot that climbed alone must not keep climbing: the room's boss is the party's fight");
-    }
-
-    /**
-     * {@code setDojoProgress} must not gate the spawn.
-     *
-     * <p>It is monotonic per tower SLOT, and a party's five rooms all share slot {@code mapId % 100}
-     * ({@code Channel.getDojoSlot}), so it answers true only for the FIRST room the party reaches.
-     * Using its return value as a spawn gate leaves every room above the first with no boss - the
-     * exact stall this fix removes. The room's own state (no living target, no clear marker) is the
-     * idempotence.
-     */
-    @Test
-    void theSpawnIsNotGatedOnTheTowersMonotonicStage() throws IOException {
-        String raise = methodBody(read(BOT), "private void raiseBoss(");
-        assertFalse(raise.contains("!channel.setDojoProgress("),
-                "setDojoProgress is per-slot and monotonic: as a gate it would spawn only the "
-                        + "first room of the tower and leave the rest empty");
-        assertTrue(raise.contains("setDojoProgress("),
-                "the call still belongs there: dojang_1st/dojang_next read the stage record it writes");
-        assertTrue(raise.contains("CLEAR_MARKER"),
-                "the per-room idempotence is the marker check, not the tower's stage");
     }
 
     private static String read(Path path) throws IOException {
