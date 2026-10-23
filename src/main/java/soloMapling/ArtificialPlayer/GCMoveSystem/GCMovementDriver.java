@@ -665,7 +665,8 @@ final class GCMovementDriver {
         if (entry.navGraphLoad != null && !entry.inAir && !entry.climbing
                 && (entry.navAwaitingRoute || (entry.navEdge != null
                 && entry.navEdge.type == BotNavigationGraph.EdgeType.JUMP))) {
-            if (entry.navGraphLoad.isCompletedExceptionally()) {
+            if (entry.navGraphLoad.isCompletedExceptionally()
+                    && BotNavigationGraphProvider.peekGraph(entry.bot.getMap(), entry.movementProfile) == null) {
                 BotPhysicsEngine.idleOnGround(entry, entry.bot);
                 broadcastIfObserved(entry);
                 failMove(entry);

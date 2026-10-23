@@ -1309,20 +1309,17 @@ final class BotPhysicsEngine {
         // platform happens to be within MAX_SLOPE_UP above. That is not an uphill slope of the
         // current foothold - the bot should fall, not jump up to the unconnected platform.
         if (step.lostGround()) {
-            // Void guard: a step past a ledge whose column has NO foothold below is not a drop to
-            // the platform beneath - it is a fall out of the map. The airborne integrator has no
-            // floor clamp, so the bot plummets until tickFallOffMapRecovery (which snaps it back
-            // and drops moveTarget - the "walked off the ledge and fell out" glitch). A step that
-            // reaches ANY ground below is a real ledge and is unaffected; only a provably empty
-            // column holds the bot at the current pixel.
+            // Refuse a fall whose actual steering policy misses every landing. The
+            // forecast starts at the fractional departure point and spends the same
+            // remainder as execution; a constant-speed arc is not a safety proof.
             int departureStepX = step.departureStepX();
-            if (!map.isSwim() && simulateFallLanding(map, step.point(), departureStepX) == null) {
+            if (!map.isSwim() && !hasGroundDepartureLanding(entry, step, desiredDir, target)) {
                 // Held at the lip: clear the held direction so resolveStance renders a STAND (not a
                 // walking-in-place WALK - moveDir still carries the planned step here), and stop the
                 // broadcast velocity. lostGround=false like the blocked-step path: the bot did not
                 // lose its ground, it simply did not move.
-                entry.moveDir = 0;
-                setMovementVelocity(entry, 0, 0);
+                idleOnGround(entry, bot);
+                entry.groundPhysicsCarryMs = 0.0;
                 return new GroundMotion(0, false);
             }
             beginFall(entry, bot, step.point(), departureStepX);
@@ -1380,6 +1377,56 @@ final class BotPhysicsEngine {
         }
         syncCharacterState(entry);
         return new GroundMotion(step.stepX(), false);
+    }
+
+    private static boolean hasGroundDepartureLanding(BotMovementState entry, GroundStepResult departure,
+                                                    int inputDir, GroundTarget target) {
+        MapleMap map = entry.bot.getMap();
+        Point airTarget = entry.moveTarget != null ? entry.moveTarget
+                : target != null && !target.stopOnly() ? new Point(target.x(), departure.point().y) : null;
+        int launchVelocityX = departure.departureStepX();
+        double velocityX = launchVelocityX;
+        AirTravelState state = new AirTravelState(departure.state().physX(), departure.point().y, 0f);
+        double tickFraction = departure.remainingAirMs() / cfg.TICK_MS;
+        int heldInput = 0;
+        int floorY = mapFloorY(map);
+        // The departure tick uses the last ground key. Subsequent ticks select the same
+        // airborne key as tickAirborne, then retain it until landing.
+        for (int tick = 0; tick < FALL_SIM_TICK_CAP; tick++) {
+            if (tick > 0) {
+                tickFraction = 1.0;
+                if (heldInput == 0) {
+                    heldInput = BotMovementManager.resolveAirSteeringDir(entry,
+                            roundedAirPosition(state), airTarget, launchVelocityX);
+                }
+                inputDir = heldInput;
+            }
+            if (tickFraction == 0.0) {
+                continue;
+            }
+            velocityX = airVelocityX(velocityX, state.velocityY(), inputDir, false,
+                    map, entry.movementProfile, tickFraction);
+            Point previous = roundedAirPosition(state);
+            AirTravelState next = advanceAirbornePosition(state.physX(), state.physY(),
+                    state.velocityY(), velocityX, tickFraction);
+            AirCollision collision = resolveAirCollision(map, previous, roundedAirPosition(next));
+            if (collision.type() == AirCollisionType.LAND) {
+                return true;
+            }
+            if (collision.type() == AirCollisionType.WALL) {
+                launchVelocityX = 0;
+                velocityX = 0.0;
+                state = new AirTravelState(collision.point().x, collision.point().y, next.velocityY());
+            } else if (collision.type() == AirCollisionType.CEILING) {
+                state = new AirTravelState(collision.point().x, collision.point().y, 0f);
+            } else {
+                state = next;
+            }
+            if (state.physY() > floorY) {
+                return false;
+            }
+        }
+        return false;
     }
 
     static GroundTravelState initialGroundTravelState(Point position) {
@@ -1821,49 +1868,47 @@ final class BotPhysicsEngine {
      * A counter-strafe decelerates straight through zero and pins at the band edge in the new
      * direction — mid-air input can never rebuild walk speed.
      */
-    private static void applyAirSteering(BotMovementState entry, MapleMap map, int steerDir, double tickFraction) {
-        if (steerDir == 0) return;
+    private static double airVelocityX(double velocityX, float velocityY, int inputDir, boolean fixedArc,
+                                       MapleMap map, BotMovementProfile profile, double tickFraction) {
         double t = tickS();
-        double fs = mapGroundSlipScale(map, entry.movementProfile);
-        double band = walkSpeedPerTick(entry.movementProfile) * fs / cfg.AIR_INPUT_BAND_DIVISOR;
-        double total = entry.airVelX + entry.airSteerVelX;
-        double inDir = total * steerDir; // velocity component along the input direction
-        if (inDir < band) {
-            inDir = Math.min(band, inDir + cfg.AIR_CONTROL_ACCEL_PXSS * fs * t * t * tickFraction);
-            entry.airSteerVelX = inDir * steerDir - entry.airVelX;
+        double fs = mapGroundSlipScale(map, profile);
+        if (inputDir != 0) {
+            double band = walkSpeedPerTick(profile) * fs / cfg.AIR_INPUT_BAND_DIVISOR;
+            double inDir = velocityX * inputDir;
+            return inDir < band
+                    ? Math.min(band, inDir + cfg.AIR_CONTROL_ACCEL_PXSS * fs * t * t * tickFraction) * inputDir
+                    : velocityX;
         }
-        // else: ApplyForce no-op — neither accelerates nor clamps an over-band velocity
-        // in the input direction (an over-cap knockback launch keeps its speed too).
-        // Client jump stance follows the held steering direction, not the preserved horizontal
-        // launch momentum. Updating facing here makes airborne debug output line up with what the
-        // client is visually trying to do, even before the net X velocity changes sign.
-        entry.facingDir = steerDir > 0 ? 1 : -1;
+        if (fixedArc || velocityX == 0.0) {
+            return velocityX;
+        }
+        // CalcFloat no-input drag switches to 100 x fs at terminal fall speed.
+        double drag = (velocityY >= maxFallPerTick() ? cfg.AIR_DRAG_TERMINAL_PXSS : cfg.AIR_DRAG_PXSS)
+                * fs * t * t * tickFraction;
+        return velocityX > 0.0 ? Math.max(0.0, velocityX - drag) : Math.min(0.0, velocityX + drag);
     }
 
-    /*
-     * No-input airborne drag (CalcFloat @ 0x9b2c3c): vx decays toward 0 at 1 x fs px/s^2,
-     * switching to 100 x fs px/s^2 while falling AT terminal velocity; clamped at zero-cross.
-     * NOT applied to committed nav arcs (fixedAirArc): those model the launch direction key
-     * held for the whole flight — held input suppresses drag and is a no-op above the input
-     * band, keeping vx constant exactly like the graph's constant-stepX arc simulation.
-     */
-    private static void applyAirDrag(BotMovementState entry, MapleMap map, double tickFraction) {
-        double total = entry.airVelX + entry.airSteerVelX;
-        if (total == 0.0) return;
-        double t = tickS();
-        double fs = mapGroundSlipScale(map, entry.movementProfile);
-        boolean terminalFall = entry.velY >= maxFallPerTick();
-        double drag = (terminalFall ? cfg.AIR_DRAG_TERMINAL_PXSS : cfg.AIR_DRAG_PXSS) * fs * t * t * tickFraction;
-        double next = total > 0.0 ? Math.max(0.0, total - drag) : Math.min(0.0, total + drag);
-        entry.airSteerVelX = next - entry.airVelX;
+    private record AirTravelState(double physX, double physY, float velocityY) {
+    }
+
+    private static Point roundedAirPosition(AirTravelState state) {
+        return new Point((int) Math.round(state.physX()), (int) Math.round(state.physY()));
+    }
+
+    private static AirTravelState advanceAirbornePosition(double x, double y, float velocityY,
+                                                         double velocityX, double tickFraction) {
+        float gravity = (float) (gravityPerTick() * tickFraction);
+        return new AirTravelState(x + velocityX * tickFraction,
+                y + (velocityY + 0.5f * gravity) * tickFraction,
+                Math.min(velocityY + gravity, maxFallPerTick()));
     }
 
     private static Point advanceAirbornePosition(BotMovementState entry, double tickFraction) {
-        entry.physX += (entry.airVelX + entry.airSteerVelX) * tickFraction;
-        float gravity = gravityPerTick();
-        float airGravity = (float) (gravity * tickFraction);
-        entry.physY += (entry.velY + 0.5f * airGravity) * tickFraction;
-        entry.velY = Math.min(entry.velY + airGravity, maxFallPerTick());
+        AirTravelState next = advanceAirbornePosition(entry.physX, entry.physY, entry.velY,
+                entry.airVelX + entry.airSteerVelX, tickFraction);
+        entry.physX = next.physX();
+        entry.physY = next.physY();
+        entry.velY = next.velocityY();
         if (entry.physY < entry.fallPeakPhysY) {
             entry.fallPeakPhysY = entry.physY;
         }
@@ -1904,10 +1949,10 @@ final class BotPhysicsEngine {
         // trajectories (input no-op above the band — vx constant); free flight with no
         // input gets the CalcFloat drag instead. fixedAirArc additionally guards direct
         // stepAirborne callers that bypass the movement layer's key-hold emulation.
+        entry.airSteerVelX = airVelocityX(entry.airVelX + entry.airSteerVelX, entry.velY,
+                entry.moveDir, entry.fixedAirArc, bot.getMap(), entry.movementProfile, tickFraction) - entry.airVelX;
         if (entry.moveDir != 0) {
-            applyAirSteering(entry, bot.getMap(), entry.moveDir, tickFraction);
-        } else if (!entry.fixedAirArc) {
-            applyAirDrag(entry, bot.getMap(), tickFraction);
+            entry.facingDir = Integer.signum(entry.moveDir);
         }
 
         // Flash Jump (adapted from GreenCatMS, NutNNut): one-time mid-air impulse. Scale 1 fires at the

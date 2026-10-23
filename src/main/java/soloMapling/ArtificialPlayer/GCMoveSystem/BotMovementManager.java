@@ -442,26 +442,7 @@ class BotMovementManager {
             // (keeps vx constant, matching the graph's constant-stepX arc sim) and suppresses
             // the no-input air drag that free flight gets.
             if (entry.moveDir == 0) {
-                if (shouldApplyAirSteering(entry)) {
-                    if (targetPos != null) {
-                        int dx = targetPos.x - botPos.x;
-                        int dir = Math.abs(dx) > BotPhysicsEngine.cfg.SWIM_ARRIVAL_RADIUS_PX
-                                ? Integer.signum(dx) : 0;
-                        // Free-flight steering only (no committed arc owns the bot): a steer
-                        // direction whose column below reads dead is refused - steering into a
-                        // dead pit's column would dive the bot into a one-way basin nothing
-                        // authorised. This keeps the fall OUT of the column in the first place;
-                        // if a bot still ends up wedged, tickUnstuck's dead-pit self-heal is the
-                        // backstop (the descent guards and the graph's dead-region prune are the
-                        // decision-side protection).
-                        if (dir != 0 && !steerColumnBelowIsLivable(entry, botPos, dir)) {
-                            dir = 0;
-                        }
-                        entry.moveDir = dir;
-                    }
-                } else {
-                    entry.moveDir = Integer.signum(entry.airVelX);
-                }
+                entry.moveDir = resolveAirSteeringDir(entry, botPos, targetPos, entry.airVelX);
             }
 
             BotPhysicsEngine.AirborneStepResult result = BotPhysicsEngine.stepAirborne(entry, bot);
@@ -530,6 +511,19 @@ class BotMovementManager {
                 && left.topY() == right.topY()
                 && left.bottomY() == right.bottomY()
                 && left.isLadder() == right.isLadder();
+    }
+
+    // Shared with the departure forecast: selecting a different key changes the landing.
+    static int resolveAirSteeringDir(BotMovementState entry, Point botPos, Point targetPos, int airVelX) {
+        if (!shouldApplyAirSteering(entry)) {
+            return Integer.signum(airVelX);
+        }
+        if (targetPos == null) {
+            return 0;
+        }
+        int dx = targetPos.x - botPos.x;
+        int dir = Math.abs(dx) > BotPhysicsEngine.cfg.SWIM_ARRIVAL_RADIUS_PX ? Integer.signum(dx) : 0;
+        return dir != 0 && !steerColumnBelowIsLivable(entry, botPos, dir) ? 0 : dir;
     }
 
     private static boolean shouldApplyAirSteering(BotMovementState entry) {
