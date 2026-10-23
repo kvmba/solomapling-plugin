@@ -619,6 +619,7 @@ public class BotGeneration {
         soloMapling.ArtificialPlayer.BotAttackSystem.BotFinalAttack.clearBot(fakechar.getId()); // release final-attack cooldown
         soloMapling.ArtificialPlayer.BotAttackSystem.BotAttackDriver.clearBot(fakechar.getId()); // release swing/ultimate cooldowns + the meso-bomb / shadow-meso / ground-mist / shadow-web timers
         GCMovement.clearBotContactState(fakechar.getId()); // release the last-attacker register (retaliate-when-hit)
+        soloMapling.ArtificialPlayer.BotMovementSystem.MovementCommands.forgetBot(fakechar.getId()); // release the movement lease + interrupt flag
         soloMapling.ArtificialPlayer.BotStatusSystem.BotDebuffApplier.clearBot(fakechar.getId()); // release debuff cooldowns
         soloMapling.ArtificialPlayer.BotMountSystem.BotMount.forget(fakechar.getId()); // release mount cooldown state
     }

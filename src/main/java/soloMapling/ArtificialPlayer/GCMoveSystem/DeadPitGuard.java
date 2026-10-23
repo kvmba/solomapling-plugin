@@ -141,8 +141,16 @@ final class DeadPitGuard {
         // refused every authorised descent onto the row and the dead-pit self-heal relocated
         // bots standing on it.
         List<Foothold> surfaces = walkableFootholds(map);
-        Map<Integer, Integer> roots = WALK_ROOTS.computeIfAbsent(map.getFootholds(),
-                k -> buildWalkRoots(map));
+        // Built OUTSIDE the cache monitor: buildWalkRoots walks every foothold and runs union-find
+        // over prev/next, and this method is reached from the movement tick while every other map's
+        // verdict reads would otherwise queue on the synchronizedMap's one global monitor. get() is
+        // O(1); a lost race builds an equivalent map and putIfAbsent discards it.
+        Map<Integer, Integer> roots = WALK_ROOTS.get(map.getFootholds());
+        if (roots == null) {
+            Map<Integer, Integer> built = buildWalkRoots(map);
+            Map<Integer, Integer> previous = WALK_ROOTS.putIfAbsent(map.getFootholds(), built);
+            roots = previous != null ? previous : built;
+        }
         List<Foothold> members = walkRegionFootholds(surfaces, roots, foothold);
         int componentRoot = rootOf(roots, foothold);
         boolean live = false;

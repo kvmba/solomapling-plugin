@@ -1944,34 +1944,50 @@ public final class PqActions {
         if (tree == null) {
             return ORPHAN_PROBE_MIN_REACH_PX;
         }
-        return ORPHAN_PROBE_REACH_BY_TREE.computeIfAbsent(tree, t -> {
-            java.util.List<org.gms.server.maps.Foothold> all = t.getAllFootholds();
-            if (all == null || all.isEmpty()) {
-                return ORPHAN_PROBE_MIN_REACH_PX;
+        Double cached = ORPHAN_PROBE_REACH_BY_TREE.get(tree);
+        if (cached != null) {
+            return cached;
+        }
+        double built = roomReachForTree(tree);
+        Double previous = ORPHAN_PROBE_REACH_BY_TREE.putIfAbsent(tree, built);
+        return previous != null ? previous : built;
+    }
+
+    /**
+     * Pure room-reach computation for one tree (see {@link #roomReachPx(MapleMap)}).
+     *
+     * <p>Split out so the caller can build it outside the cache monitor: this walks every foothold,
+     * and the probe runs from the loot path on every combat beat. Under {@code computeIfAbsent} that
+     * walk ran while holding the synchronizedMap's single global monitor, serializing every other
+     * room's probe behind it.
+     */
+    private static double roomReachForTree(org.gms.server.maps.FootholdTree t) {
+        java.util.List<org.gms.server.maps.Foothold> all = t.getAllFootholds();
+        if (all == null || all.isEmpty()) {
+            return ORPHAN_PROBE_MIN_REACH_PX;
+        }
+        int minX = Integer.MAX_VALUE;
+        int maxX = Integer.MIN_VALUE;
+        int minY = Integer.MAX_VALUE;
+        int maxY = Integer.MIN_VALUE;
+        for (org.gms.server.maps.Foothold fh : all) {
+            if (fh.isWall()) {
+                continue;
             }
-            int minX = Integer.MAX_VALUE;
-            int maxX = Integer.MIN_VALUE;
-            int minY = Integer.MAX_VALUE;
-            int maxY = Integer.MIN_VALUE;
-            for (org.gms.server.maps.Foothold fh : all) {
-                if (fh.isWall()) {
-                    continue;
-                }
-                minX = Math.min(minX, Math.min(fh.getX1(), fh.getX2()));
-                maxX = Math.max(maxX, Math.max(fh.getX1(), fh.getX2()));
-                minY = Math.min(minY, Math.min(fh.getY1(), fh.getY2()));
-                maxY = Math.max(maxY, Math.max(fh.getY1(), fh.getY2()));
-            }
-            if (minX == Integer.MAX_VALUE) {
-                return ORPHAN_PROBE_MIN_REACH_PX; // wall-only geometry: no standable surface
-            }
-            // The DIAGONAL, not the longer side: the engine's scan compares a 2D distanceSq from
-            // the bot, and a tall tower's orphan can sit at the room's far vertical end.
-            double w = maxX - (double) minX;
-            double h = maxY - (double) minY;
-            return Math.max(ORPHAN_PROBE_MIN_REACH_PX,
-                    Math.sqrt(w * w + h * h) + ORPHAN_PROBE_SLACK_PX);
-        });
+            minX = Math.min(minX, Math.min(fh.getX1(), fh.getX2()));
+            maxX = Math.max(maxX, Math.max(fh.getX1(), fh.getX2()));
+            minY = Math.min(minY, Math.min(fh.getY1(), fh.getY2()));
+            maxY = Math.max(maxY, Math.max(fh.getY1(), fh.getY2()));
+        }
+        if (minX == Integer.MAX_VALUE) {
+            return ORPHAN_PROBE_MIN_REACH_PX; // wall-only geometry: no standable surface
+        }
+        // The DIAGONAL, not the longer side: the engine's scan compares a 2D distanceSq from
+        // the bot, and a tall tower's orphan can sit at the room's far vertical end.
+        double w = maxX - (double) minX;
+        double h = maxY - (double) minY;
+        return Math.max(ORPHAN_PROBE_MIN_REACH_PX,
+                Math.sqrt(w * w + h * h) + ORPHAN_PROBE_SLACK_PX);
     }
 
     /** foothold tree -> its room-sized probe reach (see {@link #roomReachPx}). */

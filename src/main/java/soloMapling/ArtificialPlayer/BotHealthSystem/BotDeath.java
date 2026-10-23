@@ -89,8 +89,16 @@ public final class BotDeath {
      * driver thread (contact kill) can now meet a macro/grind thread (zero-HP adoption) in the
      * same window. The monitor keeps "only one markDown per episode" a property instead of a
      * hope; the overlap only ever meant a restarted lie-down.
+     *
+     * <p>The corpse teardown ({@link #stillTheCorpse}) deliberately runs AFTER the monitor is
+     * released. It reaches {@code GCMovement.stop}, which takes the bot's movement monitor, and a
+     * movement tick holds that monitor while calling {@link #adoptIfZeroHp()} (the "became zero HP"
+     * gate in GCMovementDriver). Doing the teardown under this monitor is therefore a textbook
+     * AB-BA deadlock: driver holds movement → wants death, macro/contact holds death → wants
+     * movement. It only ever showed up as a rare freeze, because it needs the zero-HP gate and the
+     * arming path to meet in the same window.
      */
-    public synchronized void kill() {
+    public void kill() {
         Character chr = this.chr;
         if (chr == null || !BotHelpers.isBot(chr)) {
             return; // only artificial characters have this lifecycle
@@ -103,14 +111,17 @@ public final class BotDeath {
         if (CompanionRoster.isCompanion(chr.getId())) {
             return;
         }
-        if (down) {
-            return; // already dead — a second killing blow must not restart the wait
+        synchronized (this) {
+            if (down) {
+                return; // already dead — a second killing blow must not restart the wait
+            }
+            // Zero first, so the world sees a corpse on the tick this happens. Everything below is
+            // inert by comparison and can afford to fail.
+            BotClientBinding.runWithBoundPlayer(chr, () -> chr.updateHp(0));
+            chr.updatePartyMemberHP(); // headless bots never receive their own stat packet
+            markDown();
         }
-        // Zero first, so the world sees a corpse on the tick this happens. Everything below is
-        // inert by comparison and can afford to fail.
-        BotClientBinding.runWithBoundPlayer(chr, () -> chr.updateHp(0));
-        chr.updatePartyMemberHP(); // headless bots never receive their own stat packet
-        markDown();
+        stillTheCorpse(chr); // outside the monitor — see the class comment on lock order
     }
 
     /**
@@ -133,13 +144,18 @@ public final class BotDeath {
      *
      * @return true when this call adopted the bot — it is down from here on
      */
-    public synchronized boolean adoptIfZeroHp() {
-        if (down || !zeroedTemplateBot()) {
-            return false;
+    public boolean adoptIfZeroHp() {
+        synchronized (this) {
+            if (down || !zeroedTemplateBot()) {
+                return false;
+            }
+            // markDown, not kill(): the HP is already at zero (the host put it there), and kill()
+            // would re-run that mutation plus its party publish for no gain.
+            markDown();
         }
-        // markDown, not kill(): the HP is already at zero (the host put it there), and kill()
-        // would re-run that mutation plus its party publish for no gain.
-        markDown();
+        // Outside the monitor: stillTheCorpse takes the bot's movement monitor, and the movement
+        // driver calls THIS method while holding it (GCMovementDriver's zero-HP gate). See kill().
+        stillTheCorpse(chr);
         // The episode is driven by the macro tick, and an unobserved grinder's next one may be
         // 4-8 minutes away — that whole stretch would be added to every death. Pull it forward
         // instead; the wheel re-paces to the corpse's own clock on that tick.
@@ -190,6 +206,10 @@ public final class BotDeath {
         return artificial && !companion && onMap && hp <= 0;
     }
 
+    /**
+     * Arms the episode: every timestamp first, then the flag. Does NOT touch the engine — the
+     * teardown must run outside this monitor (see {@link #stillTheCorpse}).
+     */
     private void markDown() {
         long now = System.currentTimeMillis();
         // Every timestamp first, then the flag: 'down' is what the macro thread reads, and it
@@ -202,7 +222,6 @@ public final class BotDeath {
         // Both death paths (kill() and adoptIfZeroHp) come through here.
         BotAuraState.cancelHidesForAction(chr);
         down = true;
-        stillTheCorpse(chr);
     }
 
     /** Stand up, reset everything, and hand control back to this bot's own behaviour. */
@@ -344,6 +363,11 @@ public final class BotDeath {
 
     /**
      * Stop everything that would keep moving a corpse.
+     *
+     * <p>MUST run with this instance's monitor released: it takes the bot's movement monitor
+     * ({@code GCMovement.stop}), and the movement driver calls {@link #adoptIfZeroHp()} while
+     * holding that monitor. Taking both in one order here and the opposite order there is the
+     * AB-BA deadlock described on {@link #kill()}.
      *
      * <p>The chair matters most: a seated bot is healed by a host timer that knows nothing
      * about death, so a bot killed mid-sit would stand itself back up out of the chair's own
