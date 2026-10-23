@@ -145,10 +145,11 @@ final class DeadPitGuard {
         // over prev/next, and this method is reached from the movement tick while every other map's
         // verdict reads would otherwise queue on the synchronizedMap's one global monitor. get() is
         // O(1); a lost race builds an equivalent map and putIfAbsent discards it.
-        Map<Integer, Integer> roots = WALK_ROOTS.get(map.getFootholds());
+        org.gms.server.maps.FootholdTree tree = map.getFootholds();
+        Map<Integer, Integer> roots = WALK_ROOTS.get(tree);
         if (roots == null) {
             Map<Integer, Integer> built = buildWalkRoots(map);
-            Map<Integer, Integer> previous = WALK_ROOTS.putIfAbsent(map.getFootholds(), built);
+            Map<Integer, Integer> previous = WALK_ROOTS.putIfAbsent(tree, built);
             roots = previous != null ? previous : built;
         }
         List<Foothold> members = walkRegionFootholds(surfaces, roots, foothold);
