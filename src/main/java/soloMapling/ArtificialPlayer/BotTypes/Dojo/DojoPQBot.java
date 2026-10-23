@@ -123,22 +123,28 @@ public class DojoPQBot extends PartyQuestBot {
     /**
      * Raise this room's boss the way {@code dojang_1st} would have.
      *
-     * <p>Two gates, both about THIS room:
+     * <p>Three gates, in the script's own order:
      *
      * <ol>
      *   <li>nothing to raise on a resting floor - {@code dojang_1st} dismisses the timer there
      *       instead of spawning;</li>
      *   <li>the marker means the boss already died here; re-raising it would restart the fight
-     *       after the room was cleared.</li>
+     *       after the room was cleared;</li>
+     *   <li>{@code setDojoProgress} is the script's own "this room has not been entered yet"
+     *       latch. It is monotonic over the STAGE ({@code (mapId / 100) % 100}), not over the
+     *       party's slot: {@code getDojoSlot} is {@code mapId % 100} and only picks which tower,
+     *       while the compared value is the floor number. {@code ingressDojo} resets the slot to
+     *       {@code -1}, so floor 1 answers true, floor 2 answers true, and so on up the tower -
+     *       exactly once per room, the first time a body steps in.</li>
      * </ol>
      *
-     * <p>{@code setDojoProgress} is still called - it advances the tower's clock and stage record
-     * ({@code dojang_1st} and {@code dojang_next} both depend on it) - but its return value is NOT
-     * a spawn gate here. It is monotonic per tower SLOT, and a party's five rooms all share slot
-     * {@code mapId % 100}, so it answers true only for the first room the party reaches. Gating on
-     * it would leave every room above the first with no boss at all - the very stall this fix is
-     * for. The script can use it because its caller is already scoped to "a body just entered this
-     * one room, which was empty until now"; the bot's own scoping is the empty-room check above.
+     * <p>That latch is not optional here. The host removes a killed boss from the map
+     * IMMEDIATELY ({@code Monster.killBy}), but the revive marker {@code 9300216} is spawned
+     * later: {@code TimerManager.schedule(..., getAnimationTime("die1") + 500)}, i.e. 0.5s for
+     * most rows and up to 4.9s for the slow ones ({@code 9300215}). Without the latch this method
+     * sees "no living target, no marker" for that whole window and raises a SECOND boss on top of
+     * the death animation - and two bots deciding at the same moment do the same. The latch makes
+     * the room's first raise the only one, which is what {@code dojang_1st} relies on.
      */
     private void raiseBoss(Character bot, int mapId) {
         int bossId = DojoPqData.bossIdFor(mapId);
@@ -150,10 +156,9 @@ public class DojoPQBot extends PartyQuestBot {
             return; // already cleared here - the marker is the record of that kill
         }
         var channel = map.getChannelServer();
-        if (channel == null) {
-            return; // an instance map with no channel: nothing to raise the room against
+        if (channel == null || !channel.setDojoProgress(mapId)) {
+            return; // no channel, or this room's slot already advanced - the boss is not ours to raise
         }
-        channel.setDojoProgress(mapId); // bookkeeping/clock, not a gate - see the note above
         Monster boss = LifeFactory.getMonster(bossId);
         if (boss == null) {
             return; // WZ without this row: nothing to spawn, the door's count check still passes

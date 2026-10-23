@@ -210,7 +210,12 @@ public final class GCMovement {
                 }
                 GCMovementDriver.stop(st);
                 STATES.remove(st.bot.getId(), st);
-                MovementCommands.releaseMovementLock(st.bot, st);
+                try {
+                    MovementCommands.releaseMovementLock(st.bot, st);
+                } catch (RuntimeException ignored) {
+                    // This session never owned the lease (a re-type already released it under
+                    // another token). One unmatched lease must not abort the rest of the unload.
+                }
             }
         }
         ARRIVAL_CALLBACKS.clear();
