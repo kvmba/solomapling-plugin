@@ -18,6 +18,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import soloMapling.ArtificialPlayer.BotAttackSystem.BotAttackEffects;
 import soloMapling.ArtificialPlayer.BotAttackSystem.BotDamageModel;
+import soloMapling.ArtificialPlayer.BotAttackSystem.BotTargetRules;
 import soloMapling.ArtificialPlayer.BotHelpers;
 import soloMapling.ArtificialPlayer.GCMoveSystem.GCMovement;
 
@@ -807,7 +808,7 @@ public final class BotSummonFollower {
         List<Monster> inRange = new ArrayList<>();
         for (MapObject mo : map.getMapObjectsInRange(from, rangeSq, List.of(MapObjectType.MONSTER))) {
             Monster m = (Monster) mo;
-            if (m.isAlive() && m.getPosition() != null) {
+            if (m.isAlive() && BotTargetRules.isCombatTarget(m) && m.getPosition() != null) {
                 inRange.add(m);
             }
         }

@@ -3,6 +3,7 @@ package soloMapling.ArtificialPlayer.BotGrindSystem;
 import org.gms.client.Character;
 import org.gms.server.life.Monster;
 import org.gms.server.maps.MapleMap;
+import soloMapling.ArtificialPlayer.BotAttackSystem.BotTargetRules;
 import soloMapling.ArtificialPlayer.BotSpotClaims;
 import soloMapling.ArtificialPlayer.GCMoveSystem.GCMovement;
 
@@ -902,8 +903,7 @@ public final class SpotFinder {
     // Shared hostile predicate (moved here from MobSeeker.isHostile; SpotFinder is the stateless spot/mob
     // util, so it's the single home — GrindBrain and TrainingBot both call SpotFinder.isHostile).
     public static boolean isHostile(Monster m) {
-        return m != null && m.isAlive()
-                && (m.getStats() == null || !m.getStats().isFriendly());
+        return m != null && m.isAlive() && BotTargetRules.isCombatTarget(m);
     }
 
     private static int clamp(int v, int lo, int hi) {

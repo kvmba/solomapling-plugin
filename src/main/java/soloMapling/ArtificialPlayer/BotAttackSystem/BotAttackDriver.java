@@ -495,9 +495,13 @@ public final class BotAttackDriver {
      * is what the quest scripts read as a FAILURE - HPQ's {@code friendlyKilled} ends the instance
      * 5s later. So no swing may even consider one, and the scan below is where every swing path
      * (the PQ combat sweep, the grind brain, the GM attack commands) draws its candidates from.
+     *
+     * <p>The rule itself lives in {@link BotTargetRules} because this is not the only scan that
+     * lands damage: the Pickpocket bomb, Shadow Meso/Web, Poison Mist and every summon strike pick
+     * their own targets. The Dojo clear marker is excluded by the same rule.
      */
-    private static boolean isFriendly(Monster monster) {
-        return monster.getStats() != null && monster.getStats().isFriendly();
+    private static boolean notTargetable(Monster monster) {
+        return !BotTargetRules.isCombatTarget(monster);
     }
 
     private static SeekScan seek(Character bot, BotAttackProfile profile, WeaponType weapon) {
@@ -517,7 +521,7 @@ public final class BotAttackDriver {
         Rectangle rightBox = reachBox(botPos, profile, weapon, false);
         for (MapObject mo : map.getMapObjectsInRange(botPos, SEEK_RANGE_SQ, MONSTER_TYPES)) {
             Monster m = (Monster) mo;
-            if (!m.isAlive() || isFriendly(m)) {
+            if (!m.isAlive() || notTargetable(m)) {
                 continue;
             }
             Point mp = m.getPosition();

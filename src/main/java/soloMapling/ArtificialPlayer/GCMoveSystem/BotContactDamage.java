@@ -9,6 +9,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import soloMapling.ArtificialPlayer.BotAttackSystem.BotAuraState;
 import soloMapling.ArtificialPlayer.BotAttackSystem.BotEnergyCharge;
+import soloMapling.ArtificialPlayer.BotAttackSystem.BotTargetRules;
 import soloMapling.ArtificialPlayer.BotHealthSystem.BotDeath;
 import soloMapling.ArtificialPlayer.BotHealthSystem.BotHealthFloor;
 import soloMapling.ArtificialPlayer.BotStatusSystem.BotDebuffApplier;
@@ -547,9 +548,11 @@ final class BotContactDamage {
 
     // A living, hostile monster - alive and not a friendly (escort/PQ) mob.
     private static boolean isHostileLivingMonster(Monster monster) {
-        return monster != null
-                && monster.isAlive()
-                && (monster.getStats() == null || !monster.getStats().isFriendly());
+        // The same rule the attack scans use: friendly escorts and the Dojo clear marker are not
+        // bodies to trade blows with - the marker in particular is a 2.09B-HP invisible wall that
+        // a charged brawler's touch retaliation would otherwise hammer forever.
+        return monster != null && monster.isAlive()
+                && BotTargetRules.isCombatTarget(monster);
     }
 
     // Package-visible so the attack layer can flag the pose after a swing (via

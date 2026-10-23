@@ -15,6 +15,7 @@ import org.gms.client.inventory.manipulator.InventoryManipulator;
 import org.gms.scripting.npc.NPCScriptManager;
 import soloMapling.ArtificialPlayer.BotSM;
 import soloMapling.ArtificialPlayer.BotAttackSystem.BotAttackDriver;
+import soloMapling.ArtificialPlayer.BotAttackSystem.BotTargetRules;
 import soloMapling.ArtificialPlayer.BotClientBinding;
 import soloMapling.ArtificialPlayer.BotAttackSystem.BotAuraState;
 import soloMapling.ArtificialPlayer.BotCommandsPack.BotAttack;
@@ -1612,13 +1613,9 @@ public final class PqActions {
 
     /** Hostile work anywhere in this quest room, not just inside an entrance-centred view box. */
     private static boolean isHuntTarget(Monster m) {
-        if (m == null || !m.isAlive()) {
-            return false;
-        }
-        if (m.getStats() != null && m.getStats().isFriendly()) {
-            return false; // Moon Bunny and friends are not targets
-        }
-        return m.getPosition() != null;
+        return m != null && m.isAlive()
+                && BotTargetRules.isCombatTarget(m) // not a friendly escort, not the dojo clear marker
+                && m.getPosition() != null;
     }
 
     /** Pick up matching drops near a point. Returns how many items were gathered. */

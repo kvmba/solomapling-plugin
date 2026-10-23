@@ -69,28 +69,82 @@ public final class DojoPqData {
     }
 
     // =========================================================================
+    // The room: what "cleared" means, and what raises the boss
+    // =========================================================================
+
+    /** {@code dojang_1st.js}: every boss revives into this transparent marker on death. */
+    public static final int CLEAR_MARKER = org.gms.constants.id.MobId.TRANSPARENT_ITEM;
+
+    /** {@code dojang_1st.js}: {@code getMonsterLifeFactory(9300183 + realstage)}. */
+    private static final int FIRST_BOSS = 9300183;
+
+    /** {@code dojang_1st.js} stops at 38; {@code MapId.isPartyDojo} accepts up to the same. */
+    public static final int LAST_STAGE = 38;
+
+    /** {@code dojang_1st.js}: {@code stage = Math.floor(mapId / 100) % 100}. */
+    public static int stageOf(int mapId) {
+        return (mapId / 100) % 100;
+    }
+
+    /**
+     * Whether this room is a rest floor ({@code dojang_1st.js}: {@code stage % 6 == 0}).
+     *
+     * <p>A rest floor has no boss by design - the script returns before spawning anything, and
+     * {@code dojang_next} is the door that moves the party up. So an empty rest room is CLEARED,
+     * not "waiting for a spawn".
+     */
+    public static boolean isRestingFloor(int mapId) {
+        int stage = stageOf(mapId);
+        return stage > 0 && stage % 6 == 0;
+    }
+
+    /**
+     * The boss this room raises, or {@code -1} on a rest floor / outside the tower.
+     *
+     * <p>Verbatim the script's arithmetic: {@code realstage = stage - (stage / 6 | 0)}, so the
+     * six-floor cycle skips the rest floor in the mob table ({@code 9300183..9300215}).
+     */
+    public static int bossIdFor(int mapId) {
+        int stage = stageOf(mapId);
+        if (stage <= 0 || stage > LAST_STAGE || isRestingFloor(mapId)) {
+            return -1;
+        }
+        return FIRST_BOSS + (stage - stage / 6);
+    }
+
+    // =========================================================================
     // The door that actually moves a body
     // =========================================================================
 
     /**
-     * The two script doors every dojo room carries, and why only one of them can move a bot.
+     * The two script doors every dojo room carries, and how a socketless bot gets through them.
      *
-     * <p>{@code out00}/{@code dojang_up} is the client's own "climb" animation: the script only
-     * sends {@code DOJO_WARP_UP} and resets the door reactor - the actual room change is the
-     * client's reply packet, which a socketless bot never sends. {@code out001}/{@code
-     * dojang_next} is the server-side door: the script itself checks the room and warps the body
-     * ({@code pi.warp(mapId + 100)}), and at a resting floor it warps the whole party that is
-     * standing in the five rooms below. That difference is the whole reason the bot walks
-     * {@code out001} and not the door a player would use.
+     * <p>{@code out00}/{@code dojang_up} is the player's climb: standing on the room floor it
+     * checks for the clear marker, sends {@code DOJO_WARP_UP} (a client-side warp animation) and
+     * calls {@code map.setReactorState()} to open the door reactor. The body reaches the top
+     * platform through the CLIENT's animation - the server never moves it - so a bot that walks
+     * this door only gets the door opened, which is still half of what it needs.
      *
-     * <p>Sources: {@code scripts/portal/dojang_up.js}, {@code scripts/portal/dojang_next.js}, and
-     * the portals of {@code wz/Map.wz/Map/Map9/925020100.img.xml} (which the party rooms
-     * {@code 9250301xx} link to).
+     * <p>{@code out001}/{@code dojang_next} is the server-side door on that top platform: the
+     * script checks the door reactor (or an empty room) and warps the body itself
+     * ({@code pi.warp(mapId + 100)}); on the floor below a rest floor it warps the whole party
+     * standing in the five rooms below. So a bot must (1) open the reactor the way
+     * {@code dojang_up} does and (2) put itself on the platform, because the room has no rope,
+     * no ladder, and 372px of wall between its floor and that platform - far more than the
+     * {@code 555^2 / (2 * 2000) = 77px} a jump clears.
+     *
+     * <p>Sources: {@code scripts/portal/dojang_up.js}, {@code scripts/portal/dojang_next.js},
+     * {@code scripts/map/onFirstUserEnter/dojang_1st.js}, and the portals/footholds of
+     * {@code wz/Map.wz/Map/Map9/925020100.img.xml} (which the party rooms {@code 9250301xx}
+     * link to).
      */
     public static final String SERVER_DOOR = "out001";
 
     /** The script that door runs; named so the selection cannot drift from the WZ data. */
     public static final String SERVER_DOOR_SCRIPT = "dojang_next";
+
+    /** The door reactor {@code setReactorState()} opens; {@code dojang_next} reads it by name. */
+    public static final String DOOR_REACTOR = "door";
 
     /**
      * Whether a bot's level would keep a given party from entering - the check worth running

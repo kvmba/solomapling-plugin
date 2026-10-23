@@ -100,7 +100,7 @@ public final class BotShadowMeso {
         for (MapObject mo : map.getMapObjectsInRange(pos, (double) SCAN_RADIUS_PX * SCAN_RADIUS_PX,
                 List.of(MapObjectType.MONSTER))) {
             Monster m = (Monster) mo;
-            if (m.isAlive() && box.contains(m.getPosition())) {
+            if (m.isAlive() && BotTargetRules.isCombatTarget(m) && box.contains(m.getPosition())) {
                 mobs.add(m);
             }
         }
