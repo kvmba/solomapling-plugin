@@ -226,6 +226,21 @@ final class BotNavigationManager {
                         : startRegionId < 0 || targetRegionId < 0 ? "no-region"
                         : startRegionId == targetRegionId ? "same-region" : "no-path";
                 clearNavigation(entry);
+                if (!entry.inAir && !entry.climbing
+                        && (startRegionId < 0 || targetRegionId < 0 || startRegionId != targetRegionId)) {
+                    // An absent crossing is not a same-surface walk. Wait for an AI/exact-graph
+                    // decision; only a completed search on the exact graph can fail the move.
+                    BotMovementManager.tickGrounded(entry, null);
+                    Point heldPosition = bot.getPosition();
+                    if (runAiTick && startRegionId >= 0 && targetRegionId >= 0
+                            && BotNavigationGraphProvider.peekGraph(bot.getMap(), entry.movementProfile) == graph
+                            && entry.moveTarget != null) {
+                        GCMovementDriver.failMove(entry);
+                    }
+                    // The failure callback can disable, warp or re-command the bot. It
+                    // is the last body-owning operation of this tick.
+                    return new NavigationDirective(heldPosition, true);
+                }
                 return new NavigationDirective(rawTargetPos, false);
             }
 

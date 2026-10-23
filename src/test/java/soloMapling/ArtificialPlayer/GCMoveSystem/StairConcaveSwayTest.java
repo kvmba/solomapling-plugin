@@ -122,7 +122,8 @@ class StairConcaveSwayTest {
                 lastDir = st.moveDir;
             }
             Foothold currentFh = BotPhysicsEngine.syncAndDetectGround(st, st.bot);
-            BotPhysicsEngine.applyGroundMotion(st, st.bot, currentFh);
+            BotPhysicsEngine.applyGroundMotion(st, st.bot, currentFh,
+                    new BotPhysicsEngine.GroundTarget(steer.x, 4));
             if (stepX == 0 && st.hspeed == 0.0) {
                 break; // settled: the bot held still for a full tick
             }

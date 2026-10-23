@@ -254,7 +254,15 @@ public class LpqStage3PitEntryTest {
         BotPhysicsEngine.teleportTo(st, bot, new Point(-187, -943));
         BotMovementManager.resetEntryStateAfterTeleport(st);
 
-        boolean sawAirborne = false;
+        // Reproduce the physical walk-off directly. An out-of-map moveTarget is no
+        // longer permission to walk into a void: navigation now correctly refuses it.
+        // The collision regression still needs the real fall, then the full driver.
+        for (int i = 0; i < 40 && !st.inAir; i++) {
+            st.moveDir = -1;
+            BotPhysicsEngine.applyGroundMotion(st, bot, BotPhysicsEngine.syncAndDetectGround(st, bot));
+            MovementClock.advance(BotPhysicsEngine.cfg.TICK_MS);
+        }
+        boolean sawAirborne = st.inAir;
         Point pitAt = null;
         for (int i = 0; i < 400; i++) {
             st.following = false;

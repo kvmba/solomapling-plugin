@@ -26,7 +26,11 @@ class BotMovementManager {
         CLIMB_DOWN
     }
 
-    record MoveAction(ActionType type, int stepX) {
+    record MoveAction(ActionType type, int stepX, BotPhysicsEngine.GroundTarget groundTarget) {
+        MoveAction(ActionType type, int stepX) {
+            this(type, stepX, null);
+        }
+
         private static final MoveAction IDLE = new MoveAction(ActionType.IDLE, 0);
         private static final MoveAction CROUCH = new MoveAction(ActionType.CROUCH, 0);
         private static final MoveAction CLIMB_UP = new MoveAction(ActionType.CLIMB_UP, 0);
@@ -190,6 +194,7 @@ class BotMovementManager {
         // GCMoveSystem: grindTarget / fidget are out of scope (pure movement) — dropped.
         entry.attackActionUntilMs = 0L; // a teleport/warp ends any swing that owned the old body
         entry.graphWarmupFallback = false;
+        entry.fallbackSurface = null;
         entry.fallbackApproach = null;
         entry.observedOwnerStepX = 0;
         entry.observedOwnerStepY = 0;
@@ -209,6 +214,7 @@ class BotMovementManager {
         entry.navJumpLaunchDelaySteps = Integer.MIN_VALUE;
         entry.navTargetRegionId = -1;
         entry.navPreciseTarget = false;
+        entry.navAwaitingRoute = false;
         entry.navBlockedPosTicks = 0;
         // No committed edge left to launch: drop the hold so a later unrelated stall is detectable again.
         entry.launchReadyAwaiting = false;
@@ -794,6 +800,7 @@ class BotMovementManager {
                 return;
             }
 
+            entry.navAwaitingRoute = false;
             targetPos = adjustGrindingTargetPosition(entry, currentFh, targetPos);
             if (entry.graphWarmupFallback && targetPos != null) {
                 if (BotFallbackMovementManager.tryImmediateAction(entry, botPos, targetPos)) {
@@ -802,6 +809,19 @@ class BotMovementManager {
                 targetPos = BotFallbackMovementManager.resolveSteeringTarget(entry, botPos, targetPos);
                 entry.navTargetPos = targetPos;
             }
+            if (targetPos == null) {
+                entry.navAwaitingRoute = true;
+                if (entry.graphWarmupFallback) {
+                    entry.lastNavDecision = "graph-warmup-no-local-route";
+                }
+                entry.moveDir = 0;
+                entry.wasMovingX = false;
+                BotPhysicsEngine.applyGroundMotion(entry, bot, currentFh,
+                        BotPhysicsEngine.GroundTarget.stop());
+                broadcastMovement(entry);
+                return;
+            }
+            entry.navAwaitingRoute = false;
             MoveAction action = planGroundAction(entry, currentFh, botPos, targetPos);
             applyGroundAction(entry, currentFh, action);
         } finally {
@@ -873,41 +893,29 @@ class BotMovementManager {
                 && entry.fallbackApproach.launch() != null;
         int stopDist = directionalDrop || fallbackLaunch ? 0
                 : entry.navPreciseTarget ? preciseNavStopDist(entry.navEdge) : cfg.STOP_DIST;
+        if (entry.graphWarmupFallback) {
+            stopDist = Math.min(stopDist, 12);
+        }
         // No hysteresis when navigating to an edge — always move toward the waypoint
         int followDist = directionalDrop ? 0
-                : (entry.navEdge != null || entry.navPreciseTarget) ? stopDist : cfg.FOLLOW_DIST;
+                : (entry.graphWarmupFallback || entry.navEdge != null || entry.navPreciseTarget) ? stopDist : cfg.FOLLOW_DIST;
+        // Walk-off/junction edges deliberately carry momentum across a boundary. All other
+        // approaches have a finite target, including a one-pixel launch point, and are driven
+        // at the physics substep cadence instead of by overshooting full-tick pulses.
+        boolean junction = entry.navEdge != null && entry.navEdge.type == BotNavigationGraph.EdgeType.WALK
+                && entry.navEdge.startPoint.equals(entry.navEdge.endPoint);
+        int radius = stopDist;
+        if (stopDist > 0 && (entry.navEdge == null || entry.navEdge.type == BotNavigationGraph.EdgeType.WALK)
+                && settledNarrowLedge(currentFh, botPos.x, targetPos.x, targetPos.y, botPos.y,
+                        BotPhysicsEngine.walkStep(entry.bot.getMap(), entry.movementProfile))) {
+            radius = Math.max(radius, BotPhysicsEngine.walkStep(entry.bot.getMap(), entry.movementProfile));
+        }
+        BotPhysicsEngine.GroundTarget groundTarget = directionalDrop || junction ? null
+                : new BotPhysicsEngine.GroundTarget(targetPos.x, radius);
         int stepX = resolveGroundStepX(entry, botPos, targetPos, stopDist, followDist);
         if (stepX == 0) {
-            return MoveAction.idle();
-        }
-        // Ours (LPQ stage-1 shelf loop): a COLLAPSED JUMP launch window (one stamped pixel) whose
-        // approach would overfly it. The intent step clamps to the remaining distance, but the
-        // ground physics integrates the real hspeed — a full stride that starts outside the
-        // window's far edge lands PAST it (and past the platform lip, a fall). Counter-strafe
-        // instead: the reverse input bleeds the momentum off over a few ticks, and the small
-        // steps that follow land INSIDE the window, where the fire gate accepts the jump.
-        if (entry.navEdge != null
-                && entry.navEdge.type == BotNavigationGraph.EdgeType.JUMP
-                && entry.navEdge.launchMinX == entry.navEdge.launchMaxX) {
-            int dir = Integer.signum(stepX);
-            int near = dir > 0 ? entry.navEdge.launchMinX : entry.navEdge.launchMaxX;
-            int far = dir > 0 ? entry.navEdge.launchMaxX : entry.navEdge.launchMinX;
-            boolean insideNow = botPos.x >= near && botPos.x <= far;
-            if (!insideNow) {
-                BotPhysicsEngine.GroundStepResult held = BotPhysicsEngine.simulateGroundMotion(
-                        entry.bot.getMap(), botPos, currentFh, dir,
-                        new BotPhysicsEngine.GroundTravelState(entry.physX, entry.hspeed, entry.groundPhysicsCarryMs),
-                        entry.movementProfile);
-                int landingX = held.lostGround()
-                        ? botPos.x + dir * BotPhysicsEngine.walkStep(entry.bot.getMap(), entry.movementProfile)
-                        : held.point().x;
-                // A lost-ground held sim IS the danger case (the momentum carries off the lip):
-                // its estimated landing overflies just the same, so it triggers the brake too.
-                boolean overflies = dir > 0 ? landingX > far : landingX < far;
-                if (overflies) {
-                    return MoveAction.walk(-dir);
-                }
-            }
+            return new MoveAction(ActionType.IDLE, 0, groundTarget != null
+                    && Math.abs(targetPos.x - botPos.x) <= radius ? groundTarget : null);
         }
         boolean canWalkStep = BotPhysicsEngine.canWalkGroundStep(entry.bot.getMap(), botPos, stepX);
         if (!canWalkStep) {
@@ -919,18 +927,6 @@ class BotMovementManager {
                 // detects lost ground and transitions into a fall with preserved momentum.
                 return MoveAction.walk(stepX);
             }
-            // Ours (LPQ stage-1 shelf loop): a JUMP-window approach whose next full stride would
-            // leave the platform. The intent step is clamped to the remaining distance, but the
-            // ground physics integrates the real hspeed (a full walkStep) and ignores the clamp —
-            // idling here still glides off the edge (friction alone carries ~8px, the probe:
-            // glide from -36 FELL). Counter-strafe one step: the reverse input kills the momentum,
-            // the bot regains stride control, and the sub-step walk-ins land INSIDE the collapsed
-            // launch window instead of past it. (A collapsed window can be as narrow as one pixel;
-            // full strides can never reliably land in it.)
-            if (!blockedByWall && entry.navEdge != null
-                    && entry.navEdge.type == BotNavigationGraph.EdgeType.JUMP) {
-                return MoveAction.walk(-Integer.signum(stepX));
-            }
             // Wall-blocked nav edges are stale or invalid. Clear them so the next AI tick can
             // replan instead of holding a walk stance into the wall.
             if (blockedByWall && entry.navEdge != null) {
@@ -941,7 +937,7 @@ class BotMovementManager {
             return MoveAction.idle();
         }
         // GCMoveSystem: mob-dodge is out of scope (pure movement) — always walk.
-        return MoveAction.walk(stepX);
+        return new MoveAction(ActionType.WALK, stepX, groundTarget);
     }
 
     private static boolean isDirectionalDropEdge(BotNavigationGraph.Edge navEdge) {
@@ -962,8 +958,7 @@ class BotMovementManager {
         // can never hold (a WALK step ~7px against a 19px stair tread), which is the toy-tower
         // stair sway. Only for pure settles: no committed edge (a climb/jump/drop crossing a tread
         // still owns the bot) and stopDist > 0 (launch-window approaches must KEEP momentum). This
-        // is the production entry — it has the full 2D positions the residency Y gate needs, which
-        // updateStepX (X only, shared with GroundSwayTest's harness) must not guess at.
+        // is the production entry — it has the full 2D positions the residency Y gate needs.
         if (stopDist > 0
                 && (entry.navEdge == null || entry.navEdge.type == BotNavigationGraph.EdgeType.WALK)) {
             Foothold standing = BotPhysicsEngine.findGroundFoothold(entry.bot.getMap(), botPos);
@@ -973,11 +968,10 @@ class BotMovementManager {
                 return 0;
             }
         }
-        if (entry.graphWarmupFallback) {
-            int localStopDist = Math.min(stopDist, 12);
-            return updateStepX(entry, entry.bot.getMap(), botPos.x, targetPos.x, localStopDist, localStopDist);
-        }
-        return updateStepX(entry, entry.bot.getMap(), botPos.x, targetPos.x, stopDist, followDist);
+        int stepX = calcStepX(entry.bot.getMap(), entry.movementProfile, botPos.x, targetPos.x,
+                entry.wasMovingX, stopDist, followDist);
+        entry.wasMovingX = stepX != 0;
+        return stepX;
     }
 
     private static void applyGroundAction(BotMovementState entry, Foothold currentFh, MoveAction action) {
@@ -1005,7 +999,7 @@ class BotMovementManager {
         }
 
         BotPhysicsEngine.GroundMotion motion =
-                BotPhysicsEngine.applyGroundMotion(entry, bot, currentFh);
+                BotPhysicsEngine.applyGroundMotion(entry, bot, currentFh, action.groundTarget());
         if (motion.lostGround()) {
             broadcastMovement(entry);
             return;
@@ -1023,7 +1017,7 @@ class BotMovementManager {
         // Preserve ground momentum while still trying to walk/jump toward a nav target.
         // Otherwise subpixel uphill/transition movement gets zeroed every tick and the bot
         // can stall forever short of a valid launch window.
-        if (entry.movementVelX == 0 && action.type() == ActionType.IDLE) {
+        if (entry.hspeed == 0.0 && action.type() == ActionType.IDLE) {
             BotPhysicsEngine.idleOnGround(entry, entry.bot);
         }
         broadcastMovement(entry);
@@ -1057,10 +1051,6 @@ class BotMovementManager {
             return 0;
         }
         return Math.min(absDx, BotPhysicsEngine.walkStep(map, profile)) * (dx >= 0 ? 1 : -1);
-    }
-
-    static int updateStepX(BotMovementState entry, MapleMap map, int botX, int targetX) {
-        return updateStepX(entry, map, botX, targetX, cfg.STOP_DIST, cfg.FOLLOW_DIST);
     }
 
     /** Ledges narrower than this are settled by standing on them, not by hunting a pixel. Kept beside the steer rule it gates. */
@@ -1102,159 +1092,6 @@ class BotMovementManager {
             return false; // still walking along the tread toward the target
         }
         return targetX >= lo - stepPx && targetX <= hi + stepPx;
-    }
-
-    static int updateStepX(BotMovementState entry, MapleMap map, int botX, int targetX, int stopDist, int followDist) {
-        return updateStepX(entry, map, entry.bot != null ? entry.bot.getPosition().y : (int) Math.round(entry.physY),
-                botX, targetX, stopDist, followDist);
-    }
-
-    private static int updateStepX(BotMovementState entry, MapleMap map, int botY, int botX, int targetX,
-                                   int stopDist, int followDist) {
-        int stepX = calcStepX(map, entry.movementProfile, botX, targetX, entry.wasMovingX, stopDist, followDist);
-        if (stepX == 0) {
-            entry.wasMovingX = false;
-            return 0;
-        }
-        entry.wasMovingX = true;
-        // Release the key before the momentum carries the bot past its target.
-        //
-        // calcStepX clamps the INTENT step to the remaining distance, but applyGroundMotion then
-        // integrates real momentum over the whole tick — so the tick's actual travel is whatever the
-        // current speed carries, not the clamp. With a precise SETTLE target (stopDist 1 CLIMB/PORTAL,
-        // 4 WALK) the glide-out of even a mid-speed bot is ~10-60px, far past that band: the bot sails
-        // through the target, finds it behind it on the next tick, walks back, overshoots again — the
-        // "walks, stops, then sways left-right on the spot" report.
-        //
-        // Two release triggers, both needed:
-        //   - releasing NOW already lands inside the band (let go and coast in), and
-        //   - HOLDING this tick would carry well past the target (don't push into an overshoot).
-        // Together they make the bot stop inside its band and stay there.
-        //
-        // Ours (small-platform sway): both projections run the LIVE ground sim forward — the same
-        // simulateGroundMotion the next tick runs — instead of the analytic estimates, which
-        // dropped the foothold's slope and terrain entirely. On sloped/stitched footholds (toy-tower
-        // stair treads, 220070000) the estimate mispredicted at tread boundaries, the bot overshot,
-        // the target flipped behind it, and it paced left-right. The sim is exact by construction;
-        // it is only near the target (<= 4 walk steps), so the cost is a few sim steps per tick.
-        //
-        // The held trigger's margin is HALF the band (floored at 1), not the whole band. With the
-        // whole band (`held > absDx + stopDist`) a WALK edge (stopDist 4) had a dead zone at a
-        // mid-high speed (~157-167, hs ~1.6): releasing now lands SHORT of the band (glide < absDx-4)
-        // AND holding this tick still does not clear the far edge (held <= absDx+4), so neither
-        // trigger fired. The bot took the step, the residual momentum carried it across the 4px band
-        // and out the far side, it walked back next tick, and paced left-right forever — the "原地踏步"
-        // report. Halving the margin closes that dead zone while, at stopDist 1 (CLIMB/PORTAL),
-        // max(1, 0) == 1 keeps the exact same threshold and settle point as before.
-        //
-        // NOT for stopDist 0. A 0 band is never a settle — it is a LAUNCH-WINDOW approach (JUMP and
-        // straight-DROP take 0 from preciseNavStopDist; a directional walk-off drop takes 0 from
-        // planGroundAction). There the bot must WALK INTO the window and keep its momentum: a release
-        // that coasts to a halt just short of the edge leaves the bot parked a few px before the
-        // launch X, where the nav's 0-tolerance gate (a directional drop needs botX >= startPoint.x)
-        // can never fire the edge — the committed trip then just stalls into the stuck-recovery jitter
-        // instead of launching. Window entry, not a stop, is the contract
-        // (see GroundSwayTest.aLaunchApproachReachesItsWindow).
-        if (stopDist > 0) {
-            int dir = Integer.signum(stepX);
-            int absDx = Math.abs(targetX - botX);
-            // Terrain-exact projections need the map. A null map (the GroundSwayTest flat-floor
-            // runtime, which hand-integrates the client step math) falls back to the analytic
-            // estimates — the pre-sway-fix behaviour the flat-floor sweep already pins.
-            if (map != null && absDx <= BotPhysicsEngine.walkStep(map, entry.movementProfile) * 4) {
-                Foothold standing = BotPhysicsEngine.findGroundFoothold(map, new Point(botX, botY));
-                Point botPos = new Point(botX, botY);
-                Point glideOut = (standing != null) ? simulatedGlideOutStop(map, entry, botPos, standing) : null;
-                int glide = (glideOut != null) ? Math.abs(glideOut.x - botX) : 0;
-                int held = simulatedHeldLandingPx(map, entry, botPos, standing, dir);
-                if (Math.abs(absDx - glide) <= stopDist
-                        || held > absDx + Math.max(1, stopDist / 2)) {
-                    entry.wasMovingX = false;
-                    return 0;
-                }
-            } else if (map == null) {
-                int glide = BotPhysicsEngine.groundStopOutPx(entry.hspeed, entry.movementProfile, map);
-                if (Math.abs(absDx - glide) <= stopDist
-                        || BotPhysicsEngine.groundHeldLandingPx(entry.hspeed, dir, entry.movementProfile, map) > absDx + Math.max(1, stopDist / 2)) {
-                    entry.wasMovingX = false;
-                    return 0;
-                }
-            }
-        }
-        // Bang-bang approach on slippery ground: only push toward the target while the bot
-        // can still brake to a stop inside the remaining distance; otherwise counter-strafe
-        // (or coast) so the bot arrives able to stop in the window/radius instead of sliding
-        // past it (pathlog-Preston-2026-06-12T083326). Plain passthrough on fs=1 maps.
-        // Directional walk-off drops are exempt: they leave the platform with momentum on
-        // purpose, so braking short of the ledge would break the edge.
-        if (isDirectionalDropEdge(entry.navEdge)) {
-            return stepX;
-        }
-        int approachDir = BotPhysicsEngine.slipperyApproachDir(map, entry.movementProfile, entry.hspeed,
-                targetX - botX, launchWindowOvershootSlackPx(entry, botX, targetX));
-        return approachDir == Integer.signum(stepX) ? stepX : approachDir;
-    }
-
-    /**
-     * Where the momentum actually puts the bot on THIS terrain, by running the live ground sim
-     * forward with the key released (dir 0) — the same integrator and preview the next tick runs.
-     * Null when the glide-out leaves ground (a lip: not a stopping point). At most
-     * POST_LANDING_BRAKE_TICK_CAP ticks, so a slippery glide is bounded.
-     */
-    private static Point simulatedGlideOutStop(MapleMap map, BotMovementState entry, Point botPos, Foothold foothold) {
-        BotPhysicsEngine.GroundStepResult step = BotPhysicsEngine.simulateGroundMotion(map, botPos, foothold, 0,
-                new BotPhysicsEngine.GroundTravelState(entry.physX, entry.hspeed, entry.groundPhysicsCarryMs),
-                entry.movementProfile);
-        for (int i = 0; i < BotPhysicsEngine.POST_LANDING_BRAKE_TICK_CAP && !step.lostGround(); i++) {
-            if (Math.abs(step.state().hspeed()) == 0.0 && step.stepX() == 0) {
-                return step.point(); // stopped
-            }
-            step = BotPhysicsEngine.simulateGroundMotion(map, step.point(), step.foothold(), 0, step.state(),
-                    entry.movementProfile);
-        }
-        return step.lostGround() ? null : step.point();
-    }
-
-    /**
-     * Where holding {@code dir} one more tick puts the bot's PIXEL — the live sim's step, not an
-     * analytic estimate. The tick integrates {@code TICK_MS} of client ground steps, so this
-     * re-derives the same step count (and the same carry) the physics will.
-     */
-    private static int simulatedHeldLandingPx(MapleMap map, BotMovementState entry, Point botPos,
-                                              Foothold foothold, int dir) {
-        BotPhysicsEngine.GroundStepResult step = BotPhysicsEngine.simulateGroundMotion(map, botPos, foothold, dir,
-                new BotPhysicsEngine.GroundTravelState(entry.physX, entry.hspeed, entry.groundPhysicsCarryMs),
-                entry.movementProfile);
-        return step.lostGround() ? Integer.MAX_VALUE : Math.abs(step.point().x - botPos.x);
-    }
-
-    /*
-     * Extra overshoot allowance (px) past the steering target before the slippery approach
-     * controller must brake. Anywhere inside a committed edge's launch window is executable,
-     * so a pulse projected to land between the target and the window's far edge is arrival,
-     * not overshoot. Without it a tight window (2px on El Nath fs=0.2) can be unreachable
-     * from rest: the smallest legal 50ms pulse travels farther than the distance to the
-     * target pixel and the controller refuses to accelerate at all
-     * (pathlog-Leroy-2026-06-12T140609).
-     */
-    private static int launchWindowOvershootSlackPx(BotMovementState entry, int botX, int targetX) {
-        BotNavigationGraph.Edge edge = entry.navEdge;
-        if (edge == null) {
-            return 0;
-        }
-        boolean windowed = edge.type == BotNavigationGraph.EdgeType.JUMP
-                || (edge.type == BotNavigationGraph.EdgeType.DROP && edge.launchStepX == 0);
-        if (!windowed || !edge.containsLaunchX(targetX)) {
-            return 0;
-        }
-        int dir = Integer.signum(targetX - botX);
-        if (dir == 0) {
-            return 0;
-        }
-        int slack = dir > 0 ? edge.launchMaxX - targetX : targetX - edge.launchMinX;
-        // JUMP execution additionally requires |x - launchX| <= walkStep around the selected
-        // launch point — never allow sliding deeper into a wide window than that gate accepts.
-        return Math.clamp(slack, 0, BotPhysicsEngine.walkStep(entry.bot.getMap(), entry.movementProfile));
     }
 
     static void initiateJump(BotMovementState entry, Character bot, int dx) {

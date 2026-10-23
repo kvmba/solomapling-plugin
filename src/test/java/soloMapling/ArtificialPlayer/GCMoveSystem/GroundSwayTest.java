@@ -18,25 +18,24 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * CLIMB/PORTAL, 4 on a WALK edge — that clamp is far smaller than the travel the current speed
  * carries (~50px of glide-out at walk speed on firm ground): the bot sails through the target,
  * finds it behind it on the next tick, walks back, overshoots again, forever.
- * {@link BotMovementManager#updateStepX} releases the key when either letting go would already land
- * inside the band, or holding one more tick would land past it. A stopDist-0 target is a
- * LAUNCH-WINDOW approach, not a settle, so it is deliberately exempt (see
- * {@code aLaunchApproachReachesItsWindow}).
- *
- * <p>A real {@code MapleMap}/{@code Character} cannot be built in a unit test — their constructors
- * trip the Spring-backed {@code Server} static initializer and Mockito is not on the test classpath
- * (the same constraint documented in {@code SwimWallClimbSimulationTest}). Following that test's
- * convention, this drives the PRODUCTION steer rule ({@code updateStepX} on a real
- * {@link BotMovementState}) together with the PRODUCTION physics core
- * ({@link MapleMovement#groundStep} under the live {@link BotPhysicsEngine#cfg} constants,
- * sub-stepped at {@code TICK_MS / 8ms} with the same carry the engine threads). What is asserted is
- * the emergent behaviour in the three directions the report cares about: the bot settles instead of
- * hunting, a launch approach still reaches its window, and a long walk is never throttled by it.
- *
- * <p>Before the fix the same sweep reached 24-31px of settled travel (a full left-right sway) in 30
- * of 77 speed/stopDist cells; after it, 0 of 77.
+ * The production ground integrator now owns both acceleration and target braking at 8ms cadence.
+ * This sweep drives that integrator on a real synthetic MapleMap, including its terrain lookup,
+ * fractional position and time carry. It checks convergence, single-pixel launch entry and
+ * uninterrupted long walks; no separate analytic test-only controller is used.
  */
 class GroundSwayTest {
+
+    private static org.gms.server.maps.MapleMap map;
+
+    @org.junit.jupiter.api.BeforeAll
+    static void boot() throws Exception {
+        LpqFallbackRopeApproachTest.stubHostEnvironment();
+        map = new org.gms.server.maps.MapleMap(922017999, 0, 0, 922010000, 0.0f);
+        org.gms.server.maps.FootholdTree tree = new org.gms.server.maps.FootholdTree(
+                new Point(-100_000, -500), new Point(100_000, 500));
+        tree.insert(FLOOR);
+        map.setFootholds(tree);
+    }
 
     private static final int TICK_MS = BotPhysicsEngine.cfg.TICK_MS;
     private static final double CLIENT_STEP_S = MapleMovement.CLIENT_STEP_MS / 1000.0;
@@ -75,22 +74,16 @@ class GroundSwayTest {
 
         /** Run one tick toward targetX; returns the intent sign the steer rule chose. */
         int tick(int targetX, int stopDist) {
-            // Production steer rule. The map is null: only its slip scale is consulted, so this is
-            // exactly the fs=1 firm-ground case under test.
-            int stepX = BotMovementManager.updateStepX(state, null, x(), targetX, stopDist, stopDist);
-            int dir = Integer.signum(stepX);
-
-            int steps = (int) ((carryMs + TICK_MS) / MapleMovement.CLIENT_STEP_MS);
-            carryMs = carryMs + TICK_MS - steps * MapleMovement.CLIENT_STEP_MS;
-            double hspeed = state.hspeed;
-            for (int i = 0; i < steps; i++) {
-                hspeed = MapleMovement.groundStep(hspeed, FLOOR, dir,
-                        profile.hForcePxs() * CLIENT_STEP_S, walkCapStep(profile), 1.0);
-                physX += hspeed;
-            }
-            state.hspeed = hspeed;
-            // previewGroundStep snaps the foot point to a whole pixel on firm ground.
-            physX = Math.round(physX);
+            boolean walkOff = state.navEdge != null && state.navEdge.launchStepX != 0;
+            if (!walkOff && state.hspeed == 0.0 && Math.abs(x() - targetX) <= stopDist) return 0;
+            int dir = Integer.compare(targetX, x());
+            var result = BotPhysicsEngine.simulateGroundMotion(map, new Point(x(), 0), FLOOR, dir,
+                    new BotPhysicsEngine.GroundTravelState(physX, state.hspeed, carryMs), profile,
+                    walkOff ? null : new BotPhysicsEngine.GroundTarget(targetX, stopDist));
+            physX = result.state().physX();
+            state.hspeed = result.state().hspeed();
+            carryMs = result.state().carryMs();
+            dir = walkOff ? dir : result.inputDir();
             return dir;
         }
     }

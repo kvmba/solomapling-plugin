@@ -18,8 +18,7 @@ final class BotPhysicsEngine {
     private static final double CLIENT_GROUND_STEP_MS = MapleMovement.CLIENT_STEP_MS;
     private static final double CLIENT_GROUND_STEP_S = CLIENT_GROUND_STEP_MS / 1000.0;
     // Brake-to-stop sim bound for slippery landings: stop takes ~2.3/fs ticks from top
-    // speed (11 at El Nath fs=0.2); 240 covers any fs >= ~0.01 with margin. Also bounds the
-    // steer's glide-out sim (BotMovementManager.simulatedGlideOutStop).
+    // speed (11 at El Nath fs=0.2); 240 covers any fs >= ~0.01 with margin.
     static final int POST_LANDING_BRAKE_TICK_CAP = 240;
     private static final int REGION_STITCH_GAP_PX = 2;
     // Max horizontal gap between adjacent foothold endpoints that the bot can walk across.
@@ -150,12 +149,27 @@ final class BotPhysicsEngine {
     record GroundTravelState(double physX, double hspeed, double carryMs) {
     }
 
+    record GroundTarget(int x, int radius, boolean stopOnly) {
+        GroundTarget(int x, int radius) {
+            this(x, radius, false);
+        }
+
+        static GroundTarget stop() {
+            return new GroundTarget(0, 0, true);
+        }
+    }
+
     record GroundStepResult(Point point,
                             Foothold foothold,
                             GroundTravelState state,
                             int stepX,
                             int velocityX,
-                            boolean lostGround) {
+                            boolean lostGround,
+                            int inputDir) {
+        GroundStepResult(Point point, Foothold foothold, GroundTravelState state,
+                         int stepX, int velocityX, boolean lostGround) {
+            this(point, foothold, state, stepX, velocityX, lostGround, 0);
+        }
     }
 
     private record GroundRegionSample(Point point, Foothold foothold) {
@@ -443,7 +457,7 @@ final class BotPhysicsEngine {
     }
 
     /* The slope-aware surface y of {@code fh} at column {@code x} (same math as findBelowIndexed). */
-    private static int surfaceY(Foothold fh, int x) {
+    static int surfaceY(Foothold fh, int x) {
         return fh.getY1() != fh.getY2() ? slopeYAt(fh, x) : fh.getY1();
     }
 
@@ -500,6 +514,20 @@ final class BotPhysicsEngine {
         }
 
         return true;
+    }
+
+    // A direct ground waypoint must identify one height at each x. Connected
+    // switchbacks need separate walking legs even though their endpoints touch.
+    static boolean canShareWalkSurface(Foothold first, Foothold second) {
+        int lo = Math.max(Math.min(first.getX1(), first.getX2()), Math.min(second.getX1(), second.getX2()));
+        int hi = Math.min(Math.max(first.getX1(), first.getX2()), Math.max(second.getX1(), second.getX2()));
+        return lo > hi || (surfaceHeightAt(first, lo) == surfaceHeightAt(second, lo)
+                && surfaceHeightAt(first, hi) == surfaceHeightAt(second, hi));
+    }
+
+    private static double surfaceHeightAt(Foothold foothold, int x) {
+        return foothold.getY1() + (double) (foothold.getY2() - foothold.getY1())
+                * (x - foothold.getX1()) / (foothold.getX2() - foothold.getX1());
     }
 
     private record EndpointConnection(Point from, Point to) {
@@ -1219,19 +1247,20 @@ final class BotPhysicsEngine {
      * Movement layer sets intent before calling; physics never returns velocity to movement.
      */
     static GroundMotion applyGroundMotion(BotMovementState entry, Character bot, Foothold foothold) {
+        return applyGroundMotion(entry, bot, foothold, null);
+    }
+
+    static GroundMotion applyGroundMotion(BotMovementState entry, Character bot, Foothold foothold,
+                                          GroundTarget target) {
         MapleMap map = bot.getMap();
         Point currentPos = bot.getPosition();
         int desiredDir = entry.moveDir;
-        if (desiredDir == 0) {
+        if (desiredDir == 0 && target == null) {
             // Standing intent while still sliding on slippery ground: glide like a player,
             // counter-strafe brake only when the slide would carry the bot off the platform.
             desiredDir = slipperyStopDir(map, entry.movementProfile, currentPos, foothold,
                     new GroundTravelState(entry.physX, entry.hspeed, entry.groundPhysicsCarryMs));
         }
-        // Counter-strafe: the held key opposes the slide. A real player visibly faces the
-        // held direction while sliding the other way; record it so facing/stance follow the
-        // INPUT instead of the velocity-derived slide direction.
-        boolean braking = desiredDir != 0 && entry.hspeed * desiredDir < 0.0;
         // A SLOW debuff scales the profile the ground step runs, so the bot walks (and accelerates)
         // slower. The navigation graph cache still keys on the un-scaled profile — only the live step
         // is scaled, so a slowed bot keeps using the same baked edges.
@@ -1247,7 +1276,13 @@ final class BotPhysicsEngine {
             stepProfile = stepProfile.withDashSpeedBonus(entry.dashSpeedBonus);
         }
         GroundStepResult step = simulateGroundMotion(map, currentPos, foothold, desiredDir,
-                new GroundTravelState(entry.physX, entry.hspeed, entry.groundPhysicsCarryMs), stepProfile);
+                new GroundTravelState(entry.physX, entry.hspeed, entry.groundPhysicsCarryMs), stepProfile, target);
+        if (target != null) {
+            desiredDir = step.inputDir();
+            entry.moveDir = desiredDir;
+        }
+        // Facing follows the effective key, including a counter-strafe, not the slide.
+        boolean braking = desiredDir != 0 && entry.hspeed * desiredDir < 0.0;
 
         // Snap-up to a *different* foothold means the bot walked off the edge and a separate
         // platform happens to be within MAX_SLOPE_UP above. That is not an uphill slope of the
@@ -1285,15 +1320,8 @@ final class BotPhysicsEngine {
         entry.airVelX = 0;
         entry.airSteerVelX = 0.0;
         entry.fixedAirArc = false;
-        // Slippery ground keeps the fractional x (position stays the rounded broadcast
-        // pixel). One 50ms input pulse from rest moves well under a pixel; truncating
-        // physX to the int position every tick discarded that progress and made tight
-        // launch windows unreachable from rest (pathlog-Leroy-2026-06-12T140609: parked
-        // 2-3px short of a 2px jump window forever on fs=0.2). Normal ground keeps the
-        // int snap - bit-exact with prior behavior.
-        entry.physX = mapGroundSlipScale(map, entry.movementProfile) < 1.0
-                ? step.state().physX()
-                : position.x;
+        // Prediction and execution carry exactly the same fractional position on every surface.
+        entry.physX = step.state().physX();
         entry.physY = position.y;
         entry.hspeed = step.state().hspeed();
         entry.groundPhysicsCarryMs = step.state().carryMs();
@@ -1326,10 +1354,20 @@ final class BotPhysicsEngine {
                                                  int desiredDir,
                                                  GroundTravelState state,
                                                  BotMovementProfile profile) {
+        return simulateGroundMotion(map, currentPos, foothold, desiredDir, state, profile, null);
+    }
+
+    static GroundStepResult simulateGroundMotion(MapleMap map, Point currentPos, Foothold foothold,
+                                                 int desiredDir, GroundTravelState state,
+                                                 BotMovementProfile profile, GroundTarget target) {
         if (map == null || currentPos == null || foothold == null || state == null) {
             return new GroundStepResult(currentPos, foothold, state, 0, 0, true);
         }
 
+        if (target != null && (target.stopOnly() || Math.abs(target.x() - state.physX()) <= target.radius()
+                + walkStep(map, profile) * 4 + groundStopOutPx(state.hspeed(), profile, map))) {
+            return simulateGroundApproach(map, currentPos, foothold, state, profile, target);
+        }
         GroundTravelState displaced = applyGroundDisplacement(map, foothold, desiredDir, state, profile);
         int newX = (int) Math.round(displaced.physX());
         int stepX = newX - currentPos.x;
@@ -1348,7 +1386,125 @@ final class BotPhysicsEngine {
         }
 
         return new GroundStepResult(preview.point(), preview.foothold() != null ? preview.foothold() : foothold, displaced,
-                stepX, velocityFromDeltaX(displaced.physX() - currentPos.x), false);
+                stepX, velocityFromDeltaX(displaced.physX() - currentPos.x), false, desiredDir);
+    }
+
+    private static GroundStepResult simulateGroundApproach(MapleMap map, Point from, Foothold foothold,
+                                                           GroundTravelState state,
+                                                           BotMovementProfile profile, GroundTarget target) {
+        GroundStepCounter counter = groundPhysicsSteps(state.carryMs(), map);
+        double x = state.physX();
+        double speed = state.hspeed();
+        double slip = mapGroundSlipScale(map, profile);
+        double force = maxHForcePerClientStep(profile);
+        double cap = maxHSpeedPerClientStep(profile);
+        Point position = from;
+        int input = 0;
+        for (int i = 0; i < counter.steps(); i++) {
+            input = target.stopOnly() ? groundBrakeInput(speed, foothold, force, cap, slip)
+                    : groundApproachDir(x, speed, foothold, target, force, cap, slip);
+            speed = MapleMovement.groundStep(speed, foothold, input, force, cap, slip);
+            x += speed;
+            GroundStepPreview preview = previewGroundStep(map, position, foothold, (int) Math.round(x));
+            if (preview.blocked()) {
+                x = position.x;
+                speed = 0.0;
+            } else if (preview.lostGround()) {
+                Point edge = new Point((int) Math.round(x), preview.baseY());
+                return new GroundStepResult(edge, foothold,
+                        new GroundTravelState(x, speed, counter.carryMs()), edge.x - from.x,
+                        velocityFromDeltaX(x - state.physX()), true, input);
+            } else {
+                position = preview.point();
+                foothold = preview.foothold() != null ? preview.foothold() : foothold;
+            }
+        }
+        return new GroundStepResult(position, foothold,
+                new GroundTravelState(x, speed, counter.carryMs()), position.x - from.x,
+                velocityFromDeltaX(x - state.physX()), false, input);
+    }
+
+    // Choose input at the client's 8ms cadence, not one indivisible 50ms pulse. The latter
+    // can be wider than the entire stop band and has a stable overshoot/reverse limit cycle.
+    private static int groundApproachDir(double x, double speed, Foothold foothold, GroundTarget target,
+                                         double force, double cap, double slip) {
+        double low = Math.nextUp((double) target.x() - target.radius() - 0.5);
+        double high = Math.nextDown((double) target.x() + target.radius() + 0.5);
+        if (target.x() >= foothold.getX1() && target.x() <= foothold.getX2()) {
+            // An arrival band does not grant permission to coast off the target's support.
+            low = Math.max(low, Math.nextUp(foothold.getX1() - 0.5));
+            high = Math.min(high, Math.nextDown(foothold.getX2() + 0.5));
+        }
+        double passive = x + groundStoppingDisplacement(speed, foothold, force, cap, slip, false);
+        if (passive >= low && passive <= high) {
+            return 0;
+        }
+        int brake = groundBrakeInput(speed, foothold, force, cap, slip);
+        double stopped = x + groundStoppingDisplacement(speed, foothold, force, cap, slip, true);
+        if (stopped >= low && stopped <= high) {
+            return brake;
+        }
+        int toward = Double.compare(target.x(), x);
+        double pushedSpeed = MapleMovement.groundStep(speed, foothold, toward, force, cap, slip);
+        double pushed = x + pushedSpeed
+                + groundStoppingDisplacement(pushedSpeed, foothold, force, cap, slip, true);
+        if ((toward > 0 ? pushed <= high : pushed >= low) && toward * (stopped - target.x()) < 0) {
+            return toward;
+        }
+        int best = 0;
+        double bestError = Double.POSITIVE_INFINITY;
+        for (int candidate = 0; candidate < 3; candidate++) {
+            int input = candidate == 0 ? 0 : candidate == 1 ? brake : toward;
+            double next = MapleMovement.groundStep(speed, foothold, input, force, cap, slip);
+            double end = x + next + groundStoppingDisplacement(next, foothold, force, cap, slip, true);
+            double error = Math.max(0.0, Math.max(low - end, end - high));
+            if (error < bestError) {
+                best = input;
+                bestError = error;
+            }
+        }
+        return best;
+    }
+
+    private static int groundBrakeInput(double speed, Foothold foothold, double force, double cap, double slip) {
+        int reverse = -Double.compare(speed, 0.0);
+        double coast = MapleMovement.groundStep(speed, foothold, 0, force, cap, slip);
+        double brake = MapleMovement.groundStep(speed, foothold, reverse, force, cap, slip);
+        return Math.abs(brake) < Math.abs(coast) ? reverse : 0;
+    }
+
+    private static double groundStoppingDisplacement(double speed, Foothold foothold,
+                                                     double force, double cap, double slip, boolean brake) {
+        if (slip < 1.0) {
+            double distance = 0.0;
+            if (brake) {
+                // Apply the first real step, including the speed cap after a SLOW /
+                // profile change, before summing the remaining constant-deceleration steps.
+                speed = MapleMovement.groundStep(speed, foothold,
+                        groundBrakeInput(speed, foothold, force, cap, slip), force, cap, slip);
+                distance = speed;
+                double acceleration = MapleMovement.SLIP_WALK_ACCEL * slip
+                        * CLIENT_GROUND_STEP_S * CLIENT_GROUND_STEP_S;
+                double glide = MapleMovement.SLIP_GLIDE_DECEL * slip
+                        * CLIENT_GROUND_STEP_S * CLIENT_GROUND_STEP_S;
+                double steps = Math.max(0.0, Math.ceil((Math.abs(speed) - (acceleration + glide) / 2) / acceleration));
+                // The last counter-steer step may cross zero: its displacement keeps
+                // that sign. copySign would turn a short reverse step into forward travel.
+                distance += Math.signum(speed) * (steps * Math.abs(speed) - acceleration * steps * (steps + 1) / 2);
+                speed -= Math.copySign(steps * acceleration, speed);
+            }
+            double deceleration = MapleMovement.SLIP_GLIDE_DECEL * slip
+                    * CLIENT_GROUND_STEP_S * CLIENT_GROUND_STEP_S;
+            double steps = Math.max(0.0, Math.ceil(Math.abs(speed) / deceleration) - 1);
+            return distance + Math.copySign(steps * Math.abs(speed) - deceleration * steps * (steps + 1) / 2, speed);
+        }
+        double distance = 0.0;
+        for (int i = 0; i < POST_LANDING_BRAKE_TICK_CAP && speed != 0.0; i++) {
+            int input = brake ? groundBrakeInput(speed, foothold, force, cap, slip) : 0;
+            speed = MapleMovement.groundStep(speed, foothold, input, force, cap, slip);
+            distance += speed;
+        }
+        return speed == 0.0 ? distance : Math.copySign(Double.POSITIVE_INFINITY, speed);
     }
 
     static WalkOffLanding simulateWalkOffLanding(MapleMap map,
@@ -2465,72 +2621,6 @@ final class BotPhysicsEngine {
         return 0;
     }
 
-    /*
-     * Bang-bang approach controller for walking toward a target x on slippery ground.
-     * On normal ground (fs >= 1 or snowshoes) this is a plain sign(dx) passthrough.
-     * On slippery ground it accelerates toward the target only while the projected travel
-     * of one more accelerating tick PLUS the stop-out from the resulting speed (counter-
-     * strafe brake down to the release threshold, then the residual glide) still fits
-     * inside the remaining distance; otherwise it counter-strafes against the slide, and
-     * once the slide is below one brake tick it holds (0) and creeps back in on later
-     * ticks. Re-evaluated every tick, so the bot arrives at the target able to stop
-     * instead of sliding past it and off the platform
-     * (pathlog-Preston-2026-06-12T083326: full-slide approach to the r17->r14 launch
-     * window at x=59 overran the platform's left edge and fell).
-     */
-    static int slipperyApproachDir(MapleMap map, BotMovementProfile profile, double hspeed, int dxToTarget) {
-        return slipperyApproachDir(map, profile, hspeed, dxToTarget, 0);
-    }
-
-    /*
-     * overshootSlackPx: extra distance past the target that still counts as arrival
-     * instead of overshoot — callers steering into a launch WINDOW pass the room between the
-     * target pixel and the window's far edge. Without it the smallest legal 50ms pulse from
-     * rest (~1.6px at fs=0.2) can exceed the remaining 1-2px to the target pixel and the
-     * controller refuses to accelerate at all, parking the bot just outside a tight window
-     * forever (pathlog-Leroy-2026-06-12T140609).
-     */
-    static int slipperyApproachDir(MapleMap map, BotMovementProfile profile, double hspeed, int dxToTarget,
-                                   int overshootSlackPx) {
-        int towardDir = Integer.signum(dxToTarget);
-        double fs = mapGroundSlipScale(map, profile);
-        if (towardDir == 0 || fs >= 1.0) {
-            return towardDir;
-        }
-
-        double dvBrake = cfg.SLIP_WALK_ACCEL_PXSS * fs * CLIENT_GROUND_STEP_S * CLIENT_GROUND_STEP_S;
-        double dvGlide = cfg.SLIP_GLIDE_DECEL_PXSS * fs * CLIENT_GROUND_STEP_S * CLIENT_GROUND_STEP_S;
-        double cap = maxHSpeedPerClientStep(profile);
-        // ceil: a real tick integrates TICK_MS/8 client steps plus carry, so overestimating
-        // the accel tick keeps the projection conservative (brakes a step early, never late).
-        int stepsPerTick = Math.max(1, (int) Math.ceil(cfg.TICK_MS / CLIENT_GROUND_STEP_MS));
-        double brakeReleaseSpeed = dvBrake * stepsPerTick; // counterStrafeBrakeDir's release threshold
-
-        // Project in the same per-client-step quanta as applySlipperyGroundStep: one tick of
-        // accelerating toward the target, then brake to releasable, then glide out the rest.
-        double v = hspeed * towardDir; // speed component toward the target, px per client step
-        double traveled = 0.0;
-        for (int i = 0; i < stepsPerTick; i++) {
-            v = Math.min(v + dvBrake, cap);
-            traveled += v;
-        }
-        while (v > brakeReleaseSpeed) {
-            v -= dvBrake;
-            traveled += v;
-        }
-        while (v > 0.0) {
-            v -= dvGlide;
-            traveled += Math.max(v, 0.0);
-        }
-
-        if (traveled < Math.abs(dxToTarget) + Math.max(0, overshootSlackPx)) {
-            return towardDir; // the post-accel stop-out still fits: keep accelerating
-        }
-        // Too hot to keep pushing: counter-strafe while the slide carries meaningful speed,
-        // else hold and let slipperyStopDir manage the residual glide.
-        return counterStrafeBrakeDir(map, profile, hspeed);
-    }
-
     /* True when this map's ground is slippery for bots WITHOUT snowshoes (fs < 1). */
     static boolean slipperyGround(MapleMap map) {
         return mapGroundSlipScale(map) < 1.0;
@@ -2539,39 +2629,12 @@ final class BotPhysicsEngine {
     /*
      * Distance (px) a ground entity travelling at {@code hspeed} (px per 8ms client step) still
      * covers after its input is RELEASED — the input-free glide-out. Callers use it to decide
-     * whether holding the key one more tick would carry them past their target: a step clamped to
-     * the REMAINING DISTANCE (calcStepX) still integrates real momentum, so on any tick whose
-     * travel plus glide-out exceeds that distance the entity sails past the target, sees it
-     * overshoot to the other side, and walks back — the left-right sway at the end of every walk
-     * (see BotMovementManager.updateStepX and BotPetFollower.followLand).
+     * when to engage the substep approach controller. This coarse bound is never used
+     * to choose the actual input or declare arrival.
      */
     static int groundStopOutPx(double hspeed, BotMovementProfile profile, MapleMap map) {
         return (int) Math.ceil(
                 MapleMovement.stopOutPxs(hspeed / CLIENT_GROUND_STEP_S, mapGroundSlipScale(map, profile)));
-    }
-
-    /*
-     * Where the bot's momentum would actually put it if it KEPT holding direction {@code dir} for
-     * the rest of this tick, then released: this tick's travel plus the glide-out from the speed
-     * that travel ends at. The glide-out alone understates this whenever the held tick still
-     * accelerates — the case that makes a bot overshoot a tight launch window.
-     *
-     * Runs the same groundStep the integrator does with a null foothold: the steer may be deciding
-     * before the ground is resolved, and a null foothold means slope 0. Slope only scales the
-     * inertia term (and is clamped to +-0.5), so this is a slight under-estimate uphill and
-     * over-estimate downhill — both absorbed by the caller's band.
-     */
-    static int groundHeldLandingPx(double hspeed, int dir, BotMovementProfile profile, MapleMap map) {
-        double fs = mapGroundSlipScale(map, profile);
-        double v = hspeed;
-        double travel = 0.0;
-        int steps = Math.max(1, cfg.TICK_MS / (int) CLIENT_GROUND_STEP_MS);
-        for (int i = 0; i < steps; i++) {
-            v = MapleMovement.groundStep(v, null, dir, maxHForcePerClientStep(profile),
-                    maxHSpeedPerClientStep(profile), fs);
-            travel += v;
-        }
-        return (int) Math.ceil(travel + MapleMovement.stopOutPxs(v / CLIENT_GROUND_STEP_S, fs));
     }
 
     private static double maxHForcePerClientStep(BotMovementProfile profile) {

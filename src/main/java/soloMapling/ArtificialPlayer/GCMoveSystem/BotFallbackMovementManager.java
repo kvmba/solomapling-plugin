@@ -31,10 +31,15 @@ final class BotFallbackMovementManager {
                           Rope rope, int landingFootholdId) {
     }
 
+    record WalkSurface(MapleMap map, Set<Integer> footholds) {
+    }
+
     static Point resolveSteeringTarget(BotMovementState entry, Point botPos, Point targetPos) {
         UpwardApproach approach = upwardApproach(entry, botPos, targetPos);
-        if (approach != null && approach.launch() != null) {
-            entry.navPreciseTarget = true;
+        if (approach != null) {
+            entry.navPreciseTarget = approach.launch() != null;
+            // No local ascent was found, not proof of global unreachability. Wait for the
+            // graph instead of pretending the upstairs target's x is a ground waypoint.
             return approach.launch();
         }
         Rope rope = selectNearbyRope(entry, botPos, targetPos);
@@ -45,7 +50,7 @@ final class BotFallbackMovementManager {
         if (rope != null) {
             return new Point(rope.x(), botPos.y);
         }
-        return targetPos;
+        return entry.bot.getMap().isSwim() || onCurrentSurface(entry, targetPos) ? targetPos : null;
     }
 
     static boolean tryImmediateAction(BotMovementState entry, Point botPos, Point targetPos) {
@@ -94,6 +99,9 @@ final class BotFallbackMovementManager {
                 entry.fixedAirArc = true;
                 return true;
             }
+        }
+        if (approach != null && approach.launch() == null) {
+            return false;
         }
 
         // In swim maps, leap upward off the platform to chase an airborne
@@ -188,6 +196,10 @@ final class BotFallbackMovementManager {
         }
         MapleMap map = entry.bot.getMap();
         Foothold standing = BotPhysicsEngine.standingFoothold(entry);
+        if (onCurrentSurface(entry, targetPos)) {
+            entry.fallbackApproach = null;
+            return null; // walking uphill on one connected surface needs no ascent action
+        }
         UpwardApproach cached = entry.fallbackApproach;
         if (cached != null && cached.map() == map && cached.profile().equals(entry.movementProfile)
                 && cached.targetY() == targetPos.y && standing != null
@@ -196,7 +208,7 @@ final class BotFallbackMovementManager {
             return cached;
         }
 
-        Set<Integer> source = sameRowFootholds(entry.fhIndex, standing);
+        Set<Integer> source = sourceFootholds(entry, standing);
         List<Point> anchors = grabLaunchAnchors(map, botPos, entry.movementProfile);
         anchors.removeIf(anchor -> {
             Foothold foothold = BotPhysicsEngine.findGroundFoothold(map, anchor);
@@ -279,7 +291,25 @@ final class BotFallbackMovementManager {
         return surface != null ? surface : new Point(x, fh.getY1());
     }
 
-    private static Set<Integer> sameRowFootholds(Map<Integer, Foothold> byId, Foothold current) {
+    private static boolean onCurrentSurface(BotMovementState entry, Point targetPos) {
+        Foothold target = BotPhysicsEngine.findGroundFoothold(entry.bot.getMap(), targetPos);
+        return target != null
+                && Math.abs(BotPhysicsEngine.surfaceY(target, targetPos.x) - targetPos.y) <= BotPhysicsEngine.cfg.MAX_SLOPE_UP
+                && sourceFootholds(entry, BotPhysicsEngine.standingFoothold(entry)).contains(target.getId());
+    }
+
+    private static Set<Integer> sourceFootholds(BotMovementState entry, Foothold standing) {
+        WalkSurface cached = entry.fallbackSurface;
+        if (cached != null && cached.map() == entry.bot.getMap() && standing != null
+                && cached.footholds().contains(standing.getId())) {
+            return cached.footholds();
+        }
+        Set<Integer> source = walkSurfaceFootholds(entry.fhIndex, standing);
+        entry.fallbackSurface = new WalkSurface(entry.bot.getMap(), source);
+        return source;
+    }
+
+    private static Set<Integer> walkSurfaceFootholds(Map<Integer, Foothold> byId, Foothold current) {
         Deque<Integer> queue = new ArrayDeque<>();
         Set<Integer> seen = new HashSet<>();
         if (current == null) {
@@ -292,8 +322,17 @@ final class BotFallbackMovementManager {
             for (int nextId : new int[]{fh.getNext(), fh.getPrev()}) {
                 Foothold next = nextId > 0 ? byId.get(nextId) : null;
                 if (next == null || next.isWall() || seen.contains(nextId)
-                        || next.getY1() != current.getY1() || next.getY2() != current.getY2()
                         || !BotPhysicsEngine.canWalkAcrossFootholds(fh, next)) {
+                    continue;
+                }
+                boolean sameSurface = true;
+                for (int id : seen) {
+                    if (!BotPhysicsEngine.canShareWalkSurface(byId.get(id), next)) {
+                        sameSurface = false;
+                        break;
+                    }
+                }
+                if (!sameSurface) {
                     continue;
                 }
                 seen.add(nextId);

@@ -2855,10 +2855,7 @@ final class BotNavigationGraphProvider {
             // shared region whose pointAt(x) silently selects the wrong floor.
             for (Foothold a : members.get(firstRoot)) {
                 for (Foothold b : members.get(secondRoot)) {
-                    int lo = Math.max(Math.min(a.getX1(), a.getX2()), Math.min(b.getX1(), b.getX2()));
-                    int hi = Math.min(Math.max(a.getX1(), a.getX2()), Math.max(b.getX1(), b.getX2()));
-                    if (lo <= hi && (heightAt(a, lo) != heightAt(b, lo)
-                            || heightAt(a, hi) != heightAt(b, hi))) {
+                    if (!BotPhysicsEngine.canShareWalkSurface(a, b)) {
                         return;
                     }
                 }
@@ -2880,11 +2877,6 @@ final class BotNavigationGraphProvider {
             parent.put(secondRoot, firstRoot);
             rank.put(firstRoot, firstRank + 1);
             members.get(firstRoot).addAll(members.remove(secondRoot));
-        }
-
-        private static double heightAt(Foothold foothold, int x) {
-            return foothold.getY1() + (double) (foothold.getY2() - foothold.getY1())
-                    * (x - foothold.getX1()) / (foothold.getX2() - foothold.getX1());
         }
     }
 }

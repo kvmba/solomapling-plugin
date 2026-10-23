@@ -129,10 +129,11 @@ public class LpqFallbackRopeApproachTest {
         // Spawn spread across the ground floor (portal st00 is x=-9)
         int[] spawns = {-9, 30, 80, 130, 180, 230};
 
-        BotMovementProfile profile = BotMovementProfile.fromCharacter(stubBot(map, -9));
+        BotMovementProfile profile = BotMovementProfile.base();
         for (int spawnX : spawns) {
             org.gms.client.Character bot = stubBot(map, spawnX);
             BotMovementState entry = new BotMovementState(bot, null);
+            entry.fhIndex = BotMovementManager.buildFhIndex(map);
             entry.movementProfile = profile;
             entry.graphWarmupFallback = true;
             Point targetPos = new Point(mobFloor);
@@ -145,6 +146,7 @@ public class LpqFallbackRopeApproachTest {
                 continue;
             }
             Point steer = BotFallbackMovementManager.resolveSteeringTarget(entry, bot.getPosition(), targetPos);
+            org.junit.jupiter.api.Assertions.assertNotNull(steer, "spawn=" + spawnX + " approach=" + entry.fallbackApproach);
             // The steering target must be on the ladder-1 column (x=-117 +- the grab column) or
             // moving along the validated launch path toward it — never parked at the mob floor.
             assertTrue(Math.abs(steer.x - (-117)) <= 130,
@@ -161,6 +163,7 @@ public class LpqFallbackRopeApproachTest {
         for (int spawnX : new int[]{-117, -100, -60, -55}) {
             org.gms.client.Character bot = stubBot(map, spawnX);
             BotMovementState entry = new BotMovementState(bot, null);
+            entry.fhIndex = BotMovementManager.buildFhIndex(map);
             entry.movementProfile = BotMovementProfile.base();
             entry.graphWarmupFallback = true;
 

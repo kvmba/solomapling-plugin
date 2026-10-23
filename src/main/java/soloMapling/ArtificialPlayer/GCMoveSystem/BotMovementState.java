@@ -257,6 +257,8 @@ class BotMovementState {
     int navBlockedPosX = Integer.MIN_VALUE;
     int navBlockedPosY = Integer.MIN_VALUE;
     boolean graphWarmupFallback = false;
+    boolean navAwaitingRoute = false;
+    BotFallbackMovementManager.WalkSurface fallbackSurface;
     BotFallbackMovementManager.UpwardApproach fallbackApproach;
     int observedOwnerStepX = 0;
     int observedOwnerStepY = 0;

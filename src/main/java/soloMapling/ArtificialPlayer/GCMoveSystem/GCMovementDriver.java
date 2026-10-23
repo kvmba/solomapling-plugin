@@ -729,6 +729,11 @@ final class GCMovementDriver {
         if (entry.climbing) {
             BotMovementManager.dismountTowardGround(entry);
         }
+        failMove(entry);
+        return true;
+    }
+
+    static void failMove(BotMovementState entry) {
         entry.moveTarget = null;
         entry.moveTargetPrecise = false;
         entry.moveBestDist = Integer.MAX_VALUE;
@@ -736,7 +741,6 @@ final class GCMovementDriver {
         entry.navProgressBestDist = Integer.MAX_VALUE;
         BotMovementManager.clearNavigationState(entry);
         GCMovement.abandonMove(entry);
-        return true;
     }
 
     private static Point resolveTarget(BotMovementState entry, Character bot) {
@@ -878,6 +882,9 @@ final class GCMovementDriver {
     static void clearReachedMoveTarget(BotMovementState entry) {
         if (entry.moveTarget == null) {
             return;
+        }
+        if (entry.navAwaitingRoute) {
+            return; // no local route: neither the loose arrival box nor an X overlap is arrival
         }
         Point botPos = entry.bot.getPosition();
         int arrivalDist = entry.moveTargetPrecise ? 8 : BotMovementManager.cfg.STOP_DIST;
