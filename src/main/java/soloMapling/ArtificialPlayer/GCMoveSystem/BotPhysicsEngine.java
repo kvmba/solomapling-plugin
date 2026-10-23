@@ -2786,89 +2786,104 @@ final class BotPhysicsEngine {
         if (tree == null) {
             return UNINDEXABLE;
         }
-        // The UNINDEXABLE verdict is cached too: getAllFootholds() rebuilds the whole list on
-        // every call (recursive collect), so it must never run outside this computeIfAbsent.
-        return COLLISION_INDEX.computeIfAbsent(tree, t -> {
-            java.util.List<Foothold> all = t.getAllFootholds();
-            if (all == null) {
-                return UNINDEXABLE;
+        // Build OUTSIDE the map monitor: the index costs getAllFootholds() (the host recollects
+        // a fresh list on every call) plus a per-foothold loop-classification pass, and this method
+        // is reached from findBelowIndexed/findGroundFoothold on every bot's 20 Hz movement tick.
+        // Under computeIfAbsent that whole build ran while holding the synchronizedMap's single
+        // global monitor, so the first bot to touch a newly loaded map serialized every other map's
+        // ticks behind it. get() is O(1) under the same monitor; a lost race just builds an
+        // equivalent index and putIfAbsent discards it (the index is immutable and only ever
+        // identity-compared against UNINDEXABLE, so duplicate builds are harmless).
+        FootholdCollisionIndex cached = COLLISION_INDEX.get(tree);
+        if (cached != null) {
+            return cached;
+        }
+        FootholdCollisionIndex built = buildCollisionIndex(tree);
+        FootholdCollisionIndex previous = COLLISION_INDEX.putIfAbsent(tree, built);
+        return previous != null ? previous : built;
+    }
+
+    /** Pure builder for one tree's collision index (see {@link #collisionIndex(MapleMap)}). */
+    private static FootholdCollisionIndex buildCollisionIndex(org.gms.server.maps.FootholdTree t) {
+        java.util.List<Foothold> all = t.getAllFootholds();
+        if (all == null) {
+            return UNINDEXABLE;
+        }
+        java.util.Map<Integer, Foothold> byId = new java.util.HashMap<>(all.size());
+        for (Foothold fh : all) {
+            byId.put(fh.getId(), fh);
+        }
+        java.util.Set<Integer> fromBelowIds = BotNavigationGraphProvider.classifyCollidableFromBelowFootholds(byId);
+        java.util.List<Foothold> walls = new java.util.ArrayList<>();
+        java.util.List<Foothold> ground = new java.util.ArrayList<>();
+        java.util.List<Foothold> fromBelow = new java.util.ArrayList<>();
+        int minX = Integer.MAX_VALUE;
+        int maxX = Integer.MIN_VALUE;
+        // Standable (non-wall) extent — the real client's flight/walk bound. Wall columns
+        // (x1==x2) hang off platforms without offering a foothold, so they are excluded.
+        int groundMinX = Integer.MAX_VALUE;
+        int groundMaxX = Integer.MIN_VALUE;
+        for (Foothold fh : all) {
+            if (fh.isWall()) {
+                if (Foothold.isCollidableWall(fh, byId)) {
+                    walls.add(fh);
+                }
+                continue;
             }
-            java.util.Map<Integer, Foothold> byId = new java.util.HashMap<>(all.size());
-            for (Foothold fh : all) {
-                byId.put(fh.getId(), fh);
+            ground.add(fh);
+            minX = Math.min(minX, Math.min(fh.getX1(), fh.getX2()));
+            maxX = Math.max(maxX, Math.max(fh.getX1(), fh.getX2()));
+            // Non-wall ⇒ x1 != x2, so this IS the standable extent (walls excluded).
+            groundMinX = Math.min(groundMinX, Math.min(fh.getX1(), fh.getX2()));
+            groundMaxX = Math.max(groundMaxX, Math.max(fh.getX1(), fh.getX2()));
+            if (fromBelowIds.contains(fh.getId())) {
+                fromBelow.add(fh);
             }
-            java.util.Set<Integer> fromBelowIds = BotNavigationGraphProvider.classifyCollidableFromBelowFootholds(byId);
-            java.util.List<Foothold> walls = new java.util.ArrayList<>();
-            java.util.List<Foothold> ground = new java.util.ArrayList<>();
-            java.util.List<Foothold> fromBelow = new java.util.ArrayList<>();
-            int minX = Integer.MAX_VALUE;
-            int maxX = Integer.MIN_VALUE;
-            // Standable (non-wall) extent — the real client's flight/walk bound. Wall columns
-            // (x1==x2) hang off platforms without offering a foothold, so they are excluded.
-            int groundMinX = Integer.MAX_VALUE;
-            int groundMaxX = Integer.MIN_VALUE;
-            for (Foothold fh : all) {
-                if (fh.isWall()) {
-                    if (Foothold.isCollidableWall(fh, byId)) {
-                        walls.add(fh);
+        }
+
+        Foothold[][] buckets;
+        if (ground.isEmpty()) {
+            buckets = new Foothold[0][];
+            minX = 0;
+            groundMinX = 0;
+            groundMaxX = 0;
+        } else {
+            int bucketCount = ((maxX - minX) >> GROUND_BUCKET_SHIFT) + 1;
+            java.util.List<java.util.List<Foothold>> building = new java.util.ArrayList<>(bucketCount);
+            for (int i = 0; i < bucketCount; i++) {
+                building.add(null);
+            }
+            for (Foothold fh : ground) {
+                int lo = (Math.min(fh.getX1(), fh.getX2()) - minX) >> GROUND_BUCKET_SHIFT;
+                int hi = (Math.max(fh.getX1(), fh.getX2()) - minX) >> GROUND_BUCKET_SHIFT;
+                for (int b = lo; b <= hi; b++) {
+                    java.util.List<Foothold> bucket = building.get(b);
+                    if (bucket == null) {
+                        bucket = new java.util.ArrayList<>(4);
+                        building.set(b, bucket);
                     }
+                    bucket.add(fh);
+                }
+            }
+            buckets = new Foothold[bucketCount][];
+            for (int i = 0; i < bucketCount; i++) {
+                java.util.List<Foothold> bucket = building.get(i);
+                if (bucket == null) {
+                    buckets[i] = NO_FOOTHOLDS;
                     continue;
                 }
-                ground.add(fh);
-                minX = Math.min(minX, Math.min(fh.getX1(), fh.getX2()));
-                maxX = Math.max(maxX, Math.max(fh.getX1(), fh.getX2()));
-                // Non-wall ⇒ x1 != x2, so this IS the standable extent (walls excluded).
-                groundMinX = Math.min(groundMinX, Math.min(fh.getX1(), fh.getX2()));
-                groundMaxX = Math.max(groundMaxX, Math.max(fh.getX1(), fh.getX2()));
-                if (fromBelowIds.contains(fh.getId())) {
-                    fromBelow.add(fh);
-                }
+                Foothold[] sorted = bucket.toArray(NO_FOOTHOLDS);
+                // Stable insertion sort with the tree's own comparator. Foothold.compareTo is a
+                // NON-TRANSITIVE partial order — TimSort (List.sort/Collections.sort on 32+
+                // elements) throws "comparison method violates its general contract" on it.
+                // The tree's findBelow only ever sorted tiny per-query lists, which land in
+                // TimSort's exception-free binary-insertion path; mirror that here per bucket.
+                insertionSort(sorted);
+                buckets[i] = sorted;
             }
-
-            Foothold[][] buckets;
-            if (ground.isEmpty()) {
-                buckets = new Foothold[0][];
-                minX = 0;
-                groundMinX = 0;
-                groundMaxX = 0;
-            } else {
-                int bucketCount = ((maxX - minX) >> GROUND_BUCKET_SHIFT) + 1;
-                java.util.List<java.util.List<Foothold>> building = new java.util.ArrayList<>(bucketCount);
-                for (int i = 0; i < bucketCount; i++) {
-                    building.add(null);
-                }
-                for (Foothold fh : ground) {
-                    int lo = (Math.min(fh.getX1(), fh.getX2()) - minX) >> GROUND_BUCKET_SHIFT;
-                    int hi = (Math.max(fh.getX1(), fh.getX2()) - minX) >> GROUND_BUCKET_SHIFT;
-                    for (int b = lo; b <= hi; b++) {
-                        java.util.List<Foothold> bucket = building.get(b);
-                        if (bucket == null) {
-                            bucket = new java.util.ArrayList<>(4);
-                            building.set(b, bucket);
-                        }
-                        bucket.add(fh);
-                    }
-                }
-                buckets = new Foothold[bucketCount][];
-                for (int i = 0; i < bucketCount; i++) {
-                    java.util.List<Foothold> bucket = building.get(i);
-                    if (bucket == null) {
-                        buckets[i] = NO_FOOTHOLDS;
-                        continue;
-                    }
-                    Foothold[] sorted = bucket.toArray(NO_FOOTHOLDS);
-                    // Stable insertion sort with the tree's own comparator. Foothold.compareTo is a
-                    // NON-TRANSITIVE partial order — TimSort (List.sort/Collections.sort on 32+
-                    // elements) throws "comparison method violates its general contract" on it.
-                    // The tree's findBelow only ever sorted tiny per-query lists, which land in
-                    // TimSort's exception-free binary-insertion path; mirror that here per bucket.
-                    insertionSort(sorted);
-                    buckets[i] = sorted;
-                }
-            }
-            return new FootholdCollisionIndex(java.util.List.copyOf(walls), java.util.List.copyOf(fromBelow),
-                    minX, buckets, groundMinX, groundMaxX);
-        });
+        }
+        return new FootholdCollisionIndex(java.util.List.copyOf(walls), java.util.List.copyOf(fromBelow),
+                minX, buckets, groundMinX, groundMaxX);
     }
 
     /*

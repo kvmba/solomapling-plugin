@@ -847,6 +847,30 @@ public class MovementCommands {
         }
     }
 
+    /**
+     * Release the per-bot bookkeeping this class holds for a character that is going away.
+     *
+     * <p>Every other per-botId registry in the plugin is cleared by
+     * {@code BotGeneration.removeBotFromServer}; this one was not, so a removed bot's lease object
+     * and its interrupt flag stayed reachable for the life of the process. Dropping the entry is
+     * only safe once the bot holds no lease: a live owner must keep its token, so the entry is
+     * removed only when nobody owns it (a removal path always runs after the FSM stop, which
+     * releases the lease, so in practice this is the normal case).
+     */
+    public static void forgetBot(int botId) {
+        movementInterruptFlags.remove(botId);
+        MovementLock lock = movementLocks.get(botId);
+        if (lock == null) {
+            return;
+        }
+        synchronized (lock) {
+            if (lock.owner != null) {
+                return; // a live session still owns the lease - it releases it itself
+            }
+        }
+        movementLocks.remove(botId, lock);
+    }
+
     // ── Nudge Utilities ────────────────────────────────────────────────
     private static final int OVERLAP_THRESHOLD_X = 40;
     private static final int OVERLAP_THRESHOLD_Y = 30;

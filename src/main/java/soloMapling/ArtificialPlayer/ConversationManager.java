@@ -66,10 +66,18 @@ public class ConversationManager {
     private static final String DIALOGUE_YAML = "ConversationDialogue.yaml";
 
     private final Set<Integer> botsInConversation = Collections.synchronizedSet(new HashSet<>());
-    // Script history, read/written only where a conversation starts (the tick and the GM trigger
-    // both reach startConversation through the manager's own flow), so it needs no extra guard.
+    // Script history. Guarded by SCRIPT_LOCK: it is a plain LinkedList, and the two entrance paths
+    // really do run on different threads - the ambient tick (a virtual thread) and a GM's
+    // !conversation trigger (a command thread). List.add/removeFirst/contains are not safe against
+    // that, and it corrupted silently before (a lost or duplicated id, then a CME from pickScript's
+    // iteration).
     private final LinkedList<String> recentScriptIds = new LinkedList<>();
     private static final int RECENT_HISTORY_SIZE = 20;
+    // Also makes the participant claim atomic. Choosing a script, reserving its participants in
+    // botsInConversation and recording the script in the history is one decision; the tick and the
+    // GM trigger used to run it concurrently, so both could pick the same bots and start two
+    // overlapping conversations that then fought over the same characters' stance and chat.
+    private final Object SCRIPT_LOCK = new Object();
 
     private volatile List<ConversationScript> allScripts;
 
@@ -113,7 +121,10 @@ public class ConversationManager {
             scheduledTask.cancel(false);
             scheduledTask = null;
         }
-        botsInConversation.clear();
+        synchronized (SCRIPT_LOCK) {
+            botsInConversation.clear();
+            recentScriptIds.clear();
+        }
         log("[ConversationManager] Stopped.");
     }
 
@@ -154,8 +165,13 @@ public class ConversationManager {
 
             List<Character> cluster = findClusterOnMap(mapId);
             if (cluster != null && cluster.size() >= 2) {
-                lastConversationPerMap.put(mapId, now);
-                startConversation(cluster, null);
+                // Arm the cooldown only when a conversation actually started. startConversation can
+                // decline a cluster whose bots were claimed by a concurrent run between this scan
+                // and its own lock; charging the map a cooldown for that would silence it for a
+                // whole interval over a race it never lost.
+                if (startConversation(cluster, null)) {
+                    lastConversationPerMap.put(mapId, now);
+                }
                 return;
             }
         }
@@ -258,29 +274,60 @@ public class ConversationManager {
         return null;
     }
 
-    private void startConversation(List<Character> cluster, Character debugPlayer) {
+    /** @return true when a conversation actually started (and its bots are now reserved) */
+    private boolean startConversation(List<Character> cluster, Character debugPlayer) {
         int clusterSize = cluster.size();
-        ConversationScript script = pickScript(clusterSize);
-        if (script == null) {
-            if (debugPlayer != null) debugPlayer.yellowMessage("[ConversationManager] No matching script found for cluster of " + clusterSize);
-            return;
+        // One atomic decision: pick the script, reserve its participants, record the script. The
+        // participant reservation has to be part of it - a bot already claimed by a live
+        // conversation must not be claimed again, and the caller's cluster was gathered before this
+        // lock was taken. Reserved here, released by the playback's finally.
+        List<Character> participants;
+        String scriptId;
+        ConversationScript script;
+        synchronized (SCRIPT_LOCK) {
+            // Only the ones THIS call reserved may ever be released again - cluster members that
+            // were already claimed belong to a live conversation elsewhere, and removing them would
+            // hand a busy bot to a second script.
+            List<Character> reserved = new ArrayList<>(clusterSize);
+            for (Character chr : cluster) {
+                if (botsInConversation.add(chr.getId())) {
+                    reserved.add(chr);
+                }
+            }
+            if (reserved.size() < 2) {
+                for (Character chr : reserved) {
+                    botsInConversation.remove(chr.getId());
+                }
+                if (debugPlayer != null) {
+                    debugPlayer.yellowMessage("[ConversationManager] Cluster of " + clusterSize
+                            + " is already busy in another conversation.");
+                }
+                return false;
+            }
+            script = pickScript(reserved.size());
+            if (script == null) {
+                for (Character chr : reserved) {
+                    botsInConversation.remove(chr.getId());
+                }
+                if (debugPlayer != null) debugPlayer.yellowMessage("[ConversationManager] No matching script found for cluster of " + reserved.size());
+                return false;
+            }
+            int roles = Math.min(reserved.size(), script.getParticipantCount());
+            participants = new ArrayList<>(reserved.subList(0, roles));
+            for (int i = roles; i < reserved.size(); i++) {
+                botsInConversation.remove(reserved.get(i).getId()); // no role in this script
+            }
+            scriptId = script.getId();
+            recentScriptIds.add(scriptId);
+            if (recentScriptIds.size() > RECENT_HISTORY_SIZE) {
+                recentScriptIds.removeFirst();
+            }
         }
 
-        List<Character> participants = new ArrayList<>(cluster.subList(0, Math.min(clusterSize, script.getParticipantCount())));
-
-        for (Character chr : participants) {
-            botsInConversation.add(chr.getId());
-        }
-
-        recentScriptIds.add(script.getId());
-        if (recentScriptIds.size() > RECENT_HISTORY_SIZE) {
-            recentScriptIds.removeFirst();
-        }
-
-        log("[ConversationManager] Starting '" + script.getId() + "' with " + participants.size() + " bots.");
+        log("[ConversationManager] Starting '" + scriptId + "' with " + participants.size() + " bots.");
 
         if (debugPlayer != null) {
-            debugPlayer.yellowMessage("[ConversationManager] Script: '" + script.getId() + "' | Participants: " + participants.size());
+            debugPlayer.yellowMessage("[ConversationManager] Script: '" + scriptId + "' | Participants: " + participants.size());
             String[] roles = {"A", "B", "C", "D"};
             for (int i = 0; i < participants.size(); i++) {
                 Character p = participants.get(i);
@@ -290,18 +337,21 @@ public class ConversationManager {
             }
         }
 
+        final ConversationScript playing = script;
+        final List<Character> held = participants;
         ExecutorServiceManager.runAsync(() -> {
             try {
-                playConversation(participants, script);
+                playConversation(held, playing);
             } catch (Exception e) {
                 log("[ConversationManager] Conversation playback error: " + e.getMessage());
                 e.printStackTrace();
             } finally {
-                for (Character chr : participants) {
+                for (Character chr : held) {
                     botsInConversation.remove(chr.getId());
                 }
             }
         });
+        return true;
     }
 
     private ConversationScript pickScript(int maxParticipants) {
