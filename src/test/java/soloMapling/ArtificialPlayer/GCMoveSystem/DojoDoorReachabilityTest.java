@@ -69,6 +69,26 @@ class DojoDoorReachabilityTest {
         interval.setConfigClazz("java.lang.Long");
         GameConfig.add(interval);
         org.gms.net.server.Server.getInstance();
+        org.junit.jupiter.api.Assumptions.assumeTrue(wzAvailable(),
+                "Map.wz not resolvable from this working directory (the geometry assertions need the real WZ)");
+    }
+
+    /**
+     * Whether the WZ tree this test measures is present.
+     *
+     * <p>{@code wz/} is not tracked, so a plain checkout (and CI) has no map data. Every
+     * {@code wz}-backed test in this package assumes it in the same way; without the guard these
+     * cases would fail rather than be skipped, and the plugin's own test suite would be red on a
+     * machine that is fine.
+     */
+    static boolean wzAvailable() {
+        try {
+            return org.gms.provider.DataProviderFactory
+                    .getDataProvider(org.gms.provider.wz.WZFiles.MAP)
+                    .getData(BotNavigationMapLoader.getMapName(ROOM)) != null;
+        } catch (Throwable unavailable) {
+            return false;
+        }
     }
 
     @Test

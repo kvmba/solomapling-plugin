@@ -155,9 +155,12 @@ public class SocialHotPotatoManager {
         log("[SocialHotPotato] Stopped.");
     }
 
-    private void scheduleNextTick() {
+    private synchronized void scheduleNextTick() {
         if (!running) return;
         int delay = MIN_INTERVAL_MS + random.nextInt(MAX_INTERVAL_MS - MIN_INTERVAL_MS);
+        // Under the same monitor as start()/stop() so the flag check and the arm are one step:
+        // a tick that read `running` just before stop() otherwise arms the next one after stop()
+        // returned, and the chain it leaves has no owner to cancel it.
         scheduledTask = ExecutorServiceManager.getScheduledExecutorService().schedule(() -> {
             try {
                 tick();
@@ -169,9 +172,10 @@ public class SocialHotPotatoManager {
         }, delay, TimeUnit.MILLISECONDS);
     }
 
-    private void scheduleNextMegaTick() {
+    private synchronized void scheduleNextMegaTick() {
         if (!running) return;
         int delay = MEGA_MIN_INTERVAL_MS + random.nextInt(MEGA_MAX_INTERVAL_MS - MEGA_MIN_INTERVAL_MS);
+        // Same monitor as start()/stop(), same reason as {@link #scheduleNextTick()}.
         megaScheduledTask = ExecutorServiceManager.getScheduledExecutorService().schedule(() -> {
             try {
                 megaTick();
