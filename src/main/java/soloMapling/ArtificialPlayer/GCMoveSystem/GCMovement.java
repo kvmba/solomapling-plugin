@@ -313,6 +313,9 @@ public final class GCMovement {
         st.moveTargetPrecise = true;
         st.moveTargetSource = "gcmove";
         if (changed) {
+            // A replacement goal must be resolved before consuming an old build's result.
+            st.navAwaitingRoute = false;
+            st.navGraphLoad = null;
             st.moveBestDist = Integer.MAX_VALUE;
             st.moveProgressAtMs = MovementClock.nowMs();
             st.moveProgressGoal = null;

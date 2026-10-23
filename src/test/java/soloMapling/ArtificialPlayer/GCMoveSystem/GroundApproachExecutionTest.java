@@ -12,6 +12,7 @@ import java.awt.Point;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.CompletableFuture;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
@@ -192,7 +193,8 @@ class GroundApproachExecutionTest {
         BotNavigationGraph graph = graph(map, true);
         try (var provider = mockStatic(BotNavigationGraphProvider.class, CALLS_REAL_METHODS)) {
             provider.when(() -> BotNavigationGraphProvider.peekBestGraph(map, state.movementProfile)).thenReturn(null);
-            provider.when(() -> BotNavigationGraphProvider.warmGraphAsync(map, state.movementProfile)).thenAnswer(inv -> null);
+            provider.when(() -> BotNavigationGraphProvider.warmGraphAsync(map, state.movementProfile))
+                    .thenReturn(new CompletableFuture<>());
             for (int i = 0; i < 10; i++) coreTick(state, i % 2 == 0);
             assertNotNull(state.moveTarget);
             assertEquals(-29, state.bot.getPosition().x);
@@ -214,6 +216,10 @@ class GroundApproachExecutionTest {
         BotMovementState state = state(map, -29, 100);
         state.moveTarget = new Point(2, 60);
         state.moveTargetPrecise = true;
+        org.gms.server.maps.Portal exit = mock(org.gms.server.maps.Portal.class);
+        when(exit.getPosition()).thenReturn(new Point(-29, 130));
+        when(exit.getId()).thenReturn(7);
+        map.addPortal(exit);
         BotNavigationGraph graph = graph(map, false);
         try (var provider = mockStatic(BotNavigationGraphProvider.class, CALLS_REAL_METHODS);
              var movement = mockStatic(GCMovement.class, CALLS_REAL_METHODS)) {
@@ -408,6 +414,390 @@ class GroundApproachExecutionTest {
             assertTrue(state.tickStopped);
             verify(state.bot, never()).setPosition(any(Point.class));
         }
+    }
+
+    private static void driverTick(BotMovementState state) throws Exception {
+        var method = GCMovementDriver.class.getDeclaredMethod("tick", BotMovementState.class);
+        method.setAccessible(true);
+        method.invoke(null, state);
+        MovementClock.advance(BotPhysicsEngine.cfg.TICK_MS);
+    }
+
+    private static void prepareDriver(BotMovementState state) {
+        state.lastProfileRefreshMs = Long.MAX_VALUE / 4;
+        state.nextPlayerScanMs = Long.MAX_VALUE / 4;
+        state.lastTickSpanMs = BotPhysicsEngine.cfg.TICK_MS;
+        when(state.bot.getJob()).thenReturn(null);
+    }
+
+    @Test
+    void fullDriverResumesTheSameMoveAfterALongGraphBuild() throws Exception {
+        MapleMap map = floor(60, 1.0f);
+        map.getFootholds().insert(new Foothold(new Point(1, 60), new Point(3, 60), 2));
+        BotMovementState state = state(map, -29, 100);
+        prepareDriver(state);
+        state.moveTarget = new Point(2, 60);
+        state.moveTargetPrecise = true;
+        BotNavigationGraph graph = graph(map, true);
+        var build = new CompletableFuture<BotNavigationGraph>();
+        try (var provider = mockStatic(BotNavigationGraphProvider.class, CALLS_REAL_METHODS);
+             var observers = mockStatic(ObserverTracker.class);
+             var movement = mockStatic(GCMovement.class, CALLS_REAL_METHODS)) {
+            observers.when(() -> ObserverTracker.isActiveMap(map.getId())).thenReturn(true);
+            provider.when(() -> BotNavigationGraphProvider.peekBestGraph(map, state.movementProfile)).thenReturn(null);
+            provider.when(() -> BotNavigationGraphProvider.warmGraphAsync(map, state.movementProfile)).thenReturn(build);
+            for (int i = 0; i < 200; i++) {
+                driverTick(state);
+                assertNotNull(state.moveTarget, "a pending build is not a movement stall");
+            }
+            assertEquals(new Point(-29, 130), state.bot.getPosition());
+            build.complete(graph);
+            provider.when(() -> BotNavigationGraphProvider.peekBestGraph(map, state.movementProfile)).thenReturn(graph);
+            provider.when(() -> BotNavigationGraphProvider.peekGraph(map, state.movementProfile)).thenReturn(graph);
+            for (int i = 0; i < 120 && state.moveTarget != null; i++) driverTick(state);
+            assertNull(state.moveTarget);
+            assertEquals(60, state.bot.getPosition().y);
+            assertFalse(state.inAir);
+            movement.verify(() -> GCMovement.abandonMove(state), never());
+            movement.verify(() -> GCMovement.fireArrival(state), times(1));
+        }
+    }
+
+    @Test
+    void aFailedGraphBuildFailsOnceWithoutUpdatingTheBodyAfterTheCallback() throws Exception {
+        MapleMap map = floor(60, 1.0f);
+        map.getFootholds().insert(new Foothold(new Point(1, 60), new Point(3, 60), 2));
+        BotMovementState state = state(map, -29, 100);
+        prepareDriver(state);
+        state.moveTarget = new Point(2, 60);
+        state.moveTargetPrecise = true;
+        var build = new CompletableFuture<BotNavigationGraph>();
+        try (var provider = mockStatic(BotNavigationGraphProvider.class, CALLS_REAL_METHODS);
+             var observers = mockStatic(ObserverTracker.class);
+             var movement = mockStatic(GCMovement.class, CALLS_REAL_METHODS)) {
+            observers.when(() -> ObserverTracker.isActiveMap(map.getId())).thenReturn(true);
+            provider.when(() -> BotNavigationGraphProvider.peekBestGraph(map, state.movementProfile)).thenReturn(null);
+            provider.when(() -> BotNavigationGraphProvider.warmGraphAsync(map, state.movementProfile)).thenReturn(build);
+            driverTick(state);
+            build.completeExceptionally(new IllegalStateException("graph build failed"));
+            movement.when(() -> GCMovement.abandonMove(state)).thenAnswer(inv -> {
+                GCMovementDriver.stop(state);
+                clearInvocations(state.bot);
+                return null;
+            });
+            driverTick(state);
+            assertNull(state.moveTarget);
+            assertTrue(state.tickStopped);
+            movement.verify(() -> GCMovement.abandonMove(state), times(1));
+            verify(state.bot, never()).setPosition(any(Point.class));
+            verify(state.bot, never()).setStance(anyInt());
+        }
+    }
+
+    @Test
+    void aMovementTimeoutFinishesItsBodyUpdatesBeforeTheFailureCallback() throws Exception {
+        MapleMap map = floor(1600, 1.0f);
+        BotMovementState state = state(map, 0, 100);
+        prepareDriver(state);
+        state.moveTarget = new Point(200, 130);
+        state.moveBestDist = 200;
+        state.moveProgressAtMs = MovementClock.nowMs() - 9_000;
+        try (var movement = mockStatic(GCMovement.class, CALLS_REAL_METHODS)) {
+            movement.when(() -> GCMovement.abandonMove(state)).thenAnswer(inv -> {
+                GCMovementDriver.stop(state);
+                clearInvocations(state.bot);
+                return null;
+            });
+            driverTick(state);
+            assertNull(state.moveTarget);
+            assertTrue(state.tickStopped);
+            movement.verify(() -> GCMovement.abandonMove(state), times(1));
+            verify(state.bot, never()).setPosition(any(Point.class));
+            verify(state.bot, never()).setStance(anyInt());
+        }
+    }
+
+    @Test
+    void aNoRouteSearchRescuesADeadPitBeforeTheFailureCallback() throws Exception {
+        MapleMap map = floor(200, 1.0f);
+        map.getFootholds().insert(new Foothold(new Point(-100, -100), new Point(100, -100), 2));
+        BotMovementState state = state(map, 0, 100);
+        state.moveTarget = new Point(0, -100);
+        state.moveTargetPrecise = true;
+        BotNavigationGraph graph = graph(map, false);
+        try (var provider = mockStatic(BotNavigationGraphProvider.class, CALLS_REAL_METHODS);
+             var movement = mockStatic(GCMovement.class, CALLS_REAL_METHODS)) {
+            provider.when(() -> BotNavigationGraphProvider.peekBestGraph(map, state.movementProfile)).thenReturn(graph);
+            provider.when(() -> BotNavigationGraphProvider.peekGraph(map, state.movementProfile)).thenReturn(graph);
+            provider.when(() -> BotNavigationGraphProvider.peekGraph(map)).thenReturn(graph);
+            movement.when(() -> GCMovement.abandonMove(state)).thenAnswer(inv -> {
+                assertEquals(new Point(0, -100), state.bot.getPosition(), "rescue precedes the callback");
+                assertFalse(state.inAir);
+                GCMovementDriver.stop(state);
+                clearInvocations(state.bot);
+                return null;
+            });
+            coreTick(state, true);
+            assertEquals(new Point(0, -100), state.bot.getPosition());
+            assertNull(state.moveTarget);
+            movement.verify(() -> GCMovement.abandonMove(state), times(1));
+            movement.verify(() -> GCMovement.fireArrival(state), never());
+            verify(state.bot, never()).setPosition(any(Point.class));
+        }
+    }
+
+    @Test
+    void theFullDriverRescuesTheRealLpqStage3Pit() throws Exception {
+        org.junit.jupiter.api.Assumptions.assumeTrue(java.nio.file.Files.isDirectory(
+                java.nio.file.Path.of("wz", "Map.wz")), "Map.wz needed");
+        MapleMap map = BotNavigationMapLoader.loadMapGeometry(922010300);
+        BotMovementState state = state(map, 0, 100);
+        prepareDriver(state);
+        BotPhysicsEngine.teleportTo(state, state.bot, new Point(0, 242));
+        BotMovementManager.resetEntryStateAfterTeleport(state);
+        BotNavigationGraphProvider.getGraph(map, state.movementProfile);
+        state.moveTarget = new Point(-260, -160);
+        state.moveTargetPrecise = true;
+        try (var observers = mockStatic(ObserverTracker.class);
+             var movement = mockStatic(GCMovement.class, CALLS_REAL_METHODS)) {
+            observers.when(() -> ObserverTracker.isActiveMap(map.getId())).thenReturn(true);
+            for (int i = 0; i < 40 && state.moveTarget != null; i++) driverTick(state);
+            assertNull(state.moveTarget);
+            assertFalse(state.inAir);
+            assertTrue(state.bot.getPosition().y < 242, "the no-path branch must not strand a bot in the basin");
+            movement.verify(() -> GCMovement.abandonMove(state), times(1));
+            movement.verify(() -> GCMovement.fireArrival(state), never());
+        }
+    }
+
+    @Test
+    void substepDeparturePreservesSpeedAndSpendsOnlyTheRemainingAirTime() {
+        for (int dir : new int[]{-1, 1}) {
+            for (double carry : new double[]{0.0, 2.0, 4.0, 6.0}) {
+                MapleMap map = floor(60, 1.0f);
+                map.getFootholds().insert(new Foothold(new Point(-500, 200), new Point(500, 200), 2));
+                BotMovementState state = state(map, dir * 30, 200);
+                state.hspeed = dir * 2.0;
+                state.groundPhysicsCarryMs = carry;
+                var target = new BotPhysicsEngine.GroundTarget(0, 4);
+                var departure = BotPhysicsEngine.simulateGroundMotion(map, state.bot.getPosition(), state.groundFoothold,
+                        -dir, new BotPhysicsEngine.GroundTravelState(state.physX, state.hspeed, carry),
+                        state.movementProfile, target);
+                assertTrue(departure.lostGround());
+                assertEquals(42.0 + carry, departure.remainingAirMs());
+                state.moveDir = -dir;
+                BotPhysicsEngine.applyGroundMotion(state, state.bot, state.groundFoothold, target);
+                assertTrue(state.inAir);
+                int velocity = (int) Math.round(departure.state().hspeed() * BotPhysicsEngine.cfg.TICK_MS
+                        / MapleMovement.CLIENT_STEP_MS);
+                assertEquals(velocity, state.airVelX, "velocity cannot be the one-pixel departure displacement");
+                double fraction = departure.remainingAirMs() / BotPhysicsEngine.cfg.TICK_MS;
+                double steer = -dir * BotPhysicsEngine.cfg.AIR_CONTROL_ACCEL_PXSS
+                        * Math.pow(BotPhysicsEngine.tickS(), 2) * fraction;
+                assertEquals(departure.state().physX() + (velocity + steer) * fraction, state.physX, 1e-6);
+                assertEquals(130 + 0.5 * BotPhysicsEngine.gravityPerTick() * fraction * fraction, state.physY, 1e-6);
+                assertEquals(BotPhysicsEngine.gravityPerTick() * fraction, state.velY, 1e-5);
+                assertEquals(0.0, state.groundPhysicsCarryMs);
+            }
+        }
+    }
+
+    @Test
+    void aSubstepFallCanLandDuringTheRemainingPartOfTheTick() {
+        MapleMap map = floor(60, 1.0f);
+        map.getFootholds().insert(new Foothold(new Point(34, 131), new Point(200, 131), 2));
+        BotMovementState state = state(map, 30, 200);
+        state.hspeed = 2.0;
+        state.moveDir = -1;
+        var result = BotPhysicsEngine.applyGroundMotion(state, state.bot, state.groundFoothold,
+                new BotPhysicsEngine.GroundTarget(0, 4));
+        assertFalse(state.inAir, "the unused air time must resolve collisions, not just extrapolate x");
+        assertFalse(result.lostGround());
+        assertEquals(131, state.bot.getPosition().y);
+        assertEquals(2, state.groundFoothold.getId());
+        assertTrue(state.hspeed > 0.0, "a partial-tick landing still carries momentum");
+    }
+
+    @Test
+    void aClosestProfileJumpWaitsForTheExactGraphWithoutTimingOut() throws Exception {
+        MapleMap map = floor(60, 1.0f);
+        map.getFootholds().insert(new Foothold(new Point(1, 60), new Point(3, 60), 2));
+        BotMovementState state = state(map, -29, 125);
+        prepareDriver(state);
+        state.moveTarget = new Point(2, 60);
+        state.moveTargetPrecise = true;
+        BotNavigationGraph closest = graph(map, true);
+        var build = new CompletableFuture<BotNavigationGraph>();
+        try (var provider = mockStatic(BotNavigationGraphProvider.class, CALLS_REAL_METHODS);
+             var observers = mockStatic(ObserverTracker.class);
+             var movement = mockStatic(GCMovement.class, CALLS_REAL_METHODS)) {
+            observers.when(() -> ObserverTracker.isActiveMap(map.getId())).thenReturn(true);
+            provider.when(() -> BotNavigationGraphProvider.peekBestGraph(map, state.movementProfile)).thenReturn(closest);
+            provider.when(() -> BotNavigationGraphProvider.peekGraph(map, state.movementProfile)).thenReturn(null);
+            provider.when(() -> BotNavigationGraphProvider.warmGraphAsync(map, state.movementProfile)).thenReturn(build);
+            for (int i = 0; i < 200; i++) {
+                driverTick(state);
+                assertNotNull(state.moveTarget, "a closest-profile jump cannot run the movement stall clock");
+                assertFalse(state.inAir, "the wrong profile's jump must not fire");
+            }
+            assertEquals("jump-graph-warmup", state.lastEdgeBlockReason);
+            build.complete(closest);
+            provider.when(() -> BotNavigationGraphProvider.peekGraph(map, state.movementProfile)).thenReturn(closest);
+            for (int i = 0; i < 120 && state.moveTarget != null; i++) driverTick(state);
+            assertNull(state.moveTarget);
+            assertEquals(60, state.bot.getPosition().y);
+            movement.verify(() -> GCMovement.abandonMove(state), never());
+            movement.verify(() -> GCMovement.fireArrival(state), times(1));
+        }
+    }
+
+    @Test
+    void aClosestProfileBuildFailureEndsTheWaitingJumpBeforeItsCallback() throws Exception {
+        MapleMap map = floor(60, 1.0f);
+        map.getFootholds().insert(new Foothold(new Point(1, 60), new Point(3, 60), 2));
+        BotMovementState state = state(map, -29, 125);
+        prepareDriver(state);
+        state.moveTarget = new Point(2, 60);
+        state.moveTargetPrecise = true;
+        BotNavigationGraph closest = graph(map, true);
+        var build = new CompletableFuture<BotNavigationGraph>();
+        try (var provider = mockStatic(BotNavigationGraphProvider.class, CALLS_REAL_METHODS);
+             var observers = mockStatic(ObserverTracker.class);
+             var movement = mockStatic(GCMovement.class, CALLS_REAL_METHODS)) {
+            observers.when(() -> ObserverTracker.isActiveMap(map.getId())).thenReturn(true);
+            provider.when(() -> BotNavigationGraphProvider.peekBestGraph(map, state.movementProfile)).thenReturn(closest);
+            provider.when(() -> BotNavigationGraphProvider.peekGraph(map, state.movementProfile)).thenReturn(null);
+            provider.when(() -> BotNavigationGraphProvider.warmGraphAsync(map, state.movementProfile)).thenReturn(build);
+            for (int i = 0; i < 30; i++) driverTick(state);
+            build.completeExceptionally(new IllegalStateException("exact graph failed"));
+            movement.when(() -> GCMovement.abandonMove(state)).thenAnswer(inv -> {
+                assertEquals(0.0, state.hspeed, "the moving approach must settle before handover");
+                GCMovementDriver.stop(state);
+                clearInvocations(state.bot);
+                return null;
+            });
+            driverTick(state);
+            assertNull(state.moveTarget);
+            assertTrue(state.tickStopped);
+            verify(state.bot, never()).setPosition(any(Point.class));
+            verify(state.bot, never()).setStance(anyInt());
+            movement.verify(() -> GCMovement.abandonMove(state), times(1));
+        }
+    }
+
+    @Test
+    void replacingTheGoalDoesNotConsumeThePreviousBuildFailure() throws Exception {
+        MapleMap map = floor(60, 1.0f);
+        map.getFootholds().insert(new Foothold(new Point(1, 60), new Point(3, 60), 2));
+        Character bot = state(map, -29, 100).bot;
+        DriverlessMovementState.inject(bot);
+        BotMovementState state = GCMovement.stateOf(bot);
+        prepareDriver(state);
+        var build = new CompletableFuture<BotNavigationGraph>();
+        var failures = new java.util.concurrent.atomic.AtomicInteger();
+        var arrivals = new java.util.concurrent.atomic.AtomicInteger();
+        try (var provider = mockStatic(BotNavigationGraphProvider.class, CALLS_REAL_METHODS);
+             var observers = mockStatic(ObserverTracker.class)) {
+            observers.when(() -> ObserverTracker.isActiveMap(map.getId())).thenReturn(true);
+            provider.when(() -> BotNavigationGraphProvider.peekBestGraph(map, state.movementProfile)).thenReturn(null);
+            provider.when(() -> BotNavigationGraphProvider.warmGraphAsync(map, state.movementProfile)).thenReturn(build);
+            GCMovement.move(bot, 2, 60);
+            driverTick(state);
+            assertTrue(state.navAwaitingRoute);
+            build.completeExceptionally(new IllegalStateException("old build failed"));
+            GCMovement.move(bot, 10, 130, arrivals::incrementAndGet, failures::incrementAndGet);
+            for (int i = 0; i < 100 && state.moveTarget != null; i++) driverTick(state);
+            assertNull(state.moveTarget);
+            assertTrue(Math.abs(bot.getPosition().x - 10) <= 8);
+            assertEquals(1, arrivals.get());
+            assertEquals(0, failures.get(), "an obsolete wait cannot fail the new same-floor move");
+        } finally {
+            GCMovement.clearMoveIntent(bot);
+            DriverlessMovementState.remove(bot.getId());
+        }
+    }
+
+    @Test
+    void aSwimDepartureUsesWaterUnitsAndTheRemainingTickImmediately() {
+        for (boolean lowerFloor : new boolean[]{false, true}) {
+            for (int dir : new int[]{-1, 1}) {
+                for (double carry : new double[]{0.0, 2.0, 4.0, 6.0}) {
+                    MapleMap map = floor(60, 1.0f);
+                    map.setSwim(true);
+                    if (lowerFloor) {
+                        map.getFootholds().insert(new Foothold(new Point(-500, 200), new Point(500, 200), 2));
+                    } else {
+                        // Keep the column open inside the map's standable X bounds, not at a side wall.
+                        map.getFootholds().insert(new Foothold(new Point(-500, 80), new Point(-450, 80), 3));
+                        map.getFootholds().insert(new Foothold(new Point(450, 80), new Point(500, 80), 4));
+                    }
+                    BotMovementState state = state(map, dir * 30, 200);
+                    state.hspeed = dir * 2.0;
+                    state.groundPhysicsCarryMs = carry;
+                    var target = new BotPhysicsEngine.GroundTarget(0, 4);
+                    var departure = BotPhysicsEngine.simulateGroundMotion(map, state.bot.getPosition(), state.groundFoothold,
+                            -dir, new BotPhysicsEngine.GroundTravelState(state.physX, state.hspeed, carry),
+                            state.movementProfile, target);
+                    assertTrue(departure.lostGround());
+                    double elapsed = departure.remainingAirMs() / 1000.0;
+                    var expected = MapleMovement.swimStep(departure.state().hspeed() / 0.008, 0.0, -dir, 0, elapsed);
+                    state.moveDir = -dir;
+                    BotPhysicsEngine.applyGroundMotion(state, state.bot, state.groundFoothold, target);
+                    assertTrue(state.inAir);
+                    assertTrue(state.swimming, "water takes ownership on the departure tick");
+                    assertEquals(0, state.airVelX);
+                    assertEquals(expected.vx(), state.hspeed, 1e-6);
+                    assertEquals(expected.vy(), state.velY, 1e-5);
+                    assertEquals(departure.state().physX() + expected.vx() * elapsed, state.physX, 1e-6);
+                    assertEquals(130 + expected.vy() * elapsed, state.physY, 1e-6);
+                    var next = MapleMovement.swimStep(expected.vx(), expected.vy(), -dir, 0, BotPhysicsEngine.tickS());
+                    BotPhysicsEngine.applySwimMotion(state);
+                    assertEquals(next.vx(), state.hspeed, 1e-6);
+                    assertEquals(next.vy(), state.velY, 1e-4);
+                }
+            }
+        }
+    }
+
+    @Test
+    void theFullDriverEntersWaterOnTheDepartureTick() throws Exception {
+        MapleMap map = floor(60, 1.0f);
+        map.setSwim(true);
+        map.getFootholds().insert(new Foothold(new Point(-500, 200), new Point(500, 200), 2));
+        BotMovementState state = state(map, 30, 200);
+        prepareDriver(state);
+        state.hspeed = 2.0;
+        state.moveTarget = new Point(0, 130);
+        state.moveTargetPrecise = true;
+        try (var observers = mockStatic(ObserverTracker.class)) {
+            observers.when(() -> ObserverTracker.isActiveMap(map.getId())).thenReturn(true);
+            driverTick(state);
+            assertTrue(state.inAir);
+            assertTrue(state.swimming);
+            assertTrue(state.hspeed > 100.0, "swim velocity must be px/s, not zero or px/tick");
+            assertEquals(0, state.airVelX);
+            double beforeY = state.physY;
+            driverTick(state);
+            assertTrue(state.swimming);
+            assertTrue(Math.abs(state.physY - beforeY) < 20.0, "no land-to-water unit spike");
+        }
+    }
+
+    @Test
+    void theWaterFloorClampsASubstepDepartureWithoutAnyFootholdBelow() {
+        MapleMap map = floor(60, 1.0f);
+        map.setSwim(true);
+        map.setMapLineBoundings(-500, 131, -1000, 1000);
+        map.getFootholds().insert(new Foothold(new Point(-500, 80), new Point(-450, 80), 3));
+        map.getFootholds().insert(new Foothold(new Point(450, 80), new Point(500, 80), 4));
+        BotMovementState state = state(map, 30, 200);
+        state.hspeed = 2.0;
+        state.moveDir = -1;
+        BotPhysicsEngine.applyGroundMotion(state, state.bot, state.groundFoothold,
+                new BotPhysicsEngine.GroundTarget(0, 4));
+        assertTrue(state.swimming);
+        assertEquals(131, state.bot.getPosition().y);
+        assertEquals(0.0f, state.velY);
     }
 
     @Test

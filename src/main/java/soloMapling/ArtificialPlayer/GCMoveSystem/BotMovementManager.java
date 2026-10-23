@@ -177,6 +177,7 @@ class BotMovementManager {
         }
 
         entry.movementProfile = updated;
+        entry.navGraphLoad = null;
         clearNavigationState(entry);
         return true;
     }
@@ -194,6 +195,7 @@ class BotMovementManager {
         // GCMoveSystem: grindTarget / fidget are out of scope (pure movement) — dropped.
         entry.attackActionUntilMs = 0L; // a teleport/warp ends any swing that owned the old body
         entry.graphWarmupFallback = false;
+        entry.navGraphLoad = null;
         entry.fallbackSurface = null;
         entry.fallbackApproach = null;
         entry.observedOwnerStepX = 0;
@@ -1111,24 +1113,9 @@ class BotMovementManager {
     static void tickUnstuck(BotMovementState entry) {
         Character bot = entry.bot;
         int walkStep = BotPhysicsEngine.walkStep(bot.getMap(), entry.movementProfile);
-        // Dead-pit self-heal, FIRST: a bot standing on an unescapable surface (no real one-move
-        // exit, no rope, no portal) cannot be rescued by any local action - every hop only reshuffles
-        // it inside the basin, and the hop loop is exactly the reported "fell into the pit and
-        // never recovers". Teleport it to the nearest livable ground and drop the goal so the
-        // brain re-decides a reachable target next tick. (nearestLivableGround can only answer
-        // null on a foothold-less map, in which case the guard could not have fired either.)
-        // Swim maps never enter this branch: the guard's swim rule reads every underwater surface
-        // livable (water is always an exit), so isOnDeadPitFloor answers false there.
-        if (isOnDeadPitFloor(entry, bot)) {
-            Point rescue = nearestLivableGround(bot, entry.movementProfile);
-            clearNavigationState(entry);
-            entry.moveTarget = null;
-            entry.unstuckCooldownMs = delayAfterCurrentTick(5000);
-            if (rescue != null) {
-                BotPhysicsEngine.teleportTo(entry, bot, rescue);
-                BotMovementManager.resetEntryStateAfterTeleport(entry);
-            }
-            broadcastMovement(entry);
+        // Rescue a dead pit before trying a hop that can only land in the same basin.
+        if (recoverDeadPit(entry)) {
+            GCMovementDriver.failMove(entry);
             return;
         }
         // A random-direction hop is a recovery on solid ground, but at a lip whose outward column has
@@ -1179,6 +1166,23 @@ class BotMovementManager {
         clearNavigationState(entry);
         entry.unstuckCooldownMs = delayAfterCurrentTick(5000);
         broadcastMovement(entry);
+    }
+
+    // Shared by stuck recovery and a completed no-route search; callbacks belong to the caller.
+    static boolean recoverDeadPit(BotMovementState entry) {
+        Character bot = entry.bot;
+        if (!isOnDeadPitFloor(entry, bot)) {
+            return false;
+        }
+        Point rescue = nearestLivableGround(bot, entry.movementProfile);
+        if (rescue == null) {
+            return false;
+        }
+        entry.unstuckCooldownMs = delayAfterCurrentTick(5000);
+        BotPhysicsEngine.teleportTo(entry, bot, rescue);
+        resetEntryStateAfterTeleport(entry);
+        broadcastMovement(entry);
+        return true;
     }
 
     /** Whether the bot stands on a surface the livability probe cannot clear (a dead pit). */

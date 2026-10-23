@@ -495,21 +495,7 @@ final class GCMovementDriver {
         if (entry.tickStopped) return;
         // Abandon a move target the bot can't make progress toward, so it never tries forever.
         if (giveUpStalledMove(entry)) {
-            // Settle ONLY a genuinely grounded bot. An airborne or climbing bot must just fall
-            // through: idleOnGround clears inAir/climbing WITHOUT starting a fall or moving the
-            // bot, so a climber (or a mid-hop bot) hit by the abandon was left standing in the air
-            // with every recovery net blind - the frozen-air watchdog requires inAir (just cleared)
-            // and the stuck hop is exempted while no moveTarget/navEdge remains. It then hung in
-            // the stand pose until some later command happened to launch it again. Clearing the
-            // target is the whole abandon: inAir/climbing themselves keep hasGoal true below, so
-            // the normal physics either lands the fall or holds the legitimate rope hang on the
-            // next tick.
-            if (entry.inAir || entry.climbing) {
-                return;
-            }
-            BotPhysicsEngine.idleOnGround(entry, bot);
-            broadcastIfObserved(entry);
-            return;
+            return; // failure callbacks have already received the fully updated body
         }
 
         Point target = resolveTarget(entry, bot);
@@ -676,6 +662,20 @@ final class GCMovementDriver {
         // closer to the goal still resets the clock below, so long legitimate arcs are untouched.
         Point bp = entry.bot.getPosition();
         long now = MovementClock.nowMs();
+        if (entry.navGraphLoad != null && !entry.inAir && !entry.climbing
+                && (entry.navAwaitingRoute || (entry.navEdge != null
+                && entry.navEdge.type == BotNavigationGraph.EdgeType.JUMP))) {
+            if (entry.navGraphLoad.isCompletedExceptionally()) {
+                BotPhysicsEngine.idleOnGround(entry, entry.bot);
+                broadcastIfObserved(entry);
+                failMove(entry);
+                return true;
+            }
+            // Construction is not movement stagnation. Also grant the completed build its
+            // first navigation tick: the driver checks this clock before resolving the graph.
+            entry.moveProgressAtMs = now;
+            return false;
+        }
         if (entry.moveProgressAtMs == 0L) {
             entry.moveProgressAtMs = now;
         }
@@ -728,12 +728,16 @@ final class GCMovementDriver {
         // ground-probed side bias the grind recovery uses, so the bot lands and replans normally.
         if (entry.climbing) {
             BotMovementManager.dismountTowardGround(entry);
+        } else if (!entry.inAir) {
+            BotPhysicsEngine.idleOnGround(entry, entry.bot);
+            broadcastIfObserved(entry);
         }
         failMove(entry);
         return true;
     }
 
     static void failMove(BotMovementState entry) {
+        entry.navGraphLoad = null;
         entry.moveTarget = null;
         entry.moveTargetPrecise = false;
         entry.moveBestDist = Integer.MAX_VALUE;

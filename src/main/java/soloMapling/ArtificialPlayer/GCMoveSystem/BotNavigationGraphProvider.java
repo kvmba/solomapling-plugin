@@ -49,7 +49,7 @@ final class BotNavigationGraphProvider {
     //     inside an 8.93 x fs px/s band (no walkSpeed air cap; counter-strafe pins at the
     //     band edge) and no-input flight drags 1 x fs (100 x fs at terminal fall). Committed
     //     arcs still fly the launch key held, so constant-stepX arc sims stay exact.
-    private static final int GRAPH_VERSION = 71; // Walk-off edges include the actual grounded departure.
+    private static final int GRAPH_VERSION = 72; // Walk-off arcs carry departure velocity, not tick displacement.
 
     // Drop caps for organic descent (re-added; v57 had removed the old single cap). A bot must
     // never plummet down a whole vertical map. Two distinct downward moves, treated differently:
@@ -495,16 +495,13 @@ final class BotNavigationGraphProvider {
         return exact != null ? exact : peekClosestGraph(map, movementProfile);
     }
 
-    static void warmGraphAsync(MapleMap map, BotMovementProfile movementProfile) {
+    static CompletableFuture<BotNavigationGraph> warmGraphAsync(MapleMap map, BotMovementProfile movementProfile) {
         if (map == null) {
-            return;
+            return CompletableFuture.completedFuture(null);
         }
         movementProfile = canonicalProfile(map, movementProfile);
         GraphCacheKey key = GraphCacheKey.from(map.getId(), movementProfile);
-        if (GRAPHS.containsKey(key)) {
-            return;
-        }
-        getOrStartGraphLoad(map, movementProfile, key, true);
+        return getOrStartGraphLoad(map, movementProfile, key, true);
     }
 
     /*

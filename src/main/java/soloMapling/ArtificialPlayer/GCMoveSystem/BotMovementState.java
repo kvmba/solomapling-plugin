@@ -8,6 +8,7 @@ import org.gms.server.maps.Rope;
 import java.awt.Point;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.ThreadLocalRandom;
 
@@ -258,6 +259,7 @@ class BotMovementState {
     int navBlockedPosY = Integer.MIN_VALUE;
     boolean graphWarmupFallback = false;
     boolean navAwaitingRoute = false;
+    CompletableFuture<BotNavigationGraph> navGraphLoad;
     BotFallbackMovementManager.WalkSurface fallbackSurface;
     BotFallbackMovementManager.UpwardApproach fallbackApproach;
     int observedOwnerStepX = 0;

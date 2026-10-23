@@ -134,6 +134,7 @@ final class BotNavigationManager {
             // would otherwise suppress the stuck watchdog for the rest of the session, since only the
             // JUMP path ever visits the raiser.
             entry.launchReadyAwaiting = false;
+            entry.navGraphLoad = null;
             Character bot = entry.bot;
             if (bot.getMap().getFootholds() == null) {
                 entry.graphWarmupFallback = false;
@@ -154,7 +155,7 @@ final class BotNavigationManager {
 
             BotNavigationGraph graph = resolveActiveGraph(bot.getMap(), entry.movementProfile);
             if (graph == null) {
-                BotNavigationGraphProvider.warmGraphAsync(bot.getMap(), entry.movementProfile);
+                entry.navGraphLoad = BotNavigationGraphProvider.warmGraphAsync(bot.getMap(), entry.movementProfile);
                 entry.graphWarmupFallback = true;
                 notifyWarmup(entry, bot);
                 entry.lastNavDecision = "graph-warmup";
@@ -167,7 +168,7 @@ final class BotNavigationManager {
                 return new NavigationDirective(fallbackTarget, false);
             }
             if (BotNavigationGraphProvider.peekGraph(bot.getMap(), entry.movementProfile) == null) {
-                BotNavigationGraphProvider.warmGraphAsync(bot.getMap(), entry.movementProfile);
+                entry.navGraphLoad = BotNavigationGraphProvider.warmGraphAsync(bot.getMap(), entry.movementProfile);
                 entry.lastNavDecision = "graph-fallback-profile";
             }
             entry.graphWarmupFallback = false;
@@ -231,15 +232,17 @@ final class BotNavigationManager {
                     // An absent crossing is not a same-surface walk. Wait for an AI/exact-graph
                     // decision; only a completed search on the exact graph can fail the move.
                     BotMovementManager.tickGrounded(entry, null);
-                    Point heldPosition = bot.getPosition();
-                    if (runAiTick && startRegionId >= 0 && targetRegionId >= 0
-                            && BotNavigationGraphProvider.peekGraph(bot.getMap(), entry.movementProfile) == graph
-                            && entry.moveTarget != null) {
-                        GCMovementDriver.failMove(entry);
+                    if (runAiTick && !entry.inAir && !entry.climbing) {
+                        boolean rescued = BotMovementManager.recoverDeadPit(entry);
+                        if (rescued || (entry.moveTarget != null && startRegionId >= 0 && targetRegionId >= 0
+                                && BotNavigationGraphProvider.peekGraph(bot.getMap(), entry.movementProfile) == graph)) {
+                            Point heldPosition = bot.getPosition();
+                            // Complete body updates before invoking user callbacks.
+                            GCMovementDriver.failMove(entry);
+                            return new NavigationDirective(heldPosition, true);
+                        }
                     }
-                    // The failure callback can disable, warp or re-command the bot. It
-                    // is the last body-owning operation of this tick.
-                    return new NavigationDirective(heldPosition, true);
+                    return new NavigationDirective(bot.getPosition(), true);
                 }
                 return new NavigationDirective(rawTargetPos, false);
             }
