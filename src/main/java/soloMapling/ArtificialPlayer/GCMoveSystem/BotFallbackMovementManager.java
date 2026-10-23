@@ -10,7 +10,6 @@ import java.awt.*;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
-import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -21,14 +20,23 @@ final class BotFallbackMovementManager {
     private BotFallbackMovementManager() {
     }
 
-    // Reach of the launch-target scan around the bot's X (px each side) and the sweep step. Bounds
-    // nearestUpwardRopeLaunch: the fallback engine runs per grounded tick while a graph bakes, so
-    // the scan must stay bounded — but tall PQ rooms are ~530px wide and the ladder can sit at the
-    // far end from where a bot spawned, so the radius must cover the whole room.
+    // Bounded launch scan on the current floor; wide PQ rooms need the far-side ladder too.
     private static final int ROPE_LAUNCH_SCAN_RADIUS_PX = 400;
     private static final int ROPE_LAUNCH_SCAN_STEP_PX = 6;
 
+    // One validated local leg survives moving-mob re-aims and physics ticks. Re-scan only
+    // after leaving its surface or changing the destination floor, map or movement profile.
+    record UpwardApproach(MapleMap map, BotMovementProfile profile, int targetY, int fromX,
+                          Set<Integer> sourceFootholds, Point launch, int stepX,
+                          Rope rope, int landingFootholdId) {
+    }
+
     static Point resolveSteeringTarget(BotMovementState entry, Point botPos, Point targetPos) {
+        UpwardApproach approach = upwardApproach(entry, botPos, targetPos);
+        if (approach != null && approach.launch() != null) {
+            entry.navPreciseTarget = true;
+            return approach.launch();
+        }
         Rope rope = selectNearbyRope(entry, botPos, targetPos);
         Point ledgeTarget = resolveFallbackLedgeTarget(entry, botPos, targetPos, rope);
         if (ledgeTarget != null) {
@@ -37,26 +45,15 @@ final class BotFallbackMovementManager {
         if (rope != null) {
             return new Point(rope.x(), botPos.y);
         }
-        // No actionable rope within arm's reach, but the target sits far above: on a
-        // vertically-stacked PQ tower the climb is a CHAIN of rope legs (LPQ stage 1 needs two
-        // ladders before the first mob floor), so the nearest VALIDATED launch — a spot the
-        // grab simulator confirms can catch some upward rope — is the right steer. Without this
-        // the bot paces its floor under a target it can only reach by walking to a ladder first
-        // (the "walks left-right, never climbs" stage-1 report). Transient by construction: the
-        // baked graph replaces this whole heuristic once it lands.
-        if (targetPos.y < botPos.y - Math.max(BotMovementManager.cfg.JUMP_Y_THRESH * 2, 60)) {
-            Point launch = nearestUpwardRopeLaunch(entry.bot.getMap(), botPos, entry.movementProfile);
-            if (launch != null) {
-                return launch;
-            }
-        }
         return targetPos;
     }
 
     static boolean tryImmediateAction(BotMovementState entry, Point botPos, Point targetPos) {
         Character bot = entry.bot;
         MapleMap map = bot.getMap();
-        Rope rope = selectNearbyRope(entry, botPos, targetPos);
+        UpwardApproach approach = upwardApproach(entry, botPos, targetPos);
+        Rope rope = approach != null && approach.rope() != null
+                ? approach.rope() : selectNearbyRope(entry, botPos, targetPos);
         if (rope != null) {
             if (canDirectlyAttachToRope(botPos, rope)) {
                 int attachY = Math.max(rope.topY(), Math.min(botPos.y, rope.bottomY()));
@@ -69,9 +66,32 @@ final class BotFallbackMovementManager {
             // the same simulation the launched jump follows, so its verdict is exact. The old
             // crude 2*walkStep range gate rejected arcs the physics proves (a 17px stand-off
             // from an overhung ladder), which left the bot steering instead of jumping.
-            int ropeDx = rope.x() - botPos.x;
-            if (BotPhysicsEngine.canReachRopeFromGround(map, botPos, rope, entry.movementProfile)) {
+            int ropeDx = approach != null && approach.rope() == rope
+                    ? approach.stepX() : Integer.signum(rope.x() - botPos.x)
+                            * BotPhysicsEngine.walkStep(map, entry.movementProfile);
+            if (BotPhysicsEngine.simulateGroundJumpRopeGrab(map, botPos, ropeDx, rope,
+                    entry.movementProfile) != null) {
                 BotMovementManager.initiateRopeJump(entry, bot, ropeDx);
+                entry.fixedAirArc = true;
+                return true;
+            }
+        }
+
+        if (approach != null && approach.launch() != null && approach.rope() == null) {
+            BotPhysicsEngine.PostLandingJump landing = BotPhysicsEngine.simulateJumpLandingWithPostLandingTicks(
+                    map, botPos, approach.stepX(), entry.movementProfile, 3);
+            if (landing != null && !landing.lostGround()
+                    && landing.finalFoothold().getId() == approach.landingFootholdId()) {
+                if (approach.stepX() == 0 && BotPhysicsEngine.slipperyGround(map)
+                        && BotPhysicsEngine.carriedAirVelX(map, entry) != 0) {
+                    entry.launchReadyAwaiting = true;
+                    entry.moveDir = 0;
+                    BotPhysicsEngine.applyGroundMotion(entry, bot, BotPhysicsEngine.standingFoothold(entry));
+                    BotMovementManager.broadcastMovement(entry);
+                    return true; // shed the slide before flying the validated vertical arc
+                }
+                BotMovementManager.initiateJump(entry, bot, approach.stepX());
+                entry.fixedAirArc = true;
                 return true;
             }
         }
@@ -93,8 +113,10 @@ final class BotFallbackMovementManager {
         }
 
         Point steeringTarget = rope == null ? targetPos : new Point(rope.x(), targetPos.y);
-        int stepX = BotMovementManager.resolveGroundStepX(entry, botPos, steeringTarget,
-                BotMovementManager.cfg.STOP_DIST, BotMovementManager.cfg.FOLLOW_DIST);
+        // A feasibility probe must not mutate walk hysteresis / braking for a different
+        // target. The actual local waypoint drives those once, in planGroundAction.
+        int stepX = Integer.signum(steeringTarget.x - botPos.x)
+                * BotPhysicsEngine.walkStep(map, entry.movementProfile);
         if (stepX == 0 || BotPhysicsEngine.canWalkGroundStep(map, botPos, stepX)) {
             return false;
         }
@@ -158,35 +180,66 @@ final class BotFallbackMovementManager {
                         BotMovementCapabilities.of(entry.bot));
     }
 
-    /*
-     * Nearest standing spot this bot can launch an UPWARD rope-grab from, or null when the
-     * whole map has no valid launch. The launch candidates reuse the graph builder's own anchor
-     * generator (feature anchors + endpoints, exactly the seeds its launch windows are grown
-     * from), and each candidate is validated with the runtime grab simulator — the same
-     * predictor the eventual rope jump fires from, so an approved target is one the jump
-     * really lands. Standing rows are NOT restricted to the bot's own floor: on a stacked tower
-     * the validated launch is the first leg of the climb chain, and the walk layer naturally
-     * clamps the steer onto real ground under it. No cache: the fallback engine only runs while
-     * a graph is baking (its warmup executors are the bottleneck anyway), and the scan is
-     * bounded by ROPE_LAUNCH_SCAN_RADIUS_PX.
-     */
-    private static Point nearestUpwardRopeLaunch(MapleMap map, Point botPos,
-                                                 BotMovementProfile profile) {
-        // Nearest-first: one simulator pass per candidate until the first valid launch, not a
-        // full-map validation sweep, per grounded tick.
-        List<Point> anchors = grabLaunchAnchors(map, botPos, profile);
-        anchors.sort((a, b) -> Integer.compare(
-                Math.abs(a.x - botPos.x), Math.abs(b.x - botPos.x)));
-        for (Point anchor : anchors) {
-            if (!walkableToSameRow(map, botPos, anchor)) {
-                continue;
-            }
-            if (!ropeGrabReachableFrom(map, anchor, profile)) {
-                continue;
-            }
-            return anchor;
+    private static UpwardApproach upwardApproach(BotMovementState entry, Point botPos, Point targetPos) {
+        if (entry.bot.getMap().isSwim()
+                || targetPos.y >= botPos.y - BotMovementManager.cfg.JUMP_Y_THRESH) {
+            entry.fallbackApproach = null;
+            return null;
         }
-        return null;
+        MapleMap map = entry.bot.getMap();
+        Foothold standing = BotPhysicsEngine.standingFoothold(entry);
+        UpwardApproach cached = entry.fallbackApproach;
+        if (cached != null && cached.map() == map && cached.profile().equals(entry.movementProfile)
+                && cached.targetY() == targetPos.y && standing != null
+                && cached.sourceFootholds().contains(standing.getId())
+                && Math.abs(cached.fromX() - botPos.x) <= ROPE_LAUNCH_SCAN_RADIUS_PX / 2) {
+            return cached;
+        }
+
+        Set<Integer> source = sameRowFootholds(entry.fhIndex, standing);
+        List<Point> anchors = grabLaunchAnchors(map, botPos, entry.movementProfile);
+        anchors.removeIf(anchor -> {
+            Foothold foothold = BotPhysicsEngine.findGroundFoothold(map, anchor);
+            return foothold == null || !source.contains(foothold.getId());
+        });
+        anchors.addFirst(new Point(botPos));
+        anchors.sort((a, b) -> Integer.compare(Math.abs(a.x - botPos.x), Math.abs(b.x - botPos.x)));
+        int step = BotPhysicsEngine.walkStep(map, entry.movementProfile);
+        int ropeReach = BotPhysicsEngine.maxRopeGrabSimulationHorizontalTravel(map, entry.movementProfile);
+        // Prefer the tower's rope chain when available; every launch uses this bot's profile.
+        for (Point anchor : anchors) {
+            for (Rope rope : map.getRopes()) {
+                if (rope.topY() >= anchor.y || Math.abs(rope.x() - anchor.x) > ropeReach) {
+                    continue;
+                }
+                int stepX = Integer.signum(rope.x() - anchor.x) * step;
+                if (BotPhysicsEngine.simulateGroundJumpRopeGrab(map, anchor, stepX, rope,
+                        entry.movementProfile) != null) {
+                    return entry.fallbackApproach = new UpwardApproach(map, entry.movementProfile,
+                            targetPos.y, botPos.x, source, anchor, stepX, rope, -1);
+                }
+            }
+        }
+        // Flat ground below the target is not a reason to keep walking. Reach the next
+        // higher shelf, including a vertical hop or a hop temporarily away from the mob x.
+        int[] jumpSteps = {0, -step, step};
+        for (Point anchor : anchors) {
+            for (int stepX : jumpSteps) {
+                BotPhysicsEngine.PostLandingJump jump = BotPhysicsEngine.simulateJumpLandingWithPostLandingTicks(
+                        map, anchor, stepX, entry.movementProfile, 3);
+                if (jump == null || jump.lostGround() || source.contains(jump.finalFoothold().getId())
+                        || jump.finalPoint().y >= anchor.y - BotPhysicsEngine.cfg.MAX_SNAP_DROP
+                        || Math.abs(jump.finalPoint().y - targetPos.y) >= Math.abs(anchor.y - targetPos.y)
+                        || !DeadPitGuard.isLivableLanding(map, jump.finalPoint(), entry.movementProfile,
+                                BotMovementCapabilities.of(entry.bot))) {
+                    continue;
+                }
+                return entry.fallbackApproach = new UpwardApproach(map, entry.movementProfile,
+                        targetPos.y, botPos.x, source, anchor, stepX, null, jump.finalFoothold().getId());
+            }
+        }
+        return entry.fallbackApproach = new UpwardApproach(map, entry.movementProfile,
+                targetPos.y, botPos.x, source, null, 0, null, -1);
     }
 
     /*
@@ -226,82 +279,28 @@ final class BotFallbackMovementManager {
         return surface != null ? surface : new Point(x, fh.getY1());
     }
 
-    /* True when the bot standing at botPos can reach the anchor's column by GROUND travel:
-     * the anchor must sit at the bot's own height (within snap tolerance) on the same connected
-     * ledge row (footholds linked by prev/next at one Y — the walk edge grouping the builder
-     * uses). A launch anchor on another row is a LATER leg of the climb (itself reached by a
-     * rope, i.e. not walkable), so steering at it would grind the bot into a wall. */
-    private static boolean walkableToSameRow(MapleMap map, Point botPos, Point anchor) {
-        if (Math.abs(anchor.y - botPos.y) > BotPhysicsEngine.cfg.MAX_SNAP_DROP) {
-            return false;
-        }
-        Foothold current = BotPhysicsEngine.findGroundFoothold(map, botPos);
-        Foothold target = BotPhysicsEngine.findGroundFoothold(map, anchor);
-        if (current == null || target == null) {
-            return false;
-        }
-        if (target.getId() == current.getId()) {
-            return true;
-        }
-        if (target.getY1() != current.getY1() || target.getY2() != current.getY2()) {
-            return false;
-        }
+    private static Set<Integer> sameRowFootholds(Map<Integer, Foothold> byId, Foothold current) {
         Deque<Integer> queue = new ArrayDeque<>();
         Set<Integer> seen = new HashSet<>();
+        if (current == null) {
+            return seen;
+        }
         queue.add(current.getId());
         seen.add(current.getId());
-        Map<Integer, Foothold> byId = new HashMap<>();
-        for (Foothold fh : map.getFootholds().getAllFootholds()) {
-            byId.put(fh.getId(), fh);
-        }
         while (!queue.isEmpty()) {
             Foothold fh = byId.get(queue.poll());
-            if (fh == null) {
-                continue;
-            }
-            if (fh.getId() == target.getId()) {
-                return true;
-            }
             for (int nextId : new int[]{fh.getNext(), fh.getPrev()}) {
-                // >0, not !=0: WZ authors 0 for "no link" and this graph's ids are 1-based, so
-                // a bare truthiness test would treat id 0 as a real foothold (none exists) but
-                // a -1 sentinel would loop forever on absent links. prev/next may also name a
-                // differently-sloped neighbour (e.g. the ground row's edge fh linking the wall
-                // strip above), so the BFS keeps the SAME-ROW gate: only walk links whose row
-                // equals the target's.
                 Foothold next = nextId > 0 ? byId.get(nextId) : null;
-                if (next == null || !seen.add(next.getId())) {
+                if (next == null || next.isWall() || seen.contains(nextId)
+                        || next.getY1() != current.getY1() || next.getY2() != current.getY2()
+                        || !BotPhysicsEngine.canWalkAcrossFootholds(fh, next)) {
                     continue;
                 }
-                if (next.getY1() != current.getY1() || next.getY2() != current.getY2()) {
-                    continue;
-                }
+                seen.add(nextId);
                 queue.add(next.getId());
             }
         }
-        return false;
-    }
-
-    /* True when a jump launched from anchor can catch some rope ABOVE the anchor: the first leg
-     * of the climb chain. Verdict comes from the TRAJECTORY simulator only — the same sim the
-     * rope jump fires at runtime. (canReachRopeFromGround is a reach-ratio heuristic that is
-     * deliberately looser than the arc: it passes points whose real jump sails past the ladder,
-     * e.g. x=-45 for the stage-1 overhung ladder whose grab window ends at x=-55. A heuristic
-     * pass here steers the bot NEXT to the window and it grinds one launch short forever.) */
-    private static boolean ropeGrabReachableFrom(MapleMap map, Point anchor,
-                                                 BotMovementProfile profile) {
-        int jumpStep = BotPhysicsEngine.walkStep(map, profile);
-        for (Rope rope : map.getRopes()) {
-            if (rope.topY() >= anchor.y) {
-                continue; // does not rise above the anchor: not an upward leg
-            }
-            for (int stepX : new int[]{-jumpStep, 0, jumpStep}) {
-                if (BotPhysicsEngine.simulateGroundJumpRopeGrab(map, anchor, stepX, rope) != null) {
-                    return true;
-                }
-            }
-        }
-        return false;
+        return seen;
     }
 
     private static Rope selectNearbyRope(BotMovementState entry, Point botPos, Point targetPos) {

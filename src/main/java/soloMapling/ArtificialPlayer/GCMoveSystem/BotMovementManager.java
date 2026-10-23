@@ -190,6 +190,7 @@ class BotMovementManager {
         // GCMoveSystem: grindTarget / fidget are out of scope (pure movement) — dropped.
         entry.attackActionUntilMs = 0L; // a teleport/warp ends any swing that owned the old body
         entry.graphWarmupFallback = false;
+        entry.fallbackApproach = null;
         entry.observedOwnerStepX = 0;
         entry.observedOwnerStepY = 0;
         clearNavigationState(entry);
@@ -799,6 +800,7 @@ class BotMovementManager {
                     return;
                 }
                 targetPos = BotFallbackMovementManager.resolveSteeringTarget(entry, botPos, targetPos);
+                entry.navTargetPos = targetPos;
             }
             MoveAction action = planGroundAction(entry, currentFh, botPos, targetPos);
             applyGroundAction(entry, currentFh, action);
@@ -867,7 +869,10 @@ class BotMovementManager {
 
     private static MoveAction planGroundAction(BotMovementState entry, Foothold currentFh, Point botPos, Point targetPos) {
         boolean directionalDrop = isDirectionalDropEdge(entry.navEdge);
-        int stopDist = directionalDrop ? 0 : entry.navPreciseTarget ? preciseNavStopDist(entry.navEdge) : cfg.STOP_DIST;
+        boolean fallbackLaunch = entry.graphWarmupFallback && entry.fallbackApproach != null
+                && entry.fallbackApproach.launch() != null;
+        int stopDist = directionalDrop || fallbackLaunch ? 0
+                : entry.navPreciseTarget ? preciseNavStopDist(entry.navEdge) : cfg.STOP_DIST;
         // No hysteresis when navigating to an edge — always move toward the waypoint
         int followDist = directionalDrop ? 0
                 : (entry.navEdge != null || entry.navPreciseTarget) ? stopDist : cfg.FOLLOW_DIST;

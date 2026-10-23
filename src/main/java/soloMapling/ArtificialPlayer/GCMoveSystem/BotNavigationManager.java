@@ -160,6 +160,10 @@ final class BotNavigationManager {
                 entry.lastNavDecision = "graph-warmup";
                 clearNavigation(entry);
                 Point fallbackTarget = rawTargetPos != null ? new Point(rawTargetPos) : bot.getPosition();
+                if (entry.climbing && entry.climbRope != null) {
+                    entry.navTargetPos = new Point(entry.climbRope.x(),
+                            Math.clamp(fallbackTarget.y, entry.climbRope.topY(), entry.climbRope.bottomY()));
+                }
                 return new NavigationDirective(fallbackTarget, false);
             }
             if (BotNavigationGraphProvider.peekGraph(bot.getMap(), entry.movementProfile) == null) {
@@ -167,6 +171,7 @@ final class BotNavigationManager {
                 entry.lastNavDecision = "graph-fallback-profile";
             }
             entry.graphWarmupFallback = false;
+            entry.fallbackApproach = null;
             if (entry.navGraph != graph) {
                 // Served graph swapped (exact-profile build finished, or a different closest
                 // fallback won): committed edges were calibrated against the old instance —

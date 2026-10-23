@@ -795,9 +795,10 @@ final class BotPhysicsEngine {
             int probeY = Math.max(currentPos.y, baseY + 1);
             snappedPoint = findGroundPoint(map, new Point(nextX, probeY));
             lostGround = snappedPoint == null || snappedPoint.y > baseY + cfg.MAX_SNAP_DROP;
+            // The foothold must own this exact surface, not the floor below it.
             snappedFoothold = snappedPoint == null || map.getFootholds() == null
                     ? null
-                    : findBelowIndexed(map, new Point(nextX, snappedPoint.y + 1));
+                    : findBelowIndexed(map, snappedPoint);
         }
 
         return new GroundStepPreview(baseY, snappedPoint, snappedFoothold, lostGround, false);

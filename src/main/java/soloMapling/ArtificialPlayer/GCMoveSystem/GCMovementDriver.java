@@ -683,8 +683,8 @@ final class GCMovementDriver {
         // distance to moveTarget itself, so a route that closes on the final goal is never cut
         // off. The second is needed because a committed nav edge may legitimately walk AWAY from
         // moveTarget first - the Tower's Maze rope walk climbs to the authored jump-off anchor
-        // before it can cross to a side ledge, and a detour to a portal does the same. While an
-        // edge is committed, closing on that edge's own waypoint therefore counts as progress
+        // before it can cross to a side ledge, and a detour to a portal does the same. Closing
+        // on the committed edge's or warmup approach's waypoint therefore counts as progress
         // too. The clock is shared, so a stall has to fail BOTH measures before the move is
         // abandoned; a new waypoint only re-baselines its distance and never renews the clock,
         // so a route that merely churns between edges still runs out of time as before.
@@ -693,9 +693,11 @@ final class GCMovementDriver {
         if (progressed) {
             entry.moveBestDist = distTarget;
         }
-        Point waypoint = (entry.navEdge != null && entry.navTargetPos != null) ? entry.navTargetPos : null;
+        // Warmup routes have no graph edge, but their validated launch / rope endpoint is
+        // just as much a waypoint. Walking away from the mob to its ladder is real progress.
+        Point waypoint = entry.navEdge != null || entry.graphWarmupFallback ? entry.navTargetPos : null;
         if (waypoint == null) {
-            entry.moveProgressGoal = null;      // no committed edge: the target measure alone owns the verdict
+            entry.moveProgressGoal = null;
             entry.navProgressBestDist = Integer.MAX_VALUE;
         } else {
             int distWaypoint = Math.abs(bp.x - waypoint.x) + Math.abs(bp.y - waypoint.y);
