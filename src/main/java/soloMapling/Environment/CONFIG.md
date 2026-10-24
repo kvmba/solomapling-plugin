@@ -75,10 +75,3 @@ Resolution matches BeiDou scripts: localized pack first, then English fallback. 
 ```
 
 `reload` re-reads YAML but does not despawn bots already online — restart (or a full environment load) to apply new counts.
-
-## Verify
-
-```bash
-cd /path/to/BeiDou-Server
-mvn -pl solomapling-plugin -am test -Dtest=EnvironmentPopulationConfigTest -Dsurefire.failIfNoSpecifiedTests=false
-```
