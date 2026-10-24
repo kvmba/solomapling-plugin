@@ -10,6 +10,7 @@ import java.awt.*;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -24,9 +25,8 @@ final class BotFallbackMovementManager {
     private static final int ROPE_LAUNCH_SCAN_RADIUS_PX = 400;
     private static final int ROPE_LAUNCH_SCAN_STEP_PX = 6;
 
-    // One validated local leg survives moving-mob re-aims and physics ticks. Re-scan only
-    // after leaving its surface or changing the destination floor, map or movement profile.
-    record UpwardApproach(MapleMap map, BotMovementProfile profile, int targetY, int fromX,
+    // One validated shelf/rope approach survives patrol movement and physics ticks.
+    record UpwardApproach(MapleMap map, BotMovementProfile profile, Point target, int fromX,
                           Set<Integer> sourceFootholds, Point launch, int stepX,
                           Rope rope, int landingFootholdId) {
     }
@@ -38,7 +38,7 @@ final class BotFallbackMovementManager {
         UpwardApproach approach = upwardApproach(entry, botPos, targetPos);
         if (approach != null) {
             entry.navPreciseTarget = approach.launch() != null;
-            // No local ascent was found, not proof of global unreachability. Wait for the
+            // No local connection was found, not proof of global unreachability. Wait for the
             // graph instead of pretending the upstairs target's x is a ground waypoint.
             return approach.launch();
         }
@@ -57,8 +57,7 @@ final class BotFallbackMovementManager {
         Character bot = entry.bot;
         MapleMap map = bot.getMap();
         UpwardApproach approach = upwardApproach(entry, botPos, targetPos);
-        Rope rope = approach != null && approach.rope() != null
-                ? approach.rope() : selectNearbyRope(entry, botPos, targetPos);
+        Rope rope = approach != null ? approach.rope() : selectNearbyRope(entry, botPos, targetPos);
         if (rope != null) {
             if (canDirectlyAttachToRope(botPos, rope)) {
                 int attachY = Math.max(rope.topY(), Math.min(botPos.y, rope.bottomY()));
@@ -190,7 +189,7 @@ final class BotFallbackMovementManager {
 
     private static UpwardApproach upwardApproach(BotMovementState entry, Point botPos, Point targetPos) {
         if (entry.bot.getMap().isSwim()
-                || targetPos.y >= botPos.y - BotMovementManager.cfg.JUMP_Y_THRESH) {
+                || targetPos.y - botPos.y > BotNavigationGraphProvider.DOWN_JUMP_MAX_DROP_PX) {
             entry.fallbackApproach = null;
             return null;
         }
@@ -200,16 +199,20 @@ final class BotFallbackMovementManager {
             entry.fallbackApproach = null;
             return null; // walking uphill on one connected surface needs no ascent action
         }
+        boolean targetAbove = targetPos.y < botPos.y - BotMovementManager.cfg.JUMP_Y_THRESH;
         UpwardApproach cached = entry.fallbackApproach;
         if (cached != null && cached.map() == map && cached.profile().equals(entry.movementProfile)
-                && cached.targetY() == targetPos.y && standing != null
+                && cached.target().y == targetPos.y
+                && Math.abs(cached.target().x - targetPos.x) <= ROPE_LAUNCH_SCAN_RADIUS_PX / 2
+                && standing != null
                 && cached.sourceFootholds().contains(standing.getId())
                 && Math.abs(cached.fromX() - botPos.x) <= ROPE_LAUNCH_SCAN_RADIUS_PX / 2) {
-            return cached;
+            return cached.launch() != null || targetAbove ? cached : null;
         }
 
         Set<Integer> source = sourceFootholds(entry, standing);
-        List<Point> anchors = grabLaunchAnchors(map, botPos, entry.movementProfile);
+        List<Point> nearbyAnchors = grabLaunchAnchors(map, botPos, entry.movementProfile);
+        List<Point> anchors = new ArrayList<>(nearbyAnchors);
         anchors.removeIf(anchor -> {
             Foothold foothold = BotPhysicsEngine.findGroundFoothold(map, anchor);
             return foothold == null || !source.contains(foothold.getId());
@@ -218,40 +221,94 @@ final class BotFallbackMovementManager {
         anchors.sort((a, b) -> Integer.compare(Math.abs(a.x - botPos.x), Math.abs(b.x - botPos.x)));
         int step = BotPhysicsEngine.walkStep(map, entry.movementProfile);
         int ropeReach = BotPhysicsEngine.maxRopeGrabSimulationHorizontalTravel(map, entry.movementProfile);
+        Point target = new Point(targetPos);
         // Prefer the tower's rope chain when available; every launch uses this bot's profile.
-        for (Point anchor : anchors) {
-            for (Rope rope : map.getRopes()) {
-                if (rope.topY() >= anchor.y || Math.abs(rope.x() - anchor.x) > ropeReach) {
-                    continue;
-                }
-                int stepX = Integer.signum(rope.x() - anchor.x) * step;
-                if (BotPhysicsEngine.simulateGroundJumpRopeGrab(map, anchor, stepX, rope,
-                        entry.movementProfile) != null) {
-                    return entry.fallbackApproach = new UpwardApproach(map, entry.movementProfile,
-                            targetPos.y, botPos.x, source, anchor, stepX, rope, -1);
+        if (targetAbove) {
+            for (Point anchor : anchors) {
+                for (Rope rope : map.getRopes()) {
+                    if (rope.topY() >= anchor.y || Math.abs(rope.x() - anchor.x) > ropeReach) {
+                        continue;
+                    }
+                    int stepX = Integer.signum(rope.x() - anchor.x) * step;
+                    if (BotPhysicsEngine.simulateGroundJumpRopeGrab(map, anchor, stepX, rope,
+                            entry.movementProfile) != null) {
+                        return entry.fallbackApproach = new UpwardApproach(map, entry.movementProfile,
+                                target, botPos.x, source, anchor, stepX, rope, -1);
+                    }
                 }
             }
         }
-        // Flat ground below the target is not a reason to keep walking. Reach the next
-        // higher shelf, including a vertical hop or a hop temporarily away from the mob x.
+        Set<Integer> targetSurface = walkSurfaceFootholds(entry.fhIndex,
+                BotPhysicsEngine.findGroundFoothold(map, targetPos));
+        UpwardApproach ascent = null;
+        UpwardApproach crossing = null;
+        Map<Integer, Boolean> ropeExits = new HashMap<>();
+        BotMovementCapabilities capabilities = BotMovementCapabilities.of(entry.bot);
+        // Prefer reaching the goal's surface. An ascent may first cross to a slightly
+        // LOWER shelf (larger y) if that shelf provides the next upward rope connection.
         int[] jumpSteps = {0, -step, step};
         for (Point anchor : anchors) {
             for (int stepX : jumpSteps) {
                 BotPhysicsEngine.PostLandingJump jump = BotPhysicsEngine.simulateJumpLandingWithPostLandingTicks(
                         map, anchor, stepX, entry.movementProfile, 3);
                 if (jump == null || jump.lostGround() || source.contains(jump.finalFoothold().getId())
-                        || jump.finalPoint().y >= anchor.y - BotPhysicsEngine.cfg.MAX_SNAP_DROP
-                        || Math.abs(jump.finalPoint().y - targetPos.y) >= Math.abs(anchor.y - targetPos.y)
+                        || jump.finalPoint().y - anchor.y > BotNavigationGraphProvider.DOWN_JUMP_MAX_DROP_PX
                         || !DeadPitGuard.isLivableLanding(map, jump.finalPoint(), entry.movementProfile,
-                                BotMovementCapabilities.of(entry.bot))) {
+                                capabilities)) {
                     continue;
                 }
-                return entry.fallbackApproach = new UpwardApproach(map, entry.movementProfile,
-                        targetPos.y, botPos.x, source, anchor, stepX, null, jump.finalFoothold().getId());
+                UpwardApproach candidate = new UpwardApproach(map, entry.movementProfile,
+                        target, botPos.x, source, anchor, stepX, null, jump.finalFoothold().getId());
+                if (targetSurface.contains(jump.finalFoothold().getId())) {
+                    return entry.fallbackApproach = candidate;
+                }
+                if (targetAbove && ascent == null
+                        && jump.finalPoint().y < anchor.y - BotPhysicsEngine.cfg.MAX_SNAP_DROP
+                        && Math.abs(jump.finalPoint().y - targetPos.y) < Math.abs(anchor.y - targetPos.y)) {
+                    ascent = candidate;
+                }
+                if (targetAbove && crossing == null
+                        && ropeExits.computeIfAbsent(jump.finalFoothold().getId(), ignored ->
+                        hasUpwardRopeExit(entry, jump.finalFoothold(), nearbyAnchors, botPos.y, targetPos.y))) {
+                    crossing = candidate;
+                }
             }
         }
-        return entry.fallbackApproach = new UpwardApproach(map, entry.movementProfile,
-                targetPos.y, botPos.x, source, null, 0, null, -1);
+        if (ascent != null || crossing != null) {
+            return entry.fallbackApproach = ascent != null ? ascent : crossing;
+        }
+        entry.fallbackApproach = new UpwardApproach(map, entry.movementProfile,
+                target, botPos.x, source, null, 0, null, -1);
+        // Cache unsuccessful shelf scans too, but do not suppress ordinary descent.
+        return targetAbove ? entry.fallbackApproach : null;
+    }
+
+    private static boolean hasUpwardRopeExit(BotMovementState entry, Foothold landing,
+                                            List<Point> anchors, int sourceY, int targetY) {
+        MapleMap map = entry.bot.getMap();
+        Set<Integer> surface = walkSurfaceFootholds(entry.fhIndex, landing);
+        int step = BotPhysicsEngine.walkStep(map, entry.movementProfile);
+        int reach = BotPhysicsEngine.maxRopeGrabSimulationHorizontalTravel(map, entry.movementProfile);
+        for (Point anchor : anchors) {
+            Foothold foothold = BotPhysicsEngine.findGroundFoothold(map, anchor);
+            if (foothold == null || !surface.contains(foothold.getId())) {
+                continue;
+            }
+            for (Rope rope : map.getRopes()) {
+                if (rope.topY() >= sourceY - BotPhysicsEngine.cfg.MAX_SNAP_DROP
+                        || Math.abs(rope.topY() - targetY) >= Math.abs(sourceY - targetY)
+                        || Math.abs(rope.x() - anchor.x) > reach) {
+                    continue;
+                }
+                int stepX = Integer.signum(rope.x() - anchor.x) * step;
+                if (canDirectlyAttachToRope(anchor, rope)
+                        || BotPhysicsEngine.simulateGroundJumpRopeGrab(map, anchor, stepX, rope,
+                        entry.movementProfile) != null) {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
     /*
