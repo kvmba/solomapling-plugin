@@ -350,6 +350,7 @@ final class BotNavigationGraph implements Serializable {
     final java.util.Set<Integer> collidableWallIds;
     final java.util.Set<Integer> collidableFromBelowIds;
     final java.util.Set<Integer> deadRegionIds;
+    final java.util.Set<Integer> legalDestinationRegionIds;
 
     BotNavigationGraph(int mapId,
                        int version,
@@ -380,6 +381,17 @@ final class BotNavigationGraph implements Serializable {
                        Map<Integer, Integer> regionIdByFootholdId, Map<Integer, List<Edge>> outgoingByRegionId,
                        java.util.Set<Integer> collidableWallIds, java.util.Set<Integer> collidableFromBelowIds,
                        java.util.Set<Integer> deadRegionIds) {
+        this(mapId, version, movementProfile, regions, regionsById, regionIdByFootholdId,
+                outgoingByRegionId, collidableWallIds, collidableFromBelowIds, deadRegionIds,
+                java.util.Set.of());
+    }
+
+    BotNavigationGraph(int mapId, int version, BotMovementProfile movementProfile,
+                       List<Region> regions, Map<Integer, Region> regionsById,
+                       Map<Integer, Integer> regionIdByFootholdId, Map<Integer, List<Edge>> outgoingByRegionId,
+                       java.util.Set<Integer> collidableWallIds, java.util.Set<Integer> collidableFromBelowIds,
+                       java.util.Set<Integer> deadRegionIds,
+                       java.util.Set<Integer> legalDestinationRegionIds) {
         this.mapId = mapId;
         this.version = version;
         this.movementProfile = movementProfile;
@@ -399,6 +411,7 @@ final class BotNavigationGraph implements Serializable {
         this.collidableWallIds = new java.util.HashSet<>(collidableWallIds);
         this.collidableFromBelowIds = new java.util.HashSet<>(collidableFromBelowIds);
         this.deadRegionIds = java.util.Set.copyOf(deadRegionIds);
+        this.legalDestinationRegionIds = java.util.Set.copyOf(legalDestinationRegionIds);
     }
 
     BotNavigationGraph(int mapId,

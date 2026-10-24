@@ -174,6 +174,25 @@ final class BotNavigationManager {
             if (BotNavigationGraphProvider.peekGraph(bot.getMap(), entry.movementProfile) == null) {
                 entry.navGraphLoad = BotNavigationGraphProvider.warmGraphAsync(bot.getMap(), entry.movementProfile);
                 entry.lastNavDecision = "graph-fallback-profile";
+                // A closest-profile graph can walk, but its climb edges are calibrated for
+                // another walkStep/jump stat. While the exact graph warms, an upward target
+                // must use the physics-validated local ascent (the same warmup fallback the
+                // graph-null branch uses) instead of planning a climb on the wrong profile.
+                if (!entry.inAir && !entry.climbing && targetAbove(bot, rawTargetPos)
+                        && targetRegionIsLegal(graph, bot.getMap(), rawTargetPos)) {
+                    clearNavigation(entry);
+                    entry.graphWarmupFallback = true;
+                    entry.fallbackApproach = null;
+                    if (BotFallbackMovementManager.resolveSteeringTarget(entry, bot.getPosition(),
+                            rawTargetPos) != null) {
+                        notifyWarmup(entry, bot);
+                        entry.lastNavDecision = "graph-fallback-profile-up";
+                        return new NavigationDirective(new Point(rawTargetPos), false);
+                    }
+                    entry.graphWarmupFallback = false;
+                    entry.fallbackApproach = null;
+                    entry.navPreciseTarget = false;
+                }
             }
             entry.graphWarmupFallback = false;
             entry.fallbackApproach = null;
@@ -223,6 +242,28 @@ final class BotNavigationManager {
                         : startRegionId < 0 || targetRegionId < 0 ? "no-region"
                         : startRegionId == targetRegionId ? "same-region" : "no-path";
                 clearNavigation(entry);
+                if (!entry.inAir && !entry.climbing && targetAbove(bot, rawTargetPos)
+                        && targetRegionIsLegal(graph, bot.getMap(), rawTargetPos)) {
+                    if (runAiTick && BotMovementManager.recoverDeadPit(entry)) {
+                        Point heldPosition = bot.getPosition();
+                        GCMovementDriver.failMove(entry);
+                        return new NavigationDirective(heldPosition, true);
+                    }
+                    // A graph without a crossing is not proof the map has none: the edge set
+                    // can omit a climb (incomplete generation, dead-region pruning, stale
+                    // cache). The physics-validated local ascent is the ground truth for an
+                    // upward target, so never park the bot on its own floor under the mob.
+                    entry.graphWarmupFallback = true;
+                    entry.fallbackApproach = null;
+                    if (BotFallbackMovementManager.resolveSteeringTarget(entry, bot.getPosition(),
+                            rawTargetPos) != null) {
+                        entry.lastNavDecision = "no-path-fallback";
+                        return new NavigationDirective(new Point(rawTargetPos), false);
+                    }
+                    entry.graphWarmupFallback = false;
+                    entry.fallbackApproach = null;
+                    entry.navPreciseTarget = false;
+                }
                 if (!entry.inAir && !entry.climbing
                         && (startRegionId < 0 || targetRegionId < 0 || startRegionId != targetRegionId)) {
                     // An absent crossing is not a same-surface walk. Wait for an AI/exact-graph
@@ -727,6 +768,17 @@ final class BotNavigationManager {
 
         if (canExecuteGroundRopeJumpEntryFromCurrentPosition(botPos, edge)) {
             if (BotNavigationGraphProvider.peekGraph(bot.getMap(), entry.movementProfile) != graph) {
+                if (targetRegionIsLegal(graph, bot.getMap(), rawTargetPos)) {
+                    // The edge belongs to a closest-profile graph; its launch window/step were
+                    // calibrated for another walkStep/jump stat. Holding the bot at the window
+                    // until the exact graph bakes is what froze the stage-1 climb. Drop the
+                    // commitment and let the physics-validated local ascent take this move.
+                    entry.lastEdgeBlockReason = "climb-graph-warmup-fallback";
+                    entry.graphWarmupFallback = true;
+                    entry.fallbackApproach = null;
+                    BotMovementManager.clearNavigationState(entry);
+                    return new NavigationDirective(rawTargetPos, false);
+                }
                 entry.lastEdgeBlockReason = "climb-graph-warmup";
                 entry.launchReadyAwaiting = true;
                 return null;
@@ -930,6 +982,22 @@ final class BotNavigationManager {
 
     private static BotNavigationGraph resolveActiveGraph(MapleMap map, BotMovementProfile movementProfile) {
         return BotNavigationGraphProvider.peekBestGraph(map, movementProfile);
+    }
+
+    /** Whether reaching {@code target} needs an ascent from the bot's current floor. */
+    private static boolean targetAbove(Character bot, Point target) {
+        Point pos = bot == null ? null : bot.getPosition();
+        return pos != null && target != null
+                && target.y < pos.y - BotMovementManager.cfg.JUMP_Y_THRESH;
+    }
+
+    /** Whether the target floor is a platform the map's spawn table proves enterable. */
+    private static boolean targetRegionIsLegal(BotNavigationGraph graph, MapleMap map, Point target) {
+        if (graph == null || map == null || target == null) {
+            return false;
+        }
+        int region = graph.findRegionId(map, target);
+        return region >= 0 && graph.legalDestinationRegionIds.contains(region);
     }
 
     static Point selectDropWaypoint(BotMovementState entry,

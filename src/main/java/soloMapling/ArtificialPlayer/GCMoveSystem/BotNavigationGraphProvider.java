@@ -50,7 +50,9 @@ final class BotNavigationGraphProvider {
     //     inside an 8.93 x fs px/s band (no walkSpeed air cap; counter-strafe pins at the
     //     band edge) and no-input flight drags 1 x fs (100 x fs at terminal fall). Committed
     //     arcs still fly the launch key held, so constant-stepX arc sims stay exact.
-    private static final int GRAPH_VERSION = 74; // Complete directed reachability, including pixel-wide launch windows.
+    // 75: monster-spawn regions are legal destinations; a missing exit edge must not delete
+    //     their inbound edges.
+    private static final int GRAPH_VERSION = 75; // Complete directed reachability, including pixel-wide launch windows.
 
     // Warmup heuristics remain conservative; the completed graph includes all simulated
     // descents and expresses preferences through costs, not by deleting reachable ground.
@@ -801,14 +803,17 @@ final class BotNavigationGraphProvider {
             for (Portal portal : map.getPortals()) {
                 addPortalEdges(portal, map, regionsById, regionIdByFootholdId, outgoing, edgeKeys);
             }
-            // Judge traps only AFTER all physical transitions exist. Every graph consumer
-            // must exclude a terminal region or a chain whose only exits end in one.
-            Set<Integer> deadRegions = findDeadRegions(map, regions, regionIdByFootholdId, outgoing);
+            // Judge traps only AFTER all physical transitions exist. A region holding a WZ
+            // monster spawn is a legal destination by the map's own data, so an incomplete
+            // exit edge set must never delete its inbound edges.
+            Set<Integer> legalDestinations = monsterSpawnRegionIds(map, regionIdByFootholdId);
+            Set<Integer> deadRegions = findDeadRegions(map, regions, regionIdByFootholdId, outgoing,
+                    legalDestinations);
             buildProfile.buildPortalEdgesNs = System.nanoTime() - phaseStartedAt;
 
             BotNavigationGraph graph = new BotNavigationGraph(
                     map.getId(), GRAPH_VERSION, movementProfile, regions, regionsById, regionIdByFootholdId, outgoing,
-                    collidableWallIds, collidableFromBelowIds, deadRegions);
+                    collidableWallIds, collidableFromBelowIds, deadRegions, legalDestinations);
             GraphBuildReport report = buildProfile.finish();
             LAST_BUILD_REPORTS.put(GraphCacheKey.from(map.getId(), movementProfile), report);
             debugprint("Built bot nav graph map {} speed={} jump={} in {} ms (regions={}, edges={}, drop={} ms, jump={} ms, jumpSamples={}, cacheHits={})",
@@ -1181,13 +1186,38 @@ final class BotNavigationGraphProvider {
         return false;
     }
 
-    private static Set<Integer> findDeadRegions(MapleMap map, List<BotNavigationGraph.Region> regions,
-                                               Map<Integer, Integer> regionIdByFootholdId,
-                                               Map<Integer, List<BotNavigationGraph.Edge>> outgoing) {
+    /**
+     * Regions the map's own WZ spawn table seats monsters on. A monster platform is a legal
+     * destination even when the generated edge set cannot prove an exit: the client put the
+     * monster there, so pathing must keep the platform enterable. The spawn point's ground
+     * query is the authoritative foothold (the spawn y is above the platform).
+     */
+    private static Set<Integer> monsterSpawnRegionIds(MapleMap map,
+                                                      Map<Integer, Integer> regionIdByFootholdId) {
+        Set<Integer> regions = new HashSet<>();
+        for (Point spawn : map.getMonsterSpawnPositions()) {
+            Foothold foothold = BotPhysicsEngine.findGroundFoothold(map, spawn);
+            if (foothold == null) {
+                continue;
+            }
+            int region = regionIdByFootholdId.getOrDefault(foothold.getId(), -1);
+            if (region >= 0) {
+                regions.add(region);
+            }
+        }
+        return regions;
+    }
+
+    static Set<Integer> findDeadRegions(MapleMap map, List<BotNavigationGraph.Region> regions,
+                                        Map<Integer, Integer> regionIdByFootholdId,
+                                        Map<Integer, List<BotNavigationGraph.Edge>> outgoing,
+                                        Set<Integer> legalDestinations) {
         Map<Integer, List<Integer>> incoming = new HashMap<>();
         Map<Integer, Integer> exits = new HashMap<>();
         for (BotNavigationGraph.Region region : regions) {
-            exits.put(region.id, 0);
+            // A legal destination is a live sink: the spawn table proves it is enterable even
+            // when a missing exit edge makes its own out-degree look zero.
+            exits.put(region.id, legalDestinations.contains(region.id) ? 1 : 0);
         }
         for (List<BotNavigationGraph.Edge> edges : outgoing.values()) {
             for (BotNavigationGraph.Edge edge : edges) {
@@ -1195,7 +1225,12 @@ final class BotNavigationGraphProvider {
                     continue; // hopping/teleporting within the same region is not an escape
                 }
                 exits.merge(edge.fromRegionId, 1, Integer::sum);
-                incoming.computeIfAbsent(edge.toRegionId, ignored -> new ArrayList<>()).add(edge.fromRegionId);
+                if (!legalDestinations.contains(edge.toRegionId)) {
+                    // An edge into a legal destination is a way out of the source; it must
+                    // never be decremented when the destination is processed in the sweep.
+                    incoming.computeIfAbsent(edge.toRegionId, ignored -> new ArrayList<>())
+                            .add(edge.fromRegionId);
+                }
             }
         }
         // Inter-map exits are not navigation edges, but they absolutely are a way out.
@@ -1227,6 +1262,9 @@ final class BotNavigationGraphProvider {
         while (!queue.isEmpty()) {
             int region = queue.removeFirst();
             for (int predecessor : incoming.getOrDefault(region, List.of())) {
+                if (legalDestinations.contains(predecessor)) {
+                    continue; // a legal destination stays enterable regardless of its exits
+                }
                 if (exits.merge(predecessor, -1, Integer::sum) == 0 && dead.add(predecessor)) {
                     queue.addLast(predecessor);
                 }
