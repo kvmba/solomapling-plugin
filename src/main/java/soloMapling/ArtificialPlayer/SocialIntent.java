@@ -16,7 +16,7 @@ import java.util.Locale;
  */
 public enum SocialIntent {
 
-    // Order = priority (see docs/BOT_SOCIAL_KEYWORDS_PLAN.md §6).
+    // Order = priority.
     APOLOGY("Apology",
             new String[]{"sorry"},
             new String[]{"抱歉", "对不起", "不好意思", "打扰了", "我的错", "对不住", "见谅",

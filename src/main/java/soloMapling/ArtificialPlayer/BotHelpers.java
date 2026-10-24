@@ -55,7 +55,7 @@ public class BotHelpers {
      * the id rule. It also spends a second registry read, which changes which side of a concurrent
      * registry flip the two formulations can disagree on. For a call that costs tens of
      * nanoseconds at a few thousand calls per second, that trade is not worth the extra branching
-     * and the reasoning burden - see docs/PERFORMANCE_HOTSPOT_ANALYSIS.md §6.6.
+     * and the reasoning burden.
      */
     public static boolean isBot(int id) {
         if (id == 999) {
