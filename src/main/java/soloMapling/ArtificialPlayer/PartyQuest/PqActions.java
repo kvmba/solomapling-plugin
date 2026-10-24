@@ -978,6 +978,7 @@ public final class PqActions {
             // for a live move like every other recurring origin (yieldsToLiveWalk) - a pickup/
             // reclaim walk armed earlier this tick would otherwise be overwritten and its
             // drop left orphaned. The next tick (or the walk's arrival nudge) re-arms this.
+            releaseStaleChase(bot);
             walkTo(bot, post, true);
             return 0;
         }
@@ -1166,6 +1167,18 @@ public final class PqActions {
     // a stale "pathable" self-heals through the driver's own no-path handling and the seek deadline.
     private static final Map<Integer, SeekState> seekStates = new java.util.concurrent.ConcurrentHashMap<>();
 
+    /**
+     * Best-effort party spread: the mob each bot is currently chasing, keyed by bot id, scoped to
+     * one map instance. Without it every bot picks the same nearest mob and the whole party walks
+     * in one clump, leaving the tower's other shelves (the top row included) unattended until the
+     * clump arrives. Claims are not a lock: they only steer target SELECTION, a dead/gone holder's
+     * claim is ignored, and a contested target still falls back to the nearest mob so no bot idles.
+     */
+    private static final Map<Integer, MobClaim> MOB_CLAIMS = new java.util.concurrent.ConcurrentHashMap<>();
+
+    private record MobClaim(int mapInstance, int mobOid) {
+    }
+
     /** Macro work and the combat sweep can seek concurrently. One monitor protects the whole episode,
      * not individual map operations: a kill/retarget must never clear another beat's progress halfway. */
     private static final class SeekState {
@@ -1182,6 +1195,7 @@ public final class PqActions {
         int pathRegion = -1;
         int pathSurfaceY;
         Boolean pathable;
+        Point lastChaseGoal;
         final Map<Integer, PathabilityVerdict> pathability = new java.util.HashMap<>();
 
         void clearProgress() {
@@ -1266,6 +1280,7 @@ public final class PqActions {
         //    standing, and the graph may bake later).
         Monster target = seekPathableTarget(bot, pos, state);
         if (target == null) {
+            stopStaleChase(bot, state);
             state.clearGoal();
             if (seekTraceEnabled(bot.getId())) {
                 seekTrace(bot, state, null, null, null, null, "no-target");
@@ -1381,6 +1396,7 @@ public final class PqActions {
             if (seekTraceEnabled(bot.getId())) {
                 seekTrace(bot, state, target, mp, mobFloor, issued, "timeout");
             }
+            releaseMobClaim(bot.getId(), target.getObjectId());
             state.targetOid = -1;
             state.clearGoal();
             return;
@@ -1389,8 +1405,44 @@ public final class PqActions {
         // Compare with the driver's ACTUAL goal, not a memo of our last command. A pickup/park
         // can replace it between beats; "has any target" must not suppress the upward chase.
         GCMovement.moveIfTargetChanged(bot, tx, ty, RETARGET_EPS_PX);
+        state.lastChaseGoal = new Point(tx, ty);
         if (seekTraceEnabled(bot.getId())) {
             seekTrace(bot, state, target, mp, mobFloor, issued, "chase");
+        }
+    }
+
+    /**
+     * Drop a combat chase the driver is still holding once the room has no live target. The
+     * chase's goal may survive a kill (the no-progress watchdog owns it for seconds), and every
+     * ready-party park yields to a live move — so without this the bot stands on its last kill
+     * platform while the rest of the party gathers at the NPC. Only the goal THIS seek issued is
+     * cancelled: a pickup/reclaim walk that replaced it stays untouched.
+     */
+    private static void stopStaleChase(Character bot, SeekState state) {
+        Point goal = state.lastChaseGoal;
+        state.lastChaseGoal = null;
+        if (goal != null) {
+            GCMovement.stopIfTarget(bot, goal);
+        }
+    }
+
+    /**
+     * Cancel a lingering combat chase when stage work is about to own the bot's movement (a
+     * ready-party park or the post-work delivery). Safe to call every tick: it only stops the
+     * driver when the live goal is exactly the one the seek layer issued, never a pickup,
+     * reclaim or stage walk that replaced it.
+     */
+    public static void releaseStaleChase(Character bot) {
+        if (bot == null) {
+            return;
+        }
+        SeekState state = seekStates.get(bot.getId());
+        if (state == null) {
+            return;
+        }
+        synchronized (state) {
+            stopStaleChase(bot, state);
+            state.clearGoal();
         }
     }
 
@@ -1511,13 +1563,17 @@ public final class PqActions {
      * platform" a normal approach).
      */
     private static Monster seekPathableTarget(Character bot, Point pos, SeekState state) {
+        int mapInstance = System.identityHashCode(bot.getMap());
         int sticky = state.targetOid;
         if (sticky >= 0) {
             MapObject mo = bot.getMap().getMapObject(sticky);
-            if (mo instanceof Monster m && isHuntTarget(m) && isPathable(bot, m, state)) {
+            if (mo instanceof Monster m && isHuntTarget(m) && isPathable(bot, m, state)
+                    && (ownsMobClaim(bot, sticky) || !mobClaimedByOther(bot, sticky, mapInstance))) {
+                claimMob(bot, m, mapInstance);
                 return m;
             }
-            state.targetOid = -1; // gone, out of the box, or unreachable
+            releaseMobClaim(bot.getId(), sticky);
+            state.targetOid = -1; // gone, out of the box, unreachable, or taken by a teammate
             state.pathability.remove(sticky);
             state.clearGoal(); // the frozen platform belongs to the dropped mob
         }
@@ -1525,6 +1581,10 @@ public final class PqActions {
         double bestSq = Double.MAX_VALUE;
         Monster bestPathable = null;
         double bestPathableSq = Double.MAX_VALUE;
+        Monster bestFree = null;
+        double bestFreeSq = Double.MAX_VALUE;
+        Monster bestFreePathable = null;
+        double bestFreePathableSq = Double.MAX_VALUE;
         for (Monster m : bot.getMap().getAllMonsters()) {
             if (!isHuntTarget(m)) {
                 continue;
@@ -1535,15 +1595,73 @@ public final class PqActions {
                 bestSq = dsq;
                 best = m;
             }
-            if (dsq < bestPathableSq && isPathable(bot, m, state)) {
+            boolean pathable = isPathable(bot, m, state);
+            if (dsq < bestPathableSq && pathable) {
                 bestPathableSq = dsq;
                 bestPathable = m;
             }
+            if (mobClaimedByOther(bot, m.getObjectId(), mapInstance)) {
+                continue;
+            }
+            if (dsq < bestFreeSq) {
+                bestFreeSq = dsq;
+                bestFree = m;
+            }
+            if (dsq < bestFreePathableSq && pathable) {
+                bestFreePathableSq = dsq;
+                bestFreePathable = m;
+            }
         }
-        Monster chosen = bestPathable != null ? bestPathable : best;
-        state.targetOid = chosen != null ? chosen.getObjectId() : -1;
+        // Reachable-and-unclaimed first, then any reachable target (a fully-claimed room still
+        // shares the fight instead of chasing an unreachable mob), then the nearest remaining.
+        Monster chosen = bestFreePathable != null ? bestFreePathable
+                : bestPathable != null ? bestPathable
+                : bestFree != null ? bestFree
+                : best;
+        if (chosen != null) {
+            claimMob(bot, chosen, mapInstance);
+            state.targetOid = chosen.getObjectId();
+        } else {
+            releaseMobClaim(bot.getId(), -1);
+            state.targetOid = -1;
+        }
         state.clearGoal();
         return chosen;
+    }
+
+    /** Whether this bot already holds the claim for {@code mobOid}. */
+    private static boolean ownsMobClaim(Character bot, int mobOid) {
+        MobClaim claim = MOB_CLAIMS.get(bot.getId());
+        return claim != null && claim.mobOid() == mobOid;
+    }
+
+    /** Whether another live bot in the same map instance is chasing {@code mobOid}. */
+    private static boolean mobClaimedByOther(Character bot, int mobOid, int mapInstance) {
+        for (Map.Entry<Integer, MobClaim> entry : MOB_CLAIMS.entrySet()) {
+            if (entry.getKey() == bot.getId()) {
+                continue;
+            }
+            MobClaim claim = entry.getValue();
+            if (claim.mapInstance() != mapInstance || claim.mobOid() != mobOid) {
+                continue;
+            }
+            var holder = CharacterStorage.getBotById(entry.getKey());
+            if (holder != null && holder.getChr() != null && holder.getChr().getMap() == bot.getMap()
+                    && holder.getChr().getHp() > 0 && !holder.death().isCorpse()) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static void claimMob(Character bot, Monster mob, int mapInstance) {
+        MOB_CLAIMS.put(bot.getId(), new MobClaim(mapInstance, mob.getObjectId()));
+    }
+
+    /** Drop this bot's claim, only when it still names {@code mobOid} (or any claim for -1). */
+    private static void releaseMobClaim(int botId, int mobOid) {
+        MOB_CLAIMS.computeIfPresent(botId,
+                (id, claim) -> mobOid < 0 || claim.mobOid() == mobOid ? null : claim);
     }
 
     /**
@@ -1602,6 +1720,7 @@ public final class PqActions {
         stageWalkShieldUntilByBot.remove(botId);
         SEEK_TRACE_UNTIL.remove(botId);
         nextSteppedOnPickupAtByBot.remove(botId);
+        MOB_CLAIMS.remove(botId);
     }
 
     /** Hostile work anywhere in this quest room, not just inside an entrance-centred view box. */
@@ -2106,6 +2225,7 @@ public final class PqActions {
         if (spot == null) {
             return;
         }
+        releaseStaleChase(bot);
         walkTo(bot, spot, true);
         // No shield here: parked-by-the-NPC is a wait, not a staged walk. The combat beat
         // may steer at whatever spawns nearby and - critically - the 250ms beat keeps the
@@ -2191,6 +2311,7 @@ public final class PqActions {
         if (npc == null) {
             return; // no stage NPC and no next00 to gather by - nothing to spread around
         }
+        releaseStaleChase(bot);
         Point target = claimNear(bot, npc);
         walkTo(bot, target, true);
         // No shield: the ring is a park, not a puzzle hold (see waitNearStageNpc).

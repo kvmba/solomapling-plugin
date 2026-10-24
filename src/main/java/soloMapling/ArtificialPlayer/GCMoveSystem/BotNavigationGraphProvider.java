@@ -52,7 +52,9 @@ final class BotNavigationGraphProvider {
     //     arcs still fly the launch key held, so constant-stepX arc sims stay exact.
     // 75: monster-spawn regions are legal destinations; a missing exit edge must not delete
     //     their inbound edges.
-    private static final int GRAPH_VERSION = 75; // Complete directed reachability, including pixel-wide launch windows.
+    // 76: stage-1 climb exits and the legal-destination cache schema are fixed; rebuild any
+    //     v75 graph baked before the monster-spawn table was present.
+    private static final int GRAPH_VERSION = 76; // Complete directed reachability, including pixel-wide launch windows.
 
     // Warmup heuristics remain conservative; the completed graph includes all simulated
     // descents and expresses preferences through costs, not by deleting reachable ground.

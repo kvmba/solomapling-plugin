@@ -706,6 +706,12 @@ public abstract class PartyQuestBot extends BotSM implements GrindTickRegistry.P
         if (!preparePortalWalk(exit)) {
             return false;
         }
+        // Never re-target a bot that is still in a jump or on a rope: the chase it is flying was
+        // the stage's own work, and overwriting the move mid-arc reads as the door yanking the
+        // bot out of the air. Let it land/climb down first; the next tick follows from the ground.
+        if (!GCMovement.isSettled(getChr())) {
+            return false;
+        }
         BotLogger.log("PQ bot " + getChr().getName() + " following the leader from "
                 + here + " to " + leaderMap + " through portal " + exit.getName());
         sayDoorLine();

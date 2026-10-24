@@ -790,6 +790,32 @@ public final class GCMovement {
         }
     }
 
+    /**
+     * Stop only when the driver's live goal is exactly {@code expected}. Check and clear run under
+     * the same state monitor, so a pickup/reclaim walk that replaced the goal between the caller's
+     * read and this call is never cancelled by mistake.
+     */
+    public static boolean stopIfTarget(Character bot, Point expected) {
+        if (bot == null || expected == null) {
+            return false;
+        }
+        BotMovementState st = STATES.get(bot.getId());
+        if (st == null) {
+            return false;
+        }
+        synchronized (st) {
+            if (st.tickStopped || st.moveTarget == null || !st.moveTarget.equals(expected)) {
+                return false;
+            }
+            GCFollow.cancel(bot);
+            GCTravel.cancel(bot);
+            clearMoveIntent(bot);
+            st.following = false;
+            st.owner = null;
+            return true;
+        }
+    }
+
     /* Field-trace accessors (the !gcmove trace path log): the driver's own last nav decision,
      * the committed edge summary, and the edge block reason. Package state exposed read-only. */
     public static String navDecision(Character bot) {
