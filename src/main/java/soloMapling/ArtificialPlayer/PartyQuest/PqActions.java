@@ -1137,19 +1137,18 @@ public final class PqActions {
     private static final int RETARGET_EPS_PX = 16;          // skip re-issuing a move for tiny shifts
     private static final long RETARGET_TIMEOUT_MS = 4_000;  // give up an unreachable target after this
     private static final int PROGRESS_EPS_PX = 20;          // movement worth counting as chase progress
-    /** A mob within this |dy| of the pinned anchor's floor counts as still on the pinned platform
-     *  (the one-beat off-platform blip tolerance). Same-LEVEL itself is decided by nav region, not
-     *  a raw y band — a 60px band on the LPQ stage-1 tower spans three ~22px stair rows. */
+    /** A mob whose floor probe moved this little from the pinned anchor is still patrolling the
+     *  same platform (or is mid-arc off it for a beat), so the chase keeps tracking its live pixel
+     *  instead of re-pinning. Traffic-light only: the ISSUED goal always takes the mob's own row,
+     *  never the anchor's y (mixing the two makes a pixel on no walkable path). */
     private static final int FLOOR_SNAP_BAND_PX = 60;
     // PINNED chase PLATFORM (LPQ stage-1 "追着上方巡逻怪小步卡顿、永远上不去"): a live mob's position
-    // changes EVERY beat (aggro walk / knockback / an airborne arc), and re-aiming the seek move at
-    // its floor point each beat can land that point in a DIFFERENT nav region than the last — so the
+    // changes EVERY beat (aggro walk / knockback / an airborne arc), and re-pinning the chase at its
+    // floor point each beat can land that point in a DIFFERENT nav region than the last — so the
     // driver discards the committed climb edge mid-rope, replans from the bottom, and the bot paces
-    // under the mob forever. So the chase pins the mob's PLATFORM (the nav region), not its pixel:
-    // while the mob's live floor stays on the pinned platform the bot walks its live x (a patrol is
-    // followed; the region is unchanged so the committed edge survives), and the pinned floor is held
-    // through an off-platform blip until CHASE_PLATFORM_DRIFT_BEATS consecutive off-platform beats
-    // prove the mob changed floors. Per-bot state: the pinned floor point + the off-platform count.
+    // under the mob forever. The pin therefore decides WHEN to re-derive (FLOOR_SNAP_BAND_PX) and
+    // how many off-platform beats to tolerate, not what row to aim at: the issued goal always takes
+    // the mob's own floor row, which is where the fight actually happens.
     private static final int CHASE_PLATFORM_DRIFT_BEATS = 4;  // ~1s of beats before re-deriving
     // REGION-STABLE GOAL (the unified gate for the whole region-flip family): whatever the anchor
     // branch above computes, the goal actually ISSUED must not change nav region beat to beat — a
@@ -1295,15 +1294,6 @@ public final class PqActions {
         // deadline wiped state. Following the live x while the platform holds fixes both.
         Point mobFloor = GCMovement.groundPointBelow(bot.getMap(), mp.x, mp.y);
         Point anchorFloor = state.anchorFloor;
-        // Same level = the mob stands on the bot's OWN walk-connected surface (one nav region),
-        // NOT a raw y-difference: on the LPQ stage-1 tower the stair rows sit ~22px apart, so a
-        // y-band spans three rows and a mob one or two rows up read "same level" - its live-x
-        // re-aims then discarded the committed climb edge every beat (卡绳索/永不登台). Regions are
-        // the platform granularity the whole frozen-anchor design is keyed on; a raw band is not.
-        boolean sameLevel = mobFloor != null
-                && GCMovement.peekRegionIdAt(bot.getMap(), mp.x, mobFloor.y) >= 0
-                && GCMovement.peekRegionIdAt(bot.getMap(), mp.x, mobFloor.y)
-                        == GCMovement.peekRegionIdAt(bot.getMap(), pos.x, pos.y);
         int tx;
         int ty;
         if (anchorFloor == null || mobFloor == null) {
@@ -1312,22 +1302,25 @@ public final class PqActions {
             state.drift = 0;
             tx = anchorFloor.x;
             ty = anchorFloor.y;
-        } else if (sameLevel
-                || Math.abs(mobFloor.y - anchorFloor.y) <= FLOOR_SNAP_BAND_PX) {
-            // Same level (no climb at stake) or the mob's floor probe still reads the pinned
-            // platform: follow the mob's live x on the PINNED floor y (the probe falling through
-            // a shelf gap onto a deep row is an off-platform blip, and only a same-REGION mob
-            // moves the goal y). What keeps the committed climb edge alive is not a frozen x -
-            // it is the region-stable goal gate below: a goal whose REGION would change is held
-            // back there, while an x shift inside one region never discards the edge
-            // (reuseCommittedEdge drops it only on a region change). An earlier cross-level
-            // x-pin description was superseded by that gate; live-x tracking is the shipped
-            // behaviour.
-            anchorFloor = new Point(mp.x, anchorFloor.y);
+        } else if (Math.abs(mobFloor.y - anchorFloor.y) <= FLOOR_SNAP_BAND_PX) {
+            // The mob's live floor still reads near the pinned platform (a patrol inside one row, or
+            // the one-beat off-platform blip of an airborne arc). Follow its live x AND its live
+            // row: the goal's Y must be the ROW THE MOB STANDS ON, never the pinned anchor's Y.
+            // Emitting (mob.x, anchorFloor.y) mixes two rows into one point, and the tower's stair
+            // rows are 33-38px apart while FLOOR_SNAP_BAND_PX is 60 - so while the bot is still on
+            // its launch row (jump in flight, knockback, rope midpoint) that mixed pixel sits on NO
+            // walkable path: the driver answers no-path every beat and the bot stands still with the
+            // room full of mobs.
+            //
+            // What keeps the committed climb edge alive is not a frozen y - it is the
+            // region-stable goal gate below: a goal whose REGION would change is held back there,
+            // while a shift inside one region never discards the edge (reuseCommittedEdge drops it
+            // only on a region change).
+            anchorFloor = new Point(mp.x, mobFloor.y);
             state.anchorFloor = anchorFloor;
             state.drift = 0;
             tx = mp.x;
-            ty = sameLevel ? mobFloor.y : anchorFloor.y;
+            ty = mobFloor.y;
         } else {
             int drift = ++state.drift;
             if (drift >= CHASE_PLATFORM_DRIFT_BEATS) {
@@ -1363,7 +1356,7 @@ public final class PqActions {
 
         // REGION-STABLE GOAL GATE (the unified fix for the whole region-flip family): the anchor
         // branches above still emit a goal whose nav region can differ from the one the bot is
-        // actually being driven to — the sameLevel branch follows the live pixel into a gap, a
+        // actually being driven to — following the live pixel can walk the goal into a gap, a
         // drift re-pin lands on a neighbouring row, and any of them discards the committed climb
         // edge MID-ROPE. Whatever the branch decided, the goal that reaches GCMovement.move must
         // hold ONE region for the whole approach: a candidate goal in a new region is held back
