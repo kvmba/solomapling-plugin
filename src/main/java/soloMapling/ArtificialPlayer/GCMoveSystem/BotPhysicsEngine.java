@@ -887,6 +887,7 @@ final class BotPhysicsEngine {
     static void idleOnGround(BotMovementState entry, Character bot) {
         Point position = bot.getPosition();
         entry.inAir = false;
+        entry.landingStopPending = false;
         entry.climbing = false;
         entry.climbRope = null;
         entry.crouching = false;
@@ -1157,6 +1158,8 @@ final class BotPhysicsEngine {
         bot.setPosition(position);
         entry.inAir = false;
         entry.groundFoothold = foothold;
+        entry.landingStopPending = (entry.navEdge != null || entry.fallbackApproach != null)
+                && foothold != null && !bot.getMap().isSwim();
         entry.climbing = false;
         entry.climbRope = null;
         entry.crouching = false;
@@ -1289,13 +1292,7 @@ final class BotPhysicsEngine {
         // is ADDED to the step profile, so a dashing pirate accelerates to a higher walk cap and the
         // movement broadcasts carry the higher velocity. The graph key still sees the un-burst
         // profile — a burst that ends mid-walk simply decelerates back onto the baked edges.
-        BotMovementProfile stepProfile = entry.movementProfile;
-        if (entry.debuffMoveScale < 1.0) {
-            stepProfile = stepProfile.speedScaled(entry.debuffMoveScale);
-        }
-        if (entry.dashSpeedBonus > 0) {
-            stepProfile = stepProfile.withDashSpeedBonus(entry.dashSpeedBonus);
-        }
+        BotMovementProfile stepProfile = groundStepProfile(entry);
         GroundStepResult step = simulateGroundMotion(map, currentPos, foothold, desiredDir,
                 new GroundTravelState(entry.physX, entry.hspeed, entry.groundPhysicsCarryMs), stepProfile, target);
         if (target != null) {
@@ -1379,6 +1376,14 @@ final class BotPhysicsEngine {
         return new GroundMotion(step.stepX(), false);
     }
 
+    static BotMovementProfile groundStepProfile(BotMovementState entry) {
+        BotMovementProfile profile = entry.movementProfile;
+        if (entry.debuffMoveScale < 1.0) {
+            profile = profile.speedScaled(entry.debuffMoveScale);
+        }
+        return entry.dashSpeedBonus > 0 ? profile.withDashSpeedBonus(entry.dashSpeedBonus) : profile;
+    }
+
     private static boolean hasGroundDepartureLanding(BotMovementState entry, GroundStepResult departure,
                                                     int inputDir, GroundTarget target) {
         MapleMap map = entry.bot.getMap();
@@ -1411,7 +1416,8 @@ final class BotPhysicsEngine {
                     state.velocityY(), velocityX, tickFraction);
             AirCollision collision = resolveAirCollision(map, previous, roundedAirPosition(next));
             if (collision.type() == AirCollisionType.LAND) {
-                return true;
+                return DeadPitGuard.isLivableLanding(map, collision.point(), entry.movementProfile,
+                        BotMovementCapabilities.of(entry.bot));
             }
             if (collision.type() == AirCollisionType.WALL) {
                 launchVelocityX = 0;
@@ -1638,57 +1644,28 @@ final class BotPhysicsEngine {
         return null;
     }
 
-    static PostLandingJump simulatePostLandingGroundTicks(MapleMap map,
-                                                          JumpLanding landing,
-                                                          int desiredDir,
-                                                          BotMovementProfile profile,
-                                                          int ticks) {
+    // Match the live landingStopPending controller, including its 8ms braking decisions.
+    static PostLandingJump simulateLandingStop(MapleMap map, JumpLanding landing, BotMovementProfile profile) {
         if (landing == null) {
             return null;
         }
-        if (map == null || landing.point() == null || landing.foothold() == null || ticks <= 0) {
-            return new PostLandingJump(landing,
-                    landing.point() == null ? null : new Point(landing.point()),
-                    landing.foothold(), false);
-        }
-
-        double landingHSpeed = landingGroundHSpeed(map, landing.foothold(),
-                landing.incomingDeltaX(), landing.incomingDeltaY(), profile);
-        GroundTravelState state = new GroundTravelState(landing.point().x, landingHSpeed, 0.0);
-        Point cursor = new Point(landing.point());
-        Foothold currentFoothold = landing.foothold();
-        if (mapGroundSlipScale(map, profile) < 1.0) {
-            // Slippery landing: stop-policy parity with the live tick (slipperyStopDir) —
-            // glide when the glide-out stays on ground, counter-strafe brake when it would
-            // slide off. Validity is "can the bot land here and come to a stop"; the policy
-            // is deterministic, so the graph gains no extra state.
-            for (int i = 0; i < POST_LANDING_BRAKE_TICK_CAP; i++) {
-                int dir = slipperyStopDir(map, profile, cursor, currentFoothold, state);
-                if (dir == 0) {
-                    // Stopped/sub-residual, or the glide-out was projected to stay on
-                    // ground — either way this landing is stable.
-                    return new PostLandingJump(landing, cursor, currentFoothold, false);
-                }
-                GroundStepResult step = simulateGroundMotion(map, cursor, currentFoothold, dir, state, profile);
-                if (step.lostGround()) {
-                    return new PostLandingJump(landing, step.point(), step.foothold(), true);
-                }
-                cursor = step.point();
-                currentFoothold = step.foothold();
-                state = step.state();
+        Point cursor = landing.point();
+        Foothold foothold = landing.foothold();
+        GroundTravelState state = new GroundTravelState(cursor.x,
+                landingGroundHSpeed(map, foothold, landing.incomingDeltaX(), landing.incomingDeltaY(), profile), 0.0);
+        for (int i = 0; i < POST_LANDING_BRAKE_TICK_CAP; i++) {
+            if (state.hspeed() == 0.0) {
+                return new PostLandingJump(landing, cursor, foothold, false);
             }
-            return new PostLandingJump(landing, cursor, currentFoothold, true); // never stopped
-        }
-        for (int i = 0; i < ticks; i++) {
-            GroundStepResult step = simulateGroundMotion(map, cursor, currentFoothold, desiredDir, state, profile);
+            GroundStepResult step = simulateGroundMotion(map, cursor, foothold, 0, state, profile, GroundTarget.stop());
             if (step.lostGround()) {
                 return new PostLandingJump(landing, step.point(), step.foothold(), true);
             }
             cursor = step.point();
-            currentFoothold = step.foothold();
+            foothold = step.foothold();
             state = step.state();
         }
-        return new PostLandingJump(landing, cursor, currentFoothold, false);
+        return new PostLandingJump(landing, cursor, foothold, true);
     }
 
     private static Point roundedAirPosition(BotMovementState entry) {
@@ -2001,7 +1978,10 @@ final class BotPhysicsEngine {
     private static void collideWithAirWall(BotMovementState entry, Character bot, Point collisionPoint) {
         entry.airVelX = 0;
         entry.airSteerVelX = 0.0;
-        entry.fixedAirArc = false;
+        entry.moveDir = 0;
+        // A collision changes velocity, not ownership of the flight. The predictor stops
+        // horizontal motion here; retaining an old key re-accelerates into the wall every
+        // tick at progress zero, preventing even gravity from moving the bot downward.
         entry.physX = collisionPoint.x;
         entry.physY = collisionPoint.y;
         bot.setPosition(collisionPoint);
@@ -2015,7 +1995,6 @@ final class BotPhysicsEngine {
 
     private static void collideWithAirCeiling(BotMovementState entry, Character bot, Point collisionPoint) {
         entry.velY = 0f;
-        entry.fixedAirArc = false;
         entry.physX = collisionPoint.x;
         entry.physY = collisionPoint.y;
         bot.setPosition(collisionPoint);
@@ -2194,18 +2173,6 @@ final class BotPhysicsEngine {
 
     static JumpLanding simulateJumpLanding(MapleMap map, Point from, int stepX, BotMovementProfile profile) {
         return simulateLanding(map, from, -jumpForcePerTick(profile), stepX, 0L);
-    }
-
-    static PostLandingJump simulateJumpLandingWithPostLandingTicks(MapleMap map,
-                                                                   Point from,
-                                                                   int stepX,
-                                                                   BotMovementProfile profile,
-                                                                   int postLandingTicks) {
-        JumpLanding landing = simulateJumpLanding(map, from, stepX, profile);
-        if (landing == null) {
-            return null;
-        }
-        return simulatePostLandingGroundTicks(map, landing, Integer.compare(stepX, 0), profile, postLandingTicks);
     }
 
     // A down-jump falls through the platform and keeps falling until it lands — NO drop-distance
@@ -2405,6 +2372,7 @@ final class BotPhysicsEngine {
         entry.inAir = true;
         entry.crouching = false;
         entry.physX = position.x;
+        entry.landingStopPending = false;
         entry.physY = position.y;
         entry.velY = initialVelY;
         stopGroundMotion(entry);
@@ -2536,6 +2504,7 @@ final class BotPhysicsEngine {
 
     private static void setClimbPosition(BotMovementState entry, Character bot, Rope rope, int y) {
         entry.groundFoothold = null;
+        entry.landingStopPending = false;
         Point position = new Point(rope.x(), y);
         bot.setPosition(position);
         entry.climbing = true;
@@ -2576,6 +2545,7 @@ final class BotPhysicsEngine {
         entry.swimming = false;
         entry.velY = 0f;
         entry.hspeed = 0.0;
+        entry.landingStopPending = false;
         entry.physX = position.x;
         entry.physY = position.y;
         entry.groundPhysicsCarryMs = 0.0;

@@ -136,6 +136,10 @@ final class BotNavigationManager {
             entry.launchReadyAwaiting = false;
             entry.navGraphLoad = null;
             Character bot = entry.bot;
+            if (entry.landingStopPending && !entry.inAir && !entry.climbing) {
+                BotMovementManager.tickGrounded(entry, null);
+                return new NavigationDirective(bot.getPosition(), true);
+            }
             if (bot.getMap().getFootholds() == null) {
                 entry.graphWarmupFallback = false;
                 clearNavigation(entry);
@@ -202,14 +206,6 @@ final class BotNavigationManager {
             // Keep a valid ground approach until execution; competing routes can otherwise reverse it every AI tick.
             BotNavigationGraph.Edge edge = reuseCommittedEdge(graph, entry, startRegionId, targetRegionId);
             boolean edgeReused = (edge != null);
-            if (edgeReused) {
-                BotNavigationGraph.Edge refreshedEdge = refreshPendingClimbExitEdge(
-                        graph, entry, bot, botPos, startRegionId, targetRegionId, pathTargetPos, edge, runAiTick);
-                if (refreshedEdge != edge) {
-                    edge = refreshedEdge;
-                    edgeReused = edge != null;
-                }
-            }
             if (edge == null && runAiTick && startRegionId >= 0 && targetRegionId >= 0) {
                 // Same-region planning is intentionally allowed: intra-region portals appear as
                 // self-loop edges (fromRegionId == toRegionId) and A* picks them when the
@@ -266,6 +262,7 @@ final class BotNavigationManager {
 
     static boolean tryExecuteCommittedEdgeAfterGroundMovement(BotMovementState entry, Point rawTargetPos) {
         if (entry == null || entry.bot == null || entry.navEdge == null || entry.inAir || entry.climbing
+                || entry.landingStopPending
                 || entry.navEdge.type == BotNavigationGraph.EdgeType.WALK) {
             return false;
         }
@@ -346,42 +343,6 @@ final class BotNavigationManager {
         if (walkable < 100) return;
         markWarmupNotified(ownerId, mapId, now);
         owner.dropMessage(5, bot.getName() + " is warming map navigation cache, using fallback movement...");
-    }
-
-    private static BotNavigationGraph.Edge refreshPendingClimbExitEdge(BotNavigationGraph graph,
-                                                                       BotMovementState entry,
-                                                                       Character bot,
-                                                                       Point botPos,
-                                                                       int startRegionId,
-                                                                       int targetRegionId,
-                                                                       Point targetPos,
-                                                                       BotNavigationGraph.Edge edge,
-                                                                       boolean runAiTick) {
-        if (!runAiTick
-                || edge == null
-                || !entry.climbing
-                || edge.type != BotNavigationGraph.EdgeType.CLIMB
-                || edge.launchStepX == 0
-                || startRegionId < 0
-                || targetRegionId < 0
-                || startRegionId == targetRegionId) {
-            return edge;
-        }
-
-        if (canExecuteClimbExitFromCurrentPosition(graph, bot.getMap(), botPos, edge)) {
-            return edge;
-        }
-
-        BotNavigationGraph.Edge bestEdge = findNextEdge(graph, bot, startRegionId, targetRegionId, targetPos);
-        if (sameEdge(edge, bestEdge) || bestEdge == null) {
-            return edge;
-        }
-
-        entry.navEdge = bestEdge;
-        entry.navTargetRegionId = targetRegionId;
-        entry.navTargetPos = null;
-        entry.navPreciseTarget = false;
-        return bestEdge;
     }
 
     static BotNavigationGraph.Edge reuseCommittedEdge(BotNavigationGraph graph,
@@ -684,7 +645,7 @@ final class BotNavigationManager {
         // Void + target guard for a straight down-jump: simulate the drop from the bot's LIVE
         // pixel and require it to land inside the edge's target region — not merely "some
         // foothold exists below". The graph baked this edge only from per-column sims
-        // (validateDownJumpLaunchX), but a reused/stale edge can fire from a landing terrace,
+        // (addDropEdges), but a reused/stale edge can fire from a landing terrace,
         // and a live pixel one step outside a validated window can graze a different platform
         // below (mirrors the JUMP edge's arcLaunchesFrom re-check). Execution-time simulation
         // uses the same integrator as the flight itself, so a fire that passes this guard is
@@ -765,8 +726,15 @@ final class BotNavigationManager {
         }
 
         if (canExecuteGroundRopeJumpEntryFromCurrentPosition(botPos, edge)) {
+            if (BotNavigationGraphProvider.peekGraph(bot.getMap(), entry.movementProfile) != graph) {
+                entry.lastEdgeBlockReason = "climb-graph-warmup";
+                entry.launchReadyAwaiting = true;
+                return null;
+            }
             entry.lastEdgeBlockReason = null;
             BotMovementManager.initiateRopeJump(entry, bot, edge.launchStepX);
+            entry.fixedAirArc = true;
+            entry.navFlightEdge = edge;
             return new NavigationDirective(rawTargetPos, true);
         }
 
@@ -785,6 +753,14 @@ final class BotNavigationManager {
         }
         BotNavigationGraph.Region toRegion = graph.getRegion(edge.toRegionId);
 
+        Rope sourceRope = findRopeForRegion(bot.getMap(), graph.getRegion(edge.fromRegionId));
+        if (!isTopStepOffExit(sourceRope, botPos, edge)
+                && BotNavigationGraphProvider.peekGraph(bot.getMap(), entry.movementProfile) != graph) {
+            entry.lastEdgeBlockReason = "climb-graph-warmup";
+            entry.launchReadyAwaiting = true;
+            return null;
+        }
+
         if (toRegion != null && toRegion.isRopeRegion) {
             // Rope-to-rope: jump to the other rope
             Rope targetRope = findRopeForRegion(bot.getMap(), toRegion);
@@ -792,63 +768,19 @@ final class BotNavigationManager {
                 return null;
             }
             BotMovementManager.jumpToRope(entry, bot, edge.launchStepX);
-            return new NavigationDirective(rawTargetPos, true);
-        }
-
-        if (edge.launchStepX == 0) {
-            Rope rope = findRopeForRegion(bot.getMap(), graph.getRegion(edge.fromRegionId));
-            if (rope == null || isTopStepOffExit(rope, botPos, edge)) {
-                // Top STEP-OFF (or no rope geometry): physics owns the landing —
-                // resolveClimbBoundary lands the bot at the top boundary and the edge completes
-                // when the region changes. The climb carries the edge to the boundary, so record
-                // that fact for reuseCommittedEdge: the eventual fall out of the boundary belongs
-                // to this edge, and a mid-fall replan must not steer off its authored landing.
-                entry.navFlightEdge = edge;
-                return null;
-            }
-            // Ours (LPQ stage-1 rope-head loop): a BALLISTIC straight-up exit minted from
-            // ropeAnchorYs (startPoint at firstClimbableY, not topY). Two physics-owned shapes
-            // keep the old behaviour and must not jump:
-            //   - a DOWNWARD exit (endPoint below startPoint): the bot climbs down the rope and
-            //     physics drops it at the bottom boundary (Eos r31->r16);
-            //   - an exit whose top-boundary probe already lands in THIS edge's target region
-            //     (Eos r31->r15's landing IS the top exit).
-            // What remains is the stranded shape: an upward exit whose physics top landing is a
-            // DIFFERENT region than the edge targets. On the LPQ stage-1 tower the probe resolves
-            // back onto the platform the bot grabbed the rope FROM (r63: y=-1399 r44) while the
-            // edge targets r42 — physics wedges the bot at the rope head forever (climb, land
-            // back, replan the same path, repeat: the "追上方怪小步卡顿、不上去打" report). Fly the
-            // authored arc for that shape, exactly like the directional exits: jumpOffRope with no
-            // direction, and fixedAirArc keeps the flight the constant-stepX trajectory the graph
-            // validated (simulateRopeJumpLanding).
-            if (edge.endPoint.y >= edge.startPoint.y) {
-                // Downward exit: physics owns the climb-down and the bottom drop. The edge stays
-                // committed through the descent, so record the boundary-ownership fact.
-                entry.navFlightEdge = edge;
-                return null;
-            }
-            Point topLanding = BotPhysicsEngine.findTopExitLanding(bot.getMap(), rope);
-            Foothold topFoothold = (topLanding != null)
-                    ? BotPhysicsEngine.findGroundFoothold(bot.getMap(), topLanding) : null;
-            if (topFoothold != null
-                    && graph.regionIdByFootholdId.getOrDefault(topFoothold.getId(), -1) == edge.toRegionId) {
-                entry.navFlightEdge = edge; // physics lands this edge's target; no jump
-                return null;
-            }
-            if (botPos.y != edge.startPoint.y) {
-                startClimbing(entry, bot, rope, edge.startPoint.y); // re-seat at the validated anchor
-            }
-            BotMovementManager.jumpOffRope(entry, bot, 0);
             entry.fixedAirArc = true;
-            entry.navFlightEdge = edge; // this flight belongs to this edge (reuseCommittedEdge)
+            entry.navFlightEdge = edge;
             return new NavigationDirective(rawTargetPos, true);
         }
 
-        // Jump off rope
-        Rope sourceRope = findRopeForRegion(bot.getMap(), graph.getRegion(edge.fromRegionId));
-        if (isTopRopeJumpExitReady(sourceRope, botPos, edge) && botPos.y != edge.startPoint.y) {
-            startClimbing(entry, bot, sourceRope, edge.startPoint.y);
+        if (isTopStepOffExit(sourceRope, botPos, edge)) {
+            entry.navFlightEdge = edge;
+            return null;
         }
+
+        // Every other ground exit was generated by simulateRopeJumpLanding, including
+        // vertical jumps whose destination happens to be below the takeoff. Fly that arc
+        // from its exact anchor, not a climb-down or a teleport to a nearby rope height.
         BotMovementManager.jumpOffRope(entry, bot, edge.launchStepX);
         // The graph authored this directional exit as its constant-stepX arc
         // (simulateRopeJumpLanding); fixedAirArc holds the launch key so the real flight keeps
@@ -930,8 +862,7 @@ final class BotNavigationManager {
             case DROP -> edge.launchStepX == 0
                     && !canExecuteDropFromCurrentPosition(graph, entry.bot.getMap(), botPos, edge);
             case CLIMB -> entry.climbing
-                    ? edge.launchStepX != 0
-                    && !canExecuteClimbExitFromCurrentPosition(graph, entry.bot.getMap(), botPos, edge)
+                    ? !canExecuteClimbExitFromCurrentPosition(graph, entry.bot.getMap(), botPos, edge)
                     : !canExecuteClimbEntryFromCurrentPosition(entry.bot.getMap(), botPos, edge,
                     findRopeForRegion(entry.bot.getMap(), graph.getRegion(edge.toRegionId)));
             case PORTAL -> !isReadyForEdge(botPos, edge) || entry.portalEnterReadyTicks > 0; // precise while walking the extra jitter ticks in
@@ -980,24 +911,8 @@ final class BotNavigationManager {
         if (entry.inAir) {
             return new Point(edge.endPoint);
         }
-        if (entry.climbing && edge.launchStepX != 0) {
-            // Jump-off and rope-to-rope exits: only hold position when the exit can execute
-            // immediately; otherwise keep steering toward the authored launch anchor.
-            // Graphgen and physics both treat edge.startPoint as the required on-rope launch Y;
-            // steering toward edge.endPoint here would be a runtime-only model mismatch because
-            // a climbing bot cannot physically approach the off-rope landing point.
-            if (graph != null && canExecuteClimbExitFromCurrentPosition(graph, entry.bot.getMap(), botPos, edge)) {
-                return new Point(botPos);
-            }
-            return new Point(edge.startPoint);
-        }
         if (entry.climbing) {
-            // launchStepX==0: keep holding climb direction on the rope and let physics dismount
-            // the bot at the boundary. The on-rope steering target should stay on the rope X;
-            // trying to snap to an off-rope landing point is a runtime-only constraint and can
-            // re-clamp the bot back onto the rope top/bottom.
-            int ropeX = entry.climbRope != null ? entry.climbRope.x() : edge.startPoint.x;
-            return new Point(ropeX, edge.endPoint.y);
+            return new Point(edge.startPoint);
         }
         if (edge.launchStepX != 0 && edge.launchMaxX > edge.launchMinX) {
             // Grounded rope-jump entry: the gate accepts the whole launch window, so steer
@@ -1462,6 +1377,9 @@ final class BotNavigationManager {
     }
 
     private static boolean isEdgeUsable(BotNavigationGraph graph, MapleMap map, BotNavigationGraph.Edge edge) {
+        if (graph.deadRegionIds.contains(edge.toRegionId)) {
+            return false;
+        }
         return switch (edge.type) {
             case WALK, JUMP, DROP, CLIMB -> true;
             case PORTAL -> {
@@ -1804,48 +1722,8 @@ final class BotNavigationManager {
             return false;
         }
 
-        if (edge.launchStepX != 0 && botPos.y != edge.startPoint.y) {
-            Rope rope = findRopeForRegion(map, graph.getRegion(edge.fromRegionId));
-            if (!isTopRopeJumpExitReady(rope, botPos, edge)) {
-                // Rope-exit jump edges are authored from a specific climb height. Launching from
-                // any other Y changes the ballistic arc; climb movement reaches the authored
-                // first climbable pixel before this executes.
-                return false;
-            }
-        }
-
-        BotNavigationGraph.Region toRegion = graph.getRegion(edge.toRegionId);
-        if (toRegion != null && toRegion.isRopeRegion) {
-            return Math.abs(botPos.y - edge.startPoint.y) <= BotMovementManager.cfg.JUMP_Y_THRESH * 2;
-        }
-
-        if (edge.launchStepX == 0) {
-            Rope rope = findRopeForRegion(map, graph.getRegion(edge.fromRegionId));
-            return rope != null && (isTopStepOffExit(rope, botPos, edge)
-                    || isAtRopeLaunchAnchor(rope, botPos, edge));
-        }
-
-        return Math.abs(botPos.y - edge.startPoint.y) <= BotMovementManager.cfg.JUMP_Y_THRESH * 2;
-    }
-
-    private static boolean isTopRopeJumpExitReady(Rope rope, Point botPos, BotNavigationGraph.Edge edge) {
-        // Top-of-rope tolerance window only: the bot lands at firstClimbableY when grabbing
-        // from above (canTopGrab/canTopStep), and the launch arc is invariant within the first
-        // climbStep below the top. Non-top anchors are single-point launch windows whose arcs
-        // are precomputed by simulateRopeJumpLanding — launching from any other Y misses the
-        // destination. The bot reaches non-top anchors exactly via the precise-target snap in
-        // BotMovementManager.shouldSnapToClimbTarget (sub-tick clamp; the only one in the
-        // physics path), so the bypass `botPos.y == edge.startPoint.y` in
-        // canExecuteClimbExitFromCurrentPosition covers those without tolerance here.
-        if (rope == null || botPos == null || edge == null || edge.launchStepX == 0) {
-            return false;
-        }
-        int firstClimbableY = BotPhysicsEngine.firstClimbableY(rope);
-        return edge.startPoint.x == rope.x()
-                && edge.startPoint.y == firstClimbableY
-                && botPos.x == rope.x()
-                && botPos.y >= firstClimbableY
-                && botPos.y <= firstClimbableY + BotPhysicsEngine.climbStepPerTick() + 2;
+        Rope rope = findRopeForRegion(map, graph.getRegion(edge.fromRegionId));
+        return rope != null && (isTopStepOffExit(rope, botPos, edge) || botPos.equals(edge.startPoint));
     }
 
     private static void startClimbing(BotMovementState entry, Character bot, Rope rope, int climbY) {
@@ -2024,24 +1902,6 @@ final class BotNavigationManager {
         return edge.startPoint.y == rope.topY()
                 && Math.abs(edge.endPoint.y - rope.topY()) <= BotMovementManager.cfg.JUMP_Y_THRESH * 2
                 && botPos.y <= rope.topY() + BotMovementManager.cfg.JUMP_Y_THRESH * 2;
-    }
-
-    /*
-     * The ballistic straight-up rope exit's launch anchor: the bot must be on the rope at (or
-     * within one climb step of) the authored startPoint.y before firing — the graph validated the
-     * arc from exactly that pixel (simulateRopeJumpLanding), and a launch from any other height
-     * would fly a different trajectory. addRopeExitEdges mints these from ropeAnchorYs (the
-     * first-climbable pixel and then every ~30px), so the anchor can be anywhere along the rope.
-     * Top step-offs (startPoint.y == topY) are excluded: those land by physics at the top boundary
-     * (isTopStepOffExit / resolveClimbBoundary) and never need a launch.
-     */
-    static boolean isAtRopeLaunchAnchor(Rope rope, Point botPos, BotNavigationGraph.Edge edge) {
-        if (rope == null || botPos == null || edge == null) {
-            return false;
-        }
-        return edge.startPoint.x == rope.x()
-                && botPos.x == rope.x()
-                && Math.abs(botPos.y - edge.startPoint.y) <= BotPhysicsEngine.climbStepPerTick() + 2;
     }
 
     private static Rope findRopeForRegion(MapleMap map, BotNavigationGraph.Region region) {

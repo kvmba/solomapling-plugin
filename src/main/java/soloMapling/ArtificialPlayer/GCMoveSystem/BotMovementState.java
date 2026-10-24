@@ -51,6 +51,7 @@ class BotMovementState {
     Foothold groundFoothold;
     double fallPeakPhysY = Double.POSITIVE_INFINITY;
     boolean inAir = false;
+    boolean landingStopPending = false; // complete the validated landing brake before the next edge
     int jumpCooldownMs = 0;
     int movementVelX = 0;
     int movementVelY = 0;

@@ -82,8 +82,9 @@ final class BotFallbackMovementManager {
         }
 
         if (approach != null && approach.launch() != null && approach.rope() == null) {
-            BotPhysicsEngine.PostLandingJump landing = BotPhysicsEngine.simulateJumpLandingWithPostLandingTicks(
-                    map, botPos, approach.stepX(), entry.movementProfile, 3);
+            BotPhysicsEngine.PostLandingJump landing = BotPhysicsEngine.simulateLandingStop(map,
+                    BotPhysicsEngine.simulateJumpLanding(map, botPos, approach.stepX(), entry.movementProfile),
+                    entry.movementProfile);
             if (landing != null && !landing.lostGround()
                     && landing.finalFoothold().getId() == approach.landingFootholdId()) {
                 if (approach.stepX() == 0 && BotPhysicsEngine.slipperyGround(map)
@@ -249,8 +250,9 @@ final class BotFallbackMovementManager {
         int[] jumpSteps = {0, -step, step};
         for (Point anchor : anchors) {
             for (int stepX : jumpSteps) {
-                BotPhysicsEngine.PostLandingJump jump = BotPhysicsEngine.simulateJumpLandingWithPostLandingTicks(
-                        map, anchor, stepX, entry.movementProfile, 3);
+                BotPhysicsEngine.PostLandingJump jump = BotPhysicsEngine.simulateLandingStop(map,
+                        BotPhysicsEngine.simulateJumpLanding(map, anchor, stepX, entry.movementProfile),
+                        entry.movementProfile);
                 if (jump == null || jump.lostGround() || source.contains(jump.finalFoothold().getId())
                         || jump.finalPoint().y - anchor.y > BotNavigationGraphProvider.DOWN_JUMP_MAX_DROP_PX
                         || !DeadPitGuard.isLivableLanding(map, jump.finalPoint(), entry.movementProfile,

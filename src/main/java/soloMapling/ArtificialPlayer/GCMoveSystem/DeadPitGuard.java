@@ -124,6 +124,19 @@ final class DeadPitGuard {
         if (map.isSwim()) {
             return true; // there is no dead-pit concept in water: any surface is left by entering it
         }
+        BotNavigationGraph graph = BotNavigationGraphProvider.peekGraph(map, profile);
+        if (graph != null) {
+            Integer region = graph.regionIdByFootholdId.get(foothold.getId());
+            if (region != null) {
+                if (!graph.deadRegionIds.contains(region)) {
+                    return true; // full per-pixel topology, not the sparse warmup probe
+                }
+                if (capabilities == null || capabilities.equals(BotMovementCapabilities.NONE)) {
+                    return false;
+                }
+                // A class skill can provide an exit absent from the plain-movement graph.
+            }
+        }
         VerdictKey key = cacheKey(profile, capabilities);
         Map<Integer, Boolean> verdicts = VERDICTS
                 .computeIfAbsent(map.getFootholds(), k -> new ConcurrentHashMap<>())

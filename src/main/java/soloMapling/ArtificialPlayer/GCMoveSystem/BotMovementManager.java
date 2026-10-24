@@ -441,7 +441,7 @@ class BotMovementManager {
             // the hop: held input is a CalcFloat no-op above the 8.93 x fs px/s input band
             // (keeps vx constant, matching the graph's constant-stepX arc sim) and suppresses
             // the no-input air drag that free flight gets.
-            if (entry.moveDir == 0) {
+            if (entry.moveDir == 0 || !shouldApplyAirSteering(entry)) {
                 entry.moveDir = resolveAirSteeringDir(entry, botPos, targetPos, entry.airVelX);
             }
 
@@ -486,14 +486,21 @@ class BotMovementManager {
             return false;
         }
 
+        BotNavigationGraph.Region intendedRope = entry.navGraph != null && entry.navFlightEdge != null
+                ? entry.navGraph.getRegion(entry.navFlightEdge.toRegionId) : null;
         for (Rope rope : bot.getMap().getRopes()) {
+            if (intendedRope != null && intendedRope.isRopeRegion
+                    && (rope.x() != intendedRope.minX || rope.topY() != intendedRope.minY
+                    || rope.bottomY() != intendedRope.maxY)) {
+                continue;
+            }
             if (sameRope(entry.blockedRopeGrab, rope)) {
                 continue;
             }
             if (Math.abs(rope.x() - botPos.x) > BotPhysicsEngine.cfg.ROPE_GRAB_X) {
                 continue;
             }
-            if (botPos.y < rope.topY() || botPos.y > rope.bottomY() + 2) {
+            if (botPos.y < BotPhysicsEngine.firstClimbableY(rope) || botPos.y > rope.bottomY()) {
                 continue;
             }
 
@@ -796,6 +803,14 @@ class BotMovementManager {
                 return;
             }
 
+            if (entry.landingStopPending) {
+                entry.moveDir = 0;
+                BotPhysicsEngine.applyGroundMotion(entry, bot, currentFh, BotPhysicsEngine.GroundTarget.stop());
+                entry.landingStopPending = !entry.inAir && entry.hspeed != 0.0;
+                broadcastMovement(entry);
+                return;
+            }
+
             entry.navAwaitingRoute = false;
             targetPos = adjustGrindingTargetPosition(entry, currentFh, targetPos);
             if (entry.graphWarmupFallback && targetPos != null) {
@@ -828,9 +843,8 @@ class BotMovementManager {
     /*
      * Stop-distance used when navPreciseTarget is true.
      * WALK edges use 4px to absorb terrain micro-bumps on sloped footholds.
-     * JUMP and straight down-jump DROP edges use 0px because the bot must walk INTO the
-     * authored launch window, not stop just outside it. Other precise edge types
-     * (CLIMB, PORTAL, non-windowed fallback cases) use 1px to reach the exact anchor.
+     * JUMP, CLIMB and straight down-jump DROP edges use 0px because the bot must walk
+     * INTO the launch/grip window, not stop a pixel outside it. Portals use 1px.
      */
     static int preciseNavStopDist(BotNavigationGraph.Edge navEdge) {
         if (navEdge != null && navEdge.type == BotNavigationGraph.EdgeType.WALK
@@ -839,6 +853,7 @@ class BotMovementManager {
         }
         if (navEdge != null
                 && (navEdge.type == BotNavigationGraph.EdgeType.JUMP
+                || navEdge.type == BotNavigationGraph.EdgeType.CLIMB
                 || (navEdge.type == BotNavigationGraph.EdgeType.DROP && navEdge.launchStepX == 0))) {
             // Bot must walk INTO the launch window, not just near it. The launch window checks
             // are strict, so stopDist=1 can halt the bot exactly 1px before the valid range.
@@ -913,7 +928,14 @@ class BotMovementManager {
             return new MoveAction(ActionType.IDLE, 0, groundTarget != null
                     && Math.abs(targetPos.x - botPos.x) <= radius ? groundTarget : null);
         }
-        boolean canWalkStep = BotPhysicsEngine.canWalkGroundStep(entry.bot.getMap(), botPos, stepX);
+        // Preview the SAME substep controller that will execute this approach. A full-speed
+        // pulse may leave a three-pixel ledge while a one-pixel approach safely stops on it.
+        boolean canWalkStep = groundTarget != null
+                ? !BotPhysicsEngine.simulateGroundMotion(entry.bot.getMap(), botPos, currentFh,
+                        Integer.signum(stepX), new BotPhysicsEngine.GroundTravelState(
+                                entry.physX, entry.hspeed, entry.groundPhysicsCarryMs),
+                        BotPhysicsEngine.groundStepProfile(entry), groundTarget).lostGround()
+                : BotPhysicsEngine.canWalkGroundStep(entry.bot.getMap(), botPos, stepX);
         if (!canWalkStep) {
             boolean blockedByWall = BotPhysicsEngine.isGroundStepBlockedByWall(entry.bot.getMap(), botPos, stepX);
             if (!blockedByWall

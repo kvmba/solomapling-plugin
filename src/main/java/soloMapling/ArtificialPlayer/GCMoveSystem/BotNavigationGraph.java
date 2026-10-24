@@ -349,6 +349,7 @@ final class BotNavigationGraph implements Serializable {
     final Map<Integer, List<Edge>> outgoingByRegionId;
     final java.util.Set<Integer> collidableWallIds;
     final java.util.Set<Integer> collidableFromBelowIds;
+    final java.util.Set<Integer> deadRegionIds;
 
     BotNavigationGraph(int mapId,
                        int version,
@@ -370,6 +371,15 @@ final class BotNavigationGraph implements Serializable {
                        Map<Integer, List<Edge>> outgoingByRegionId,
                        java.util.Set<Integer> collidableWallIds,
                        java.util.Set<Integer> collidableFromBelowIds) {
+        this(mapId, version, movementProfile, regions, regionsById, regionIdByFootholdId,
+                outgoingByRegionId, collidableWallIds, collidableFromBelowIds, java.util.Set.of());
+    }
+
+    BotNavigationGraph(int mapId, int version, BotMovementProfile movementProfile,
+                       List<Region> regions, Map<Integer, Region> regionsById,
+                       Map<Integer, Integer> regionIdByFootholdId, Map<Integer, List<Edge>> outgoingByRegionId,
+                       java.util.Set<Integer> collidableWallIds, java.util.Set<Integer> collidableFromBelowIds,
+                       java.util.Set<Integer> deadRegionIds) {
         this.mapId = mapId;
         this.version = version;
         this.movementProfile = movementProfile;
@@ -378,10 +388,17 @@ final class BotNavigationGraph implements Serializable {
         this.regionIdByFootholdId = new HashMap<>(regionIdByFootholdId);
         this.outgoingByRegionId = new HashMap<>();
         for (Map.Entry<Integer, List<Edge>> entry : outgoingByRegionId.entrySet()) {
-            this.outgoingByRegionId.put(entry.getKey(), new ArrayList<>(entry.getValue()));
+            List<Edge> usable = new ArrayList<>();
+            for (Edge edge : entry.getValue()) {
+                if (!deadRegionIds.contains(edge.toRegionId)) {
+                    usable.add(edge);
+                }
+            }
+            this.outgoingByRegionId.put(entry.getKey(), usable);
         }
         this.collidableWallIds = new java.util.HashSet<>(collidableWallIds);
         this.collidableFromBelowIds = new java.util.HashSet<>(collidableFromBelowIds);
+        this.deadRegionIds = java.util.Set.copyOf(deadRegionIds);
     }
 
     BotNavigationGraph(int mapId,
