@@ -128,6 +128,21 @@ public final class LudiStages {
         if (PqActions.countItem(bot, LudiPqData.PASS) <= 0) {
             // Delivered: spread into the NPC ring with the rest of the ready party.
             PqActions.spreadNearStageNpc(bot, stageNpc);
+        } else {
+            // Still carrying: walk to the SAME post anyway.
+            //
+            // This is the reported "jumps onto the isolated platform, kills, then stands still -
+            // it has to jump away". The old flow moved a ready bot only when its pockets were
+            // EMPTY (spreadNearStageNpc), so a bot that finished its fight on a side ledge - the
+            // tower's isolated perches and stair treads - with passes still in hand issued no
+            // command at all and stayed there for the rest of the stage. It is the normal end of
+            // every collection stage, so it read as the whole party freezing at once.
+            //
+            // Going to the post is always right for a ready bot: it is where the leader comes for
+            // the turn-in, and walkTo routes through the nav graph, so leaving a perch is a real
+            // jump/drop off it. The stock stays pocketed - handItemsToLeaderAfterStage still drops
+            // it only once the leader is at the post, so delivery timing is unchanged.
+            PqActions.waitNearStageNpc(bot, stageNpc);
         }
     }
 
