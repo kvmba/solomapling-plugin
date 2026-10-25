@@ -6,6 +6,13 @@ import org.gms.server.maps.Foothold;
 import org.gms.server.maps.MapleMap;
 
 import java.awt.Point;
+import java.util.ArrayDeque;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
 
 // Adapted from GreenCatMS bot movement-skill packets (NutNNut). Credit: NutNNut.
 /*
@@ -42,14 +49,8 @@ final class GCMovementSkills {
     static final int TELEPORT_Y_SNAP_PX = 75;    // horizontal-blink vertical snap band
     static final int FLASH_JUMP_Y_SNAP_PX = 90;  // a dash tolerates a bit more height change than a blink
 
-    // Ours (tier/fit layer): dash tiers. FJ_TRAVEL_PX = expected total ground covered per scale (launch
-    // drift + dash), derived from the physics constants — calibrate with !gcmove fj before trusting the
-    // numbers hard. Per jump we pick the LARGEST tier that (a) is within the bot's level cap
-    // (FlashJumpTiers) and (b) fits the remaining platform run, so a Night Lord uses the full dash on a
-    // long ledge and automatically downshifts on a small platform instead of dashing off the edge.
+    // Largest learned tier whose simulated flight and braking stay on the launch surface.
     static final float[] FJ_SCALES = {1.0f, 0.75f, 0.55f};
-    static final int[] FJ_TRAVEL_PX = {340, 240, 160};
-    private static final int FJ_LAND_MARGIN_PX = 40; // keep the landing this far inside the ledge end
     private static final int MOVE_DURATION_MS = 50; // per-fragment duration (matches the driver's broadcast tick)
 
     // v83 MovePath fragment command bytes.
@@ -101,6 +102,90 @@ final class GCMovementSkills {
         return true;
     }
 
+    record TeleportApproach(BotNavigationGraph graph, int targetRegion, Point launch, Point landing, int direction) {
+    }
+
+    /** One blink connecting two ordinary routes. No invented position or map-specific waypoint. */
+    static TeleportApproach findTeleportApproach(MapleMap map, BotNavigationGraph graph,
+                                                 Point from, Point target) {
+        int start = graph.findRegionId(map, from);
+        int goal = graph.findRegionId(map, target);
+        if (start < 0 || goal < 0 || graph.deadRegionIds.contains(goal)) return null;
+        Map<Integer, List<Integer>> reverse = new HashMap<>();
+        Map<Integer, List<Integer>> forward = new HashMap<>();
+        for (var region : graph.regions) {
+            for (var edge : graph.getOutgoing(region.id)) {
+                if (edge.type == BotNavigationGraph.EdgeType.PORTAL) {
+                    var portal = map.getPortal(edge.portalId);
+                    if (portal == null || !portal.getPortalStatus()) continue;
+                }
+                reverse.computeIfAbsent(edge.toRegionId, ignored -> new ArrayList<>()).add(region.id);
+                forward.computeIfAbsent(region.id, ignored -> new ArrayList<>()).add(edge.toRegionId);
+            }
+        }
+        Set<Integer> reachesGoal = reachable(reverse, goal);
+        Set<Integer> reachableFromStart = reachable(forward, start);
+        TeleportApproach best = null;
+        long bestCost = Long.MAX_VALUE;
+        for (var region : graph.regions) {
+            if (region.isRopeRegion || !reachableFromStart.contains(region.id) || reachesGoal.contains(region.id)) continue;
+            for (var segment : region.segments) {
+                for (int x = segment.minX; x <= segment.maxX; x++) {
+                    Point launch = segment.pointAt(x);
+                    Point[] landings = {upTeleportLanding(map, launch),
+                            horizontalTeleportLanding(map, launch, -1), horizontalTeleportLanding(map, launch, 1),
+                            downTeleportLanding(map, launch)};
+                    for (int direction = 0; direction < landings.length; direction++) {
+                        Point landing = landings[direction];
+                        if (landing == null || !reachesGoal.contains(graph.findRegionId(map, landing))) continue;
+                        long cost = Math.abs((long) from.x - x) + Math.abs((long) from.y - launch.y)
+                                + Math.abs((long) target.x - landing.x) + Math.abs((long) target.y - landing.y);
+                        if (cost < bestCost) {
+                            bestCost = cost;
+                            best = new TeleportApproach(graph, goal, launch, landing, direction);
+                        }
+                    }
+                }
+            }
+        }
+        return best;
+    }
+
+    private static Set<Integer> reachable(Map<Integer, List<Integer>> edges, int start) {
+        Set<Integer> seen = new HashSet<>();
+        ArrayDeque<Integer> queue = new ArrayDeque<>();
+        seen.add(start);
+        queue.add(start);
+        while (!queue.isEmpty()) {
+            for (int next : edges.getOrDefault(queue.removeFirst(), List.of())) {
+                if (seen.add(next)) queue.addLast(next);
+            }
+        }
+        return seen;
+    }
+
+    static boolean executeTeleportApproach(BotMovementState entry, TeleportApproach approach) {
+        Point from = entry.bot.getPosition();
+        if (from.distanceSq(approach.launch()) > 64 || entry.inAir || entry.climbing
+                || MovementClock.nowMs() < entry.attackActionUntilMs) return false;
+        Point landing = approach.landing();
+        // Revalidate at the actual pixel, not merely the route's representative launch.
+        Point actual = switch (approach.direction()) {
+            case 0 -> upTeleportLanding(entry.bot.getMap(), from);
+            case 1 -> horizontalTeleportLanding(entry.bot.getMap(), from, -1);
+            case 2 -> horizontalTeleportLanding(entry.bot.getMap(), from, 1);
+            case 3 -> downTeleportLanding(entry.bot.getMap(), from);
+            default -> throw new IllegalStateException("Unknown teleport direction");
+        };
+        if (actual == null || approach.graph().findRegionId(entry.bot.getMap(), actual)
+                != approach.graph().findRegionId(entry.bot.getMap(), landing)) return false;
+        BotPhysicsEngine.teleportTo(entry, entry.bot, actual);
+        BotMovementManager.resetEntryStateAfterTeleport(entry);
+        if (ObserverTracker.isActiveMap(entry.bot.getMapId())) broadcastTeleport(entry.bot, from, actual,
+                standStance(Integer.compare(actual.x, from.x)));
+        return true;
+    }
+
     // ── Flash Jump (thief air dash) ───────────────────────────────────────────
 
     // scaleCap = the bot's level-tier dash cap (FlashJumpTiers via the caller); the platform fit below
@@ -115,11 +200,7 @@ final class GCMovementSkills {
             return false; // no position, or already airborne/on a rope — don't stack a dash
         }
         int dir = targetX >= origin.x ? 1 : -1;
-        // Pick the largest dash that fits the platform (and the level cap). We do NOT warp to a landing
-        // point — the airborne integrator lands the bot naturally; the fit just guarantees the chosen arc
-        // has ledge to land on (we intentionally skip GreenCatMS's nav-graph landing sim). Fall-off-map
-        // recovery backstops any residual overshoot.
-        float scale = fitScale(map, origin, dir, scaleCap);
+        float scale = fitScale(map, origin, dir, scaleCap, st.movementProfile);
         if (scale <= 0f) {
             return false; // no arc fits the remaining run — caller walks (or uses the plain engage hop)
         }
@@ -134,7 +215,7 @@ final class GCMovementSkills {
     }
 
     // Dev/calibration only (the !gcmove fj hook): fire a dash at an exact scale, bypassing the level cap
-    // and the platform fit, so real travel distances can be measured against FJ_TRAVEL_PX.
+    // and the platform fit, so real travel distances can be measured in-game.
     static boolean execFlashJumpForced(BotMovementState st, Character bot, int dir, float scale) {
         Point origin = bot.getPosition();
         if (bot.getMap() == null || origin == null || st.inAir || st.climbing) {
@@ -146,54 +227,19 @@ final class GCMovementSkills {
         return true;
     }
 
-    // The largest tier scale <= cap whose expected travel fits the platform. Primary gate: the remaining
-    // same-ledge run toward dir (the dash lands back on the launch ledge, so run bounds the safe travel).
-    // When the nav graph can't place the bot (region unknown), fall back to probing for same-level ground
-    // around each tier's landing distance. 0 = nothing fits.
-    private static float fitScale(MapleMap map, Point origin, int dir, float cap) {
-        int run = sameLedgeRun(map, origin, dir);
-        for (int i = 0; i < FJ_SCALES.length; i++) {
-            if (FJ_SCALES[i] > cap + 0.001f) {
-                continue; // above this bot's level tier
-            }
-            int travel = FJ_TRAVEL_PX[i];
-            if (run >= 0) {
-                if (run - FJ_LAND_MARGIN_PX >= travel) {
-                    return FJ_SCALES[i];
-                }
-            } else if (landingProbe(map, origin, dir, travel) != null) {
-                return FJ_SCALES[i];
-            }
+    static float fitScale(MapleMap map, Point origin, int dir, float cap, BotMovementProfile profile) {
+        Foothold source = BotPhysicsEngine.findGroundFoothold(map, origin);
+        if (source == null) return 0f;
+        for (float scale : FJ_SCALES) {
+            if (scale > cap + 0.001f) continue;
+            BotPhysicsEngine.PostLandingJump stopped = BotPhysicsEngine.simulateLandingStop(map,
+                    BotPhysicsEngine.simulateFlashJumpLanding(map, origin, dir, profile, scale), profile);
+            Point onSource = stopped == null ? null : BotPhysicsEngine.findWalkRegionGroundPoint(map, source,
+                    stopped.finalPoint().x, stopped.finalPoint().y);
+            if (stopped != null && !stopped.lostGround() && onSource != null
+                    && onSource.equals(stopped.finalPoint())) return scale;
         }
         return 0f;
-    }
-
-    // Walkable distance from origin to the end of the bot's own ledge in `dir`, or -1 when the graph
-    // has no region for the spot (unbaked / mid-air origin). Grinding bots always run on a baked map
-    // (SpotFinder.profile bakes it), so -1 is the rare fallback path, not the norm.
-    private static int sameLedgeRun(MapleMap map, Point origin, int dir) {
-        int region = GCMovement.regionIdAt(map, origin.x, origin.y);
-        if (region < 0) {
-            return -1;
-        }
-        for (GCMovement.Ledge l : GCMovement.walkableLedges(map)) {
-            if (l.regionId() == region) {
-                return dir > 0 ? l.maxX() - origin.x : origin.x - l.minX();
-            }
-        }
-        return -1;
-    }
-
-    // Same-level ground within a small window inward of the expected landing distance (fallback fit
-    // check when the ledge run is unknown).
-    private static Point landingProbe(MapleMap map, Point origin, int dir, int travel) {
-        for (int reach = travel; reach >= travel - 60; reach -= 20) {
-            Point g = GCMovement.groundPointBelow(map, origin.x + dir * reach, origin.y - 4);
-            if (g != null && Math.abs(g.y - origin.y) <= FLASH_JUMP_Y_SNAP_PX) {
-                return g;
-            }
-        }
-        return null;
     }
 
     // ── Landing math (foothold-only; ported concept from BotPhysicsEngine.teleportLanding) ──
@@ -224,11 +270,10 @@ final class GCMovementSkills {
     // the RAW landing ladder; the executor's livability-filtered variant is downLanding below.
     static Point downTeleportLanding(MapleMap map, Point origin) {
         Point best = null;
-        Point probe = GCMovement.groundPointBelow(map, origin.x, origin.y + 1);
-        int guard = 0;
-        while (probe != null && probe.y > origin.y && probe.y - origin.y <= TELEPORT_RANGE_PX && guard++ < 12) {
+        Point probe = BotPhysicsEngine.pointBelowIndexed(map, new Point(origin.x, origin.y + 1));
+        while (probe != null && probe.y > origin.y && probe.y - origin.y <= TELEPORT_RANGE_PX) {
             best = probe;
-            probe = GCMovement.groundPointBelow(map, origin.x, probe.y + 1);
+            probe = BotPhysicsEngine.pointBelowIndexed(map, new Point(origin.x, probe.y + 1));
         }
         return best;
     }
@@ -239,13 +284,11 @@ final class GCMovementSkills {
     // the blink entirely: never into a one-way trap, and never past the range contract.
     private static Point downLanding(MapleMap map, Point origin, BotMovementProfile profile,
                                      BotMovementCapabilities capabilities) {
-        Point best = downTeleportLanding(map, origin);
-        while (best != null && !DeadPitGuard.isLivableLanding(map, best, profile, capabilities)) {
-            Point above = GCMovement.groundPointBelow(map, origin.x, best.y - 1);
-            if (above == null || above.y >= best.y || above.y - origin.y > TELEPORT_RANGE_PX) {
-                return null;
-            }
-            best = above;
+        Point best = null;
+        Point probe = BotPhysicsEngine.pointBelowIndexed(map, new Point(origin.x, origin.y + 1));
+        while (probe != null && probe.y > origin.y && probe.y - origin.y <= TELEPORT_RANGE_PX) {
+            if (DeadPitGuard.isLivableLanding(map, probe, profile, capabilities)) best = probe;
+            probe = BotPhysicsEngine.pointBelowIndexed(map, new Point(origin.x, probe.y + 1));
         }
         return best;
     }

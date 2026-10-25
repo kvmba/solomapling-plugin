@@ -43,10 +43,8 @@ public class BotRecruitManager {
     // wording, so a Chinese-speaking player's natural shout matches on 组队 without a second list.
     private static final String[] RECRUIT_KEYWORDS = {"party", "team", "join", "group", "组队", "一起",
             "求带", "带带", "抱大腿", "缺人", "来人", "收人", "还差人", "就差你", "组个队", "组一波"};
-    // Kept comfortably above the InviteCoordinator's ~3-min silent timeout so the accept window no
-    // longer races it - the coordinator now backstops staleness (a late accept just NOT_FOUNDs
-    // harmlessly). This also keeps isArmed() true across the whole realistic invite window, which
-    // gates recruitingNow()/priority speed and the follower-cap UI.
+    // Consent covers invitations arriving in this window. A valid arrival may be drained
+    // later; the coordinator, not this recruit deadline, expires the invitation itself.
     private static final long INVITE_WINDOW_MS = 200_000;     // accept window after saying "invite me"
     private static final long DECLINE_COOLDOWN_MS = 180_000;  // per-player re-ask cooldown after a decline
 
@@ -71,6 +69,15 @@ public class BotRecruitManager {
     // on decline the (bot,player) pair goes on cooldown. willBecomeFollower gates the global cap.
     public static RecruitAnswer rollPartyAsk(Character botChr, Character player, double acceptChance,
                                              boolean willBecomeFollower) {
+        synchronized (BotPartyQueue.getInstance()) {
+            return rollPartyAskUnlocked(botChr, player, acceptChance, willBecomeFollower);
+        }
+    }
+
+    private static RecruitAnswer rollPartyAskUnlocked(Character botChr, Character player, double acceptChance,
+                                                       boolean willBecomeFollower) {
+        // A fresh answer replaces the previous consent, including a refusal or a cap rejection.
+        ARMED.computeIfPresent(botChr.getId(), (id, armed) -> armed.inviterId() == player.getId() ? null : armed);
         if (botChr.getLevel() < 10) {
             // The party handler hard-blocks invites to sub-10 characters ("does not meet the
             // requirements") - decline organically instead of arming a window that can't be used.
@@ -118,6 +125,12 @@ public class BotRecruitManager {
     // pending invite must always be answered: accept if it's the armed inviter (id match),
     // politely reject everything else (frees the slot; the inviter gets the normal declined notice).
     public static InvitePoll pollInvites(Character botChr) {
+        synchronized (BotPartyQueue.getInstance()) {
+            return pollInvitesUnlocked(botChr);
+        }
+    }
+
+    private static InvitePoll pollInvitesUnlocked(Character botChr) {
         if (!BotPartyQueue.getInstance().hasPendingInvite(botChr)) {
             return InvitePoll.NONE;
         }
@@ -127,12 +140,13 @@ public class BotRecruitManager {
         }
         Armed armed = ARMED.get(botChr.getId());
         Character inviter = entry.getInviter();
-        // Accept on inviter-id match alone (no window expiry check): the id proves this is the player
-        // the bot agreed to, and the InviteCoordinator's own ~3-min timeout bounds staleness. A truly
-        // stale accept just NOT_FOUNDs at the coordinator and no join happens - harmless. This stops a
-        // legitimate-but-late invite from being guillotined into a "declined" reject.
+        // Authorize when the invitation arrived, not when a delayed macro tick drains it.
+        // The host bounds the invitation's lifetime; it does not bound old recruit consent.
         boolean armedMatch = armed != null && inviter != null
-                && inviter.getId() == armed.inviterId();
+                && inviter.getId() == armed.inviterId()
+                && entry.enqueuedAtMs() >= armed.expiresAtMs() - INVITE_WINDOW_MS
+                && entry.enqueuedAtMs() <= armed.expiresAtMs()
+                && !declinedByThisBot(botChr.getId(), inviter.getId());
         if (armedMatch) {
             boolean joined = BotPartyCommands.botAcceptPartyInvite(botChr, inviter.getId());
             if (joined) {

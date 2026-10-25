@@ -177,6 +177,7 @@ class BotMovementManager {
         }
 
         entry.movementProfile = updated;
+        entry.teleportApproach = null;
         entry.navGraphLoad = null;
         clearNavigationState(entry);
         return true;
@@ -192,6 +193,7 @@ class BotMovementManager {
     }
 
     private static void clearTransientState(BotMovementState entry) {
+        entry.teleportApproach = null;
         // GCMoveSystem: grindTarget / fidget are out of scope (pure movement) — dropped.
         entry.attackActionUntilMs = 0L; // a teleport/warp ends any swing that owned the old body
         entry.graphWarmupFallback = false;
@@ -1203,6 +1205,8 @@ class BotMovementManager {
 
     /** Whether the bot stands on a surface the livability probe cannot clear (a dead pit). */
     private static boolean isOnDeadPitFloor(BotMovementState entry, Character bot) {
+        // A conservative warmup hold is not proof that the bot needs a recovery teleport.
+        if (BotNavigationGraphProvider.peekGraph(bot.getMap(), entry.movementProfile) == null) return false;
         Point pos = bot.getPosition();
         if (pos == null || bot.getMap() == null || bot.getMap().getFootholds() == null) {
             return false;

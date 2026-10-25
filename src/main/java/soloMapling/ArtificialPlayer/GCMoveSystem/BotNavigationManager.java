@@ -209,6 +209,33 @@ final class BotNavigationManager {
             int startRegionId = resolveCurrentRegionId(graph, entry, bot.getMap(), botPos);
             int targetRegionId = resolveTargetRegionId(graph, entry, bot.getMap(), rawTargetPos);
             Point pathTargetPos = adjustPathTarget(entry, graph, targetRegionId, rawTargetPos);
+            GCMovementSkills.TeleportApproach blink = entry.teleportApproach;
+            if (blink != null && (blink.graph() != graph || blink.targetRegion() != targetRegionId)) {
+                entry.teleportApproach = blink = null;
+                clearNavigation(entry);
+            }
+            if (blink == null && runAiTick && !entry.inAir && !entry.climbing
+                    && startRegionId >= 0 && targetRegionId >= 0 && startRegionId != targetRegionId
+                    && BotMovementCapabilities.of(bot).teleport()
+                    && findPath(graph, bot, startRegionId, targetRegionId, pathTargetPos) == null) {
+                entry.teleportApproach = blink = GCMovementSkills.findTeleportApproach(bot.getMap(), graph,
+                        botPos, pathTargetPos);
+            }
+            if (blink != null) {
+                if (GCMovementSkills.executeTeleportApproach(entry, blink)) {
+                    entry.teleportApproach = null;
+                    clearNavigation(entry);
+                    entry.lastNavDecision = "teleport-link";
+                    return new NavigationDirective(rawTargetPos, true);
+                }
+                pathTargetPos = blink.launch();
+                targetRegionId = graph.findRegionId(bot.getMap(), pathTargetPos);
+                if (startRegionId == targetRegionId) {
+                    entry.navPreciseTarget = true;
+                    entry.navTargetPos = pathTargetPos;
+                    return new NavigationDirective(pathTargetPos, false);
+                }
+            }
 
             // Stale-edge give-up: a committed edge whose position gate (jump-pos/drop-pos/
             // climb-pos) has rejected the bot for several consecutive ticks WITHOUT the bot
@@ -1110,7 +1137,8 @@ final class BotNavigationManager {
             return false;
         }
         int region = graph.findRegionId(map, target);
-        return region >= 0 && graph.legalDestinationRegionIds.contains(region);
+        return region >= 0 && !graph.deadRegionIds.contains(region)
+                && graph.legalDestinationRegionIds.contains(region);
     }
 
     static Point selectDropWaypoint(BotMovementState entry,

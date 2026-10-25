@@ -28,9 +28,9 @@ public class MonsterPlatformNavigationTest {
     }
 
     @Test
-    public void monsterSpawnPlatformIsNotSweptAsDead() {
-        Foothold base = floor(1, -100, 0, 0);
-        Foothold spawnShelf = floor(2, 50, 100, -100);
+    public void monsterSpawnDoesNotInventAnExit() {
+        Foothold base = floor(1, -100, 0, -300);
+        Foothold spawnShelf = floor(2, 50, 100, 100);
         BotNavigationGraph.Region baseRegion = new BotNavigationGraph.Region(
                 1, List.of(new BotNavigationGraph.Segment(base)));
         BotNavigationGraph.Region shelfRegion = new BotNavigationGraph.Region(
@@ -47,14 +47,8 @@ public class MonsterPlatformNavigationTest {
         when(map.getPortals()).thenReturn(List.of());
 
         Set<Integer> dead = BotNavigationGraphProvider.findDeadRegions(map,
-                List.of(baseRegion, shelfRegion), regionByFoothold, outgoing, Set.of(2));
-        assertFalse("a monster platform is a legal destination", dead.contains(2));
-        assertFalse("a platform whose only exit is a legal destination stays live", dead.contains(1));
-
-        Set<Integer> withoutMonster = BotNavigationGraphProvider.findDeadRegions(map,
-                List.of(baseRegion, shelfRegion), regionByFoothold, outgoing, Set.of());
-        assertEquals("without the spawn proof the missing exit makes the shelf terminal",
-                Set.of(1, 2), withoutMonster);
+                List.of(baseRegion, shelfRegion), regionByFoothold, outgoing);
+        assertEquals("a spawn cannot turn a terminal basin into an exit", Set.of(2), dead);
     }
 
     @Test

@@ -155,9 +155,7 @@ public final class PqActions {
             }
             clearReactorBeat(bot.getId()); // stage walking supersedes box work
             stageWalkShieldUntilByBot.remove(bot.getId());
-            Point here = bot.getPosition();
-            if (Math.abs(here.x - target.x) <= ARRIVAL_EPS_PX
-                    && Math.abs(here.y - target.y) <= ARRIVAL_EPS_PX) {
+            if (GCMovement.isAtTarget(bot, target, ARRIVAL_EPS_PX)) {
                 GCMovement.stop(bot);
                 return true;
             }
@@ -197,10 +195,7 @@ public final class PqActions {
         if (walkShieldReleases(arrivedFlag, GCMovement.isMoving(bot))) {
             stageWalkShieldUntilByBot.remove(bot.getId(), shield);
         }
-        Point pos = bot.getPosition();
-        return bot.getMap() == map && pos != null
-                && Math.abs(pos.x - target.x) <= ARRIVAL_EPS_PX
-                && Math.abs(pos.y - target.y) <= ARRIVAL_EPS_PX;
+        return bot.getMap() == map && GCMovement.isAtTarget(bot, target, ARRIVAL_EPS_PX);
     }
 
     /**
@@ -1195,7 +1190,7 @@ public final class PqActions {
         int pathRegion = -1;
         int pathSurfaceY;
         Boolean pathable;
-        Point lastChaseGoal;
+        Object chaseMove;
         final Map<Integer, PathabilityVerdict> pathability = new java.util.HashMap<>();
 
         void clearProgress() {
@@ -1247,6 +1242,7 @@ public final class PqActions {
                 return; // teardown removed this episode while this beat waited
             }
             if (state.map != bot.getMap()) {
+                state.chaseMove = null;
                 state.map = bot.getMap();
                 state.targetOid = -1;
                 state.clearGoal();
@@ -1404,8 +1400,7 @@ public final class PqActions {
 
         // Compare with the driver's ACTUAL goal, not a memo of our last command. A pickup/park
         // can replace it between beats; "has any target" must not suppress the upward chase.
-        GCMovement.moveIfTargetChanged(bot, tx, ty, RETARGET_EPS_PX);
-        state.lastChaseGoal = new Point(tx, ty);
+        state.chaseMove = GCMovement.moveIfTargetChanged(bot, tx, ty, RETARGET_EPS_PX);
         if (seekTraceEnabled(bot.getId())) {
             seekTrace(bot, state, target, mp, mobFloor, issued, "chase");
         }
@@ -1416,20 +1411,20 @@ public final class PqActions {
      * chase's goal may survive a kill (the no-progress watchdog owns it for seconds), and every
      * ready-party park yields to a live move — so without this the bot stands on its last kill
      * platform while the rest of the party gathers at the NPC. Only the goal THIS seek issued is
-     * cancelled: a pickup/reclaim walk that replaced it stays untouched.
+     * cancelled by identity: a pickup/reclaim walk at even the same pixel stays untouched.
      */
     private static void stopStaleChase(Character bot, SeekState state) {
-        Point goal = state.lastChaseGoal;
-        state.lastChaseGoal = null;
-        if (goal != null) {
-            GCMovement.stopIfTarget(bot, goal);
+        Object move = state.chaseMove;
+        state.chaseMove = null;
+        if (move != null) {
+            GCMovement.stopIfTarget(bot, move);
         }
     }
 
     /**
      * Cancel a lingering combat chase when stage work is about to own the bot's movement (a
      * ready-party park or the post-work delivery). Safe to call every tick: it only stops the
-     * driver when the live goal is exactly the one the seek layer issued, never a pickup,
+     * driver when the live move is the one the seek layer issued, never a pickup,
      * reclaim or stage walk that replaced it.
      */
     public static void releaseStaleChase(Character bot) {
@@ -1542,7 +1537,7 @@ public final class PqActions {
         Point surface = GCMovement.groundPointBelow(bot.getMap(), x, y);
         int surfaceY = (surface != null) ? surface.y : y;
         if (region >= 0 && region == state.pathRegion
-                && surfaceY == state.pathSurfaceY && state.pathable != null) {
+                && surfaceY == state.pathSurfaceY && Boolean.TRUE.equals(state.pathable)) {
             return state.pathable;
         }
         boolean pathable = GCMovement.canPathTo(bot, x, y);

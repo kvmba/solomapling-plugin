@@ -248,7 +248,20 @@ public final class BotAttackEffects {
                 : target.getStats().isFfaLoot() ? 2
                 : bot.getParty() != null ? 1 : 0);
 
-        boolean killed = target.damage(bot, damage, false); // register damage; false = allow death
+        boolean killed;
+        if (target.getId() == soloMapling.ArtificialPlayer.BotTypes.Ariant.AriantPqData.SCORPION) {
+            // Selection alone cannot protect a capture target: concurrent and delayed hits
+            // must share the host's damage lock and stop below the exact capture threshold.
+            target.lockMonster();
+            try {
+                int safeDamage = BotTargetRules.catchSafeDamage(target, damage);
+                killed = safeDamage > 0 && target.damage(bot, safeDamage, true);
+            } finally {
+                target.unlockMonster();
+            }
+        } else {
+            killed = target.damage(bot, damage, false);
+        }
         if (killed) {
             // withDrops=false: keep the EXP distribution + death broadcast, skip the
             // vanilla drop step (which yields nothing for a bot-only kill). We spawn the

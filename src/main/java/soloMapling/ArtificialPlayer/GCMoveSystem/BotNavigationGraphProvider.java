@@ -54,7 +54,7 @@ final class BotNavigationGraphProvider {
     //     their inbound edges.
     // 76: stage-1 climb exits and the legal-destination cache schema are fixed; rebuild any
     //     v75 graph baked before the monster-spawn table was present.
-    private static final int GRAPH_VERSION = 76; // Complete directed reachability, including pixel-wide launch windows.
+    private static final int GRAPH_VERSION = 77; // Exit-reachable safety; monster destinations are not exits.
 
     // Warmup heuristics remain conservative; the completed graph includes all simulated
     // descents and expresses preferences through costs, not by deleting reachable ground.
@@ -512,6 +512,7 @@ final class BotNavigationGraphProvider {
     }
 
     static BotNavigationGraph rebuildGraph(MapleMap map, BotMovementProfile movementProfile) {
+        movementProfile = canonicalProfile(map, movementProfile);
         GraphCacheKey key = GraphCacheKey.from(map.getId(), movementProfile);
         BotNavigationGraph rebuilt = buildGraph(map, movementProfile);
         GRAPHS.put(key, rebuilt);
@@ -805,12 +806,10 @@ final class BotNavigationGraphProvider {
             for (Portal portal : map.getPortals()) {
                 addPortalEdges(portal, map, regionsById, regionIdByFootholdId, outgoing, edgeKeys);
             }
-            // Judge traps only AFTER all physical transitions exist. A region holding a WZ
-            // monster spawn is a legal destination by the map's own data, so an incomplete
-            // exit edge set must never delete its inbound edges.
+            // Task destinations and safe landings are different facts. A monster spawn
+            // never invents an exit from an otherwise one-way basin.
             Set<Integer> legalDestinations = monsterSpawnRegionIds(map, regionIdByFootholdId);
-            Set<Integer> deadRegions = findDeadRegions(map, regions, regionIdByFootholdId, outgoing,
-                    legalDestinations);
+            Set<Integer> deadRegions = findDeadRegions(map, regions, regionIdByFootholdId, outgoing);
             buildProfile.buildPortalEdgesNs = System.nanoTime() - phaseStartedAt;
 
             BotNavigationGraph graph = new BotNavigationGraph(
@@ -1212,35 +1211,30 @@ final class BotNavigationGraphProvider {
 
     static Set<Integer> findDeadRegions(MapleMap map, List<BotNavigationGraph.Region> regions,
                                         Map<Integer, Integer> regionIdByFootholdId,
-                                        Map<Integer, List<BotNavigationGraph.Edge>> outgoing,
-                                        Set<Integer> legalDestinations) {
+                                        Map<Integer, List<BotNavigationGraph.Edge>> outgoing) {
         Map<Integer, List<Integer>> incoming = new HashMap<>();
-        Map<Integer, Integer> exits = new HashMap<>();
+        Set<Integer> live = new HashSet<>();
+        int topY = regions.stream().filter(r -> !r.isRopeRegion)
+                .mapToInt(r -> r.minY).min().orElse(Integer.MIN_VALUE);
         for (BotNavigationGraph.Region region : regions) {
-            // A legal destination is a live sink: the spawn table proves it is enterable even
-            // when a missing exit edge makes its own out-degree look zero.
-            exits.put(region.id, legalDestinations.contains(region.id) ? 1 : 0);
+            // The map's top ground is an ordinary perch, not a pit below other ground.
+            if (!region.isRopeRegion && region.minY == topY) live.add(region.id);
         }
         for (List<BotNavigationGraph.Edge> edges : outgoing.values()) {
             for (BotNavigationGraph.Edge edge : edges) {
                 if (edge.fromRegionId == edge.toRegionId) {
                     continue; // hopping/teleporting within the same region is not an escape
                 }
-                exits.merge(edge.fromRegionId, 1, Integer::sum);
-                if (!legalDestinations.contains(edge.toRegionId)) {
-                    // An edge into a legal destination is a way out of the source; it must
-                    // never be decremented when the destination is processed in the sweep.
-                    incoming.computeIfAbsent(edge.toRegionId, ignored -> new ArrayList<>())
-                            .add(edge.fromRegionId);
-                }
+                incoming.computeIfAbsent(edge.toRegionId, ignored -> new ArrayList<>())
+                        .add(edge.fromRegionId);
             }
         }
-        // Inter-map exits are not navigation edges, but they absolutely are a way out.
-        // Spawn-only portals (target 999999999) do not count. Open/closed status is
-        // runtime state, not geometry: this cache is shared by every instance of the map.
+        // Scripted stage doors use the no-map sentinel too; only plain spawn portals
+        // lack both a real target and a script. Runtime open/closed state is not baked.
         for (Portal portal : map.getPortals()) {
-            if (portal.getTargetMapId() == 999999999
-                    || portal.getTargetMapId() == map.getId()) {
+            boolean scripted = portal.getScriptName() != null && !portal.getScriptName().isEmpty();
+            if (!scripted && (portal.getTargetMapId() == 999999999
+                    || portal.getTargetMapId() == map.getId())) {
                 continue;
             }
             Point at = portal.getPosition();
@@ -1249,28 +1243,23 @@ final class BotNavigationGraphProvider {
                     <= BotMovementManager.cfg.JUMP_Y_THRESH * 2) {
                 int region = regionIdByFootholdId.getOrDefault(floor.getId(), -1);
                 if (region >= 0) {
-                    exits.merge(region, 1, Integer::sum);
+                    live.add(region);
+                }
+            }
+        }
+        // Reverse reachability handles closed cycles as well as terminal dead ends.
+        ArrayDeque<Integer> queue = new ArrayDeque<>(live);
+        while (!queue.isEmpty()) {
+            int region = queue.removeFirst();
+            for (int predecessor : incoming.getOrDefault(region, List.of())) {
+                if (live.add(predecessor)) {
+                    queue.addLast(predecessor);
                 }
             }
         }
         Set<Integer> dead = new HashSet<>();
-        ArrayDeque<Integer> queue = new ArrayDeque<>();
-        exits.forEach((id, count) -> {
-            if (count == 0) {
-                dead.add(id);
-                queue.add(id);
-            }
-        });
-        while (!queue.isEmpty()) {
-            int region = queue.removeFirst();
-            for (int predecessor : incoming.getOrDefault(region, List.of())) {
-                if (legalDestinations.contains(predecessor)) {
-                    continue; // a legal destination stays enterable regardless of its exits
-                }
-                if (exits.merge(predecessor, -1, Integer::sum) == 0 && dead.add(predecessor)) {
-                    queue.addLast(predecessor);
-                }
-            }
+        for (BotNavigationGraph.Region region : regions) {
+            if (!live.contains(region.id)) dead.add(region.id);
         }
         return dead;
     }

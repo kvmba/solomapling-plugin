@@ -279,14 +279,14 @@ public final class GCMovement {
     }
 
     /** Reconcile a chase against the live driver goal atomically with arrival/abandonment. */
-    public static void moveIfTargetChanged(Character bot, int x, int y, int epsilonPx) {
+    public static Object moveIfTargetChanged(Character bot, int x, int y, int epsilonPx) {
         enable(bot);
         BotMovementState st = STATES.get(bot.getId());
         if (st == null) {
-            return;
+            return null;
         }
         synchronized (st) {
-            if (st.tickStopped) return;
+            if (st.tickStopped) return null;
             GCFollow.cancel(bot);
             GCTravel.cancel(bot);
             Point current = st.moveTarget;
@@ -294,6 +294,7 @@ public final class GCMovement {
                     || Math.abs(current.y - y) >= epsilonPx) {
                 setMoveTarget(st, x, y, null);
             }
+            return st.moveTarget;
         }
     }
 
@@ -304,6 +305,7 @@ public final class GCMovement {
         boolean changed = st.moveTarget == null || st.moveTargetMap != map
                 || st.moveTarget.x != x || st.moveTarget.y != y;
         st.climbPositionHeld = false;
+        if (changed) st.teleportApproach = null;
         FAILURE_CALLBACKS.remove(st.bot.getId());
         st.following = false;
         st.farmAnchor = null;
@@ -614,6 +616,7 @@ public final class GCMovement {
         synchronized (st) {
             if (st.tickStopped) return;
             st.climbPositionHeld = st.climbing;
+            st.teleportApproach = null;
             st.moveTarget = null;
             st.moveTargetMap = null;
             st.moveTargetPrecise = false;
@@ -791,11 +794,11 @@ public final class GCMovement {
     }
 
     /**
-     * Stop only when the driver's live goal is exactly {@code expected}. Check and clear run under
+     * Cancel only the move token returned by moveIfTargetChanged. Check and clear run under
      * the same state monitor, so a pickup/reclaim walk that replaced the goal between the caller's
      * read and this call is never cancelled by mistake.
      */
-    public static boolean stopIfTarget(Character bot, Point expected) {
+    public static boolean stopIfTarget(Character bot, Object expected) {
         if (bot == null || expected == null) {
             return false;
         }
@@ -804,12 +807,17 @@ public final class GCMovement {
             return false;
         }
         synchronized (st) {
-            if (st.tickStopped || st.moveTarget == null || !st.moveTarget.equals(expected)) {
+            if (st.tickStopped || st.moveTarget != expected || st.moveTargetMap != bot.getMap()) {
                 return false;
             }
             GCFollow.cancel(bot);
             GCTravel.cancel(bot);
             clearMoveIntent(bot);
+            // Automatic chase retirement is not an explicit request to hang on a rope.
+            st.climbPositionHeld = false;
+            st.climbUpIntent = false;
+            st.ropeEntryPending = false;
+            if (st.climbing) BotMovementManager.dismountTowardGround(st);
             st.following = false;
             st.owner = null;
             return true;
@@ -938,6 +946,20 @@ public final class GCMovement {
         }
         synchronized (st) {
             return !st.climbing && (!st.inAir || st.swimming);
+        }
+    }
+
+    /** The same arrival contract as the driver, including intentional mid-rope puzzle spots. */
+    public static boolean isAtTarget(Character bot, Point target, int radius) {
+        BotMovementState st = bot == null ? null : STATES.get(bot.getId());
+        if (bot == null || target == null) return false;
+        if (st == null) return Math.abs(bot.getPosition().x - target.x) <= radius
+                && Math.abs(bot.getPosition().y - target.y) <= radius;
+        synchronized (st) {
+            Point pos = bot.getPosition();
+            if (st.navAwaitingRoute || st.portalDropAtMs > 0) return false;
+            return GCMovementDriver.reachedRopeTarget(st, target, radius)
+                    || GCMovementDriver.reachedMoveTarget(st.climbing, st.inAir, st.swimming, pos, target, radius);
         }
     }
 
@@ -1406,7 +1428,10 @@ public final class GCMovement {
         if (from >= 0 && from == to) {
             return true;
         }
-        return MovementPlan.inMap(graph, map, bot.getPosition(), new Point(x, y)) != null;
+        Point target = new Point(x, y);
+        return MovementPlan.inMap(graph, map, bot.getPosition(), target) != null
+                || (BotMovementCapabilities.of(bot).teleport()
+                && GCMovementSkills.findTeleportApproach(map, graph, bot.getPosition(), target) != null);
     }
 
     /* Snap an arbitrary (possibly airborne) point down to the foothold it rests over, or null if there's

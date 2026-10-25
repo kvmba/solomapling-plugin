@@ -44,12 +44,106 @@ public class LudiNavigationTest {
         verifyStage(922010300);
     }
 
+    @Test
+    public void ordinaryMageWalksAndBlinksToStageFiveTopDoor() throws Exception {
+        initializeJobServices();
+        MapleMap map = loadGeometry(922010500);
+        Point start = BotPhysicsEngine.findGroundPoint(map, map.getPortal("sp").getPosition());
+        Point target = map.getPortal("in01").getPosition();
+        BotMovementProfile profile = new BotMovementProfile(105, 110);
+        BotNavigationGraph graph = build(map, profile);
+        int goal = graph.findRegionId(map, target);
+        assertNull("ordinary ground movement cannot clear the top step", BotNavigationManager.findPath(
+                graph, map, start, graph.findRegionId(map, start), goal, target));
+        var approach = GCMovementSkills.findTeleportApproach(map, graph, start, target);
+        assertNotNull("a learned blink must link reachable ground to the top door", approach);
+        assertNotNull(BotNavigationManager.findPath(graph, map, start, graph.findRegionId(map, start),
+                graph.findRegionId(map, approach.launch()), approach.launch()));
+        var bot = character(map, new Point(start));
+        when(bot.getJob()).thenReturn(org.gms.client.Job.FP_WIZARD);
+        BotMovementState state = new BotMovementState(bot, null);
+        state.movementProfile = profile;
+        state.physX = bot.getPosition().x;
+        state.physY = bot.getPosition().y;
+        state.moveTarget = target;
+        state.moveTargetMap = map;
+        state.moveTargetPrecise = true;
+        for (Foothold fh : map.getFootholds().getAllFootholds()) state.fhIndex.put(fh.getId(), fh);
+        try (var provider = mockStatic(BotNavigationGraphProvider.class, CALLS_REAL_METHODS)) {
+            provider.when(() -> BotNavigationGraphProvider.peekGraph(map)).thenReturn(graph);
+            provider.when(() -> BotNavigationGraphProvider.peekGraph(map, profile)).thenReturn(graph);
+            provider.when(() -> BotNavigationGraphProvider.peekBestGraph(map, profile)).thenReturn(graph);
+            MovementClock.useVirtual(10_000);
+            boolean blinked = false;
+            try {
+                for (int tick = 0; tick < 3000; tick++) {
+                    MovementClock.advance(50);
+                    Point before = bot.getPosition();
+                    var nav = BotNavigationManager.resolveTarget(state, target, tick % 2 == 0);
+                    if ("teleport-link".equals(state.lastNavDecision)) {
+                        blinked = true;
+                        assertTrue("a blink never bypasses its range", Math.abs(bot.getPosition().y - before.y)
+                                <= GCMovementSkills.TELEPORT_RANGE_PX);
+                    } else {
+                        assertTrue("route approach cannot teleport", before.distance(bot.getPosition()) < 40);
+                    }
+                    if (!nav.consumedTick) {
+                        if (state.moveTargetPrecise && state.navEdge == null) state.navPreciseTarget = true;
+                        if (state.inAir) BotMovementManager.tickAirborne(state, nav.targetPos);
+                        else if (state.climbing) BotMovementManager.tickClimbing(state, nav.targetPos, tick % 2 == 0);
+                        else BotMovementManager.tickGrounded(state, nav.targetPos);
+                        if (tick % 2 == 0 && !state.inAir && !state.climbing)
+                            BotNavigationManager.tryExecuteCommittedEdgeAfterGroundMovement(state, target);
+                    }
+                    if (!state.inAir && !state.climbing && Math.abs(bot.getPosition().x - target.x) <= 8
+                            && Math.abs(bot.getPosition().y - target.y) <= 8) break;
+                }
+                assertTrue("the mage must actually use its blink", blinked);
+                assertEquals("the full walk/blink/walk reaches the door", goal,
+                        graph.findRegionId(map, bot.getPosition()));
+                assertTrue("arrive at the door, not merely its region: " + bot.getPosition(),
+                        bot.getPosition().distance(target) <= 12);
+            } finally {
+                MovementClock.reset();
+            }
+        }
+    }
+
+    private static void initializeJobServices() throws Exception {
+        try (var server = mockStatic(org.gms.manager.ServerManager.class)) {
+            var context = mock(org.springframework.context.ApplicationContext.class);
+            var properties = mock(org.gms.property.ServiceProperty.class);
+            when(properties.getLanguage()).thenReturn("en-US");
+            when(context.getBean(org.gms.property.ServiceProperty.class)).thenReturn(properties);
+            var messages = mock(org.springframework.context.MessageSource.class);
+            when(messages.getMessage(anyString(), any(), any(java.util.Locale.class))).thenAnswer(call -> call.getArgument(0));
+            when(context.getBean(anyString(), eq(org.springframework.context.MessageSource.class))).thenReturn(messages);
+            server.when(org.gms.manager.ServerManager::getApplicationContext).thenReturn(context);
+            Class.forName(org.gms.client.Job.class.getName());
+        }
+    }
+
     private static void verifyStage(int mapId) throws Exception {
+        MapleMap map = loadGeometry(mapId);
+        Element root = readMap(mapId);
+        Point spawn = map.getPortal("sp").getPosition();
+        assertNotNull(spawn);
+        Point start = BotPhysicsEngine.findGroundPoint(map, spawn);
+        for (BotMovementProfile profile : List.of(BotMovementProfile.base(), new BotMovementProfile(140, 120))) {
+            verifyRoutes(mapId, map, root, start, profile);
+        }
+    }
+
+    private static Element readMap(int mapId) throws Exception {
         String directory = System.getProperty("navigation.wz");
         assumeTrue("pass -Dnavigation.wz to exercise local WZ maps", directory != null);
         Path file = Path.of(directory, mapId + ".img.xml");
         assertTrue(Files.isRegularFile(file));
-        Element root = DocumentBuilderFactory.newInstance().newDocumentBuilder().parse(file.toFile()).getDocumentElement();
+        return DocumentBuilderFactory.newInstance().newDocumentBuilder().parse(file.toFile()).getDocumentElement();
+    }
+
+    private static MapleMap loadGeometry(int mapId) throws Exception {
+        Element root = readMap(mapId);
         List<Foothold> footholds = new ArrayList<>();
         for (Element layer : children(child(root, "foothold"))) {
             for (Element group : children(layer)) {
@@ -73,7 +167,6 @@ public class LudiNavigationTest {
         for (Element node : children(child(root, "ladderRope"))) {
             map.addRope(new Rope(integer(node, "x"), integer(node, "y1"), integer(node, "y2"), integer(node, "l") == 1));
         }
-        Point spawn = null;
         for (Element node : children(child(root, "portal"))) {
             Portal portal = mock(Portal.class);
             Point position = new Point(integer(node, "x"), integer(node, "y"));
@@ -82,15 +175,15 @@ public class LudiNavigationTest {
             when(portal.getTarget()).thenReturn(value(node, "tn"));
             when(portal.getPosition()).thenReturn(position);
             when(portal.getTargetMapId()).thenReturn(integer(node, "tm"));
+            when(portal.getScriptName()).thenReturn(value(node, "script"));
             when(portal.getPortalStatus()).thenReturn(true);
             map.addPortal(portal);
-            if ("sp".equals(portal.getName())) {
-                spawn = position;
-            }
         }
-        assertNotNull(spawn);
-        Point start = BotPhysicsEngine.findGroundPoint(map, spawn);
-        for (BotMovementProfile profile : List.of(BotMovementProfile.base(), new BotMovementProfile(140, 120))) {
+        return map;
+    }
+
+    private static void verifyRoutes(int mapId, MapleMap map, Element root, Point start,
+                                      BotMovementProfile profile) throws Exception {
             BotNavigationGraph graph = build(map, profile);
             HashSet<Integer> tested = new HashSet<>();
             List<Point> goals = new ArrayList<>();
@@ -143,7 +236,6 @@ public class LudiNavigationTest {
             System.out.println("LPQ " + mapId + " " + profile.totalSpeedStat() + "/" + profile.totalJumpStat()
                     + ": executed " + workPlatforms + " work platforms / " + tested.size()
                     + " total platforms; excluded " + graph.deadRegionIds.size() + " dead regions");
-        }
     }
 
     private static Element child(Element parent, String name) {

@@ -169,11 +169,13 @@ public class NavigationReachabilityTest {
 
     @Test
     public void branchesWhoseOnlyExitIsADeadPitAreAlsoExcluded() throws Exception {
-        MapleMap map = geometry(floor(1, -50, 50, 0), floor(2, -50, 50, 400), floor(3, -50, 50, 800));
+        Foothold branch = floor(1, -50, 50, 0), middle = floor(2, -50, 50, 400), bottom = floor(3, -50, 50, 800);
+        MapleMap map = geometry(branch, middle, bottom,
+                floor(4, 700, 800, -400)); // ordinary top ground, outside this dead branch
         when(map.getPortals().iterator().next().getTargetMapId()).thenReturn(999999999);
         BotNavigationGraph graph = build(map);
-        assertEquals(java.util.Set.of(1, 2, 3), graph.deadRegionIds);
-        assertTrue(graph.getOutgoing(1).isEmpty());
+        assertEquals(java.util.Set.of(region(graph, branch), region(graph, middle), region(graph, bottom)), graph.deadRegionIds);
+        assertTrue(graph.getOutgoing(region(graph, branch)).isEmpty());
     }
 
     @Test

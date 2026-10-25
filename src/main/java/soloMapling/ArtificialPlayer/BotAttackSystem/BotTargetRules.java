@@ -3,6 +3,7 @@ package soloMapling.ArtificialPlayer.BotAttackSystem;
 import org.gms.constants.id.MobId;
 import org.gms.server.life.Monster;
 import org.gms.server.life.MonsterStats;
+import soloMapling.ArtificialPlayer.BotTypes.Ariant.AriantPqData;
 
 /**
  * The one rule for "may a bot swing at this mob".
@@ -45,6 +46,14 @@ public final class BotTargetRules {
 
     /** Whether this monster can be attacked (and chased) at all. Liveness is the caller's test. */
     public static boolean isCombatTarget(Monster monster) {
-        return monster != null && isCombatTarget(monster.getStats(), monster.getId());
+        return monster != null && isCombatTarget(monster.getStats(), monster.getId())
+                && !(monster.getId() == AriantPqData.SCORPION
+                && AriantPqData.catchableAt(monster.getHp(), monster.getMaxHp()));
+    }
+
+    /** Rechecked under the host monster lock when damage lands, including delayed/summon hits. */
+    static int catchSafeDamage(Monster monster, int damage) {
+        int catchHp = Math.max(1, (monster.getMaxHp() / 10) * 4 - 1);
+        return Math.max(0, Math.min(damage, monster.getHp() - catchHp));
     }
 }

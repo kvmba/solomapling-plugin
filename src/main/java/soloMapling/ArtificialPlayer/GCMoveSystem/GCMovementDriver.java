@@ -893,12 +893,7 @@ final class GCMovementDriver {
         }
         Point botPos = entry.bot.getPosition();
         int arrivalDist = entry.moveTargetPrecise ? 8 : BotMovementManager.cfg.STOP_DIST;
-        if (entry.climbing && entry.climbRope != null && entry.moveTargetPrecise
-                && Math.abs(entry.moveTarget.x - entry.climbRope.x()) <= 8
-                && entry.moveTarget.y > entry.climbRope.topY() + arrivalDist
-                && entry.moveTarget.y < entry.climbRope.bottomY() - arrivalDist
-                && Math.abs(botPos.y - entry.moveTarget.y) <= arrivalDist
-                && BotPhysicsEngine.findGroundFoothold(entry.bot.getMap(), entry.moveTarget) == null) {
+        if (entry.moveTargetPrecise && reachedRopeTarget(entry, entry.moveTarget, arrivalDist)) {
             entry.climbPositionHeld = true;
             entry.moveTarget = null;
             entry.moveTargetPrecise = false;
@@ -1010,6 +1005,14 @@ final class GCMovementDriver {
         }
         return Math.abs(botPos.x - target.x) <= arrivalDist
                 && Math.abs(botPos.y - target.y) <= arrivalDist;
+    }
+
+    static boolean reachedRopeTarget(BotMovementState entry, Point target, int radius) {
+        return entry.climbing && entry.climbRope != null
+                && Math.abs(target.x - entry.climbRope.x()) <= radius
+                && target.y > entry.climbRope.topY() + radius && target.y < entry.climbRope.bottomY() - radius
+                && Math.abs(entry.bot.getPosition().y - target.y) <= radius
+                && BotPhysicsEngine.findGroundFoothold(entry.bot.getMap(), target) == null;
     }
 
     /*

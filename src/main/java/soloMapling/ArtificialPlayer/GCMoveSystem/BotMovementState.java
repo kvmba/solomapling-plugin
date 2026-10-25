@@ -89,6 +89,7 @@ class BotMovementState {
     // the physics-owned rope boundary exits (top step-off / climb-down delegation): there the climb
     // carries the edge to the boundary, and the fall out of it belongs to the same edge.
     BotNavigationGraph.Edge navFlightEdge = null;
+    GCMovementSkills.TeleportApproach teleportApproach;
     // Flash Jump (Hermit/NL). execFlashJump launches a normal jump then arms pendingFlashJump; the
     // airborne integrator injects the (±550,-350) dash impulse at the apex (velY>=0) and raises
     // flashJumpFired so tickAirborne broadcasts the type-6 "fj" dash frame that one tick. Adapted from

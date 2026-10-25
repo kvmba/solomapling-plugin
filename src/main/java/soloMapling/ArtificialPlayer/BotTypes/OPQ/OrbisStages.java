@@ -307,9 +307,11 @@ public final class OrbisStages {
         // and a pickup in that window cancels the trigger.
         if (mobsPresent(bot, OrbisPqData.PAPA_MOB_LOW, OrbisPqData.PAPA_MOB_HIGH)) {
             huntMobs(bot, OrbisPqData.PAPA_MOB_LOW, OrbisPqData.PAPA_MOB_HIGH);
-            PqActions.loot(bot, bot.getPosition(), 4_000,
-                    new int[]{OrbisPqData.PAPA_MEDAL, OrbisPqData.PAPA_TRAP_ITEM, OrbisPqData.PAPA_SEED});
         }
+        // The final kill's delayed drop and pickup walk outlive the monsters that made them.
+        // loot itself excludes exact piles waiting on an armed item reactor.
+        PqActions.loot(bot, bot.getPosition(), 4_000,
+                new int[]{OrbisPqData.PAPA_MEDAL, OrbisPqData.PAPA_TRAP_ITEM, OrbisPqData.PAPA_SEED});
         return false;
     }
 

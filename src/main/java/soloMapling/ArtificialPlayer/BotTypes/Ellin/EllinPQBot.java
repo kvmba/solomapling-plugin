@@ -23,9 +23,6 @@ public class EllinPQBot extends PartyQuestBot {
     /** The NPC standing in the maze whose talk warps the team out of it. */
     private static final int MAZE_NPC = 2133001;
 
-    /** The last map the bot asked the maze NPC from, so the ask fires once per visit. */
-    private int mazeExitAsked = -1;
-
     public EllinPQBot(Character character) {
         super(character);
         dialoguePath = "EllinPQBotDialogue.yaml";
@@ -185,17 +182,15 @@ public class EllinPQBot extends PartyQuestBot {
     }
 
     /**
-     * Ask the maze's NPC (2133001) to open the way out, once per maze visit.
+     * Ask the maze's NPC (2133001) to open the way out; retry while still in the maze.
      *
      * <p>The script warps the whole team to the frog room on the confirmation click, so the
      * bot's talk is not self-serving - it is the door. Clicks are paced by the engine's own
      * 500ms throttle inside {@code PqActions.talkTo}.
      */
     private void askMazeExit() {
-        if (mazeExitAsked == getChr().getMapId() && PqActions.inInstance(getChr())) {
-            return; // already asked on this visit; the warp either happened or is pending
-        }
-        mazeExitAsked = getChr().getMapId();
+        // A successful confirmation warps the team synchronously. While still here, retry:
+        // an unavailable NPC or a refused start must not latch this or a later run shut.
         PqActions.talkTo(getChr(), MAZE_NPC, 0);
     }
 }

@@ -1,6 +1,8 @@
 package soloMapling.ArtificialPlayer.BotPartySystem;
 
 import org.gms.client.Character;
+import org.gms.net.server.coordinator.world.InviteCoordinator;
+import org.gms.net.server.coordinator.world.InviteCoordinator.InviteType;
 
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -80,17 +82,15 @@ public class BotPartyQueue {
     /**
      * How long a queued invite stays answerable.
      *
-     * <p>Matches the host's own expiry: {@code InviteCoordinator.runTimeoutSchedule} drops an
-     * unanswered invite after six 30s sweeps (3 minutes). Without a matching TTL here the entry
-     * outlived the coordinator's copy, so a bot answering a stale partyId got NOT_FOUND - the
-     * player saw "accepted" and no party - while the entry kept authorising the same dead invite
-     * on every later turn.
+     * <p>The host owns invitation expiry. This local retention bound only discards records
+     * whose host slot has already gone; a delayed bot must still be able to drain a live slot.
      */
     private static final long INVITE_TTL_MS = 180_000L;
 
     public synchronized PartyInviteEntry getPartyInvite(Character fakechar) {
         PartyInviteEntry entry = queues.get(fakechar);
-        if (entry != null && System.currentTimeMillis() - entry.enqueuedAtMs() > INVITE_TTL_MS) {
+        if (entry != null && System.currentTimeMillis() - entry.enqueuedAtMs() > INVITE_TTL_MS
+                && !InviteCoordinator.hasInvite(InviteType.PARTY, fakechar.getId())) {
             queues.remove(fakechar);
             debugprint("getPartyInvite: expired entry dropped for " + fakechar.getName());
             return null;
