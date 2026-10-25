@@ -156,28 +156,27 @@ public class Eos100LadderArrivalGateTest {
         BotMovementProfile profile = new BotMovementProfile(105, 110);
         BotNavigationGraphProvider.getGraph(real, profile);
 
-        // Mock the map only to inject live monsters + the spawn list the spot profile reads;
-        // every geometry query still delegates to the real WZ-loaded map.
-        MapleMap map = mock(MapleMap.class, invocation -> {
-            Method m = invocation.getMethod();
-            String name = m.getName();
-            if (name.equals("getAllMonsters")) {
-                return MOBS;
-            }
-            if (name.equals("getMonsterSpawnPositions")) {
-                return SPAWNS;
-            }
-            if (name.equals("getId")) {
-                return MAP_ID;
-            }
-            try {
-                return m.invoke(real, invocation.getArguments());
-            } catch (java.lang.reflect.InvocationTargetException e) {
-                throw e.getCause();
-            }
-        });
-        when(map.isSwim()).thenReturn(false);
-        when(map.getMapArea()).thenReturn(real.getMapArea());
+        // The map is the REAL WZ-loaded object with the live feed injected through the host's own
+        // collections - NOT a Mockito mock delegating to it by reflection. That mock made every
+        // geometry query pay a Class.getMethod dispatch, and the collision probes call
+        // getFootholds() once per candidate: JFR attributed 68% of this test's samples to mock
+        // dispatch, ~50s of pure overhead per run. It also meant the production tick ran against a
+        // mock instead of the map it ships against. loadMapGeometry() returns a fresh map per sim,
+        // so there is never a previous feed to clear.
+        MapleMap map = real;
+        for (Monster injected : MOBS) {
+            map.addMapObject(injected);
+        }
+        // The camp spot needs four same-ledge spawns on the y=856 row. The loader does not read the
+        // WZ life list, so the row is seeded through the host's own spawn collection - the same
+        // addAllMonsterSpawn the world server uses when it populates a map.
+        for (Point spawn : SPAWNS) {
+            Monster marker = mock(Monster.class);
+            when(marker.getId()).thenReturn(3110102);
+            when(marker.isMobile()).thenReturn(true);
+            when(marker.getPosition()).thenReturn(new Point(spawn));
+            map.addAllMonsterSpawn(marker, -1, 0);
+        }
 
         AtomicReference<Point> pos = new AtomicReference<>(new Point(spawnX, spawnY));
         Character bot = mock(Character.class, RETURNS_DEEP_STUBS);
