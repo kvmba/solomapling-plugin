@@ -133,4 +133,46 @@ class BotDebuffStateTest {
         assertFalse(s.isFrozen());
         assertEquals(1.0, s.moveFactor());
     }
+
+    @Test
+    void expiryLocksTheSameDiseaseOutForFiveSeconds() {
+        BotDebuffState s = new BotDebuffState(null);
+        long t0 = 1_000_000L;
+        assertTrue(s.apply(Disease.STUN, 1, 1, null, t0));
+
+        long expiredAt = t0 + 1_000;
+        s.tickAt(expiredAt);
+        assertFalse(s.has(Disease.STUN));
+        assertEquals(0, s.size());
+
+        // The same disease cannot land again while the post-expiry window is open (engine rule).
+        assertFalse(s.apply(Disease.STUN, LONG, 1, null, expiredAt + 1));
+        assertTrue(s.isImmune(Disease.STUN, expiredAt + BotDebuffTable.DEBUFF_IMMUNE_MS - 1));
+        assertFalse(s.isImmune(Disease.STUN, expiredAt + BotDebuffTable.DEBUFF_IMMUNE_MS),
+                "the window is exactly DEBUFF_IMMUNE_MS long");
+        assertTrue(s.apply(Disease.STUN, LONG, 1, null, expiredAt + BotDebuffTable.DEBUFF_IMMUNE_MS),
+                "once the window closes it can land again");
+    }
+
+    @Test
+    void aStillRunningDiseaseIsNotExpired() {
+        BotDebuffState s = new BotDebuffState(null);
+        long t0 = 2_000_000L;
+        assertTrue(s.apply(Disease.SEAL, LONG, 1, null, t0));
+
+        s.tickAt(t0);
+        assertTrue(s.has(Disease.SEAL));
+        assertFalse(s.isImmune(Disease.SEAL, t0), "no lockout before it ends");
+    }
+
+    @Test
+    void anotherDiseasesLockoutDoesNotBlockTheRest() {
+        BotDebuffState s = new BotDebuffState(null);
+        long t0 = 3_000_000L;
+        s.apply(Disease.STUN, 1, 1, null, t0);
+        long expiredAt = t0 + 1_000;
+        s.tickAt(expiredAt);
+
+        assertTrue(s.apply(Disease.SEAL, LONG, 1, null, expiredAt + 1), "SEAL has its own, unused window");
+    }
 }

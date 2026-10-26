@@ -38,6 +38,10 @@ public final class BotDebuffTable {
     // How long a bot-side disease lasts when the engine skill has no resolvable duration.
     public static final long DEFAULT_DURATION_MS = 5_000L;
 
+    // After a disease ends, the same disease cannot land again for this long - the engine's own rule
+    // (Character.DEBUFF_IMMUNE_DURATION), so a mob parked on a bot cannot re-apply it back-to-back.
+    public static final long DEBUFF_IMMUNE_MS = 5_000L;
+
     // Mirrors Character.giveDebuff's cap: a bot carries at most this many diseases at once.
     public static final int MAX_ACTIVE = 2;
 

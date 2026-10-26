@@ -58,8 +58,9 @@ public final class BotDebuffApplier {
         long now = System.currentTimeMillis();
         for (MobSkillId id : mob.getSkills()) {
             Disease disease = diseaseFor(id.type());
-            if (disease == null || cooldownActive(bot.getId(), disease, now)) {
-                continue;
+            if (disease == null || cooldownActive(bot.getId(), disease, now)
+                    || state.isImmune(disease, now)) {
+                continue; // still cooling down, or still inside the post-debuff immunity window
             }
             MobSkill skill = skillFor(id);
             if (skill == null) {

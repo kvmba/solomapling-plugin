@@ -39,6 +39,10 @@ public final class BotDebuffState {
 
     private final Character chr;
     private final Map<Disease, Entry> active = new ConcurrentHashMap<>();
+    // Same-disease lockout after a disease ENDED, keyed disease -> epoch ms it stops being immune.
+    // Mirrors the engine's Character.debuffImmuneUntil: a mob parked on a bot cannot re-apply a
+    // disease the moment it wears off.
+    private final Map<Disease, Long> immuneUntil = new ConcurrentHashMap<>();
 
     public BotDebuffState(Character chr) {
         this.chr = chr;
@@ -80,6 +84,23 @@ public final class BotDebuffState {
     /** How many diseases are active right now (0..{@link BotDebuffTable#MAX_ACTIVE}). */
     int size() {
         return active.size();
+    }
+
+    /**
+     * True while a disease that just ENDED is still inside its post-debuff immunity window. The engine
+     * has the same rule ({@code Character.isDebuffImmune}), so a bot is not re-locked the instant a
+     * stun wears off. Package-visible so the lockout is unit-testable.
+     */
+    boolean isImmune(Disease disease, long now) {
+        Long until = immuneUntil.get(disease);
+        if (until == null) {
+            return false;
+        }
+        if (until <= now) {
+            immuneUntil.remove(disease, until);
+            return false;
+        }
+        return true;
     }
 
     /** STUN / SEDUCE: the bot cannot move or attack. */
@@ -148,13 +169,23 @@ public final class BotDebuffState {
      * @return true when this call actually added the disease
      */
     boolean apply(Disease disease, long durationMs, int skillX, MobSkill skill) {
+        return apply(disease, durationMs, skillX, skill, System.currentTimeMillis());
+    }
+
+    /**
+     * As above with the clock supplied, so the post-debuff immunity window is exercised without
+     * waiting on real time.
+     */
+    boolean apply(Disease disease, long durationMs, int skillX, MobSkill skill, long now) {
         if (!BotDebuffTable.isDebuff(disease)) {
             return false;
         }
         if (active.size() >= BotDebuffTable.MAX_ACTIVE) {
             return false; // matches Character.giveDebuff's cap
         }
-        long now = System.currentTimeMillis();
+        if (isImmune(disease, now)) {
+            return false; // just wore off: the engine's post-debuff immunity window
+        }
         long duration = durationMs > 0 ? durationMs : BotDebuffTable.DEFAULT_DURATION_MS;
         long poisonFirstAt = BotDebuffTable.poisons(disease) ? now + BotDebuffTable.POISON_TICK_MS : 0L;
         Entry prior = active.putIfAbsent(disease, new Entry(now + duration, skill, poisonFirstAt));
@@ -172,24 +203,35 @@ public final class BotDebuffState {
      * tick when its period elapses. Called once per bot tick.
      */
     public void tick() {
-        if (active.isEmpty() || chr == null) {
+        tickAt(System.currentTimeMillis());
+    }
+
+    /**
+     * Core of {@link #tick()} with the clock supplied, so expiry, the post-debuff immunity window and
+     * the poison cadence are all exercisable without real time. A state with no character (the
+     * character-free test seam) still expires, it just has no packet to cancel and no HP to drain.
+     */
+    void tickAt(long now) {
+        if (active.isEmpty()) {
             return;
         }
-        if (chr.getMap() == null || chr.getHp() <= 0) {
+        if (chr != null && (chr.getMap() == null || chr.getHp() <= 0)) {
             clearAll(); // leaving the world / already a corpse: the packets no longer matter
             return;
         }
-        long now = System.currentTimeMillis();
         for (Map.Entry<Disease, Entry> e : active.entrySet()) {
             Disease disease = e.getKey();
             Entry entry = e.getValue();
             if (now >= entry.expiresAtMs) {
                 if (active.remove(disease, entry)) {
                     broadcastCancel(disease);
+                    // The engine stamps the same lockout when its own disease expires
+                    // (Character.dispelDebuff): the same disease cannot land again for a while.
+                    immuneUntil.put(disease, now + BotDebuffTable.DEBUFF_IMMUNE_MS);
                 }
                 continue;
             }
-            if (BotDebuffTable.poisons(disease) && now >= entry.nextPoisonAtMs) {
+            if (chr != null && BotDebuffTable.poisons(disease) && now >= entry.nextPoisonAtMs) {
                 entry.nextPoisonAtMs = now + BotDebuffTable.POISON_TICK_MS;
                 applyPoison((int) Math.round(chr.getCurrentMaxHp() * BotDebuffTable.POISON_MAX_HP_FRACTION));
             }
