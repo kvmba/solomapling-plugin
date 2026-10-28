@@ -86,7 +86,13 @@ public final class PqRecruitPoints {
             // keeps the bots within ten levels of each other, and a player within the spread can
             // take them. (A player far outside the bots' levels simply cannot use them - the
             // master refuses a too-broad party - which is the quest's own rule, not a bot fault.)
-            new Point("Dojo",         925020001,  25,  55, 2, 5));
+            new Point("Dojo",         925020001,  25,  55, 2, 5),
+            // The clocktower's machine room. Its script accepts 1-255, which is not a band worth
+            // spawning from: a bot drawn at the script's floor would stand under a clock with
+            // 23,000,000 HP and contribute nothing. 95-145 keeps them in the third-job band the
+            // spawner's low-third draw turns into 95-111 - enough output to bring the clock down
+            // inside the quest's 45 minutes, and still eligible for the script's own test.
+            new Point("PapulatusBattle", 220080000, 95, 145, 1, 6));
 
     /**
      * The Orbis point, kept apart because its bot predates this table and is spawned by its own

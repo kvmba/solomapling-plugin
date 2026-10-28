@@ -225,6 +225,7 @@ feat(pq): <PQ 名> — bot 可陪玩全流程
 | Monster Carnival | `CARNIVAL_PQ_BOT` | `!bot cpqbot` |
 | Pyramid | `PYRAMID_PQ_BOT` | `!bot pyramidbot` |
 | Mu Lung Dojo | `DOJO_PQ_BOT` | `!bot dojobot` |
+| Papulatus (闹钟) | `PAPULATUS_PQ_BOT` | `!bot papulatusbot` |
 | Ariant Coliseum | `ARIANT_PQ_BOT` | `!bot arpqbot` |
 
 ### 尚未实现

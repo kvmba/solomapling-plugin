@@ -133,6 +133,7 @@ public final class PqBotSpawner {
             case "BossRushPQ" -> BotTypeManager.BotType.BOSS_RUSH_PQ_BOT;
             case "Pyramid" -> BotTypeManager.BotType.PYRAMID_PQ_BOT;
             case "Dojo" -> BotTypeManager.BotType.DOJO_PQ_BOT;
+            case "PapulatusBattle" -> BotTypeManager.BotType.PAPULATUS_PQ_BOT;
             default -> null;
         };
     }

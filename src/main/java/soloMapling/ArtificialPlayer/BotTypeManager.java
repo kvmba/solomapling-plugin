@@ -25,6 +25,7 @@ import soloMapling.ArtificialPlayer.BotTypes.Kerning.KerningPQBot;
 import soloMapling.ArtificialPlayer.BotTypes.Ludi.LudiPQBot;
 import soloMapling.ArtificialPlayer.BotTypes.Magatia.MagatiaPQBot;
 import soloMapling.ArtificialPlayer.BotTypes.OPQ.OPQBot;
+import soloMapling.ArtificialPlayer.BotTypes.Papulatus.PapulatusPQBot;
 import soloMapling.ArtificialPlayer.BotTypes.Pirate.PiratePQBot;
 import soloMapling.ArtificialPlayer.BotTypes.Pyramid.PyramidPQBot;
 import soloMapling.ArtificialPlayer.BotTypes.Zakum.ZakumPQBot;
@@ -249,6 +250,13 @@ public class BotTypeManager {
             public void createAndSetBot(Character character) {
                 DojoPQBot dojoBot = new DojoPQBot(character);
                 CharacterStorage.addActiveBot(character.getId(), dojoBot);
+            }
+        },
+        PAPULATUS_PQ_BOT {
+            @Override
+            public void createAndSetBot(Character character) {
+                PapulatusPQBot papBot = new PapulatusPQBot(character);
+                CharacterStorage.addActiveBot(character.getId(), papBot);
             }
         },
         ARIANT_PQ_BOT {

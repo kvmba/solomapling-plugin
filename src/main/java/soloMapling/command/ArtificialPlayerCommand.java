@@ -391,6 +391,10 @@ public class ArtificialPlayerCommand extends Command {
             case "dojobot":
                 setBotType(fakechar, BotTypeManager.BotType.DOJO_PQ_BOT);
                 break;
+            case "papulatusbot":
+            case "papbot":
+                setBotType(fakechar, BotTypeManager.BotType.PAPULATUS_PQ_BOT);
+                break;
             case "arpqbot":
             case "ariantbot":
                 setBotType(fakechar, BotTypeManager.BotType.ARIANT_PQ_BOT);
@@ -1204,6 +1208,7 @@ public class ArtificialPlayerCommand extends Command {
         player.yellowMessage("!bot cpqbot <cid>                - set as Monster Carnival (CPQ) bot");
         player.yellowMessage("!bot pyramidbot <cid>            - set as Nett's Pyramid bot");
         player.yellowMessage("!bot dojobot <cid>               - set as Mu Lung Dojo bot");
+        player.yellowMessage("!bot papulatusbot <cid>          - set as Papulatus bot");
         player.yellowMessage("!bot arpqbot <cid>               - set as Ariant Coliseum bot");
         player.yellowMessage("!bot jqbot <cid>                 - set as JQ bot");
         player.yellowMessage("-- Bot Conversion --");

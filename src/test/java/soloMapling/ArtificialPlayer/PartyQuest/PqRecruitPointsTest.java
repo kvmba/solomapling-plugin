@@ -3,6 +3,7 @@ package soloMapling.ArtificialPlayer.PartyQuest;
 import org.junit.jupiter.api.Test;
 
 import soloMapling.ArtificialPlayer.BotTypes.Magatia.MagatiaPqData;
+import soloMapling.ArtificialPlayer.BotTypes.Papulatus.PapulatusPqData;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -28,7 +29,7 @@ class PqRecruitPointsTest {
         for (String name : new String[]{
                 "HenesysPQ", "KerningPQ", "LudiPQ", "PiratePQ", "AmoriaPQ",
                 "EllinPQ", "MagatiaPQ", "MagatiaPQ_Z", "ZakumPQ", "HorntailPQ",
-                "BossRushPQ", "OrbisPQ", "Pyramid", "Dojo"}) {
+                "BossRushPQ", "OrbisPQ", "Pyramid", "Dojo", "PapulatusBattle"}) {
             assertNotNull(PqRecruitPoints.byName(name), name + " has no recruit point");
         }
     }
@@ -51,6 +52,18 @@ class PqRecruitPointsTest {
         // Duarte's menu map (not the in-run instance map), and the Dojo hall the master stands in.
         assertEquals(926010000, PqRecruitPoints.byName("Pyramid").recruitMap());
         assertEquals(925020001, PqRecruitPoints.byName("Dojo").recruitMap());
+    }
+
+    @Test
+    void papulatusRecruitsInTheClocktowerLobbyAndFightsInTheMachineRoom() {
+        // The event script's own recruitMap/exitMap, and the room playerEntry warps the party to.
+        assertEquals(220080000, PqRecruitPoints.byName("PapulatusBattle").recruitMap());
+        assertTrue(PapulatusPqData.isBossRoom(220080001));
+        assertFalse(PapulatusPqData.isBossRoom(220080000)); // the lobby is not the run
+        // The script accepts 1-255; the table narrows it to a band with real output, and the
+        // floor must still satisfy the script's own eligibility check.
+        assertEquals(95, PqRecruitPoints.byName("PapulatusBattle").minLevel());
+        assertEquals(145, PqRecruitPoints.byName("PapulatusBattle").maxLevel());
     }
 
     @Test
