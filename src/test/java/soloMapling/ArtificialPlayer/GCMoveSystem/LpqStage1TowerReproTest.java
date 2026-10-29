@@ -6,6 +6,7 @@ import org.gms.manager.ServerManager;
 import org.gms.property.ServiceProperty;
 import org.gms.server.maps.MapleMap;
 import org.gms.service.ConfigService;
+import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.springframework.context.ApplicationContext;
@@ -53,6 +54,14 @@ public class LpqStage1TowerReproTest {
         org.gms.net.server.Server.getInstance();
         org.junit.jupiter.api.Assumptions.assumeTrue(mapWzAvailable(),
                 "Map.wz not resolvable from this working directory (sim needs the real WZ)");
+        // Virtual clock: the sims drive the production tick in a tight loop, so a wall
+        // clock would freeze every time-based gate and force a real sleep per tick.
+        MovementClock.useVirtual(1_000_000L);
+    }
+
+    @AfterAll
+    static void restoreClock() {
+        MovementClock.reset();
     }
 
     static boolean mapWzAvailable() {
@@ -129,6 +138,7 @@ public class LpqStage1TowerReproTest {
             } catch (ReflectiveOperationException e) {
                 throw new RuntimeException(e.getCause() != null ? e.getCause() : e);
             }
+            MovementClock.advance(BotPhysicsEngine.cfg.TICK_MS);
             BotMovementState st = sim.st();
             if (i % 5 == 0) {
                 sim.trace().append(String.format("t=%4d pos=%s nav=%-18s edge=%s block=%s air=%b climb=%b warmup=%b mt=%s%n",
@@ -151,7 +161,7 @@ public class LpqStage1TowerReproTest {
         st.moveTargetPrecise = true;
         st.moveTargetSource = "gcmove";
         st.moveBestDist = Integer.MAX_VALUE;
-        st.moveProgressAtMs = System.currentTimeMillis();
+        st.moveProgressAtMs = MovementClock.nowMs();
     }
 
     private void report(String label, Sim sim) {

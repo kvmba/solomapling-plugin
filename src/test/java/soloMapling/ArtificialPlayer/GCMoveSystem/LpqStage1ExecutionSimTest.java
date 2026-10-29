@@ -6,6 +6,7 @@ import org.gms.manager.ServerManager;
 import org.gms.property.ServiceProperty;
 import org.gms.server.maps.MapleMap;
 import org.gms.service.ConfigService;
+import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.springframework.context.ApplicationContext;
@@ -63,11 +64,22 @@ public class LpqStage1ExecutionSimTest {
         setter.invoke(new ServerManager(), ctx);
         GameConfig.add(config("server", "update_interval", "100"));
         org.gms.net.server.Server.getInstance();
+        // Virtual clock: these sims drive the production tick in a tight loop, so a wall clock would
+        // either freeze every time-based gate (1s down-jump cadence, 2s airborne stall, the seek's
+        // pathability TTL) or force a real Thread.sleep per tick. Advancing the shared movement clock
+        // one tick per simulated tick makes those gates elapse identically at full speed. Reset in
+        // restoreClock() so other test classes are unaffected.
+        MovementClock.useVirtual(1_000_000L);
         // The sims load the REAL 922010100 geometry through the production WZ loader, which
         // resolves the server's wz directory relative to the working directory. On a machine
         // without it every case would just error "Map data not found" - skip with a reason.
         org.junit.jupiter.api.Assumptions.assumeTrue(mapWzAvailable(),
                 "Map.wz not resolvable from this working directory (sim needs the real WZ)");
+    }
+
+    @AfterAll
+    static void restoreClock() {
+        MovementClock.reset();
     }
 
     static boolean mapWzAvailable() {
@@ -120,6 +132,24 @@ public class LpqStage1ExecutionSimTest {
         when(bot.getHp()).thenReturn(5000);
         when(bot.getChair()).thenReturn(0);
         when(bot.getPosition()).thenAnswer(inv -> pos.get());
+        // Pin every accessor the driver reads on EVERY tick to a concrete value.
+        //
+        // With RETURNS_DEEP_STUBS an unstubbed call does not return a cached stub: it builds a new
+        // mock chain on the spot (~5-20us each). The driver touches stance/job/stats/buffs dozens of
+        // times per tick, which measured ~1.5ms per tick of pure Mockito overhead - the reason these
+        // sims took minutes. Pinning them is also more faithful: a deep-stub getJob() answers a
+        // garbage job, not a real level-35-50 adventurer.
+        when(bot.getStance()).thenReturn(0); // STAND: not climbing, not swimming
+        when(bot.getBuffedValue(org.mockito.ArgumentMatchers.any())).thenReturn(null);
+        when(bot.getTotalMoveSpeedStat()).thenReturn(100);
+        when(bot.getTotalJumpStat()).thenReturn(100);
+        // NOTE: a real Inventory stub, NOT null. BotAttack.resolveEquippedWeaponType calls
+        // chr.getInventory(InventoryType.EQUIPPED).getItem(...) with no null check, so a
+        // null here NPEs the combat beat. An empty stub keeps the no-weapon path (the same
+        // thing RETURNS_DEEP_STUBS used to hand back) without the per-call mock-chain cost.
+        when(bot.getInventory(org.mockito.ArgumentMatchers.any())).thenReturn(
+                mock(org.gms.client.inventory.Inventory.class, RETURNS_DEEP_STUBS));
+        when(bot.getParty()).thenReturn(null);
         org.mockito.Mockito.doAnswer(inv -> {
             pos.set(new Point(inv.getArgument(0)));
             return null;
@@ -159,6 +189,10 @@ public class LpqStage1ExecutionSimTest {
             } catch (ReflectiveOperationException e) {
                 throw new RuntimeException(e.getCause() != null ? e.getCause() : e);
             }
+            // One simulated tick = one driver period, so every wall-clock gate in the production
+            // code (down-jump cadence, airborne stall, pathability TTL) elapses exactly as it would
+            // live - without a real Thread.sleep per tick, which is what made these sims crawl.
+            MovementClock.advance(BotPhysicsEngine.cfg.TICK_MS);
             BotMovementState st = sim.st();
             if (i % 5 == 0) {
                 sim.trace().append(String.format("t=%4d pos=%s nav=%-18s edge=%s air=%b climb=%b prof=%d/%d warmup=%b mt=%s%n",
@@ -180,7 +214,10 @@ public class LpqStage1ExecutionSimTest {
         st.moveTargetPrecise = true;
         st.moveTargetSource = "gcmove";
         st.moveBestDist = Integer.MAX_VALUE;
-        st.moveProgressAtMs = System.currentTimeMillis();
+        // Shared movement clock, not the wall clock: with a virtual clock the production code reads
+        // this same timebase, so the no-progress window measures simulated ticks instead of mixing
+        // two clocks (which made the re-issued seek look stalled).
+        st.moveProgressAtMs = MovementClock.nowMs();
     }
 
     private void report(String label, Sim sim, Point end) {

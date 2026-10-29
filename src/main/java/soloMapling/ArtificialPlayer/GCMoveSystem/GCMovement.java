@@ -260,9 +260,90 @@ public final class GCMovement {
         }
     }
 
+    /**
+     * Reconcile a goal that TRACKS something alive (a mob's floor point).
+     *
+     * <p>Differs from {@link #moveIfTargetChanged} in what a sliding goal means. A walking mob moves
+     * its floor point every combat beat, and the generic path treats every such move as a fresh order,
+     * which restarts the no-progress clock - re-arming the very watchdog that exists to give a wedged
+     * chase up. A tracked order keeps that clock running instead; only a leap beyond {@code leashPx}
+     * (the mob teleported, a knockback put the bot on another floor, the chase switched target) counts
+     * as a new order.
+     *
+     * @return the goal the driver now holds for this order, so the caller can retract exactly that one.
+     */
+    public static Point moveTracking(Character bot, int x, int y, int leashPx) {
+        enable(bot);
+        BotMovementState st = STATES.get(bot.getId());
+        if (st == null) {
+            return null;
+        }
+        synchronized (st) {
+            if (st.tickStopped) return null;
+            GCFollow.cancel(bot);
+            GCTravel.cancel(bot);
+            Point current = st.moveTarget;
+            // The chase dead-band is deliberately ONE pixel, not the generic RETARGET_EPS: a tracked
+            // goal lags by whatever band it is given. At 16px the goal sat up to 16px behind a walking
+            // mob, the bot walked to that stale pixel, the 8px arrival stood it down, and it waited
+            // there until the mob had drifted clear again - a slower version of the same step-stop
+            // cycle. Only an unchanged pixel is skipped, which keeps this cheap in the common case.
+            boolean sameOrder = st.moveTargetTracking && current != null
+                    && st.moveTargetMap == bot.getMap()
+                    && Math.abs(current.x - x) <= leashPx
+                    && Math.abs(current.y - y) <= leashPx;
+            if (sameOrder && current.x == x && current.y == y) {
+                return new Point(current); // unchanged goal: clock untouched
+            }
+            setMoveTarget(st, x, y, null, sameOrder, true);
+            return new Point(st.moveTarget);
+        }
+    }
+
+    /**
+     * Cancel the live move ONLY if its goal is still {@code goal} (within one px).
+     *
+     * <p>For a producer that must retract its OWN order without disturbing one that superseded it.
+     *
+     * @return true when this call was the one that released the order
+     */
+    public static boolean stopIfTarget(Character bot, Point goal) {
+        if (bot == null || goal == null) {
+            return false;
+        }
+        BotMovementState st = STATES.get(bot.getId());
+        if (st == null) {
+            return false;
+        }
+        synchronized (st) {
+            if (st.tickStopped || st.moveTarget == null || st.moveTargetMap != bot.getMap()
+                    || Math.abs(st.moveTarget.x - goal.x) > 1
+                    || Math.abs(st.moveTarget.y - goal.y) > 1) {
+                return false; // a pickup / park / follow replaced our order - leave it alone
+            }
+            GCFollow.cancel(bot);
+            GCTravel.cancel(bot);
+            clearMoveIntent(bot);
+            st.following = false;
+            st.owner = null;
+            return true;
+        }
+    }
+
     // Caller holds the same monitor as the physics tick: never publish half a move or lose a new
     // target/callback to the previous move's arrival while the combat thread is issuing it.
     private static void setMoveTarget(BotMovementState st, int x, int y, Runnable onArrival) {
+        setMoveTarget(st, x, y, onArrival, false, false);
+    }
+
+    /**
+     * @param keepProgress a live-body chase that merely slid: keep the running no-progress clock.
+     *     False only for a genuinely NEW order, which legitimately restarts the clock.
+     * @param tracking marks the order as a chase for its whole life, so contact stands the movement
+     *     down instead of retiring it. True from the FIRST order of a chase (unlike keepProgress).
+     */
+    private static void setMoveTarget(BotMovementState st, int x, int y, Runnable onArrival,
+                                      boolean keepProgress, boolean tracking) {
         MapleMap map = st.bot.getMap();
         boolean changed = st.moveTarget == null || st.moveTargetMap != map
                 || st.moveTarget.x != x || st.moveTarget.y != y;
@@ -275,7 +356,8 @@ public final class GCMovement {
         st.moveTargetMap = map;
         st.moveTargetPrecise = true;
         st.moveTargetSource = "gcmove";
-        if (changed) {
+        st.moveTargetTracking = tracking;
+        if (changed && !keepProgress) {
             st.moveBestDist = Integer.MAX_VALUE;
             st.moveProgressAtMs = MovementClock.nowMs();
             st.moveProgressGoal = null;
@@ -490,6 +572,7 @@ public final class GCMovement {
             st.moveTarget = null;
             st.moveTargetMap = null;
             st.moveTargetPrecise = false;
+            st.moveTargetTracking = false;
             st.farmAnchor = null;
             st.farmAnchorMapId = -1;
             BotMovementManager.clearNavigationState(st);
@@ -512,6 +595,7 @@ public final class GCMovement {
             st.following = true;
             st.moveTarget = null;
             st.moveTargetPrecise = false;
+            st.moveTargetTracking = false;
             st.farmAnchor = null;
             st.farmAnchorMapId = -1;
             ARRIVAL_CALLBACKS.remove(bot.getId());
@@ -688,6 +772,32 @@ public final class GCMovement {
         if (st == null) return false;
         synchronized (st) {
             return st.climbing;
+        }
+    }
+
+    /* True while a climber is holding its position on purpose and every climb-stall net must stand
+     * down for it.
+     *
+     * <p>Two shapes qualify:
+     * <ul>
+     *   <li>an explicit rest hang ({@code resting}) — a grind break's rope nap, ended by
+     *       GrindBreakRoutine itself;</li>
+     *   <li>a hold on a bot that is NOT grinding ({@code climbPositionHeld && !grinding}) — a GM
+     *       {@code !gcmove stop}, a travel/reach arrival on a rope, a PQ bot reaching its goal.</li>
+     * </ul>
+     *
+     * <p>A GRINDING bot is deliberately excluded from the second shape even while held. GrindBrain
+     * early-returns on {@code isClimbing}, so it never re-issues a goal; if the grind layer's own
+     * stall net also stood down, a mid-rope arrival would leave the bot hanging with no writer and
+     * no watchdog until the 60s macro bail. Keeping the grind net armed is what
+     * {@code shouldHoldClimbIdle}'s {@code !grinding} clause already encodes. */
+    public static boolean isHoldingClimb(Character bot) {
+        BotMovementState st = bot == null ? null : STATES.get(bot.getId());
+        if (st == null) {
+            return false;
+        }
+        synchronized (st) {
+            return st.climbing && (st.resting || (st.climbPositionHeld && !st.grinding));
         }
     }
 
@@ -1104,6 +1214,18 @@ public final class GCMovement {
      */
     public static long movementNowMs() {
         return MovementClock.nowMs();
+    }
+
+    /**
+     * Whether the shared movement clock is being driven by an execution sim instead of the wall clock.
+     *
+     * <p>Exposed for callers outside this package that would otherwise spend REAL time waiting (the
+     * quest layer's bounded walks and holds). Under a virtual clock nothing advances
+     * {@link #movementNowMs()} unless the sim ticks, so such a wait either burns its whole real
+     * duration or never terminates - both wrong. Mutators stay package-private.
+     */
+    public static boolean isVirtualClock() {
+        return MovementClock.isVirtual();
     }
 
     /*

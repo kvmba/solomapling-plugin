@@ -228,6 +228,15 @@ class BotMovementManager {
     static boolean isStuckCheckExempt(BotMovementState entry) {
         return entry.inAir || entry.climbing || entry.graphWarmupFallback
                 || entry.launchReadyAwaiting
+                // A tracked chase standing ON its goal is where it wants to be: the seek beat keeps
+                // sliding the order, so the bot is not wedged - hopping it off the perch it just
+                // reached is exactly the LPQ stage-1 "reaches the mob ledge, gets bumped off, climbs
+                // back" loop. The moveTarget test is part of the rule, not decoration: every path that
+                // retires an order clears moveTarget, and several of them (arrival, stall abandon,
+                // coarse finish, teleport) leave the tracking flag set until the next order rewrites
+                // it. Without the test, a stale flag would keep the stall watchdog switched off for a
+                // bot that has no order at all.
+                || (entry.moveTargetTracking && entry.moveTarget != null && entry.navEdge == null)
                 || (entry.navEdge == null && entry.moveTarget == null);
     }
 
@@ -1242,32 +1251,106 @@ class BotMovementManager {
     }
 
     /*
+     * The dead-pit self-heal: a bot that is TRYING TO LEAVE a surface with no exit is teleported to
+     * the nearest livable ground and loses its goal, so the brain re-decides a reachable target on
+     * the next tick.
+     *
+     * <p>Deliberately NOT part of {@link #tickUnstuck}'s hop rule. The hop is a local recovery for a
+     * bot standing on ordinary ground that a goal has wedged; the pit is a property of the SURFACE,
+     * and folding the two together meant every watchdog exemption (a live chase, a satisfied launch,
+     * a rope hold) also disabled the only escape from a basin.
+     *
+     * <p>The "is it trying to leave" part is not decoration. A room's OWN floor can legitimately be
+     * judged inescapable by the livability probe - the LPQ boss room's y=572 row is one continuous
+     * no-exit apron that bots cross and stand on while working, and an unconditional surface test
+     * warped every bot off it on its first tick. A bot with no goal (idling exactly where it was
+     * told to be) or with a goal it is already standing on has nothing to be rescued from: the
+     * surface is where the bot was sent. Only a bot whose goal lies on ANOTHER surface is actually
+     * trapped - it cannot get there from here, which is precisely the dead pit's signature.
+     *
+     * @return true when the bot WAS trapped and the rescue ran (the caller must stop steering this
+     *     tick: the teleport already moved it)
+     */
+    static boolean selfHealDeadPit(BotMovementState entry) {
+        if (entry == null || entry.bot == null || entry.climbing || entry.inAir) {
+            return false; // a climber/faller is not standing on the surface being judged
+        }
+        if (entry.moveTarget == null) {
+            return false; // nothing to reach: an idle spot is not a trap
+        }
+        if (entry.unstuckCooldownMs > 0) {
+            return false; // the rescue itself is rate-limited; it is not a per-tick action
+        }
+        Character bot = entry.bot;
+        Point pos = bot.getPosition();
+        if (pos == null || bot.getMap() == null || bot.getMap().getFootholds() == null) {
+            return false;
+        }
+        Foothold standing = BotPhysicsEngine.findGroundFoothold(bot.getMap(), pos);
+        if (standing == null || sameSurface(bot.getMap(), standing, entry.moveTarget)) {
+            return false; // the goal is this very surface: the bot is where it means to be
+        }
+        // The verdict is a property of the walk region and costs 6-700us for an UNSEEN foothold, so
+        // this runs on every driver tick of every bot and must not re-ask: one answer per (map,
+        // foothold) pair. The map has to be part of the key - foothold ids restart per map, so an id
+        // remembered from another map names a different surface.
+        if (bot.getMap() == entry.deadPitCheckedMap && standing.getId() == entry.deadPitCheckedFootholdId) {
+            return false;
+        }
+        entry.deadPitCheckedMap = bot.getMap();
+        entry.deadPitCheckedFootholdId = standing.getId();
+        if (DeadPitGuard.isLivableSurface(bot.getMap(), standing, entry.movementProfile,
+                BotMovementCapabilities.of(bot))) {
+            return false;
+        }
+        Point rescue = nearestLivableGround(bot, entry.movementProfile);
+        clearNavigationState(entry);
+        entry.moveTarget = null;
+        entry.moveTargetTracking = false;
+        entry.unstuckCooldownMs = delayAfterCurrentTick(PIT_HEAL_COOLDOWN_MS);
+        if (rescue != null) {
+            BotPhysicsEngine.teleportTo(entry, bot, rescue);
+            BotMovementManager.resetEntryStateAfterTeleport(entry);
+        }
+        broadcastMovement(entry);
+        return true;
+    }
+
+    /**
+     * Whether {@code target} sits on the surface {@code surface} provides.
+     *
+     * <p>A single walk region is routinely stitched from many short foothold segments (this room's
+     * y=572 apron is 18 of them), so the region - not the segment's own X span - is the right
+     * granularity: comparing spans would call a goal 400px down the same row "another surface" and
+     * rescue a bot off the floor it was told to work on.
+     */
+    private static boolean sameSurface(MapleMap map, Foothold surface, Point target) {
+        if (target == null || map == null) {
+            return false;
+        }
+        int region = GCMovement.peekRegionIdOfFoothold(map, surface);
+        // Unbaked (-2) and region-less (-1) cannot answer the question, so fall through to the
+        // foothold identity test. Collapsing them instead makes the two probes agree by accident:
+        // an unbaked map returns -2 for BOTH points, which would read as "same surface" and quietly
+        // disarm the rescue on exactly the maps whose graph has not finished baking.
+        if (region >= 0) {
+            return GCMovement.peekRegionIdAt(map, target.x, target.y) == region;
+        }
+        Foothold underTarget = BotPhysicsEngine.findGroundFoothold(map, target);
+        return underTarget != null && underTarget.getId() == surface.getId();
+    }
+
+    /** How long the dead-pit rescue waits before it may act again, so a failed relocation cannot
+     *  re-broadcast a teleport every 50ms. */
+    private static final int PIT_HEAL_COOLDOWN_MS = 5_000;
+
+    /*
      * Fires a recovery action when the bot has been stuck in the same spot.
      * Clears the nav edge so A* replans on the next AI tick.
      */
     static void tickUnstuck(BotMovementState entry) {
         Character bot = entry.bot;
         int walkStep = BotPhysicsEngine.walkStep(bot.getMap(), entry.movementProfile);
-        // Dead-pit self-heal, FIRST: a bot standing on an unescapable surface (no real one-move
-        // exit, no rope, no portal) cannot be rescued by any local action - every hop only reshuffles
-        // it inside the basin, and the hop loop is exactly the reported "fell into the pit and
-        // never recovers". Teleport it to the nearest livable ground and drop the goal so the
-        // brain re-decides a reachable target next tick. (nearestLivableGround can only answer
-        // null on a foothold-less map, in which case the guard could not have fired either.)
-        // Swim maps never enter this branch: the guard's swim rule reads every underwater surface
-        // livable (water is always an exit), so isOnDeadPitFloor answers false there.
-        if (isOnDeadPitFloor(entry, bot)) {
-            Point rescue = nearestLivableGround(bot, entry.movementProfile);
-            clearNavigationState(entry);
-            entry.moveTarget = null;
-            entry.unstuckCooldownMs = delayAfterCurrentTick(5000);
-            if (rescue != null) {
-                BotPhysicsEngine.teleportTo(entry, bot, rescue);
-                BotMovementManager.resetEntryStateAfterTeleport(entry);
-            }
-            broadcastMovement(entry);
-            return;
-        }
         // A random-direction hop is a recovery on solid ground, but at a lip whose outward column has
         // no ground below it is a fall out of the map. Prefer a direction with a real landing; if
         // neither has one, stay put rather than launch off the edge.
@@ -1316,20 +1399,6 @@ class BotMovementManager {
         clearNavigationState(entry);
         entry.unstuckCooldownMs = delayAfterCurrentTick(5000);
         broadcastMovement(entry);
-    }
-
-    /** Whether the bot stands on a surface the livability probe cannot clear (a dead pit). */
-    private static boolean isOnDeadPitFloor(BotMovementState entry, Character bot) {
-        Point pos = bot.getPosition();
-        if (pos == null || bot.getMap() == null || bot.getMap().getFootholds() == null) {
-            return false;
-        }
-        Foothold standing = BotPhysicsEngine.findGroundFoothold(bot.getMap(), pos);
-        if (standing == null) {
-            return false;
-        }
-        return !DeadPitGuard.isLivableSurface(bot.getMap(), standing, entry.movementProfile,
-                BotMovementCapabilities.of(entry.bot));
     }
 
     /**

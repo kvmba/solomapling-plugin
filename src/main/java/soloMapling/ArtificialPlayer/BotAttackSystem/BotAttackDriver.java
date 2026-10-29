@@ -162,6 +162,37 @@ public final class BotAttackDriver {
         return p != null ? p.reachY : 0;
     }
 
+    /**
+     * Whether {@code mob} is inside this bot's swing RIGHT NOW.
+     *
+     * <p>This is the one honest answer to "am I in the fight with that mob", and it is deliberately
+     * the SAME predicate the swing uses ({@link #mobsInReach}: the profile's real reach box, the
+     * melee WZ box when the skill has one, the forward clipping, and the same-ledge rule), so a
+     * caller that treats "in reach" as progress can never disagree with what the attack lands on.
+     * {@link #attackReachX}/{@link #attackReachY} are the box's X/Y extents, not this test: a
+     * manhattan radius built from them admits a mob 80px straight up through a 60px reach box, and
+     * an X-only radius admits anything on a different ledge.
+     *
+     * <p>Facing is judged toward the mob: the swing turns to its target before it measures, so a
+     * target behind the bot is still reachable once the attack re-orients.
+     */
+    public static boolean canReach(Character bot, Monster mob) {
+        if (bot == null || mob == null || bot.getMap() == null || !mob.isAlive()) {
+            return false;
+        }
+        Point botPos = bot.getPosition();
+        Point mobPos = mob.getPosition();
+        if (botPos == null || mobPos == null) {
+            return false;
+        }
+        BotAttackProfile profile = primaryProfile(bot);
+        if (profile == null) {
+            return false;
+        }
+        return inReach(bot, profile, BotAttack.resolveEquippedWeaponType(bot),
+                mobPos.x < botPos.x, mob);
+    }
+
     private static BotAttackProfile primaryProfile(Character bot) {
         if (bot == null) {
             return null;
@@ -448,32 +479,43 @@ public final class BotAttackDriver {
         if (botPos == null) {
             return List.of();
         }
-        Rectangle box = reachBox(bot, profile, weapon, facingLeft);
-
         List<Monster> found = new ArrayList<>();
         for (MapObject mo : bot.getMap().getMapObjectsInRange(botPos, SEEK_RANGE_SQ, MONSTER_TYPES)) {
             Monster m = (Monster) mo;
-            if (!m.isAlive()) {
-                continue;
-            }
-            Point mp = m.getPosition();
-            if (mp == null) {
-                continue;
-            }
-            // Bosses are big and multi-bodied: test their part positions against a vertically
-            // padded box so e.g. Zakum's elevated arms still register as in-reach.
-            Rectangle test = m.isBoss()
-                    ? new Rectangle(box.x, box.y - BOSS_Y_PAD, box.width, box.height + 2 * BOSS_Y_PAD)
-                    : box;
-            // The reach box is a flat rectangle with no terrain sense, so a tall box would let the bot
-            // hit a mob standing on a separate platform overhead/below. Drop mobs on a different ledge
-            // than the bot (bosses exempt). Cheap (peek-only) and only run for box-passing mobs.
-            if (test.contains(mp) && onAttackableSurface(bot.getMap(), botPos, m)) {
+            if (inReach(bot, profile, weapon, facingLeft, m)) {
                 found.add(m);
             }
         }
         found.sort((a, b) -> Double.compare(botPos.distanceSq(a.getPosition()), botPos.distanceSq(b.getPosition())));
         return found;
+    }
+
+    /*
+     * The single-mob half of mobsInReach: the full reach rule for ONE candidate, so "is that mob
+     * inside my swing" costs a box test instead of a scan + sort + list. Both callers go through
+     * this one implementation - a gate that treats "in reach" as progress must never disagree with
+     * the swing that lands.
+     */
+    private static boolean inReach(Character bot, BotAttackProfile profile, WeaponType weapon,
+                                   boolean facingLeft, Monster m) {
+        Point botPos = bot.getPosition();
+        if (botPos == null || m == null || !m.isAlive()) {
+            return false;
+        }
+        Point mp = m.getPosition();
+        if (mp == null) {
+            return false;
+        }
+        Rectangle box = reachBox(bot, profile, weapon, facingLeft);
+        // Bosses are big and multi-bodied: test their part positions against a vertically
+        // padded box so e.g. Zakum's elevated arms still register as in-reach.
+        Rectangle test = m.isBoss()
+                ? new Rectangle(box.x, box.y - BOSS_Y_PAD, box.width, box.height + 2 * BOSS_Y_PAD)
+                : box;
+        // The reach box is a flat rectangle with no terrain sense, so a tall box would let the bot
+        // hit a mob standing on a separate platform overhead/below. Drop mobs on a different ledge
+        // than the bot (bosses exempt). Cheap (peek-only) and only run for box-passing mobs.
+        return test.contains(mp) && onAttackableSurface(bot.getMap(), botPos, m);
     }
 
     /*

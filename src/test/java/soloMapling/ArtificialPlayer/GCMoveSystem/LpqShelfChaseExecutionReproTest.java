@@ -6,6 +6,7 @@ import org.gms.manager.ServerManager;
 import org.gms.property.ServiceProperty;
 import org.gms.server.maps.MapleMap;
 import org.gms.service.ConfigService;
+import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.springframework.context.ApplicationContext;
@@ -60,6 +61,14 @@ public class LpqShelfChaseExecutionReproTest {
         GameConfig.add(config("server", "update_interval", "100"));
         org.gms.net.server.Server.getInstance();
         org.junit.jupiter.api.Assumptions.assumeTrue(mapWzAvailable(), "Map.wz needed");
+        // Virtual clock: the sims drive the production tick in a tight loop, so a wall
+        // clock would freeze every time-based gate and force a real sleep per tick.
+        MovementClock.useVirtual(1_000_000L);
+    }
+
+    @AfterAll
+    static void restoreClock() {
+        MovementClock.reset();
     }
 
     static boolean mapWzAvailable() {
@@ -135,6 +144,7 @@ public class LpqShelfChaseExecutionReproTest {
             } catch (ReflectiveOperationException e) {
                 throw new RuntimeException(e.getCause() != null ? e.getCause() : e);
             }
+            MovementClock.advance(BotPhysicsEngine.cfg.TICK_MS);
             BotMovementState st = sim.st();
             if (i % 5 == 0) {
                 sim.trace().append(String.format("t=%4d pos=%s nav=%-16s edge=%s block=%s air=%b climb=%b mt=%s%n",
@@ -153,7 +163,7 @@ public class LpqShelfChaseExecutionReproTest {
         st.moveTargetPrecise = true;
         st.moveTargetSource = "gcmove";
         st.moveBestDist = Integer.MAX_VALUE;
-        st.moveProgressAtMs = System.currentTimeMillis();
+        st.moveProgressAtMs = MovementClock.nowMs();
     }
 
     /** The chase legs the v67 repair promised are executable, from the GROUND (the reported

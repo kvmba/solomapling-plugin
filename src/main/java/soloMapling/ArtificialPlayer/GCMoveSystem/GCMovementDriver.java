@@ -430,6 +430,17 @@ final class GCMovementDriver {
         // when no real player shares the bot's map) and on the i-frame window.
         BotContactDamage.tickMobDamage(entry, bot);
 
+        // Dead-pit self-heal: a bot that cannot get from the surface it stands on to the surface its
+        // goal is on is teleported to the nearest livable ground. Deliberately here, in the PHYSICAL
+        // part of the tick, and not in the stuck-detection path: every net down there asks "is this
+        // bot standing where its goal wants it" (a live chase, a satisfied launch, a rope hold) or
+        // "has it been motionless for 0.5s" (a bot pacing along the basin floor is not) - and an
+        // inescapable basin makes both questions moot. The target surface, not the goal's existence,
+        // is what distinguishes "trapped here" from "parked here": see selfHealDeadPit.
+        if (BotMovementManager.selfHealDeadPit(entry)) {
+            return;
+        }
+
         boolean active = ObserverTracker.isActiveMap(bot.getMapId());
 
         // LOD promotion (M2): the bot was moving analytically (coarse) and a player just arrived —
@@ -693,6 +704,7 @@ final class GCMovementDriver {
         }
         entry.moveTarget = null;
         entry.moveTargetPrecise = false;
+        entry.moveTargetTracking = false;
         entry.moveBestDist = Integer.MAX_VALUE;
         entry.moveProgressGoal = null;
         entry.navProgressBestDist = Integer.MAX_VALUE;
@@ -843,12 +855,51 @@ final class GCMovementDriver {
         }
         Point botPos = entry.bot.getPosition();
         int arrivalDist = entry.moveTargetPrecise ? 8 : BotMovementManager.cfg.STOP_DIST;
+        // A TRACKING goal is a live body, and EVERY arrival rule below is a landing rule: "the bot
+        // is standing where this order pointed". For a body that walks, that is not the end of the
+        // order - the seek beat slides the pixel every 250ms and the producer retracts the order
+        // once the room is quiet. Retiring it here (any branch, not just the generic box test) left
+        // the bot goal-less between beats, which is the reported "small stuttering steps" at exactly
+        // the retarget cadence. The guard is therefore a single early return, placed BEFORE every
+        // termination path, so no arrival variant can reopen that gap:
+        //  - the narrow-ledge residency satisfies a goal whose X sits on the bot's own tread, and a
+        //    chase mob walking onto that tread is exactly the shape that kept triggering it;
+        //  - the overlapping-foothold snap satisfies a goal one surface up from the bot's feet.
+        // Standing still is still expressed: contact stands the MOVEMENT down (and drops the
+        // committed edge, which a landing deliberately keeps) without touching the ORDER.
+        if (entry.moveTargetTracking) {
+            if (!entry.climbing && !entry.inAir
+                    && Math.abs(botPos.x - entry.moveTarget.x) <= arrivalDist
+                    && Math.abs(botPos.y - entry.moveTarget.y) <= arrivalDist) {
+                // Full teardown, not just navEdge: navFlightEdge/navJumpLaunch* hold an invariant
+                // that they only exist while an edge is committed, and a half-cleared set would
+                // leave the executor believing a launch is still pending.
+                BotMovementManager.clearNavigationState(entry);
+            }
+            return;
+        }
         if (entry.climbing && entry.climbRope != null && entry.moveTargetPrecise
                 && Math.abs(entry.moveTarget.x - entry.climbRope.x()) <= 8
                 && entry.moveTarget.y > entry.climbRope.topY() + arrivalDist
                 && entry.moveTarget.y < entry.climbRope.bottomY() - arrivalDist
                 && Math.abs(botPos.y - entry.moveTarget.y) <= arrivalDist
-                && BotPhysicsEngine.findGroundFoothold(entry.bot.getMap(), entry.moveTarget) == null) {
+                // Mid-rope hang test. The original guard asked "is there ground under the target"
+                // (findGroundFoothold == null), which is false on 9991 of the game's 10032 ropes
+                // (99.6% - any rope that ends over a floor) - so a rope goal was never an arrival
+                // there: the goal stayed set, the no-progress watchdog saw no approach, and at 3s
+                // giveUpStalledMove dismounted the climber into a straight drop (920010300's
+                // 3224px OPQ ladder: 2959px measured). The question the rule actually needs is
+                // narrower: is there a landing on the ROPE'S OWN column between the target and the
+                // rope's bottom, i.e. a platform the climber would have to keep climbing to? No
+                // landing -> the target is a genuine mid-rope hang and the climb is over.
+                //
+                // The probe column is climbRope.x(), not moveTarget.x: the gate above accepts a
+                // target up to 8px off the rope, and probing the target's column instead answers
+                // the wrong question - 95 ropes (1.0% of the long ones) flip verdict between the
+                // rope's column and a +-8px neighbour.
+                && !BotPhysicsEngine.hasLandingBetween(entry.bot.getMap(),
+                        new Point(entry.climbRope.x(), entry.moveTarget.y),
+                        entry.climbRope.bottomY())) {
             entry.climbPositionHeld = true;
             entry.moveTarget = null;
             entry.moveTargetPrecise = false;

@@ -6,6 +6,7 @@ import org.gms.manager.ServerManager;
 import org.gms.property.ServiceProperty;
 import org.gms.server.maps.MapleMap;
 import org.gms.service.ConfigService;
+import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.springframework.context.ApplicationContext;
@@ -67,6 +68,14 @@ public class LpqRopeHeadBallisticExitReproTest {
         GameConfig.add(config("server", "update_interval", "100"));
         org.gms.net.server.Server.getInstance();
         org.junit.jupiter.api.Assumptions.assumeTrue(mapWzAvailable(), "Map.wz needed");
+        // Virtual clock: these sims drive the production tick in a tight loop, so a
+        // wall clock would freeze every time-based gate and force a real sleep per tick.
+        MovementClock.useVirtual(1_000_000L);
+    }
+
+    @AfterAll
+    static void restoreClock() {
+        MovementClock.reset();
     }
 
     static boolean mapWzAvailable() {
@@ -104,6 +113,21 @@ public class LpqRopeHeadBallisticExitReproTest {
         when(bot.getHp()).thenReturn(5000);
         when(bot.getChair()).thenReturn(0);
         when(bot.getPosition()).thenAnswer(inv -> pos.get());
+        // Pin every accessor the driver reads on EVERY tick. With RETURNS_DEEP_STUBS an unstubbed
+        // call builds a fresh mock chain each time (5-20us); the driver touches these dozens of times
+        // per tick, which measured ~1.5ms/tick of pure Mockito overhead. Pinning is also faithful:
+        // a deep-stub getJob()/getStance() answers garbage, not a real adventurer.
+        when(bot.getStance()).thenReturn(0); // STAND: not climbing, not swimming
+        when(bot.getBuffedValue(org.mockito.ArgumentMatchers.any())).thenReturn(null);
+        when(bot.getTotalMoveSpeedStat()).thenReturn(100);
+        when(bot.getTotalJumpStat()).thenReturn(100);
+        // NOTE: a real Inventory stub, NOT null. BotAttack.resolveEquippedWeaponType calls
+        // chr.getInventory(InventoryType.EQUIPPED).getItem(...) with no null check, so a
+        // null here NPEs the combat beat. An empty stub keeps the no-weapon path (the same
+        // thing RETURNS_DEEP_STUBS used to hand back) without the per-call mock-chain cost.
+        when(bot.getInventory(org.mockito.ArgumentMatchers.any())).thenReturn(
+                mock(org.gms.client.inventory.Inventory.class, RETURNS_DEEP_STUBS));
+        when(bot.getParty()).thenReturn(null);
         org.mockito.Mockito.doAnswer(inv -> {
             pos.set(new Point(inv.getArgument(0)));
             return null;
@@ -135,6 +159,7 @@ public class LpqRopeHeadBallisticExitReproTest {
             if (i % 30 == 0) ObserverTracker.markObservedNow(922010100);
             try {
                 TICK.invoke(null, sim.st());
+                MovementClock.advance(BotPhysicsEngine.cfg.TICK_MS);
             } catch (ReflectiveOperationException e) {
                 throw new RuntimeException(e.getCause() != null ? e.getCause() : e);
             }
@@ -158,7 +183,7 @@ public class LpqRopeHeadBallisticExitReproTest {
         st.moveTargetPrecise = true;
         st.moveTargetSource = "gcmove";
         st.moveBestDist = Integer.MAX_VALUE;
-        st.moveProgressAtMs = System.currentTimeMillis();
+        st.moveProgressAtMs = MovementClock.nowMs();
     }
 
     /**

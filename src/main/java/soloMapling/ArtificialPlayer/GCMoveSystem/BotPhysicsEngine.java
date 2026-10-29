@@ -437,6 +437,46 @@ final class BotPhysicsEngine {
         return offsetDistance < exactDistance ? offsetGround : exactGround;
     }
 
+    /*
+     * Whether the column at {@code from.x} holds standable ground strictly between {@code from.y}
+     * and {@code toY} — the question a rope arrival has to answer: "is there a platform on this
+     * rope's own column between me and the rope's bottom, i.e. a ledge I would have to keep
+     * climbing to instead of hanging here?"
+     *
+     * A rope hanging over open floor all the way down has NO such landing, so a goal anywhere on
+     * it is a genuine mid-rope hang. A rope crossing a platform does have one, and a goal above
+     * that platform must keep climbing to it instead of stopping in the air.
+     *
+     * Both bounds are exclusive: the target pixel itself is not "between", and neither is a
+     * platform sharing the rope's bottom y (that is the rope's own landing). Walls (x1==x2) never
+     * appear at all — the collision index files them separately from standable ground, which is
+     * exactly right: a wall column offers no surface to stand on.
+     */
+    static boolean hasLandingBetween(MapleMap map, Point from, int toY) {
+        if (map == null || map.getFootholds() == null || from == null) {
+            return false;
+        }
+        FootholdCollisionIndex index = collisionIndex(map);
+        if (index == UNINDEXABLE) {
+            return false; // no index: treat as "no landing", the caller keeps its old behaviour
+        }
+        int probeY = from.y + 1; // exclusive of the target's own pixel
+        for (Foothold fh : index.groundBucketAt(from.x)) {
+            // Span test on the min/max edges: 432 of the WZ's 233034 walkable footholds are
+            // authored right-to-left (x1 > x2, e.g. 109010108's x 79..-169 ledge), so the raw
+            // getX1()/getX2() comparison would miss the column and report "no landing" on the 18
+            // rope/foothold pairs of that shape.
+            if (Math.min(fh.getX1(), fh.getX2()) > from.x || Math.max(fh.getX1(), fh.getX2()) < from.x) {
+                continue;
+            }
+            int fy = fh.getY1() != fh.getY2() ? slopeYAt(fh, from.x) : fh.getY1();
+            if (fy >= probeY && fy < toY) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     // Canonical walk-connectivity rule shared by graph region merging and runtime ground traversal.
     // If two foothold endpoints form a walkable local step, they must be in the same walk region.
     static boolean canWalkAcrossFootholds(Foothold first, Foothold second) {

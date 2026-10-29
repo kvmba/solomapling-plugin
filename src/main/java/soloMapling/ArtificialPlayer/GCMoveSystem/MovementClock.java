@@ -35,4 +35,16 @@ final class MovementClock {
     static void reset() {
         virtual = false;
     }
+
+    /**
+     * Whether time is currently driven by an execution sim rather than the wall clock.
+     *
+     * <p>Callers that would otherwise spend REAL time waiting (a bounded {@code await}, a deliberate
+     * {@code Thread.sleep}) must check this: under a virtual clock nobody advances {@link #nowMs()}
+     * unless the sim itself ticks, so such a wait either blocks for its whole real duration (making
+     * every test that walks to a spot pay the cap) or never terminates at all.
+     */
+    static boolean isVirtual() {
+        return virtual;
+    }
 }

@@ -158,10 +158,13 @@ public final class PqActions {
         long deadline = movementNowMs() + WALK_BLOCK_CAP_MS;
         boolean arrivedFlag = false;
         try {
-            // Stop as soon as the engine gives the move up (an unreachable/stalled
-            // target that the driver abandons without firing the callback), so a wedged
-            // walk costs one cap at most rather than the whole timeout.
-            while (movementNowMs() < deadline) {
+            // Under a virtual clock nobody advances movementNowMs() unless the simulation itself
+            // ticks, so this wait must not spend real time at all: a spin (or even one await) would
+            // burn the caller's thread for the whole cap and make every sim that walks to a spot pay
+            // 1.2s per call - measured, that is what slowed the suite down again. The sim's own tick
+            // driver moves the bot in that mode, so the walk simply keeps running and the tick moves
+            // on, exactly like a walk that outlives the cap in production.
+            while (!GCMovement.isVirtualClock() && movementNowMs() < deadline) {
                 if (arrived.await(50, java.util.concurrent.TimeUnit.MILLISECONDS)) {
                     arrivedFlag = true;
                     break;
@@ -1018,7 +1021,11 @@ public final class PqActions {
         }
         // Capped at one walk block: a longer hold freezes a busy stage tick for the whole
         // span, and a bot-only room's 36-48s cadence already spaces its ticks far apart.
-        blockingSleep(Math.min(millis, WALK_BLOCK_CAP_MS));
+        // A virtual clock means an execution sim owns the timeline - a real sleep here would
+        // just cost the test suite that many wall-clock seconds per call.
+        if (!GCMovement.isVirtualClock()) {
+            blockingSleep(Math.min(millis, WALK_BLOCK_CAP_MS));
+        }
     }
 
     /** Inline-pickup cap for a loot sweep (see {@link #loot}): what one tick may pay for. */
@@ -1055,23 +1062,30 @@ public final class PqActions {
     // and the room reads as quiet forever (the mobs are mobTime=-1 and never close the gap). The
     // whole tower is ~3000px tall, so a bot standing anywhere in it sees the whole hunt.
     static final int SEEK_STACK_RANGE_Y = 3_200;    // tall PQ towers are one vertical room
-    private static final int RETARGET_EPS_PX = 16;          // skip re-issuing a move for tiny shifts
     private static final long RETARGET_TIMEOUT_MS = 4_000;  // give up an unreachable target after this
     private static final int PROGRESS_EPS_PX = 20;          // movement worth counting as chase progress
-    /** A mob within this |dy| of the pinned anchor's floor counts as still on the pinned platform
-     *  (the one-beat off-platform blip tolerance). Same-LEVEL itself is decided by nav region, not
-     *  a raw y band — a 60px band on the LPQ stage-1 tower spans three ~22px stair rows. */
+    /**
+     * Row tolerance for treating a mob's floor as the same row the chase last aimed at, so a probe
+     * that momentarily falls through a shelf gap is not read as a platform change. The emitted goal
+     * always uses the mob's OWN row - this band only decides whether the anchor bookkeeping counts
+     * the beat as continuous.
+     */
     private static final int FLOOR_SNAP_BAND_PX = 60;
-    // PINNED chase PLATFORM (LPQ stage-1 "追着上方巡逻怪小步卡顿、永远上不去"): a live mob's position
+    // PLATFORM STABILITY (LPQ stage-1 "追着上方巡逻怪小步卡顿、永远上不去"): a live mob's position
     // changes EVERY beat (aggro walk / knockback / an airborne arc), and re-aiming the seek move at
-    // its floor point each beat can land that point in a DIFFERENT nav region than the last — so the
-    // driver discards the committed climb edge mid-rope, replans from the bottom, and the bot paces
-    // under the mob forever. So the chase pins the mob's PLATFORM (the nav region), not its pixel:
-    // while the mob's live floor stays on the pinned platform the bot walks its live x (a patrol is
-    // followed; the region is unchanged so the committed edge survives), and the pinned floor is held
-    // through an off-platform blip until CHASE_PLATFORM_DRIFT_BEATS consecutive off-platform beats
-    // prove the mob changed floors. Per-bot state: the pinned floor point + the off-platform count.
+    // its floor point each beat can land that point in a DIFFERENT nav region than the last - which
+    // makes the driver discard the committed climb edge mid-rope, replan from the bottom, and pace
+    // under the mob forever. The region-stable gate below absorbs that: a candidate goal whose region
+    // differs is held for CHASE_PLATFORM_DRIFT_BEATS beats before being adopted. It holds the WHOLE
+    // goal, which is why the emitted y is always the mob's own row (see seekAndAttack).
     private static final int CHASE_PLATFORM_DRIFT_BEATS = 4;  // ~1s of beats before re-deriving
+    /**
+     * How far a tracked chase goal may slide before it counts as a NEW order (which restarts the
+     * driver's no-progress clock), in px. A patrol moves the goal a few px per beat and must keep the
+     * clock running; a mob that teleported, a knockback onto another floor or a switch to a different
+     * mob is real news. Well under a tower storey (~56px) so a genuine floor change still reads new.
+     */
+    private static final int CHASE_LEASH_PX = 40;
     // REGION-STABLE GOAL (the unified gate for the whole region-flip family): whatever the anchor
     // branch above computes, the goal actually ISSUED must not change nav region beat to beat — a
     // region flip is what makes the driver discard the committed climb/jump edge mid-flight (the
@@ -1104,6 +1118,9 @@ public final class PqActions {
         int pathRegion = -1;
         int pathSurfaceY;
         Boolean pathable;
+        // The goal the last chase beat handed the driver (the previous pixel when the candidate stayed
+        // inside the dead-band). Only this exact goal may be retracted by the seek.
+        Point lastChaseGoal;
         final Map<Integer, PathabilityVerdict> pathability = new java.util.HashMap<>();
 
         void clearProgress() {
@@ -1119,6 +1136,10 @@ public final class PqActions {
             flips = 0;
             pathRegion = -1;
             pathable = null;
+            // lastChaseGoal is deliberately NOT cleared here: it records what was actually handed to
+            // the driver, and clearGoal() runs on the very path that has to retract that order (a
+            // dropped sticky target). Clearing it here made the retraction a no-op, so a killed mob's
+            // chase order survived and blocked every stage action behind yieldsToLiveWalk.
             clearProgress();
         }
     }
@@ -1188,6 +1209,11 @@ public final class PqActions {
         //    standing, and the graph may bake later).
         Monster target = seekPathableTarget(bot, pos, state);
         if (target == null) {
+            // The room is quiet. Retract the goal THIS chase handed the driver: a live chase order is
+            // invisible to every later stage action (the ready-party parks, the post-work delivery and
+            // the follow beat all yield to a live move), so leaving it behind parks the bot on its
+            // last kill spot - the reported "kills the mob, then just stands there".
+            stopOwnChaseGoal(bot, state);
             state.clearGoal();
             if (seekTraceEnabled(bot.getId())) {
                 seekTrace(bot, state, null, null, null, null, "no-target");
@@ -1200,31 +1226,20 @@ public final class PqActions {
         // before the walk gets there, so this walk always ends in a landed swing or a timeout.
         Point mp = target.getPosition();
 
-        // FROZEN PLATFORM / LIVE PIXEL: the nav layer must not have its goal's REGION flip beat to
-        // beat (a live mob's floor point on an airborne arc probes a DIFFERENT foothold, so the
-        // committed climb edge is discarded mid-rope and the bot paces under the mob forever). But
-        // the mob's PIXEL is not what must be frozen - only its PLATFORM. So: while the mob's live
-        // floor stays on the pinned platform, follow its live x (a patrol is walked, and the region
-        // is unchanged, so the committed edge survives); only when its live floor leaves the platform
-        // (airborne arc / another ledge) is the pinned goal held, and only after
-        // CHASE_PLATFORM_DRIFT_BEATS consecutive off-platform beats is the platform re-pinned.
+        // LIVE PIXEL, STABLE REGION: the nav layer must not have its goal's REGION flip beat to beat
+        // (a live mob's floor point on an airborne arc probes a DIFFERENT foothold, so the committed
+        // climb edge is discarded mid-rope and the bot paces under the mob forever). That stability is
+        // the region-stable gate's job, further down: it holds a candidate goal whose region differs
+        // for CHASE_PLATFORM_DRIFT_BEATS beats. Because that gate protects the whole goal, the code
+        // here is free to aim at the mob's accurate, live floor point every beat - x and row alike.
         //
-        // Pinning x (the old behaviour) was the stage-1 "追着上方怪小步卡顿、上不去" bug: a mob above
+        // Pinning x (an older behaviour) was the stage-1 "追着上方怪小步卡顿、上不去" bug: a mob above
         // the bot never reads same-level, so tx stayed at the FIRST-SEEN x forever - the bot walked to
         // a stale pixel, the no-progress watchdog abandoned the move, and the seek's retarget memo
         // (that same stale x) then refused to re-arm it: the bot hung on the rope until the 4s seek
-        // deadline wiped state. Following the live x while the platform holds fixes both.
+        // deadline wiped state. Following the live x fixes that.
         Point mobFloor = GCMovement.groundPointBelow(bot.getMap(), mp.x, mp.y);
         Point anchorFloor = state.anchorFloor;
-        // Same level = the mob stands on the bot's OWN walk-connected surface (one nav region),
-        // NOT a raw y-difference: on the LPQ stage-1 tower the stair rows sit ~22px apart, so a
-        // y-band spans three rows and a mob one or two rows up read "same level" - its live-x
-        // re-aims then discarded the committed climb edge every beat (卡绳索/永不登台). Regions are
-        // the platform granularity the whole frozen-anchor design is keyed on; a raw band is not.
-        boolean sameLevel = mobFloor != null
-                && GCMovement.peekRegionIdAt(bot.getMap(), mp.x, mobFloor.y) >= 0
-                && GCMovement.peekRegionIdAt(bot.getMap(), mp.x, mobFloor.y)
-                        == GCMovement.peekRegionIdAt(bot.getMap(), pos.x, pos.y);
         int tx;
         int ty;
         if (anchorFloor == null || mobFloor == null) {
@@ -1233,22 +1248,19 @@ public final class PqActions {
             state.drift = 0;
             tx = anchorFloor.x;
             ty = anchorFloor.y;
-        } else if (sameLevel
-                || Math.abs(mobFloor.y - anchorFloor.y) <= FLOOR_SNAP_BAND_PX) {
-            // Same level (no climb at stake) or the mob's floor probe still reads the pinned
-            // platform: follow the mob's live x on the PINNED floor y (the probe falling through
-            // a shelf gap onto a deep row is an off-platform blip, and only a same-REGION mob
-            // moves the goal y). What keeps the committed climb edge alive is not a frozen x -
-            // it is the region-stable goal gate below: a goal whose REGION would change is held
-            // back there, while an x shift inside one region never discards the edge
-            // (reuseCommittedEdge drops it only on a region change). An earlier cross-level
-            // x-pin description was superseded by that gate; live-x tracking is the shipped
-            // behaviour.
-            anchorFloor = new Point(mp.x, anchorFloor.y);
+        } else if (Math.abs(mobFloor.y - anchorFloor.y) <= FLOOR_SNAP_BAND_PX) {
+            // Follow the mob's live x AND its live row. The pinned anchor used to supply the y here
+            // whenever the mob's floor probe stayed inside FLOOR_SNAP_BAND_PX, and on this tower the
+            // shelf steps are 56px apart while the band is 60 - so a mob that walked up one shelf was
+            // ALWAYS inside the band and the goal stayed on the BOT'S row (verified: mob at -513 with
+            // goal y=-450). The bot then paced left-right underneath a mob it never aimed at, and once
+            // it did climb, the stale row below dragged it back down. The region-stable gate below is
+            // what keeps a committed climb/jump edge alive; a frozen y is not needed for that.
+            anchorFloor = new Point(mp.x, mobFloor.y);
             state.anchorFloor = anchorFloor;
             state.drift = 0;
             tx = mp.x;
-            ty = sameLevel ? mobFloor.y : anchorFloor.y;
+            ty = mobFloor.y;
         } else {
             int drift = ++state.drift;
             if (drift >= CHASE_PLATFORM_DRIFT_BEATS) {
@@ -1302,23 +1314,58 @@ public final class PqActions {
         // field traces showed. The manhattan distance to the mob is the honest measure: any
         // real approach beats the best-seen by the epsilon; swaying never does.
         int mobDist = Math.abs(pos.x - mp.x) + Math.abs(pos.y - mp.y);
-        if (mobDist < state.bestDist - PROGRESS_EPS_PX) {
-            state.bestDist = mobDist;
+        // A WALKING mob never lets the manhattan best improve: it walks away as fast as the bot closes,
+        // so the distance oscillates inside a band and "closed by 20px more than ever before" never
+        // happens. Judged that way the chase timed out every 4s, dropped the target and re-armed it a
+        // beat later - the bot lost its order on a timer. Being IN THE FIGHT is progress: the swing
+        // actually lands on that mob this beat, which is what this deadline exists to detect the
+        // absence of. The test is the attack driver's own reach predicate (reach box + facing +
+        // same-ledge), never a distance radius: an X-only or manhattan radius admits a mob 80px
+        // straight up through a 60px reach box or one on a ledge above, and the deadline then
+        // renews forever on a target the bot can never touch.
+        boolean inReach = BotAttackDriver.canReach(bot, target);
+        if (inReach || mobDist < state.bestDist - PROGRESS_EPS_PX) {
+            state.bestDist = Math.min(state.bestDist, mobDist);
             state.deadline = movementNowMs() + RETARGET_TIMEOUT_MS;
         } else if (movementNowMs() > state.deadline) {
             if (seekTraceEnabled(bot.getId())) {
                 seekTrace(bot, state, target, mp, mobFloor, issued, "timeout");
             }
+            // Drop the MOB and retract the order it produced. Leaving the goal behind is not a
+            // harmless leftover: a tracked order keeps the driver walking (it is not retired on
+            // contact), and isStuckCheckExempt stands the stall watchdog down while one is live - so
+            // an unreachable mob would silence the bot for as long as it exists. The next beat seeks
+            // afresh (targetOid cleared), so giving up on one target costs nothing.
+            stopOwnChaseGoal(bot, state);
             state.targetOid = -1;
             state.clearGoal();
             return;
         }
 
-        // Compare with the driver's ACTUAL goal, not a memo of our last command. A pickup/park
-        // can replace it between beats; "has any target" must not suppress the upward chase.
-        GCMovement.moveIfTargetChanged(bot, tx, ty, RETARGET_EPS_PX);
+        // Compare with the driver's ACTUAL goal, not a memo of our last command. A pickup/park can
+        // replace it between beats; "has any target" must not suppress the upward chase. This is a
+        // TRACKING order (see GCMovement.moveTracking): the goal is a live body, so sliding it keeps
+        // the no-progress clock running and contact stands the movement down instead of retiring it.
+        state.lastChaseGoal = GCMovement.moveTracking(bot, tx, ty, CHASE_LEASH_PX);
         if (seekTraceEnabled(bot.getId())) {
             seekTrace(bot, state, target, mp, mobFloor, issued, "chase");
+        }
+    }
+
+    /**
+     * Retract the chase goal this episode handed the driver, and only that one.
+     *
+     * <p>A quiet room ends the order, and the driver has to be told: every stage action (ready-party
+     * parks, the post-work delivery, the follow beat) yields to a live move, so a chase goal left
+     * pointing at a dead mob's last pixel silently blocks them until the driver's own no-progress
+     * timeout - the reported "kills the mob, then just stands there". {@link GCMovement#stopIfTarget}
+     * checks the live goal first, so a pickup, park or follow that superseded the chase is safe.
+     */
+    private static void stopOwnChaseGoal(Character bot, SeekState state) {
+        Point goal = state.lastChaseGoal;
+        state.lastChaseGoal = null;
+        if (goal != null) {
+            GCMovement.stopIfTarget(bot, goal);
         }
     }
 

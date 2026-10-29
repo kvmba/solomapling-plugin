@@ -45,6 +45,18 @@ public final class ClimbRecovery {
     void handleClimb(Character chr) {
         Point pos = chr.getPosition();
         int y = (pos != null) ? pos.y : 0;
+        // A DELIBERATE hold is not a stall. The driver's own nets already stand down for
+        // climbPositionHeld / resting; this sampler only sees the Character, so it asks the state
+        // through isHoldingClimb. Without it the 1.2s window dismounted a bot off the very rope it
+        // walked to for a break (measured: 1.25s, straight off the hang point).
+        //
+        // isHoldingClimb deliberately does NOT exempt a GRINDING bot's arrival hold: GrindBrain
+        // early-returns while climbing, so nothing else would ever issue that bot a new goal.
+        if (GCMovement.isHoldingClimb(chr)) {
+            climbStallSinceMs = 0L;
+            lastClimbY = y;
+            return;
+        }
         // A deliberate nav climb (isNavigatingClimb) is left alone ONLY while it actually advances. The
         // old unconditional exemption reset the stall clock on every sample for any bot holding a
         // committed climb edge, so a wedge there hung forever: a rope-top stall (physics clamps to
@@ -110,6 +122,11 @@ public final class ClimbRecovery {
     }
 
     private static long now() {
-        return System.currentTimeMillis();
+        // The shared movement clock, not System.currentTimeMillis: the 1.2s stall window and the
+        // 3s dismount grace are read by the SAME driver ticks that already run on MovementClock
+        // elsewhere, and a virtual-clock execution sim must be able to drive them without
+        // Thread.sleep. GCMovement.movementNowMs() is the package's public seam for exactly this
+        // reason (PqActions' seek deadlines and trace windows already read it).
+        return GCMovement.movementNowMs();
     }
 }
