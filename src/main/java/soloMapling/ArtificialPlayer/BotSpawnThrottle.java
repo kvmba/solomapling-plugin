@@ -45,6 +45,19 @@ public final class BotSpawnThrottle {
 
     private static final Object LOCK = new Object();
 
+    // ── Clock (production: the wall clock) ──────────────────────────────────────────────────────
+    // Every window computation and every wait reads this one timebase. Tests swap in a virtual
+    // clock so "60 spawns at 10/s must span ~5 windows" is verified without spending five real
+    // seconds asleep - the same seam MovementClock gives the movement sims. Kept as a plain
+    // volatile flag rather than a ThreadLocal because a wait deliberately happens on many threads.
+    private static volatile boolean virtualClock;
+    private static final java.util.concurrent.atomic.AtomicLong virtualNowMs =
+            new java.util.concurrent.atomic.AtomicLong();
+
+    private static long nowMs() {
+        return virtualClock ? virtualNowMs.get() : System.currentTimeMillis();
+    }
+
     // Start of the current window (epoch ms).
     private static long windowStartMs = 0L;
     // Permits already handed out in the current window.
@@ -132,7 +145,7 @@ public final class BotSpawnThrottle {
      * a wave of {@code limit} spawns go back-to-back inside its window.
      */
     private static void rollWindowIfDue() {
-        long now = System.currentTimeMillis();
+        long now = nowMs();
         if (windowStartMs == 0L) {
             windowStartMs = now;
             usedInWindow.set(0);
@@ -182,7 +195,7 @@ public final class BotSpawnThrottle {
         }
         synchronized (LOCK) {
             if (windowStartMs == 0L) {
-                windowStartMs = System.currentTimeMillis();
+                windowStartMs = nowMs();
             }
             windowStartMs -= ms;
         }
@@ -193,6 +206,27 @@ public final class BotSpawnThrottle {
         synchronized (LOCK) {
             return windowStartMs;
         }
+    }
+
+    /**
+     * Test seam: run the throttle on a virtual clock starting at {@code startMs}, or pass
+     * {@code null} to return to the wall clock. See the clock field's note - the point is that a
+     * test asserting the PACING (not the sleeping) need not spend real seconds asleep.
+     */
+    static void useVirtualClockForTest(Long startMs) {
+        synchronized (LOCK) {
+            virtualClock = startMs != null;
+            if (startMs != null) {
+                virtualNowMs.set(startMs);
+            }
+            windowStartMs = 0L;
+            usedInWindow.set(0);
+        }
+    }
+
+    /** The timebase this throttle is currently reading, for tests that advance it. */
+    static long nowMsForTest() {
+        return nowMs();
     }
 
     /** Permits handed out in the current window (diagnostics / tests). */
@@ -227,7 +261,7 @@ public final class BotSpawnThrottle {
             return Integer.MAX_VALUE;
         }
         synchronized (LOCK) {
-            long now = System.currentTimeMillis();
+            long now = nowMs();
             boolean expired = windowStartMs == 0L
                     || (now - windowStartMs >= WINDOW_MS);
             if (expired) {
@@ -249,8 +283,18 @@ public final class BotSpawnThrottle {
         return Math.max(0.0, (count - remaining()) / (double) limit);
     }
 
+    /**
+     * Park until {@code deadlineMs}. On the wall clock this really sleeps; on the virtual clock it
+     * advances that clock to the deadline instead, so the pacing rule under test runs at full
+     * speed. Advancing here (rather than on another thread) keeps the simulated timeline strictly
+     * ordered: a waiter cannot wake before the deadline it was given.
+     */
     private static void sleepUntil(long deadlineMs) {
-        long remainingMs = deadlineMs - System.currentTimeMillis();
+        if (virtualClock) {
+            virtualNowMs.accumulateAndGet(deadlineMs, Math::max);
+            return;
+        }
+        long remainingMs = deadlineMs - nowMs();
         while (remainingMs > 0) {
             try {
                 Thread.sleep(remainingMs);
@@ -258,7 +302,7 @@ public final class BotSpawnThrottle {
                 Thread.currentThread().interrupt();
                 throw new IllegalStateException("bot spawn throttle interrupted", e);
             }
-            remainingMs = deadlineMs - System.currentTimeMillis();
+            remainingMs = deadlineMs - nowMs();
         }
     }
 }

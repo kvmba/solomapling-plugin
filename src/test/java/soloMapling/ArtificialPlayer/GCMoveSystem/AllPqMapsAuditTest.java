@@ -225,6 +225,15 @@ public class AllPqMapsAuditTest {
             if (raw.getFootholds() == null || raw.getFootholds().getAllFootholds().isEmpty()) {
                 return mapId + " OK(no-footholds) ropes=" + raw.getRopes().size();
             }
+            if (!hasDecorativeRopes(mapId)) {
+                // No uf=0 rope: pass B's rope set is identical, so a re-keyed clone would re-bake
+                // the same geometry for nothing. Report both verdicts from the one bake (the
+                // second is a cache hit) so the usable-link column and its gate stay intact.
+                int ropes = raw.getRopes().size();
+                return mapId + " ropes=" + ropes + "/" + ropes
+                        + " | " + auditMap(raw, mapId + " as-is")
+                        + " | " + auditMap(raw, mapId + " usable");
+            }
             // clone with only usable ropes (uf=0 decorative removed) for pass B
             MapleMap usable = cloneMapWithUsableRopes(raw, mapId);
             // Re-key the clone so the graph cache does not hand back the raw map's bake. The id
@@ -242,6 +251,27 @@ public class AllPqMapsAuditTest {
         } catch (Throwable t) {
             return mapId + " BAKE-FAIL " + t.getClass().getSimpleName() + ": " + t.getMessage();
         }
+    }
+
+    /** True when the WZ marks at least one rope uf=0 (decorative), i.e. pass B differs at all. */
+    private boolean hasDecorativeRopes(int mapId) {
+        org.gms.provider.DataProvider mapSource =
+                org.gms.provider.DataProviderFactory.getDataProvider(org.gms.provider.wz.WZFiles.MAP);
+        org.gms.provider.Data mapData = mapSource.getData(
+                "Map/Map" + (mapId / 100000000) + "/" + String.format("%09d", mapId) + ".img");
+        if (mapData == null) {
+            return true; // unknown: keep the full two-pass path rather than skip a real check
+        }
+        org.gms.provider.Data ropeData = mapData.getChildByPath("ladderRope");
+        if (ropeData == null) {
+            return false;
+        }
+        for (org.gms.provider.Data rope : ropeData) {
+            if (org.gms.provider.DataTool.getInt(rope.getChildByPath("uf"), 1) == 0) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private MapleMap reKey(MapleMap src, int newId) throws Exception {

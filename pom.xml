@@ -200,6 +200,42 @@
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-surefire-plugin</artifactId>
                 <version>3.5.4</version>
+                <executions>
+                    <!-- These two classes are the suite's pure-computation heavyweights (thousands
+                         of nav-graph bakes / millions of physics probes over real WZ geometry), and
+                         the only ones whose cost depends on HOW the mocks elsewhere were made:
+                         Mockito's inline mock maker retransforms every class a deep-stub mock
+                         touches, and here that includes java.awt.Point and the host's
+                         MapleMap/Foothold/Rope. Once an earlier test has created such a mock, every
+                         real `new Point()` and geometry call on those classes pays a dispatcher
+                         lookup, so by suite order alone GroundSwayTest ran 5.5s -> 54.8s and the
+                         198-map audit 25s -> 65s. A fresh JVM per class restores the clean cost for
+                         ~2s of startup. The other ~290 classes keep the shared fork: they need the
+                         inline maker (final Job / static mocks) and a fork each would cost far more
+                         than it saves. -->
+                    <execution>
+                        <id>default-test</id>
+                        <configuration>
+                            <excludes>
+                                <exclude>**/AllPqMapsAuditTest.java</exclude>
+                                <exclude>**/GroundSwayTest.java</exclude>
+                            </excludes>
+                        </configuration>
+                    </execution>
+                    <execution>
+                        <id>geometry-heavy</id>
+                        <goals>
+                            <goal>test</goal>
+                        </goals>
+                        <configuration>
+                            <includes>
+                                <include>**/AllPqMapsAuditTest.java</include>
+                                <include>**/GroundSwayTest.java</include>
+                            </includes>
+                            <reuseForks>false</reuseForks>
+                        </configuration>
+                    </execution>
+                </executions>
             </plugin>
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>

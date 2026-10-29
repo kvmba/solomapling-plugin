@@ -2768,6 +2768,19 @@ final class BotPhysicsEngine {
     private static final java.util.Map<org.gms.server.maps.FootholdTree, FootholdCollisionIndex> COLLISION_INDEX =
             java.util.Collections.synchronizedMap(new java.util.WeakHashMap<>());
 
+    // Single-entry memo in front of COLLISION_INDEX. A bake probes one map millions of times in a
+    // row, and every one of those hits had to enter COLLISION_INDEX's global monitor and hash a
+    // weak key — a warm JFR of the 198-map bake put 24% of all samples in that map lookup, the
+    // single largest item. A volatile read plus an identity compare turns the repeated hit into
+    // ~2ns, so the lock is now taken once per map switch instead of once per probe. The weak map
+    // stays authoritative (MapManager.getDisposableMap hands out uncached instances that must
+    // remain collectable); the memo pins at most ONE tree, and the next probe on any other map
+    // replaces it, so it cannot accumulate.
+    private record CachedCollisionIndex(org.gms.server.maps.FootholdTree tree, FootholdCollisionIndex index) {
+    }
+
+    private static volatile CachedCollisionIndex lastCollisionIndex;
+
     // Sentinel for trees that can't be indexed (Mockito tree/map stubs in tests return null
     // foothold lists) — callers fall back to the original tree/map query so stubbed seams keep
     // working exactly as before.
@@ -2779,9 +2792,13 @@ final class BotPhysicsEngine {
         if (tree == null) {
             return UNINDEXABLE;
         }
+        CachedCollisionIndex memo = lastCollisionIndex;
+        if (memo != null && memo.tree() == tree) {
+            return memo.index();
+        }
         // The UNINDEXABLE verdict is cached too: getAllFootholds() rebuilds the whole list on
         // every call (recursive collect), so it must never run outside this computeIfAbsent.
-        return COLLISION_INDEX.computeIfAbsent(tree, t -> {
+        FootholdCollisionIndex index = COLLISION_INDEX.computeIfAbsent(tree, t -> {
             java.util.List<Foothold> all = t.getAllFootholds();
             if (all == null) {
                 return UNINDEXABLE;
@@ -2862,6 +2879,8 @@ final class BotPhysicsEngine {
             return new FootholdCollisionIndex(java.util.List.copyOf(walls), java.util.List.copyOf(fromBelow),
                     minX, buckets, groundMinX, groundMaxX);
         });
+        lastCollisionIndex = new CachedCollisionIndex(tree, index);
+        return index;
     }
 
     /*

@@ -150,32 +150,39 @@ class BotSpawnThrottleTest {
     void burstLargerThanWindowIsPacedAcrossWindows() throws Exception {
         final int limit = 10;
         final int bots = 60; // 6 windows' worth
-        BotSpawnThrottle.setLimitForTest(limit);
+        // Virtual clock: the assertion is about the PACING (~5 windows of simulated time), not
+        // about really sleeping those 5 seconds. The waited-out time still advances the throttle's
+        // own timeline, so a grant that skipped the window would show up as a smaller span.
+        BotSpawnThrottle.useVirtualClockForTest(1_000_000L);
+        try {
+            BotSpawnThrottle.setLimitForTest(limit);
+            long startMs = BotSpawnThrottle.nowMsForTest();
 
-        CountDownLatch start = new CountDownLatch(1);
-        CountDownLatch done = new CountDownLatch(bots);
-        for (int i = 0; i < bots; i++) {
-            Thread.ofVirtual().start(() -> {
-                try {
-                    start.await();
-                    BotSpawnThrottle.acquire();
-                } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
-                } finally {
-                    done.countDown();
-                }
-            });
+            CountDownLatch start = new CountDownLatch(1);
+            CountDownLatch done = new CountDownLatch(bots);
+            for (int i = 0; i < bots; i++) {
+                Thread.ofVirtual().start(() -> {
+                    try {
+                        start.await();
+                        BotSpawnThrottle.acquire();
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                    } finally {
+                        done.countDown();
+                    }
+                });
+            }
+            start.countDown();
+            assertTrue(done.await(25, TimeUnit.SECONDS), "spawn throttle deadlocked");
+
+            // 60 bots at 10/s needs ~5s (the first 10 are immediate, then 5 more windows).
+            long elapsedMs = BotSpawnThrottle.nowMsForTest() - startMs;
+            assertTrue(elapsedMs >= 4000,
+                    "60 bots at 10/s must span ~5 windows, but finished in " + elapsedMs
+                            + "ms - the limit is not being enforced");
+        } finally {
+            BotSpawnThrottle.useVirtualClockForTest(null);
         }
-
-        long t0 = System.nanoTime();
-        start.countDown();
-        assertTrue(done.await(25, TimeUnit.SECONDS), "spawn throttle deadlocked");
-        long elapsedMs = (System.nanoTime() - t0) / 1_000_000;
-
-        // 60 bots at 10/s needs ~5s (the first 10 are immediate, then 5 more windows).
-        assertTrue(elapsedMs >= 4000,
-                "60 bots at 10/s must span ~5 windows, but finished in " + elapsedMs
-                        + "ms - the limit is not being enforced");
     }
 
     /**
@@ -193,34 +200,41 @@ class BotSpawnThrottleTest {
     void neverExceedsTheLimitWithinAWindow() throws Exception {
         final int limit = 8;
         final int bots = 64;
-        BotSpawnThrottle.setLimitForTest(limit);
-
-        java.util.Queue<Integer> overflows = new java.util.concurrent.ConcurrentLinkedQueue<>();
-        BotSpawnThrottle.setOverflowProbe(overflows::add);
-
-        CountDownLatch start = new CountDownLatch(1);
-        CountDownLatch done = new CountDownLatch(bots);
-        for (int i = 0; i < bots; i++) {
-            Thread.ofVirtual().start(() -> {
-                try {
-                    start.await();
-                    BotSpawnThrottle.acquire();
-                } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
-                } finally {
-                    done.countDown();
-                }
-            });
-        }
-        start.countDown();
+        // Virtual clock for the same reason as the pacing test: what is asserted is the per-window
+        // grant count, and 64 bots at 8/s would otherwise cost 7 real seconds of sleeping.
+        BotSpawnThrottle.useVirtualClockForTest(1_000_000L);
         try {
-            assertTrue(done.await(25, TimeUnit.SECONDS), "spawn throttle deadlocked");
-            assertTrue(overflows.isEmpty(),
-                    "granted more than the limit within one window: " + overflows + " (limit " + limit + ")");
-            assertTrue(BotSpawnThrottle.usedInWindow() <= limit,
-                    "window count " + BotSpawnThrottle.usedInWindow() + " exceeds limit " + limit);
+            BotSpawnThrottle.setLimitForTest(limit);
+
+            java.util.Queue<Integer> overflows = new java.util.concurrent.ConcurrentLinkedQueue<>();
+            BotSpawnThrottle.setOverflowProbe(overflows::add);
+
+            CountDownLatch start = new CountDownLatch(1);
+            CountDownLatch done = new CountDownLatch(bots);
+            for (int i = 0; i < bots; i++) {
+                Thread.ofVirtual().start(() -> {
+                    try {
+                        start.await();
+                        BotSpawnThrottle.acquire();
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                    } finally {
+                        done.countDown();
+                    }
+                });
+            }
+            start.countDown();
+            try {
+                assertTrue(done.await(25, TimeUnit.SECONDS), "spawn throttle deadlocked");
+                assertTrue(overflows.isEmpty(),
+                        "granted more than the limit within one window: " + overflows + " (limit " + limit + ")");
+                assertTrue(BotSpawnThrottle.usedInWindow() <= limit,
+                        "window count " + BotSpawnThrottle.usedInWindow() + " exceeds limit " + limit);
+            } finally {
+                BotSpawnThrottle.setOverflowProbe(null);
+            }
         } finally {
-            BotSpawnThrottle.setOverflowProbe(null);
+            BotSpawnThrottle.useVirtualClockForTest(null);
         }
     }
 
