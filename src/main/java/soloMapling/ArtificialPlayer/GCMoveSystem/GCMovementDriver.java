@@ -262,6 +262,7 @@ final class GCMovementDriver {
             stop(entry);
             return;
         }
+        soloMapling.ArtificialPlayer.BotAttackSystem.BotAuraState.updateGuardHide(bot);
         // Pick up runtime profile changes (party Haste) before the map-change branch, so onMapChange warms
         // the new map's graph with the up-to-date profile. Throttled + no-op when unchanged (see helper).
         maybeRefreshProfile(entry);

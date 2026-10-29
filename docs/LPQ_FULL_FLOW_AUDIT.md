@@ -179,9 +179,9 @@ sneakDoorRooms（:668-670）每 tick 只在开头 showBuff(hide) 一次；随后
 
 **后果**：机器人走不到那个台，杀不了怪，于是 4001156 不产生，箱子永不触发，Rombard 永不出现，3 张证物为 0。纯近战队伍即使能站到对面也打不出伤害（攻击层的 onAttackableSurface 会拒绝跨平台目标）。本阶段依赖远程职业从左侧台隔空打怪，属于地图设计要求，不是插件缺陷。
 
-**修复**：gatherPasses 的 stage 7 分支改为杀平台怪、等掉落物触发箱子、再杀 Rombard，并明确不拾取 4001156（一旦捡起，箱子就永远不会触发）。追怪用 reachableOnly，避免对着打不到的怪空转。
+**修复**：gatherPasses 的 stage 7 分支改为杀平台怪、等掉落物触发箱子、再杀 Rombard，并明确不拾取 4001156（一旦捡起，箱子就永远不会触发）。reachableOnly 不仅检查怪物脚下的平台，还为远程/魔法寻找可走到、能命中该怪的射击点；当前 AUTO 选择确实包含该怪时才撤回自己的追击订单并驻留。射击范围由攻击层计算，移动层一次遍历可达导航图选择地面点；仅在水平空间允许时留出到达容差，不缩小平台固定的合法 Y 范围。
 
-**攻击层同时要放开一处**：BotAttackDriver.onAttackableSurface 原本对所有攻击都套用近战平台判定（onDifferentLedge），于是远程职业也拒绝这三只跨平台的怪。但投射物本来就能跨越没有 foothold 链的缺口，2040042.js 的台词也明说需要远程。现改为按 route 区分：RANGED 与 MAGIC 豁免平台判定，只保留 reach box 的距离约束；近战仍保留两道。nearestMob 同时不再做平台过滤（它只用于朝向与诊断，过滤会让远程在唯一能射击的房间里连朝向都选不到目标）。
+**攻击层同时要放开一处**：BotAttackDriver.onAttackableSurface 原本对所有攻击都套用近战平台判定（onDifferentLedge），于是远程职业也拒绝这三只跨平台的怪。但投射物本来就能跨越没有 foothold 链的缺口，2040042.js 的台词也明说需要远程。现改为按 route 区分：RANGED 与 MAGIC 豁免平台判定，只保留 reach box 的距离约束；近战仍保留两道。nearestMob 使用同一 route 的平台规则，并优先朝向当前能命中的目标，避免被更近却不在攻击框内的怪抢走朝向。驻留判定和真正挥击共用 AUTO 的 profile、朝向及命中数量上限选择。
 
 **阶段 7 分支必须排在通用 killable 分支之前**：三只平台怪本身就是 killable，若先走 killableMobPresent 分支，就会用无约束的 seekAndAttack 去追它们，reachableOnly 根本执行不到。
 
@@ -258,7 +258,7 @@ st9ratz=false  st9crystal=false     （全部档位，findPath 返回 null）
 - 挥击也打不到：BotAttackDriver.onAttackableSurface 会因 GCMovement.onDifferentLedge 把异层怪排除（Ratz 非 boss，不享受豁免）。
 - 晶体召唤本身对机器人是可做的：PqActions.hitReactor 无服务器距离校验，插件侧的 approachReactor 90/70 像素只是姿态门。
 
-**修复**：fightBoss 改为先用 nearestArmedReactorOid 找到仍在等待的晶体（判据是 getReactorType() == 100，不能用 isActive()，因为晶体两个状态都有效），站在其可达范围内就 hitReactor 召唤；随后 seekAndAttack(bot, true) 补伤害。Alishar 是 boss，跨平台豁免，出现即可打。打不到就安静等待真人，不再空转。
+**修复**：fightBoss 改为先用 nearestArmedReactorOid 找到仍在等待的晶体（判据是 getReactorType() == 100，不能用 isActive()），仅在当前距离及平台允许时用 hitReactorIfInReach 召唤。这个检查不下发移动、不设置行走保护，也不取消其他生产者的订单；不可达晶体不会阻碍后续 seekAndAttack(bot, true) 转火 Alishar。
 
 ### 结算 / 奖励关 · 922011000 → 922011100 —— 流程缺失 8（根因修订）
 
@@ -335,7 +335,7 @@ exitTrapRoom / exitDoorRoom 用最严格的 standsDownForLiveMove = GCMovement.h
 | 7 | 8 | 公告改为还差 5 减已在箱上的机器人数；为 0 时用独立文案明确告知玩家不要上箱 | 已修 |
 | 8 | 9后 | isInsideQuest 扩到 922011100；新增 breakBonusBoxes 只破 36 箱不拾取；workStage 不再在 stage 9 后 return true | 已修 |
 | 9 | 全局 | sweepOrphanDropOutside 加 canPathTo 过滤 | **不修**（见下） |
-| 10 | 5 | 隐身改为只在穿越守卫行时开启（110px 带），而不是整个房间常开；breakBoxInPlace 每次挥击前重开 | 已修 |
+| 10 | 5 | 隐身由物理线程单独在接触伤害检查前更新（110px 守卫行带），宏节拍不再启停；安全箱台和离图后取消自身维护的隐身 | 已修 |
 
 ### 为什么第 9 条不修
 
@@ -343,7 +343,7 @@ exitTrapRoom / exitDoorRoom 用最严格的 standsDownForLiveMove = GCMovement.h
 
 ### 第 10 条的量化依据
 
-506 的四个箱子台在 y=-630 / -1064 / -1459 / -3535，七只无敌怪分四行在 y=-441 / -862 / -1266 / -2497，箱台到最近守卫约 190px。所以隐身带必须窄于 190px，否则每个箱台都算“穿越”，隐身等于全程常开（即被替换掉的旧行为）。取 110px：箱台上不隐身，守卫行上隐身。
+506 的四个箱子台在 y=-630 / -1064 / -1459 / -3535，七只无敌怪分四行在 y=-441 / -862 / -1266 / -2497，箱台到最近守卫约 190px。所以隐身带必须窄于 190px，否则每个箱台都算“穿越”，隐身等于全程常开（即被替换掉的旧行为）。取 110px：箱台上不隐身，守卫行上隐身。启停必须由移动物理线程在接触伤害检查前执行；只在宏节拍检查位置会漏过整次穿越，保留宏/物理双写则会由旧位置样本错误取消新隐身。
 
 ## 六、复现方法
 

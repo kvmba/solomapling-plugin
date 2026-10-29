@@ -1343,6 +1343,57 @@ public final class GCMovement {
         return MovementPlan.inMap(graph, map, bot.getPosition(), new Point(x, y)) != null;
     }
 
+    /** Nearest reachable ground inside an interaction box; one peek-only graph traversal. */
+    public static Point nearestReachableGround(Character bot, java.awt.Rectangle bounds) {
+        MapleMap map = bot.getMap();
+        Point from = bot.getPosition();
+        BotNavigationGraph graph = BotNavigationGraphProvider.peekBestGraph(map, BotMovementProfile.fromCharacter(bot));
+        if (graph == null) return null;
+        int start = graph.findRegionId(map, from);
+        if (start < 0) return null;
+        java.util.Set<Integer> seen = new java.util.HashSet<>();
+        java.util.ArrayDeque<Integer> queue = new java.util.ArrayDeque<>();
+        seen.add(start);
+        queue.add(start);
+        Point best = null;
+        double bestSq = Double.MAX_VALUE;
+        while (!queue.isEmpty()) {
+            int id = queue.removeFirst();
+            BotNavigationGraph.Region region = graph.getRegion(id);
+            for (BotNavigationGraph.Segment segment : region.segments) {
+                int left = Math.max(segment.minX, bounds.x);
+                int right = Math.min(segment.maxX, bounds.x + bounds.width - 1);
+                if (segment.y1 != segment.y2) {
+                    double dxPerY = (double) (segment.x2 - segment.x1) / (segment.y2 - segment.y1);
+                    double topX = segment.x1 + (bounds.y - segment.y1) * dxPerY;
+                    double bottomX = segment.x1 + (bounds.y + bounds.height - 1 - segment.y1) * dxPerY;
+                    left = Math.max(left, (int) Math.ceil(Math.min(topX, bottomX)));
+                    right = Math.min(right, (int) Math.floor(Math.max(topX, bottomX)));
+                }
+                if (left > right) continue;
+                // Inset X where space permits: a precise walk can settle up to 8px early.
+                // Do not shrink Y: a platform fixes the feet's row, even at the last legal pixel.
+                int inset = Math.min(8, (right - left) / 2);
+                Point candidate = segment.pointAt(Math.clamp(from.x, left + inset, right - inset));
+                candidate = BotPhysicsEngine.findGroundPoint(map, candidate);
+                if (candidate == null || !bounds.contains(candidate) || graph.findRegionId(map, candidate) != id) continue;
+                double cost = from.distanceSq(candidate);
+                if (cost < bestSq) {
+                    best = candidate;
+                    bestSq = cost;
+                }
+            }
+            for (BotNavigationGraph.Edge edge : graph.getOutgoing(id)) {
+                if (edge.type == BotNavigationGraph.EdgeType.PORTAL) {
+                    Portal portal = map.getPortal(edge.portalId);
+                    if (portal == null || !portal.getPortalStatus()) continue;
+                }
+                if (seen.add(edge.toRegionId)) queue.addLast(edge.toRegionId);
+            }
+        }
+        return best;
+    }
+
     /* Snap an arbitrary (possibly airborne) point down to the foothold it rests over, or null if there's
      * no floor below it. Lets a bot aim a move at a jumping/airborne mob's actual platform instead of its
      * raw y, so the pathfinder doesn't take a long detour to reach a mob that's really right in front. */

@@ -422,6 +422,20 @@ public final class PqActions {
         return true;
     }
 
+    /** Strike only when already beside the reactor; never issue a walk, stop, or stage shield. */
+    public static boolean hitReactorIfInReach(Character bot, int reactorOid) {
+        if (bot == null || bot.getMap() == null) return false;
+        Reactor reactor = bot.getMap().getReactorByOid(reactorOid);
+        if (reactor == null || !reactor.isActive() || GCMovement.isClimbing(bot)) return false;
+        Point pos = bot.getPosition();
+        Point at = reactor.getPosition();
+        if (Math.abs(pos.x - at.x) > APPROACH_X || Math.abs(pos.y - at.y) > APPROACH_Y
+                || GCMovement.onDifferentLedge(bot.getMap(), pos.x, pos.y, at.x, at.y)) return false;
+        BotAttack.basicSwing(bot);
+        CustomReactor.hitReactorWithScript(bot.getMap(), reactorOid, bot);
+        return true;
+    }
+
     /**
      * Every alive reactor on the map with this data id, as oids. Quest stages scatter several
      * boxes of the same id across the room (LPQ stage 2's eleven pass boxes share 2202003), so
@@ -1204,7 +1218,8 @@ public final class PqActions {
                 state.clearGoal();
                 state.pathability.clear();
             }
-            if (reachableOnly) {
+            if (reachableOnly && !state.reachableOnly) {
+                state.pathability.clear();
                 state.reachableOnly = true; // sticky: see below
             }
             if (movementShielded(botId) || reactorBeatArmed(bot)) {
@@ -1233,6 +1248,7 @@ public final class PqActions {
             return;
         }
         synchronized (state) {
+            if (state.reachableOnly) state.pathability.clear();
             state.reachableOnly = false;
         }
     }
@@ -1273,6 +1289,12 @@ public final class PqActions {
         // ropes as its edges need). Ranged/magic reach is respected by the swing above firing
         // before the walk gets there, so this walk always ends in a landed swing or a timeout.
         Point mp = target.getPosition();
+        boolean inReach = BotAttackDriver.canReach(bot, target);
+        if (state.reachableOnly && inReach && GCMovement.isSettled(bot)) {
+            stopOwnChaseGoal(bot, state);
+            state.clearProgress();
+            return; // already at a firing position: do not walk across to the mob's own ledge
+        }
 
         // LIVE PIXEL, STABLE REGION: the nav layer must not have its goal's REGION flip beat to beat
         // (a live mob's floor point on an airborne arc probes a DIFFERENT foothold, so the committed
@@ -1341,6 +1363,11 @@ public final class PqActions {
                 ty = underMob.y;
             }
         }
+        PathabilityVerdict approach = state.pathability.get(target.getObjectId());
+        if (state.reachableOnly && approach != null && approach.firingPosition() != null) {
+            tx = approach.firingPosition().x;
+            ty = approach.firingPosition().y;
+        }
 
         // REGION-STABLE GOAL GATE (the unified fix for the whole region-flip family): the anchor
         // branches above still emit a goal whose nav region can differ from the one the bot is
@@ -1371,7 +1398,6 @@ public final class PqActions {
         // same-ledge), never a distance radius: an X-only or manhattan radius admits a mob 80px
         // straight up through a 60px reach box or one on a ledge above, and the deadline then
         // renews forever on a target the bot can never touch.
-        boolean inReach = BotAttackDriver.canReach(bot, target);
         if (inReach || mobDist < state.bestDist - PROGRESS_EPS_PX) {
             state.bestDist = Math.min(state.bestDist, mobDist);
             state.deadline = movementNowMs() + RETARGET_TIMEOUT_MS;
@@ -1526,9 +1552,8 @@ public final class PqActions {
     }
 
     /**
-     * The chase target this beat: the sticky one while it stays alive, inside the seek box,
-     * and PATHABLE (canPathTo from the bot — the sticky check re-plans too, so a mob that
-     * wandered onto an unreachable ledge is released rather than walked into a wall under).
+     * Keep a pathable sticky target; otherwise prefer another pathable mob. Re-selecting the
+     * same unreachable fallback keeps its episode's deadline rather than resetting progress.
      * Otherwise the nearest live hostile in the box, pathable candidates first (platforms
      * above/below included - the nav graph's climb edges make "up the rope to the next
      * platform" a normal approach).
@@ -1541,8 +1566,6 @@ public final class PqActions {
                 return m;
             }
             state.targetOid = -1; // gone, out of the box, or unreachable
-            state.pathability.remove(sticky);
-            state.clearGoal(); // the frozen platform belongs to the dropped mob
         }
         Monster best = null;
         double bestSq = Double.MAX_VALUE;
@@ -1566,12 +1589,15 @@ public final class PqActions {
         Monster chosen = bestPathable != null ? bestPathable
                 : (state.reachableOnly ? null : best);
         state.targetOid = chosen != null ? chosen.getObjectId() : -1;
-        state.clearGoal();
+        // Re-selecting the SAME unreachable fallback is still the same chase episode. Keep
+        // its progress clock, but switch immediately if another mob has become pathable.
+        if (state.targetOid != sticky) state.clearGoal();
         return chosen;
     }
 
     /**
-     * Whether the bot's graph can plan a route to this mob's floor point (peek, no build).
+     * Whether the bot's graph can plan a route to this mob's floor (or a firing position for
+     * a reachable-only stage). Peek-only: never build a graph on the combat beat.
      *
      * <p>The answer is cached per (bot, mob) for a beat-window: the sweep calls this on every
      * mob in the room every 250ms, and each call walks the nav graph's region data - a
@@ -1586,7 +1612,7 @@ public final class PqActions {
      * the read path unboxed a Boolean that a concurrent re-stamp or the stop-time clear could
      * have absent while the stamp was still present (NPE on the shared combat sweep).
      */
-    private record PathabilityVerdict(long takenAtMs, boolean pathable) {
+    private record PathabilityVerdict(long takenAtMs, boolean pathable, Point firingPosition) {
     }
     private static boolean isPathable(Character bot, Monster m, SeekState state) {
         Point mp = m.getPosition();
@@ -1602,8 +1628,16 @@ public final class PqActions {
         Point ground = GCMovement.groundPointBelow(bot.getMap(), mp.x, mp.y);
         int ty = (ground != null) ? ground.y : mp.y;
         boolean pathable = GCMovement.canPathTo(bot, mp.x, ty);
-        state.pathability.put(key, new PathabilityVerdict(now, pathable));
+        Point firing = !pathable && state.reachableOnly ? findFiringPosition(bot, m) : null;
+        pathable |= firing != null;
+        state.pathability.put(key, new PathabilityVerdict(now, pathable, firing));
         return pathable;
+    }
+
+    /** Search actual standable surfaces inside the attack box, not the mob's inaccessible floor. */
+    private static Point findFiringPosition(Character bot, Monster mob) {
+        java.awt.Rectangle bounds = BotAttackDriver.firingPositions(bot, mob);
+        return bounds == null ? null : GCMovement.nearestReachableGround(bot, bounds);
     }
 
     /**

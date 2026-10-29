@@ -62,17 +62,15 @@ class AttackLedgeRuleTest {
 
     @Test
     void theRouteIsThreadedFromTheSwingDecision() throws Exception {
-        String body = methodBody(source(), "private static boolean inReach(");
-        assertTrue(body.contains("profile.route"),
+        String body = methodBody(source(), "private static boolean inReach(Character bot, Point botPos,");
+        assertTrue(body.contains("onAttackableSurface(bot.getMap(), botPos, m, route)"),
                 "inReach must pass its own route in, or the exemption can never apply");
     }
 
     @Test
-    void theFacingAnchorIsNotLedgeFiltered() throws Exception {
-        // nearestMob only picks the mob to FACE (and feeds the miss diagnostic). Filtering it by
-        // ledge left a ranged bot facing nothing on the one room it could shoot across.
+    void theFacingAnchorUsesTheSameRouteAsTheSwing() throws Exception {
         String body = methodBody(source(), "private static Monster nearestMob(");
-        assertFalse(body.contains("onAttackableSurface"),
-                "the facing anchor must not apply the melee ledge gate");
+        assertTrue(body.contains("onAttackableSurface(bot.getMap(), botPos, m, profile.route)"),
+                "melee rejects a foreign ledge while projectiles retain their exemption");
     }
 }

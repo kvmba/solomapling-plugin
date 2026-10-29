@@ -131,7 +131,7 @@ class LudiStageFixesTest {
         String boss = methodBody(source(LudiStages.class), "public static void fightBoss(");
         assertTrue(boss.contains("LudiPqData.BOSS_CRYSTAL"),
                 "the altar is the only thing that summons Alishar on this server");
-        assertTrue(boss.contains("hitReactor(bot, crystal)"),
+        assertTrue(boss.contains("hitReactorIfInReach(bot, crystal)"),
                 "striking it is a plain reactor hit - type 100 does not block a weapon hit");
         assertTrue(boss.indexOf("BOSS_CRYSTAL") < boss.indexOf("seekAndAttack"),
                 "summon first, then add damage");

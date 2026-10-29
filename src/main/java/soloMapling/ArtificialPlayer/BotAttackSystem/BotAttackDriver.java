@@ -162,35 +162,31 @@ public final class BotAttackDriver {
         return p != null ? p.reachY : 0;
     }
 
-    /**
-     * Whether {@code mob} is inside this bot's swing RIGHT NOW.
-     *
-     * <p>This is the one honest answer to "am I in the fight with that mob", and it is deliberately
-     * the SAME predicate the swing uses ({@link #mobsInReach}: the profile's real reach box, the
-     * melee WZ box when the skill has one, the forward clipping, and the same-ledge rule), so a
-     * caller that treats "in reach" as progress can never disagree with what the attack lands on.
-     * {@link #attackReachX}/{@link #attackReachY} are the box's X/Y extents, not this test: a
-     * manhattan radius built from them admits a mob 80px straight up through a 60px reach box, and
-     * an X-only radius admits anything on a different ledge.
-     *
-     * <p>Facing is judged toward the mob: the swing turns to its target before it measures, so a
-     * target behind the bot is still reachable once the attack re-orients.
-     */
+    /** Whether the current AUTO selection includes this mob, ignoring the per-swing cooldown. */
     public static boolean canReach(Character bot, Monster mob) {
-        if (bot == null || mob == null || bot.getMap() == null || !mob.isAlive()) {
-            return false;
-        }
-        Point botPos = bot.getPosition();
-        Point mobPos = mob.getPosition();
-        if (botPos == null || mobPos == null) {
-            return false;
-        }
-        BotAttackProfile profile = primaryProfile(bot);
-        if (profile == null) {
-            return false;
-        }
-        return inReach(bot, profile, BotAttack.resolveEquippedWeaponType(bot),
-                mobPos.x < botPos.x, mob);
+        if (bot == null || mob == null || bot.getMap() == null || GCMovement.isClimbing(bot)) return false;
+        BotDebuffState status = BotDebuffState.of(bot);
+        if (status != null && status.blocksAttack()) return false;
+        WeaponType weapon = BotAttack.resolveEquippedWeaponType(bot);
+        BotAttackConfig.JobAttacks attacks = BotAttackConfig.resolve(bot.getJob(), weapon);
+        AttackSelection selection = selectAttack(bot, weapon,
+                gateProfile(bot, attacks.single(), weapon), gateProfile(bot, attacks.aoe(), weapon),
+                gateProfile(bot, attacks.ultimate(), weapon), Choice.AUTO, System.currentTimeMillis());
+        return selection != null && selection.targets().contains(mob);
+    }
+
+    /** Valid shooter coordinates for the sustained projectile, using its real hit box. */
+    public static Rectangle firingPositions(Character bot, Monster mob) {
+        WeaponType weapon = BotAttack.resolveEquippedWeaponType(bot);
+        BotAttackProfile profile = gateProfile(bot, primaryProfile(bot), weapon);
+        if (profile == null || profile.route == BotAttackProfile.Route.CLOSE) return null;
+        Rectangle box = reachBox(new Point(), profile, weapon, false);
+        if (mob.isBoss()) box = new Rectangle(box.x, box.y - BOSS_Y_PAD, box.width, box.height + 2 * BOSS_Y_PAD);
+        Point target = mob.getPosition();
+        // Projectiles may face either way. Rectangle upper bounds are exclusive, so invert
+        // integer hit coordinates with +1 rather than silently losing the last legal row.
+        return new Rectangle(target.x - profile.reachX + 1, target.y - box.y - box.height + 1,
+                profile.reachX * 2, box.height);
     }
 
     private static BotAttackProfile primaryProfile(Character bot) {
@@ -264,69 +260,15 @@ public final class BotAttackDriver {
             return AttackResult.miss("no attack for job " + bot.getJob() + " / weapon " + weapon);
         }
 
-        // Face the nearest mob BEFORE measuring reach, so directional attacks are oriented
-        // toward the fight (the reach box is built relative to the bot's facing).
-        Monster nearest = nearestMob(bot);
-        if (nearest == null) {
+        AttackSelection selection = selectAttack(bot, weapon, single, aoe, ultimate, choice, now);
+        if (selection == null) {
             return AttackResult.miss("no targetable mobs within " + SEEK_RANGE + "px (none, or all on a separate ledge)");
         }
-        boolean facingLeft = faceTarget(bot, nearest.getPosition());
-
-        // Pick the profile. Forced choices use exactly that slot; AUTO fires an AoE when 2+ mobs are in
-        // reach, else the single-target attack.
-        BotAttackProfile profile;
-        boolean healUndead = false;
-        // Set when the AUTO branch below already scanned the pack profile's reach: escalating to that
-        // same profile reuses the scan, so the AoE path measures reach once instead of twice.
-        List<Monster> reachCache = null;
-        if (choice == Choice.SINGLE) {
-            profile = single;
-        } else if (choice == Choice.AOE) {
-            profile = aoe;
-        } else if (choice == Choice.ULTIMATE) {
-            profile = ultimate;
-        } else if (isClericVsUndead(bot, nearest)) {
-            profile = HEAL_PROFILE; // Heal-as-damage on the undead pack
-            healUndead = true;
-        } else {
-            // The AoE we'd throw at a pack: the full-map ultimate when it's off its long separate
-            // cooldown, otherwise the sustained mob attack (Crusher / Shining Ray / Ice Strike /
-            // Explosion). While the ultimate cools, the bot keeps mobbing with the sustained AoE
-            // instead of dropping to single-target. Only escalate to an AoE when 2+ mobs are in reach.
-            // (Every slot was already enabler-gated above, so a pack attack requiring 变身/海盗船
-            // only reaches here while that aura is up.)
-            boolean ultReady = ultimate != null && now >= nextUltimateByBot.getOrDefault(bot.getId(), 0L);
-            BotAttackProfile packAttack = ultReady ? ultimate : aoe;
-            List<Monster> packInReach = packAttack == null
-                    ? List.of()
-                    : mobsInReach(bot, packAttack, weapon, facingLeft);
-            if (packInReach.size() >= 2) {
-                profile = packAttack;
-                reachCache = packInReach; // same inputs scanned once - reuse for the target list
-            } else {
-                profile = single != null ? single : (aoe != null ? aoe : ultimate);
-            }
-        }
-
-        // 斗气必杀技节流 (Panic / Coma consume the whole orb ring): while the finisher's 60s cadence
-        // runs, swap the plan back to the warrior-lineage base attacks (Power Strike / Slash Blast)
-        // so the ring keeps growing instead of being wiped every few swings - the bank-and-spend
-        // rhythm a real combo player plays at. The base profiles share the finisher's reach box and
-        // cooldown, so only the rendered skill changes. Forced GM choices stay on the finisher.
-        if (choice == Choice.AUTO && !BotComboOrb.finisherReady(bot)
-                && BotComboOrb.isFinisher(profile.skillFor(weapon))) {
-            profile = profile.numAttacked > 1
-                    ? BotAttackProfile.meleeAoe(Warrior.SLASH_BLAST, 1)
-                    : BotAttackProfile.melee(Warrior.POWER_STRIKE, 1);
-        }
-
-        List<Monster> targets = cap(reachCache != null ? reachCache : mobsInReach(bot, profile, weapon, facingLeft),
-                profile.numAttacked);
-        if (healUndead) {
-            targets = undeadOnly(targets); // Heal must not damage a living mob caught in the box
-        }
+        BotAttackProfile profile = selection.profile();
+        boolean facingLeft = faceTarget(bot, selection.facingTarget());
+        List<Monster> targets = selection.targets();
         if (targets.isEmpty()) {
-            return AttackResult.miss(healUndead ? "no undead in heal range"
+            return AttackResult.miss(profile == HEAL_PROFILE ? "no undead in heal range"
                     : reachDiagnostic(bot, profile, weapon, facingLeft));
         }
 
@@ -435,13 +377,57 @@ public final class BotAttackDriver {
         }
 
         nextAttackByBot.put(bot.getId(), now + profile.cooldownMs);
-        if (profile == ultimate) { // firing the throttled full-map nuke starts its long cooldown
+        if (selection.ultimate()) { // firing the throttled full-map nuke starts its long cooldown
             nextUltimateByBot.put(bot.getId(), now + FULL_MAP_ULTIMATE_COOLDOWN_MS);
         }
         String label = targets.size() > 1
                 ? targets.size() + " mobs (nearest '" + targets.get(0).getName() + "')"
                 : targets.get(0).getName();
         return AttackResult.hit(label, reported, killed);
+    }
+
+    private record AttackSelection(BotAttackProfile profile, List<Monster> targets,
+                                   Point facingTarget, boolean ultimate) {}
+
+    // Shared by the actual swing and the chase's hold/progress check. Cooldowns prevent a
+    // swing, not a firing position; aura gates, facing, AUTO profile and target cap are identical.
+    private static AttackSelection selectAttack(Character bot, WeaponType weapon,
+                                                 BotAttackProfile single, BotAttackProfile aoe,
+                                                 BotAttackProfile ultimate, Choice choice, long now) {
+        BotAttackProfile primary = switch (choice) {
+            case SINGLE -> single;
+            case AOE -> aoe;
+            case ULTIMATE -> ultimate;
+            case AUTO -> single != null ? single : (aoe != null ? aoe : ultimate);
+        };
+        if (primary == null) return null;
+        Monster nearest = nearestMob(bot, primary, weapon);
+        if (nearest == null) return null;
+        Point facingTarget = nearest.getPosition();
+        boolean facingLeft = facingTarget.x < bot.getPosition().x;
+        BotAttackProfile profile = primary;
+        List<Monster> targets = null;
+        if (choice == Choice.AUTO) {
+            if (isClericVsUndead(bot, nearest)) {
+                profile = HEAL_PROFILE;
+            } else {
+                boolean ultReady = ultimate != null && now >= nextUltimateByBot.getOrDefault(bot.getId(), 0L);
+                BotAttackProfile pack = ultReady ? ultimate : aoe;
+                List<Monster> packTargets = pack == null ? List.of() : mobsInReach(bot, pack, weapon, facingLeft);
+                if (packTargets.size() >= 2) {
+                    profile = pack;
+                    targets = packTargets;
+                }
+            }
+            if (!BotComboOrb.finisherReady(bot) && BotComboOrb.isFinisher(profile.skillFor(weapon))) {
+                profile = profile.numAttacked > 1 ? BotAttackProfile.meleeAoe(Warrior.SLASH_BLAST, 1)
+                        : BotAttackProfile.melee(Warrior.POWER_STRIKE, 1);
+                targets = null; // the replacement skill can have a different WZ box
+            }
+        }
+        if (targets == null) targets = mobsInReach(bot, profile, weapon, facingLeft);
+        if (profile == HEAL_PROFILE) targets = undeadOnly(targets);
+        return new AttackSelection(profile, cap(targets, profile.numAttacked), facingTarget, profile == ultimate);
     }
 
     /*
@@ -480,9 +466,10 @@ public final class BotAttackDriver {
             return List.of();
         }
         List<Monster> found = new ArrayList<>();
+        Rectangle box = reachBox(botPos, profile, weapon, facingLeft);
         for (MapObject mo : bot.getMap().getMapObjectsInRange(botPos, SEEK_RANGE_SQ, MONSTER_TYPES)) {
             Monster m = (Monster) mo;
-            if (inReach(bot, profile, weapon, facingLeft, m)) {
+            if (inReach(bot, botPos, box, profile.route, m)) {
                 found.add(m);
             }
         }
@@ -496,9 +483,7 @@ public final class BotAttackDriver {
      * this one implementation - a gate that treats "in reach" as progress must never disagree with
      * the swing that lands.
      */
-    private static boolean inReach(Character bot, BotAttackProfile profile, WeaponType weapon,
-                                   boolean facingLeft, Monster m) {
-        Point botPos = bot.getPosition();
+    private static boolean inReach(Character bot, Point botPos, Rectangle box, BotAttackProfile.Route route, Monster m) {
         if (botPos == null || m == null || !m.isAlive()) {
             return false;
         }
@@ -506,7 +491,6 @@ public final class BotAttackDriver {
         if (mp == null) {
             return false;
         }
-        Rectangle box = reachBox(bot, profile, weapon, facingLeft);
         // Bosses are big and multi-bodied: test their part positions against a vertically
         // padded box so e.g. Zakum's elevated arms still register as in-reach.
         Rectangle test = m.isBoss()
@@ -516,7 +500,7 @@ public final class BotAttackDriver {
         // hit a mob standing on a separate platform overhead/below. Drop melee mobs on a different
         // ledge than the bot (bosses exempt, and ranged/magic are exempt by route - see
         // onAttackableSurface). Cheap (peek-only) and only run for box-passing mobs.
-        return test.contains(mp) && onAttackableSurface(bot.getMap(), botPos, m, profile.route);
+        return test.contains(mp) && onAttackableSurface(bot.getMap(), botPos, m, route);
     }
 
     /*
@@ -534,7 +518,10 @@ public final class BotAttackDriver {
      * character - mage AoE, Dragon Roar, Heaven's Hammer) keep both sides.
      */
     private static Rectangle reachBox(Character bot, BotAttackProfile profile, WeaponType weapon, boolean facingLeft) {
-        Point p = bot.getPosition();
+        return reachBox(bot.getPosition(), profile, weapon, facingLeft);
+    }
+
+    private static Rectangle reachBox(Point p, BotAttackProfile profile, WeaponType weapon, boolean facingLeft) {
         int skillId = profile.skillFor(weapon);
         Rectangle wz = wzBox(skillId, profile.skillLevel, p, facingLeft);
 
@@ -601,39 +588,46 @@ public final class BotAttackDriver {
      * control (e.g. the GM TestAttackBot) fall back to that legacy flip.
      */
     private static boolean faceTarget(Character bot, Point target) {
+        boolean left = target.x < bot.getPosition().x;
         if (GCMovement.isEnabled(bot)) {
-            boolean left = target.x < bot.getPosition().x;
             GCMovement.face(bot, left);
-            return left;
+        } else {
+            MovementCommands.botFaceTowardsPoint(bot, target);
         }
-        MovementCommands.botFaceTowardsPoint(bot, target);
-        return MovementCommands.facingLeft(bot);
+        return left; // damage uses the selected direction even if a legacy turn recording is absent
     }
 
     /* The closest live mob within the seek radius (any direction), or null. */
-    private static Monster nearestMob(Character bot) {
+    private static Monster nearestMob(Character bot, BotAttackProfile profile, WeaponType weapon) {
         Point botPos = bot.getPosition();
         if (botPos == null) {
             return null;
         }
         Monster nearest = null;
+        Monster nearestInReach = null;
         double bestSq = Double.MAX_VALUE;
+        double bestReachSq = Double.MAX_VALUE;
+        Rectangle leftBox = reachBox(botPos, profile, weapon, true);
+        Rectangle rightBox = reachBox(botPos, profile, weapon, false);
         for (MapObject mo : bot.getMap().getMapObjectsInRange(botPos, SEEK_RANGE_SQ, MONSTER_TYPES)) {
             Monster m = (Monster) mo;
             if (!m.isAlive() || m.getPosition() == null) {
                 continue;
             }
-            // NO ledge filter here. This is only the facing/diagnostic anchor, and the ledge test
-            // is route-dependent (a projectile legitimately crosses a gap): filtering here would
-            // leave a ranged bot facing nothing on exactly the rooms it can shoot across. The
-            // route-aware gate lives in inReach, where the actual swing is decided.
             double dsq = botPos.distanceSq(m.getPosition());
-            if (dsq < bestSq) {
+            if (dsq < bestReachSq && inReach(bot, botPos,
+                    m.getPosition().x < botPos.x ? leftBox : rightBox, profile.route, m)) {
+                bestReachSq = dsq;
+                nearestInReach = m;
+            }
+            // The diagnostic fallback still obeys the route's surface rule. Once an actual
+            // shot is found no fallback can win, so do not repeat its ledge probes.
+            if (nearestInReach == null && dsq < bestSq && onAttackableSurface(bot.getMap(), botPos, m, profile.route)) {
                 bestSq = dsq;
                 nearest = m;
             }
         }
-        return nearest;
+        return nearestInReach != null ? nearestInReach : nearest;
     }
 
     /*
@@ -673,7 +667,7 @@ public final class BotAttackDriver {
      */
     private static String reachDiagnostic(Character bot, BotAttackProfile profile, WeaponType weapon, boolean facingLeft) {
         Point botPos = bot.getPosition();
-        Monster nearest = nearestMob(bot);
+        Monster nearest = nearestMob(bot, profile, weapon);
         if (nearest == null) {
             return "no targetable mobs within " + SEEK_RANGE + "px (none, or all on a separate ledge)";
         }

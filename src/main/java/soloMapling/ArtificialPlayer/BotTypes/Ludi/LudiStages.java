@@ -111,8 +111,8 @@ public final class LudiStages {
         // inside the trigger box).
         if (stage == 7) {
             if (stage7LedgeMobAlive(bot) || stage7PassStillWanted(bot)) {
-                // reachableOnly: a mob on the far shelves is OUT of the chase, not an 8-second
-                // dead-end walk. A ranged/magic kit can still strike it once it is in reach.
+                // Reach the shot, not the inaccessible mob floor: the chase can select a
+                // walkable firing ledge for ranged/magic and leaves impossible melee shots alone.
                 PqActions.seekAndAttack(bot, true);
                 return;
             }
@@ -748,28 +748,6 @@ public final class LudiStages {
             exitDoorRoom(bot);
             return;
         }
-        // Hide while PASSING a guard row - not for the whole visit.
-        //
-        // <p>506's four boxes sit on ledges at y=-630/-1064/-1459/-3535 and the seven
-        // invincible golems stand in rows at y=-441/-862/-1266/-2497, i.e. BETWEEN the box
-        // ledges. The bot only ever needs the hide while it is crossing one of those rows:
-        // standing on a box ledge itself is out of the golems' touch. Showing it up front "to
-        // be safe" left the hide up for the whole room, which reads as a permanently invisible
-        // bot and (worse) made the hide the visible state rather than the crossing.
-        //
-        // <p>So the hide is armed by proximity to a guard row ({@link #crossingGuardRow}) and
-        // dropped once the bot is clear. The strike cancels it anyway (an attack action), which
-        // is why it is re-shown on every tick spent inside a row.
-        if (hideSkillFor(bot) != 0) {
-            if (crossingGuardRow(bot)) {
-                if (!BotAuraState.isMonsterImmune(bot)) {
-                    soloMapling.ArtificialPlayer.BotAttackSystem.BotBuffEffects.showBuff(bot, hideSkillFor(bot));
-                }
-            } else if (BotAuraState.isMonsterImmune(bot)) {
-                // Clear the crossing: drop the hide so the bot does not wander the room invisible.
-                BotAuraState.cancelHidesForAction(bot);
-            }
-        }
         // Boxes while hidden: the strike cancels the hide, so re-show happens next tick.
         // The beat is off: a swing mid-walk would break the hide in a PAD-999 room.
         int box = nearestBoxOid(bot, LudiPqData.BOX_STAGE5);
@@ -936,34 +914,6 @@ public final class LudiStages {
                         && m.getPosition() != null
                         && Math.abs(m.getPosition().x - p.x) <= 120
                         && Math.abs(m.getPosition().y - p.y) <= 150);
-    }
-
-    /**
-     * Whether the bot is CROSSING a guard row on 922010506, i.e. must be hidden right now.
-     *
-     * <p>The room's four box ledges sit at y=-630/-1064/-1459/-3535 and its seven invincible
-     * golems stand in rows at y=-441/-862/-1266/-2497 - i.e. BETWEEN the ledges, roughly 190px
-     * from each. So the hide is needed while the bot moves between two ledges, not while it
-     * works a box: the band must therefore be NARROWER than that 190px gap, or every box ledge
-     * would read as "crossing" and the hide would simply stay up for the whole visit - the
-     * behaviour this replaced.
-     *
-     * <p>110px covers the golem's own touch reach (PAD 999 kills on contact; the separate
-     * {@link #guardCanReach} uses 150px for "it can reach me") while staying clear of the box
-     * ledges at ~190px. Crossing is a pass-through, so the window only has to cover the moment
-     * the bot is beside a row, not the whole traversal.
-     */
-    private static final int GUARD_CROSSING_BAND_Y = 110;
-
-    private static boolean crossingGuardRow(Character bot) {
-        Point p = bot.getPosition();
-        if (p == null) {
-            return false;
-        }
-        return bot.getMap().getAllMonsters().stream()
-                .anyMatch(m -> m.isAlive() && m.getId() == LudiPqData.GUARD_MOB
-                        && m.getPosition() != null
-                        && Math.abs(m.getPosition().y - p.y) <= GUARD_CROSSING_BAND_Y);
     }
 
     /**
@@ -1359,8 +1309,7 @@ public final class LudiStages {
         // `type == 100` test is the engine's own "still waiting for its item" state - once the
         // altar fires it advances past it, and striking the spent crystal would do nothing.
         int crystal = nearestArmedReactorOid(bot, LudiPqData.BOSS_CRYSTAL);
-        if (crystal >= 0 && PqActions.approachReactor(bot, crystal, false, false) == PqActions.Approach.IN_POSITION) {
-            PqActions.hitReactor(bot, crystal);
+        if (crystal >= 0 && PqActions.hitReactorIfInReach(bot, crystal)) {
             return;
         }
         // Everything else is damage-only, and only on what the bot can actually touch:

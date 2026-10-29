@@ -1290,15 +1290,8 @@ class BotMovementManager {
         if (standing == null || sameSurface(bot.getMap(), standing, entry.moveTarget)) {
             return false; // the goal is this very surface: the bot is where it means to be
         }
-        // The verdict is a property of the walk region and costs 6-700us for an UNSEEN foothold, so
-        // this runs on every driver tick of every bot and must not re-ask: one answer per (map,
-        // foothold) pair. The map has to be part of the key - foothold ids restart per map, so an id
-        // remembered from another map names a different surface.
-        if (bot.getMap() == entry.deadPitCheckedMap && standing.getId() == entry.deadPitCheckedFootholdId) {
-            return false;
-        }
-        entry.deadPitCheckedMap = bot.getMap();
-        entry.deadPitCheckedFootholdId = standing.getId();
+        // DeadPitGuard already caches the VERDICT by geometry, profile and capabilities. A local
+        // "checked this floor" flag would suppress rescue after a second fall or a capability change.
         if (DeadPitGuard.isLivableSurface(bot.getMap(), standing, entry.movementProfile,
                 BotMovementCapabilities.of(bot))) {
             return false;

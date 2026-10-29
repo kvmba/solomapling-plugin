@@ -25,6 +25,7 @@ import org.gms.constants.skills.WindArcher;
 import org.gms.util.PacketCreator;
 import soloMapling.ArtificialPlayer.GCMoveSystem.GCMovement;
 
+import java.awt.Point;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -112,6 +113,11 @@ public final class BotAuraState {
     private static final Map<Integer, Integer> MORPH_SKILL = new ConcurrentHashMap<>();
     /** botIds whose 隐身术 aura is intended to be up (a cancel is only sent on the drop edge). */
     private static final Set<Integer> DARK_SIGHT_UP = ConcurrentHashMap.newKeySet();
+    // Hides owned by the guard-crossing policy, so leaving its map retires only our own aura.
+    private static final Set<Integer> GUARD_HIDES = ConcurrentHashMap.newKeySet();
+    private static final int LPQ_GUARD_ROOM = 922010506;
+    private static final int LPQ_GUARD_MOB = 9300013;
+    private static final int GUARD_CROSSING_BAND_Y = 110;
 
     /**
      * botId -> every plain cosmetic aura currently shown (the non-state-bound buffs whose foreign
@@ -501,6 +507,30 @@ public final class BotAuraState {
         return DARK_SIGHT_UP.contains(id) || isDisguised(id);
     }
 
+    /** Movement-thread only, before contact damage. Quest macro work never writes this policy. */
+    public static void updateGuardHide(Character bot) {
+        int id = bot.getId();
+        boolean crossing = false;
+        if (bot.getMapId() == LPQ_GUARD_ROOM && bot.getHp() > 0) {
+            Point pos = bot.getPosition();
+            for (var mob : bot.getMap().getAllMonsters()) {
+                if (mob.isAlive() && mob.getId() == LPQ_GUARD_MOB
+                        && Math.abs(mob.getPosition().y - pos.y) <= GUARD_CROSSING_BAND_Y) {
+                    crossing = true;
+                    break;
+                }
+            }
+        }
+        if (!crossing) {
+            if (GUARD_HIDES.remove(id)) cancelHidesForAction(bot);
+        } else if (!isMonsterImmune(bot)) {
+            List<Integer> kit = BotBuffConfig.buffsForJob(bot.getJob());
+            int hide = kit.contains(Rogue.DARK_SIGHT) ? Rogue.DARK_SIGHT
+                    : kit.contains(Brawler.OAK_BARREL) ? Brawler.OAK_BARREL : 0;
+            if (hide != 0 && BotBuffEffects.showBuff(bot, hide) > 0) GUARD_HIDES.add(id);
+        }
+    }
+
     /** This bot's 疾驰 skill id (0 = none), resolved once from its job's buff registry and cached. */
     static int dashSkillFor(Character bot) {
         Integer cached = DASH_SKILL.get(bot.getId());
@@ -628,6 +658,7 @@ public final class BotAuraState {
         DASH_RESHOW_AT.remove(botId);
         MORPH_SKILL.remove(botId);
         DARK_SIGHT_UP.remove(botId);
+        GUARD_HIDES.remove(botId);
         SHOWN_AURAS.remove(botId);
         ATTACK_ENABLER_UNTIL.remove(botId);
         BotDashBurst.clearBot(botId);

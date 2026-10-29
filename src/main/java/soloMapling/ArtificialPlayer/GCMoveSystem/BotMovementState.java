@@ -260,14 +260,6 @@ class BotMovementState {
     int unstuckCooldownMs = 0;
     int stuckCheckX = Integer.MIN_VALUE;
     int stuckCheckY = Integer.MIN_VALUE;
-    // The foothold whose dead-pit livability verdict this bot last asked for, and the MAP it was
-    // asked on. Foothold ids restart per map (id 6 is a wall stub on 922010100 and the boss room's
-    // apron on 922010900), so the id alone cannot key this: after a map change the same id names a
-    // different surface, and reusing the old verdict would suppress or fake the rescue.
-    // The verdict itself costs 6-700us for an unseen foothold, so it cannot be asked every tick;
-    // deadPitCheckedMap holds the map the id belongs to.
-    int deadPitCheckedFootholdId = Integer.MIN_VALUE;
-    MapleMap deadPitCheckedMap = null;
     // True when this navigation tick found the committed edge's POSITION GATE satisfied and withheld the
     // launch only for a transient reason (exact-profile graph still baking, the launch window still being
     // walked into, or residual ground slide). The bot is exactly where it needs to be - waiting on the
