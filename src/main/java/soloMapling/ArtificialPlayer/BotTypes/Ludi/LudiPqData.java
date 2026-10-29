@@ -43,6 +43,12 @@ public final class LudiPqData {
     public static final int STAGE_7 = 922010700;
     public static final int STAGE_8 = 922010800; // the crate combination
     public static final int STAGE_9 = 922010900; // the boss
+    /** The bonus stage the quest warps the whole team into after the boss trophy is turned in. */
+    public static final int BONUS_MAP = 922011000;
+    /** The bonus stage's follow-up room, one minute later (a plain warp, no boxes). */
+    public static final int BONUS_TAIL_MAP = 922011100;
+    /** The bonus stage's reward boxes: 36 of them, and breaking one sprays items. */
+    public static final int BONUS_BOX = 2202004;
 
     /** Stage 4's five door rooms (in01..in05 lead in; each holds box mobs that drop passes). */
     public static final int STAGE4_ROOM_FIRST = 922010401;
@@ -53,15 +59,32 @@ public final class LudiPqData {
 
     /** The pass boxes: stage 2's tower, stage 3's mob crates, stage 5's guarded rooms. */
     public static final int BOX_STAGE2 = 2202003;
+    /**
+     * The stage-2 tower's trap box. Breaking it runs its script, which warps EVERYBODY on the
+     * map into the trap room (922010201) - that room holds four of the stage's fifteen passes,
+     * so the trap is not optional: eleven tower boxes plus these four are exactly the 15 the
+     * turn-in (2040037.js) asks for.
+     */
+    public static final int BOX_STAGE2_TRAP = 2200002;
     public static final int BOX_STAGE3 = 2201001;
     public static final int BOX_STAGE5 = 2202003;
     /**
-     * Stage 7's pass boxes (three on 922010700): hitting one runs the reactor script that
-     * summons a Rombard (9300010), the only mob in the stage that drops a 4001022 pass - the
-     * room's three pre-placed mobs (9300169-71) drop only 4001156. Without hitting these the
-     * stage's three passes can never be produced by the bot itself.
+     * Stage 7's pass boxes (three on 922010700). They are item-triggered ({@code type=100}):
+     * their WZ event wants one 4001156, and the box's own script does NOT drop that item - so
+     * the pass comes from the Rombard (9300010) the box summons once armed. The item that arms
+     * them is the drop of the three ledge mobs below, which is why killing those mobs is the
+     * real work of this stage.
      */
     public static final int BOX_STAGE7 = 2201002;
+    /**
+     * The three mobs on 922010700's right-hand ledges (9300170 at 224,-1044, 9300169 at
+     * 219,-1276, 9300171 at 228,-1543). Each drops one 4001156, and {@code calcDropPos}
+     * re-seats it onto its own ledge - inside the matching box's trigger box, which is what
+     * arms the box without anyone touching it.
+     */
+    public static final int[] STAGE7_LEDGE_MOBS = {9300169, 9300170, 9300171};
+    /** Stage 9's altar (2201003 at 599,0): striking it runs the script that summons Alishar. */
+    public static final int BOSS_CRYSTAL = 2201003;
     /** Stage 5's guard: invincible per WZ (PAD 999) - hide, do not fight it. */
     public static final int GUARD_MOB = 9300013;
     /** Stage 4's box mobs - ordinary killables that drop the passes. */

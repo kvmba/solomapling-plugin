@@ -99,23 +99,28 @@ public final class LudiStages {
     public static void gatherPasses(Character bot, int stage) {
         // Recover our stale hand-off piles (the leader missed them and the despawn clock runs).
         PqActions.recoverUngatheredHandoffs(bot, LudiPqData.PASS);
+        // Stage 7 is not a box-breaking stage: the three pass boxes are item-triggered
+        // (type 100) and are armed by the 4001156 drops of the three ledge mobs. Those mobs
+        // stand on ledges with no inbound edge (only a fall from above enters them), so the
+        // work is killing them from the LEFT ledges with a ranged/magic kit - the drop re-seats
+        // onto the mob's own ledge, inside the box's trigger box, and the box summons the
+        // Rombard on its own five seconds later.
+        //
+        // <p>Two things this stage must NOT do: walk at the box (unreachable), and pick the
+        // 4001156 up (a picked-up item can never arm the box - the trigger matches a live drop
+        // inside the trigger box).
+        if (stage == 7) {
+            if (stage7LedgeMobAlive(bot) || stage7PassStillWanted(bot)) {
+                // reachableOnly: a mob on the far shelves is OUT of the chase, not an 8-second
+                // dead-end walk. A ranged/magic kit can still strike it once it is in reach.
+                PqActions.seekAndAttack(bot, true);
+                return;
+            }
+        }
         if (killableMobPresent(bot)) {
             PqActions.seekAndAttack(bot);
             PqActions.loot(bot, bot.getPosition(), LOOT_RADIUS_PX, new int[]{LudiPqData.PASS});
             return;
-        }
-        // Stage 7 hand-writes the passes: its only source is the Rombard (9300010) that the
-        // three box reactors (2201002) summon when hit - the room's pre-placed mobs drop no
-        // passes at all. With nothing killable left, an armed box means the stage is NOT
-        // done: break one (same claim/approach/beat pattern as the stage-1/2 box towers) and
-        // let the next beat hunt what it summons. Only a room whose boxes are all spent
-        // reaches the delivery below.
-        if (stage == 7) {
-            int box = nearestOwnedBoxOid(bot, LudiPqData.BOX_STAGE7);
-            if (box >= 0 && hitReactorRotate(bot, box, LudiPqData.BOX_STAGE7)) {
-                PqActions.loot(bot, bot.getPosition(), LOOT_RADIUS_PX, new int[]{LudiPqData.PASS});
-                return;
-            }
         }
         // Room quiet: the work is done. Hold the stage-NPC post and hand the stock over the
         // moment the leader comes for the turn-in.
@@ -128,6 +133,51 @@ public final class LudiStages {
             // Delivered: spread into the NPC ring with the rest of the ready party.
             PqActions.spreadNearStageNpc(bot, stageNpc);
         }
+    }
+
+    /**
+     * Whether any of stage 7's three ledge mobs is still standing.
+     *
+     * <p>They are the stage's only pass source (their 4001156 arms the boxes that summon the
+     * Rombard), so while one lives the stage is not done. Checked by data id rather than by
+     * "anything killable": the Rombard is also killable and means the opposite.
+     */
+    private static boolean stage7LedgeMobAlive(Character bot) {
+        for (Monster m : bot.getMap().getAllMonsters()) {
+            if (!m.isAlive()) {
+                continue;
+            }
+            for (int id : LudiPqData.STAGE7_LEDGE_MOBS) {
+                if (m.getId() == id) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Whether stage 7 still owes passes: a Rombard is up and not yet killed, or a box is still
+     * ARMED but unfired.
+     *
+     * <p>"Armed" is {@code getReactorType() == 100} - the engine's own test for an
+     * item-triggered reactor waiting for its item. It must NOT be {@code isActive()}: 2201002
+     * has two states and both carry a valid type, so {@code isActive()} stays true forever and
+     * the stage would never reach its delivery branch. Once the box fires it advances to its
+     * spent state (type 999) and this answers "no more passes from here".
+     */
+    private static boolean stage7PassStillWanted(Character bot) {
+        if (killableMobPresent(bot)) {
+            return true; // a Rombard (or anything else killable) is still standing
+        }
+        for (var reactor : bot.getMap().getAllReactors()) {
+            if (reactor.getId() == LudiPqData.BOX_STAGE7
+                    && reactor.isAlive()
+                    && reactor.getReactorType() == 100) {
+                return true; // still waiting for its 4001156: the pass has not been earned yet
+            }
+        }
+        return false;
     }
 
     /**
@@ -153,10 +203,12 @@ public final class LudiStages {
      * party's only pass source in this room - there are no mobs to hunt here - so the stage
      * is a climb past each box, breaking it on the way.
      *
-     * <p>The room's twelfth box, the trap (2200002), is left strictly alone: its script
-     * warps the whole party into the trap room (922010201), where four more of the fifteen
-     * passes wait behind {@link #workTrapRoom}. A bot that pops it "for free mesos" drags
-     * the run sideways instead.
+     * <p>The room's twelfth box, the trap (2200002), is popped ONCE the tower's own eleven are
+     * spent: its script warps EVERYBODY on the map into the trap room (922010201), and that
+     * room's four boxes carry the last four of the fifteen passes the turn-in asks for. Popping
+     * it earlier would yank workers off the boxes they are still breaking, so the gate is
+     * "no tower box left standing" - {@code findAllReactorOids}, not {@code nearestOwnedBoxOid}:
+     * the latter also answers "-1" while teammates still hold their share.
      *
      * <p>The tower is one vertical room: its boxes hang on floors between the spawn at the
      * top (y -2521) and the ground floor at the bottom (y +129), and the floors between them
@@ -174,6 +226,16 @@ public final class LudiStages {
         if (box >= 0 && hitReactorDescendRotate(bot, box, LudiPqData.BOX_STAGE2)) {
             PqActions.loot(bot, bot.getPosition(), LOOT_RADIUS_PX, new int[]{LudiPqData.PASS});
             return;
+        }
+        // Tower spent: the trap box is the last four passes, so spring it. Gated on the map
+        // having NO tower box left at all - not on this bot's share being exhausted, which also
+        // happens while teammates are still breaking theirs, and springing the trap then would
+        // warp those workers off their boxes mid-climb.
+        if (PqActions.findAllReactorOids(bot, LudiPqData.BOX_STAGE2).isEmpty()) {
+            int trap = nearestOwnedBoxOid(bot, LudiPqData.BOX_STAGE2_TRAP);
+            if (trap >= 0 && hitReactorDescendRotate(bot, trap, LudiPqData.BOX_STAGE2_TRAP)) {
+                return;
+            }
         }
         // Boxes all gone: the stage's work is done and the leader still has to turn the
         // passes in. Hold the stage-NPC post and deliver only when HE comes into range
@@ -451,6 +513,12 @@ public final class LudiStages {
             if (cleared.contains(room) || roomClaimedByOtherLiveBot(bot, room)) {
                 continue;
             }
+            // Same posting table claimDoorRoom applies: a room this bot can never enter is not
+            // "work still outstanding" for it. Without this the bot reported an errand it could
+            // not run, so the follow-leader beat kept it from rejoining the party.
+            if (roomFirst == LudiPqData.STAGE5_ROOM_FIRST && !stage5RoomAdmits(bot, room)) {
+                continue;
+            }
             return true;
         }
         return false;
@@ -515,10 +583,30 @@ public final class LudiStages {
         String doorName = LudiPqData.roomPortalName(room - roomFirst);
         org.gms.server.maps.Portal door = bot.getMap().getPortal(doorName);
         if (door == null || door.getPosition() == null) {
+            releaseDoorRoom(bot);
             return false;
         }
-        if (PqActions.walkTo(bot, door.getPosition())) PqActions.enterPortal(bot, door);
-        return bot.getMapId() == room;
+        if (PqActions.walkTo(bot, door.getPosition())) {
+            PqActions.enterPortal(bot, door);
+            if (bot.getMapId() == room) {
+                return true;
+            }
+        }
+        // Only give the claim up when the walk is genuinely OVER: walkTo's false means "not
+        // arrived inside its 1.2s window", and a long walk to a far door is still in flight
+        // then. Releasing on that would have two bots swapping the same room every tick.
+        // A live move that the driver has not abandoned keeps the claim; a body the driver HAS
+        // abandoned (or one that is somehow not moving at all) is the "cannot path there" case
+        // the release exists for.
+        if (!GCMovement.hasMoveTarget(bot)) {
+            releaseDoorRoom(bot);
+        }
+        return false;
+    }
+
+    /** Drop this bot's door-room claim so a teammate can take the room. */
+    private static void releaseDoorRoom(Character bot) {
+        DOOR_ROOM_CLAIMS.remove(bot.getId());
     }
 
     /** Whether the party leader stands in this bot's room right now. */
@@ -660,13 +748,27 @@ public final class LudiStages {
             exitDoorRoom(bot);
             return;
         }
-        // Re-show every tick while inside: the strike cancels the hide (an attack action),
-        // so the next tick's show re-stealths - one box per tick, the honest sneak pace.
-        // Only hide-carrying kits are ever routed into the guard room (the posting table);
-        // a bot in 501-505 without a hide is simply on its own honest legs there - those
-        // rooms are WZ-empty of guards.
-        if (hideSkillFor(bot) != 0 && !BotAuraState.isMonsterImmune(bot)) {
-            soloMapling.ArtificialPlayer.BotAttackSystem.BotBuffEffects.showBuff(bot, hideSkillFor(bot));
+        // Hide while PASSING a guard row - not for the whole visit.
+        //
+        // <p>506's four boxes sit on ledges at y=-630/-1064/-1459/-3535 and the seven
+        // invincible golems stand in rows at y=-441/-862/-1266/-2497, i.e. BETWEEN the box
+        // ledges. The bot only ever needs the hide while it is crossing one of those rows:
+        // standing on a box ledge itself is out of the golems' touch. Showing it up front "to
+        // be safe" left the hide up for the whole room, which reads as a permanently invisible
+        // bot and (worse) made the hide the visible state rather than the crossing.
+        //
+        // <p>So the hide is armed by proximity to a guard row ({@link #crossingGuardRow}) and
+        // dropped once the bot is clear. The strike cancels it anyway (an attack action), which
+        // is why it is re-shown on every tick spent inside a row.
+        if (hideSkillFor(bot) != 0) {
+            if (crossingGuardRow(bot)) {
+                if (!BotAuraState.isMonsterImmune(bot)) {
+                    soloMapling.ArtificialPlayer.BotAttackSystem.BotBuffEffects.showBuff(bot, hideSkillFor(bot));
+                }
+            } else if (BotAuraState.isMonsterImmune(bot)) {
+                // Clear the crossing: drop the hide so the bot does not wander the room invisible.
+                BotAuraState.cancelHidesForAction(bot);
+            }
         }
         // Boxes while hidden: the strike cancels the hide, so re-show happens next tick.
         // The beat is off: a swing mid-walk would break the hide in a PAD-999 room.
@@ -837,6 +939,34 @@ public final class LudiStages {
     }
 
     /**
+     * Whether the bot is CROSSING a guard row on 922010506, i.e. must be hidden right now.
+     *
+     * <p>The room's four box ledges sit at y=-630/-1064/-1459/-3535 and its seven invincible
+     * golems stand in rows at y=-441/-862/-1266/-2497 - i.e. BETWEEN the ledges, roughly 190px
+     * from each. So the hide is needed while the bot moves between two ledges, not while it
+     * works a box: the band must therefore be NARROWER than that 190px gap, or every box ledge
+     * would read as "crossing" and the hide would simply stay up for the whole visit - the
+     * behaviour this replaced.
+     *
+     * <p>110px covers the golem's own touch reach (PAD 999 kills on contact; the separate
+     * {@link #guardCanReach} uses 150px for "it can reach me") while staying clear of the box
+     * ledges at ~190px. Crossing is a pass-through, so the window only has to cover the moment
+     * the bot is beside a row, not the whole traversal.
+     */
+    private static final int GUARD_CROSSING_BAND_Y = 110;
+
+    private static boolean crossingGuardRow(Character bot) {
+        Point p = bot.getPosition();
+        if (p == null) {
+            return false;
+        }
+        return bot.getMap().getAllMonsters().stream()
+                .anyMatch(m -> m.isAlive() && m.getId() == LudiPqData.GUARD_MOB
+                        && m.getPosition() != null
+                        && Math.abs(m.getPosition().y - p.y) <= GUARD_CROSSING_BAND_Y);
+    }
+
+    /**
      * The room's exit back to its stage's main map: the exit portal the bot can actually
      * PATH to, nearest first.
      *
@@ -910,6 +1040,33 @@ public final class LudiStages {
             if (dsq < bestSq) {
                 bestSq = dsq;
                 best = oid;
+            }
+        }
+        return best;
+    }
+
+    /**
+     * The nearest reactor of a data id that is still ARMED ({@code getReactorType() == 100}).
+     *
+     * <p>Distinct from {@link #nearestBoxOid} on purpose: {@code isActive()} only means "alive
+     * with a valid state type", which stays true after an item reactor fires (its next state
+     * carries a type of its own). An altar that has already summoned its boss must not be
+     * struck again, so the caller needs the stricter test.
+     */
+    private static int nearestArmedReactorOid(Character bot, int dataId) {
+        int best = -1;
+        double bestSq = Double.MAX_VALUE;
+        for (var reactor : bot.getMap().getAllReactors()) {
+            if (reactor.getId() != dataId || !reactor.isAlive() || reactor.getReactorType() != 100) {
+                continue;
+            }
+            if (reactor.getPosition() == null) {
+                continue;
+            }
+            double dsq = bot.getPosition().distanceSq(reactor.getPosition());
+            if (dsq < bestSq) {
+                bestSq = dsq;
+                best = reactor.getObjectId();
             }
         }
         return best;
@@ -1101,7 +1258,10 @@ public final class LudiStages {
      * deterministic guess set; the leader's conversation then generates the real combination,
      * and the next tick re-reads it and moves the bots onto the real five.
      *
-     * @return how many crates the plan wants, or -1 when the quest's plan is unusable
+     * @return how many crates still need a body (5 minus the bots standing on one), or -1 when
+     *         the quest's plan is unusable. This is what the announcement must say: the plan's
+     *         total (always 5) read as "5 more needed" and made the player take a sixth crate,
+     *         which the script counts as a failed attempt.
      */
     public static int takeCrate(Character bot, int bodyIndex) {
         String combo = PqActions.readEimString(bot, LudiPqData.COMBO_PROPERTY);
@@ -1119,7 +1279,59 @@ public final class LudiStages {
         if (mine != null) {
             PqActions.holdArea(bot, mine, 1_200);
         }
-        return wanted.size();
+        // The announcement asks the HUMANS to fill the rest, so the count is "crates still
+        // unoccupied by a bot". Bots seat themselves tail-first and a party can hold more bots
+        // than crates (6 players, 5 crates), so the seated count is capped by the plan size -
+        // see seatedBots, which is also why this cannot go negative.
+        return Math.max(0, wanted.size() - seatedBots(bot));
+    }
+
+    /**
+     * How many of the plan's five crates the bots in this party can occupy: the bots take the
+     * TAIL of the list, so a party with more bots than crates fills the plan completely and the
+     * rest are simply not seated ({@link LudiPqData#crateAt} answers null past the end).
+     */
+    private static int seatedBots(Character bot) {
+        var party = bot.getParty();
+        if (party == null) {
+            return 1;
+        }
+        int bots = 0;
+        for (var member : party.getMembers()) {
+            if (CharacterStorage.getBotById(member.getId()) != null) {
+                bots++;
+            }
+        }
+        return Math.min(LudiPqData.CRATES_TO_STAND_ON, bots);
+    }
+
+    // =========================================================================
+    // After stage 9 - the bonus room
+    // =========================================================================
+
+    /**
+     * Break the bonus room's reward boxes, and nothing else.
+     *
+     * <p>{@code 922011000} holds 36 of 2202004; each one sprays a handful of items on the
+     * ground ({@code 2202004.js} -> {@code rm.sprayItems}). Those items belong to the party's
+     * human members - the bot's job in this minute is to open the boxes, so it must not run a
+     * loot sweep at all. (The shared combat beat's stepped-on pickup is disabled for these
+     * maps by {@link LudiPQBot#steppedOnLootIds()}.)
+     *
+     * <p>The room ends by itself: {@code clearPQ} armed a one-minute timer, and
+     * {@code scheduledTimeout} warps the whole team to 922011100. So there is no exit to walk
+     * and no state to report - break boxes while any stand, and otherwise just stay with the
+     * party. The tail room ({@code 922011100}) has no boxes (its reactors are the exit NPC and
+     * a scenery object), so it is a plain "wait for the team" room.
+     */
+    public static void breakBonusBoxes(Character bot) {
+        int box = nearestBoxOid(bot, LudiPqData.BONUS_BOX);
+        if (box >= 0) {
+            // onBeat arms the combat sweep to carry the approach and take the swings; the box
+            // is an ordinary breakable reactor (2202004 links 2202002's 4-state walk), so a
+            // plain strike sequence is all it needs.
+            hitReactorRotate(bot, box, LudiPqData.BONUS_BOX);
+        }
     }
 
     // =========================================================================
@@ -1129,10 +1341,34 @@ public final class LudiStages {
     /**
      * Fight the boss stage.
      *
-     * <p>The stage ends when one Alishar trophy is in hand, and that drop belongs to whoever
-     * killed him, so the bot only has to add damage.
+     * <p>What actually ends the stage: one Alishar trophy (4001023) in the party leader's hands,
+     * so the bot's job is damage - but only on what it can reach.
+     *
+     * <p>The crystal (2201003) at (599,0) is the only thing that summons Alishar: its script
+     * spawns 9300012 on this map, and the server's own event hooks ({@code monsterKilled} /
+     * {@code allMonstersDead} in LudiPQ.js) are empty, so killing the Ratz does nothing at all
+     * despite 2040044.js saying it does. The crystal's ledge has no inbound edge in the map
+     * data (it can only be entered by falling onto it from above), so a bot that cannot reach
+     * it must WAIT rather than circle a target it can never touch - the human player can reach
+     * the altar and summon. That is why both halves are best-effort: strike the crystal when
+     * standing in its reach, add damage to Alishar when he is up, and otherwise hold.
      */
     public static void fightBoss(Character bot) {
-        PqActions.seekAndAttack(bot);
+        // Summon: only from inside the crystal's own reach, since the server does no distance
+        // check and a hit from across the room would read as hitting through walls. The
+        // `type == 100` test is the engine's own "still waiting for its item" state - once the
+        // altar fires it advances past it, and striking the spent crystal would do nothing.
+        int crystal = nearestArmedReactorOid(bot, LudiPqData.BOSS_CRYSTAL);
+        if (crystal >= 0 && PqActions.approachReactor(bot, crystal, false, false) == PqActions.Approach.IN_POSITION) {
+            PqActions.hitReactor(bot, crystal);
+            return;
+        }
+        // Everything else is damage-only, and only on what the bot can actually touch:
+        // reachableOnly keeps the chase off the altar ledge's Ratz, which stand on a shelf no
+        // edge chain reaches. Without it the bot spends every beat walking at a target it can
+        // never fight (the "paces under the platform" report) instead of waiting for the human
+        // to summon Alishar. Alishar himself is a boss and is exempt from the ledge filter, so
+        // he is still chased the moment he appears on a floor the bot can stand on.
+        PqActions.seekAndAttack(bot, true);
     }
 }

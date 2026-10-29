@@ -1,20 +1,20 @@
 # 玩具塔（Ludi PQ / 101 组队任务）全流程 BUG 审计
 
-日期：2026-10-28　分支：`optimize/performance-v2` @ `0d0c9f3`
+日期：2026-10-28　分支：optimize/performance-v2 @ 0d0c9f3
 
 ## 一、结论总表
 
 | # | 阶段 | 根因 | 后果 | 级别 |
 |---|---|---|---|---|
 | 1 | 2 | 陷阱箱 2200002 从不打（LudiStages.java:156） | 塔内 11 箱只产 11/15，阶段 2 算术无解 | 硬卡死 |
-| 2 | 7 | 三个产证箱在右侧单向列，导航图无路可达 | 阶段 7 永久 0/3，Rombard 永不召唤 | 硬卡死 |
+| 2 | 7 | 三只平台怪在右侧无入边台，打不到 → 其 4001156 掉落无法落入箱子触发框 | 阶段 7 永久 0/3，箱子不触发，Rombard 永不召唤 | 硬卡死 |
 | 3 | 9 | fightBoss 只有 seekAndAttack，从不召唤 Alishar | 本局无法结束 | 硬卡死 |
-| 4 | 5 | 门房分派表按职业判能力，与跳跃几何不符 | 法师占 501 上不去且不释放 | 硬卡死 |
-| 5 | 5 | doorRoomsOutstanding 不套用分派表 | 24/24 也交不掉 | 死锁 |
-| 6 | 3 | 先拆箱再打怪，不等本箱 3 只清完 | 一次放满 32 只 Blocktopus | 行为缺陷 |
-| 7 | 8 | 公告把计划总数当还差几个 | 玩家照做则 playersOnCombo==6 | 协作缺陷 |
+| 4 | 5 | 门房分派表按职业判能力，与跳跃几何不符 | 法师占 501 上不去，队友被挡在外 | 硬卡死 |
+| 5 | 5 | 分派表把 501/506 的箱子锁死（不是 doorRoomsOutstanding） | 全队上限 20/24，阶段无法上交 | 死锁 |
+| 6 | 3 | 先拆箱再打怪，不等本箱 3 只清完 | 一次放满 32 只 Blocktopus | 行为缺陷（**不修**） |
+| 7 | 8 | 公告把计划总数当还差几个 | 玩家照做则 playersOnCombo==6，白跑一次 | 协作缺陷 |
 | 8 | 9后 | workStage 返回 true 直接退本 | 放弃奖励关 922011000/922011100 | 流程缺失 |
-| 9 | 全局 | 孤儿掉落探测不校验可达性 | bot 被拖在原地 | 移动打架 |
+| 9 | 全局 | 孤儿掉落探测不校验可达性 | 每 6s 一次 8s 空转 | **不修**（见下） |
 | 10 | 5 | 隐身只在 tick 头开一次 | 箱内 4 连击整段裸奔 | 潜在致死 |
 
 ---
@@ -79,6 +79,8 @@ PqActions.seekAndAttack(bot);
 
 - 后果：Blocktopus PAD 115 / MAD 125，35–50 级队伍被围杀、狂喝药。能清，但死亡率和通关时间显著劣化。正确形状应是 killableMobPresent 为真时不拆新箱。
 
+**处置（复核后）**：不修。需求方确认一次放满 32 只可接受——它不是卡死，只是增加药耗与通关时间。保留原状，避免为“体验优化”改动已验证可跑的清怪循环。
+
 ### 阶段 4 · 922010400 + 401–405 门房（6 张）
 
 - 数量吻合：401/402/403 各 1 只 9300008，404 两只 9300014（WZ 同一坐标重复两条，实际两只），405 一只 9300014，共 6 只 = 6 张。
@@ -114,7 +116,7 @@ in01（922010500 的 top door）挂在 fh420 y=-1291，其下 fh415/416 y=-1276�
 
 再叠加 506 只认隐身职业（贼/海盗），5 bot + 1 真人的常见配置很难同时覆盖 501 与 506。
 
-#### (b) doorRoomsOutstanding 不套用分派表（:448-457 vs :492-504）
+#### (b) doorRoomsOutstanding 与 claimDoorRoom 的判据不一致（:448-457 vs :492-504）
 
 ```java
 // claimDoorRoom：会跳过 bot 进不去的房间
@@ -127,8 +129,11 @@ for (int room = roomFirst; room <= roomLast; room++) {
 }
 ```
 
-后果：只要 501/506 存在没人有资格 claim 的房间，isFollowingLeader() 永远返回 false，deliverAndPark 永远进不去。即便机器人兜里揣着 20/24 张，没有任何 bot 会走到 NPC 交货。这是有货交不掉，比货不够更隐蔽，也是本阶段真正的死锁点。
+**后果（修订）**：这与交货无关。doorRoomsOutstanding 只有一个调用点 LudiPQBot.isFollowingLeader，而 isFollowingLeader 只被 PartyQuestBot.followLeaderIntoNextRoom 使用，作用仅是决定要不要跟着队长穿门。交货走的是完全独立的路径：workStage 在 stage 5 时调 sneakDoorRooms 或 workStage5FromMainRoom，claimDoorRoom 返回 -1 时直接执行 deliverAndPark(bot, 5)，不看 isFollowingLeader。所以原文的“24/24 也交不掉”不成立。
 
+**真正的死锁**：分派表本身。法师被判可进 501（hasTeleportSkill 为真），但其 jump 档位是 levelJumpStat(level)，35-50 级恒为 110，实测 110/110 对 in01 为 NULL，进不去。而 claimDoorRoom 每 tick 把 501 重新写回（roomClaimedByOtherLiveBot 只跳过其他 bot 的 claim，自己的 claim 不挡自己），于是队友始终看到 501 被活着的 bot 占着，能进的贼反而被挤走。501 那四箱因此永远拿不到，全队上限 20/24，2040040.js 的 haveItem(4001022, 24) 永不成立。
+
+doorRoomsOutstanding 的判据不一致是同一个 bug 的**症状**：它让 bot 误以为自己还有活，因而不跟随队长。修顺序上先修分派表（根因），再对齐这个判据（一致性）。
 #### (c) 隐身在 tick 头只开一次（潜在致死 10）
 
 sneakDoorRooms（:668-670）每 tick 只在开头 showBuff(hide) 一次；随后 hitReactorRotate(onBeat=false) → breakBoxInPlace 在同一 tick 内连打 4 下（:927-937，BOX_SWING_CAP=6，600–850ms/下）。第一下 BotAttack.basicSwing 就 BotAuraState.cancelHidesForAction，之后约 3 秒是裸体站在 PAD 999 房间里。
@@ -146,19 +151,23 @@ sneakDoorRooms（:668-670）每 tick 只在开头 showBuff(hide) 一次；随后
 
 ### 阶段 7 · 922010700（3 张）—— 硬卡死 2
 
-根因：gatherPasses 的 stage 7 分支（LudiStages.java:113-119）走 nearestOwnedBoxOid(BOX_STAGE7) + hitReactorRotate，而 hitReactorRotate → approachReactor → approachUnder 只在站在箱子脚下 ≤90px 横 / ≤70px 竖时返回 IN_POSITION 才挥击。
+**根因（修订）**：这一阶段不是打箱子阶段。三个 2201002 是 item 型反应器（WZ event type=100，要 1 张 4001156），而它自己的脚本不掉这张卡，卡片来自它召唤的 Rombard（9300010）。真正让箱子触发的是三只平台怪的掉落物。
 
-真实几何（逐条解析 922010700.img.xml）：
+链路（WZ 逐条实测）：
 
-| 元素 | 位置 |
-|---|---|
-| 3 个 2201002 产证箱 | (228,-1037)、(230,-1263)、(230,-1535)，全在右侧 x≈183–265 窄台 |
-| 4 条绳 | x=-205 (-988..-721)、x=-171 (-707..-272)、x=-196 (-1261..-994)、x=-227 (-1467..-1292)，全在左侧 |
-| 右台与左台的关系 | 同高两台之间横跨 366px（如 -1263 左右两段），无绳、无斜跬、无传送门 |
+| 箱子 | 触发框 x / y | 对应怪 | 掉落落点 | 落入框内 |
+|---|---|---|---|---|
+| (228,-1037) | x[161,266] y[-1053,-1030] | 9300170 (224,-1044) | (224,-1037) | 是 |
+| (230,-1263) | x[163,268] y[-1279,-1256] | 9300169 (219,-1276) | (219,-1263) | 是 |
+| (230,-1535) | x[163,268] y[-1551,-1528] | 9300171 (228,-1543) | (228,-1535) | 是 |
 
-生产图的边表更直接：右列 r3 / r6 / r7 之间只有 DROP 和下降弧（r3→r6 DROP、r6→r7 DROP、r7→r9 DROP/JUMP），进入右列的唯一入边来自 y=-4365 的封闭顶台（r1→r3 JUMP、r2→r4 JUMP），而该台远在 VRTop=-2160 之外。
+三只怪各 100% 掉 4001156（drop_data，chance=999999），calcDropPos 把它重新落到同平台，正好在箱子触发框内。于是宿主 MapleMap.activateItemReactors 命中该 type=100 反应器，5 秒后 ActivateItemReactor.run() 调 hitReactor，箱子的 act() 执行 spawnMonster(9300010, 1, -211)。
 
-实测（5 种档位，从 st00 或任一左侧台出发）：
+宿主 NPC 2040042 的台词直接印证本设计：You need ranged personnel here. They must kill the three Ratz, which will trigger something.
+
+**为什么打不到**：三只怪站在右侧 x≈183-265 的窄台上，该台在导航图里没有任何入边。右列 r3/r6/r7 之间只有下行边（DROP 与下降弧），唯一入边来自 y=-4365 的封闭顶台，而该台在 VRTop=-2160 之外。物理侧交叉验证：从 y=-774 向右 simulateWalkOffLanding 一律 null，向左可落 y=-709，即只能从上方掉入。
+
+实测（5 种档位，从 st00 或任一左侧台出发，findPath 全部 null）：
 
 ```
 110/110  st7boxes=false/false/false
@@ -168,13 +177,16 @@ sneakDoorRooms（:668-670）每 tick 只在开头 showBuff(hide) 一次；随后
 148/123  st7boxes=false/false/false
 ```
 
-findPath 全部返回 null。
+**后果**：机器人走不到那个台，杀不了怪，于是 4001156 不产生，箱子永不触发，Rombard 永不出现，3 张证物为 0。纯近战队伍即使能站到对面也打不出伤害（攻击层的 onAttackableSurface 会拒绝跨平台目标）。本阶段依赖远程职业从左侧台隔空打怪，属于地图设计要求，不是插件缺陷。
 
-后果：approachReactor 永远给不出 IN_POSITION，hitReactorRotate 三次轮换后返回 false，gatherPasses 落到交货分支，于是 Rombard 永不召唤，3 张证物永远拿不到。预置的 9300169/170/171 只掉 4001156（drop_data 明确），完全不顶用。阶段 7 变成等真人。
+**修复**：gatherPasses 的 stage 7 分支改为杀平台怪、等掉落物触发箱子、再杀 Rombard，并明确不拾取 4001156（一旦捡起，箱子就永远不会触发）。追怪用 reachableOnly，避免对着打不到的怪空转。
 
-一个容易误判的点：宿主 ReactorHitHandler 对 oid 无任何距离校验（只读 oid/charPos/stance/skillid 直接 hitReactor），所以打不到完全是插件自己 APPROACH_X=90 / APPROACH_Y=70 的盒子决定的。这也是为什么本阶段不是偶尔打空，而是一次都不打。
+**攻击层同时要放开一处**：BotAttackDriver.onAttackableSurface 原本对所有攻击都套用近战平台判定（onDifferentLedge），于是远程职业也拒绝这三只跨平台的怪。但投射物本来就能跨越没有 foothold 链的缺口，2040042.js 的台词也明说需要远程。现改为按 route 区分：RANGED 与 MAGIC 豁免平台判定，只保留 reach box 的距离约束；近战仍保留两道。nearestMob 同时不再做平台过滤（它只用于朝向与诊断，过滤会让远程在唯一能射击的房间里连朝向都选不到目标）。
 
-未确认项（不作结论）：真人能否用 400px 射程的弓从左侧台隔空打中箱子，未在实机验证；官方地图本意是否为远程点箱，未查证。无论哪种，机器人的 hitReactorRotate 都不会去打。
+**阶段 7 分支必须排在通用 killable 分支之前**：三只平台怪本身就是 killable，若先走 killableMobPresent 分支，就会用无约束的 seekAndAttack 去追它们，reachableOnly 根本执行不到。
+
+
+**一处必须记住的陷阱**：findAllReactorOids 的过滤条件是 isActive()，而 2201002 有 state 0（type=100）和 state 1（type=999）两个有效状态，isActive() 永远为 true。判断箱子是否还欠卡必须用 getReactorType() == 100，否则阶段 7 永远走不到交货分支。
 
 ### 阶段 8 · 922010800（组合箱）
 
@@ -212,51 +224,54 @@ takeCrate 返回的是计划总数 5（LudiStages.java:1122 return wanted.size()
 
 另一个正确性隐患（宿主脚本侧，但由机器人布局触发）：2040043.js 统计 playersOnCombo 时对全实例玩家用 map.getArea(y).contains(pos)，不校验玩家是否在同一张图。LPQ 各阶段共用坐标空间（y≈-176/-145 一带多图都有台子），掉队 bot 的坐标可能被算进 stage 8 箱区，计数/图案被污染。bot 越多、越容易有人掉队，风险越高。
 
-### 阶段 9 · 922010900（Boss）—— 硬卡死 3
+### 阶段 9 · 922010900（Boss）—— 硬卡死 3（根因修订）
 
-根因（LudiStages.java:1135-1137）：
+**根因**：fightBoss 只有 PqActions.seekAndAttack(bot)，从不召唤。
 
-```java
-public static void fightBoss(Character bot) {
-    PqActions.seekAndAttack(bot);
-}
-```
+**补充一：晶体打一次就召唤，不需要投物**。2201003 的 WZ 只有 state 0（type=100，要 1 张 4001022）和 state 1（1x1 空 canvas，无 event）。ReactorFactory 读到 state 0 的 event 后，nextState=1，isInEndState 判据是 nextState < 当前 state（1 < 0 为假），于是走 else 分支，state == getNextState 成立，直接触发 act()。所以武器击打一下就会 spawnMonster(9300012)，投物只是另一条可选路径，不是必要条件。
 
-只有追击，没有任何召唤动作。
+**补充二：本服务端没有 Ratz 到 Alishar 的联动**。全仓只有一处 spawnMonster(9300012 ...)，就是 scripts/reactor/2201003.js。LudiPQ.js 的 monsterKilled 与 allMonstersDead 都是空函数。但 NPC 2040044 的台词写的是 Kill the Ratz on that platform to reveal the Alishar，与实现矛盾。结论：怪不是召唤入口，晶体才是；NPC 台词在本服务端属于误导文本。
 
-宿主真实机制（三处互证）：
+宿主真实机制（五处互证）：
 
 | 事实 | 出处 |
 |---|---|
-| 晶体 2201003 是 item 型（type=100），要 4001022 x 1 | wz/Reactor.wz/2201003.img.xml 的 event/0 {type:100, state:1, 0:4001022, 1:1} |
+| 晶体 2201003 是 item 型（type=100），要 4001022 x 1 | wz/Reactor.wz/2201003.img.xml 的 event/0 |
 | act() 在 922010900 召唤 Alishar | scripts/reactor/2201003.js 的 rm.spawnMonster(9300012, 941, 184) |
 | Alishar 掉奖杯 | drop_data (9300012, 4001023, 999999) |
 | turn-in 收 1 个奖杯 | npc/2040044.js 的 cm.haveItem(4001023, 1) |
+| 无 Ratz 触发链 | LudiPQ.js 的 monsterKilled / allMonstersDead 为空 |
 
-几何：Ratz 9300006 在 (588,-3)，即晶体所在的 x 554..636 / y=0 小台；st00 (-171,178) 落在 y=184 的 forbidFallDown 全宽行。
+几何：Ratz 9300006 在 (588,-3)，晶体在 (599,0)，两者同在 x 554..636 / y=0 小台；st00 (-171,178) 落在 y=184 的 forbidFallDown 全宽行。
 
 实测（5 种档位）：
 
 ```
-st9ratz=false  st9crystal=false     （全部档位）
+st9ratz=false  st9crystal=false     （全部档位，findPath 返回 null）
 ```
 
-边表：r3 (y=0) 只有 →r6 DROP/JUMP（向下），r6 → r5 JUMP（120）、r5 → r4 JUMP（74），而 r4 只能回 r5/r6。184 → 0 无任何上行边；y=572 行（r7）连一条边都没有。
+边表：晶体台 R3 的入边为 0，与之相关的边全是 R3 到 R6 的下行；184 到 0 没有任何上行边。物理侧交叉验证：从 y=74 台向右走可落 y=184，向左可落 y=120，但从 184 无法上行到 0。
 
-后果：
+**后果**：
 
-- seekAndAttack 会把 Ratz 当目标，canPathTo 为 false，seekPathableTarget 退回最近怪，仍向 (588,0) 发 move，驱动无法规划，RETARGET_TIMEOUT_MS=4s 无进度放弃，下一 tick 重来。整局在台下反复原地起意。
-- 而且它连挥击都打不到：BotAttackDriver.mobsInReach 的 onAttackableSurface 会因 GCMovement.onDifferentLedge 把异层怪排除（Ratz 非 boss，不吃 BOSS_Y_PAD 豁免）。
-- 晶体召唤本身对机器人是可做但没写：PqActions.hitReactor 对距离无校验，feedReactor 的整套投掷逻辑在 OPQ 已有现成实现，LPQ 没有调用。
+- seekAndAttack 会把 Ratz 当目标，canPathTo 为 false 时 seekPathableTarget 退回最近怪，仍向 (588,0) 发 move，驱动无法规划，4 秒无进度放弃，下一 tick 重来，整局在台下反复原地起意。
+- 挥击也打不到：BotAttackDriver.onAttackableSurface 会因 GCMovement.onDifferentLedge 把异层怪排除（Ratz 非 boss，不享受豁免）。
+- 晶体召唤本身对机器人是可做的：PqActions.hitReactor 无服务器距离校验，插件侧的 approachReactor 90/70 像素只是姿态门。
 
-### 结算 / 奖励关 · 922011000 → 922011100 —— 流程缺失 8
+**修复**：fightBoss 改为先用 nearestArmedReactorOid 找到仍在等待的晶体（判据是 getReactorType() == 100，不能用 isActive()，因为晶体两个状态都有效），站在其可达范围内就 hitReactor 召唤；随后 seekAndAttack(bot, true) 补伤害。Alishar 是 boss，跨平台豁免，出现即可打。打不到就安静等待真人，不再空转。
+
+### 结算 / 奖励关 · 922011000 → 922011100 —— 流程缺失 8（根因修订）
 
 - workStage 在 stage 9 cleared 时 return stage >= 9（LudiPQBot.java:119），tickPartyQuest 立刻 returnToLobby（PartyQuestBot.java:326-330）。
 - 但 LudiPQ.js 的 clearPQ 是 warpEventTeam(922011000) 加 1 分钟奖励关，之后 scheduledTimeout 再送 922011100。
 - isInsideQuest 又不含这两张图（LudiPQBot.java:53-55），所以即便被传过去，tickLobby 也会把它送回大厅。
 - 后果：机器人 100% 放弃奖励关（922011000 有 36 个 2202004 蓝箱加 NPC 2040045）。玩家少一个队友；若玩家也掉线，实例会被 changedMap 提前 end。
 
----
+**奖励关的正确玩法（补充）**：这 36 个箱子的脚本是 rm.sprayItems(true, 1, 30, 60, 15)，打破即喷出奖励。奖励归队伍里的真人，**bot 只负责开箱，绝不能拾取**。所以 steppedOnLootIds 在这两张图必须返回空数组，也不得调用任何 loot。
+
+**传送链路已核实**：warpEventTeam 用 getPlayerList()，只含注册在实例里的角色。bot 进入事件地图时，Character.changeMap 会自动调用 mapEim.registerPlayer(this, false)，而宿主 registerPlayer 明确支持 headless bot（HostHooks.isArtificial 分支）。所以 scheduledTimeout 的团队传送会带上 bot，不需要插件自行 registerPlayer。
+
+**修复**：isInsideQuest 扩到 922011100；新增 breakBonusBoxes 只破 2202004 不拾取；workStage 在 stage 9 后不再 return true；steppedOnLootIds 在奖励关返回空。922011100 没有 next00 也没有箱子，bot 只需留在队里等传送。
 
 ## 三、跨阶段：追怪 / 移动 打架
 
@@ -269,6 +284,8 @@ PqActions.sweepOrphanDropOutside（:1773-1816）只过滤 botCanLoot / isFloorLo
 - 期间 GCMovement.isMoving 为真，waitNearStageNpc / handItemsToLeaderAfterStage 的 yieldsToLiveWalk 一律让路。
 
 后果：bot 既不去交货也不去打怪，表现为站在台边反复小步，直到掉落 3 分钟消失（item_expire_time）。这是追怪/移动打架里最实的一条，根因是目标选择没有可达性门。
+
+**处置（复核后）：不修**。理由见第五节。这里保留原分析作为已知代价记录：加可达性过滤会让探测失去覆盖整房间的能力，而实测代价（8s 放弃加 6s 节流）可控，且阶段 7 与 9 的空转痛点已由 reachableOnly 单独解决。
 
 ### 2. 追怪优先级压过交付岗
 
@@ -305,21 +322,28 @@ exitTrapRoom / exitDoorRoom 用最严格的 standsDownForLiveMove = GCMovement.h
 
 ---
 
-## 五、修复优先级（按根因，不做补丁）
+## 五、修复优先级与落地结果（按根因，不做补丁）
 
-1. 阶段 2：补 BOX_STAGE2_TRAP，findAllReactorOids(BOX_STAGE2).isEmpty() 后再弹陷阱箱（99cf7de 已有实现，直接移植/合并）。
-2. 阶段 7：先确认这张图的设计意图（远程点箱 or 缺一条上行边）；机器人在箱子不可达时必须停止空转并上报玩家，而不是静默停在原地。
-3. 阶段 9：fightBoss 改为先 feedReactor/hitReactor(2201003) 召唤 9300012，再 seekAndAttack；Ratz 不应作为 chase 目标（异层且无路）。
-4. 阶段 5：
-   - 分派表改为基于 BotMovementProfile.fromCharacter(bot).totalJumpStat() 的实际升程判定（队伍轻功已建模，见 HasteJumpGrantTest）；不要用 hasTeleportSkill（导航层无 teleport 边）。
-   - doorRoomsOutstanding 必须套用与 claimDoorRoom 相同的本 bot 是否有资格过滤。
-   - 进门失败（enterDoorRoom 走不到加 walkTo 无路）要释放 claim 并记一次失败，避免永久占位。
-5. 阶段 3：加 killableMobPresent 为真时不拆新箱的门。
-6. 阶段 8：公告改为还差 5 - 已在箱上的机器人数 个，并指出空位序号（wanted[0]）；机器人数 = 5 时文案必须是你别上箱。
-7. 阶段 9 后：识别 922011000 / 922011100，至少把 isInsideQuest 扩到奖励关，或在 returnToLobby 前等 clearPQ 的团队传送。
-8. 全局：sweepOrphanDropOutside 加 GCMovement.canPathTo 过滤；breakBoxInPlace 每次挥击前重开隐身（阶段 5）。
+| # | 阶段 | 根因动作 | 结果 |
+|---|---|---|---|
+| 1 | 2 | 补 BOX_STAGE2_TRAP；门条件用 findAllReactorOids(BOX_STAGE2).isEmpty()，不能用 box < 0（队友持有时也为 -1，会把人从箱子旁拉走） | 已修 |
+| 2 | 7 | 不是打箱子：改为杀三只平台怪，让 4001156 落进触发框自动武装箱子，再杀 Rombard；明确不拾取 4001156；追怪用 reachableOnly | 已修 |
+| 3 | 9 | 先用 getReactorType()==100 找到仍在等待的晶体并 hitReactor 召唤，再 seekAndAttack(bot, true) 补伤害；打不到就等真人 | 已修 |
+| 4 | 5 | 分派表保留原判据 hasTeleportSkill 或 hasHasteSkill（已确认符合设计：501 的门槛是室内垂直机动，不是 in01 的台阶）；补进门失败释放 claim | 已修 |
+| 5 | 5 | doorRoomsOutstanding 套用与 claimDoorRoom 相同的资格过滤（一致性修复，非交货主因） | 已修 |
+| 6 | 3 | 加 killableMobPresent 门，避免一次放满 32 只 | **不修**（需求方确认可接受） |
+| 7 | 8 | 公告改为还差 5 减已在箱上的机器人数；为 0 时用独立文案明确告知玩家不要上箱 | 已修 |
+| 8 | 9后 | isInsideQuest 扩到 922011100；新增 breakBonusBoxes 只破 36 箱不拾取；workStage 不再在 stage 9 后 return true | 已修 |
+| 9 | 全局 | sweepOrphanDropOutside 加 canPathTo 过滤 | **不修**（见下） |
+| 10 | 5 | 隐身改为只在穿越守卫行时开启（110px 带），而不是整个房间常开；breakBoxInPlace 每次挥击前重开 | 已修 |
 
----
+### 为什么第 9 条不修
+
+孤儿掉落探测的设计目标是覆盖整个房间（含纵向跨层），而加可达性过滤会与这个目标冲突：实测 PqOrphanProbeTest 的“探测覆盖房间远端”用例在 y=130 到 y=542 之间必失败（这段在 922010100 上确实不可达，但探测本就该看见它）。代价也可控：driver 8 秒无进展放弃，探针 6 秒节流，不是高频空转。真正的空转痛点（阶段 7 与 9 的不可达怪）已由 reachableOnly 精确解决。
+
+### 第 10 条的量化依据
+
+506 的四个箱子台在 y=-630 / -1064 / -1459 / -3535，七只无敌怪分四行在 y=-441 / -862 / -1266 / -2497，箱台到最近守卫约 190px。所以隐身带必须窄于 190px，否则每个箱台都算“穿越”，隐身等于全程常开（即被替换掉的旧行为）。取 110px：箱台上不隐身，守卫行上隐身。
 
 ## 六、复现方法
 

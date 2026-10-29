@@ -1383,6 +1383,7 @@ pq.stage_plan: "Stage {0}: {1}"
 pq.kerning.pass_dropped: "Answered Cloto - my pass is at the leader's feet."
 pq.ludi.stage1: "Stage 1: 25 passes for the Red Balloon. The leader turns them in - I am fighting for them."
 pq.ludi.stage8: "Stage 8: {0} crates need a body - I am on one, take another!"
+pq.ludi.stage8_full: "Stage 8: every crate is taken - do NOT step on one, five bodies are already up!"
 
 # ---- In-quest stage chatter (PqStageChat) ---------------------------------
 # One shared pool per beat for every quest bot, plus per-quest pools that

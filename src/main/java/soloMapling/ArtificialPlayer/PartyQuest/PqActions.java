@@ -1121,6 +1121,8 @@ public final class PqActions {
         // The goal the last chase beat handed the driver (the previous pixel when the candidate stayed
         // inside the dead-band). Only this exact goal may be retracted by the seek.
         Point lastChaseGoal;
+        /** When set, the chase never falls back to an unreachable mob (see seekAndAttack). */
+        boolean reachableOnly;
         final Map<Integer, PathabilityVerdict> pathability = new java.util.HashMap<>();
 
         void clearProgress() {
@@ -1166,6 +1168,27 @@ public final class PqActions {
      * targets are dropped after a no-progress timeout and re-seeked next beat.
      */
     public static void seekAndAttack(Character bot) {
+        seekAndAttack(bot, false);
+    }
+
+    /**
+     * {@link #seekAndAttack(Character)}, optionally restricted to targets the bot can actually
+     * REACH.
+     *
+     * <p>Default behaviour falls back to the nearest live hostile even when nothing is pathable
+     * (a mob on a ledge across the room). That is right for a chase - the driver abandons the
+     * move after its no-progress window and the next beat re-seeks - but wrong for rooms whose
+     * work is "strike what is in range and leave the unreachable to the human": there the
+     * fallback keeps re-issuing a walk into a dead end, and the bot never gets to the delivery
+     * post.
+     *
+     * <p>Like the quest hooks this is PERSISTENT per bot, not per call: the combat sweep runs
+     * every 250ms from {@link soloMapling.ArtificialPlayer.PartyQuest.PartyQuestBot#grindTick()}
+     * through the no-arg overload, and a per-call flag would be reset by that beat before the
+     * stage's own intent could ever take effect. {@link #clearSeekState} drops it with the rest
+     * of the bot's chase state.
+     */
+    public static void seekAndAttack(Character bot, boolean reachableOnly) {
         if (bot == null || bot.getMap() == null) {
             return;
         }
@@ -1181,11 +1204,36 @@ public final class PqActions {
                 state.clearGoal();
                 state.pathability.clear();
             }
+            if (reachableOnly) {
+                state.reachableOnly = true; // sticky: see below
+            }
             if (movementShielded(botId) || reactorBeatArmed(bot)) {
                 attack(bot); // stage/box work owns steering, even for direct macro callers
                 return;
             }
             seekAndAttack(bot, state);
+        }
+    }
+
+    /**
+     * Stop restricting the chase to reachable targets for this bot (the sticky flag set by
+     * {@link #seekAndAttack(Character, boolean)}).
+     *
+     * <p>Sticky on purpose. The stage sets it once per macro tick, while the 250ms combat sweep
+     * calls the no-arg overload in between; a per-call flag would be cleared by that beat long
+     * before the stage could rely on it. The stage that needs the restriction therefore turns it
+     * on and every other stage turns it off, both through the same stage-level call.
+     */
+    public static void clearReachableOnly(Character bot) {
+        if (bot == null) {
+            return;
+        }
+        SeekState state = seekStates.get(bot.getId());
+        if (state == null) {
+            return;
+        }
+        synchronized (state) {
+            state.reachableOnly = false;
         }
     }
 
@@ -1515,7 +1563,8 @@ public final class PqActions {
                 bestPathable = m;
             }
         }
-        Monster chosen = bestPathable != null ? bestPathable : best;
+        Monster chosen = bestPathable != null ? bestPathable
+                : (state.reachableOnly ? null : best);
         state.targetOid = chosen != null ? chosen.getObjectId() : -1;
         state.clearGoal();
         return chosen;
@@ -1861,6 +1910,7 @@ public final class PqActions {
             walkForPickup(bot, nearest);
         }
     }
+
     /**
      * The orphan probe's reach in px: the map's walkable extent plus a margin, memoized per
      * foothold tree.

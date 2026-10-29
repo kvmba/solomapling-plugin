@@ -513,9 +513,10 @@ public final class BotAttackDriver {
                 ? new Rectangle(box.x, box.y - BOSS_Y_PAD, box.width, box.height + 2 * BOSS_Y_PAD)
                 : box;
         // The reach box is a flat rectangle with no terrain sense, so a tall box would let the bot
-        // hit a mob standing on a separate platform overhead/below. Drop mobs on a different ledge
-        // than the bot (bosses exempt). Cheap (peek-only) and only run for box-passing mobs.
-        return test.contains(mp) && onAttackableSurface(bot.getMap(), botPos, m);
+        // hit a mob standing on a separate platform overhead/below. Drop melee mobs on a different
+        // ledge than the bot (bosses exempt, and ranged/magic are exempt by route - see
+        // onAttackableSurface). Cheap (peek-only) and only run for box-passing mobs.
+        return test.contains(mp) && onAttackableSurface(bot.getMap(), botPos, m, profile.route);
     }
 
     /*
@@ -622,11 +623,10 @@ public final class BotAttackDriver {
             if (!m.isAlive() || m.getPosition() == null) {
                 continue;
             }
-            // Skip mobs on a separate ledge so the bot faces (and later swings at) a mob it can
-            // actually reach, instead of fixating up at a platform overhead.
-            if (!onAttackableSurface(bot.getMap(), botPos, m)) {
-                continue;
-            }
+            // NO ledge filter here. This is only the facing/diagnostic anchor, and the ledge test
+            // is route-dependent (a projectile legitimately crosses a gap): filtering here would
+            // leave a ranged bot facing nothing on exactly the rooms it can shoot across. The
+            // route-aware gate lives in inReach, where the actual swing is decided.
             double dsq = botPos.distanceSq(m.getPosition());
             if (dsq < bestSq) {
                 bestSq = dsq;
@@ -641,10 +641,22 @@ public final class BotAttackDriver {
      * above or below the bot. Bosses are exempt - large, multi-bodied, with parts on their own
      * footholds (and already handled by the padded reach box). Degrades to "true" (no filtering)
      * when the map's nav graph isn't baked, so it never silently blanks a bot's targets.
+     *
+     * <p>PROJECTILES ARE NOT LEDGE-BOUND. A bow, a claw throw or a spell crosses a gap that no
+     * foothold chain bridges - that is exactly how Ludi PQ's stage 7 is meant to be played (the
+     * room's three Ratz stand on shelves that only a fall from above enters, and 2040042.js says
+     * so: "You need ranged personnel here"). Applying the melee ledge test to a ranged/magic
+     * attack made the bot refuse every one of those targets, which is the opposite of the frame.
+     * So the ranged routes keep only the reach-box test (a projectile still has a finite range)
+     * and skip the ledge test; melee keeps both.
      */
-    private static boolean onAttackableSurface(MapleMap map, Point botPos, Monster m) {
+    private static boolean onAttackableSurface(MapleMap map, Point botPos, Monster m,
+                                               BotAttackProfile.Route route) {
         if (m.isBoss()) {
             return true;
+        }
+        if (route == BotAttackProfile.Route.RANGED || route == BotAttackProfile.Route.MAGIC) {
+            return true; // a projectile crosses the gap the ledge test would reject
         }
         Point mp = m.getPosition();
         return mp == null || !GCMovement.onDifferentLedge(map, botPos.x, botPos.y, mp.x, mp.y);

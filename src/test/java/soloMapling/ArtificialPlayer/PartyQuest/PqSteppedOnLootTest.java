@@ -39,9 +39,15 @@ class PqSteppedOnLootTest {
     @Test
     void ludiOptsInWithItsPassAndNothingElse() throws Exception {
         String ludi = javaSource(LUDI_BOT);
-        assertTrue(ludi.matches("(?s).*protected int\\[\\] steppedOnLootIds\\(\\) \\{\\s*"
-                        + "return new int\\[\\]\\{LudiPqData.PASS};\\s*}.*"),
+        // The pass is the quest's only scoopable item - and NOT in the bonus room, where the
+        // boxes spray rewards that belong to the party's human members.
+        assertTrue(ludi.contains("new int[]{LudiPqData.PASS}"),
                 "Ludi must scoop exactly its pass");
+        assertTrue(ludi.matches("(?s).*protected int\\[\\] steppedOnLootIds\\(\\) \\{\\s*"
+                        + "int mapId = getChr\\(\\)\\.getMapId\\(\\);\\s*"
+                        + "if \\(mapId == LudiPqData\\.BONUS_MAP \\|\\| mapId == LudiPqData\\.BONUS_TAIL_MAP\\) \\{\\s*"
+                        + "return new int\\[0\\];.*"),
+                "the bonus rooms must opt OUT: their spray is the party's");
         assertFalse(ludi.contains("PAPA_SEED") || ludi.contains("flowerSeed"),
                 "Ludi must not sweep any other mechanic's ground item");
     }

@@ -51,7 +51,13 @@ public class LudiPQBot extends PartyQuestBot {
 
     @Override
     protected boolean isInsideQuest(int mapId) {
-        return mapId >= LudiPqData.ENTRY_MAP && mapId <= LudiPqData.STAGE_9;
+        // The bonus rooms are part of the run: clearPQ warps the whole team to 922011000 for a
+        // minute of reward boxes and then to 922011100. A bot that treats them as "outside the
+        // quest" is warped home by tickLobby the instant the reward stage starts, which is why
+        // the party lost its bots for the last minute of every run.
+        return (mapId >= LudiPqData.ENTRY_MAP && mapId <= LudiPqData.STAGE_9)
+                || mapId == LudiPqData.BONUS_MAP
+                || mapId == LudiPqData.BONUS_TAIL_MAP;
     }
 
     @Override
@@ -66,11 +72,28 @@ public class LudiPQBot extends PartyQuestBot {
 
     @Override
     protected boolean workStage() {
+        int mapId = getChr().getMapId();
+        // The bonus rooms come FIRST: they are not a numbered stage (stageOf reads them as
+        // 10+), and the whole point of the minute there is to break the reward boxes. Every
+        // other stage path would route them to "stage cleared, wait by an NPC" and burn the
+        // minute standing still.
+        if (mapId == LudiPqData.BONUS_MAP || mapId == LudiPqData.BONUS_TAIL_MAP) {
+            LudiStages.breakBonusBoxes(getChr());
+            return false;
+        }
+        // Stages 7 and 9 refuse unreachable chase targets: stage 7's ledge mobs sit on shelves
+        // with no inbound edge, and stage 9's Ratz sit on the altar ledge. The flag is sticky so
+        // the 250ms combat sweep cannot clear it, which means every OTHER stage has to clear it
+        // explicitly - here, once per tick, before any stage work runs.
+        int stageHere = stageOf(mapId);
+        if (stageHere != 7 && stageHere != 9) {
+            PqActions.clearReachableOnly(getChr());
+        }
         // The door rooms (stages 4 and 5) sit just past their stage's main map, which the
         // stage arithmetic reads as stage 302+ - route them first, by room id. Both stages
         // explore autonomously: a bot in the main room claims a room and walks in through
         // its script portal; stage 5's guard rooms admit only hide-carrying lineages.
-        int roomStage = LudiPqData.roomStage(getChr().getMapId());
+        int roomStage = LudiPqData.roomStage(mapId);
         if (roomStage == 4) {
             LudiStages.workDoorRooms(getChr(), LudiPqData.STAGE4_ROOM_FIRST,
                     LudiPqData.STAGE4_ROOM_LAST);
@@ -116,7 +139,11 @@ public class LudiPQBot extends PartyQuestBot {
                 PqActions.say(getChr(), BotMessages.get("pq.passes_dropped"));
             }
             PqActions.waitNearStageNpc(getChr(), LudiPqData.stageNpcId(stage));
-            return stage >= 9;
+            // Stage 9 does NOT end the run: 2040044.js's turn-in calls eim.clearPQ(), which
+            // warps the whole team to the bonus room for a minute of reward boxes. Returning
+            // true here sent the bot home the moment the trophy was handed in, so every run
+            // lost its bots for the bonus stage (and a party of only bots ended the instance).
+            return false;
         }
 
         switch (stage) {
@@ -223,6 +250,10 @@ public class LudiPQBot extends PartyQuestBot {
      */
     @Override
     protected int[] steppedOnLootIds() {
+        int mapId = getChr().getMapId();
+        if (mapId == LudiPqData.BONUS_MAP || mapId == LudiPqData.BONUS_TAIL_MAP) {
+            return new int[0]; // the bonus room's spray is the party's, not the bot's
+        }
         return new int[]{LudiPqData.PASS};
     }
 
@@ -294,7 +325,9 @@ public class LudiPQBot extends PartyQuestBot {
         if (announcedStage != 8) {
             announcedStage = 8;
             soloMapling.ArtificialPlayer.PartyQuest.PqActions.say(getChr(),
-                    BotMessages.get("pq.ludi.stage8", wanted));
+                    wanted == 0
+                            ? BotMessages.get("pq.ludi.stage8_full")
+                            : BotMessages.get("pq.ludi.stage8", wanted));
         }
     }
 
