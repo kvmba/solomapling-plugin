@@ -1394,6 +1394,45 @@ public final class GCMovement {
         return best;
     }
 
+    /**
+     * The point the movement driver is currently walking to, or null when it holds no goal.
+     *
+     * <p>Read-only, and answers WHERE rather than merely "somewhere" like
+     * {@link #hasMoveTarget}: that is what lets a caller recognise an order it issued without
+     * keeping a second copy of it - a copy would go stale the moment anything else replaced the
+     * order.
+     */
+    public static Point moveTargetOf(Character bot) {
+        BotMovementState st = stateOf(bot);
+        if (st == null) {
+            return null;
+        }
+        synchronized (st) {
+            return st.moveTarget == null ? null : new Point(st.moveTarget);
+        }
+    }
+
+    /**
+     * Whether any living mob of {@code mobId} would touch this bot within {@code marginPx} of its
+     * current position - the same body-box test the contact-damage layer runs.
+     *
+     * <p>Exposed for the stage-5 guard policy: "is a PAD-999 golem close enough to hit me" is a
+     * geometry question about the mob's own WZ hitbox, and the hide has to be armed from it. The
+     * previous policy used a fixed {@code |dy| <= 110} band, which is narrower than the golem's
+     * real body: 9300013 links to 4230110, whose stand frame is {@code lt=(-67,-139) rb=(84,0)},
+     * so a bot is inside its touch box from 139px above the golem's feet. The 29px band between
+     * 110 and 139 was walked through unhidden.
+     *
+     * <p>{@code marginPx} widens the mob box horizontally so the caller can arm the hide one step
+     * BEFORE contact instead of on the tick that already took the hit.
+     */
+    public static boolean monsterWithinTouch(Character bot, int mobId, int marginPx) {
+        if (bot == null || bot.getMap() == null || bot.getPosition() == null) {
+            return false;
+        }
+        return BotContactDamage.monsterWithinTouch(bot, mobId, marginPx);
+    }
+
     /* Snap an arbitrary (possibly airborne) point down to the foothold it rests over, or null if there's
      * no floor below it. Lets a bot aim a move at a jumping/airborne mob's actual platform instead of its
      * raw y, so the pathfinder doesn't take a long detour to reach a mob that's really right in front. */

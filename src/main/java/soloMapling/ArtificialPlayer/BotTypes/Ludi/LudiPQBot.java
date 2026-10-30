@@ -49,6 +49,28 @@ public class LudiPQBot extends PartyQuestBot {
         tickPartyQuest();
     }
 
+    /**
+     * The shared 250ms combat beat, with this quest's reachability policy refreshed FIRST.
+     *
+     * <p>Stages 7 and 9 must only chase targets their graph can actually reach: stage 7's ledge
+     * mobs and stage 9's altar Ratz both stand on shelves with no inbound edge. That intent used
+     * to be expressed only inside {@code workStage}, which runs on the MACRO tick - 2-6s while a
+     * player watches, but 36-48s on an unobserved map. The combat beat between those ticks runs
+     * the no-arg {@code seekAndAttack}, i.e. reachableOnly=false, so a bot that entered
+     * 922010900 before its first macro tick chased the altar ledge itself: measured, it walked
+     * to (585,184) - the floor directly under the unreachable altar - and sat there until the
+     * next macro tick happened to set the flag again (18.5s later in the same trace).
+     *
+     * <p>{@code applyChasePolicy} only writes the flag; it never issues a move. That is what makes
+     * it safe to call before the beat's own gates (corpse, frozen, off-map) - a bot that is not
+     * allowed to act still gets its policy corrected, and nothing is steered.
+     */
+    @Override
+    public void grindTick() {
+        LudiStages.applyChasePolicy(getChr());
+        super.grindTick();
+    }
+
     @Override
     protected boolean isInsideQuest(int mapId) {
         // The bonus rooms are part of the run: clearPQ warps the whole team to 922011000 for a
@@ -77,17 +99,20 @@ public class LudiPQBot extends PartyQuestBot {
         // 10+), and the whole point of the minute there is to break the reward boxes. Every
         // other stage path would route them to "stage cleared, wait by an NPC" and burn the
         // minute standing still.
-        if (mapId == LudiPqData.BONUS_MAP || mapId == LudiPqData.BONUS_TAIL_MAP) {
+        if (mapId == LudiPqData.BONUS_MAP) {
             LudiStages.breakBonusBoxes(getChr());
             return false;
         }
-        // Stages 7 and 9 refuse unreachable chase targets: stage 7's ledge mobs sit on shelves
-        // with no inbound edge, and stage 9's Ratz sit on the altar ledge. The flag is sticky so
-        // the 250ms combat sweep cannot clear it, which means every OTHER stage has to clear it
-        // explicitly - here, once per tick, before any stage work runs.
-        int stageHere = stageOf(mapId);
-        if (stageHere != 7 && stageHere != 9) {
-            PqActions.clearReachableOnly(getChr());
+        // The tail room has NO boxes at all: it holds the reward NPC (2040035) and nothing
+        // else. Sending it through the box loop left the bot standing there for the rest of
+        // the run - and the room is inside this quest's map range, so tickLobby does not
+        // reclaim it either. Its exit is the NPC beat: walk up, let the conversation "read",
+        // then go home.
+        if (mapId == LudiPqData.BONUS_TAIL_MAP) {
+            if (LudiStages.takeBonusReward(getChr())) {
+                returnToLobby("bonus stage finished");
+            }
+            return false;
         }
         // The door rooms (stages 4 and 5) sit just past their stage's main map, which the
         // stage arithmetic reads as stage 302+ - route them first, by room id. Both stages
@@ -279,14 +304,18 @@ public class LudiPQBot extends PartyQuestBot {
     }
 
     /**
-     * Which stage a room is, by its position in the quest's map run.
+     * Which stage a room is, by its position in the quest's map run; -1 for any room that is not
+     * part of the numbered run.
      *
      * <p>The room ids step by HUNDRED (922010100, 922010200, ... 922010900), so the stage is
      * the id delta over 100 - the raw delta (the old arithmetic) returned 101 for stage 2 and
      * fell through the stage switch's default on every room past the first, which is why the
      * bots did nothing from stage 2 on.
+     *
+     * <p>Shared with {@code LudiStages.applyChasePolicy} so the reachability rule and the work
+     * routing can never disagree about which stage the bot is standing in.
      */
-    private static int stageOf(int mapId) {
+    static int stageOf(int mapId) {
         if (mapId < LudiPqData.ENTRY_MAP || mapId > LudiPqData.STAGE_9) {
             return -1;
         }

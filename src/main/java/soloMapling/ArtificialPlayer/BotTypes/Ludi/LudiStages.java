@@ -118,7 +118,12 @@ public final class LudiStages {
             }
         }
         if (killableMobPresent(bot)) {
-            PqActions.seekAndAttack(bot);
+            // Pickup first: a pass a kill left inside the loot radius is the nearest unfinished
+            // work, and loot() can only walk to it when no live move owns the driver. Issuing
+            // the chase first (the old order) meant this branch never ran.
+            if (!PqActions.pickupBeforeChase(bot, LOOT_RADIUS_PX, new int[]{LudiPqData.PASS})) {
+                PqActions.seekAndAttack(bot);
+            }
             PqActions.loot(bot, bot.getPosition(), LOOT_RADIUS_PX, new int[]{LudiPqData.PASS});
             return;
         }
@@ -310,23 +315,29 @@ public final class LudiStages {
     }
 
     /**
-     * Whether a room exit must stand down this tick because the movement driver still holds a
-     * live move. {@code walkTo} replaces {@code moveTarget} unconditionally, and entering the
-     * portal mid-walk cancels the walk outright - either way a pickup/reclaim walk armed earlier
-     * in the tick (or the chase) is cut off and its drop is orphaned in a room the bot is
-     * leaving. This is the same "a live move is never re-targeted mid-flight" contract the park
-     * re-arms honour, but STRICTER than {@code PqActions.yieldsToLiveWalk}: that gate lets a
-     * re-arm through when the bot stands on its own spot, while a transition - the one move
-     * that leaves the room - must never cancel a walk, even from its spot. The exit waits for
-     * the driver to go idle; the walk's own arrival nudge re-runs the tick's work promptly, and
-     * a walk the engine ABANDONS (its no-progress watchdog, ~8s) frees the exit on a later tick.
-     * Deliberate trade: a drop that is visible but UNREACHABLE keeps re-arming a walk (loot's
-     * own scan, then the 6s orphan probe) and holds the exit until the drop despawns (~3 min)
-     * or a teammate takes it - the drop is stage-required, and leaving without it orphans it
-     * for good, which is the defect this gate closes.
+     * Whether a room exit must stand down this tick because the bot is walking to a drop it still
+     * has to collect.
+     *
+     * <p>The room's exit is the one move that leaves the room, so it must not cut off a pickup
+     * walk whose drop would then be orphaned. But "the driver holds SOME move" was too broad: a
+     * CHASE order is a live move too, and a chase is never finished while a mob exists - so a bot
+     * that had once targeted a mob it could not reach kept its exit closed for the whole
+     * three-minute drop-despawn window, and the party moved on without it. That is one of the ways
+     * a run loses a bot per stage.
+     *
+     * <p>Recognised from the driver's own goal rather than from a flag set when the walk was
+     * issued: any other producer replaces that goal, so a flag would go stale - and a stale flag
+     * would close this exit (and stand the chase down) for the rest of the run.
      */
     private static boolean standsDownForLiveMove(Character bot) {
-        return GCMovement.hasMoveTarget(bot);
+        Point goal = PqActions.moveTargetOf(bot);
+        if (goal == null || bot.getPosition() == null) {
+            return false;
+        }
+        if (PqActions.withinPickupReach(bot, goal)) {
+            return false; // the walk has landed; nothing left to protect
+        }
+        return !PqActions.itemsOnFloorAt(bot, goal, new int[]{LudiPqData.PASS}).isEmpty();
     }
 
     /**
@@ -441,7 +452,12 @@ public final class LudiStages {
         if (crate >= 0) {
             hitReactorRotate(bot, crate, LudiPqData.BOX_STAGE3);
         }
-        PqActions.seekAndAttack(bot);
+        // Same ordering rule as gatherPasses: the crate's three Blocktopus die where they were
+        // summoned, so their passes land inside the crate radius and must be collected before
+        // the next chase order replaces the pickup walk.
+        if (!PqActions.pickupBeforeChase(bot, CRATE_LOOT_RADIUS_PX, new int[]{LudiPqData.PASS})) {
+            PqActions.seekAndAttack(bot);
+        }
         PqActions.loot(bot, bot.getPosition(), CRATE_LOOT_RADIUS_PX, new int[]{LudiPqData.PASS});
         // No crates left and nothing alive to fight: the stage's work is done. Hold the
         // stage-NPC post and deliver the stock only when the leader comes for the turn-in,
@@ -664,8 +680,12 @@ public final class LudiStages {
             exitDoorRoom(bot);
             return;
         }
-        // Inside a room: fight the box mobs and sweep the passes they drop.
-        PqActions.seekAndAttack(bot);
+        // Inside a room: fight the box mobs and sweep the passes they drop. Pickup first for the
+        // same reason as the collection stages - the room's one or two mobs die where they stood,
+        // and the chase order used to shut loot()'s walk out for the whole visit.
+        if (!PqActions.pickupBeforeChase(bot, LOOT_RADIUS_PX, new int[]{LudiPqData.PASS})) {
+            PqActions.seekAndAttack(bot);
+        }
         PqActions.loot(bot, bot.getPosition(), LOOT_RADIUS_PX, new int[]{LudiPqData.PASS});
         PqActions.recoverUngatheredHandoffs(bot, LudiPqData.PASS);
         // Room quiet (all the room's killable mobs dead): the work is done. Remember it as
@@ -714,14 +734,10 @@ public final class LudiStages {
     }
 
     /**
-     * Work the stage-5 door rooms in stealth: the rooms' four pass boxes can be guarded by
-     * invincible Block Golems (PAD 999 - a touch is a death sentence), so the bot shows
-     * 隐身术 for the whole visit. Only 922010500 (the main room, 2 golems) and 922010506
-     * (7) actually hold them - rooms 922010501-505 are empty in WZ - but the stealth stance
-     * is harmless where no guard stands, and it is re-evaluated per room, so a guard added
-     * by a future WZ edit is covered. The hide makes the bot untouchable (isMonsterImmune)
-     * and costs nothing: it is cancelled by the reactor strike itself, and re-shown next
-     * tick.
+     * Work the stage-5 door rooms in stealth. The hide itself is owned by the movement thread
+     * ({@code BotAuraState#updateGuardHide}), which arms it from the body's real contact geometry
+     * instead of from a macro-tick guess, and covers both rooms that seat guards (922010500's
+     * ground floor and 922010506). This method therefore only does the boxes.
      *
      * <p>Which bot enters WHICH room is the posting table ({@link #stage5RoomAdmits}): the
      * guard room (922010506) admits only a hide-carrying kit - 隐身术 (rogue lineage) or
@@ -882,6 +898,7 @@ public final class LudiStages {
         releaseTowerBox(botId);
         DOOR_ROOM_CLAIMS.remove(botId);
         CLEARED_DOOR_ROOMS.remove(botId);
+        releaseBonusReward(botId);
         PqActions.releaseWaitClaims(botId);
     }
 
@@ -1256,6 +1273,35 @@ public final class LudiStages {
     }
 
     // =========================================================================
+    // Chase policy
+    // =========================================================================
+
+    /**
+     * Seconds this bot's chase must stay on targets the navigation graph can actually reach.
+     *
+     * <p>Set for the two stages whose work sits on a shelf with no inbound edge, cleared for
+     * every other room. This is a pure policy flag - it never issues a move. The chase itself is
+     * driven by whoever normally drives it (the combat beat through {@code seekAndAttack}), which
+     * reads the flag.
+     *
+     * <p>Why it must be re-asserted on the beat instead of once per stage: the flag lives inside
+     * {@code PqActions} and is sticky by design, but the macro tick that used to set it runs
+     * 36-48s apart on an unobserved map. Measured on 922010900, a bot entering the room before
+     * its first macro tick chased the unreachable altar ledge and stalled at (585,184) for 18.5s.
+     */
+    public static void applyChasePolicy(Character bot) {
+        if (bot == null || bot.getMap() == null) {
+            return;
+        }
+        int stage = LudiPQBot.stageOf(bot.getMapId());
+        boolean restrict = stage == 7 || stage == 9;
+        // Only the FLAG. Every other room - including the bonus maps, the trap room and the door
+        // sub-rooms, which stageOf reads as -1 or 302+ - has to drop it, or the bot would refuse
+        // to chase anything off its own ledge for the rest of the run.
+        PqActions.setReachableOnly(bot, restrict);
+    }
+
+    // =========================================================================
     // After stage 9 - the bonus room
     // =========================================================================
 
@@ -1282,6 +1328,75 @@ public final class LudiStages {
             // plain strike sequence is all it needs.
             hitReactorRotate(bot, box, LudiPqData.BONUS_BOX);
         }
+    }
+
+    /**
+     * Work the bonus stage's TAIL room (922011100) and take its exit.
+     *
+     * <p>{@code clearPQ} armed a one-minute timer and {@code scheduledTimeout} warped the team
+     * from the box room to this one. The room holds no boxes at all - its only contents are the
+     * two NPCs (2040035 Arturo at (190,-1136), 9000033 at (24,-582)) and three ropes - so the box
+     * loop used above has nothing to do here and the bot stood still forever: 922011100 is inside
+     * {@link LudiPqData}'s quest range, so {@code tickLobby} does not reclaim it either.
+     *
+     * <p>The exit is what a player does there: walk up to 2040035, spend a moment on it, and be
+     * warped home. The bot deliberately does NOT run that conversation. {@code 2040035.js} hands
+     * out {@code eim.giveEventReward(player)} and then warps, so driving it from a bot would grant
+     * the bot an event reward and - when its inventory happens to be full - leave the script's
+     * dialog open with nothing able to click it closed. What the bot reproduces is the observable
+     * part only: the walk to the NPC, the pause a person spends reading, and the hop back to the
+     * party lobby.
+     *
+     * @return true once the dialogue beat is over and this bot should leave the run
+     */
+    public static boolean takeBonusReward(Character bot) {
+        Point post = bonusTailNpcSpot(bot);
+        if (post == null) {
+            return false; // no standable spot under the NPC: this room is broken, not the bot
+        }
+        if (!PqActions.withinPickupReach(bot, post)) {
+            // Nothing else in this room owns the driver (no mobs, no boxes), so the walk does not
+            // have to yield to anyone; walkTo's own "already standing on the spot" test is what
+            // keeps a re-arm from restarting a finished walk.
+            PqActions.walkTo(bot, post);
+            bonusTalkUntil.remove(bot.getId());
+            return false;
+        }
+        long now = System.currentTimeMillis();
+        Long until = bonusTalkUntil.get(bot.getId());
+        if (until == null) {
+            // Arrived: stand and read. Jittered per bot so a cohort does not warp in lockstep.
+            bonusTalkUntil.put(bot.getId(),
+                    now + BONUS_TALK_MIN_MS
+                            + ThreadLocalRandom.current().nextLong(BONUS_TALK_JITTER_MS));
+            return false;
+        }
+        return now >= until;
+    }
+
+    /**
+     * The standable spot at the reward NPC, from the room's own WZ geometry: 2040035 is declared
+     * at (190,-1136) and the ledge beneath it sits at y=-1133.
+     */
+    private static Point bonusTailNpcSpot(Character bot) {
+        Point at = LudiPqData.BONUS_TAIL_NPC_SPOT;
+        Point ground = GCMovement.groundPointBelow(bot.getMap(), at.x, at.y);
+        return ground != null ? ground : at;
+    }
+
+    /**
+     * The pause a player spends on 2040035's two confirmations. Long enough that the walk up to
+     * the NPC and the departure read as separate beats; short enough that the room costs seconds.
+     */
+    private static final long BONUS_TALK_MIN_MS = 2_000L;
+    private static final long BONUS_TALK_JITTER_MS = 1_200L;
+
+    /** botId -> the epoch-ms at which this bot's simulated turn-in conversation ends. */
+    private static final Map<Integer, Long> bonusTalkUntil = new java.util.concurrent.ConcurrentHashMap<>();
+
+    /** Drop the tail room's dialogue clock with the rest of this bot's room state. */
+    static void releaseBonusReward(int botId) {
+        bonusTalkUntil.remove(botId);
     }
 
     // =========================================================================

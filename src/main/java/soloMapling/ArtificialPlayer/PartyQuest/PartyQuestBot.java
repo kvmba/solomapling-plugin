@@ -103,6 +103,32 @@ public abstract class PartyQuestBot extends BotSM implements GrindTickRegistry.P
         super(character);
     }
 
+    /** How many rooms one catch-up tick may chain through (each hop is a bounded walk+portal). */
+    private static final int MAX_CATCHUP_HOPS = 3;
+
+    /**
+     * How fast a bot that is behind the party re-decides, in ms. A bot left in the previous room
+     * is by definition on a map no player is watching, so the default unobserved cadence
+     * ({@link BotSM#lowPriorityDelayMs}, 36-48s) applies to it - one room per 36-48s against a
+     * party that advances one room per stage, which is exactly how a run loses one bot per stage.
+     * Catch-up is a short, bounded errand (a few rooms at most), so it is paced at the normal
+     * observed cadence instead; the moment the bot shares the leader's map the ordinary cadence
+     * takes over again.
+     */
+    private static final long CATCHUP_DELAY_MS = 2_500L;
+
+    @Override
+    protected long lowPriorityDelayMs() {
+        Character bot = getChr();
+        if (bot != null && bot.getMap() != null && isInsideQuest(bot.getMapId())) {
+            Character leader = partyLeader();
+            if (leader != null && leader.getMapId() != bot.getMapId()) {
+                return CATCHUP_DELAY_MS;
+            }
+        }
+        return super.lowPriorityDelayMs();
+    }
+
     @Override
     public synchronized void startScheduledTask(long initialDelayMs) {
         // Both engine sessions span the FSM's RUNNING lifetime, not the object's - the same rule
@@ -201,8 +227,57 @@ public abstract class PartyQuestBot extends BotSM implements GrindTickRegistry.P
             }
             return;
         }
+        // A pickup order the macro tick issued owns the steering until it lands. This beat runs
+        // every 250ms and its chase goal would otherwise replace that order immediately: measured
+        // on LPQ stage 1, the macro tick aimed at a pass at (100,-180) and the very next beat
+        // retargeted the bot at a mob at (120,-572), so the pass was never collected while the
+        // bot climbed away from it.
+        //
+        // Recognised from the DRIVER's own goal rather than from a flag set when the order was
+        // issued: any other producer (walkTo, a park, a follow) replaces that goal and clears the
+        // arrival callback, so a flag would go stale and, once stale, silently kill this bot's
+        // chase for the whole run. "Is one of my quest items sitting at the goal I am walking to"
+        // cannot go stale. Swinging still happens - attack() never steers.
+        if (walkingAtALootableDrop(bot)) {
+            PqActions.attack(bot);
+            return;
+        }
         PqActions.seekAndAttack(bot);
     }
+
+    /**
+     * Whether the movement driver's current goal is a drop this quest wants (see
+     * {@link #steppedOnLootIds()}), and the bot has not reached it yet.
+     *
+     * <p>Cost: the floor scan walks the map's object table, and this runs on every 250ms beat.
+     * That is accepted rather than optimised: only a quest that opts into
+     * {@link #steppedOnLootIds()} ever reaches the scan (it early-returns on an empty list), and a
+     * quest party is at most a handful of bots - the alternative, caching "is there loot at the
+     * goal", is exactly the kind of second copy of state that goes stale and silently kills the
+     * chase.
+     *
+     * <p>The reach test uses the driver's own arrival box: once the bot is standing on the goal
+     * the walk is over, and letting it hold the beat at that point would freeze the bot on its
+     * own feet.
+     */
+    private boolean walkingAtALootableDrop(Character bot) {
+        int[] itemIds = steppedOnLootIds();
+        if (itemIds.length == 0) {
+            return false; // a quest with no scoopable item never has a pickup order
+        }
+        Point goal = PqActions.moveTargetOf(bot);
+        if (goal == null || bot.getPosition() == null) {
+            return false;
+        }
+        if (Math.abs(bot.getPosition().x - goal.x) <= PICKUP_ARRIVAL_PX
+                && Math.abs(bot.getPosition().y - goal.y) <= PICKUP_ARRIVAL_PX) {
+            return false; // the walk has landed; the sweep's own pickup takes it from here
+        }
+        return !PqActions.itemsOnFloorAt(bot, goal, itemIds).isEmpty();
+    }
+
+    /** The arrival band that ends a pickup walk, in px (the driver's precise-target box). */
+    private static final int PICKUP_ARRIVAL_PX = 8;
 
     /** Shared empty opt-in for {@link #steppedOnLootIds()}; never mutated. */
     private static final int[] EMPTY_LOOT_IDS = new int[0];
@@ -314,7 +389,22 @@ public abstract class PartyQuestBot extends BotSM implements GrindTickRegistry.P
         // transition - registered in the instance but standing in an empty room, where it
         // contributes nothing and, worse, is still counted by getPlayerCount for the puzzles
         // that care how many people are present.
-        if (followLeaderIntoNextRoom()) {
+        //
+        // The loop is what makes catch-up CATCH UP. One hop per tick meant a bot that fell one
+        // room behind needed one macro tick per room to close the gap - and the tick that matters
+        // here is the UNOBSERVED one (36-48s, because a lagging bot is by definition on a map no
+        // player is watching). Against a party advancing one room per stage, the deficit never
+        // closes. Hopping while the door chain is open closes several rooms inside ONE tick, and
+        // each hop is still an ordinary walk+portal (its script re-checks the stage gate, so a
+        // bot can never skip ahead of the leader).
+        boolean moved = false;
+        for (int hop = 0; hop < MAX_CATCHUP_HOPS; hop++) {
+            if (!followLeaderIntoNextRoom()) {
+                break;
+            }
+            moved = true;
+        }
+        if (moved) {
             return; // moved rooms; work resumes from the new one next tick
         }
 

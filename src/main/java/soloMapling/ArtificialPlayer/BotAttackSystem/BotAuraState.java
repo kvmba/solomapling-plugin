@@ -25,7 +25,6 @@ import org.gms.constants.skills.WindArcher;
 import org.gms.util.PacketCreator;
 import soloMapling.ArtificialPlayer.GCMoveSystem.GCMovement;
 
-import java.awt.Point;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -115,9 +114,15 @@ public final class BotAuraState {
     private static final Set<Integer> DARK_SIGHT_UP = ConcurrentHashMap.newKeySet();
     // Hides owned by the guard-crossing policy, so leaving its map retires only our own aura.
     private static final Set<Integer> GUARD_HIDES = ConcurrentHashMap.newKeySet();
-    private static final int LPQ_GUARD_ROOM = 922010506;
+    /** The two LPQ rooms whose WZ data seats invincible 9300013 guards. */
+    private static final Set<Integer> GUARD_MAPS = Set.of(922010500, 922010506);
     private static final int LPQ_GUARD_MOB = 9300013;
-    private static final int GUARD_CROSSING_BAND_Y = 110;
+    /**
+     * How far AHEAD of contact the hide is armed, in px of horizontal body-box overlap. The
+     * golem's own box is the trigger; this only buys the one movement tick it takes to show the
+     * aura before the bodies meet.
+     */
+    private static final int GUARD_LOOKAHEAD_PX = 40;
 
     /**
      * botId -> every plain cosmetic aura currently shown (the non-state-bound buffs whose foreign
@@ -507,19 +512,30 @@ public final class BotAuraState {
         return DARK_SIGHT_UP.contains(id) || isDisguised(id);
     }
 
-    /** Movement-thread only, before contact damage. Quest macro work never writes this policy. */
+    /**
+     * Movement-thread only, before contact damage. Arms this bot's own hide whenever a stage-5
+     * Block Golem's real body box is (or is about to be) inside the bot's touch box, and retires
+     * it as soon as that stops being true.
+     *
+     * <p>Two rooms seat the invincible guards, and both matter:
+     * <ul>
+     *   <li>922010506 - the seven-golem room, whose four box ledges hang between guard rows;</li>
+     *   <li>922010500 - the MAIN room's ground floor. Its two golems stand at y≈55 while every
+     *       sub-room's exit portal lands at the bottom of the tower and the party's next door
+     *       (next00) sits at the top: returning from a room means crossing that floor. Measured
+     *       on the real map, a THIEF carrying 隐身术 took 50 contact ticks there and was
+     *       protected for none of them, because this policy only recognised 922010506.</li>
+     * </ul>
+     *
+     * <p>The trigger is the golem's geometry, not a y band. 9300013 links to 4230110, whose
+     * stand frame is lt=(-67,-139) rb=(84,0): a bot is inside the touch box from 139px above the
+     * golem's feet, while the old band was 110px - the 29px in between was walked unhidden.
+     */
     public static void updateGuardHide(Character bot) {
         int id = bot.getId();
         boolean crossing = false;
-        if (bot.getMapId() == LPQ_GUARD_ROOM && bot.getHp() > 0) {
-            Point pos = bot.getPosition();
-            for (var mob : bot.getMap().getAllMonsters()) {
-                if (mob.isAlive() && mob.getId() == LPQ_GUARD_MOB
-                        && Math.abs(mob.getPosition().y - pos.y) <= GUARD_CROSSING_BAND_Y) {
-                    crossing = true;
-                    break;
-                }
-            }
+        if (bot.getMap() != null && bot.getHp() > 0 && GUARD_MAPS.contains(bot.getMapId())) {
+            crossing = GCMovement.monsterWithinTouch(bot, LPQ_GUARD_MOB, GUARD_LOOKAHEAD_PX);
         }
         if (!crossing) {
             if (GUARD_HIDES.remove(id)) cancelHidesForAction(bot);

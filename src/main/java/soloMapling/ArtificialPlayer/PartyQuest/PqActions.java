@@ -1070,7 +1070,12 @@ public final class PqActions {
     // beats, so closing on a mob and hammering it need no blocking sleeps - the "act, freeze,
     // act" the macro cadence produced came from waiting out cooldowns inline, and at 4Hz that
     // wait is simply the next beat.
-    private static final int SEEK_RANGE_X = 900;            // hunt a live mob within this |dx| (cross-ledge)
+    //
+    // Fallback steering radius, in px: when NOTHING in the room is pathable, the chase still
+    // walks toward the nearest live mob so the bot keeps closing instead of standing still - but
+    // only a mob this close counts as a sensible thing to walk at blindly. A reachable mob has no
+    // such limit (see isHuntTarget): the room's work is the whole room.
+    private static final int BLIND_STEER_RANGE_X = 900;
     // LPQ stage 1 (922010100) seats its first Ratz 580px above the entry floor over a series of
     // one-way ledges - a box tuned to the grind maps' floor stacks stops the chase before it starts
     // and the room reads as quiet forever (the mobs are mobTime=-1 and never close the gap). The
@@ -1217,6 +1222,10 @@ public final class PqActions {
                 state.targetOid = -1;
                 state.clearGoal();
                 state.pathability.clear();
+                // A fresh episode adopts the stage's pending policy. Without this the room's
+                // first chase beat ran unrestricted even though the stage had already asked for
+                // reachable-only targets.
+                state.reachableOnly = pendingReachableOnly(botId);
             }
             if (reachableOnly && !state.reachableOnly) {
                 state.pathability.clear();
@@ -1231,6 +1240,91 @@ public final class PqActions {
     }
 
     /**
+     * The point the movement driver is currently walking to, or null when it holds no goal.
+     *
+     * <p>Read-only seam used by a quest's combat beat to recognise an order it issued (the
+     * looting sweep's walk to a specific drop) without keeping a second copy of that state - a
+     * copy that would go stale the moment any other producer replaced the order.
+     */
+    public static Point moveTargetOf(Character bot) {
+        return GCMovement.moveTargetOf(bot);
+    }
+
+    /**
+     * Matching floor drops within the stepped-on reach of {@code at} - the read-only half of
+     * {@link #lootSteppedOn}, exposed so a caller can ask "is something at my goal" without
+     * picking it up.
+     */
+    public static List<MapObject> itemsOnFloorAt(Character bot, Point at, int[] itemIds) {
+        if (bot == null || at == null || itemIds == null || itemIds.length == 0) {
+            return List.of();
+        }
+        return BotLogic.checkForItemsOnFloor(bot, at, STEPPED_ON_REACH_PX, itemIds);
+    }
+
+    /**
+     * Whether a pickup walk within {@code radiusPx} should take the wheel THIS beat: a matching
+     * drop is on the floor, out of reach, and the driver's current goal is not already it.
+     *
+     * <p>This exists because looting and chasing were written as two calls in that order
+     * ({@code seekAndAttack} then {@code loot}), and {@code loot}'s out-of-reach branch yields
+     * to any live move. The chase it just issued is a live move, so the walk-to-the-drop branch
+     * never ran: measured on LPQ stage 1, a pass lying 200px away on the bot's own floor was
+     * still unpicked 24 macro beats later while the bot climbed away to a mob 800px above. The
+     * floor sweep ({@link #lootSteppedOn}) only covers 60px, so everything between 60px and the
+     * caller's radius was simply never collected until the room went quiet.
+     *
+     * <p>The order is therefore inverted, not the radius widened: when the drop is the nearest
+     * unfinished piece of work, it goes first and the chase resumes on the next beat (its target
+     * is sticky, and the retraction below only drops the ORDER, never the target).
+     *
+     * @return true when this call took the driver for a pickup walk; the caller must not issue
+     *         another move this beat
+     */
+    public static boolean pickupBeforeChase(Character bot, double radiusPx, int[] itemIds) {
+        if (bot == null || bot.getMap() == null || itemIds == null || itemIds.length == 0
+                || bot.getPosition() == null) {
+            return false;
+        }
+        SeekState control = seekStates.computeIfAbsent(bot.getId(), ignored -> new SeekState());
+        synchronized (control) {
+            if (movementShielded(bot.getId()) || reactorBeatArmed(bot)) {
+                return false; // a staged walk / box beat already owns this beat
+            }
+            List<MapObject> found = BotLogic.checkForItemsOnFloor(bot, bot.getPosition(), radiusPx, itemIds);
+            Point botPos = bot.getPosition();
+            Point nearest = null;
+            double bestSq = Double.MAX_VALUE;
+            for (MapObject o : found) {
+                if (!(o instanceof MapItem drop) || !isFloorLoot(drop)
+                        || !DropCommands.botCanLoot(bot, drop)) {
+                    continue;
+                }
+                Point ip = drop.getPosition();
+                if (ip == null) {
+                    continue;
+                }
+                double dsq = botPos.distanceSq(ip);
+                if (dsq <= PICKUP_REACH_SQ) {
+                    return false; // in reach: loot() picks it up inline, no walk needed
+                }
+                if (dsq < bestSq) {
+                    bestSq = dsq;
+                    nearest = ip;
+                }
+            }
+            if (nearest == null) {
+                return false;
+            }
+            // Retract only the chase order this episode issued, then hand the driver the drop.
+            stopOwnChaseGoal(bot, control);
+            control.clearGoal();
+            GCMovement.move(bot, nearest.x, nearest.y, () -> nudgeStageTick(bot));
+            return true;
+        }
+    }
+
+    /**
      * Stop restricting the chase to reachable targets for this bot (the sticky flag set by
      * {@link #seekAndAttack(Character, boolean)}).
      *
@@ -1240,17 +1334,51 @@ public final class PqActions {
      * on and every other stage turns it off, both through the same stage-level call.
      */
     public static void clearReachableOnly(Character bot) {
+        setReachableOnly(bot, false);
+    }
+
+    /**
+     * Set or clear the reachable-only policy for this bot's chase, WITHOUT steering.
+     *
+     * <p>Kept separate from {@link #seekAndAttack(Character, boolean)} on purpose: that overload
+     * both sets the flag and runs a chase beat. A caller that only wants to (re)assert the policy
+     * - the quest's per-tick policy refresh - must not also issue a move, because it may run
+     * outside the driver's own gates (dead, frozen, off-map).
+     */
+    public static void setReachableOnly(Character bot, boolean reachableOnly) {
         if (bot == null) {
             return;
         }
+        // Recorded as a PENDING intent, not applied to whatever SeekState happens to exist: the
+        // policy refresh runs before the chase beat, and on the first beat of a room there is no
+        // SeekState yet - writing only into an existing one silently lost the policy, and the bot
+        // then chased the unreachable altar ledge (measured goal (588,0)).
+        REACHABLE_ONLY_INTENT.put(bot.getId(), reachableOnly);
         SeekState state = seekStates.get(bot.getId());
         if (state == null) {
-            return;
+            return; // consumed when the chase creates its episode
         }
         synchronized (state) {
-            if (state.reachableOnly) state.pathability.clear();
-            state.reachableOnly = false;
+            if (state.reachableOnly == reachableOnly) {
+                return; // already in the requested mode: no state churn on every beat
+            }
+            if (reachableOnly) {
+                state.pathability.clear();
+            }
+            state.reachableOnly = reachableOnly;
         }
+    }
+
+    /**
+     * botId -> the chase reachability policy this bot's stage demands. Sticky, and independent of
+     * whether a chase episode exists yet: the policy is refreshed at the top of every combat beat
+     * while the episode is created by the chase itself, so the two must not be the same object.
+     */
+    private static final Map<Integer, Boolean> REACHABLE_ONLY_INTENT = new java.util.concurrent.ConcurrentHashMap<>();
+
+    /** Consume the pending policy when a chase episode is created; true when it restricts. */
+    private static boolean pendingReachableOnly(int botId) {
+        return Boolean.TRUE.equals(REACHABLE_ONLY_INTENT.get(botId));
     }
 
     private static void seekAndAttack(Character bot, SeekState state) {
@@ -1268,9 +1396,10 @@ public final class PqActions {
         //    chase target. The chase target must be PATHABLE: on a tower whose climb chain
         //    the graph cannot plan end-to-end, the nearest mob sits across a missing link and
         //    the un-pathable chase degrades into walking the bot's own floor under it forever
-        //    (the stage-1 report). Prefer the nearest pathable hostile; only a room where
-        //    NOTHING is pathable keeps the plain nearest (steering is still better than
-        //    standing, and the graph may bake later).
+        //    (the stage-1 report). Prefer the nearest pathable hostile anywhere in the room;
+        //    only a room where NOTHING is pathable keeps a plain nearest - and only one close
+        //    enough to be worth a blind walk (steering is still better than standing, and the
+        //    graph may bake later).
         Monster target = seekPathableTarget(bot, pos, state);
         if (target == null) {
             // The room is quiet. Retract the goal THIS chase handed the driver: a live chase order is
@@ -1554,9 +1683,13 @@ public final class PqActions {
     /**
      * Keep a pathable sticky target; otherwise prefer another pathable mob. Re-selecting the
      * same unreachable fallback keeps its episode's deadline rather than resetting progress.
-     * Otherwise the nearest live hostile in the box, pathable candidates first (platforms
-     * above/below included - the nav graph's climb edges make "up the rope to the next
-     * platform" a normal approach).
+     *
+     * <p>Selection: the nearest live hostile the nav graph can actually reach - across the WHOLE
+     * room, not just a radius around the bot (the LPQ stage-4 door rooms' only mob sits 914-964px
+     * from the entry portal, and a horizontal cap made the room read as quiet). Only when nothing
+     * in the room is pathable does the plain nearest fallback apply, and only inside
+     * {@link #BLIND_STEER_RANGE_X} - walking blindly at a mob across a map the graph cannot route
+     * would just pin the bot to a wall.
      */
     private static Monster seekPathableTarget(Character bot, Point pos, SeekState state) {
         int sticky = state.targetOid;
@@ -1565,29 +1698,29 @@ public final class PqActions {
             if (mo instanceof Monster m && isHuntTarget(m, pos) && isPathable(bot, m, state)) {
                 return m;
             }
-            state.targetOid = -1; // gone, out of the box, or unreachable
+            state.targetOid = -1; // gone, outside the stack, or unreachable
         }
-        Monster best = null;
-        double bestSq = Double.MAX_VALUE;
-        Monster bestPathable = null;
-        double bestPathableSq = Double.MAX_VALUE;
+        Monster nearest = null;
+        double nearestSq = Double.MAX_VALUE;
+        Monster nearestPathable = null;
+        double nearestPathableSq = Double.MAX_VALUE;
         for (Monster m : bot.getMap().getAllMonsters()) {
             if (!isHuntTarget(m, pos)) {
                 continue;
             }
             Point mp = m.getPosition();
             double dsq = pos.distanceSq(mp);
-            if (dsq < bestSq) {
-                bestSq = dsq;
-                best = m;
+            if (dsq < nearestSq && isBlindSteerRange(pos, mp)) {
+                nearestSq = dsq;
+                nearest = m;
             }
-            if (dsq < bestPathableSq && isPathable(bot, m, state)) {
-                bestPathableSq = dsq;
-                bestPathable = m;
+            if (dsq < nearestPathableSq && isPathable(bot, m, state)) {
+                nearestPathableSq = dsq;
+                nearestPathable = m;
             }
         }
-        Monster chosen = bestPathable != null ? bestPathable
-                : (state.reachableOnly ? null : best);
+        Monster chosen = nearestPathable != null ? nearestPathable
+                : (state.reachableOnly ? null : nearest);
         state.targetOid = chosen != null ? chosen.getObjectId() : -1;
         // Re-selecting the SAME unreachable fallback is still the same chase episode. Keep
         // its progress clock, but switch immediately if another mob has become pathable.
@@ -1656,12 +1789,21 @@ public final class PqActions {
             }
         }
         orphanProbeAtByBot.remove(botId);
+        REACHABLE_ONLY_INTENT.remove(botId);
         stageWalkShieldUntilByBot.remove(botId);
         SEEK_TRACE_UNTIL.remove(botId);
         nextSteppedOnPickupAtByBot.remove(botId);
     }
 
-    /** Whether this mob is a legitimate chase target from {@code pos}: hostile and in the seek box. */
+    /**
+     * Whether this mob is a legitimate chase target from {@code pos}: hostile and inside the
+     * room's vertical stack. There is deliberately no horizontal radius: a quest room is ONE
+     * room, and a fixed |dx| cap silently turned every wider room into a "quiet" one - LPQ's
+     * stage-4 door rooms (922010401..405, 1866px wide) seat their only mob 914-964px from the
+     * entry portal, so the bot stood at the door until a real player walked in and the mob (which
+     * only a real client can move) drifted into the old radius. Horizontal reach is the nav
+     * graph's answer ({@link #isPathable}), never a constant.
+     */
     private static boolean isHuntTarget(Monster m, Point pos) {
         if (m == null || !m.isAlive()) {
             return false;
@@ -1670,8 +1812,15 @@ public final class PqActions {
             return false; // Moon Bunny and friends are not targets
         }
         Point mp = m.getPosition();
-        return mp != null && Math.abs(mp.x - pos.x) <= SEEK_RANGE_X
-                && Math.abs(mp.y - pos.y) <= SEEK_STACK_RANGE_Y;
+        return mp != null && Math.abs(mp.y - pos.y) <= SEEK_STACK_RANGE_Y;
+    }
+
+    /**
+     * Whether a mob is close enough to blindly walk at when the graph cannot plan a route to
+     * anything in the room (see {@link #BLIND_STEER_RANGE_X}). Reachable mobs ignore this.
+     */
+    private static boolean isBlindSteerRange(Point pos, Point mobPos) {
+        return Math.abs(mobPos.x - pos.x) <= BLIND_STEER_RANGE_X;
     }
 
     /** Pick up matching drops near a point. Returns how many items were gathered. */
@@ -1767,6 +1916,19 @@ public final class PqActions {
      * proximity-honest pickup in this class (loot, the delivery post, the reclaim walk):
      * the engine's pickupItem has no distance check, so "close" is this class's rule.
      */
+    /**
+     * Whether the bot already stands within hand-off reach of a point.
+     *
+     * <p>The one definition of that reach: the delivery post, the reclaim walk and the bonus
+     * stage's NPC beat all share it, so a bot never has to walk to a point it is already standing
+     * on. Exposed rather than copied - a second constant would drift from this one.
+     */
+    public static boolean withinPickupReach(Character bot, Point at) {
+        return bot != null && at != null && bot.getPosition() != null
+                && bot.getPosition().distanceSq(at) <= PICKUP_REACH_SQ;
+    }
+
+    /** The hand-off / pickup reach, in px squared. */
     private static final double PICKUP_REACH_SQ = 150.0 * 150.0;
 
     /**

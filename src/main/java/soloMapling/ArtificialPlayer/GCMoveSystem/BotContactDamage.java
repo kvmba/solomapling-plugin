@@ -99,6 +99,10 @@ final class BotContactDamage {
     // foot-box by this much to catch wide mobs whose anchor sits just outside, then precision-check
     // each candidate with the real lower-half hitbox overlap.
     private static final int   MOB_QUERY_MARGIN       = 150;
+    // Vertical reach of a "would this body touch me" query, in px above the mob's feet. Taller than
+    // any guard body (9300013's is 139px), because the answer arms an immunity aura one tick
+    // BEFORE contact - the same query is also what makes a body standing above the mob count.
+    private static final int   MOB_QUERY_VERTICAL_MARGIN = 400;
 
     // Reused read-only type filter for the touch scan (getMapObjectsInRect only reads it), so the
     // per-tick contact check on an observed map does not allocate a fresh List each time.
@@ -507,6 +511,51 @@ final class BotContactDamage {
         Rectangle mobLowerHalf = new Rectangle(mobBounds.x, mobBounds.y + mobBounds.height - lowerHeight,
                 mobBounds.width, lowerHeight);
         return mobLowerHalf.intersects(botBounds);
+    }
+
+    /**
+     * Whether any living mob of {@code mobId} on this bot's map has its real body box within
+     * {@code marginPx} of the bot's touch box. Read-only: no damage, no i-frame bookkeeping.
+     *
+     * <p>Same geometry the damage path uses ({@link #getBotTouchBounds} +
+     * {@link BotMobHitboxProvider}), so a caller that arms an immunity aura from this answer is
+     * arming it exactly on the contacts that would otherwise land.
+     */
+    static boolean monsterWithinTouch(Character bot, int mobId, int marginPx) {
+        if (bot == null || bot.getMap() == null) {
+            return false;
+        }
+        Point pos = bot.getPosition();
+        if (pos == null) {
+            return false;
+        }
+        Rectangle botBounds = new Rectangle(pos.x, pos.y - MOB_TOUCH_SWEEP_HEIGHT, 1,
+                MOB_TOUCH_SWEEP_HEIGHT + 1);
+        // getMapObjectsInRect tests the mob's ORIGIN (its feet pixel), not an overlap of boxes:
+        // a body 125px above the golem's feet is outside a rect grown by the default margin
+        // around those feet, yet well inside the golem's own 139px-tall body. The vertical grow
+        // therefore has to cover a body's full height above its feet, or the only mobs that ever
+        // reach the precision check are the ones already touching.
+        Rectangle query = new Rectangle(botBounds);
+        query.grow(MOB_QUERY_MARGIN + marginPx, MOB_QUERY_VERTICAL_MARGIN);
+        for (MapObject obj : bot.getMap().getMapObjectsInRect(query, MONSTER_TYPES)) {
+            Monster mob = (Monster) obj;
+            if (!isHostileLivingMonster(mob) || mob.getId() != mobId) {
+                continue;
+            }
+            Rectangle mobBounds = BotMobHitboxProvider.getMobBounds(mob);
+            if (mobBounds == null) {
+                continue;
+            }
+            // A WIDER probe box, not a wider touch box: the answer drives "hide before contact",
+            // while the damage path keeps its own exact overlap.
+            Rectangle probe = new Rectangle(mobBounds);
+            probe.grow(marginPx, 0);
+            if (probe.intersects(botBounds)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static Rectangle getBotTouchBounds(BotMovementState entry, Character bot) {

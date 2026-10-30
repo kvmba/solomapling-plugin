@@ -47,6 +47,14 @@ public final class LudiPqData {
     public static final int BONUS_MAP = 922011000;
     /** The bonus stage's follow-up room, one minute later (a plain warp, no boxes). */
     public static final int BONUS_TAIL_MAP = 922011100;
+    /** The bonus stage's reward NPC: 2040035 stands in the tail room and is the way out. */
+    public static final int BONUS_TAIL_NPC = 2040035;
+    /**
+     * Where 2040035 stands in 922011100, straight out of the map's life section. The bot walks
+     * here and plays its turn-in beat; it never reads the NPC object, because the room's shadow
+     * geometry (the navigation loader) carries no life section at all.
+     */
+    public static final Point BONUS_TAIL_NPC_SPOT = new Point(190, -1136);
     /** The bonus stage's reward boxes: 36 of them, and breaking one sprays items. */
     public static final int BONUS_BOX = 2202004;
 

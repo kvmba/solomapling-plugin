@@ -23,6 +23,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.context.ApplicationContext;
 import soloMapling.ArtificialPlayer.BotAttackSystem.BotAttackDriver;
@@ -569,6 +570,60 @@ class LpqReviewRegressionTest {
         BotPhysicsEngine.teleportTo(state, bot, new Point(-83, -630));
         tick();
         assertFalse(BotAuraState.isMonsterImmune(bot), "the safe box ledge is not a permanent hide");
+    }
+
+    /**
+     * LPQ stage 4's door rooms are 1866px wide, and the room a bot warps into is NOT always its
+     * right-hand spawn ledge: {@code 922010400}'s {@code in01/in02/in05} target the room's
+     * {@code st00} (x≈295, right side) while {@code in03/in04} target {@code out00} (x≈-1366, the
+     * LEFT exit). The room's only mob stands on the left shelf, so the two spawn-ledge landings
+     * sat 914/917px away while the left-exit landings sat 697/726px away. The chase used to filter
+     * candidates by {@code |dx| <= 900}, which read exactly those two rooms as "quiet" while
+     * {@code LudiStages.workDoorRooms}' whole-map {@code killableMobPresent} still reported work
+     * left - the bot neither fought nor left, and only a real player entering the room ever moved
+     * it (the host hands mob control to real clients only, so the mob sat still until someone
+     * walked in and dragged it into range).
+     */
+    @ParameterizedTest(name = "room {0}: st00 landing({1},{2}) -> mob({3},{4})")
+    @CsvSource({
+            "922010401, 295, -79, -619, 225",  // dx 914 - 14px past the old cap
+            "922010405, 307, -79, -610, 225"   // dx 917
+    })
+    void aStage4DoorRoomMobBeyondTheOldHorizontalCapIsStillHunted(int mapId, int entryX, int entryY,
+                                                                  int mobX, int mobY) throws Exception {
+        MapleMap map = realMap(mapId);
+        createBot(map, new Point(entryX, entryY), Job.BEGINNER);
+        Monster mob = monster(9300008, 99140 + mapId % 10, new Point(mobX, mobY));
+        inject(map, mob);
+        assertTrue(Math.abs(mobX - entryX) > 900, "this room only exercises the bug past the old cap");
+
+        PqActions.seekAndAttack(bot);
+        assertNotNull(state.moveTarget, "the room's only mob must be chased, not read as quiet");
+        assertEquals(mobX, state.moveTarget.x, "the chase must aim at the mob's own floor pixel");
+        assertTrue(GCMovement.canPathTo(bot, mobX, mobY), "the mob's shelf must be reachable");
+
+        // End to end: production driver ticks must actually close the gap into attack reach.
+        boolean reached = false;
+        for (int beat = 0; beat < 400 && !reached; beat++) { // 100s at 250ms/beat
+            PqActions.seekAndAttack(bot);
+            reached = BotAttackDriver.canReach(bot, mob);
+            if (!reached) {
+                for (int t = 0; t < 5; t++) tick(); // 250ms of 50ms ticks
+            }
+        }
+        assertTrue(reached, "the bot must walk from the door into the mob's attack reach; ended at "
+                + bot.getPosition());
+    }
+
+    @Test
+    void aStage4LeftExitLandingStillWorks() throws Exception {
+        // in03 targets out00 (-1366), 726px from the mob - inside the old cap, so it never stalled.
+        MapleMap map = realMap(922010403);
+        createBot(map, new Point(-1366, -81), Job.BEGINNER);
+        inject(map, monster(9300008, 99145, new Point(-640, 225)));
+        PqActions.seekAndAttack(bot);
+        assertNotNull(state.moveTarget, "the in-range left-exit landing must keep working");
+        assertEquals(-640, state.moveTarget.x);
     }
 
     @Test
