@@ -331,7 +331,12 @@ public final class GrindBrain {
                 return true; // mid-swing beat: hold the plant, keep the vendetta
             }
             if (Math.abs(mp.x - lastMoveTargetX) >= ROAM_RETARGET_EPS) {
-                GCMovement.move(chr, mp.x, mp.y);
+                // Ground the goal: a mob's raw pixel is not a standing point (a flying or mid-hop
+                // attacker's y is off the floor by far more than the 8px arrival band, which left the
+                // bot standing on the right pixel and the order un-arrivable until the 8s stall
+                // watchdog abandoned it). Same resolve as travelApproachPoint/approachLeashed.
+                Point mgp = GCMovement.groundPointBelow(chr.getMap(), mp.x, mp.y);
+                GCMovement.move(chr, mp.x, (mgp != null) ? mgp.y : mp.y);
                 lastMoveTargetX = mp.x;
             }
         }

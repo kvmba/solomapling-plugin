@@ -398,9 +398,27 @@ final class BotPhysicsEngine {
         return fh;
     }
 
+    /*
+     * How far (px) a bot's feet may sit off a foothold's own interpolated line and still count as
+     * standing on it. Purely the truncation-vs-rounding artefact described above: the host truncates
+     * its slope interpolation, the graph rounds, so the disagreement is never more than one pixel.
+     */
+    static final int GROUND_LINE_SLACK_PX = 1;
+
     static Foothold findGroundFoothold(MapleMap map, Point position) {
         if (map == null || map.getFootholds() == null || position == null) {
             return null;
+        }
+
+        // The foothold the feet are literally standing ON must win over anything the probes find.
+        // Both probes below are "lowest foothold at or under this y", which on a slope can skip the
+        // bot's own foothold by one pixel (the tree truncates its interpolation, the graph rounds) and
+        // answer a DIFFERENT foothold - one storey up or down - from a column where several overlap.
+        // That is what makes a bot on one uninterrupted ledge read as "the platform changed" and
+        // replan a jump/drop. Asking the exact-column question first is both cheaper and correct.
+        Foothold underfoot = footholdUnderFeet(map, position);
+        if (underfoot != null) {
+            return underfoot;
         }
 
         Foothold exact = findBelowIndexed(map, position);
@@ -416,6 +434,35 @@ final class BotPhysicsEngine {
         if (exactGround == null) return offset;
         if (offsetGround == null) return exact;
         return Math.abs(offsetGround.y - position.y) < Math.abs(exactGround.y - position.y) ? offset : exact;
+    }
+
+    /*
+     * The foothold whose own line passes through {@code position} at its column, or null.
+     *
+     * Anchored on the SAME interpolation the bots are drawn with (the graph's rounding), with a
+     * {@link #GROUND_LINE_SLACK_PX} tolerance for the one-pixel disagreement with the tree's
+     * truncating findBelow - the disagreement that makes the two probes below skip the bot's own
+     * foothold and answer one a storey away.
+     *
+     * Only candidates whose span contains the column are considered, so a bot standing between two
+     * platforms gets null and the ordinary probes answer. This can never invent ground, and walls
+     * are excluded because they are vertical stubs, never ground.
+     */
+    private static Foothold footholdUnderFeet(MapleMap map, Point position) {
+        Foothold best = null;
+        int bestDelta = Integer.MAX_VALUE;
+        for (Foothold fh : collisionIndex(map).groundBucketAt(position.x)) {
+            if (fh.isWall() || position.x < fh.getX1() || position.x > fh.getX2()) {
+                continue;
+            }
+            int lineY = fh.getY1() == fh.getY2() ? fh.getY1() : slopeYAt(fh, position.x);
+            int delta = Math.abs(lineY - position.y);
+            if (delta <= GROUND_LINE_SLACK_PX && delta < bestDelta) {
+                best = fh;
+                bestDelta = delta;
+            }
+        }
+        return best;
     }
 
     static Point findGroundPoint(MapleMap map, Point position) {
