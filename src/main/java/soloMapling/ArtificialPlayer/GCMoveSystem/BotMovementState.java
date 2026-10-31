@@ -239,6 +239,8 @@ class BotMovementState {
     // ── Navigation state (written by NM, read by MM) ──
     String lastEdgeBlockReason = null;
     Point navTargetPos = null;
+    // Final destination of the committed route, distinct from its next execution waypoint.
+    Point navPathTargetPos = null;
     BotNavigationGraph navGraph = null;
     BotNavigationGraph.Edge navEdge = null;
     BotNavigationGraph.Edge navJumpLaunchEdge = null;

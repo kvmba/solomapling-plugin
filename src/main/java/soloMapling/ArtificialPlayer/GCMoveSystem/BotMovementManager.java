@@ -198,6 +198,7 @@ class BotMovementManager {
 
     static void clearNavigationState(BotMovementState entry) {
         entry.navTargetPos = null;
+        entry.navPathTargetPos = null;
         entry.navEdge = null;
         // The in-flight edge fact dies with the commitment it annotates (invariant:
         // navFlightEdge != null implies navEdge != null). Physics clears it on landing/rope

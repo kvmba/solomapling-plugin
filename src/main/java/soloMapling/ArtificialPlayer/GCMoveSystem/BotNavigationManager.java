@@ -232,6 +232,9 @@ final class BotNavigationManager {
                 return new NavigationDirective(rawTargetPos, false);
             }
 
+            if (runAiTick && !pathTargetPos.equals(entry.navPathTargetPos)) {
+                entry.navPathTargetPos = new Point(pathTargetPos);
+            }
             NavigationDirective executionDirective = tryExecuteEdge(graph, entry, bot, botPos, rawTargetPos, edge, runAiTick);
             if (executionDirective != null) {
                 entry.lastNavDecision = "exec";
@@ -382,10 +385,14 @@ final class BotNavigationManager {
                 || entry.climbing
                 || startRegionId < 0
                 || targetRegionId < 0
-                || startRegionId == targetRegionId) {
+                || startRegionId == targetRegionId
+                || targetPos.equals(entry.navPathTargetPos)) {
             return edge;
         }
 
+        // Replan for a changed destination, not for our own approach movement. Otherwise
+        // opposite exits through DIFFERENT regions can alternately win every few pixels
+        // (LPQ box9: left to the box floor vs. right through the shelf below).
         BotNavigationGraph.Edge bestEdge = findNextEdge(graph, bot, startRegionId, targetRegionId, targetPos);
         if (bestEdge == null || sameEdge(edge, bestEdge)) {
             return edge;

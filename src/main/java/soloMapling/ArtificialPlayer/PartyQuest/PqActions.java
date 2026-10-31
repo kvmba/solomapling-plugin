@@ -312,8 +312,7 @@ public final class PqActions {
         SeekState control = seekStates.computeIfAbsent(bot.getId(), ignored -> new SeekState());
         synchronized (control) {
             Point pos = bot.getPosition();
-            if (Math.abs(pos.x - floor.x) <= APPROACH_X && Math.abs(pos.y - floor.y) <= APPROACH_Y
-                    && !GCMovement.isClimbing(bot)) {
+            if (atApproachFloor(bot, pos, floor)) {
                 if (!movementShielded(bot.getId())) GCMovement.stop(bot);
                 control.approach = null;
                 return Approach.IN_POSITION;
@@ -348,6 +347,21 @@ public final class PqActions {
     /** Striking box on the same platform: the approach box around its floor point. */
     private static final int APPROACH_X = 90;
     private static final int APPROACH_Y = 70;
+
+    private static boolean atApproachFloor(Character bot, Point pos, Point floor) {
+        if (Math.abs(pos.x - floor.x) > APPROACH_X || Math.abs(pos.y - floor.y) > APPROACH_Y
+                || !GCMovement.isSettled(bot)) return false;
+        int currentRegion = GCMovement.peekRegionIdAt(bot.getMap(), pos.x, pos.y);
+        if (currentRegion != GCMovement.UNBAKED_REGION) {
+            return currentRegion >= 0
+                    && currentRegion == GCMovement.peekRegionIdAt(bot.getMap(), floor.x, floor.y);
+        }
+        // Before the graph warms, only the same foothold proves arrival. Pixel proximity
+        // alone accepts the shelf 65px above LPQ box9 and cancels its descent.
+        var standing = GCMovement.groundFoothold(bot.getMap(), pos);
+        var target = GCMovement.groundFoothold(bot.getMap(), floor);
+        return standing != null && target != null && standing.getId() == target.getId();
+    }
 
     /**
      * Approach the floor under an aerial target when that floor is BELOW the bot, walking
@@ -426,11 +440,10 @@ public final class PqActions {
     public static boolean hitReactorIfInReach(Character bot, int reactorOid) {
         if (bot == null || bot.getMap() == null) return false;
         Reactor reactor = bot.getMap().getReactorByOid(reactorOid);
-        if (reactor == null || !reactor.isActive() || GCMovement.isClimbing(bot)) return false;
+        if (reactor == null || !reactor.isActive()) return false;
         Point pos = bot.getPosition();
         Point at = reactor.getPosition();
-        if (Math.abs(pos.x - at.x) > APPROACH_X || Math.abs(pos.y - at.y) > APPROACH_Y
-                || GCMovement.onDifferentLedge(bot.getMap(), pos.x, pos.y, at.x, at.y)) return false;
+        if (!atApproachFloor(bot, pos, at)) return false;
         BotAttack.basicSwing(bot);
         CustomReactor.hitReactorWithScript(bot.getMap(), reactorOid, bot);
         return true;
