@@ -192,6 +192,12 @@ class BotMovementManager {
         entry.graphWarmupFallback = false;
         entry.observedOwnerStepX = 0;
         entry.observedOwnerStepY = 0;
+        // A teleport is not movement: the anti-tunnel sweep's "previous foot pixel" must die with
+        // the body it described. Carried across a rescue/wedge snap/promotion re-seat it becomes a
+        // rectangle spanning the whole jump, which the contact check then reads as the bot having
+        // walked through everything in between - LPQ's stage-5 guards one-shot a thief out of its
+        // hide that way, from a ledge the bot never left.
+        entry.lastMobTouchCheckPos = null;
         clearNavigationState(entry);
         entry.movementBroadcastValid = false;
     }

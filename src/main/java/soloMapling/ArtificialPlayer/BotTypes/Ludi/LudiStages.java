@@ -843,19 +843,20 @@ public final class LudiStages {
     /**
      * Whether stage 5 admits this bot to a specific sub-room if the party moved there: the
      * follow gate checks the posting table against the room the party is actually in (or
-     * walking into), not against "some room somewhere". The main map is admitted freely even
-     * though WZ seats guards there too (922010500 holds two 9300013, on the ground floor at
-     * y≈54-58; the seven-guard room is the bottom sub-room 922010506): following into the
-     * main map is ordinary party movement, and the combat sweep already stands the bot's
-     * swings down whenever a guard is in its seek box (LudiPQBot#fightsOnSweep), while
-     * the NPC post sits ~273px above the guards' ledge - past a touch. The sub-rooms are the
-     * rooms a box fight happens IN, which is where the posting table binds.
+     * walking into), not against "some room somewhere".
+     *
+     * <p>The main map is admitted for every kit on the UPPER floors, which is where the party
+     * lives: following into it is ordinary party movement, the stage NPC post (y=-225) sits
+     * ~273px above the guards' ledge, and the combat sweep stands the bot's swings down while a
+     * guard is in its seek box (LudiPQBot#fightsOnSweep). The guarded ground floor is not a
+     * "room" a bot is posted to - it is a floor no target may point at, which
+     * {@link #refusesFloor} decides where a chase picks its target.
      */
     public static boolean stage5AdmitsTo(Character bot, int mapId) {
         if (LudiPqData.roomStage(mapId) >= 0) {
             return stage5RoomAdmits(bot, mapId); // a sub-room: its own posting rule
         }
-        return true; // the main map: no guard geometry to survive
+        return true; // the main map: the upper floors are ordinary party movement
     }
 
     /**
@@ -931,6 +932,51 @@ public final class LudiStages {
                         && m.getPosition() != null
                         && Math.abs(m.getPosition().x - p.x) <= 120
                         && Math.abs(m.getPosition().y - p.y) <= 150);
+    }
+
+    /**
+     * Whether this kit carries the hide stage 5's guarded floor demands: 隐身术 (4001003, the
+     * rogue lineage) or 橡木伪装 (5101007, the Brawler).
+     *
+     * <p>The gunslinger line is the trap here - those bots are pirates, but 橡木伪装 is the
+     * Brawler's skill and is absent from their registry; the night walker's 隐身术 (14001003) is
+     * not registered either. One switch behind both halves of the rule: this same gate decides
+     * who may enter 922010506, and who may be given a target on 922010500's guarded floor.
+     */
+    public static boolean carriesGuardHide(Character bot) {
+        return bot != null && hideSkillFor(bot) != 0;
+    }
+
+    /**
+     * The guards' floor of 922010500 - everything at or below this y.
+     *
+     * <p>From the WZ life table: the two invincible 9300013 stand on the ledge at y=58 with
+     * their feet at y=54/55, and every foothold below them (y=90..662) is the same bottom
+     * shaft. Everything the party uses is above it: the stage NPC post y=-225, the stage door
+     * y=-216, the sub-room doors y=-525..-1292. Only 922010506's two exits land down there
+     * (at in06, y=251).
+     *
+     * <p>A y line rather than a region id on purpose: regions are bake artifacts that a re-bake
+     * may renumber, while these values come straight from the map data.
+     */
+    public static final int GUARD_FLOOR_Y = 0;
+
+    /**
+     * Whether {@code point} is somewhere this bot must not be given as a target: it lies on
+     * stage 5's guarded floor and this kit has no hide to survive it.
+     *
+     * <p>Applied where a chase PICKS its target, not where an order is cancelled afterwards:
+     * cancelling only lasts until the next beat re-issues the same order (measured - the bot
+     * creeps down a step per beat and ends up beside the golems anyway). There is no way back
+     * from that floor either, so a hide-less body sent down stays down until the stage-clear
+     * warp collects it.
+     */
+    public static boolean refusesFloor(Character bot, Point point) {
+        return bot != null
+                && bot.getMapId() == LudiPqData.STAGE_5
+                && point != null
+                && point.y >= GUARD_FLOOR_Y
+                && !carriesGuardHide(bot);
     }
 
     /**

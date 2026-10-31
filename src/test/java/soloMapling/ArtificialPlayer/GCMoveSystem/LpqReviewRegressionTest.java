@@ -869,8 +869,78 @@ class LpqReviewRegressionTest {
         }
     }
 
+    /**
+     * A teleport is not a walk: the anti-tunnel sweep must not span it.
+     *
+     * <p>Reproduces the reported "hidden thief loses ~500 HP on the safe box ledge": the bot crossed
+     * the stage-5 guard room while nobody was on the map (the driver advances such a bot
+     * analytically - one tick can be 1-4s of travel), so the contact layer never refreshed its
+     * "previous foot pixel". When a real player then entered, the next observed tick swept one
+     * rectangle from the entry landing all the way to the box ledge, through the golem standing
+     * between them, and the golem's PAD 999 hit landed on a bot that was 189px above it and could
+     * not have been touched.
+     */
+    @Test
+    void anUnobservedCrossingCannotLandTheGuardOnArrival() throws Exception {
+        MapleMap map = realMap(922010506);
+        createBot(map, new Point(179, -223), Job.THIEF);            // st00, the room's entry landing
+        when(bot.getCurrentMaxHp()).thenReturn(5000);               // a hit that lands would really cost HP
+        inject(map, monster(9300013, 99121, new Point(-80, -441)));
+
+        // One observed contact beat at the landing: the sweep anchor is a real neighbouring pixel.
+        ObserverTracker.markObservedNow(map.getId());
+        BotContactDamage.tickMobDamage(state, bot);
+        assertNotNull(state.lastMobTouchCheckPos, "sanity: an observed beat seeds the anchor");
+        verify(bot, never()).safeAddHP(anyInt());
+
+        // The player leaves; the bot crosses the golem's floor to the box ledge with nobody watching.
+        // Nothing about that stretch is a physics walk - the driver advances such a bot analytically
+        // (tryCoarseAdvance writes the body straight to an interpolated point, one tick being 1-4s of
+        // travel), so the contact layer must not keep the landing as "the previous pixel".
+        MovementClock.advance(2_500L);
+        bot.setPosition(new Point(-83, -630));
+        BotContactDamage.tickMobDamage(state, bot);
+        assertNull(state.lastMobTouchCheckPos,
+                "an unobserved stretch is not a walk: its anchor must not survive into the next sweep");
+
+        // The player walks in: the first observed beat must not read that crossing as a walk.
+        ObserverTracker.markObservedNow(map.getId());
+        BotContactDamage.tickMobDamage(state, bot);
+        verify(bot, never()).safeAddHP(anyInt());
+    }
+
+    /**
+     * The same rule at the other discontinuity: a rescue / wedge / promotion teleport.
+     *
+     * <p>{@code resetEntryStateAfterTeleport} is the single funnel every snap goes through, but it
+     * only cleared NAV state - the contact sweep's anchor survived, so the first tick after a snap
+     * swept the whole teleport distance and hit everything on the way.
+     */
+    @Test
+    void aTeleportCannotLandTheGuardOnArrival() throws Exception {
+        MapleMap map = realMap(922010506);
+        createBot(map, new Point(179, -223), Job.THIEF);
+        when(bot.getCurrentMaxHp()).thenReturn(5000);
+        inject(map, monster(9300013, 99122, new Point(-80, -441)));
+        ObserverTracker.markObservedNow(map.getId());
+        BotContactDamage.tickMobDamage(state, bot);
+        assertNotNull(state.lastMobTouchCheckPos, "sanity: an observed beat seeds the anchor");
+
+        // A recover-snap from the entry landing up to the box ledge, then the next contact beat.
+        BotPhysicsEngine.teleportTo(state, bot, new Point(-83, -630));
+        BotMovementManager.resetEntryStateAfterTeleport(state);
+        assertNull(state.lastMobTouchCheckPos, "a teleport is not a walk: the anchor dies with it");
+
+        BotContactDamage.tickMobDamage(state, bot);
+        verify(bot, never()).safeAddHP(anyInt());
+    }
+
     private void tick() throws Exception {
         ObserverTracker.markObservedNow(bot.getMapId());
+        runTick();
+    }
+
+    private void runTick() throws Exception {
         Method tick = GCMovementDriver.class.getDeclaredMethod("tick", BotMovementState.class);
         tick.setAccessible(true);
         try {

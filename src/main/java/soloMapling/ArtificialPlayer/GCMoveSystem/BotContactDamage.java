@@ -144,6 +144,14 @@ final class BotContactDamage {
     static void tickMobDamage(BotMovementState entry, Character bot) {
         if (!GCMovement.isMapObserved(bot.getMapId())) {
             entry.mobHitCooldownMs = 0; // reset i-frames so the first hit on re-entry is instant
+            // No tile of the walk that happened while nobody watched may survive into the next
+            // observed tick: unobserved bots are advanced ANALYTICALLY (tryCoarseAdvance writes the
+            // body straight to an interpolated point, and an idle/heartbeat tick can be 1-4s of
+            // travel), so the "previous foot pixel" kept here is not a neighbouring pixel at all.
+            // Left in place it makes the first sweep after a player walks in one room-wide AABB -
+            // measured on LPQ 922010506: bot on the box ledge at (-83,-630), guard at (-80,-441),
+            // the sweep read as a body passing through the golem and took ~500 HP off a hidden thief.
+            entry.lastMobTouchCheckPos = null;
             diagnose(bot, null, "MAP_UNOBSERVED", null);
             return;
         }

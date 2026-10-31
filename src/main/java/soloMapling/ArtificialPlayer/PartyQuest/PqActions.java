@@ -1787,6 +1787,13 @@ public final class PqActions {
                 continue;
             }
             Point mp = m.getPosition();
+            // A monster standing somewhere this kit may not walk (stage 5's golem floor) is not a
+            // target at all: it is neither the reachable choice nor the blind-steer fallback.
+            // Filtering it here, before either candidate list, is what keeps the chase from ever
+            // producing the order - cancelling an issued order would only last until the next beat.
+            if (soloMapling.ArtificialPlayer.BotTypes.Ludi.LudiStages.refusesFloor(bot, mp)) {
+                continue;
+            }
             double dsq = pos.distanceSq(mp);
             if (dsq < nearestSq && isBlindSteerRange(pos, mp)) {
                 nearestSq = dsq;
