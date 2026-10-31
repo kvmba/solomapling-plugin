@@ -49,7 +49,7 @@ final class BotNavigationGraphProvider {
     //     inside an 8.93 x fs px/s band (no walkSpeed air cap; counter-strafe pins at the
     //     band edge) and no-input flight drags 1 x fs (100 x fs at terminal fall). Committed
     //     arcs still fly the launch key held, so constant-stepX arc sims stay exact.
-    private static final int GRAPH_VERSION = 69; // 69: resolveAirCollision breaks a LAND/WALL progress TIE toward the LAND when that floor spans the wall's clamp pixel (the bot's own side) - a fall crossing a floor row at the wall's exact column used to clamp onto the wall face at (or past) the row's height and then fall through the row (LPQ stage 3's wall column x=-265 over the y=242 pit); a tie landing beyond the wall face still stops at the wall. Landing predictions change, so caches must rebuild. 68: JUMP edges carry the PRE-INSET validated launch span; the executor's ±walkStep launch phase is clamped to it (collapsed windows' phase band used to re-reach pixels the builder rejected — arcs landed two floors down, the LPQ stage-1 shelf chase fell and looped: "追怪但不跳上平台打"); 67: one-way-island repair - shelves with no inbound edge (the LPQ stage-1 tower's -2288/-1924 mob rows: >DOWN_JUMP_MAX_DROP_PX from above, jump-gap unsimulable, no rope) get an escapable-landing-gated straight-drop edge from the row above, so mobs on them stay pathable and the chase never degrades to pacing the floor above; 66: flight bound clamped to the standable foothold AABB (was max(VR, tree bounds)) - arcs that crossed the platform edge into a map's full-height no-foothold VR margin (Eos Tower 920010100's x=220..359 band) free-fell forever; the tightened boundary invalidates baked arcs that reached past the standable extent (old v65 caches parked in dead v65/); 65: dead-region arc prune - DROP/JUMP arcs landing in regions the bot can never leave are cut to a fixpoint (the escape-hatch deep drop must not land the bot in a one-way pit: LPQ stage 3's y-242 pit under a forbidFallDown stage row); 64: escape-hatch deep-drop edge (a region with no capped descent edge gets one full-descent straight drop to its deepest landing, dead ends like the 玩具塔 floor-1 R5 vanish); 51: kinetic slippery model + snowshoes; 52: brake-to-stop landings; 53: glide-unless-edge stop policy (slipperyStopDir); 56: uncap straight-drop launch windows (full droppable span, no +/-20 fragmentation); 57: remove the (empirically wrong) 300px down-jump drop cap - down-jumps fall until landing; 58: rope-grab reach counts descent below the ledge (mid-rope jump-grabs from adjacent platforms); 59: fall-sim caps to map height not 1500ms - long single-fall descents (tall shafts: Ellinia tree, Perion) now generate DROP/JUMP/ROPE edges; 60: re-cap drops for organic descent - walk-offs capped at MAX_DROP_PX, down-jumps at the tighter DOWN_JUMP_MAX_DROP_PX, and down-jumps carry DOWN_JUMP_COST_PENALTY_MS so the pathfinder prefers ropes/walk-offs over plummeting an entire vertical map; 61: widened rope top-exit probe (BotPhysicsEngine.findTopExitLanding) - accept a step-off foothold slightly above/below the rope top and a few px off-axis, so uneven/slanted ladder heads mint a clean CLIMB step-off edge instead of only ballistic top jump-offs; 62: cache filename now encodes snowShoes (the 4th key dimension) - old three-dimension filenames are unreadable by design, and the bump parks them in a dead v61/ directory that can be deleted wholesale; 63: inset every JUMP launch window by one walk step before stamping it on the edge - an edge-pressed window let the executor's +/-walkStep launch phase overfly a small platform and the bot fall to the bottom
+    private static final int GRAPH_VERSION = 70; // 70: directional walk-off (DROP) edges are gated on the LIVE walk-off simulation, not on a ballistic fall fired from the authored ledge pixel - where the ledge gap is inside one walk step (LPQ stage 8 crates, 922010800: 8px gap vs a 6px step) the bot walks across instead of falling, so the baked descent was unexecutable and its route ping-ponged between two rows (the crate-stair sway). A dropped edge also re-validates the landing against the ledge it leaves. Landing/walk-off sets change, so caches must rebuild. 69: resolveAirCollision breaks a LAND/WALL progress TIE toward the LAND when that floor spans the wall's clamp pixel (the bot's own side) - a fall crossing a floor row at the wall's exact column used to clamp onto the wall face at (or past) the row's height and then fall through the row (LPQ stage 3's wall column x=-265 over the y=242 pit); a tie landing beyond the wall face still stops at the wall. Landing predictions change, so caches must rebuild. 68: JUMP edges carry the PRE-INSET validated launch span; the executor's ±walkStep launch phase is clamped to it (collapsed windows' phase band used to re-reach pixels the builder rejected — arcs landed two floors down, the LPQ stage-1 shelf chase fell and looped: "追怪但不跳上平台打"); 67: one-way-island repair - shelves with no inbound edge (the LPQ stage-1 tower's -2288/-1924 mob rows: >DOWN_JUMP_MAX_DROP_PX from above, jump-gap unsimulable, no rope) get an escapable-landing-gated straight-drop edge from the row above, so mobs on them stay pathable and the chase never degrades to pacing the floor above; 66: flight bound clamped to the standable foothold AABB (was max(VR, tree bounds)) - arcs that crossed the platform edge into a map's full-height no-foothold VR margin (Eos Tower 920010100's x=220..359 band) free-fell forever; the tightened boundary invalidates baked arcs that reached past the standable extent (old v65 caches parked in dead v65/); 65: dead-region arc prune - DROP/JUMP arcs landing in regions the bot can never leave are cut to a fixpoint (the escape-hatch deep drop must not land the bot in a one-way pit: LPQ stage 3's y-242 pit under a forbidFallDown stage row); 64: escape-hatch deep-drop edge (a region with no capped descent edge gets one full-descent straight drop to its deepest landing, dead ends like the 玩具塔 floor-1 R5 vanish); 51: kinetic slippery model + snowshoes; 52: brake-to-stop landings; 53: glide-unless-edge stop policy (slipperyStopDir); 56: uncap straight-drop launch windows (full droppable span, no +/-20 fragmentation); 57: remove the (empirically wrong) 300px down-jump drop cap - down-jumps fall until landing; 58: rope-grab reach counts descent below the ledge (mid-rope jump-grabs from adjacent platforms); 59: fall-sim caps to map height not 1500ms - long single-fall descents (tall shafts: Ellinia tree, Perion) now generate DROP/JUMP/ROPE edges; 60: re-cap drops for organic descent - walk-offs capped at MAX_DROP_PX, down-jumps at the tighter DOWN_JUMP_MAX_DROP_PX, and down-jumps carry DOWN_JUMP_COST_PENALTY_MS so the pathfinder prefers ropes/walk-offs over plummeting an entire vertical map; 61: widened rope top-exit probe (BotPhysicsEngine.findTopExitLanding) - accept a step-off foothold slightly above/below the rope top and a few px off-axis, so uneven/slanted ladder heads mint a clean CLIMB step-off edge instead of only ballistic top jump-offs; 62: cache filename now encodes snowShoes (the 4th key dimension) - old three-dimension filenames are unreadable by design, and the bump parks them in a dead v61/ directory that can be deleted wholesale; 63: inset every JUMP launch window by one walk step before stamping it on the edge - an edge-pressed window let the executor's +/-walkStep launch phase overfly a small platform and the bot fall to the bottom
 
     // Drop caps for organic descent (re-added; v57 had removed the old single cap). A bot must
     // never plummet down a whole vertical map. Two distinct downward moves, treated differently:
@@ -1542,9 +1542,38 @@ final class BotNavigationGraphProvider {
             return;
         }
 
-        // Ballistic fall from ledge at max walk velocity — single simulation call.
+        // Ballistic fall from ledge at max walk velocity.
         int stepX = BotPhysicsEngine.walkStep(map, movementProfile) * direction;
-        BotPhysicsEngine.JumpLanding landing = BotPhysicsEngine.simulateFallLanding(map, endpoint, stepX);
+
+        // Ours (the walk-off edge the bot actually flies): the flight is simulated from where the
+        // executor really leaves the ground, not from the authoured ledge pixel. The executor walks
+        // the runway with the direction held and leaves at the first pixel past the ledge; the
+        // head-pixel fall starts one step earlier, over the gap, so the two disagree by a step.
+        // Where a same-row neighbour sits inside one ground-step snap (922010800's crate rows: an
+        // 8px gap against a 6px step, well inside MAX_SNAP_DROP) the bot steps across and never
+        // descends, yet the head-pixel fall reported a descent - the bake stamped a descent that
+        // cannot be performed, and a route through it ping-pongs between two rows (the crate-stair
+        // sway, ended only by the 8s no-progress give-up, which replans the same route).
+        //
+        // The walk starts AT REST from the runway anchor. That anchor is the edge's precise
+        // waypoint, and a walk-off edge's precise stop distance is 1px (preciseNavStopDist), so
+        // the bot does settle there before holding the direction. Seeding full speed here would
+        // validate a flight the bot only flies when it happens to arrive already sprinting.
+        //
+        // A null verdict (the walk is clamped at the lip) keeps the previous, fall-based behaviour:
+        // that is the pixel the executor's own void guard falls from.
+        BotPhysicsEngine.WalkOffLanding liveWalkOff = BotPhysicsEngine.simulateWalkOffLanding(
+                map, startPoint, direction, BotPhysicsEngine.initialGroundTravelState(startPoint),
+                movementProfile);
+        BotPhysicsEngine.JumpLanding landing;
+        if (liveWalkOff != null) {
+            if (liveWalkOff.landing().point().y <= liveWalkOff.launchPoint().y + 4) {
+                return; // walking this way never descends: no drop edge exists here
+            }
+            landing = liveWalkOff.landing();
+        } else {
+            landing = BotPhysicsEngine.simulateFallLanding(map, endpoint, stepX);
+        }
         if (landing == null) {
             return;
         }
@@ -1554,19 +1583,24 @@ final class BotNavigationGraphProvider {
         if (below == null || below.id == from.id) {
             return;
         }
-        if (landing.point().y <= endpoint.y + 4) {
+        // Measure the drop from where the bot LEAVES the ledge. The runway anchor and the exit
+        // pixel differ (by the runway, and by where the walk actually lets go), so using the
+        // anchor here would over- or under-state the fall on sloped and stepped runways.
+        int ledgeY = liveWalkOff != null ? liveWalkOff.launchPoint().y : endpoint.y;
+        if (landing.point().y <= ledgeY + 4) {
             return;
         }
         // Cap how far a walk-off fall may drop, so bots don't fall off a ledge into a full-map shaft.
-        if (landing.point().y - endpoint.y > MAX_DROP_PX) {
+        if (landing.point().y - ledgeY > MAX_DROP_PX) {
             return;
         }
 
-        // Reuse the landing we already simulated: estimateFallLandingTimeMs re-runs the identical
-        // simulateLanding(start, 0f, stepX, 0L) and returns landing.timeMs(), and `landing` is
-        // non-null here (null returned above), so the number is provably the same.
-        int travelMs = landing.timeMs()
-                + estimateHorizontalTravelTimeMs(actualRunway, movementProfile);
+        // Cost: the walked runway + flight when the live walk-off gave a verdict (its own timer
+        // already covers both halves), otherwise the fall time plus the runway estimate. Adding the
+        // runway estimate to the walk-off's timer would count the runway twice.
+        int travelMs = liveWalkOff != null
+                ? liveWalkOff.travelTimeMs()
+                : landing.timeMs() + estimateHorizontalTravelTimeMs(actualRunway, movementProfile);
 
         addEdge(from.id, below.id, BotNavigationGraph.EdgeType.DROP,
                 startPoint,
