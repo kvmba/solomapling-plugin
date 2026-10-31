@@ -107,24 +107,35 @@ public abstract class PartyQuestBot extends BotSM implements GrindTickRegistry.P
     private static final int MAX_CATCHUP_HOPS = 3;
 
     /**
-     * How fast a bot that is behind the party re-decides, in ms. A bot left in the previous room
-     * is by definition on a map no player is watching, so the default unobserved cadence
-     * ({@link BotSM#lowPriorityDelayMs}, 36-48s) applies to it - one room per 36-48s against a
-     * party that advances one room per stage, which is exactly how a run loses one bot per stage.
-     * Catch-up is a short, bounded errand (a few rooms at most), so it is paced at the normal
-     * observed cadence instead; the moment the bot shares the leader's map the ordinary cadence
-     * takes over again.
+     * How fast a bot working the run re-decides, in ms.
+     *
+     * <p>A quest room is by definition a map no real player is watching, so the default
+     * unobserved cadence ({@link BotSM#lowPriorityDelayMs}, 36-48s) is what every stage decision
+     * in one used to run at. Catch-up was already paced at this value, but only while the leader
+     * stood on a different map - so the two cases that matter most fell straight through to
+     * 36-48s: a bot that had finished its own sub-room and was back on the leader's map (it
+     * claims the next room on its next tick), and a run whose leader does not resolve a Character
+     * at all ({@link #partyLeader} answers null for an offline leader, and a bot-led party may
+     * answer the bot itself). Both showed up as "enters a sub-room alone, comes back to the main
+     * map and just stands there for a long while".
+     *
+     * <p>The gate is "this MAP belongs to a run instance", not "inside the quest's map set": a
+     * recruit lobby or another public map that a quest happens to list in
+     * {@link #isInsideQuest(int)} carries no instance, so a bot standing there keeps the slow
+     * background cadence - a hall of idle runners must not turn into a busy one. The map's own
+     * instance is read rather than the bot's: a room-to-room walk unregisters and re-registers
+     * the character on the way through ({@code Character.changeMap}), so the character's field is
+     * momentarily null exactly when the returning bot is deciding what to do next.
      */
-    private static final long CATCHUP_DELAY_MS = 2_500L;
+    private static final long IN_RUN_DELAY_MS = 2_500L;
 
     @Override
     protected long lowPriorityDelayMs() {
         Character bot = getChr();
-        if (bot != null && bot.getMap() != null && isInsideQuest(bot.getMapId())) {
-            Character leader = partyLeader();
-            if (leader != null && leader.getMapId() != bot.getMapId()) {
-                return CATCHUP_DELAY_MS;
-            }
+        if (bot != null && bot.getMap() != null
+                && isInsideQuest(bot.getMapId())
+                && bot.getMap().getEventInstance() != null) {
+            return IN_RUN_DELAY_MS;
         }
         return super.lowPriorityDelayMs();
     }

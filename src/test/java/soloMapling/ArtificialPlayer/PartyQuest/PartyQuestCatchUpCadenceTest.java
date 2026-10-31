@@ -50,25 +50,50 @@ class PartyQuestCatchUpCadenceTest {
     }
 
     @Test
-    void aBehindBotReDecidesAtTheObservedCadence() throws Exception {
+    void aBotWorkingTheRunReDecidesFast() throws Exception {
         String body = methodBody(source(), "protected long lowPriorityDelayMs()");
         assertTrue(body.contains("isInsideQuest"),
-                "the fast cadence is for catching up INSIDE a run, not for idling in town");
-        assertTrue(body.contains("leader.getMapId() != bot.getMapId()"),
-                "the fast cadence applies only while this bot is behind the leader");
-        assertTrue(body.contains("CATCHUP_DELAY_MS"), "the catch-up pace must be its own constant");
+                "the fast cadence is for the run, not for idling in town");
+        assertTrue(body.contains("getMap().getEventInstance() != null"),
+                "the fast cadence is for maps that belong to the run's instance");
+        assertTrue(body.contains("IN_RUN_DELAY_MS"), "the in-run pace must be its own constant");
         assertTrue(body.contains("super.lowPriorityDelayMs()"),
-                "a bot that is not behind keeps the ordinary cadence exactly");
+                "a bot outside the run keeps the ordinary cadence exactly");
+    }
+
+    /**
+     * A recruit lobby must not be pushed onto the fast wheel. Three quests list a public map in
+     * {@code isInsideQuest}: BossRush's host map (970030000, which is also its recruit point),
+     * Carnival's two lobbies and Ariant's coliseum lobby. Those maps carry no instance, so the
+     * instance gate is what keeps a hall full of idle runners on the background cadence.
+     *
+     * <p>The MAP's instance is the right one to read, not the character's: a room-to-room walk
+     * unregisters and re-registers the character mid-warp, so the character's field is null for a
+     * moment exactly when a returning bot decides its next move - which would drop it back onto
+     * the 36-48s wheel at the very moment this fix exists for.
+     */
+    @Test
+    void aPublicLobbyMapKeepsTheSlowBackgroundCadence() throws Exception {
+        String body = methodBody(source(), "protected long lowPriorityDelayMs()");
+        assertTrue(body.contains("getMap().getEventInstance()"),
+                "isInsideQuest alone is not enough - it contains public lobby maps, and the "
+                        + "pace would turn every empty recruit hall into a busy one");
+        assertFalse(body.contains("getChr().getEventInstance()"),
+                "the character's instance is nulled during a room-to-room warp; read the map's");
+        assertFalse(body.contains("partyLeader"),
+                "the pace must not depend on where the leader is: a bot back on the leader's "
+                        + "map (or a leader that resolves no Character) is still inside the run");
     }
 
     @Test
     void catchUpPaceBeatsTheUnobservedDefault() throws Exception {
         String java = source();
-        long catchUp = Long.parseLong(
-                java.replaceAll("(?s).*CATCHUP_DELAY_MS = ([0-9_]+)L;.*", "$1").replace("_", ""));
+        long inRun = Long.parseLong(
+                java.replaceAll("(?s).*IN_RUN_DELAY_MS = ([0-9_]+)L;.*", "$1").replace("_", ""));
         // BotSM's unobserved cadence is 36_000 + rand(12_000).
-        assertTrue(catchUp <= 4_000,
-                "catching up has to be much faster than the 36-48s unobserved wheel; got " + catchUp);
+        assertTrue(inRun <= 4_000,
+                "a bot working the run must re-decide in seconds, not on the 36-48s wheel; got "
+                        + inRun);
     }
 
     @Test
