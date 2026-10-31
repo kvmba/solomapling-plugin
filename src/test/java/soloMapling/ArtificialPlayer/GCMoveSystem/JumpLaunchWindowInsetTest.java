@@ -44,23 +44,31 @@ class JumpLaunchWindowInsetTest {
     }
 
     @Test
-    void aWindowNarrowerThanTwiceTheMarginCollapsesToItsCentreNotEmpty() {
+    void aWindowNarrowerThanTwiceTheMarginKeepsItsWholeValidatedSpanWhenItCan() {
         BotNavigationGraph.Region r = region(-100, 100, 0);
-        // Window [40,44], margin 6 -> 46 > 38: too thin to inset, must not empty.
+        // Window [40,44], margin 6 -> 46 > 38: too thin to inset, must not empty. The window is
+        // INTERIOR (nowhere near the ledge's ends), so the whole span is kept: a single centre
+        // pixel is stepped straight over by a full-speed bot, which then paces in front of the
+        // takeoff point (the dense-stair sway). Every pixel in the span is one the builder
+        // validated, so keeping it cannot overfly anything.
         int[] w = BotNavigationGraphProvider.insetJumpLaunchWindow(r, 40, 44, 6);
         assertTrue(w[0] <= w[1], "the window must never be emptied (a lost edge strands bots)");
-        assertEquals(42, w[0], "collapses to the window centre");
-        assertEquals(42, w[1]);
+        assertEquals(40, w[0], "the interior span keeps its validated min");
+        assertEquals(44, w[1], "the interior span keeps its validated max");
+        assertTrue(w[1] - w[0] >= 1, "an interior thin window must stay wider than one pixel");
     }
 
     @Test
-    void aThinWindowPressedAgainstTheEdgeIsPulledOffTheEdge() {
+    void aThinWindowPressedAgainstTheEdgeCollapsesToAPointInsideIt() {
         BotNavigationGraph.Region r = region(-100, 220, 0);
-        // The pathological case: a 2px window sitting on the ledge's last pixels.
+        // The pathological case: a 2px window sitting on the ledge's last pixels. Here the
+        // collapse is what protects the arc: a takeoff one phase-step past the validated span
+        // overflies the target and the bot falls (the Orbis Tower / shelf-1 report). Nothing
+        // beyond the ledge exists to walk onto, so a single interior point is the right answer.
         int[] w = BotNavigationGraphProvider.insetJumpLaunchWindow(r, 218, 220, 6);
         assertTrue(w[1] <= 220, "must stay on the ledge");
         assertTrue(w[1] < 220, "the collapsed point must be pulled inside the ledge edge");
-        assertEquals(w[0], w[1], "a collapsed window is a single point");
+        assertEquals(w[0], w[1], "an edge-pressed thin window collapses to a single point");
     }
 
     @Test
