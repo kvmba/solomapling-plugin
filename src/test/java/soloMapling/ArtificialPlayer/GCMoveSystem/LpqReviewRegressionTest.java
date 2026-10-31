@@ -386,7 +386,7 @@ class LpqReviewRegressionTest {
     }
 
     @ParameterizedTest
-    @EnumSource(value = Job.class, names = {"HUNTER", "CLERIC"})
+    @EnumSource(value = Job.class, names = {"HUNTER"})
     void stage7RangedBotWalksToAFiringPositionAndKeepsItOnCombatBeats(Job job) throws Exception {
         MapleMap map = realMap(922010700);
         createBot(map, new Point(-43, -783), job);
@@ -438,8 +438,28 @@ class LpqReviewRegressionTest {
         }
     }
 
+    /**
+     * A cast is not the "ranged personnel" the frame asks for. Stage 7's shelves stay out of a
+     * mage's reach: it is never offered a firing ledge, so it never snipes the three Ratz from
+     * across the room. (Its own in-range AoE is untouched - only the remote role is refused.)
+     */
+    @Test
+    void aMageIsNeverGivenAStage7FiringPosition() throws Exception {
+        MapleMap map = realMap(922010700);
+        createBot(map, new Point(-43, -783), Job.CLERIC);
+        state.movementProfile = BotMovementProfile.fromCharacter(bot);
+        BotNavigationGraphProvider.getGraph(map, state.movementProfile);
+        Monster ratz = monster(9300170, 99150, new Point(224, -1044));
+        inject(map, ratz);
+        assertNull(BotAttackDriver.firingPositions(bot, ratz),
+                "a mage gets no remote firing ledge");
+        LudiStages.gatherPasses(bot, 7);
+        assertNull(state.moveTarget,
+                "with no firing ledge there is no shot to walk to, so the mage stays put");
+    }
+
     @ParameterizedTest
-    @EnumSource(value = Job.class, names = {"HUNTER", "CLERIC"})
+    @EnumSource(value = Job.class, names = {"HUNTER"})
     void actualAutoBeatsKillAllThreeStage7Targets(Job job) throws Exception {
         MapleMap map = realMap(922010700);
         createBot(map, new Point(-43, -783), job);

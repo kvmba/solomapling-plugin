@@ -175,11 +175,19 @@ public final class BotAttackDriver {
         return selection != null && selection.targets().contains(mob);
     }
 
-    /** Valid shooter coordinates for the sustained projectile, using its real hit box. */
+    /**
+     * Valid shooter coordinates for the sustained projectile, or null when this bot has none.
+     *
+     * <p>THROWN PROJECTILES ONLY. The quests that put a body on a shelf with no inbound edge -
+     * LPQ stage 7's three Ratz (2040042.js: "You need ranged personnel here") and stage 9's
+     * altar - ask for 弓/弩/镖/子弹. A cast is rendered through the magic packet and is
+     * not that role: giving it this same remote firing ledge made mages snipe across the whole
+     * room, so the search now answers only for Route.RANGED.
+     */
     public static Rectangle firingPositions(Character bot, Monster mob) {
         WeaponType weapon = BotAttack.resolveEquippedWeaponType(bot);
         BotAttackProfile profile = gateProfile(bot, primaryProfile(bot), weapon);
-        if (profile == null || profile.route == BotAttackProfile.Route.CLOSE) return null;
+        if (profile == null || profile.route != BotAttackProfile.Route.RANGED) return null;
         Rectangle box = reachBox(new Point(), profile, weapon, false);
         if (mob.isBoss()) box = new Rectangle(box.x, box.y - BOSS_Y_PAD, box.width, box.height + 2 * BOSS_Y_PAD);
         Point target = mob.getPosition();

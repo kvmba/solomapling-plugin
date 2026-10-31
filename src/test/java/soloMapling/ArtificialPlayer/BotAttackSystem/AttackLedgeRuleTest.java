@@ -73,4 +73,15 @@ class AttackLedgeRuleTest {
         assertTrue(body.contains("onAttackableSurface(bot.getMap(), botPos, m, profile.route)"),
                 "melee rejects a foreign ledge while projectiles retain their exemption");
     }
+
+    /**
+     * The remote-firing ROLE is thrown-projectile only. A mage keeps its own in-range casts (the
+     * attack-layer exemption is untouched) but is never handed a firing ledge to snipe from.
+     */
+    @Test
+    void firingPositionsIsAGunToTheRangedRouteOnly() throws Exception {
+        String body = methodBody(source(), "public static Rectangle firingPositions(");
+        assertTrue(body.contains("profile.route != BotAttackProfile.Route.RANGED"),
+                "a mage has no firing ledge: the stage-7 crew is thrown-projectile only");
+    }
 }
