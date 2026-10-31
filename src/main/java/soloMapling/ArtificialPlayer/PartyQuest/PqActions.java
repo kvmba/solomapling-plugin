@@ -1432,10 +1432,31 @@ public final class PqActions {
         // before the walk gets there, so this walk always ends in a landed swing or a timeout.
         Point mp = target.getPosition();
         boolean inReach = BotAttackDriver.canReach(bot, target);
-        if (state.reachableOnly && inReach && GCMovement.isSettled(bot)) {
-            stopOwnChaseGoal(bot, state);
+        if (inReach) {
+            // The swing already fired at the top of this beat, so closing further changes nothing
+            // about the damage - it only moves the bot into the mob's own touch box. That is the
+            // whole reported defect: a ranged bot shooting from right next to the boss. The reach
+            // box is symmetric around the bot, so `canReach` holds at distance ZERO as well - a
+            // chase that stopped only on `!inReach` walked bowmen and mages onto their target.
+            if (!GCMovement.isSettled(bot)) {
+                // Mid arc (a jump or a knockback). Keep the landing order the driver already
+                // holds: re-issuing the mob's floor here is what turned every hit's knockback
+                // into "walk back into the boss" once the bot was airborne.
+                return;
+            }
             state.clearProgress();
-            return; // already at a firing position: do not walk across to the mob's own ledge
+            Point back = standoffGoal(bot, pos, mp);
+            if (back == null) {
+                stopOwnChaseGoal(bot, state);
+                return; // at a firing position: hold it, never walk on top of the target
+            }
+            // A projectile kit with the mob already inside its comfort band steps back out of it,
+            // firing on the move - the same rule the grind layer's ranged style kites by.
+            state.lastChaseGoal = GCMovement.moveTracking(bot, back.x, back.y, CHASE_LEASH_PX);
+            if (seekTraceEnabled(bot.getId())) {
+                seekTrace(bot, state, target, mp, null, back, "standoff");
+            }
+            return;
         }
 
         // LIVE PIXEL, STABLE REGION: the nav layer must not have its goal's REGION flip beat to beat
@@ -1534,13 +1555,12 @@ public final class PqActions {
         // A WALKING mob never lets the manhattan best improve: it walks away as fast as the bot closes,
         // so the distance oscillates inside a band and "closed by 20px more than ever before" never
         // happens. Judged that way the chase timed out every 4s, dropped the target and re-armed it a
-        // beat later - the bot lost its order on a timer. Being IN THE FIGHT is progress: the swing
-        // actually lands on that mob this beat, which is what this deadline exists to detect the
-        // absence of. The test is the attack driver's own reach predicate (reach box + facing +
-        // same-ledge), never a distance radius: an X-only or manhattan radius admits a mob 80px
-        // straight up through a 60px reach box or one on a ledge above, and the deadline then
-        // renews forever on a target the bot can never touch.
-        if (inReach || mobDist < state.bestDist - PROGRESS_EPS_PX) {
+        // beat later - the bot lost its order on a timer. An IN-REACH beat is not progress either:
+        // those hold their position above and never reach this deadline. So the deadline only ever
+        // measures a genuine approach, and "no closer for 4s" is exactly the unreachable-mob case it
+        // exists to detect. The reach test itself would be an X-only radius otherwise, which admits a
+        // mob 80px straight up through a 60px reach box or one on a ledge above.
+        if (mobDist < state.bestDist - PROGRESS_EPS_PX) {
             state.bestDist = Math.min(state.bestDist, mobDist);
             state.deadline = movementNowMs() + RETARGET_TIMEOUT_MS;
         } else if (movementNowMs() > state.deadline) {
@@ -1567,6 +1587,51 @@ public final class PqActions {
             seekTrace(bot, state, target, mp, mobFloor, issued, "chase");
         }
     }
+
+    /**
+     * The point a projectile kit backs off to when its target closes inside its comfort band, or
+     * null when there is nothing to do: a melee kit (it must close), a target still comfortably
+     * away, or one on a separate ledge where stepping sideways would only lose the shot.
+     *
+     * <p>This is the PQ chase's half of the rule the grind layer's ranged style already applies
+     * ({@code EngageBeat.kiteIfTooClose} - step back and fire mid-retreat). Without it a bowman or
+     * mage holds no gap at all: the mob walks up, the bot keeps shooting from inside its touch box,
+     * and the party's ranged members eat the boss's contact damage for the whole fight.
+     *
+     * <p>The step is measured from the BOT's own x, so backing out of the band always ends outside
+     * it: the band between the standoff and the reach is the hysteresis, and a stationary mob can
+     * never make the bot pace in and out. A mob that keeps walking in is simply answered with
+     * another step on the next beat - the bot fires mid-retreat on every one of them.
+     */
+    private static Point standoffGoal(Character bot, Point pos, Point mp) {
+        int standoff = BotAttackDriver.standoffX(bot);
+        if (standoff <= 0 || Math.abs(mp.x - pos.x) >= standoff) {
+            return null;
+        }
+        if (GCMovement.onDifferentLedge(bot.getMap(), pos.x, pos.y, mp.x, mp.y)) {
+            return null; // a shot across a gap IS this position: never trade it for distance
+        }
+        int dir = (pos.x >= mp.x) ? 1 : -1; // step further from the mob
+        // Measured from the BOT, never from the mob's own x: a target taken on the mob's far
+        // side is a walk straight through it, and a chasing mob meets the bot in the middle.
+        int step = Math.max(STANDOFF_MIN_STEP_PX, standoff - Math.abs(pos.x - mp.x));
+        Point ground = GCMovement.groundPointBelow(bot.getMap(), pos.x + dir * step, pos.y);
+        // Only a row the bot can already stand on: a point over the ledge edge would walk it off
+        // the platform instead of backing away, so an edge honestly reads as "no room to retreat".
+        return (ground != null && Math.abs(ground.y - pos.y) <= STANDOFF_ROW_PX) ? ground : null;
+    }
+
+    /**
+     * How far the retreat target may sit off the bot's own row and still count as the same floor
+     * (a slope, a step, a stacked anchor - not the drop past a ledge edge).
+     */
+    private static final int STANDOFF_ROW_PX = 40;
+
+    /**
+     * Smallest retreat step that still counts as backing off. Below this the bot would spend a
+     * beat re-issuing a motion the driver's 8px arrival band swallows whole.
+     */
+    private static final int STANDOFF_MIN_STEP_PX = 40;
 
     /**
      * Retract the chase goal this episode handed the driver, and only that one.

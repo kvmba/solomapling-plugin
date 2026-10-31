@@ -307,18 +307,131 @@ class LpqReviewRegressionTest {
         assertEquals(new Point(600, 0), state.moveTarget);
     }
 
+    /**
+     * A bot that is already in reach keeps the order it is flying to, mid-arc.
+     *
+     * <p>The retired shape of this check was "some goal must exist after the beat", which only the
+     * buggy fall-through satisfied: an airborne in-reach bot re-issued the MOB'S OWN PIXEL as its
+     * goal, so every knockback came back as "walk into the mob". The invariant is narrower and it
+     * is the one that matters: the landing order survives, and the chase never replaces it with the
+     * mob's pixel.
+     */
     @Test
-    void enteringAttackRangeMidFlightDoesNotRetireTheLandingOrder() throws Exception {
+    void enteringAttackRangeMidFlightKeepsItsLandingOrder() throws Exception {
         MapleMap map = map(922019991);
         floor(map, 1, -100, 0, 800);
         createBot(map, new Point(100, -40), Job.HUNTER);
+        Monster target = monster(9300170, 99129, new Point(200, 0));
+        inject(map, target);
+        GCMovement.move(bot, 100, 0); // the landing order the arc is flying to
+        Point landing = new Point(state.moveTarget);
         state.inAir = true;
-        inject(map, monster(9300170, 99129, new Point(200, 0)));
         try (var effects = mockStatic(BotAttackEffects.class)) {
             PqActions.seekAndAttack(bot, true);
-            assertNotNull(state.moveTarget, "an airborne shot is not a settled firing position");
+            assertEquals(landing, state.moveTarget, "an airborne shot keeps its landing order");
+            assertNotEquals(target.getPosition(), state.moveTarget,
+                    "and must never re-aim at the mob's own pixel");
             assertTrue(state.inAir);
         }
+    }
+
+    /**
+     * A projectile kit that can already hit the mob must not keep walking at it. The reach box is
+     * symmetric around the bot, so {@code canReach} is TRUE at distance zero as well - a chase that
+     * only stopped on {@code !inReach} walked bowmen and mages onto the boss they were shooting,
+     * which is the reported "远程职业也挨着 boss 打".
+     */
+    @Test
+    void aRangedKitHoldsItsPositionInsteadOfWalkingOnTopOfTheMob() throws Exception {
+        MapleMap map = map(922019993);
+        floor(map, 1, -600, 0, 900);
+        createBot(map, new Point(0, 0), Job.HUNTER);
+        inject(map, monster(9300170, 99140, new Point(400, 0)));
+        try (var effects = mockStatic(BotAttackEffects.class)) {
+            for (int beat = 0; beat < 200; beat++) {
+                PqActions.seekAndAttack(bot);
+                tick();
+            }
+            assertNull(state.moveTarget, "a target already inside the reach box is not a walk order");
+            assertEquals(0, bot.getPosition().x, "the bot must not creep toward the mob either");
+        }
+    }
+
+    /**
+     * The other half: a mob that closes the gap cannot leave a ranged kit standing inside its touch
+     * box. The bot steps back out to {@link BotAttackDriver#standoffX} and fires on the move - the
+     * grind layer's ranged kiting rule, which the PQ chase never applied.
+     */
+    @Test
+    void aClosingMobCannotLeaveARangedKitInTouchRange() throws Exception {
+        MapleMap map = map(922019994);
+        floor(map, 1, -3000, 0, 3000);
+        createBot(map, new Point(0, 0), Job.HUNTER);
+        AtomicReference<Point> mobPos = new AtomicReference<>(new Point(400, 0));
+        Monster mob = monster(9300170, 99141, new Point(400, 0));
+        when(mob.getPosition()).thenAnswer(inv -> mobPos.get());
+        inject(map, mob);
+        int standoff = BotAttackDriver.standoffX(bot);
+        assertTrue(standoff > 0, "a bowman holds a standoff");
+        int tightest = Integer.MAX_VALUE;
+        try (var effects = mockStatic(BotAttackEffects.class)) {
+            for (int beat = 0; beat < 400; beat++) {
+                Point before = bot.getPosition();
+                Point chase = mobPos.get();
+                // The mob walks at the bot, like a boss chasing its nearest player.
+                int step = Math.min(6, Math.abs(chase.x - before.x));
+                if (step > 0) {
+                    mobPos.set(new Point(chase.x > before.x ? chase.x - step : chase.x + step, chase.y));
+                }
+                PqActions.seekAndAttack(bot);
+                tick();
+                if (beat > 20) {
+                    tightest = Math.min(tightest, Math.abs(bot.getPosition().x - mobPos.get().x));
+                }
+            }
+        }
+        assertTrue(tightest >= standoff - 30,
+                "a chasing mob must never close inside the standoff; tightest=" + tightest
+                        + " standoff=" + standoff + " bot=" + bot.getPosition() + " mob=" + mobPos.get());
+    }
+
+    /**
+     * Cornered against the ledge edge a ranged kit cannot hold the band - what it must never do is
+     * walk TOWARD the mob it is already too close to (the old fall-through did exactly that, aiming
+     * at the mob's own pixel). It stands and fires, and the standoff resumes when room returns.
+     */
+    @Test
+    void aCorneredRangedKitStandsAndFiresInsteadOfWalkingIntoTheMob() throws Exception {
+        MapleMap map = map(922019996);
+        floor(map, 1, -100, 0, 300);
+        createBot(map, new Point(250, 0), Job.HUNTER);
+        inject(map, monster(9300170, 99143, new Point(200, 0)));
+        try (var effects = mockStatic(BotAttackEffects.class)) {
+            PqActions.seekAndAttack(bot);
+            assertTrue(state.moveTarget == null
+                            || state.moveTarget.x >= 250,
+                    "a cornered kit never walks toward the mob; goal=" + state.moveTarget);
+        }
+    }
+
+    /** A melee kit still closes - the standoff is a projectile rule, not a retreat for everyone. */
+    @Test
+    void aMeleeKitStillClosesToItsOwnReach() throws Exception {
+        MapleMap map = map(922019995);
+        floor(map, 1, -600, 0, 900);
+        createBot(map, new Point(0, 0), Job.BEGINNER);
+        Monster mob = monster(9300005, 99142, new Point(400, 0));
+        inject(map, mob);
+        try (var effects = mockStatic(BotAttackEffects.class)) {
+            for (int beat = 0; beat < 600; beat++) {
+                PqActions.seekAndAttack(bot);
+                tick();
+            }
+        }
+        int dx = Math.abs(bot.getPosition().x - 400);
+        assertTrue(dx <= BotAttackDriver.attackReachX(bot),
+                "a melee kit must close to its own reach; dx=" + dx);
+        assertEquals(0, BotAttackDriver.standoffX(bot), "and it owns no standoff at all");
     }
 
     @ParameterizedTest
@@ -336,6 +449,55 @@ class LpqReviewRegressionTest {
         }
     }
 
+    // =========================================================================
+    // Stage 9 - the boss
+    // =========================================================================
+
+    /**
+     * A ranged kit must not fight Alishar from inside his touch box.
+     *
+     * <p>Two defects stacked here. The chase only stopped on {@code !canReach}, and the reach box
+     * is symmetric around the bot - so "in reach" held at distance ZERO and the bot kept walking
+     * onto the boss. And when the boss walked at the bot, nothing stepped back: a bowman stood
+     * still and fired while Alishar closed in. Measured before the fix: the bot ended at dx=1
+     * (touching) and, when the boss moved, at dx=0.
+     */
+    @Test
+    void stage9ARangedKitNeverFightsAlisharFromInsideHisTouchBox() throws Exception {
+        MapleMap map = realMap(922010900);
+        assumeTrue(map != null, "GMS083 Map.wz required");
+        createBot(map, new Point(-171, 178), Job.HUNTER);
+        AtomicReference<Point> bossPos = new AtomicReference<>(new Point(941, 184));
+        Monster boss = monster(9300012, 998120, new Point(941, 184));
+        when(boss.getPosition()).thenAnswer(inv -> bossPos.get());
+        when(boss.isBoss()).thenReturn(true);
+        inject(map, boss);
+        int standoff = BotAttackDriver.standoffX(bot);
+        assertTrue(standoff > 0, "a bowman holds a standoff");
+        int tightest = Integer.MAX_VALUE;
+        try (var effects = mockStatic(BotAttackEffects.class)) {
+            for (int beat = 0; beat < 500; beat++) {
+                Point before = bot.getPosition();
+                Point chase = bossPos.get();
+                // Alishar walks at the bot the way a live boss chases its nearest player.
+                int step = Math.min(2, Math.abs(chase.x - before.x));
+                if (beat > 60 && step > 0) {
+                    bossPos.set(new Point(chase.x > before.x ? chase.x - step : chase.x + step, chase.y));
+                }
+                LudiStages.applyChasePolicy(bot);
+                PqActions.seekAndAttack(bot);
+                tick();
+                if (beat > 60) {
+                    tightest = Math.min(tightest, Math.abs(bot.getPosition().x - bossPos.get().x));
+                }
+            }
+        }
+        assertTrue(tightest >= standoff - 40,
+                "Alishar must never be allowed inside the bowman's standoff; tightest=" + tightest
+                        + " standoff=" + standoff + " bot=" + bot.getPosition() + " boss=" + bossPos.get());
+    }
+
+    /** The altar summon stays best-effort and never blocks the fight (unchanged contract). */
     @Test
     void anUnreachableCrystalNeverArmsAWalkAndCannotBlockTheBoss() throws Exception {
         MapleMap map = map(922019975);

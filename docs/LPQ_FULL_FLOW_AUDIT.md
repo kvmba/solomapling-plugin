@@ -336,6 +336,25 @@ exitTrapRoom / exitDoorRoom 用最严格的 standsDownForLiveMove = GCMovement.h
 | 8 | 9后 | isInsideQuest 扩到 922011100；新增 breakBonusBoxes 只破 36 箱不拾取；workStage 不再在 stage 9 后 return true | 已修 |
 | 9 | 全局 | sweepOrphanDropOutside 加 canPathTo 过滤 | **不修**（见下） |
 | 10 | 5 | 隐身由物理线程单独在接触伤害检查前更新（110px 守卫行带），宏节拍不再启停；安全箱台和离图后取消自身维护的隐身 | 已修 |
+| 11 | 9 + 全局 | 追击只在 `!canReach` 时前进，而 reach box 是对称的——距离 0 也算"能打"，于是远程职业一路走到 boss 身上；给 projectile kit 定 standoff（射程一半）并在被逼近时后撤，近战仍 0 | 已修 |
+
+### 第 11 条：远程职业贴脸（根因）
+
+**现象**：玩具塔 101 boss 阶段，弓/弩/镖/法师像近战一样走到 Alishar 身边开火，被接触伤害打死。
+
+**根因链**（三处叠加，都在 PQ 战斗层）：
+
+1. `BotAttackProfile.ranged()/magic()` 只给 `reachX=450`（上限），`BotAttackDriver.reachBox` 把它当成以 bot 为中心的 ±450 矩形——**射程没有下限**，距离 0 也"合法命中"。
+2. `PqActions.seekAndAttack` 的唯一停止条件是 `inReach`，而它此前**只在 `reachableOnly` 阶段（LPQ 7/9）且 `isSettled` 时**才生效；其余所有 `seekAndAttack` 调用方（Kerning 5、BossRush、Papulatus、Dojo、Pyramid…）每拍都继续 `moveTracking` 走到怪物脚下，实测 HUNTER 停在 `dx=1`。
+3. boss 命中会走 `BotContactDamage.applyDamage → beginKnockback` 把 bot 打成 `inAir`，`GCMovement.isSettled` 立刻为 false，于是"已到位"分支被跳过，落回追击段——**每次挨打的击退都被翻译成"走回 boss 脚下"**。实测 `canReach=true` 却下发了 `moveTarget=(941,184)`（boss 的像素）。
+
+**修复**：
+
+- `BotAttackDriver.standoffX`：近战 0，投射类 `reachX/2`（与刷怪层 `EngageBeat.kiteIfTooClose` 同一条规则）。
+- `PqActions.seekAndAttack`：`inReach` 即停（不再限 `reachableOnly`）；空中（跳跃/击退）保持既有落点订单、绝不重新瞄准怪物像素；目标进入 comfort band 时按 bot 自身 x 后撤一步（不跨层、不越过台边）。
+- 进度计时不再把 `inReach` 当"进展"（那些拍已提前返回）——否则一个原地互射的目标永远不会被放弃。
+
+**验证**（真实 922010900 + 9300012）：修复前静态 boss 停在 `dx=1`、移动 boss 时 `dx=0`；修复后 500 拍全程 `tightest ≥ standoff-40`（225-40）。全量 1784 通过。
 
 ### 为什么第 9 条不修
 
