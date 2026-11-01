@@ -20,6 +20,9 @@ import soloMapling.ArtificialPlayer.BotAttackSystem.BotAuraState;
 import soloMapling.ArtificialPlayer.BotCommandsPack.BotAttack;
 import soloMapling.ArtificialPlayer.BotCommandsPack.DropCommands;
 import soloMapling.ArtificialPlayer.BotCommandsPack.SocialCommands;
+import soloMapling.ArtificialPlayer.BotGrindSystem.CombatSpacing;
+import soloMapling.ArtificialPlayer.BotGrindSystem.MovementStyle;
+import soloMapling.ArtificialPlayer.BotGrindSystem.MovementStylePolicy;
 import soloMapling.ArtificialPlayer.BotLogic;
 import soloMapling.ArtificialPlayer.BotMessagingSystem.CharacterStorage;
 import soloMapling.ArtificialPlayer.GCMoveSystem.GCMovement;
@@ -197,11 +200,17 @@ public final class PqActions {
      * next out-of-reach one. Callers only reach here with the drop already past
      * {@link #PICKUP_REACH_SQ}, so no arrival re-check is needed.
      */
-    private static void walkForPickup(Character bot, Point at) {
+    private static void walkForPickup(Character bot, MapItem drop) {
         SeekState control = seekStates.computeIfAbsent(bot.getId(), ignored -> new SeekState());
         synchronized (control) {
             if (!movementShielded(bot.getId()) && !reactorBeatArmed(bot)) {
-                GCMovement.move(bot, at.x, at.y, () -> nudgeStageTick(bot));
+                if (control.pickupMap != bot.getMap()) {
+                    control.pickupMap = bot.getMap();
+                    control.failedPickups.clear();
+                }
+                Point at = drop.getPosition();
+                GCMovement.move(bot, at.x, at.y, () -> nudgeStageTick(bot),
+                        () -> control.failedPickups.add(drop));
             }
         }
     }
@@ -993,7 +1002,7 @@ public final class PqActions {
                 // owns the driver, and the pile has the rest of its 3-minute despawn window to
                 // be walked to on a later tick.
                 if (!yieldsToLiveWalk(bot, at)) {
-                    walkForPickup(bot, at);
+                    walkForPickup(bot, drop);
                 }
                 continue; // out of reach; the pile is picked up on a later tick, up close
             }
@@ -1133,6 +1142,7 @@ public final class PqActions {
     // plans on the bot's best graph — a mismatch can only ever SKIP a re-check, never fake one:
     // a stale "pathable" self-heals through the driver's own no-path handling and the seek deadline.
     private static final Map<Integer, SeekState> seekStates = new java.util.concurrent.ConcurrentHashMap<>();
+    private static final int[] NO_LOOT_IDS = new int[0];
 
     /** Macro work and the combat sweep can seek concurrently. One monitor protects the whole episode,
      * not individual map operations: a kill/retarget must never clear another beat's progress halfway. */
@@ -1153,6 +1163,11 @@ public final class PqActions {
         // The goal the last chase beat handed the driver (the previous pixel when the candidate stayed
         // inside the dead-band). Only this exact goal may be retracted by the seek.
         Point lastChaseGoal;
+        Point retreatGoal;
+        final CombatSpacing spacing = new CombatSpacing();
+        MapleMap pickupMap;
+        // Movement failure callbacks run under the driver lock: never take SeekState's lock there.
+        final java.util.Set<MapItem> failedPickups = java.util.concurrent.ConcurrentHashMap.newKeySet();
         /** When set, the chase never falls back to an unreachable mob (see seekAndAttack). */
         boolean reachableOnly;
         final Map<Integer, PathabilityVerdict> pathability = new java.util.HashMap<>();
@@ -1163,6 +1178,8 @@ public final class PqActions {
         }
 
         void clearGoal() {
+            retreatGoal = null;
+            spacing.reset();
             anchorFloor = null;
             drift = 0;
             goal = null;
@@ -1221,6 +1238,11 @@ public final class PqActions {
      * of the bot's chase state.
      */
     public static void seekAndAttack(Character bot, boolean reachableOnly) {
+        seekAndAttack(bot, reachableOnly, NO_LOOT_IDS);
+    }
+
+    /** Fight and collect only the quest's named floor items before committing to another chase. */
+    public static void seekAndAttack(Character bot, boolean reachableOnly, int[] itemIds) {
         if (bot == null || bot.getMap() == null) {
             return;
         }
@@ -1248,8 +1270,19 @@ public final class PqActions {
                 attack(bot); // stage/box work owns steering, even for direct macro callers
                 return;
             }
+            if (itemIds.length > 0 && pickupBeforeChase(bot, combatLootRadius(bot), itemIds, STEPPED_ON_REACH_SQ)) {
+                attack(bot); // collect on the 250ms beat without suppressing shots along the way
+                return;
+            }
             seekAndAttack(bot, state);
         }
+    }
+
+    /** Include the shot's vertical span and drop landing spread (600px for the standard ranged kit). */
+    private static double combatLootRadius(Character bot) {
+        int reachX = BotAttackDriver.attackReachX(bot);
+        int reachY = BotAttackDriver.attackReachY(bot);
+        return Math.max(260, reachX + reachY);
     }
 
     /**
@@ -1275,9 +1308,22 @@ public final class PqActions {
         return BotLogic.checkForItemsOnFloor(bot, at, STEPPED_ON_REACH_PX, itemIds);
     }
 
+    /** Read the driver's live goal, not a flag that could survive a replaced/disappeared drop. */
+    public static boolean walkingToLoot(Character bot, int[] itemIds) {
+        if (itemIds.length == 0) return false;
+        Point goal = GCMovement.moveTargetOf(bot);
+        if (goal == null) return false;
+        Point pos = bot.getPosition();
+        if (Math.abs(pos.x - goal.x) <= 8 && Math.abs(pos.y - goal.y) <= 8) return false;
+        for (MapObject object : itemsOnFloorAt(bot, goal, itemIds)) {
+            if (object instanceof MapItem drop && canCollectFloorDrop(bot, drop)) return true;
+        }
+        return false;
+    }
+
     /**
      * Whether a pickup walk within {@code radiusPx} should take the wheel THIS beat: a matching
-     * drop is on the floor, out of reach, and the driver's current goal is not already it.
+     * drop is on the floor and out of reach. An existing walk to that drop keeps ownership.
      *
      * <p>This exists because looting and chasing were written as two calls in that order
      * ({@code seekAndAttack} then {@code loot}), and {@code loot}'s out-of-reach branch yields
@@ -1287,14 +1333,17 @@ public final class PqActions {
      * floor sweep ({@link #lootSteppedOn}) only covers 60px, so everything between 60px and the
      * caller's radius was simply never collected until the room went quiet.
      *
-     * <p>The order is therefore inverted, not the radius widened: when the drop is the nearest
-     * unfinished piece of work, it goes first and the chase resumes on the next beat (its target
-     * is sticky, and the retraction below only drops the ORDER, never the target).
+     * <p>The drop goes first; the chase resumes after collection. Only walking reach is extended
+     * for a ranged kill: actual pickup still uses the caller's proximity and entitlement rules.
      *
      * @return true when this call took the driver for a pickup walk; the caller must not issue
      *         another move this beat
      */
     public static boolean pickupBeforeChase(Character bot, double radiusPx, int[] itemIds) {
+        return pickupBeforeChase(bot, radiusPx, itemIds, PICKUP_REACH_SQ);
+    }
+
+    private static boolean pickupBeforeChase(Character bot, double radiusPx, int[] itemIds, double pickupReachSq) {
         if (bot == null || bot.getMap() == null || itemIds == null || itemIds.length == 0
                 || bot.getPosition() == null) {
             return false;
@@ -1304,13 +1353,13 @@ public final class PqActions {
             if (movementShielded(bot.getId()) || reactorBeatArmed(bot)) {
                 return false; // a staged walk / box beat already owns this beat
             }
+            if (walkingToLoot(bot, itemIds)) return true;
             List<MapObject> found = BotLogic.checkForItemsOnFloor(bot, bot.getPosition(), radiusPx, itemIds);
             Point botPos = bot.getPosition();
-            Point nearest = null;
+            MapItem nearest = null;
             double bestSq = Double.MAX_VALUE;
             for (MapObject o : found) {
-                if (!(o instanceof MapItem drop) || !isFloorLoot(drop)
-                        || !DropCommands.botCanLoot(bot, drop)) {
+                if (!(o instanceof MapItem drop) || !canCollectFloorDrop(bot, drop)) {
                     continue;
                 }
                 Point ip = drop.getPosition();
@@ -1318,12 +1367,13 @@ public final class PqActions {
                     continue;
                 }
                 double dsq = botPos.distanceSq(ip);
-                if (dsq <= PICKUP_REACH_SQ) {
-                    return false; // in reach: loot() picks it up inline, no walk needed
+                if (dsq <= pickupReachSq) {
+                    continue; // the caller's paced pickup handles it without a walk
                 }
-                if (dsq < bestSq) {
+                if (dsq < bestSq && !soloMapling.ArtificialPlayer.BotTypes.Ludi.LudiStages.refusesFloor(bot, ip)
+                        && GCMovement.canPathTo(bot, ip.x, ip.y)) {
                     bestSq = dsq;
-                    nearest = ip;
+                    nearest = drop;
                 }
             }
             if (nearest == null) {
@@ -1332,8 +1382,32 @@ public final class PqActions {
             // Retract only the chase order this episode issued, then hand the driver the drop.
             stopOwnChaseGoal(bot, control);
             control.clearGoal();
-            GCMovement.move(bot, nearest.x, nearest.y, () -> nudgeStageTick(bot));
+            walkForPickup(bot, nearest);
             return true;
+        }
+    }
+
+    private static boolean canCollectFloorDrop(Character bot, MapItem drop) {
+        if (!isFloorLoot(drop) || !DropCommands.botCanLoot(bot, drop)) return false;
+        SeekState control = seekStates.get(bot.getId());
+        if (control == null) return true;
+        synchronized (control) {
+            if (control.pickupMap != bot.getMap()) {
+                control.pickupMap = bot.getMap();
+                control.failedPickups.clear();
+            }
+            return !control.failedPickups.contains(drop);
+        }
+    }
+
+    private static void collectFloorDrop(Character bot, MapItem drop) {
+        // The host refuses drops younger than 400ms; that is settling, not a failed pickup.
+        if (System.currentTimeMillis() - drop.getDropTime() < 400) return;
+        SeekState control = seekStates.computeIfAbsent(bot.getId(), ignored -> new SeekState());
+        synchronized (control) {
+            if (!canCollectFloorDrop(bot, drop)) return;
+            DropCommands.botLootSingleDrop(bot, drop);
+            if (!drop.isPickedUp()) control.failedPickups.add(drop);
         }
     }
 
@@ -1427,25 +1501,29 @@ public final class PqActions {
             return; // the room is quiet (or nothing reachable); hold position this beat
         }
 
-        // Close on the target: walk to the floor under it (the nav layer jumps/drops/climbs
-        // ropes as its edges need). Ranged/magic reach is respected by the swing above firing
-        // before the walk gets there, so this walk always ends in a landed swing or a timeout.
+        // Attack reach and approach distance are separate: a projectile may fire while closing,
+        // but ordinary fights stop inside the same comfort band as the grind layer.
         Point mp = target.getPosition();
         boolean inReach = BotAttackDriver.canReach(bot, target);
-        if (inReach) {
-            // The swing already fired at the top of this beat, so closing further changes nothing
-            // about the damage - it only moves the bot into the mob's own touch box. That is the
-            // whole reported defect: a ranged bot shooting from right next to the boss. The reach
-            // box is symmetric around the bot, so `canReach` holds at distance ZERO as well - a
-            // chase that stopped only on `!inReach` walked bowmen and mages onto their target.
-            if (!GCMovement.isSettled(bot)) {
-                // Mid arc (a jump or a knockback). Keep the landing order the driver already
-                // holds: re-issuing the mob's floor here is what turned every hit's knockback
-                // into "walk back into the boss" once the bot was airborne.
+        if (inReach && !GCMovement.isSettled(bot)) {
+            return; // preserve the existing landing order during a jump/knockback
+        }
+        PathabilityVerdict approach = state.pathability.get(target.getObjectId());
+        boolean ledgeShot = inReach && (state.reachableOnly || !approach.pathable())
+                && GCMovement.onDifferentLedge(bot.getMap(), pos.x, pos.y, mp.x, mp.y);
+        if (inReach && (!BotAttackDriver.isProjectile(bot) || ledgeShot
+                || (Math.abs(mp.x - pos.x) <= CombatSpacing.approachX(bot)
+                && (target.isBoss() || Math.abs(mp.y - pos.y) <= CombatSpacing.approachY(bot))))) {
+            // Hold the same 80%-of-reach band as grinding, not the edge of the attack box.
+            // Cross-ledge shots keep their firing platform even when that band is unreachable.
+            state.clearProgress();
+            // Finish a committed kite step; stopping it on the next cooldown beat cuts a 90px
+            // retreat into a few pixels and leaves a chasing mob inside the comfort band.
+            if (state.retreatGoal != null && state.retreatGoal.equals(GCMovement.moveTargetOf(bot))
+                    && (Math.abs(pos.x - state.retreatGoal.x) > 8 || Math.abs(pos.y - state.retreatGoal.y) > 8)) {
                 return;
             }
-            state.clearProgress();
-            Point back = standoffGoal(bot, pos, mp);
+            Point back = standoffGoal(bot, pos, mp, state);
             if (back == null) {
                 stopOwnChaseGoal(bot, state);
                 return; // at a firing position: hold it, never walk on top of the target
@@ -1453,11 +1531,13 @@ public final class PqActions {
             // A projectile kit with the mob already inside its comfort band steps back out of it,
             // firing on the move - the same rule the grind layer's ranged style kites by.
             state.lastChaseGoal = GCMovement.moveTracking(bot, back.x, back.y, CHASE_LEASH_PX);
+            state.retreatGoal = state.lastChaseGoal;
             if (seekTraceEnabled(bot.getId())) {
                 seekTrace(bot, state, target, mp, null, back, "standoff");
             }
             return;
         }
+        state.retreatGoal = null;
 
         // LIVE PIXEL, STABLE REGION: the nav layer must not have its goal's REGION flip beat to beat
         // (a live mob's floor point on an airborne arc probes a DIFFERENT foothold, so the committed
@@ -1526,7 +1606,6 @@ public final class PqActions {
                 ty = underMob.y;
             }
         }
-        PathabilityVerdict approach = state.pathability.get(target.getObjectId());
         if (state.reachableOnly && approach != null && approach.firingPosition() != null) {
             tx = approach.firingPosition().x;
             ty = approach.firingPosition().y;
@@ -1588,37 +1667,26 @@ public final class PqActions {
         }
     }
 
-    /**
-     * The point a projectile kit backs off to when its target closes inside its comfort band, or
-     * null when there is nothing to do: a melee kit (it must close), a target still comfortably
-     * away, or one on a separate ledge where stepping sideways would only lose the shot.
-     *
-     * <p>This is the PQ chase's half of the rule the grind layer's ranged style already applies
-     * ({@code EngageBeat.kiteIfTooClose} - step back and fire mid-retreat). Without it a bowman or
-     * mage holds no gap at all: the mob walks up, the bot keeps shooting from inside its touch box,
-     * and the party's ranged members eat the boss's contact damage for the whole fight.
-     *
-     * <p>The step is measured from the BOT's own x, so backing out of the band always ends outside
-     * it: the band between the standoff and the reach is the hysteresis, and a stationary mob can
-     * never make the bot pace in and out. A mob that keeps walking in is simply answered with
-     * another step on the next beat - the bot fires mid-retreat on every one of them.
-     */
-    private static Point standoffGoal(Character bot, Point pos, Point mp) {
-        int standoff = BotAttackDriver.standoffX(bot);
-        if (standoff <= 0 || Math.abs(mp.x - pos.x) >= standoff) {
+    /** Grinding's ranged-style kite step, limited to the bot's own floor so it cannot lose a ledge shot. */
+    private static Point standoffGoal(Character bot, Point pos, Point mp, SeekState state) {
+        if (MovementStylePolicy.forBot(bot) != MovementStyle.RANGED) {
             return null;
         }
+        long now = movementNowMs();
+        int step = state.spacing.retreatStep(Math.abs(mp.x - pos.x), now);
+        if (step == 0) return null;
         if (GCMovement.onDifferentLedge(bot.getMap(), pos.x, pos.y, mp.x, mp.y)) {
             return null; // a shot across a gap IS this position: never trade it for distance
         }
         int dir = (pos.x >= mp.x) ? 1 : -1; // step further from the mob
         // Measured from the BOT, never from the mob's own x: a target taken on the mob's far
         // side is a walk straight through it, and a chasing mob meets the bot in the middle.
-        int step = Math.max(STANDOFF_MIN_STEP_PX, standoff - Math.abs(pos.x - mp.x));
         Point ground = GCMovement.groundPointBelow(bot.getMap(), pos.x + dir * step, pos.y);
         // Only a row the bot can already stand on: a point over the ledge edge would walk it off
         // the platform instead of backing away, so an edge honestly reads as "no room to retreat".
-        return (ground != null && Math.abs(ground.y - pos.y) <= STANDOFF_ROW_PX) ? ground : null;
+        if (ground == null || Math.abs(ground.y - pos.y) > STANDOFF_ROW_PX) return null;
+        state.spacing.retreated(now);
+        return ground;
     }
 
     /**
@@ -1626,12 +1694,6 @@ public final class PqActions {
      * (a slope, a step, a stacked anchor - not the drop past a ledge edge).
      */
     private static final int STANDOFF_ROW_PX = 40;
-
-    /**
-     * Smallest retreat step that still counts as backing off. Below this the bot would spend a
-     * beat re-issuing a motion the driver's 8px arrival band swallows whole.
-     */
-    private static final int STANDOFF_MIN_STEP_PX = 40;
 
     /**
      * Retract the chase goal this episode handed the driver, and only that one.
@@ -1645,6 +1707,7 @@ public final class PqActions {
     private static void stopOwnChaseGoal(Character bot, SeekState state) {
         Point goal = state.lastChaseGoal;
         state.lastChaseGoal = null;
+        state.retreatGoal = null;
         if (goal != null) {
             GCMovement.stopIfTarget(bot, goal);
         }
@@ -1937,7 +2000,7 @@ public final class PqActions {
         // carries a 100ms stagger): an overflow pile waits for the next macro tick, far below
         // the drops' own despawn - a wide sweep can no longer freeze a busy stage tick.
         List<MapObject> lone = found.stream()
-                .filter(o -> o instanceof MapItem drop && isFloorLoot(drop))
+                .filter(o -> o instanceof MapItem drop && canCollectFloorDrop(bot, drop))
                 .limit(LOOT_INLINE_MAX)
                 .toList();
         if (lone.isEmpty()) {
@@ -1951,7 +2014,7 @@ public final class PqActions {
         // kill's drop reachable without a whole-room grab.
         Point botPos = bot.getPosition();
         List<MapObject> reachable = new java.util.ArrayList<>();
-        Point nearestOutOfReach = null;
+        MapItem nearestOutOfReach = null;
         double walkSq = Double.MAX_VALUE;
         for (MapObject o : lone) {
             Point ip = o.getPosition();
@@ -1963,7 +2026,7 @@ public final class PqActions {
                 reachable.add(o);
             } else if (dsq < walkSq) {
                 walkSq = dsq;
-                nearestOutOfReach = ip; // the nearest out-of-reach drop is this tick's walk target
+                nearestOutOfReach = (MapItem) o;
             }
         }
         if (reachable.isEmpty()) {
@@ -1979,7 +2042,10 @@ public final class PqActions {
         for (int id : itemIds) {
             before += countItem(bot, id);
         }
-        DropCommands.lootItemListOnFloor(bot, reachable);
+        for (MapObject object : reachable) {
+            collectFloorDrop(bot, (MapItem) object);
+            blockingSleep(100);
+        }
         int after = 0;
         for (int id : itemIds) {
             after += countItem(bot, id);
@@ -2085,8 +2151,7 @@ public final class PqActions {
         MapItem nearest = null;
         double bestSq = STEPPED_ON_REACH_SQ;
         for (MapObject o : found) {
-            if (!(o instanceof MapItem drop) || !isFloorLoot(drop)
-                    || !DropCommands.botCanLoot(bot, drop)) {
+            if (!(o instanceof MapItem drop) || !canCollectFloorDrop(bot, drop)) {
                 continue;
             }
             Point ip = drop.getPosition();
@@ -2106,7 +2171,7 @@ public final class PqActions {
         for (int id : itemIds) {
             before += countItem(bot, id);
         }
-        DropCommands.botLootSingleDrop(bot, nearest);
+        collectFloorDrop(bot, nearest);
         nextSteppedOnPickupAtByBot.put(bot.getId(), now + STEPPED_ON_PICKUP_GAP_MIN_MS
                 + ThreadLocalRandom.current().nextLong(STEPPED_ON_PICKUP_GAP_MAX_MS
                 - STEPPED_ON_PICKUP_GAP_MIN_MS + 1));
@@ -2165,16 +2230,14 @@ public final class PqActions {
                 roomReachPx(bot.getMap()), itemIds);
         Point botPos = bot.getPosition();
         double callerReachSq = radiusPx * radiusPx;
-        Point nearest = null;
+        MapItem nearest = null;
         double bestSq = Double.MAX_VALUE;
         for (MapObject o : anywhere) {
             // botCanLoot already refuses picked-up drops, addressed hand-off piles,
             // still-protected drops AND position-less drops; isFloorLoot additionally
             // refuses multi-piece stacks (item-triggered reactors match their stack by
             // identity).
-            if (!(o instanceof MapItem drop)
-                    || !DropCommands.botCanLoot(bot, drop)
-                    || !isFloorLoot(drop)) {
+            if (!(o instanceof MapItem drop) || !canCollectFloorDrop(bot, drop)) {
                 continue;
             }
             Point ip = drop.getPosition();
@@ -2184,7 +2247,7 @@ public final class PqActions {
             }
             if (dsq < bestSq) {
                 bestSq = dsq;
-                nearest = ip;
+                nearest = drop;
             }
         }
         if (nearest != null) {

@@ -27,17 +27,6 @@ final class EngageBeat {
     private static final int AOE_REPOSITION_DEADZONE_PX = 110; // don't re-center for a pack this close to underfoot
     private static final long AOE_REPOSITION_COOLDOWN_MS = 700; // cadence floor so it steps in, not jitters
 
-    // ── Ranged kiting (bowmen back off when a mob closes inside the comfort band) ──
-    private static final int KITE_MIN_PX = 150;             // a mob nearer than this (|dx|) triggers a step back
-    private static final int KITE_STEP_PX = 90;             // how far the bot retreats per kite step
-    private static final long KITE_COOLDOWN_MS = 400;       // cadence floor between kite steps
-    // Hysteresis: after a kite step the mob must close all the way back inside the comfort band
-    // before another retreat is allowed. KITE_STEP_PX alone re-triggers on the mob's next 250ms beat
-    // (it is still inside the band we just opened), so a chasing mob pinned an archer in a fireless
-    // step-back loop - the exact "keeps repositioning, never fires" report. The mob's ~250ms move beats
-    // close that gap in under two beats, so the escape stays real while every other beat swings.
-    private static final int KITE_RETRIGGER_MARGIN_PX = 30; // must re-enter KITE_MIN_PX by this much to kite again
-
     // ── Attack tempo (real classes can't walk mid-attack; only jumps/teleports move while attacking) ──
     static final long ATTACK_WALK_LOCK_MS = 500;            // after a swing, hold position this long before walking
     // Must be >= TURN_STEP_MAX_PX: doTurnBeat steps up to TURN_STEP_MAX_PX toward the mob, and if
@@ -54,12 +43,8 @@ final class EngageBeat {
     // Cadence gates (per bot, reset each episode).
     private long nextSkillMoveMs = 0L;
     private long nextAoeRepositionMs = 0L;
-    private long nextKiteMs = 0L;
-    // Kite hysteresis memory: the |dx| the mob must close back inside before another retreat may
-    // fire. Starts at the band edge itself (a first-ever kite is allowed anywhere inside the band);
-    // each retreat re-arms it at KITE_MIN_PX - KITE_RETRIGGER_MARGIN_PX.
+    private final CombatSpacing spacing = new CombatSpacing();
     private long nextTurnBeatOkMs = 0L;
-    private int kiteReenterAtDx = KITE_MIN_PX;
 
     EngageBeat(GrindBrain brain) {
         this.b = brain;
@@ -68,9 +53,8 @@ final class EngageBeat {
     void reset() {
         nextSkillMoveMs = 0L;
         nextAoeRepositionMs = 0L;
-        nextKiteMs = 0L;
+        spacing.reset();
         nextTurnBeatOkMs = 0L;
-        kiteReenterAtDx = KITE_MIN_PX;
     }
 
     /*
@@ -308,30 +292,26 @@ final class EngageBeat {
      *   even the retreat beat contributes damage; the driver's own cooldown gates it.
      */
     private boolean kiteIfTooClose(Character chr, Monster mob) {
-        if (now() < nextKiteMs) {
-            return false;
-        }
         Point pos = chr.getPosition();
         Point mp = (mob != null) ? mob.getPosition() : null;
-        if (pos == null || mp == null || Math.abs(pos.x - mp.x) >= KITE_MIN_PX) {
-            return false; // comfortable spacing already
+        if (pos == null || mp == null) {
+            return false;
         }
-        int dx = Math.abs(pos.x - mp.x);
-        if (dx > kiteReenterAtDx) {
-            return false; // we already opened this gap; wait for the mob to push back inside (hysteresis)
+        long now = now();
+        int step = spacing.retreatStep(Math.abs(pos.x - mp.x), now);
+        if (step == 0) {
+            return false;
         }
         int dir = (pos.x >= mp.x) ? 1 : -1; // step further from the mob
         int[] leash = b.effectiveLeash(chr);
-        int tx = GrindBrain.clamp(pos.x + dir * KITE_STEP_PX, leash[0], leash[1]);
+        int tx = GrindBrain.clamp(pos.x + dir * step, leash[0], leash[1]);
         if (Math.abs(tx - pos.x) < TURN_STEP_MIN_PX) {
             return false; // leash edge -> can't back up, just fire
         }
         Point gp = GCMovement.groundPointBelow(chr.getMap(), tx, pos.y);
         GCMovement.move(chr, tx, (gp != null) ? gp.y : pos.y);
         b.lastMoveTargetX = tx;
-        nextKiteMs = now() + KITE_COOLDOWN_MS;
-        // Re-arm only after the mob has closed back within KITE_MIN_PX - MARGIN of us.
-        kiteReenterAtDx = KITE_MIN_PX - KITE_RETRIGGER_MARGIN_PX;
+        spacing.retreated(now);
         BotAttackDriver.botAttack(chr); // kites shoot on the move: fire the in-reach swing mid-retreat
         return true;
     }

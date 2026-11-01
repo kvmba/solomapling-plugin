@@ -48,12 +48,16 @@ class EngageBeatSwingPriorityTest {
     }
 
     @Test
-    void kiteStepCannotRetriggerInsideTheGapItJustOpened() throws Exception {
-        int min = constant("KITE_MIN_PX");
-        int margin = constant("KITE_RETRIGGER_MARGIN_PX");
-        assertTrue(margin > 0 && margin < min,
-                "the re-trigger threshold (KITE_MIN_PX - margin) must sit strictly inside the band, "
-                        + "else the hysteresis is a no-op and a chasing mob re-triggers every cooldown");
+    void kiteStepCannotRetriggerInsideTheGapItJustOpened() {
+        CombatSpacing spacing = new CombatSpacing();
+        assertEquals(0, spacing.retreatStep(150, 1000));
+        assertEquals(90, spacing.retreatStep(149, 1000));
+        spacing.retreated(1000);
+        assertEquals(0, spacing.retreatStep(100, 1399), "400ms cooldown is shared with PQ");
+        assertEquals(0, spacing.retreatStep(130, 1400), "the mob must re-enter the band by 30px");
+        assertEquals(90, spacing.retreatStep(120, 1400));
+        spacing.reset();
+        assertEquals(90, spacing.retreatStep(149, 1400), "a new episode restores the first-kite threshold");
     }
 
     @Test

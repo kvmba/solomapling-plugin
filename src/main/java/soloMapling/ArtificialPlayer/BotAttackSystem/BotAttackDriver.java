@@ -162,18 +162,9 @@ public final class BotAttackDriver {
         return p != null ? p.reachY : 0;
     }
 
-    /**
-     * The closest gap this kit keeps from a target it can already hit, or 0 when it has none.
-     *
-     * <p>The reach box is symmetric around the bot, so "can hit" is satisfied at distance ZERO as
-     * well: a bowman or a mage that only ever asked {@link #canReach} walked up to the mob's own
-     * pixel and fired from inside touch damage. This is the other half of the attack geometry -
-     * melee owns 0 (it has to close), a projectile kit holds half of its reach, which is the same
-     * band the grind layer's ranged style kites around ({@code EngageBeat.kiteIfTooClose}).
-     */
-    public static int standoffX(Character bot) {
+    public static boolean isProjectile(Character bot) {
         BotAttackProfile p = primaryProfile(bot);
-        return (p == null || p.route == BotAttackProfile.Route.CLOSE) ? 0 : p.reachX / 2;
+        return p != null && p.route != BotAttackProfile.Route.CLOSE;
     }
 
     /** Whether the current AUTO selection includes this mob, ignoring the per-swing cooldown. */

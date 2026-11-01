@@ -113,17 +113,14 @@ public final class LudiStages {
             if (stage7LedgeMobAlive(bot) || stage7PassStillWanted(bot)) {
                 // Reach the shot, not the inaccessible mob floor: the chase can select a
                 // walkable firing ledge for ranged/magic and leaves impossible melee shots alone.
-                PqActions.seekAndAttack(bot, true);
+                PqActions.seekAndAttack(bot, true, new int[]{LudiPqData.PASS});
                 return;
             }
         }
         if (killableMobPresent(bot)) {
-            // Pickup first: a pass a kill left inside the loot radius is the nearest unfinished
-            // work, and loot() can only walk to it when no live move owns the driver. Issuing
-            // the chase first (the old order) meant this branch never ran.
-            if (!PqActions.pickupBeforeChase(bot, LOOT_RADIUS_PX, new int[]{LudiPqData.PASS})) {
-                PqActions.seekAndAttack(bot);
-            }
+            // Share the combat beat's pickup-before-chase decision, including ranged drops
+            // beyond LOOT_RADIUS_PX. The macro tick must not replace that pickup with a chase.
+            PqActions.seekAndAttack(bot, false, new int[]{LudiPqData.PASS});
             PqActions.loot(bot, bot.getPosition(), LOOT_RADIUS_PX, new int[]{LudiPqData.PASS});
             return;
         }
@@ -448,6 +445,10 @@ public final class LudiStages {
      * hit a box, kill its spawn, loot, repeat.
      */
     public static void breakCratesAndHunt(Character bot) {
+        if (PqActions.walkingToLoot(bot, new int[]{LudiPqData.PASS})) {
+            PqActions.attack(bot);
+            return; // finish the pickup before choosing another crate or chase
+        }
         int crate = nearestBoxOid(bot, LudiPqData.BOX_STAGE3);
         if (crate >= 0) {
             hitReactorRotate(bot, crate, LudiPqData.BOX_STAGE3);
@@ -455,9 +456,7 @@ public final class LudiStages {
         // Same ordering rule as gatherPasses: the crate's three Blocktopus die where they were
         // summoned, so their passes land inside the crate radius and must be collected before
         // the next chase order replaces the pickup walk.
-        if (!PqActions.pickupBeforeChase(bot, CRATE_LOOT_RADIUS_PX, new int[]{LudiPqData.PASS})) {
-            PqActions.seekAndAttack(bot);
-        }
+        PqActions.seekAndAttack(bot, false, new int[]{LudiPqData.PASS});
         PqActions.loot(bot, bot.getPosition(), CRATE_LOOT_RADIUS_PX, new int[]{LudiPqData.PASS});
         // No crates left and nothing alive to fight: the stage's work is done. Hold the
         // stage-NPC post and deliver the stock only when the leader comes for the turn-in,
@@ -683,9 +682,7 @@ public final class LudiStages {
         // Inside a room: fight the box mobs and sweep the passes they drop. Pickup first for the
         // same reason as the collection stages - the room's one or two mobs die where they stood,
         // and the chase order used to shut loot()'s walk out for the whole visit.
-        if (!PqActions.pickupBeforeChase(bot, LOOT_RADIUS_PX, new int[]{LudiPqData.PASS})) {
-            PqActions.seekAndAttack(bot);
-        }
+        PqActions.seekAndAttack(bot, false, new int[]{LudiPqData.PASS});
         PqActions.loot(bot, bot.getPosition(), LOOT_RADIUS_PX, new int[]{LudiPqData.PASS});
         PqActions.recoverUngatheredHandoffs(bot, LudiPqData.PASS);
         // Room quiet (all the room's killable mobs dead): the work is done. Remember it as
@@ -1479,6 +1476,6 @@ public final class LudiStages {
         // never fight (the "paces under the platform" report) instead of waiting for the human
         // to summon Alishar. Alishar himself is a boss and is exempt from the ledge filter, so
         // he is still chased the moment he appears on a floor the bot can stand on.
-        PqActions.seekAndAttack(bot, true);
+        PqActions.seekAndAttack(bot, true, new int[]{LudiPqData.PASS});
     }
 }

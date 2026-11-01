@@ -2,6 +2,7 @@ package soloMapling.ArtificialPlayer.GCMoveSystem;
 
 import org.gms.client.Character;
 import org.gms.client.Job;
+import org.gms.client.inventory.Item;
 import org.gms.config.GameConfig;
 import org.gms.dao.entity.GameConfigDO;
 import org.gms.manager.ServerManager;
@@ -10,6 +11,7 @@ import org.gms.server.life.Monster;
 import org.gms.server.maps.Foothold;
 import org.gms.server.maps.FootholdTree;
 import org.gms.server.maps.MapObject;
+import org.gms.server.maps.MapItem;
 import org.gms.server.maps.MapObjectType;
 import org.gms.server.maps.MapleMap;
 import org.gms.server.maps.Portal;
@@ -31,6 +33,12 @@ import soloMapling.ArtificialPlayer.BotAttackSystem.BotAttackEffects;
 import soloMapling.ArtificialPlayer.BotAttackSystem.BotAuraState;
 import soloMapling.ArtificialPlayer.BotAttackSystem.BotBuffEffects;
 import soloMapling.ArtificialPlayer.BotCommandsPack.BotAttack;
+import soloMapling.ArtificialPlayer.BotCommandsPack.DropCommands;
+import soloMapling.ArtificialPlayer.BotGrindSystem.CombatSpacing;
+import soloMapling.ArtificialPlayer.BotHealthSystem.BotDeath;
+import soloMapling.ArtificialPlayer.BotStatusSystem.BotDebuffState;
+import soloMapling.ArtificialPlayer.BotTypes.Ludi.LudiPQBot;
+import soloMapling.ArtificialPlayer.BotTypes.Ludi.LudiPqData;
 import soloMapling.ArtificialPlayer.BotTypes.Ludi.LudiStages;
 import soloMapling.ArtificialPlayer.PartyQuest.PqActions;
 import soloMapling.MapVFX.CustomReactor;
@@ -103,6 +111,7 @@ class LpqReviewRegressionTest {
     void releaseState() throws Exception {
         states().remove(BOT_ID);
         PqActions.clearSeekState(BOT_ID);
+        PqActions.clearReactorBeat(BOT_ID);
         LudiStages.releaseRoomState(BOT_ID);
         BotAttackDriver.clearBot(BOT_ID);
         BotAuraState.clearBot(BOT_ID);
@@ -194,9 +203,10 @@ class LpqReviewRegressionTest {
                     anyInt(), anyInt(), anyInt(), anyInt(), anyInt(), anyInt(), anyShort()));
             for (int beat = 0; beat < 80; beat++) {
                 PqActions.seekAndAttack(bot, true);
-                MovementClock.advance(250);
+                tick();
             }
-            assertNull(state.moveTarget, "stationary is safe here because AUTO really can hit the target");
+            assertNull(state.moveTarget, "hold once inside the same approach band as grinding");
+            assertTrue(Math.abs(bot.getPosition().x - 400) <= CombatSpacing.approachX(bot));
         }
     }
 
@@ -335,33 +345,28 @@ class LpqReviewRegressionTest {
         }
     }
 
-    /**
-     * A projectile kit that can already hit the mob must not keep walking at it. The reach box is
-     * symmetric around the bot, so {@code canReach} is TRUE at distance zero as well - a chase that
-     * only stopped on {@code !inReach} walked bowmen and mages onto the boss they were shooting,
-     * which is the reported "远程职业也挨着 boss 打".
-     */
-    @Test
-    void aRangedKitHoldsItsPositionInsteadOfWalkingOnTopOfTheMob() throws Exception {
+    /** A shot at 400px is legal, but the ordinary fighting position is 80% of 450px, not max range. */
+    @ParameterizedTest
+    @EnumSource(value = Job.class, names = {"HUNTER", "CLERIC", "GUNSLINGER"})
+    void aProjectileKitClosesToTheSameBandAsGrindingWithoutWalkingOntoTheMob(Job job) throws Exception {
         MapleMap map = map(922019993);
         floor(map, 1, -600, 0, 900);
-        createBot(map, new Point(0, 0), Job.HUNTER);
+        createBot(map, new Point(0, 0), job);
         inject(map, monster(9300170, 99140, new Point(400, 0)));
         try (var effects = mockStatic(BotAttackEffects.class)) {
             for (int beat = 0; beat < 200; beat++) {
                 PqActions.seekAndAttack(bot);
                 tick();
             }
-            assertNull(state.moveTarget, "a target already inside the reach box is not a walk order");
-            assertEquals(0, bot.getPosition().x, "the bot must not creep toward the mob either");
+            int dx = Math.abs(400 - bot.getPosition().x);
+            assertEquals(360, CombatSpacing.approachX(bot));
+            assertTrue(dx <= CombatSpacing.approachX(bot) && dx >= 300,
+                    "close to the shared approach band, then hold; dx=" + dx);
+            assertNull(state.moveTarget);
         }
     }
 
-    /**
-     * The other half: a mob that closes the gap cannot leave a ranged kit standing inside its touch
-     * box. The bot steps back out to {@link BotAttackDriver#standoffX} and fires on the move - the
-     * grind layer's ranged kiting rule, which the PQ chase never applied.
-     */
+    /** Repeated kite steps must finish and use grinding's 150px trigger / 120px re-entry band. */
     @Test
     void aClosingMobCannotLeaveARangedKitInTouchRange() throws Exception {
         MapleMap map = map(922019994);
@@ -371,8 +376,6 @@ class LpqReviewRegressionTest {
         Monster mob = monster(9300170, 99141, new Point(400, 0));
         when(mob.getPosition()).thenAnswer(inv -> mobPos.get());
         inject(map, mob);
-        int standoff = BotAttackDriver.standoffX(bot);
-        assertTrue(standoff > 0, "a bowman holds a standoff");
         int tightest = Integer.MAX_VALUE;
         try (var effects = mockStatic(BotAttackEffects.class)) {
             for (int beat = 0; beat < 400; beat++) {
@@ -390,9 +393,9 @@ class LpqReviewRegressionTest {
                 }
             }
         }
-        assertTrue(tightest >= standoff - 30,
-                "a chasing mob must never close inside the standoff; tightest=" + tightest
-                        + " standoff=" + standoff + " bot=" + bot.getPosition() + " mob=" + mobPos.get());
+        assertTrue(tightest >= 100,
+                "a chasing mob must not trap the bot in touch range; tightest=" + tightest
+                        + " bot=" + bot.getPosition() + " mob=" + mobPos.get());
     }
 
     /**
@@ -414,6 +417,372 @@ class LpqReviewRegressionTest {
         }
     }
 
+    @ParameterizedTest
+    @EnumSource(value = Job.class, names = {"HUNTER", "CLERIC"})
+    void onlyTheOrdinaryRangedMovementStyleKitesBack(Job job) throws Exception {
+        MapleMap map = map(922019993);
+        floor(map, 1, -600, 0, 900);
+        createBot(map, new Point(0, 0), job);
+        Monster target = monster(9300170, 99210, new Point(100, 0));
+        inject(map, target);
+        try (var effects = mockStatic(BotAttackEffects.class)) {
+            PqActions.seekAndAttack(bot);
+            if (job == Job.HUNTER) {
+                assertEquals(new Point(-90, 0), state.moveTarget,
+                        "the first kite is a 90px step, not a forced 225px gap");
+                MovementClock.advance(250);
+                PqActions.seekAndAttack(bot);
+                assertEquals(new Point(-90, 0), state.moveTarget, "finish the step across cooldown beats");
+            } else {
+                assertNull(state.moveTarget, "mages retain the same non-kiting movement style as grinding");
+            }
+        }
+    }
+
+    @Test
+    void aLegalCrossLedgeShotKeepsItsPlatformOutsideTheOrdinaryApproachBand() throws Exception {
+        MapleMap map = map(922019993);
+        floor(map, 1, -100, 0, 100);
+        floor(map, 2, 350, -40, 450);
+        createBot(map, new Point(0, 0), Job.HUNTER);
+        Monster target = monster(9300170, 99211, new Point(400, -40));
+        inject(map, target);
+        try (var effects = mockStatic(BotAttackEffects.class)) {
+            assertTrue(BotAttackDriver.canReach(bot, target));
+            PqActions.seekAndAttack(bot, true);
+            assertNull(state.moveTarget, "do not replace an honest ledge shot with an impossible approach");
+        }
+    }
+
+    @Test
+    void anOrdinaryReachableLedgeDoesNotRestoreMaxRangeStanding() throws Exception {
+        MapleMap map = map(922019993);
+        floor(map, 1, -100, 0, 160);
+        floor(map, 2, 190, 0, 500);
+        createBot(map, new Point(0, 0), Job.HUNTER);
+        Monster target = monster(9300170, 99212, new Point(400, 0));
+        inject(map, target);
+        try (var effects = mockStatic(BotAttackEffects.class)) {
+            assertTrue(BotAttackDriver.canReach(bot, target), "the shot is within 450px");
+            assertTrue(GCMovement.canPathTo(bot, 400, 0), "the ordinary shelf is reachable");
+            PqActions.seekAndAttack(bot);
+            assertNotNull(state.moveTarget, "normal reachable shelves still use the shared approach band");
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(ints = {100, 200, 350, 440, 520})
+    void stage1CombatBeatWalksToAndCollectsARangedPassBeforeChasingAgain(int distance) throws Exception {
+        // Still stage 1, but not its real map id: synthetic geometry must not poison later WZ sims.
+        MapleMap map = map(LudiPqData.ENTRY_MAP + 99);
+        floor(map, 1, -600, 0, 1600);
+        createBot(map, new Point(0, 0), Job.HUNTER);
+        LudiPQBot pq = combatBot();
+        Point passAt = new Point(distance, 0);
+        MapItem pass = pass(99200, passAt);
+        inject(map, pass);
+        inject(map, monster(9300005, 99201, new Point(1200, 0)));
+
+        try (var effects = mockStatic(BotAttackEffects.class); var loot = mockStatic(DropCommands.class, CALLS_REAL_METHODS)) {
+            loot.when(() -> DropCommands.botLootSingleDrop(bot, pass)).thenAnswer(inv -> {
+                assertTrue(bot.getPosition().distanceSq(passAt) <= 60.0 * 60.0,
+                        "a distant pass must be walked to, never vacuumed");
+                pass.setPickedUp(true);
+                map.removeMapObject(pass);
+                return null;
+            });
+            pq.grindTick(); // no macro tick: the 4Hz beat alone must discover the drop
+            assertEquals(passAt, state.moveTarget);
+            long progressAt = state.moveProgressAtMs;
+            MovementClock.advance(250);
+            pq.grindTick();
+            assertEquals(progressAt, state.moveProgressAtMs, "repeated beats must not restart the live walk");
+            loot.verify(() -> DropCommands.botLootSingleDrop(bot, pass), never());
+
+            for (int tick = 0; tick < 200 && !pass.isPickedUp(); tick++) {
+                pq.grindTick();
+                tick();
+            }
+            assertTrue(pass.isPickedUp(), "the combat beat must finish pickup without a macro tick");
+            loot.verify(() -> DropCommands.botLootSingleDrop(bot, pass));
+            pq.grindTick();
+            assertEquals(new Point(1200, 0), state.moveTarget, "resume hunting once the pass is collected");
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void stage1RangedKillStartsPickupOnTheNextCombatBeat(boolean lastMob) throws Exception {
+        MapleMap map = map(LudiPqData.ENTRY_MAP + 99);
+        floor(map, 1, -600, 0, 1600);
+        createBot(map, new Point(0, 0), Job.HUNTER);
+        LudiPQBot pq = combatBot();
+        Monster first = monster(9300005, 99202, new Point(350, 0));
+        inject(map, first);
+        if (!lastMob) inject(map, monster(9300005, 99203, new Point(1200, 0)));
+        MapItem drop = pass(99204, new Point(350, 0));
+        try (var effects = mockStatic(BotAttackEffects.class)) {
+            effects.when(() -> BotAttackEffects.rangedStrike(eq(bot), anyMap(), anyInt(), anyInt(),
+                    anyInt(), anyInt(), anyInt(), anyInt(), anyShort())).thenAnswer(inv -> {
+                when(first.isAlive()).thenReturn(false);
+                inject(map, drop);
+                return true;
+            });
+            pq.grindTick();
+            MovementClock.advance(250);
+            pq.grindTick();
+            assertEquals(drop.getPosition(), state.moveTarget,
+                    "the next 250ms beat must reclaim the driver from the next-mob chase");
+        }
+    }
+
+    @Test
+    void combatPickupSkipsProtectedStacksAndUnreachablePasses() throws Exception {
+        MapleMap map = map(LudiPqData.ENTRY_MAP + 99);
+        floor(map, 1, -100, 0, 200);
+        floor(map, 2, 350, -150, 450);
+        createBot(map, new Point(0, 0), Job.HUNTER);
+        MapItem stack = pass(99205, new Point(100, 0));
+        stack.getItem().setQuantity((short) 2);
+        inject(map, stack);
+        MapItem addressed = pass(99206, new Point(110, 0));
+        addressed.lockItem();
+        try {
+            addressed.setPermanentOwnerLocked(true);
+        } finally {
+            addressed.unlockItem();
+        }
+        inject(map, addressed);
+        inject(map, pass(99207, new Point(400, -150)));
+        assertFalse(GCMovement.canPathTo(bot, 400, -150));
+        combatBot().grindTick();
+        assertNull(state.moveTarget, "mechanic stacks, addressed piles and unreachable drops cannot own steering");
+    }
+
+    @Test
+    void aCombatPickupDoesNotReplaceAStageWalkOrReactorBeat() throws Exception {
+        MapleMap map = map(LudiPqData.ENTRY_MAP + 99);
+        floor(map, 1, -600, 0, 1600);
+        createBot(map, new Point(0, 0), Job.HUNTER);
+        LudiPQBot pq = combatBot();
+        inject(map, pass(99208, new Point(350, 0)));
+        Point door = new Point(-300, 0);
+        PqActions.walkTo(bot, door);
+        pq.grindTick();
+        assertEquals(door, state.moveTarget, "the portal/puzzle walk keeps steering");
+        PqActions.clearSeekState(BOT_ID);
+        Reactor box = reactor(2201000, 99209, new Point(1000, 0));
+        inject(map, box);
+        PqActions.armReactorBeat(bot, box.getObjectId());
+        pq.grindTick();
+        assertNotEquals(new Point(350, 0), state.moveTarget, "a reactor beat outranks opportunistic pickup");
+        PqActions.clearReactorBeat(BOT_ID);
+    }
+
+    @ParameterizedTest
+    @ValueSource(ints = {1, 3, 4, 7, 9})
+    void macroAndCombatBeatsKeepTheSamePickupGoal(int stage) throws Exception {
+        int mapId = stage == 4 ? LudiPqData.STAGE4_ROOM_FIRST
+                : stage == 9 ? LudiPqData.STAGE_9 - 1 : LudiPqData.ENTRY_MAP + (stage - 1) * 100 + 99;
+        MapleMap map = map(mapId);
+        floor(map, 1, -1000, 0, 1600);
+        createBot(map, new Point(0, 0), Job.HUNTER);
+        LudiPQBot pq = combatBot();
+        MapItem drop = pass(99300, new Point(-520, 0));
+        inject(map, drop);
+        inject(map, monster(9300005, 99301, new Point(1000, 0)));
+        try (var effects = mockStatic(BotAttackEffects.class)) {
+            pq.grindTick();
+            assertEquals(drop.getPosition(), state.moveTarget);
+            // A nearer pass appearing must not pull an already committed pickup back and forth.
+            inject(map, pass(99302, new Point(200, 0)));
+            long progressAt = state.moveProgressAtMs;
+            for (int beat = 0; beat < 8; beat++) {
+                MovementClock.advance(250);
+                switch (stage) {
+                    case 3 -> LudiStages.breakCratesAndHunt(bot);
+                    case 4 -> LudiStages.workDoorRooms(bot, mapId, mapId);
+                    case 9 -> LudiStages.fightBoss(bot);
+                    default -> LudiStages.gatherPasses(bot, stage);
+                }
+                pq.grindTick();
+                assertEquals(drop.getPosition(), state.moveTarget, "no macro/combat target ping-pong");
+                assertEquals(progressAt, state.moveProgressAtMs, "do not restart the movement watchdog");
+            }
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void aDisappearedPassCannotLeaveTheBotPermanentlyWaiting(boolean liveMob) throws Exception {
+        MapleMap map = map(LudiPqData.ENTRY_MAP + 98);
+        floor(map, 1, -1000, 0, 1600);
+        createBot(map, new Point(0, 0), Job.HUNTER);
+        LudiPQBot pq = combatBot();
+        MapItem drop = pass(99303, new Point(-350, 0));
+        inject(map, drop);
+        if (liveMob) inject(map, monster(9300005, 99304, new Point(1000, 0)));
+        try (var effects = mockStatic(BotAttackEffects.class)) {
+            pq.grindTick();
+            drop.setPickedUp(true);
+            map.removeMapObject(drop);
+            for (int beat = 0; beat < 60 && (state.moveTarget != null || beat == 0); beat++) {
+                pq.grindTick();
+                if (liveMob) {
+                    assertEquals(new Point(1000, 0), state.moveTarget, "the next chase can replace the vanished drop");
+                    return;
+                }
+                for (int tick = 0; tick < 5; tick++) tick();
+            }
+            assertNull(state.moveTarget, "continuing to the old pickup point must finish normally");
+        }
+    }
+
+    @Test
+    void aRejectedPickupIsNotChasedAgainByEitherLoop() throws Exception {
+        MapleMap map = map(LudiPqData.ENTRY_MAP + 98);
+        floor(map, 1, -1000, 0, 1600);
+        createBot(map, new Point(0, 0), Job.HUNTER);
+        LudiPQBot pq = combatBot();
+        MapItem drop = pass(99305, new Point(0, 0));
+        inject(map, drop);
+        inject(map, monster(9300005, 99306, new Point(1000, 0)));
+        try (var effects = mockStatic(BotAttackEffects.class);
+             var loot = mockStatic(DropCommands.class, CALLS_REAL_METHODS)) {
+            loot.when(() -> DropCommands.botLootSingleDrop(bot, drop)).thenAnswer(inv -> null);
+            for (int beat = 0; beat < 80; beat++) {
+                pq.grindTick();
+                if (beat % 8 == 0) LudiStages.gatherPasses(bot, 1);
+                assertNotEquals(drop.getPosition(), state.moveTarget, "a refused pickup must not pull the bot back");
+                for (int tick = 0; tick < 5; tick++) tick();
+            }
+            assertTrue(bot.getPosition().x > 300, "continue fighting instead of oscillating over the failed drop");
+            loot.verify(() -> DropCommands.botLootSingleDrop(bot, drop));
+        }
+    }
+
+    @Test
+    void anAbandonedPickupWalkDoesNotRestartForever() throws Exception {
+        MapleMap map = map(LudiPqData.ENTRY_MAP + 98);
+        floor(map, 1, -1000, 0, 1600);
+        createBot(map, new Point(0, 0), Job.HUNTER);
+        LudiPQBot pq = combatBot();
+        MapItem drop = pass(99307, new Point(-350, 0));
+        inject(map, drop);
+        inject(map, monster(9300005, 99308, new Point(1000, 0)));
+        try (var effects = mockStatic(BotAttackEffects.class)) {
+            pq.grindTick();
+            assertEquals(drop.getPosition(), state.moveTarget);
+            GCMovement.abandonMove(state); // the driver's actual no-progress/failure notification
+            state.moveTarget = null;
+            for (int beat = 0; beat < 8; beat++) {
+                pq.grindTick();
+                LudiStages.gatherPasses(bot, 1);
+                assertEquals(new Point(1000, 0), state.moveTarget);
+            }
+        }
+    }
+
+    @Test
+    void aFreshDropIsNotMistakenForARejectedPickup() throws Exception {
+        MapleMap map = map(LudiPqData.ENTRY_MAP + 98);
+        floor(map, 1, -1000, 0, 1600);
+        createBot(map, new Point(0, 0), Job.HUNTER);
+        MapItem drop = pass(99309, new Point(0, 0));
+        drop.setDropTime(System.currentTimeMillis() + 1000);
+        inject(map, drop);
+        try (var loot = mockStatic(DropCommands.class, CALLS_REAL_METHODS)) {
+            loot.when(() -> DropCommands.botLootSingleDrop(bot, drop)).thenAnswer(inv -> {
+                drop.setPickedUp(true);
+                map.removeMapObject(drop);
+                return null;
+            });
+            PqActions.lootSteppedOn(bot, new int[]{LudiPqData.PASS});
+            loot.verify(() -> DropCommands.botLootSingleDrop(bot, drop), never());
+            drop.setDropTime(System.currentTimeMillis() - 1000);
+            MovementClock.advance(250);
+            PqActions.lootSteppedOn(bot, new int[]{LudiPqData.PASS});
+            assertTrue(drop.isPickedUp(), "the 400ms host settle gate must remain retryable");
+        }
+    }
+
+    @Test
+    void failedPickupStateIsScopedToTheMapInstanceAndBotLifetime() throws Exception {
+        MapleMap first = map(LudiPqData.ENTRY_MAP + 98);
+        floor(first, 1, -1000, 0, 1600);
+        createBot(first, new Point(0, 0), Job.HUNTER);
+        MapItem drop = pass(99310, new Point(0, 0));
+        inject(first, drop);
+        try (var loot = mockStatic(DropCommands.class, CALLS_REAL_METHODS)) {
+            loot.when(() -> DropCommands.botLootSingleDrop(bot, drop)).thenAnswer(inv -> null);
+            PqActions.lootSteppedOn(bot, new int[]{LudiPqData.PASS});
+            MovementClock.advance(250);
+            PqActions.lootSteppedOn(bot, new int[]{LudiPqData.PASS});
+            loot.verify(() -> DropCommands.botLootSingleDrop(bot, drop));
+
+            MapleMap next = map(first.getId()); // a different instance, even with the same map id
+            floor(next, 1, -1000, 0, 1600);
+            when(bot.getMap()).thenReturn(next);
+            inject(next, drop);
+            MovementClock.advance(250);
+            PqActions.lootSteppedOn(bot, new int[]{LudiPqData.PASS});
+            loot.verify(() -> DropCommands.botLootSingleDrop(bot, drop), times(2));
+
+            PqActions.clearSeekState(BOT_ID);
+            PqActions.lootSteppedOn(bot, new int[]{LudiPqData.PASS});
+            loot.verify(() -> DropCommands.botLootSingleDrop(bot, drop), times(3));
+        }
+    }
+
+    @Test
+    void concurrentMacroAndCombatLoopsCannotReplaceTheCommittedPickup() throws Exception {
+        MapleMap map = map(LudiPqData.ENTRY_MAP + 98);
+        floor(map, 1, -1000, 0, 1600);
+        createBot(map, new Point(0, 0), Job.HUNTER);
+        LudiPQBot pq = combatBot();
+        MapItem drop = pass(99311, new Point(-520, 0));
+        inject(map, drop);
+        inject(map, monster(9300005, 99312, new Point(1000, 0)));
+        pq.grindTick();
+        long progressAt = state.moveProgressAtMs;
+        CountDownLatch start = new CountDownLatch(1);
+        try (var workers = Executors.newFixedThreadPool(2)) {
+            var combat = workers.submit(() -> {
+                assertTrue(start.await(5, TimeUnit.SECONDS));
+                for (int beat = 0; beat < 100; beat++) pq.grindTick();
+                return null;
+            });
+            var macro = workers.submit(() -> {
+                assertTrue(start.await(5, TimeUnit.SECONDS));
+                for (int beat = 0; beat < 100; beat++) LudiStages.gatherPasses(bot, 1);
+                return null;
+            });
+            start.countDown();
+            combat.get(10, TimeUnit.SECONDS);
+            macro.get(10, TimeUnit.SECONDS);
+        }
+        assertEquals(drop.getPosition(), state.moveTarget);
+        assertEquals(progressAt, state.moveProgressAtMs);
+    }
+
+    private LudiPQBot combatBot() {
+        when(bot.getParty()).thenReturn(mock(org.gms.net.server.world.Party.class));
+        LudiPQBot pq = mock(LudiPQBot.class, CALLS_REAL_METHODS);
+        doReturn(bot).when(pq).getChr();
+        doReturn(true).when(pq).getRunning();
+        doReturn(mock(BotDeath.class)).when(pq).death();
+        doReturn(mock(BotDebuffState.class)).when(pq).status();
+        return pq;
+    }
+
+    private MapItem pass(int oid, Point at) {
+        MapItem drop = new MapItem(new Item(LudiPqData.PASS, (short) 1, (short) 1), at,
+                null, bot, null, (byte) 2, false);
+        drop.setObjectId(oid);
+        drop.setDropTime(System.currentTimeMillis() - 5000L);
+        return drop;
+    }
+
     /** A melee kit still closes - the standoff is a projectile rule, not a retreat for everyone. */
     @Test
     void aMeleeKitStillClosesToItsOwnReach() throws Exception {
@@ -431,7 +800,6 @@ class LpqReviewRegressionTest {
         int dx = Math.abs(bot.getPosition().x - 400);
         assertTrue(dx <= BotAttackDriver.attackReachX(bot),
                 "a melee kit must close to its own reach; dx=" + dx);
-        assertEquals(0, BotAttackDriver.standoffX(bot), "and it owns no standoff at all");
     }
 
     @ParameterizedTest
@@ -472,8 +840,6 @@ class LpqReviewRegressionTest {
         when(boss.getPosition()).thenAnswer(inv -> bossPos.get());
         when(boss.isBoss()).thenReturn(true);
         inject(map, boss);
-        int standoff = BotAttackDriver.standoffX(bot);
-        assertTrue(standoff > 0, "a bowman holds a standoff");
         int tightest = Integer.MAX_VALUE;
         try (var effects = mockStatic(BotAttackEffects.class)) {
             for (int beat = 0; beat < 500; beat++) {
@@ -492,9 +858,9 @@ class LpqReviewRegressionTest {
                 }
             }
         }
-        assertTrue(tightest >= standoff - 40,
+        assertTrue(tightest >= 110,
                 "Alishar must never be allowed inside the bowman's standoff; tightest=" + tightest
-                        + " standoff=" + standoff + " bot=" + bot.getPosition() + " boss=" + bossPos.get());
+                        + " bot=" + bot.getPosition() + " boss=" + bossPos.get());
     }
 
     /** The altar summon stays best-effort and never blocks the fight (unchanged contract). */

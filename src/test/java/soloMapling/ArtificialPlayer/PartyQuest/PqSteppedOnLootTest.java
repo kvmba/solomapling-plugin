@@ -60,8 +60,7 @@ class PqSteppedOnLootTest {
         String body = java.substring(start, java.indexOf("\n    }", start));
 
         assertTrue(body.contains("STEPPED_ON_REACH_SQ"), "the reach is the stepped-on box");
-        assertTrue(body.contains("botCanLoot"), "addressed piles stay refused");
-        assertTrue(body.contains("isFloorLoot"), "multi-piece stacks stay refused");
+        assertTrue(body.contains("canCollectFloorDrop"), "use the shared entitlement and failed-pickup gate");
         assertTrue(body.contains("nextSteppedOnPickupAtByBot"), "pickups are paced, not vacuumed");
         assertFalse(body.contains("walkForPickup") || body.contains("GCMovement.move"),
                 "a combat beat must never steer the driver");

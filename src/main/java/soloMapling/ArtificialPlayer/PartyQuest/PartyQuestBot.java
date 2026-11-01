@@ -253,7 +253,7 @@ public abstract class PartyQuestBot extends BotSM implements GrindTickRegistry.P
             PqActions.attack(bot);
             return;
         }
-        PqActions.seekAndAttack(bot);
+        PqActions.seekAndAttack(bot, false, steppedOnLootIds());
     }
 
     /**
@@ -272,23 +272,8 @@ public abstract class PartyQuestBot extends BotSM implements GrindTickRegistry.P
      * own feet.
      */
     private boolean walkingAtALootableDrop(Character bot) {
-        int[] itemIds = steppedOnLootIds();
-        if (itemIds.length == 0) {
-            return false; // a quest with no scoopable item never has a pickup order
-        }
-        Point goal = PqActions.moveTargetOf(bot);
-        if (goal == null || bot.getPosition() == null) {
-            return false;
-        }
-        if (Math.abs(bot.getPosition().x - goal.x) <= PICKUP_ARRIVAL_PX
-                && Math.abs(bot.getPosition().y - goal.y) <= PICKUP_ARRIVAL_PX) {
-            return false; // the walk has landed; the sweep's own pickup takes it from here
-        }
-        return !PqActions.itemsOnFloorAt(bot, goal, itemIds).isEmpty();
+        return PqActions.walkingToLoot(bot, steppedOnLootIds());
     }
-
-    /** The arrival band that ends a pickup walk, in px (the driver's precise-target box). */
-    private static final int PICKUP_ARRIVAL_PX = 8;
 
     /** Shared empty opt-in for {@link #steppedOnLootIds()}; never mutated. */
     private static final int[] EMPTY_LOOT_IDS = new int[0];

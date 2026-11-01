@@ -31,7 +31,6 @@ public final class GrindBrain {
     // this grace beat, so a kill inside our own spot's radius (a mob walking home to us, or a spawn
     // landing mid-check) isn't read as "empty here, mobs there" the instant the last one died.
     static final long NEARBY_MOB_GRACE_MS = 1_500;
-    private static final double APPROACH_REACH_FRAC = 0.80;  // stop at this fraction of attack reach
     static final int ROAM_RETARGET_EPS = 16;         // skip re-issuing move for tiny shifts
     private static final long TARGET_RETARGET_TIMEOUT = 4_000; // give up walking to an unreachable target/spot after this
     private static final int APPROACH_PROGRESS_EPS = 20;     // bot must move at least this far to count as progress
@@ -534,8 +533,8 @@ public final class GrindBrain {
     // bots fire from afar. Floored at the melee values for short attacks.
     boolean inAttackRange(Character chr, Monster mob) {
         if (approachX < 0) {
-            approachX = Math.max(APPROACH_X, (int) (BotAttackDriver.attackReachX(chr) * APPROACH_REACH_FRAC));
-            approachY = Math.max(APPROACH_Y, (int) (BotAttackDriver.attackReachY(chr) * APPROACH_REACH_FRAC));
+            approachX = CombatSpacing.approachX(chr);
+            approachY = CombatSpacing.approachY(chr);
         }
         Point pos = chr.getPosition();
         Point mp = mob.getPosition();

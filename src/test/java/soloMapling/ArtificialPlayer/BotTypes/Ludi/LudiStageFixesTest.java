@@ -109,7 +109,7 @@ class LudiStageFixesTest {
                 "stage 7 must hunt the ledge mobs");
         assertTrue(gather.contains("stage7PassStillWanted(bot)"),
                 "and keep working while a pass is still owed");
-        assertTrue(gather.contains("seekAndAttack(bot, true)"),
+        assertTrue(gather.contains("seekAndAttack(bot, true, new int[]{LudiPqData.PASS})"),
                 "with reachableOnly: an unreachable mob is out of the chase, not an 8s dead end");
         assertFalse(gather.contains("hitReactorRotate(bot, box, LudiPqData.BOX_STAGE7)"),
                 "the box sits on a ledge with no inbound edge - walking at it can never work");
@@ -135,7 +135,7 @@ class LudiStageFixesTest {
                 "striking it is a plain reactor hit - type 100 does not block a weapon hit");
         assertTrue(boss.indexOf("BOSS_CRYSTAL") < boss.indexOf("seekAndAttack"),
                 "summon first, then add damage");
-        assertTrue(boss.contains("seekAndAttack(bot, true)"),
+        assertTrue(boss.contains("seekAndAttack(bot, true, new int[]{LudiPqData.PASS})"),
                 "the altar ledge's Ratz are unreachable: the chase must not walk at them");
     }
 
