@@ -92,6 +92,61 @@ class LpqStage8UpwardStairSwayTest {
         assertEquals(47, w[1], "an interior thin window must keep its validated max");
     }
 
+    /**
+     * Every pixel the stamped window exposes must be one the builder validated. The boundary
+     * searches only find the ENDS of a valid run, so on a stair lattice (whose arcs skim a
+     * neighbouring tread) the span can contain interior pixels that land in another region;
+     * widening the window would then let the executor fire from a rejected pixel and overfly
+     * its target.
+     */
+    @Test
+    void everyPixelOfAStampedJumpWindowLandsInItsTargetRegion() {
+        int widened = 0;
+        int bad = 0;
+        for (int mapId : new int[]{922010800, 922010100, 100040105, 103000006}) {
+            MapleMap m;
+            try {
+                m = BotNavigationMapLoader.loadMapGeometry(mapId);
+            } catch (Throwable t) {
+                continue;
+            }
+            BotNavigationGraph g = BotNavigationGraphProvider.rebuildGraph(m, BotMovementProfile.base());
+            for (int rid = 1; rid < 20000; rid++) {
+                BotNavigationGraph.Region region = g.getRegion(rid);
+                if (region == null || region.isRopeRegion) {
+                    continue;
+                }
+                List<BotNavigationGraph.Edge> out = g.getOutgoing(rid);
+                if (out == null) {
+                    continue;
+                }
+                for (BotNavigationGraph.Edge e : out) {
+                    if (e.type != BotNavigationGraph.EdgeType.JUMP || e.launchMaxX - e.launchMinX < 1) {
+                        continue;
+                    }
+                    widened++;
+                    for (int x = e.launchMinX; x <= e.launchMaxX; x++) {
+                        if (x < region.minX || x > region.maxX) {
+                            bad++;
+                            continue;
+                        }
+                        BotPhysicsEngine.JumpLanding l = BotPhysicsEngine.simulateJumpLanding(
+                                m, region.pointAt(x), e.launchStepX, BotMovementProfile.base());
+                        int landed = l == null ? -1 : g.regionIdByFootholdId.getOrDefault(l.foothold().getId(), -1);
+                        if (l == null || landed != e.toRegionId) {
+                            bad++;
+                            System.out.printf("WINDOW-BAD map=%d %d->%d x=%d landed=%d%n",
+                                    mapId, e.fromRegionId, e.toRegionId, x, landed);
+                        }
+                    }
+                }
+            }
+        }
+        assertTrue(widened > 50, "the sweep degenerated: only " + widened + " multi-pixel windows");
+        assertEquals(0, bad,
+                "a stamped jump window exposes a pixel that does not land in its target - see WINDOW-BAD");
+    }
+
     @Test
     void anEdgePressedThinWindowStillCollapses() {
         BotNavigationGraph.Region r = region(-100, 220, 0);

@@ -1799,6 +1799,20 @@ final class BotNavigationGraphProvider {
         int[] inset = insetJumpLaunchWindow(from, minX, maxX, jumpLaunchMargin(map, movementProfile));
         minX = inset[0];
         maxX = inset[1];
+        // Ours (dense-stair sway, review): the two boundary searches only find the ENDS of the
+        // valid run, so on a map whose landing flips between regions every few px (a stair lattice
+        // whose arcs skim a neighbouring tread) the span can contain interior pixels that do NOT
+        // reach toRegionId. The inset above can now hand back a multi-pixel interior span instead
+        // of one pixel, so it must not assume contiguity: shrink the window around its centre to a
+        // run whose EVERY pixel the builder validates. Without this the executor could fire from a
+        // rejected pixel - the very overfly-the-target failure the inset exists to prevent.
+        int[] contiguous = contiguousValidJumpSpan(from, map, regionIdByFootholdId, minX, maxX,
+                launchStepX, targetRegionId, stats, jumpLandingCache, movementProfile);
+        if (contiguous == null) {
+            return null;
+        }
+        minX = contiguous[0];
+        maxX = contiguous[1];
 
         int representativeX = (minX + maxX) / 2;
         Point representativeStart = from.pointAt(representativeX);
@@ -1816,6 +1830,43 @@ final class BotNavigationGraphProvider {
         return new JumpLaunchWindow(minX, maxX, validMinX, validMaxX,
                 representativeStart, representativeSimulation.landing().point(),
                 representativeSimulation.landing().timeMs());
+    }
+
+    private static int[] contiguousValidJumpSpan(BotNavigationGraph.Region from,
+                                                 MapleMap map,
+                                                 Map<Integer, Integer> regionIdByFootholdId,
+                                                 int minX,
+                                                 int maxX,
+                                                 int launchStepX,
+                                                 int targetRegionId,
+                                                 JumpBuildStats stats,
+                                                 JumpLandingCache jumpLandingCache,
+                                                 BotMovementProfile movementProfile) {
+        int lo = Math.clamp(minX, from.minX, from.maxX);
+        int hi = Math.clamp(maxX, from.minX, from.maxX);
+        if (lo > hi) {
+            return null;
+        }
+        // Walk outward from the centre while the pixel validates, so the result is always a
+        // contiguous run of validated pixels. The centre is not necessarily valid (a bad pixel can
+        // sit mid-span on a stair lattice), so it is tested too and a fully-invalid span yields
+        // null - the caller then drops the edge rather than stamping an unflyable window.
+        int centre = Math.clamp((lo + hi) / 2, lo, hi);
+        if (!isValidJumpLaunchX(from, map, regionIdByFootholdId, centre, launchStepX, targetRegionId,
+                stats, jumpLandingCache, movementProfile)) {
+            return null;
+        }
+        int left = centre;
+        while (left - 1 >= lo && isValidJumpLaunchX(from, map, regionIdByFootholdId, left - 1, launchStepX,
+                targetRegionId, stats, jumpLandingCache, movementProfile)) {
+            left--;
+        }
+        int right = centre;
+        while (right + 1 <= hi && isValidJumpLaunchX(from, map, regionIdByFootholdId, right + 1, launchStepX,
+                targetRegionId, stats, jumpLandingCache, movementProfile)) {
+            right++;
+        }
+        return new int[]{left, right};
     }
 
     private static JumpLaunchWindow expandDownJumpLaunchWindow(BotNavigationGraph.Region from,
@@ -1985,8 +2036,7 @@ final class BotNavigationGraphProvider {
             //
             // Both concerns are satisfied by keeping the whole validated span ONLY when the window
             // does not touch the ledge edge: nothing can be overflown past a ledge that is not
-            // there, and every arc fired inside the span is one the builder validated per pixel.
-            // An edge-pressed window keeps the old centre collapse.
+            // there. An edge-pressed window keeps the old centre collapse.
             boolean pressedAgainstEdge = minX <= from.minX || maxX >= from.maxX;
             int clampedLo = Math.clamp(minX, from.minX, from.maxX);
             int clampedHi = Math.clamp(maxX, from.minX, from.maxX);
