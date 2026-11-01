@@ -69,6 +69,16 @@ final class MovementPlan {
      * A* result itself, not this plan.
      */
     static MovementPlan inMap(BotNavigationGraph graph, MapleMap map, Point startPos, Point targetPos) {
+        return inMap(graph, map, startPos, targetPos, true);
+    }
+
+    /*
+     * As above for a specific body: {@code canBlink=false} keeps blinks out of the plan. The graph
+     * is class-neutral (one map = one bake), so an unobserved bot's analytic route must apply the
+     * same class filter the physics path does, or the two plans disagree about where it can go.
+     */
+    static MovementPlan inMap(BotNavigationGraph graph, MapleMap map, Point startPos, Point targetPos,
+                              boolean canBlink) {
         if (graph == null || map == null || startPos == null || targetPos == null) {
             return null;
         }
@@ -78,7 +88,7 @@ final class MovementPlan {
             return null;
         }
         List<BotNavigationGraph.Edge> edges =
-                BotNavigationManager.findPath(graph, map, startPos, startRegion, targetRegion, targetPos);
+                BotNavigationManager.findPath(graph, map, startPos, startRegion, targetRegion, targetPos, canBlink);
         return inMap(map.getId(), edges);
     }
 

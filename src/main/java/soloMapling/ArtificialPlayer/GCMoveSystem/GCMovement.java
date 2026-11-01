@@ -1397,7 +1397,14 @@ public final class GCMovement {
         if (from >= 0 && from == to) {
             return true;
         }
-        return MovementPlan.inMap(graph, map, bot.getPosition(), new Point(x, y)) != null;
+        // Bot-aware search: the graph is shared by every class (one bake per map), so a
+        // blink-less body must not read a mage's blink chain as walkable. Callers act on this -
+        // LudiStages.enterDoorRoom keeps a room claim on a "reachable" door - and a phantom route
+        // makes a bot hold a room it can never enter. Seedless on purpose: this is a REACHABILITY
+        // question, and the per-bot route jitter would make the answer depend on which of two
+        // equally-priced routes that bot happens to prefer.
+        return BotNavigationManager.findPath(graph, map, bot.getPosition(), from, to,
+                new Point(x, y), BotMovementCapabilities.of(bot).teleport()) != null;
     }
 
     /** Nearest reachable ground inside an interaction box; one peek-only graph traversal. */

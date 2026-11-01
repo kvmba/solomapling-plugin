@@ -210,9 +210,28 @@ public class LudiStage5MageBlinkTest {
         BotNavigationGraph g = BotNavigationGraphProvider.getGraph(map, warrior);
         int sr = g.findRegionId(map, from);
         int dr = g.findRegionId(map, door);
-        assertNull(BotNavigationManager.findPath(g, map, from, sr, dr, door),
-                "without the skill there is no route to a step no jump clears");
-        assertEquals(0, countTeleportEdges(g), "a warrior's graph must carry no blink edges at all");
+
+        // The graph is class-neutral (one bake per map, shared by everyone), so the blink edges are
+        // present for ALL bodies - what must differ is the ROUTE each body is given. A warrior
+        // asking for a destination only reachable by blinking must be told there is no route.
+        assertNull(BotNavigationManager.findPath(g, map, from, sr, dr, door, false),
+                "a body without the skill has no route to a step no jump clears");
+        assertNotNull(BotNavigationManager.findPath(g, map, from, sr, dr, door, true),
+                "a body WITH the skill does reach it - the graph itself carries the edge");
+
+        // And the reachability check callers actually use agrees.
+        Character bot = mock(Character.class, RETURNS_DEEP_STUBS);
+        when(bot.getMap()).thenReturn(map);
+        when(bot.getMapId()).thenReturn(MAP);
+        when(bot.getJob()).thenReturn(Job.FIGHTER);
+        when(bot.getLevel()).thenReturn(40);
+        when(bot.getTotalMoveSpeedStat()).thenReturn(100);
+        when(bot.getTotalJumpStat()).thenReturn(100);
+        when(bot.getBuffedValue(org.gms.client.BuffStat.MONSTER_RIDING)).thenReturn(null);
+        when(bot.getPosition()).thenReturn(new Point(from));
+        assertFalse(GCMovement.canPathTo(bot, door.x, door.y),
+                "a fighter must not be told the top door is reachable: the room claim then "
+                        + "never releases and the mage who could enter is locked out");
     }
 
     /**

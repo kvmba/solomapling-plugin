@@ -559,7 +559,8 @@ final class GCMovementDriver {
                 || entry.coarsePlanMapId != bot.getMapId()
                 || !target.equals(entry.coarsePlanTarget);
         if (needPlan) {
-            MovementPlan plan = MovementPlan.inMap(graph, bot.getMap(), bot.getPosition(), target);
+            MovementPlan plan = MovementPlan.inMap(graph, bot.getMap(), bot.getPosition(), target,
+                    BotMovementCapabilities.of(bot).teleport());
             if (plan == null) {
                 // Null plan means BOTH "same region — walk straight there" and "no path / no
                 // region". Only the first is an arrival: teleporting to the goal on a no-path

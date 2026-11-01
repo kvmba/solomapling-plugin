@@ -27,6 +27,16 @@ record BotMovementProfile(int totalSpeedStat, int totalJumpStat, boolean snowSho
     static final int STAT_BUCKET_SIZE = 5;
     static final int MAX_EFFECTIVE_SPEED_STAT = 200;
     static final int MAX_EFFECTIVE_JUMP_STAT = 123;
+
+    /**
+     * The weakest jump stat any body walks around with (level 1-9, see {@link #levelJumpStat}).
+     *
+     * <p>Used where a decision has to hold "for everybody" rather than for one body - chiefly the
+     * nav graph's "is this step a jump or a wall" test. The graph is shared by every class, so it
+     * must answer for the worst legs, or a tall-jumping baker would drop a blink that a short body
+     * needs (measured: same map baked from jump 110 vs 115 differed by 113 blink edges).
+     */
+    static final int MIN_JUMP_STAT = 100;
     static final BotMovementProfile BASE = new BotMovementProfile(BASE_TOTAL_STAT, BASE_TOTAL_STAT);
 
     // Class-aware "effective Haste". Bots' Haste buff is cosmetic (no stat), so thief speed/jump is

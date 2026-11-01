@@ -148,7 +148,9 @@ public class LPQStage5TopDoorExecutionTest {
         int sr = g.findRegionId(map, from);
         int dr = g.findRegionId(map, door);
         assertTrue(sr != dr, "the door must sit in a different region for this case to mean anything");
-        assertNull(BotNavigationManager.findPath(g, map, from, sr, dr, door),
+        // Class-neutral graph: the blink exists for everyone who owns the skill. A body without it
+        // must still be told there is no route (that is what keeps it from claiming the room).
+        assertNull(BotNavigationManager.findPath(g, map, from, sr, dr, door, false),
                 "an unreachable door answers null - never an empty 'walk straight there'");
     }
 

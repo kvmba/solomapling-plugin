@@ -95,7 +95,10 @@ class PathUnreachableContractTest {
         int dr = g.findRegionId(map, door);
         assertTrue(sr != dr, "the test needs two DIFFERENT regions to be meaningful");
 
-        List<BotNavigationGraph.Edge> path = BotNavigationManager.findPath(g, map, from, sr, dr, door);
+        // The graph is class-neutral (one bake per map), so it carries the blink that clears this
+        // step. What must stay honest is the answer for a BODY WITHOUT the skill: no route.
+        List<BotNavigationGraph.Edge> path =
+                BotNavigationManager.findPath(g, map, from, sr, dr, door, false);
         assertNull(path, "an unreachable cross-region target must answer null, not an empty list");
     }
 

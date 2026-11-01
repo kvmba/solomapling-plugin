@@ -567,6 +567,8 @@ final class BotNavigationManager {
         if (entry.inAir || entry.climbing || !atBlinkAnchor(bot.getPosition(), edge)) {
             return null;
         }
+        // Read the LIVE job, not the cached profile: a bot that just job-advanced must not be held
+        // back by a 20s-stale snapshot. The cost is one Integer range check.
         if (!BotMovementCapabilities.of(bot).teleport()) {
             clearNavigation(entry);
             return null;
@@ -582,7 +584,8 @@ final class BotNavigationManager {
         // never land in consecutive ticks. Chaining them tick-after-tick read as a single long warp
         // (measured: 152px then 115px inside 100ms) and is impossible for a player.
         entry.teleportUseCooldownUntilMs = MovementClock.nowMs() + TELEPORT_USE_COOLDOWN_MS;
-        clearNavigation(entry);
+        // resetEntryState already clears the navigation state (via clearTransientState); the extra
+        // clearNavigation before it would only run twice.
         BotMovementManager.resetEntryState(entry);
         return new NavigationDirective(rawTargetPos, true);
     }
@@ -1153,7 +1156,8 @@ final class BotNavigationManager {
                                                         int startRegionId,
                                                         int targetRegionId,
                                                         Point targetPos) {
-        List<BotNavigationGraph.Edge> path = findPath(graph, bot.getMap(), bot.getPosition(), startRegionId, targetRegionId, targetPos, null, routeSeed(bot));
+        List<BotNavigationGraph.Edge> path =
+                findPath(graph, bot, startRegionId, targetRegionId, targetPos);
         if (path == null || path.isEmpty()) {
             return null;
         }
@@ -1165,7 +1169,11 @@ final class BotNavigationManager {
                                                   int startRegionId,
                                                   int targetRegionId,
                                                   Point targetPos) {
-        return findPath(graph, bot.getMap(), bot.getPosition(), startRegionId, targetRegionId, targetPos, null, routeSeed(bot));
+        // The bot knows its own move set; a class-neutral graph does not. Route it around blinks
+        // it cannot cast instead of planning them and having the executor refuse each one.
+        return runSearch(graph, bot.getMap(), bot.getPosition(), startRegionId, targetRegionId,
+                targetPos, null, useAdmissibleHeuristic, true, routeSeed(bot),
+                BotMovementCapabilities.of(bot).teleport()).path();
     }
 
     static List<BotNavigationGraph.Edge> findPath(BotNavigationGraph graph,
@@ -1175,6 +1183,18 @@ final class BotNavigationManager {
                                                   int targetRegionId,
                                                   Point targetPos) {
         return findPath(graph, map, startPos, startRegionId, targetRegionId, targetPos, null);
+    }
+
+    /** As above for a body whose move set is known: {@code canBlink=false} excludes blinks. */
+    static List<BotNavigationGraph.Edge> findPath(BotNavigationGraph graph,
+                                                  MapleMap map,
+                                                  Point startPos,
+                                                  int startRegionId,
+                                                  int targetRegionId,
+                                                  Point targetPos,
+                                                  boolean canBlink) {
+        return runSearch(graph, map, startPos, startRegionId, targetRegionId, targetPos,
+                null, useAdmissibleHeuristic, true, 0L, canBlink).path();
     }
 
     static List<BotNavigationGraph.Edge> findPathForTargetScore(BotNavigationGraph graph,
@@ -1235,6 +1255,26 @@ final class BotNavigationManager {
                                    boolean zeroHeuristic,
                                    boolean instrument,
                                    long routeSeed) {
+        return runSearch(graph, map, startPos, startRegionId, targetRegionId, targetPos,
+                pathfindCaller, zeroHeuristic, instrument, routeSeed, true);
+    }
+
+    /*
+     * As above, honouring THIS body's move set: {@code canBlink=false} makes TELEPORT edges
+     * unplannable. The graph itself is class-neutral (one map = one bake shared by every body -
+     * see BotNavigationGraphProvider.addTeleportEdges), so the class filter has to live here.
+     */
+    static SearchOutcome runSearch(BotNavigationGraph graph,
+                                   MapleMap map,
+                                   Point startPos,
+                                   int startRegionId,
+                                   int targetRegionId,
+                                   Point targetPos,
+                                   String pathfindCaller,
+                                   boolean zeroHeuristic,
+                                   boolean instrument,
+                                   long routeSeed,
+                                   boolean canBlink) {
         long startedAt = System.nanoTime();
         PathfindProfile profile = null;
         // routeSeed != 0 (per-bot) diversifies routes so 100 bots don't stack on one optimal
@@ -1283,6 +1323,9 @@ final class BotNavigationManager {
                     edgeChecks++;
                     if (!isEdgeUsable(graph, map, edge)) {
                         continue;
+                    }
+                    if (!canBlink && edge.type == BotNavigationGraph.EdgeType.TELEPORT) {
+                        continue; // no 快速移动: this blink is not a move for this body
                     }
                     usableEdges++;
 
