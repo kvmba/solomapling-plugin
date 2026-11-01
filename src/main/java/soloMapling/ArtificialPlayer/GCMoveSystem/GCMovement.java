@@ -150,7 +150,7 @@ public final class GCMovement {
     private static void settleGroundedOnDisable(BotMovementState st, Character bot) {
         // The settle is the LAST thing this bot's movement session does, so it must leave the bot on
         // real ground, not merely in a standing pose. A session can end while the bot is still above its
-        // floor: the arrival float lifts it PORTAL_FLOAT_HEIGHT_PX up and arms the drop with inAir still
+        // floor: the arrival float starts at the raised spawn y and arms the drop with inAir still
         // false, and the off-map recovery teleports to the VR-top fallback when nothing is below. Settling
         // there left the bot in mid-air with the driver stopped and its state removed - nothing left to
         // drop it: the "bot frozen in the air" report. Re-resolve the floor under it exactly as enable()
@@ -421,6 +421,40 @@ public final class GCMovement {
         }
     }
 
+    /**
+     * How far above the arrival portal a character is put on the first frame of a map change.
+     *
+     * <p>This is NOT a tunable - it is the host's own entering-field raise. {@code
+     * PacketCreator.spawnPlayerMapObject} writes {@code position.y - 42} and the JUMP stance into every
+     * {@code SPAWN_PLAYER} packet sent with {@code enteringField}, which is exactly the packet a room
+     * receives when someone warps in. A real player keeps that height: the same packet carries
+     * foothold 0 for them, so the client just lets them fall.
+     *
+     * <p>A bot lost it. That packet fills the foothold field with the bot's real foothold id (so the
+     * sprite renders on the right layer), and the client SNAPS a sprite onto a foothold id it is given
+     * - so every arriving bot was pulled back down to the floor while the player beside it stayed up.
+     * The reported "the bot is not raised at first, then gets pulled up later". The dynamic engine's
+     * arrival float then used a second, unrelated number (60px above the FLOOR), so the frame the room
+     * had already seen and the frame the drop started from disagreed by a different amount per room.
+     *
+     * <p>Now {@link #enterPortal} arms the jump pose before the warp - which is what makes the host
+     * emit foothold 0 and leaves the bot up there like a player - and the float starts at this same
+     * raised y. Note the limit of that: a warp driven by a HOST script (the stage-2 trap box's
+     * {@code rm.warpMap}, the bonus stage's {@code clearPQ}) never passes through {@code enterPortal},
+     * so those arrivals still get the foothold snapped back; nothing in the plugin sits between those
+     * scripts and {@code MapleMap.addPlayer}.
+     */
+    static final int ENTRY_RAISE_PX = 42;
+
+    /**
+     * The point a bot is shown at on the first frame after a map change: the arrival portal raised by
+     * {@link #ENTRY_RAISE_PX}, which is the y the host's entering-field packet already put on the wire.
+     * Pure so the contract is unit-testable without a live map (see {@code GroundSwayTest}).
+     */
+    static Point entrySpawnPoint(Point spawn) {
+        return new Point(spawn.x, spawn.y - ENTRY_RAISE_PX);
+    }
+
     /** Enter a scripted quest portal without racing the physics tick, including same-map warps. */
     public static void enterPortal(Character bot, Portal portal) {
         if (bot == null || portal == null || bot.getClient() == null || bot.getMap() == null) return;
@@ -432,16 +466,39 @@ public final class GCMovement {
             Point entrance = portal.getPosition();
             if (map.getPortal(portal.getId()) != portal
                     || Math.abs(before.x - entrance.x) > 8 || Math.abs(before.y - entrance.y) > 8) return;
+            // Arm the jump pose before the warp so the host's SPAWN_PLAYER omits the foothold and the
+            // client cannot snap the bot back down (see ENTRY_RAISE_PX). Only a bot under dynamic
+            // control: its next driver tick re-derives the real pose through resolveStance, whereas a
+            // bot with no session would be left standing in the jump pose forever.
+            int stanceBefore = bot.getStance();
+            if (st != null) {
+                bot.setStance(bot.isFacingLeft()
+                        ? CharacterStance.JUMP_LEFT_STANCE : CharacterStance.JUMP_RIGHT_STANCE);
+            }
             portal.enterPortal(bot.getClient());
-            if (st != null && (bot.getMap() != map || !bot.getPosition().equals(before))) {
-                clearMoveIntent(bot);
-                // Map changes are re-seeded by the driver. Same-map portals need the same
-                // physics reset now, or the next tick restores the pre-portal shadow position.
-                if (bot.getMap() == map) {
-                    BotPhysicsEngine.teleportTo(st, bot, bot.getPosition());
-                    BotMovementManager.resetEntryStateAfterTeleport(st);
-                    BotMovementManager.broadcastMovement(st);
-                }
+            if (st == null) {
+                return; // no session to re-seed (the pre-existing recorded-path contract)
+            }
+            if (bot.getMap() == map && bot.getPosition().equals(before)) {
+                bot.setStance(stanceBefore); // the stage gate refused the door - undo the entry pose
+                return;
+            }
+            clearMoveIntent(bot);
+            // Map changes are re-seeded by the driver. Same-map portals need the same
+            // physics reset now, or the next tick restores the pre-portal shadow position.
+            if (bot.getMap() == map) {
+                BotPhysicsEngine.teleportTo(st, bot, bot.getPosition());
+                BotMovementManager.resetEntryStateAfterTeleport(st);
+                BotMovementManager.broadcastMovement(st);
+            } else {
+                // Hand the pose back NOW, not on the next driver tick. The host does not reset a
+                // stance on a map change (changeMapInternal only setPosition), and an unobserved
+                // room's driver ticks once a second (four when idle) - so a player walking in
+                // within that window would receive sendSpawnData's enteringField=false frame,
+                // which writes chr.getStance() verbatim and would show the bot hovering in a jump
+                // pose. The entry pose has done its job (the host already omitted the foothold on
+                // this map's SPAWN_PLAYER).
+                bot.setStance(stanceBefore);
             }
         }
     }

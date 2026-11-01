@@ -1041,12 +1041,6 @@ final class GCMovementDriver {
         return true;
     }
 
-    // Organic portal entry: the bot appears at the portal lifted at least this far above the floor
-    // (a natural portal sits higher → keep its height), floats the "client load" beat, then drops.
-    // Guarantees a visible spawn→float→drop even when the arrival portal sits on the ground. Mirrors
-    // the recorded engine's portalenterdrop feel; tune to taste.
-    private static final int PORTAL_FLOAT_HEIGHT_PX = 60;
-
     static void onMapChange(BotMovementState entry, Character bot) {
         // Publish only after arrival is armed. Map identity also detects moves between two
         // instances with the same id; a second warp mid-handler remains pending for the next tick.
@@ -1088,9 +1082,14 @@ final class GCMovementDriver {
         // ~1.5s per hop). The hold + release runs in tick(); beginPortalDrop hands off to the
         // airborne integrator.
         if (ground != null && ObserverTracker.isActiveMap(bot.getMapId())) {
-            // Lift to at least PORTAL_FLOAT_HEIGHT_PX above the floor (keep a higher natural portal),
-            // so the bot floats at/above the portal a beat, then drops — every time, not just for
-            // portals that happen to sit high.
+            // Float at the SAME y the room was already shown: the host's entering-field SPAWN_PLAYER
+            // writes position.y - ENTRY_RAISE_PX (42) and a jump pose, and GCMovement.enterPortal arms
+            // that pose so the host omits the foothold and the client cannot snap the sprite back down.
+            // Starting the drop from the identical point is what makes "the frame the room saw" and
+            // "the frame the bot falls from" one position instead of two unrelated raises - the old
+            // floor-relative PORTAL_FLOAT_HEIGHT_PX (60) disagreed with the host by a different amount
+            // in every room, which is the reported "it is not raised at first, then gets pulled up".
+            //
             // Arm the pending drop BEFORE teleportTo: teleportTo -> clearMovementState leaves inAir
             // FALSE, so between the two writes there is otherwise a window with neither flag set.
             // GCMovement.disable() landing in that window used to settle+stop the driver with the
@@ -1101,8 +1100,8 @@ final class GCMovementDriver {
             // Also silence flavor for the float + the fall that follows the drop release, so an arriving
             // bot doesn't swing a skill in mid-air in front of the player who is watching the entry.
             entry.portalArrivalGuardUntilMs = entry.portalDropAtMs + PORTAL_FALL_GUARD_MS;
-            int floatY = Math.min(spawn.y, ground.y - PORTAL_FLOAT_HEIGHT_PX);
-            BotPhysicsEngine.teleportTo(entry, bot, new Point(spawn.x, floatY));
+            Point raised = GCMovement.entrySpawnPoint(spawn);
+            BotPhysicsEngine.teleportTo(entry, bot, raised);
         } else {
             // Unobserved (or no floor below): just stand where we landed — no float.
             BotPhysicsEngine.teleportTo(entry, bot, ground != null ? ground : spawn);
