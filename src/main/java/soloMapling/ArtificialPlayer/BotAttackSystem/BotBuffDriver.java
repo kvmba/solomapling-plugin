@@ -75,7 +75,7 @@ public final class BotBuffDriver {
     private static int castDueBuffs(Character bot, boolean force, boolean silent) {
         if (bot == null) return 0;
 
-        List<Integer> buffIds = BotBuffConfig.buffsForJob(bot.getJob());
+        List<Integer> buffIds = BotBuffConfig.buffsFor(bot.getJob(), bot.getLevel());
         if (buffIds.isEmpty()) return 0;
 
         long now = System.currentTimeMillis();

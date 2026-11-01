@@ -167,4 +167,24 @@ public final class BotBuffConfig {
         }
         return result;
     }
+
+    /**
+     * The buffs this bot may cast RIGHT NOW: its job's list minus any buff whose own job tier the
+     * bot's level has not unlocked. The lineage walk is by job id, so an inherited 3rd/4th-job buff
+     * would otherwise reach a bot sitting below that advancement level.
+     */
+    public static List<Integer> buffsFor(Job job, int level) {
+        List<Integer> all = buffsForJob(job);
+        if (all.isEmpty()) {
+            return all;
+        }
+        List<Integer> usable = new ArrayList<>(all.size());
+        for (int skillId : all) {
+            // The skill id's own job segment decides its tier (4211003 -> 421, a 3rd job).
+            if (level >= BotSkillLevelGate.minLevelForSkill(skillId)) {
+                usable.add(skillId);
+            }
+        }
+        return usable;
+    }
 }

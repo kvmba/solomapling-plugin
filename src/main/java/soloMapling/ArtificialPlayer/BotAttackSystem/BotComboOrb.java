@@ -70,7 +70,7 @@ public final class BotComboOrb {
      * - which here is the Crusader lineage, the jobs the buff layer shows the aura on.
      */
     public static boolean onAttackLanded(Character bot, int skillId) {
-        if (bot == null || bot.getJob() == null || !bot.getJob().isA(Job.CRUSADER)) {
+        if (!wantsCombo(bot)) {
             return false;
         }
         Skill skill = comboSkillFor(bot);
@@ -129,8 +129,8 @@ public final class BotComboOrb {
      * jobs always answer true - the gate guards the RING, not their attacks.
      */
     public static boolean finisherReady(Character bot) {
-        if (bot == null || bot.getJob() == null || !bot.getJob().isA(Job.CRUSADER)) {
-            return true;
+        if (!wantsCombo(bot)) {
+            return true; // non-combo jobs (and a combo job below its tier) always answer true
         }
         return System.currentTimeMillis() >= nextFinisherByBot.getOrDefault(bot.getId(), 0L);
     }
@@ -147,7 +147,7 @@ public final class BotComboOrb {
         if (bot == null || bot.getJob() == null) {
             return "bot or job is null";
         }
-        boolean combo = bot.getJob().isA(Job.CRUSADER);
+        boolean combo = wantsCombo(bot);
         long cdLeft = 0;
         if (combo) {
             cdLeft = Math.max(0, nextFinisherByBot.getOrDefault(bot.getId(), 0L) - System.currentTimeMillis());
@@ -190,8 +190,11 @@ public final class BotComboOrb {
 
     /** Whether this character is a warrior-line job that can hold a combo at all. */
     private static boolean wantsCombo(Character bot) {
+        // 斗气集中 is a 3rd-job skill (1111002): a bot carrying the Crusader job below level 70 has
+        // not learnt it, so it shows no ring at all - the same level gate the attacks use.
         return bot != null && bot.getJob() != null
-                && bot.getJob().isA(Job.CRUSADER) && bot.getMap() != null;
+                && bot.getJob().isA(Job.CRUSADER) && bot.getMap() != null
+                && bot.getLevel() >= BotSkillLevelGate.minLevelForSkill(Crusader.COMBO);
     }
 
     /*

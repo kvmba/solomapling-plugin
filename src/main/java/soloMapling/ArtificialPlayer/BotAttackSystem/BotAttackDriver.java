@@ -173,7 +173,7 @@ public final class BotAttackDriver {
         BotDebuffState status = BotDebuffState.of(bot);
         if (status != null && status.blocksAttack()) return false;
         WeaponType weapon = BotAttack.resolveEquippedWeaponType(bot);
-        BotAttackConfig.JobAttacks attacks = BotAttackConfig.resolve(bot.getJob(), weapon);
+        BotAttackConfig.JobAttacks attacks = BotAttackConfig.resolve(bot.getJob(), weapon, bot.getLevel());
         AttackSelection selection = selectAttack(bot, weapon,
                 gateProfile(bot, attacks.single(), weapon), gateProfile(bot, attacks.aoe(), weapon),
                 gateProfile(bot, attacks.ultimate(), weapon), Choice.AUTO, System.currentTimeMillis());
@@ -207,7 +207,7 @@ public final class BotAttackDriver {
             return null;
         }
         WeaponType weapon = BotAttack.resolveEquippedWeaponType(bot);
-        BotAttackConfig.JobAttacks atks = BotAttackConfig.resolve(bot.getJob(), weapon);
+        BotAttackConfig.JobAttacks atks = BotAttackConfig.resolve(bot.getJob(), weapon, bot.getLevel());
         if (atks.single() != null) {
             return atks.single();
         }
@@ -221,7 +221,7 @@ public final class BotAttackDriver {
             return false;
         }
         WeaponType weapon = BotAttack.resolveEquippedWeaponType(bot);
-        BotAttackConfig.JobAttacks atks = BotAttackConfig.resolve(bot.getJob(), weapon);
+        BotAttackConfig.JobAttacks atks = BotAttackConfig.resolve(bot.getJob(), weapon, bot.getLevel());
         return atks.aoe() != null || atks.ultimate() != null;
     }
 
@@ -245,7 +245,7 @@ public final class BotAttackDriver {
         }
 
         WeaponType weapon = BotAttack.resolveEquippedWeaponType(bot);
-        BotAttackConfig.JobAttacks atks = BotAttackConfig.resolve(bot.getJob(), weapon);
+        BotAttackConfig.JobAttacks atks = BotAttackConfig.resolve(bot.getJob(), weapon, bot.getLevel());
         // Every slot is gated up front, BEFORE the forced-slot existence checks: a skill that
         // requires the 变身 morph / 海盗船 resolves to null while that exact aura is down (a real
         // client refuses it untransformed, and a plain 变身 does not license a 超级变身 skill), so
@@ -450,7 +450,9 @@ public final class BotAttackDriver {
      * so getBuffedValue is always null here). Only the claw line carries Shadow Partner.
      */
     private static int shadowDoubled(Character bot, int baseLines) {
-        return BotBuffConfig.buffsForJob(bot.getJob()).contains(Hermit.SHADOW_PARTNER)
+        // 影子伙伴 is a 3rd-job skill (level 70+): a bot carrying the Hermit job below that has not
+        // unlocked it, so it must not get the doubled line count (which also inflates the damage).
+        return BotBuffConfig.buffsFor(bot.getJob(), bot.getLevel()).contains(Hermit.SHADOW_PARTNER)
                 ? baseLines * 2 : baseLines;
     }
 

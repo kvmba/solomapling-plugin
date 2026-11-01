@@ -106,7 +106,7 @@ public final class BotEnergyCharge {
         if (bot == null || mobsHit <= 0 || bot.getJob() == null) {
             return;
         }
-        if (!isEnergyChargeJob(bot.getJob().getId())) {
+        if (!isEnergyChargeJob(bot)) {
             return;
         }
 
@@ -140,7 +140,7 @@ public final class BotEnergyCharge {
         if (bot == null || bot.getJob() == null) {
             return false;
         }
-        if (!isEnergyChargeJob(bot.getJob().getId()) || !isCharged(bot.getEnergyBar())) {
+        if (!isEnergyChargeJob(bot) || !isCharged(bot.getEnergyBar())) {
             return false;
         }
         long now = System.currentTimeMillis();
@@ -190,7 +190,7 @@ public final class BotEnergyCharge {
         int energy = bot.getEnergyBar();
         String state = isCharged(energy) ? "CHARGED" : (energy >= ARM_ENERGY ? "armed" : "charging");
         return bot.getName() + " (job " + bot.getJob().getId() + ") energy=" + energy + " " + state
-                + (isEnergyChargeJob(bot.getJob().getId()) ? "" : " - this job has no Energy Charge");
+                + (isEnergyChargeJob(bot) ? "" : " - this job has no Energy Charge");
     }
 
     /*
@@ -231,7 +231,7 @@ public final class BotEnergyCharge {
     /** Whether this character is a brawler-line pirate that can hold a charge at all. */
     private static boolean wantsCharge(Character bot) {
         return bot != null && bot.getJob() != null
-                && isEnergyChargeJob(bot.getJob().getId()) && bot.getMap() != null;
+                && isEnergyChargeJob(bot) && bot.getMap() != null;
     }
 
     // ── charge model (pure, so the numbers are testable without WZ or a character) ──────────────
@@ -273,6 +273,15 @@ public final class BotEnergyCharge {
      */
     static boolean isEnergyChargeJob(int jobId) {
         return jobId / 10 == 51 && jobId >= 511;
+    }
+
+    /**
+     * As {@link #isEnergyChargeJob(int)}, plus the level the skill needs: 能量获得 is a 3rd-job skill,
+     * so a bot carrying the Marauder job below level 70 has not learnt it and must not charge.
+     */
+    static boolean isEnergyChargeJob(Character bot) {
+        return bot != null && bot.getJob() != null && isEnergyChargeJob(bot.getJob().getId())
+                && bot.getLevel() >= BotSkillLevelGate.minLevelForJob(bot.getJob().getId());
     }
 
     record Gain(int energy, boolean becameFull) {

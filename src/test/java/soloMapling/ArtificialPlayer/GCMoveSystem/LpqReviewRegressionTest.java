@@ -1034,7 +1034,7 @@ class LpqReviewRegressionTest {
             Method search = PqActions.class.getDeclaredMethod("findFiringPosition", Character.class, Monster.class);
             search.setAccessible(true);
             assertNotNull(search.invoke(null, bot, target));
-            config.verify(() -> soloMapling.ArtificialPlayer.BotAttackSystem.BotAttackConfig.resolve(any(), any()), times(1));
+            config.verify(() -> soloMapling.ArtificialPlayer.BotAttackSystem.BotAttackConfig.resolve(any(), any(), anyInt()), times(1));
             profiles.verify(() -> BotMovementProfile.fromCharacter(bot), times(1));
         }
     }

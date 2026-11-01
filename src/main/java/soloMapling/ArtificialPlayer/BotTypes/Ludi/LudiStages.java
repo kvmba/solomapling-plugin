@@ -880,7 +880,7 @@ public final class LudiStages {
      * this body can survive the room.
      */
     public static int hideSkillFor(Character bot) {
-        var kit = BotBuffConfig.buffsForJob(bot.getJob());
+        var kit = BotBuffConfig.buffsFor(bot.getJob(), bot.getLevel());
         if (kit.contains(Rogue.DARK_SIGHT)) {
             return Rogue.DARK_SIGHT;
         }

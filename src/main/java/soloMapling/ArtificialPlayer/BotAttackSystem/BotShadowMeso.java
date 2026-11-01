@@ -62,7 +62,8 @@ public final class BotShadowMeso {
      */
     public static BotMesoBomb.Blast tryThrow(Character bot, WeaponType weapon, boolean facingLeft) {
         if (bot == null || bot.getMap() == null || bot.getJob() == null
-                || !bot.getJob().isA(Job.HERMIT)) {
+                || !bot.getJob().isA(Job.HERMIT)
+                || bot.getLevel() < BotSkillLevelGate.minLevelForSkill(Hermit.SHADOW_MESO)) {
             return null;
         }
         long now = System.currentTimeMillis();

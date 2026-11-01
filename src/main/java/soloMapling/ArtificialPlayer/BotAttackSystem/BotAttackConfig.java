@@ -212,6 +212,21 @@ public final class BotAttackConfig {
         BY_JOB.put(job, new JobAttacks(single, aoe, ultimate));
     }
 
+    /**
+     * Whether {@code level} has unlocked every skill this entry can render. Checked per skill (not
+     * per entry) because several entries deliberately hold a later tier's attack (Hero's Brandish
+     * under HERO, Bowmaster's Hurricane, Buccaneer's Barrage); keying the floor on the entry id
+     * would let a level-70 Hero keep a 4th-job attack.
+     */
+    private static boolean admitsAttacks(int level, JobAttacks atks) {
+        for (BotAttackProfile p : new BotAttackProfile[]{atks.single(), atks.aoe(), atks.ultimate()}) {
+            if (p != null && level < BotSkillLevelGate.minLevelForSkill(p.skillId)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
     /*
      * The bot's effective {single, aoe, ultimate} attacks: the most advanced of each across its
      * lineage (highest job id wins, which is also the highest tier within a branch). Because the
@@ -219,8 +234,12 @@ public final class BotAttackConfig {
      * earlier job (Bishop's Shining Ray, the arch-mages' Ice Strike / Explosion) alongside the
      * ultimate it introduces itself. 1st-job rogues get their basic seeded from the weapon. Any
      * field may be null.
+     *
+     * <p>Every slot is gated by the bot's LEVEL: a skill whose own job tier the level has not
+     * unlocked counts as absent, so the lineage falls back to the best attack the level really has
+     * (a level-40 Chief Bandit keeps Savage Blow, not Band of Thieves).</p>
      */
-    public static JobAttacks resolve(Job job, WeaponType weapon) {
+    public static JobAttacks resolve(Job job, WeaponType weapon, int level) {
         if (job == null) {
             return new JobAttacks(null, null, null);
         }
@@ -233,6 +252,10 @@ public final class BotAttackConfig {
                 continue;
             }
             JobAttacks a = entry.getValue();
+            // The level gate is per SKILL, not per entry - see admitsAttacks.
+            if (!admitsAttacks(level, a)) {
+                continue;
+            }
             if (a.single() != null && j.getId() > bestSingleId) {
                 single = a.single();
                 bestSingleId = j.getId();

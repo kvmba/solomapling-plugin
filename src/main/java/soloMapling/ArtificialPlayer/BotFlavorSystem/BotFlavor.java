@@ -170,7 +170,7 @@ public final class BotFlavor {
     // no damage. markAlerted keeps the pose from being cancelled by the next idle-refresh packet.
     private static void doSkillSwing(Character chr) {
         WeaponType weapon = BotAttack.resolveEquippedWeaponType(chr);
-        BotAttackConfig.JobAttacks atk = BotAttackConfig.resolve(chr.getJob(), weapon);
+        BotAttackConfig.JobAttacks atk = BotAttackConfig.resolve(chr.getJob(), weapon, chr.getLevel());
         BotAttackProfile profile = pickProfile(atk);
         GCMovement.markAlerted(chr);
         if (profile == null) {

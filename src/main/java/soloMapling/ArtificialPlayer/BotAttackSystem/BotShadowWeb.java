@@ -58,7 +58,8 @@ public final class BotShadowWeb {
      */
     public static BotMesoBomb.Blast tryCast(Character bot, boolean facingLeft) {
         if (bot == null || bot.getMap() == null || bot.getJob() == null
-                || !bot.getJob().isA(Job.HERMIT)) {
+                || !bot.getJob().isA(Job.HERMIT)
+                || bot.getLevel() < BotSkillLevelGate.minLevelForSkill(Hermit.SHADOW_WEB)) {
             return null;
         }
         Skill skill = SkillFactory.getSkill(Hermit.SHADOW_WEB);

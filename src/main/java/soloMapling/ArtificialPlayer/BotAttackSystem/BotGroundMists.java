@@ -61,7 +61,8 @@ public final class BotGroundMists {
      */
     public static BotMesoBomb.Blast tryCast(Character bot, boolean facingLeft) {
         if (bot == null || bot.getMap() == null || bot.getJob() == null
-                || !bot.getJob().isA(Job.FP_MAGE)) {
+                || !bot.getJob().isA(Job.FP_MAGE)
+                || bot.getLevel() < BotSkillLevelGate.minLevelForSkill(FPMage.POISON_MIST)) {
             return null;
         }
         Skill skill = SkillFactory.getSkill(FPMage.POISON_MIST);

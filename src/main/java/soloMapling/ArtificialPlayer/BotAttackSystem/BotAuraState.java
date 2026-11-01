@@ -163,7 +163,8 @@ public final class BotAuraState {
         if (wanted == 0 || bot == null) {
             return 0;
         }
-        return BotBuffConfig.buffsForJob(bot.getJob()).contains(wanted) ? wanted : 0;
+        // Unlocked for this bot: in its job's kit AND at a level the skill's own tier has opened.
+        return BotBuffConfig.buffsFor(bot.getJob(), bot.getLevel()).contains(wanted) ? wanted : 0;
     }
 
     /** The host's own {@code isDash} set: the 疾驰 speed/jump burst. */
@@ -554,7 +555,7 @@ public final class BotAuraState {
             return cached;
         }
         int found = 0;
-        for (int skillId : BotBuffConfig.buffsForJob(bot.getJob())) {
+        for (int skillId : BotBuffConfig.buffsFor(bot.getJob(), bot.getLevel())) {
             if (isDash(skillId)) {
                 found = skillId;
                 break;

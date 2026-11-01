@@ -617,7 +617,7 @@ public final class SkillShowController {
         }
 
         WeaponType weapon = BotAttack.resolveEquippedWeaponType(showBot);
-        BotAttackConfig.JobAttacks atks = BotAttackConfig.resolve(job, weapon);
+        BotAttackConfig.JobAttacks atks = BotAttackConfig.resolve(job, weapon, showBot.getLevel());
         Set<Integer> seen = new LinkedHashSet<>();
         for (BotAttackProfile p : new BotAttackProfile[]{atks.single(), atks.aoe(), atks.ultimate()}) {
             if (p == null) {

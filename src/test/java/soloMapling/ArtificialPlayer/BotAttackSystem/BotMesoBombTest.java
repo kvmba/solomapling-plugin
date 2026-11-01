@@ -44,6 +44,16 @@ class BotMesoBombTest {
     }
 
     @Test
+    void pickpocketNeedsTheThirdJobEvenThoughTheJobIsChiefBandit() {
+        // The reported bug: a Chief Bandit bot rolled at level 78, pinned to level 38 by the Ludibrium
+        // PQ lobby, kept scattering 敛财术 bags. The job gate alone is not enough - the skill itself
+        // is 3rd-job, so a level-38 player cannot have the buff up and nothing may drop.
+        assertTrue(38 < BotSkillLevelGate.minLevelForSkill(ChiefBandit.PICKPOCKET));
+        assertTrue(69 < BotSkillLevelGate.minLevelForSkill(ChiefBandit.PICKPOCKET));
+        assertEquals(70, BotSkillLevelGate.minLevelForSkill(ChiefBandit.PICKPOCKET));
+    }
+
+    @Test
     void nonTriggerSkillsScatterNothing() {
         assertFalse(BotMesoBomb.isTriggerSkill(ChiefBandit.MESO_EXPLOSION)); // the bomb itself
         assertFalse(BotMesoBomb.isTriggerSkill(1111008));                    // Shout, unrelated

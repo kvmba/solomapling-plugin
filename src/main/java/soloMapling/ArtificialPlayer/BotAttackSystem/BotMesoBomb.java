@@ -115,7 +115,12 @@ public final class BotMesoBomb {
         if (bot == null || bot.getMap() == null || hits == null || hits.isEmpty()) {
             return;
         }
-        if (!TRIGGER_SKILLS.contains(skillId) || !bot.getJob().isA(Job.CHIEFBANDIT)) {
+        // The job alone is not enough: 敛财术 is a 3rd-job skill (level 70+). A Chief Bandit bot can
+        // legitimately sit below that when a spawner rewrote its level after the job was rolled (the
+        // Ludibrium PQ lobby did exactly that), and a real player of that level cannot have the buff
+        // up - so no bag may drop.
+        if (!TRIGGER_SKILLS.contains(skillId) || !bot.getJob().isA(Job.CHIEFBANDIT)
+                || bot.getLevel() < BotSkillLevelGate.minLevelForSkill(ChiefBandit.PICKPOCKET)) {
             return;
         }
         Skill pickpocket = SkillFactory.getSkill(ChiefBandit.PICKPOCKET);
@@ -155,7 +160,8 @@ public final class BotMesoBomb {
                 int bagNo = bagIndex++;
                 BotTiming.after(bagNo * BAG_SCATTER_STAGGER_MS, () -> {
                     if (bot.getMap() != map || bot.getJob() == null
-                            || !bot.getJob().isA(Job.CHIEFBANDIT)) {
+                            || !bot.getJob().isA(Job.CHIEFBANDIT)
+                            || bot.getLevel() < BotSkillLevelGate.minLevelForSkill(ChiefBandit.PICKPOCKET)) {
                         return; // the bot left this map (or lost the job) mid-rain
                     }
                     if (BAGS_BY_BOT.get(bot.getId()) != register) {
@@ -225,7 +231,8 @@ public final class BotMesoBomb {
      * when nothing is worth blowing up (the caller swings normally).
      */
     public static Blast tryDetonate(Character bot, boolean facingLeft) {
-        if (bot == null || bot.getMap() == null || !bot.getJob().isA(Job.CHIEFBANDIT)) {
+        if (bot == null || bot.getMap() == null || !bot.getJob().isA(Job.CHIEFBANDIT)
+                || bot.getLevel() < BotSkillLevelGate.minLevelForSkill(ChiefBandit.MESO_EXPLOSION)) {
             return null;
         }
         Set<Integer> register = BAGS_BY_BOT.get(bot.getId());
