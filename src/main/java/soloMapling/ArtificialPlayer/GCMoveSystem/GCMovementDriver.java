@@ -1292,9 +1292,18 @@ final class GCMovementDriver {
         if (pos == null) {
             return;
         }
+        // Ours (out-of-range x): the horizontal bound is the STANDABLE foothold extent, not the VR
+        // rect. A map's VR box routinely reaches past its last platform (LPQ: VR ±400, standable
+        // ±365, and 2379 of the game's 5363 maps have such a gap), so a VR test calls a bot hovering
+        // in that gap "inside the map" and no recovery ever fires. The foothold extent is also the
+        // bound the flight collision enforces, so watchdog and physics now agree on where the map
+        // ends. Maps with no standable columns keep the VR fallback.
+        Point standable = BotPhysicsEngine.standableXBounds(map);
+        int leftBound = standable != null ? standable.x : vr.x;
+        int rightBound = standable != null ? standable.y : vr.x + vr.width;
         boolean belowFloor = pos.y > vr.y + vr.height + FALL_RECOVER_SLACK_PX;
-        boolean offSides = pos.x < vr.x - FALL_RECOVER_SLACK_PX
-                || pos.x > vr.x + vr.width + FALL_RECOVER_SLACK_PX;
+        boolean offSides = pos.x < leftBound - FALL_RECOVER_SLACK_PX
+                || pos.x > rightBound + FALL_RECOVER_SLACK_PX;
         if (!belowFloor && !offSides) {
             return;
         }
@@ -1309,7 +1318,7 @@ final class GCMovementDriver {
         // it (the reported "bots sucked to the top of the map"). Both answers must pass the
         // livability probe: anything dead falls back to the nearest livable ground (a real exit
         // exists there), and the VR top is never consulted again.
-        Point clamped = new Point(Math.max(vr.x, Math.min(vr.x + vr.width, pos.x)), pos.y);
+        Point clamped = new Point(Math.max(leftBound, Math.min(rightBound, pos.x)), pos.y);
         Point ground = BotPhysicsEngine.findGroundPoint(map, new Point(clamped.x, clamped.y - 1));
         if (ground == null || !DeadPitGuard.isLivableLanding(map, ground, entry.movementProfile,
                 BotMovementCapabilities.of(entry.bot))) {

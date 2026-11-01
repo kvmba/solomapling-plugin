@@ -2712,11 +2712,21 @@ final class BotPhysicsEngine {
         if (map == null || map.getFootholds() == null) {
             return AirCollision.none();
         }
+        // Ours (out-of-range fall): check the map's x bound even for a purely vertical step. A body
+        // resting outside the standable extent falls straight down with airVelX 0, so previousPos.x
+        // == nextPos.x on every tick; the old early return here skipped the boundary entirely and
+        // the bot fell the whole map height untouched (measured on 922010800: x=395, standable ends
+        // at 365, fell to y=4971). mapSideBoundaryCollision clamps an out-of-bounds body back and
+        // answers NONE when the body is already inside, so this call is free in the normal case.
+        AirCollision bound = mapSideBoundaryCollision(map, previousPos, nextPos);
+        if (bound.type() == AirCollisionType.WALL) {
+            return bound;
+        }
         if (previousPos.x == nextPos.x) {
             return AirCollision.none();
         }
 
-        AirCollision best = mapSideBoundaryCollision(map, previousPos, nextPos);
+        AirCollision best = bound;
         for (Foothold foothold : collisionIndex(map).collidableWalls()) {
             AirCollision collision = wallCollision(foothold, previousPos, nextPos, allowWalkableGroundEndpoint);
             if (collision.type() == AirCollisionType.WALL && collision.progress() < best.progress()) {
@@ -2728,16 +2738,35 @@ final class BotPhysicsEngine {
 
     private static AirCollision mapSideBoundaryCollision(MapleMap map, Point previousPos, Point nextPos) {
         Rectangle area = map.getMapArea();
-        if (area == null || area.width <= 0 || area.height <= 0 || previousPos.x == nextPos.x) {
+        if (area == null || area.width <= 0 || area.height <= 0) {
+            return AirCollision.none();
+        }
+        // Ours (out-of-range fall): clamp to the standable x extent BEFORE anything else, and
+        // regardless of travel direction or even of any horizontal travel at all. A body that is
+        // outside the bound must be put back on it, full stop. Two shapes used to escape here:
+        //   - a purely vertical step (airVelX 0, or drag-cancelled) skipped the whole test because
+        //     `previousPos.x == nextPos.x`;
+        //   - a step moving INWARD from outside hit the `previousPos.x > boundaryX` early return,
+        //     which disarmed the bound permanently.
+        // Measured on 922010800 with the old code: airborne at x=395 (standable ends at 365) fell
+        // to y=4971 with no collision at all. Clamping first makes the bound self-healing: one
+        // frame outside, and the very next step snaps the body back onto the edge.
+        int leftBoundX = effectiveLeftBoundaryX(map, area);
+        int rightBoundX = effectiveRightBoundaryX(map, area);
+        int clampedX = Math.max(leftBoundX, Math.min(rightBoundX, nextPos.x));
+        if (clampedX != nextPos.x) {
+            return new AirCollision(AirCollisionType.WALL, new Point(clampedX, nextPos.y), null, 0.0);
+        }
+        if (previousPos.x == nextPos.x) {
             return AirCollision.none();
         }
 
         int dir = Integer.compare(nextPos.x, previousPos.x);
-        int boundaryX = dir > 0 ? effectiveRightBoundaryX(map, area) : effectiveLeftBoundaryX(map, area);
-        if (dir > 0 && (previousPos.x > boundaryX || nextPos.x <= boundaryX)) {
+        int boundaryX = dir > 0 ? rightBoundX : leftBoundX;
+        if (dir > 0 && nextPos.x <= boundaryX) {
             return AirCollision.none();
         }
-        if (dir < 0 && (previousPos.x < boundaryX || nextPos.x >= boundaryX)) {
+        if (dir < 0 && nextPos.x >= boundaryX) {
             return AirCollision.none();
         }
 
@@ -2779,6 +2808,24 @@ final class BotPhysicsEngine {
             return area.x + area.width;
         }
         return collisionIndex(map).standableMaxX();
+    }
+
+    /**
+     * The standable x extent — the real bound a bot's body may occupy — or null when the map has no
+     * usable foothold columns.
+     *
+     * <p>Deliberately foothold-derived, never the VR rect: a map's VR box routinely extends PAST
+     * its last platform (LPQ 922010100: VR ±400, standable ±365), so a VR-based test declares a bot
+     * hovering in that gap "inside the map" and no recovery ever fires. The flight bound already
+     * uses these same numbers, which keeps the watchdog and the physics agreeing about where the
+     * map ends.
+     */
+    static Point standableXBounds(MapleMap map) {
+        if (map == null || !hasUsableFootholdXBounds(map)) {
+            return null;
+        }
+        FootholdCollisionIndex index = collisionIndex(map);
+        return new Point(index.standableMinX(), index.standableMaxX());
     }
 
     private static boolean hasUsableFootholdXBounds(MapleMap map) {
