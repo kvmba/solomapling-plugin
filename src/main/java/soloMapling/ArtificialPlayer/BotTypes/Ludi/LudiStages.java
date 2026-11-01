@@ -601,6 +601,20 @@ public final class LudiStages {
             releaseDoorRoom(bot);
             return false;
         }
+        // Can this body reach its own door at all? Asked BEFORE walking, because after walkTo()
+        // there is always a live move target: the macro tick re-issues this same walk every ~2.5s,
+        // which refreshes the driver's progress clock and keeps that order alive forever. Any
+        // release condition placed after the walk is therefore dead code - a bot that can never
+        // enter held its claim for the whole run while `roomClaimedByOtherLiveBot` kept every
+        // teammate out of the room (the stage-5 top room: four boxes nobody could touch, so the
+        // 24-pass turn-in never completed).
+        //
+        // Unreachable means "the graph says there is no edge chain to this door for THIS bot's
+        // profile", which is exactly the reason to hand the room to someone else.
+        if (!GCMovement.canPathTo(bot, door.getPosition().x, door.getPosition().y)) {
+            releaseDoorRoom(bot);
+            return false;
+        }
         if (PqActions.walkTo(bot, door.getPosition())) {
             PqActions.enterPortal(bot, door);
             if (bot.getMapId() == room) {
@@ -814,22 +828,24 @@ public final class LudiStages {
 
     /**
      * Whether this bot's kit is eligible to claim {@code room} in stage 5 - the posting table
-     * above (top = mobility, bottom = hide, the rest = anyone).
+     * above (top = the blink, bottom = the hide, the rest = anyone).
      *
      * <p>The top room's door (in01 of 922010500) hangs on a ledge a full 100px above the row
-     * beneath it, with no WZ foothold / rope / portal bridging the step; WZ Physics.img
-     * (gravity 2000, jumpSpeed 555) makes that a jump of ~115% jump stat or a blink. The room is
-     * NOT optional - all six stage-5 rooms hold four pass boxes and the stage asks for 24, so
-     * refusing the top room to a body that cannot make the step starves the turn-in. The answer
-     * is therefore not "skip the room" but "the party's Haste must be modelled": see
-     * {@link BotMovementProfile#fromCharacter}, where a haste-thief in the party raises the
-     * jump stat it grants (the real skill grants speed AND jump).
+     * beneath it, with no WZ foothold / rope / portal bridging the step. WZ Physics.img
+     * (gravity 2000, jumpSpeed 555) puts that step above the entire LPQ jump band - 110 jump
+     * rises 93px, and even the +20 party-Haste ceiling (123) reaches 116px, so no jump clears it.
+     * One blink (快速移动, 150px) does.
+     *
+     * <p>So the posting is the CLASS, not "whatever the party buffs happen to be": the room needs
+     * a body with the skill itself. This is also the honest form of the rule - the graph bakes
+     * TELEPORT edges for exactly these jobs ({@link BotMovementProfile#fromCharacter}), so
+     * "admitted" and "can path there" finally answer the same question. A party without a mage
+     * cannot clear stage 5; that is the quest's own design, not something to paper over.
      */
     static boolean stage5RoomAdmits(Character bot, int room) {
         if (room == LudiPqData.STAGE5_ROOM_FIRST) {
             Job job = bot.getJob();
-            return MovementStylePolicy.hasTeleportSkill(job == null ? 0 : job.getId())
-                    || MovementStylePolicy.hasHasteSkill(job);
+            return MovementStylePolicy.hasTeleportSkill(job == null ? 0 : job.getId());
         }
         if (room == LudiPqData.STAGE5_ROOM_LAST) {
             return hideSkillFor(bot) != 0; // guards: 隐身术 / 橡木伪装 only

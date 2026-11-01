@@ -25,6 +25,33 @@ final class BotNavigationManager {
     private static final int JUMP_READY_X_TOLERANCE = 10;
     private static final int EDGE_READY_X_TOLERANCE = 14;
     private static final int NO_MOVEMENT_WALK_TOLERANCE = 4;
+
+    /**
+     * How far a bot may stand from a baked blink's anchor and still fire it.
+     *
+     * <p>Tighter than {@link #EDGE_READY_X_TOLERANCE} because the blink's landing is resolved from
+     * the bot's LIVE pixel: off-anchor it is a different move than the baked edge.
+     */
+    private static final int TELEPORT_ANCHOR_X_TOLERANCE = 4;
+
+    /**
+     * The blink's cast delay: the soonest another blink may fire. A player cannot chain blinks in
+     * consecutive frames, and doing so renders as one long warp instead of two casts.
+     */
+    private static final long TELEPORT_USE_COOLDOWN_MS = 400L;
+
+    /**
+     * Whether the bot stands on a blink edge's anchor.
+     *
+     * <p>ONE predicate for both sides of the blink - the precise-approach decision and the fire
+     * gate. Two bands (the generic 14px "ready" tolerance for steering, this one for firing) leave
+     * a dead zone where the bot has stopped steering and will not yet blink, i.e. it walks to the
+     * row under the goal and waits there.
+     */
+    private static boolean atBlinkAnchor(Point botPos, BotNavigationGraph.Edge edge) {
+        return Math.abs(botPos.x - edge.startPoint.x) <= TELEPORT_ANCHOR_X_TOLERANCE
+                && Math.abs(botPos.y - edge.startPoint.y) <= BotMovementManager.cfg.JUMP_Y_THRESH;
+    }
     // Stale-edge give-up: after this many consecutive no-movement ticks blocked on a
     // committed edge's position gate ("*-pos"), drop the edge and replan from the live
     // position (6-10 ticks = 300-500ms, jittered per park spot).
@@ -507,8 +534,57 @@ final class BotNavigationManager {
             case DROP -> tryExecuteDrop(graph, entry, bot, botPos, rawTargetPos, edge);
             case CLIMB -> tryExecuteClimb(graph, entry, bot, botPos, rawTargetPos, edge);
             case PORTAL -> tryExecutePortalEdge(entry, bot, botPos, rawTargetPos, edge);
+            case TELEPORT -> tryExecuteTeleport(entry, bot, rawTargetPos, edge);
             default -> null;
         };
+    }
+
+    /**
+     * Fire a baked 快速移动 blink.
+     *
+     * <p>Runs the REAL executor ({@link GCMovementSkills#execTeleport}) rather than writing the
+     * landing pixel: which axis, how far, and what counts as a landing are its rules, and the edge
+     * was baked from that same {@link GCMovementSkills#landingToward} call - so the warp performed
+     * is the warp planned. If the executor refuses (airborne, nothing in reach after a knockback),
+     * the edge is dropped and the next tick replans, exactly like a refused portal.
+     *
+     * <p>Firing only from the anchor is what keeps that promise: the landing is resolved from the
+     * bot's LIVE pixel, so a blink released while still walking in is a different move than the one
+     * baked for the edge.
+     *
+     * <p><b>The class gate is mandatory, not defensive.</b> {@code peekBestGraph} serves the closest
+     * cached profile while a bot's own graph is still baking, so a warrior standing on a map whose
+     * only baked graph belongs to a mage REALLY IS handed TELEPORT edges (measured: a fighter
+     * walked the blink chain and reached the stage-5 top door it cannot enter). The graph cannot
+     * filter them - A* has no character - so the executor is where "this edge is not mine" is
+     * decided. The refusal also keeps the edge from being re-planned forever: the bot's own graph
+     * lands within the same window and the route then reads no-path, which is the truth.
+     */
+    private static NavigationDirective tryExecuteTeleport(BotMovementState entry,
+                                                          Character bot,
+                                                          Point rawTargetPos,
+                                                          BotNavigationGraph.Edge edge) {
+        if (entry.inAir || entry.climbing || !atBlinkAnchor(bot.getPosition(), edge)) {
+            return null;
+        }
+        if (!BotMovementCapabilities.of(bot).teleport()) {
+            clearNavigation(entry);
+            return null;
+        }
+        if (MovementClock.nowMs() < entry.teleportUseCooldownUntilMs) {
+            return null;
+        }
+        if (!GCMovementSkills.execTeleport(entry, bot, edge.endPoint.x, edge.endPoint.y)) {
+            clearNavigation(entry);
+            return null;
+        }
+        // A blink is a cast, not a teleport packet: the skill has a cast delay, so two blinks can
+        // never land in consecutive ticks. Chaining them tick-after-tick read as a single long warp
+        // (measured: 152px then 115px inside 100ms) and is impossible for a player.
+        entry.teleportUseCooldownUntilMs = MovementClock.nowMs() + TELEPORT_USE_COOLDOWN_MS;
+        clearNavigation(entry);
+        BotMovementManager.resetEntryState(entry);
+        return new NavigationDirective(rawTargetPos, true);
     }
 
     private static NavigationDirective tryExecuteJump(BotNavigationGraph graph,
@@ -914,6 +990,11 @@ final class BotNavigationManager {
                     : !canExecuteClimbEntryFromCurrentPosition(entry.bot.getMap(), botPos, edge,
                     findRopeForRegion(entry.bot.getMap(), graph.getRegion(edge.toRegionId)));
             case PORTAL -> !isReadyForEdge(botPos, edge) || entry.portalEnterReadyTicks > 0; // precise while walking the extra jitter ticks in
+            // Precise until the bot is on the anchor: see atBlinkAnchor. The generic ready band
+            // (14px) is wider than the gate that fires the blink (4px), so trusting it stopped
+            // the bot mid-approach and left it standing in the gap - "walked to the door row and
+            // waited", the very symptom this feature exists to fix.
+            case TELEPORT -> !atBlinkAnchor(botPos, edge);
         };
     }
 
@@ -924,6 +1005,7 @@ final class BotNavigationManager {
             case JUMP -> entry.inAir ? new Point(edge.endPoint) : selectJumpWaypoint(graph, entry, botPos, edge);
             case DROP -> selectDropWaypoint(entry, graph, botPos, edge);
             case PORTAL -> new Point(edge.startPoint); // always head to the portal entrance; it only fires once landed there
+            case TELEPORT -> new Point(edge.startPoint); // the anchor: blink as soon as the bot is on it
         };
     }
 
@@ -1488,7 +1570,7 @@ final class BotNavigationManager {
 
     private static boolean isEdgeUsable(BotNavigationGraph graph, MapleMap map, BotNavigationGraph.Edge edge) {
         return switch (edge.type) {
-            case WALK, JUMP, DROP, CLIMB -> true;
+            case WALK, JUMP, DROP, CLIMB, TELEPORT -> true;
             case PORTAL -> {
                 Portal portal = map.getPortal(edge.portalId);
                 yield portal != null && portal.getPortalStatus();
@@ -1516,7 +1598,8 @@ final class BotNavigationManager {
 
         return switch (edge.type) {
             case JUMP -> dx <= JUMP_READY_X_TOLERANCE && dy <= BotMovementManager.cfg.JUMP_Y_THRESH;
-            case DROP, CLIMB, PORTAL -> dx <= EDGE_READY_X_TOLERANCE && dy <= BotMovementManager.cfg.JUMP_Y_THRESH * 2;
+            case DROP, CLIMB, PORTAL, TELEPORT -> dx <= EDGE_READY_X_TOLERANCE
+                    && dy <= BotMovementManager.cfg.JUMP_Y_THRESH * 2;
             default -> dx <= BotMovementManager.cfg.STOP_DIST + 8
                     && dy <= BotMovementManager.cfg.JUMP_Y_THRESH * 2;
         };

@@ -59,6 +59,41 @@ final class GCMovementSkills {
 
     // ── Teleport (mage blink) ─────────────────────────────────────────────────
 
+    /**
+     * Where a blink toward (targetX, targetY) from {@code origin} would land, or null.
+     *
+     * <p>The SINGLE source of the blink's landing rule: the executor lands where this answers, and
+     * the navigation graph bakes its TELEPORT edges from it, so a planned blink and a fired blink
+     * can never disagree. That split is not theoretical - when the graph probed "nearest platform
+     * above" on its own while this method chose an axis from |dx| vs |dy|, a plan reaching a row
+     * fired a blink that landed 34px lower and the bot stalled under a goal it could no longer
+     * reach.
+     *
+     * <p>Axis rule: the larger delta picks the axis (a player blinks the way the key points), so a
+     * mostly-vertical target resolves vertically and a mostly-horizontal one horizontally. A
+     * straight-up blink takes the first platform above; a straight-down one the deepest LIVABLE
+     * platform in range (never into a basin the bot cannot leave).
+     *
+     * <p>{@code capabilities} only matters for the downward case (the livability filter). Callers
+     * that bake must pass the same value the executor will use for that body, or an edge can be
+     * baked with one landing and fired with another.
+     */
+    static Point landingToward(MapleMap map, Point origin, int targetX, int targetY,
+                               BotMovementProfile profile, BotMovementCapabilities capabilities) {
+        if (map == null || origin == null) {
+            return null;
+        }
+        int dx = targetX - origin.x;
+        int dy = targetY - origin.y;
+        if (Math.abs(dx) >= Math.abs(dy)) {
+            return horizontalTeleportLanding(map, origin, dx >= 0 ? 1 : -1);
+        }
+        if (dy > 0) {
+            return downLanding(map, origin, profile, capabilities);
+        }
+        return upTeleportLanding(map, origin);
+    }
+
     // Blink toward (targetX, targetY): pick a same-region landing up to TELEPORT_RANGE_PX toward the target,
     // warp the bot there, and broadcast the blink. Returns false (caller walks) if nothing valid is in range.
     static boolean execTeleport(BotMovementState st, Character bot, int targetX, int targetY) {
@@ -77,16 +112,8 @@ final class GCMovementSkills {
         if (st.inAir || st.climbing) {
             return false;
         }
-        int dx = targetX - origin.x;
-        int dy = targetY - origin.y;
-        Point dest;
-        if (Math.abs(dx) >= Math.abs(dy)) {
-            dest = horizontalTeleportLanding(map, origin, dx >= 0 ? 1 : -1);
-        } else if (dy > 0) {
-            dest = downLanding(map, origin, st.movementProfile, BotMovementCapabilities.of(bot));
-        } else {
-            dest = upTeleportLanding(map, origin);
-        }
+        Point dest = landingToward(map, origin, targetX, targetY, st.movementProfile,
+                BotMovementCapabilities.of(bot));
         if (dest == null || (dest.x == origin.x && dest.y == origin.y)) {
             return false;
         }

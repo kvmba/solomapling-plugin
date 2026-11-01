@@ -16,7 +16,7 @@ import java.io.Serializable;
 import java.util.Map;
 
 // Ported from GreenCatMS. Credit: NutNNut.
-record BotMovementProfile(int totalSpeedStat, int totalJumpStat, boolean snowShoes)
+record BotMovementProfile(int totalSpeedStat, int totalJumpStat, boolean snowShoes, boolean teleport)
         implements Serializable {
     // Serialized inside cached BotNavigationGraph instances; keep explicit so
     // cache compatibility is controlled by GRAPH_VERSION instead of compiler-generated UIDs.
@@ -83,8 +83,12 @@ record BotMovementProfile(int totalSpeedStat, int totalJumpStat, boolean snowSho
         totalJumpStat = Math.min(Math.max(1, totalJumpStat), MAX_EFFECTIVE_JUMP_STAT);
     }
 
+    BotMovementProfile(int totalSpeedStat, int totalJumpStat, boolean snowShoes) {
+        this(totalSpeedStat, totalJumpStat, snowShoes, false);
+    }
+
     BotMovementProfile(int totalSpeedStat, int totalJumpStat) {
-        this(totalSpeedStat, totalJumpStat, false);
+        this(totalSpeedStat, totalJumpStat, false, false);
     }
 
     static BotMovementProfile base() {
@@ -146,7 +150,38 @@ record BotMovementProfile(int totalSpeedStat, int totalJumpStat, boolean snowSho
         }
         // Bucket here (not in the canonical constructor) so the bot's graph key stays on exact
         // multiples of STAT_BUCKET_SIZE, while a follower profile can hold an exact reduced stat.
-        return new BotMovementProfile(bucketStat(totalSpeed), bucketStat(totalJump), wearsSnowShoes(character));
+        //
+        // The blink flag is the FOURTH axis of the graph key (see GraphCacheKey): a mage's graph
+        // carries TELEPORT edges a warrior's must not - one shared jump/speed bucket is not enough
+        // to promise the same set of moves.
+        return new BotMovementProfile(bucketStat(totalSpeed), bucketStat(totalJump),
+                wearsSnowShoes(character), hasTeleportSkill(job));
+    }
+
+    /**
+     * Whether this job's kit carries 快速移动 (Teleport), the blink the graph bakes as a
+     * {@link BotNavigationGraph.EdgeType#TELEPORT} edge.
+     *
+     * <p>2nd job and above only: base Magician (200) has not learned it. This is the ONE table for
+     * the skill - {@link BotMovementCapabilities} (the dead-pit verdict) reads it too, so the graph
+     * and the guard cannot disagree about which bodies can blink.
+     */
+    static boolean hasTeleportSkill(Job job) {
+        if (job == null) {
+            return false;
+        }
+        int id = job.getId();
+        return hasTeleportSkill(id);
+    }
+
+    /**
+     * As {@link #hasTeleportSkill(Job)} by id, for callers that already read the id (and for
+     * host-less tests, where {@link Job} cannot be instrumented).
+     */
+    static boolean hasTeleportSkill(int jobId) {
+        return (jobId >= 210 && jobId <= 212)
+                || (jobId >= 220 && jobId <= 222)
+                || (jobId >= 230 && jobId <= 232);
     }
 
     /** True while the bot is actually riding (the MONSTER_RIDING buff is registered). */
@@ -268,7 +303,7 @@ record BotMovementProfile(int totalSpeedStat, int totalJumpStat, boolean snowSho
         int scaled = (int) Math.round(totalSpeedStat * factor);
         // Bucket explicitly (the canonical constructor no longer does) so a slowed bot keeps the
         // exact prior behaviour / graph-key alignment.
-        return new BotMovementProfile(bucketStat(scaled), totalJumpStat, snowShoes);
+        return new BotMovementProfile(bucketStat(scaled), totalJumpStat, snowShoes, teleport);
     }
 
     /**
@@ -281,7 +316,7 @@ record BotMovementProfile(int totalSpeedStat, int totalJumpStat, boolean snowSho
         if (speedBonus <= 0) {
             return this;
         }
-        return new BotMovementProfile(totalSpeedStat + speedBonus, totalJumpStat, snowShoes);
+        return new BotMovementProfile(totalSpeedStat + speedBonus, totalJumpStat, snowShoes, teleport);
     }
 
     /**
@@ -294,7 +329,7 @@ record BotMovementProfile(int totalSpeedStat, int totalJumpStat, boolean snowSho
     BotMovementProfile reducedBy(int delta) {
         int speed = Math.max(BASE_TOTAL_STAT, totalSpeedStat - delta);
         int jump = Math.max(BASE_TOTAL_STAT, totalJumpStat - delta);
-        return new BotMovementProfile(speed, jump, snowShoes);
+        return new BotMovementProfile(speed, jump, snowShoes, teleport);
     }
 
     double walkVelocityPxs() {

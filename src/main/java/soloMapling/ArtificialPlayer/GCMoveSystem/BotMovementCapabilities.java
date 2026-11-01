@@ -1,6 +1,7 @@
 package soloMapling.ArtificialPlayer.GCMoveSystem;
 
 import org.gms.client.Character;
+import org.gms.client.Job;
 
 /*
  * The movement-skill abilities a bot's class grants, as far as the dead-pit verdict needs them: a
@@ -8,8 +9,8 @@ import org.gms.client.Character;
  * The verdict is keyed on this value, so a warrior can never be handed a mage's "livable" answer —
  * "a real player can leave" must mean "THIS bot's player can leave".
  *
- * The job tables mirror MovementStylePolicy (teleport mages) and FlashJumpTiers (dash tiers);
- * BotMovementCapabilitiesTest pins the two against drift.
+ * The job tables mirror FlashJumpTiers (dash tiers) and reuse the movement profile's own teleport
+ * predicate — one table, because the graph bakes TELEPORT edges from that same predicate.
  */
 record BotMovementCapabilities(boolean teleport, float flashJumpScale) {
 
@@ -29,9 +30,15 @@ record BotMovementCapabilities(boolean teleport, float flashJumpScale) {
         return new BotMovementCapabilities(isTeleportMage(jobId), flashJumpScale(jobId, bot.getLevel()));
     }
 
-    // Magician 2nd job and above (base Magician 200 has no Teleport): 210-212 F/P, 220-222 I/L, 230-232 Cleric.
+    /**
+     * Magician 2nd job and above (base Magician 200 has not learned the skill): 210-212 F/P,
+     * 220-222 I/L, 230-232 Cleric.
+     *
+     * <p>Delegates to the movement profile's table so the graph (which bakes TELEPORT edges) and
+     * this verdict (which decides whether a pocket is escapable) can never disagree.
+     */
     private static boolean isTeleportMage(int jobId) {
-        return (jobId >= 210 && jobId <= 212) || (jobId >= 220 && jobId <= 222) || (jobId >= 230 && jobId <= 232);
+        return BotMovementProfile.hasTeleportSkill(jobId);
     }
 
     private static float flashJumpScale(int jobId, int level) {

@@ -140,7 +140,7 @@ class BotNavigationGraphCacheWriteTest {
     /** The on-disk file for a full cache key, derived the same way graphFile() does. */
     private static Path cacheFile(Path tmpRoot, int mapId, int speed, int jump, boolean snowShoes) {
         return cacheDirFor(tmpRoot).resolve(mapId + "-s" + speed + "-j" + jump
-                + "-ss" + (snowShoes ? 1 : 0) + ".bin");
+                + "-ss" + (snowShoes ? 1 : 0) + "-tp0.bin");
     }
 
     /*
@@ -406,6 +406,7 @@ class BotNavigationGraphCacheWriteTest {
                 {2_000_000, 155, 123}, {3_000_000, 140, 110}, {4_000_000, 140, 110}}) {
             for (int shoed = 0; shoed <= 1; shoed++) {
                 out.add(wrongDir.resolve(key[0] + "-s" + key[1] + "-j" + key[2] + "-ss" + shoed + ".bin"));
+                out.add(wrongDir.resolve(key[0] + "-s" + key[1] + "-j" + key[2] + "-ss" + shoed + "-tp1.bin"));
             }
         }
         return out;

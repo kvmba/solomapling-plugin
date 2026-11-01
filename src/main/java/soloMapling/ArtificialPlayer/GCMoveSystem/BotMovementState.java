@@ -127,6 +127,10 @@ class BotMovementState {
     long portalUseCooldownUntilMs = 0L;
     int portalEnterReadyTicks = -1;       // -1 = disarmed (airborne / not in range)
 
+    // ── Skill-move gating ──
+    /** Earliest ms the next 快速移动 blink may fire (the skill's cast delay). */
+    long teleportUseCooldownUntilMs = 0L;
+
     // ── Broadcast-stance timing (ALERT substitution while alertedUntilMs in the future) ──
     long alertedUntilMs = 0L;
     boolean alertResetScheduled = false;  // guards BotContactDamage's one-shot alert-reset task

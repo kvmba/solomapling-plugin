@@ -26,7 +26,18 @@ final class BotNavigationGraph implements Serializable {
         JUMP,
         DROP,
         CLIMB,
-        PORTAL
+        PORTAL,
+        /**
+         * A class-skill blink (法师 2nd job 快速移动 / Teleport) between two regions. Baked only
+         * for a profile whose class grants it (see BotMovementProfile#teleport), validated with
+         * the same 150px range / 75px vertical snap band the executor applies, so the edge is
+         * exactly the blink {@code GCMovementSkills.execTeleport} will perform.
+         *
+         * <p>Off the mage profile these edges do not exist at all: a warrior's graph must never
+         * claim a route a warrior cannot walk (the LPQ stage-5 top door, whose 100px step is
+         * above the whole 35-50 jump band and below one blink).
+         */
+        TELEPORT
     }
 
     static final class Segment implements Serializable {

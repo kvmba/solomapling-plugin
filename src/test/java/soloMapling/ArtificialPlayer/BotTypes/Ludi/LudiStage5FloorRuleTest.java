@@ -141,6 +141,28 @@ class LudiStage5FloorRuleTest {
                 "a thief's 隐身术 opens it");
     }
 
+    /**
+     * The top room is the MAGE's, by class. Its door sits behind a 100px step that the whole
+     * 35-50 jump band cannot clear (93px, 116px with maxed party Haste) and one blink can - so
+     * "the party has a haste thief" is not a qualification for it. A thief ordering the room and
+     * then stalling in front of the door is exactly the run-killing shape this rule prevents:
+     * the claim blocks the mage who could have entered, and the room's four boxes stay untouched.
+     */
+    @Test
+    void theTopRoomAdmitsOnlyTheBlinkKits() {
+        for (Job job : new Job[]{Job.FP_WIZARD, Job.IL_WIZARD, Job.CLERIC,
+                Job.FP_MAGE, Job.IL_MAGE, Job.BISHOP}) {
+            assertTrue(LudiStages.stage5AdmitsTo(botOnStage5(job), LudiPqData.STAGE5_ROOM_FIRST),
+                    job + " owns 快速移动 and may take the top room");
+        }
+        for (Job job : new Job[]{Job.THIEF, Job.ASSASSIN, Job.BANDIT, Job.HERMIT,
+                Job.CHIEFBANDIT, Job.NIGHTLORD, Job.SHADOWER, Job.FIGHTER, Job.HUNTER,
+                Job.GUNSLINGER, Job.BRAWLER, Job.MAGICIAN}) {
+            assertFalse(LudiStages.stage5AdmitsTo(botOnStage5(job), LudiPqData.STAGE5_ROOM_FIRST),
+                    job + " cannot make the top room's step and must not claim it");
+        }
+    }
+
     private static Character botOnStage5(Job job) {
         Character bot = mock(Character.class, RETURNS_DEEP_STUBS);
         when(bot.getId()).thenReturn(890031);

@@ -49,7 +49,7 @@ final class BotNavigationGraphProvider {
     //     inside an 8.93 x fs px/s band (no walkSpeed air cap; counter-strafe pins at the
     //     band edge) and no-input flight drags 1 x fs (100 x fs at terminal fall). Committed
     //     arcs still fly the launch key held, so constant-stepX arc sims stay exact.
-    private static final int GRAPH_VERSION = 71; // 71: insetJumpLaunchWindow keeps an INTERIOR thin window's whole validated span instead of collapsing it to the centre pixel (only an edge-pressed window still collapses) - a one-pixel takeoff is stepped straight over by a full-speed bot, which then paces in front of the point (LPQ stage 8's dense stairs: fh210->fh251 has a 4px valid span and the bot swayed at x=41..43 until the rescue hop). Edge.launchMinX/Max are serialized, so the window change must invalidate caches. 70: directional walk-off (DROP) edges are gated on the LIVE walk-off simulation, not on a ballistic fall fired from the authored ledge pixel - where the ledge gap is inside one walk step (LPQ stage 8 crates, 922010800: 8px gap vs a 6px step) the bot walks across instead of falling, so the baked descent was unexecutable and its route ping-ponged between two rows (the crate-stair sway). A dropped edge also re-validates the landing against the ledge it leaves. Landing/walk-off sets change, so caches must rebuild. 69: resolveAirCollision breaks a LAND/WALL progress TIE toward the LAND when that floor spans the wall's clamp pixel (the bot's own side) - a fall crossing a floor row at the wall's exact column used to clamp onto the wall face at (or past) the row's height and then fall through the row (LPQ stage 3's wall column x=-265 over the y=242 pit); a tie landing beyond the wall face still stops at the wall. Landing predictions change, so caches must rebuild. 68: JUMP edges carry the PRE-INSET validated launch span; the executor's ±walkStep launch phase is clamped to it (collapsed windows' phase band used to re-reach pixels the builder rejected — arcs landed two floors down, the LPQ stage-1 shelf chase fell and looped: "追怪但不跳上平台打"); 67: one-way-island repair - shelves with no inbound edge (the LPQ stage-1 tower's -2288/-1924 mob rows: >DOWN_JUMP_MAX_DROP_PX from above, jump-gap unsimulable, no rope) get an escapable-landing-gated straight-drop edge from the row above, so mobs on them stay pathable and the chase never degrades to pacing the floor above; 66: flight bound clamped to the standable foothold AABB (was max(VR, tree bounds)) - arcs that crossed the platform edge into a map's full-height no-foothold VR margin (Eos Tower 920010100's x=220..359 band) free-fell forever; the tightened boundary invalidates baked arcs that reached past the standable extent (old v65 caches parked in dead v65/); 65: dead-region arc prune - DROP/JUMP arcs landing in regions the bot can never leave are cut to a fixpoint (the escape-hatch deep drop must not land the bot in a one-way pit: LPQ stage 3's y-242 pit under a forbidFallDown stage row); 64: escape-hatch deep-drop edge (a region with no capped descent edge gets one full-descent straight drop to its deepest landing, dead ends like the 玩具塔 floor-1 R5 vanish); 51: kinetic slippery model + snowshoes; 52: brake-to-stop landings; 53: glide-unless-edge stop policy (slipperyStopDir); 56: uncap straight-drop launch windows (full droppable span, no +/-20 fragmentation); 57: remove the (empirically wrong) 300px down-jump drop cap - down-jumps fall until landing; 58: rope-grab reach counts descent below the ledge (mid-rope jump-grabs from adjacent platforms); 59: fall-sim caps to map height not 1500ms - long single-fall descents (tall shafts: Ellinia tree, Perion) now generate DROP/JUMP/ROPE edges; 60: re-cap drops for organic descent - walk-offs capped at MAX_DROP_PX, down-jumps at the tighter DOWN_JUMP_MAX_DROP_PX, and down-jumps carry DOWN_JUMP_COST_PENALTY_MS so the pathfinder prefers ropes/walk-offs over plummeting an entire vertical map; 61: widened rope top-exit probe (BotPhysicsEngine.findTopExitLanding) - accept a step-off foothold slightly above/below the rope top and a few px off-axis, so uneven/slanted ladder heads mint a clean CLIMB step-off edge instead of only ballistic top jump-offs; 62: cache filename now encodes snowShoes (the 4th key dimension) - old three-dimension filenames are unreadable by design, and the bump parks them in a dead v61/ directory that can be deleted wholesale; 63: inset every JUMP launch window by one walk step before stamping it on the edge - an edge-pressed window let the executor's +/-walkStep launch phase overfly a small platform and the bot fall to the bottom
+    private static final int GRAPH_VERSION = 72; // 72: TELEPORT edges - a 2nd-job+ mage's graph now carries the 快速移动 blinks it can really perform (upward steps only: down is DROP, sideways is WALK), keyed on the profile's blink flag so a warrior's graph never contains them. Baked edge sets change, so caches must rebuild. 71: insetJumpLaunchWindow keeps an INTERIOR thin window's whole validated span instead of collapsing it to the centre pixel (only an edge-pressed window still collapses) - a one-pixel takeoff is stepped straight over by a full-speed bot, which then paces in front of the point (LPQ stage 8's dense stairs: fh210->fh251 has a 4px valid span and the bot swayed at x=41..43 until the rescue hop). Edge.launchMinX/Max are serialized, so the window change must invalidate caches. 70: directional walk-off (DROP) edges are gated on the LIVE walk-off simulation, not on a ballistic fall fired from the authored ledge pixel - where the ledge gap is inside one walk step (LPQ stage 8 crates, 922010800: 8px gap vs a 6px step) the bot walks across instead of falling, so the baked descent was unexecutable and its route ping-ponged between two rows (the crate-stair sway). A dropped edge also re-validates the landing against the ledge it leaves. Landing/walk-off sets change, so caches must rebuild. 69: resolveAirCollision breaks a LAND/WALL progress TIE toward the LAND when that floor spans the wall's clamp pixel (the bot's own side) - a fall crossing a floor row at the wall's exact column used to clamp onto the wall face at (or past) the row's height and then fall through the row (LPQ stage 3's wall column x=-265 over the y=242 pit); a tie landing beyond the wall face still stops at the wall. Landing predictions change, so caches must rebuild. 68: JUMP edges carry the PRE-INSET validated launch span; the executor's ±walkStep launch phase is clamped to it (collapsed windows' phase band used to re-reach pixels the builder rejected — arcs landed two floors down, the LPQ stage-1 shelf chase fell and looped: "追怪但不跳上平台打"); 67: one-way-island repair - shelves with no inbound edge (the LPQ stage-1 tower's -2288/-1924 mob rows: >DOWN_JUMP_MAX_DROP_PX from above, jump-gap unsimulable, no rope) get an escapable-landing-gated straight-drop edge from the row above, so mobs on them stay pathable and the chase never degrades to pacing the floor above; 66: flight bound clamped to the standable foothold AABB (was max(VR, tree bounds)) - arcs that crossed the platform edge into a map's full-height no-foothold VR margin (Eos Tower 920010100's x=220..359 band) free-fell forever; the tightened boundary invalidates baked arcs that reached past the standable extent (old v65 caches parked in dead v65/); 65: dead-region arc prune - DROP/JUMP arcs landing in regions the bot can never leave are cut to a fixpoint (the escape-hatch deep drop must not land the bot in a one-way pit: LPQ stage 3's y-242 pit under a forbidFallDown stage row); 64: escape-hatch deep-drop edge (a region with no capped descent edge gets one full-descent straight drop to its deepest landing, dead ends like the 玩具塔 floor-1 R5 vanish); 51: kinetic slippery model + snowshoes; 52: brake-to-stop landings; 53: glide-unless-edge stop policy (slipperyStopDir); 56: uncap straight-drop launch windows (full droppable span, no +/-20 fragmentation); 57: remove the (empirically wrong) 300px down-jump drop cap - down-jumps fall until landing; 58: rope-grab reach counts descent below the ledge (mid-rope jump-grabs from adjacent platforms); 59: fall-sim caps to map height not 1500ms - long single-fall descents (tall shafts: Ellinia tree, Perion) now generate DROP/JUMP/ROPE edges; 60: re-cap drops for organic descent - walk-offs capped at MAX_DROP_PX, down-jumps at the tighter DOWN_JUMP_MAX_DROP_PX, and down-jumps carry DOWN_JUMP_COST_PENALTY_MS so the pathfinder prefers ropes/walk-offs over plummeting an entire vertical map; 61: widened rope top-exit probe (BotPhysicsEngine.findTopExitLanding) - accept a step-off foothold slightly above/below the rope top and a few px off-axis, so uneven/slanted ladder heads mint a clean CLIMB step-off edge instead of only ballistic top jump-offs; 62: cache filename now encodes snowShoes (the 4th key dimension) - old three-dimension filenames are unreadable by design, and the bump parks them in a dead v61/ directory that can be deleted wholesale; 63: inset every JUMP launch window by one walk step before stamping it on the edge - an edge-pressed window let the executor's +/-walkStep launch phase overfly a small platform and the bot fall to the bottom
 
     // Drop caps for organic descent (re-added; v57 had removed the old single cap). A bot must
     // never plummet down a whole vertical map. Two distinct downward moves, treated differently:
@@ -122,11 +122,12 @@ final class BotNavigationGraphProvider {
                 });
     }
 
-    private record GraphCacheKey(int mapId, int totalSpeedStat, int totalJumpStat, boolean snowShoes) {
+    private record GraphCacheKey(int mapId, int totalSpeedStat, int totalJumpStat, boolean snowShoes,
+                                 boolean teleport) {
         static GraphCacheKey from(int mapId, BotMovementProfile profile) {
             BotMovementProfile effective = profile == null ? BotMovementProfile.base() : profile;
             return new GraphCacheKey(mapId, effective.totalSpeedStat(), effective.totalJumpStat(),
-                    effective.snowShoes());
+                    effective.snowShoes(), effective.teleport());
         }
     }
 
@@ -136,7 +137,8 @@ final class BotNavigationGraphProvider {
         if (profile == null || !profile.snowShoes() || BotPhysicsEngine.slipperyGround(map)) {
             return profile;
         }
-        return new BotMovementProfile(profile.totalSpeedStat(), profile.totalJumpStat(), false);
+        return new BotMovementProfile(profile.totalSpeedStat(), profile.totalJumpStat(), false,
+                profile.teleport());
     }
 
     static final class GraphBuildReport {
@@ -154,6 +156,7 @@ final class BotNavigationGraphProvider {
         final int dropEdgeCount;
         final int climbEdgeCount;
         final int portalEdgeCount;
+        final int teleportEdgeCount;
         final long collectFootholdsNs;
         final long buildRegionsNs;
         final long addRopeRegionsNs;
@@ -184,6 +187,7 @@ final class BotNavigationGraphProvider {
                          int dropEdgeCount,
                          int climbEdgeCount,
                          int portalEdgeCount,
+                         int teleportEdgeCount,
                          long buildAnchorPointsNs,
                          long collectFootholdsNs,
                          long buildRegionsNs,
@@ -215,6 +219,7 @@ final class BotNavigationGraphProvider {
             this.dropEdgeCount = dropEdgeCount;
             this.climbEdgeCount = climbEdgeCount;
             this.portalEdgeCount = portalEdgeCount;
+            this.teleportEdgeCount = teleportEdgeCount;
             this.collectFootholdsNs = collectFootholdsNs;
             this.buildRegionsNs = buildRegionsNs;
             this.addRopeRegionsNs = addRopeRegionsNs;
@@ -259,6 +264,7 @@ final class BotNavigationGraphProvider {
         private int dropEdgeCount;
         private int climbEdgeCount;
         private int portalEdgeCount;
+        private int teleportEdgeCount;
         private long collectFootholdsNs;
         private long buildRegionsNs;
         private long addRopeRegionsNs;
@@ -289,6 +295,7 @@ final class BotNavigationGraphProvider {
                 case DROP -> dropEdgeCount++;
                 case CLIMB -> climbEdgeCount++;
                 case PORTAL -> portalEdgeCount++;
+                case TELEPORT -> teleportEdgeCount++;
             }
         }
 
@@ -328,6 +335,7 @@ final class BotNavigationGraphProvider {
                     dropEdgeCount,
                     climbEdgeCount,
                     portalEdgeCount,
+                    teleportEdgeCount,
                     buildAnchorPointsNs,
                     collectFootholdsNs,
                     buildRegionsNs,
@@ -452,6 +460,16 @@ final class BotNavigationGraphProvider {
             int distance = Math.abs(key.totalSpeedStat() - requested.totalSpeedStat())
                     + Math.abs(key.totalJumpStat() - requested.totalJumpStat())
                     + (key.snowShoes() != requested.snowShoes() ? 1_000 : 0);
+            // A blink/no-blink mismatch is not a "closer or farther" question at all: the graph's
+            // TELEPORT edges are moves this body cannot perform, so serving it hands the bot a plan
+            // it can never execute. Measured before this rule: a warrior sharing a map with a mage
+            // was given the mage's graph while its own baked, walked the blink chain to the stage-5
+            // top door, and then spun at the last ledge once the executor refused each blink. The
+            // honest answer is "no graph yet" - the caller falls back to the warmup path and the
+            // real graph lands moments later.
+            if (key.teleport() != requested.teleport()) {
+                continue;
+            }
             // Ties are common (two speed/jump buckets equally far away), and the old full-cache
             // scan broke them by ConcurrentHashMap iteration order — arbitrary and unstable. Now
             // that we scan a small per-map set, break ties on the key itself so the chosen graph
@@ -466,7 +484,8 @@ final class BotNavigationGraphProvider {
         return bestGraph;
     }
 
-    // Deterministic ordering for tie-breaking: mapId, then speed, then jump, then snowshoes.
+    // Deterministic ordering for tie-breaking: mapId, then speed, then jump, then snowshoes,
+    // then the blink flag.
     private static int compareKeys(GraphCacheKey a, GraphCacheKey b) {
         int c = Integer.compare(a.mapId(), b.mapId());
         if (c != 0) {
@@ -480,7 +499,11 @@ final class BotNavigationGraphProvider {
         if (c != 0) {
             return c;
         }
-        return Boolean.compare(a.snowShoes(), b.snowShoes());
+        c = Boolean.compare(a.snowShoes(), b.snowShoes());
+        if (c != 0) {
+            return c;
+        }
+        return Boolean.compare(a.teleport(), b.teleport());
     }
 
     /*
@@ -638,18 +661,21 @@ final class BotNavigationGraphProvider {
                     || graph.mapId != key.mapId()
                     || graph.movementProfile.totalSpeedStat() != key.totalSpeedStat()
                     || graph.movementProfile.totalJumpStat() != key.totalJumpStat()
-                    || graph.movementProfile.snowShoes() != key.snowShoes()) {
+                    || graph.movementProfile.snowShoes() != key.snowShoes()
+                    || graph.movementProfile.teleport() != key.teleport()) {
                 // Name the dimension that actually differs. This branch fires on any mismatch, so
                 // a message that always blamed snowShoes would send the next reader down the wrong
                 // path — the common case here is a GRAPH_VERSION bump, not a profile collision.
-                log.warn("Discarding bot nav graph cache {}: {} (map {} speed {} jump {} snowshoes {}"
-                                + " vs wanted map {} speed {} jump {} snowshoes {})",
+                log.warn("Discarding bot nav graph cache {}: {} (map {} speed {} jump {} snowshoes {} tp {}"
+                                + " vs wanted map {} speed {} jump {} snowshoes {} tp {})",
                         file.getFileName(),
                         graph.version != GRAPH_VERSION ? "version " + graph.version + " != " + GRAPH_VERSION
                                 : "key mismatch",
                         graph.mapId, graph.movementProfile.totalSpeedStat(),
                         graph.movementProfile.totalJumpStat(), graph.movementProfile.snowShoes(),
-                        key.mapId(), key.totalSpeedStat(), key.totalJumpStat(), key.snowShoes());
+                        graph.movementProfile.teleport(),
+                        key.mapId(), key.totalSpeedStat(), key.totalJumpStat(), key.snowShoes(),
+                        key.teleport());
                 return null;
             }
             seedCachedFootholdCollisionIds(graph);
@@ -720,6 +746,10 @@ final class BotNavigationGraphProvider {
                 + "-s" + key.totalSpeedStat()
                 + "-j" + key.totalJumpStat()
                 + "-ss" + (key.snowShoes() ? 1 : 0)
+                // tp: the blink dimension. A mage's graph carries TELEPORT edges; without the flag
+                // in the filename the two profiles would share one file and whichever loaded first
+                // would serve the other its own move set.
+                + "-tp" + (key.teleport() ? 1 : 0)
                 + ".bin");
     }
 
@@ -813,6 +843,18 @@ final class BotNavigationGraphProvider {
                         anchorsByRegionId.getOrDefault(region.id, List.of()), outgoing, edgeKeys, jumpLandingCache, movementProfile);
             }
             buildProfile.buildJumpEdgesNs = System.nanoTime() - phaseStartedAt;
+
+            // Only a body that owns the skill gets the edges. Everything downstream (A*, the
+            // executor, DeadPitGuard) then reads one graph that describes THIS bot's real move
+            // set - the alternative, filtering at query time, is what let a mage claim a room its
+            // jump could never enter while the plan said otherwise.
+            if (movementProfile.teleport()) {
+                for (BotNavigationGraph.Region region : groundRegions) {
+                    addTeleportEdges(region, map, regionsById, regionIdByFootholdId,
+                            anchorsByRegionId.getOrDefault(region.id, List.of()), outgoing, edgeKeys,
+                            movementProfile);
+                }
+            }
 
             phaseStartedAt = System.nanoTime();
             for (BotNavigationGraph.Region region : ropeRegions) {
@@ -1610,6 +1652,69 @@ final class BotNavigationGraphProvider {
                 travelMs,
                 outgoing,
                 edgeKeys);
+    }
+
+    /**
+     * Bake the 快速移动 (Teleport) edges for one ground region: only the UPWARD steps a jump in
+     * this body's band cannot make.
+     *
+     * <p>Two filters decide the set, both about keeping the graph honest rather than maximal:
+     *
+     * <ul>
+     *   <li><b>Up only.</b> Down is already DROP (walk-off / down-jump) and sideways is WALK, so a
+     *       blink there is only a shortcut - and a shortcut driven as a committed edge rewires the
+     *       approach/retention rules for no navigational gain. On a stacked room the two together
+     *       also zig-zag: measured on 922010500, a plan reaching the -1276 row blinked up 34px and
+     *       straight back down inside one room, each hop individually cheaper than the next step.</li>
+     *   <li><b>Only the steps a jump cannot clear.</b> WZ Physics gives the whole 35-50 LPQ band
+     *       93px of rise (116px with maxed party Haste). A ledge that a jump can reach already has
+     *       a JUMP edge; a second, cheaper one merely makes the plan prefer the blink everywhere,
+     *       which both reads wrong and buries the mage in commit/retain churn on every platform
+     *       boundary. What the class is genuinely FOR is the wall no jump clears - exactly the
+     *       100px step the stage-5 top door sits behind.</li>
+     * </ul>
+     *
+     * <p>The landing comes from the blink's OWN rule
+     * ({@link GCMovementSkills#landingToward}) - the call the executor makes - so a baked edge is
+     * exactly the warp the bot performs from that pixel. Anything the executor would resolve
+     * differently is simply not baked, which is what keeps "planned" and "executable" the same
+     * claim.
+     *
+     * <p>Duplicate (source region -> destination) pairs are dropped by the edge key: one edge per
+     * step is all A* can use, and the anchors along one ledge otherwise agree on the same step.
+     */
+    private static void addTeleportEdges(BotNavigationGraph.Region from,
+                                         MapleMap map,
+                                         Map<Integer, BotNavigationGraph.Region> regionsById,
+                                         Map<Integer, Integer> regionIdByFootholdId,
+                                         List<Point> anchors,
+                                         Map<Integer, List<BotNavigationGraph.Edge>> outgoing,
+                                         Set<String> edgeKeys,
+                                         BotMovementProfile movementProfile) {
+        int jumpReach = (int) Math.floor(BotPhysicsEngine.calculateMaxJumpHeight(movementProfile));
+        for (Point anchor : anchors) {
+            Point above = BotPhysicsEngine.findGroundPointAbove(map, anchor,
+                    GCMovementSkills.TELEPORT_RANGE_PX);
+            if (above == null) {
+                continue; // nothing overhead: no vertical step here at all
+            }
+            if (anchor.y - above.y <= jumpReach) {
+                continue; // a jump already covers this step - the JUMP edges own it
+            }
+            // Ask the executor's own rule, aiming at the platform above on this very column.
+            Point landing = GCMovementSkills.landingToward(map, anchor, anchor.x, above.y,
+                    movementProfile, BotMovementCapabilities.NONE);
+            if (landing == null) {
+                continue;
+            }
+            BotNavigationGraph.Region to = findRegionBelow(map, regionsById, regionIdByFootholdId,
+                    new Point(landing.x, landing.y - BotPhysicsEngine.cfg.MAX_SNAP_DROP));
+            if (to == null || to.id == from.id) {
+                continue; // the same platform: not a step
+            }
+            addEdge(from.id, to.id, BotNavigationGraph.EdgeType.TELEPORT,
+                    anchor, landing, 0, 0, 0, outgoing, edgeKeys);
+        }
     }
 
     /*

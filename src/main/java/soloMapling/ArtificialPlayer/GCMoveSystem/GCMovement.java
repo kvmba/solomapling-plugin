@@ -1762,7 +1762,7 @@ public final class GCMovement {
             return "GCMove: bake FAILED for map " + bot.getMapId();
         }
         int regions = g.regions.size();
-        int walk = 0, jump = 0, drop = 0, climb = 0, portal = 0, total = 0;
+        int walk = 0, jump = 0, drop = 0, climb = 0, portal = 0, teleport = 0, total = 0;
         for (List<BotNavigationGraph.Edge> edges : g.outgoingByRegionId.values()) {
             for (BotNavigationGraph.Edge e : edges) {
                 total++;
@@ -1772,14 +1772,15 @@ public final class GCMovement {
                     case DROP -> drop++;
                     case CLIMB -> climb++;
                     case PORTAL -> portal++;
+                    case TELEPORT -> teleport++;
                 }
             }
         }
         int ropes = bot.getMap().getRopes().size();
         return String.format(
                 "GCMove bake map %d in %dms: regions=%d ropes=%d edges=%d "
-                        + "(walk=%d jump=%d drop=%d climb=%d portal=%d)",
-                bot.getMapId(), ms, regions, ropes, total, walk, jump, drop, climb, portal);
+                        + "(walk=%d jump=%d drop=%d climb=%d portal=%d teleport=%d)",
+                bot.getMapId(), ms, regions, ropes, total, walk, jump, drop, climb, portal, teleport);
     }
 
     // Diagnostic for the widened rope top-exit probe. Iterates the player's map ropes, runs the

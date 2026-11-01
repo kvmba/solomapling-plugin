@@ -60,13 +60,4 @@ public final class MovementStylePolicy {
     public static boolean hasTeleportSkill(int jobId) {
         return isTeleportMage(jobId);
     }
-
-    /**
-     * Whether this job learns 轻功 (Haste): the Assassin and Bandit lineages from 2nd job on.
-     * The movement profile models a haste thief's speed from its own copy of this predicate;
-     * keep the two in sync.
-     */
-    public static boolean hasHasteSkill(Job job) {
-        return job != null && (job.isA(Job.ASSASSIN) || job.isA(Job.BANDIT));
-    }
 }
