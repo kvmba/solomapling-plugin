@@ -304,7 +304,7 @@ final class GCMovementDriver {
         if (entry.portalDropAtMs > 0L) {
             if (MovementClock.nowMs() < entry.portalDropAtMs) {
                 BotPhysicsEngine.idleOnGround(entry, bot); // float at the spawn point
-                entry.inAir = true; // show the JUMP stance while floating (the release fall already does)
+                entry.inAir = true; // still airborne for isMoving/isGrounded + tick cadence (pose: resolveStance)
                 broadcastIfObserved(entry);
                 return;
             }
@@ -1104,9 +1104,11 @@ final class GCMovementDriver {
             Point raised = GCMovement.entrySpawnPoint(spawn);
             BotPhysicsEngine.teleportTo(entry, bot, raised);
         } else {
-            // Unobserved (or no floor below): just stand where we landed — no float.
-            BotPhysicsEngine.teleportTo(entry, bot, ground != null ? ground : spawn);
+            // Unobserved (or no floor below): just stand where we landed — no float. Disarm BEFORE
+            // the teleport: a stale pending drop from the previous map would otherwise make the
+            // seat resolve the suspended JUMP pose on a bot that is about to stand on real ground.
             entry.portalDropAtMs = 0L;
+            BotPhysicsEngine.teleportTo(entry, bot, ground != null ? ground : spawn);
         }
         BotNavigationGraphProvider.warmGraphAsync(map, entry.movementProfile);
         broadcastIfObserved(entry);

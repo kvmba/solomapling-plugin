@@ -1842,6 +1842,20 @@ final class BotPhysicsEngine {
         return baseStance;
     }
 
+    /*
+     * The single "the body is off the ground" predicate for the POSE and for the wire foothold.
+     *
+     * Two states qualify: a real jump/fall (inAir), and a bot waiting out its map-entry float, which
+     * carries a pending drop (portalDropAtMs) instead of inAir because both paths that establish the
+     * float clear inAir - clearMovementState inside teleportTo, and idleOnGround in the hold branch.
+     *
+     * Keeping ONE predicate is what stops a JUMP stance byte from being paired with a real foothold
+     * id in the same frame (the client snaps a sprite onto a foothold id it is given).
+     */
+    static boolean isAirbornePose(BotMovementState entry) {
+        return entry.inAir || entry.portalDropAtMs > 0L;
+    }
+
     static int resolveStance(BotMovementState entry) {
         Character bot = entry.bot;
         if (bot != null && bot.getHp() <= 0) {
@@ -1858,7 +1872,15 @@ final class BotPhysicsEngine {
         if (entry.crouching) {
             return entry.facingDir >= 0 ? CharacterStance.PRONE_RIGHT_STANCE : CharacterStance.PRONE_LEFT_STANCE;
         }
-        if (entry.inAir) {
+        // A bot suspended at its map-entry float point must already hold JUMP in Character.stance.
+        // The pre-fix rule keyed on inAir alone, and the pose was only repaired inside
+        // movementSnapshot() - i.e. inside a BROADCAST, which the driver skips entirely while the map
+        // is unobserved. The character therefore stayed STAND (or the pose it warped in with) for the
+        // whole 1.5-2.1s hold, and a player entering reads getStance() verbatim from
+        // Character.sendSpawnData: the reported bot hovering in a standing pose - measured on a real
+        // map, unaffected by the broadcast dedup cache (which only hides the frame from observers who
+        // were already there).
+        if (isAirbornePose(entry)) {
             return entry.facingDir >= 0 ? CharacterStance.JUMP_RIGHT_STANCE : CharacterStance.JUMP_LEFT_STANCE;
         }
         if (entry.moveDir > 0) {

@@ -1620,12 +1620,17 @@ class BotMovementManager {
             }
         }
 
+        // The SAME predicate resolveStance uses to pick the pose (BotPhysicsEngine.isAirbornePose),
+        // so the pose byte and the fh byte can never disagree. A bot suspended at its map-entry
+        // float carries a pending drop rather than inAir, and pairing a JUMP stance with a real
+        // foothold id is exactly the frame that snaps the sprite onto the floor.
+        boolean airborne = BotPhysicsEngine.isAirbornePose(entry);
         // Only a land pose pays for the ground lookup; every other pose resolves to 0/rope below.
-        Foothold fh = (entry.climbing || entry.inAir || entry.swimming)
+        Foothold fh = (entry.climbing || airborne || entry.swimming)
                 ? null
                 : BotPhysicsEngine.findGroundFoothold(bot.getMap(), bot.getPosition());
         int groundFhId = fh != null ? fh.getId() : 0;
-        return resolveWireFh(entry.climbing, entry.inAir, entry.swimming, ropeWireFh, groundFhId);
+        return resolveWireFh(entry.climbing, airborne, entry.swimming, ropeWireFh, groundFhId);
     }
 
     /**
