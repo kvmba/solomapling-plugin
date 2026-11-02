@@ -406,7 +406,7 @@ public final class SoloGrindController {
         // key), so BotLevelUpNotice is deliberately NOT called here - it would double-announce.
         companion.gainExp(gain, false, false, false);
         if (companion.getLevel() > startLevel) {
-            log.info("Companion solo grind level up cid={} from={} to={} map={}",
+            log.debug("Companion solo grind level up cid={} from={} to={} map={}",
                     companion.getId(), startLevel, companion.getLevel(), companion.getMapId());
         }
     }

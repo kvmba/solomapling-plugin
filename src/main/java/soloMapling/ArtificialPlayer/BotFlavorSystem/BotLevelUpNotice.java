@@ -48,6 +48,6 @@ public final class BotLevelUpNotice {
             }
             player.dropMessage(6, msg);
         }
-        log.info(msg);
+        log.debug(msg);
     }
 }
