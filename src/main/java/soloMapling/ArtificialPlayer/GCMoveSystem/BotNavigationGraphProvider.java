@@ -372,6 +372,15 @@ final class BotNavigationGraphProvider {
     private static final class JumpLandingCache {
         private final Map<JumpLandingKey, BotPhysicsEngine.PostLandingJump> hits = new HashMap<>();
         private final Set<JumpLandingKey> misses = new HashSet<>();
+        // Full "does a launch here reach that target" verdicts. The same pixel is re-probed by
+        // every boundary search and by every anchor's contiguous sweep, so without this a wide
+        // region re-derives one answer thousands of times: map 922000000 (one 7087px, 81-segment
+        // region) ran 4.6M probes for 29k distinct flight sims, 99.4% of its jump phase wasted.
+        private final Map<JumpVerdictKey, Boolean> verdicts = new HashMap<>();
+        private final Map<DownJumpVerdictKey, Boolean> downJumpVerdicts = new HashMap<>();
+    }
+
+    private record JumpVerdictKey(int regionId, int launchX, int launchStepX, int targetRegionId) {
     }
 
     private record RopeGrabKey(int x, int y, int launchStepX, int ropeX, int ropeTopY, int ropeBottomY) {
@@ -813,7 +822,8 @@ final class BotNavigationGraphProvider {
             phaseStartedAt = System.nanoTime();
             for (BotNavigationGraph.Region region : groundRegions) {
                 addDropEdges(region, map, regionsById, regionIdByFootholdId,
-                        anchorsByRegionId.getOrDefault(region.id, List.of()), outgoing, edgeKeys, movementProfile);
+                        anchorsByRegionId.getOrDefault(region.id, List.of()), outgoing, edgeKeys,
+                        jumpLandingCache, movementProfile);
             }
             buildProfile.buildDropEdgesNs = System.nanoTime() - phaseStartedAt;
 
@@ -883,6 +893,10 @@ final class BotNavigationGraphProvider {
                     String.format("%.2f", report.buildJumpEdgesNs / 1_000_000.0),
                     report.jumpSampleCount,
                     report.jumpCacheHitCount);
+            // The per-column segment tables only pay off while an edge phase is sampling the same
+            // ledges millions of times. Released here so a fully baked world does not carry them
+            // (~20MB of int arrays across the ~1200 mob maps); a later lookup rebuilds in place.
+            graph.releaseRegionTables();
             return graph;
         } finally {
             BotPhysicsEngine.clearBuildWalkRegionLookup();
@@ -1199,6 +1213,7 @@ final class BotNavigationGraphProvider {
                                      List<Point> anchors,
                                      Map<Integer, List<BotNavigationGraph.Edge>> outgoing,
                                      Set<String> edgeKeys,
+                                     JumpLandingCache jumpLandingCache,
                                      BotMovementProfile movementProfile) {
         addDirectionalDropEdge(from, map, regionsById, regionIdByFootholdId, -1, outgoing, edgeKeys, movementProfile);
         addDirectionalDropEdge(from, map, regionsById, regionIdByFootholdId, 1, outgoing, edgeKeys, movementProfile);
@@ -1215,7 +1230,7 @@ final class BotNavigationGraphProvider {
             }
 
             JumpLaunchWindow launchWindow = expandDownJumpLaunchWindow(
-                    from, map, regionIdByFootholdId, anchor.x, movementProfile);
+                    from, map, regionIdByFootholdId, anchor.x, movementProfile, jumpLandingCache);
             if (launchWindow == null) {
                 continue;
             }
@@ -1991,7 +2006,8 @@ final class BotNavigationGraphProvider {
                                                                MapleMap map,
                                                                Map<Integer, Integer> regionIdByFootholdId,
                                                                int anchorX,
-                                                               BotMovementProfile movementProfile) {
+                                                               BotMovementProfile movementProfile,
+                                                               JumpLandingCache cache) {
         BotPhysicsEngine.JumpLanding anchorLanding = validateDownJumpLaunchX(
                 from, map, regionIdByFootholdId, anchorX, movementProfile);
         if (anchorLanding == null) {
@@ -2003,8 +2019,8 @@ final class BotNavigationGraphProvider {
             return null;
         }
 
-        int minX = findDownJumpBoundary(from, map, regionIdByFootholdId, anchorX, targetRegionId, true, movementProfile);
-        int maxX = findDownJumpBoundary(from, map, regionIdByFootholdId, anchorX, targetRegionId, false, movementProfile);
+        int minX = findDownJumpBoundary(from, map, regionIdByFootholdId, anchorX, targetRegionId, true, movementProfile, cache);
+        int maxX = findDownJumpBoundary(from, map, regionIdByFootholdId, anchorX, targetRegionId, false, movementProfile, cache);
 
         int representativeX = (minX + maxX) / 2;
         Point representativeStart = from.pointAt(representativeX);
@@ -2072,7 +2088,8 @@ final class BotNavigationGraphProvider {
                                             int startX,
                                             int targetRegionId,
                                             boolean searchLeft,
-                                            BotMovementProfile movementProfile) {
+                                            BotMovementProfile movementProfile,
+                                            JumpLandingCache cache) {
         // A straight down-jump has NO horizontal launch precision (you press down+jump and fall
         // in place), so the window is the whole contiguous span of the source region that drops
         // into the same target - bounded only by the region edges, exactly like findJumpBoundary.
@@ -2092,7 +2109,7 @@ final class BotNavigationGraphProvider {
                 break;
             }
 
-            if (!isValidDownJumpLaunchX(from, map, regionIdByFootholdId, probeX, movementProfile, targetRegionId)) {
+            if (!isValidDownJumpLaunchX(from, map, regionIdByFootholdId, probeX, movementProfile, targetRegionId, cache)) {
                 invalidX = probeX;
                 break;
             }
@@ -2106,7 +2123,7 @@ final class BotNavigationGraphProvider {
 
         while (Math.abs(validX - invalidX) > 1) {
             int probeX = (validX + invalidX) / 2;
-            if (isValidDownJumpLaunchX(from, map, regionIdByFootholdId, probeX, movementProfile, targetRegionId)) {
+            if (isValidDownJumpLaunchX(from, map, regionIdByFootholdId, probeX, movementProfile, targetRegionId, cache)) {
                 validX = probeX;
             } else {
                 invalidX = probeX;
@@ -2177,6 +2194,28 @@ final class BotNavigationGraphProvider {
                                               JumpBuildStats stats,
                                               JumpLandingCache jumpLandingCache,
                                               BotMovementProfile movementProfile) {
+        // The verdict depends only on (region, launch pixel, launch class, target), so memoize it:
+        // a pixel's answer is asked for again by the next anchor's window search on the same ledge.
+        JumpVerdictKey key = new JumpVerdictKey(from.id, launchX, launchStepX, targetRegionId);
+        Boolean cached = jumpLandingCache.verdicts.get(key);
+        if (cached != null) {
+            return cached;
+        }
+        boolean valid = computeJumpLaunchValid(from, map, regionIdByFootholdId, launchX, launchStepX,
+                targetRegionId, stats, jumpLandingCache, movementProfile);
+        jumpLandingCache.verdicts.put(key, valid);
+        return valid;
+    }
+
+    private static boolean computeJumpLaunchValid(BotNavigationGraph.Region from,
+                                                  MapleMap map,
+                                                  Map<Integer, Integer> regionIdByFootholdId,
+                                                  int launchX,
+                                                  int launchStepX,
+                                                  int targetRegionId,
+                                                  JumpBuildStats stats,
+                                                  JumpLandingCache jumpLandingCache,
+                                                  BotMovementProfile movementProfile) {
         if (!isApproachableJumpLaunchX(from, map, launchX)) {
             return false;
         }
@@ -2236,8 +2275,23 @@ final class BotNavigationGraphProvider {
                                                   Map<Integer, Integer> regionIdByFootholdId,
                                                   int launchX,
                                                   BotMovementProfile movementProfile,
-                                                  int targetRegionId) {
-        return validateDownJumpLaunchX(from, map, regionIdByFootholdId, launchX, movementProfile, targetRegionId) != null;
+                                                  int targetRegionId,
+                                                  JumpLandingCache cache) {
+        // Same square as the jump path: every anchor runs its own boundary search over the same
+        // columns, and each probe re-simulates a full down-jump. One entry per (region, column,
+        // target) collapses it. Measured on 925040000: 5.5M findBelow probes for 35 regions.
+        DownJumpVerdictKey key = new DownJumpVerdictKey(from.id, launchX, targetRegionId);
+        Boolean cached = cache.downJumpVerdicts.get(key);
+        if (cached != null) {
+            return cached;
+        }
+        boolean valid = validateDownJumpLaunchX(from, map, regionIdByFootholdId, launchX, movementProfile,
+                targetRegionId) != null;
+        cache.downJumpVerdicts.put(key, valid);
+        return valid;
+    }
+
+    private record DownJumpVerdictKey(int regionId, int launchX, int targetRegionId) {
     }
 
     private static BotPhysicsEngine.JumpLanding validateDownJumpLaunchX(BotNavigationGraph.Region from,

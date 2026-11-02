@@ -2727,7 +2727,19 @@ final class BotPhysicsEngine {
         }
 
         AirCollision best = bound;
+        // A wall can only be crossed when its column lies strictly inside the swept x span:
+        // wallCollision's own gate is progress > 0 && progress <= 1, i.e. dxWall * dirX in
+        // (0, |spanX|]. Sweeping every collidable wall of the map on every airborne tick is the
+        // hottest item in a bake (a 500-foothold map carries ~100 wall columns and one arc flies
+        // ~17 ticks), so this integer span test drops almost all of them without any float math.
+        int spanX = nextPos.x - previousPos.x;
+        int dirX = Integer.signum(spanX);
+        int absSpanX = Math.abs(spanX);
         for (Foothold foothold : collisionIndex(map).collidableWalls()) {
+            int dxWall = (foothold.getX1() - previousPos.x) * dirX;
+            if (dxWall <= 0 || dxWall > absSpanX) {
+                continue;
+            }
             AirCollision collision = wallCollision(foothold, previousPos, nextPos, allowWalkableGroundEndpoint);
             if (collision.type() == AirCollisionType.WALL && collision.progress() < best.progress()) {
                 best = collision;

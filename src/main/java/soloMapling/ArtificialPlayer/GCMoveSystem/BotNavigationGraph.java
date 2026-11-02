@@ -188,13 +188,55 @@ final class BotNavigationGraph implements Serializable {
         }
 
         private Segment findBestSegment(int x) {
-            Segment best = segments.get(0);
-            int bestDistance = distanceToSegment(best, x);
+            // A single-segment region needs no table at all, and a two-segment one is cheaper to
+            // scan than to index: the table costs 4 bytes per column up front.
+            if (segments.size() <= 2) {
+                return segments.get(scanBestSegment(x));
+            }
+            // A wide region can carry a hundred-plus segments, and the jump bake asks pointAt()
+            // once per sampled pixel per launch class per boundary probe - measured 4.6M lookups
+            // for a single region (map 922000000, 7087px, 81 segments), where this scan alone was
+            // 37% of the whole map's bake. The answer depends only on x, so answer it from a
+            // per-column table built once.
+            int[] byX = segmentByX;
+            if (byX == null) {
+                byX = buildSegmentByX();
+                segmentByX = byX;
+            }
+            // Out-of-range x clamps: every segment is then beyond the same edge, so the ordering is
+            // the scan's own ordering shifted by a constant (see distanceToSegment).
+            int px = Math.clamp(x, minX, maxX) - minX;
+            return segments.get(byX[px]);
+        }
+
+        /* Transient: derived from `segments`, never part of the cache file's data shape. */
+        private transient volatile int[] segmentByX;
+
+        /**
+         * Drop the column table. It exists only to make a bake fast; across the ~1200 mob maps the
+         * tables total ~20MB of int arrays that would otherwise stay resident forever. The graph
+         * provider calls this once a build finishes, and any later lookup simply rebuilds it.
+         */
+        void releaseSegmentTable() {
+            segmentByX = null;
+        }
+
+        private int[] buildSegmentByX() {
+            int width = maxX - minX + 1;
+            int[] out = new int[width];
+            for (int i = 0; i < width; i++) {
+                out[i] = scanBestSegment(minX + i);
+            }
+            return out;
+        }
+
+        private int scanBestSegment(int x) {
+            int best = 0;
+            int bestDistance = distanceToSegment(segments.get(0), x);
             for (int i = 1; i < segments.size(); i++) {
-                Segment segment = segments.get(i);
-                int distance = distanceToSegment(segment, x);
+                int distance = distanceToSegment(segments.get(i), x);
                 if (distance < bestDistance) {
-                    best = segment;
+                    best = i;
                     bestDistance = distance;
                 }
             }
@@ -360,6 +402,17 @@ final class BotNavigationGraph implements Serializable {
     final Map<Integer, List<Edge>> outgoingByRegionId;
     final java.util.Set<Integer> collidableWallIds;
     final java.util.Set<Integer> collidableFromBelowIds;
+
+    /**
+     * Drop every region's column table. Those tables only exist to make a bake fast; across the
+     * ~1200 mob maps they total ~20MB of int arrays, and once a map is baked the graph is queried
+     * at a few dozen lookups per second, where the plain scan is free. Lookups rebuild on demand.
+     */
+    void releaseRegionTables() {
+        for (Region region : regions) {
+            region.releaseSegmentTable();
+        }
+    }
 
     BotNavigationGraph(int mapId,
                        int version,
