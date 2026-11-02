@@ -223,6 +223,12 @@ public abstract class PartyQuestBot extends BotSM implements GrindTickRegistry.P
                 || !isInsideQuest(bot.getMapId())) {
             return;
         }
+        // No graph yet: this sweep must not steer on the warmup heuristic, and must not build one
+        // on this thread either (the shared 250ms sweep is one thread for every bot). The macro
+        // tick does the building (GCMovement.ensureGraph) and will run the fight on its next beat.
+        if (!GCMovement.hasGraph(bot)) {
+            return;
+        }
         // Sweep the drops the bot is standing on, whatever the stage's steering is doing this
         // beat: a kill lands its item at the mob's feet, and waiting for the macro tick to come
         // back for it is the reported "the pass is still lying there" delay. Narrow on purpose -
@@ -378,6 +384,15 @@ public abstract class PartyQuestBot extends BotSM implements GrindTickRegistry.P
             returnToLobby("no longer in a party");
             return;
         }
+
+        // Quest work runs with the real graph, or not at all. The warmup heuristic has no A*, so
+        // it cannot take a shelf whose x sits inside the bot's own platform (LPQ stage 1: the
+        // -450 mob row's first Ratz is the only one it can ever reach, and the -506/-572 rungs
+        // that lead on up the tower are never even attempted). Building costs one map on this
+        // tick's own (virtual) thread; a party entering together may build it once per member,
+        // which is bounded and never waits on the async warm queue. A build failure throws and the
+        // tick wheel logs it - it must never fall through to the heuristic.
+        GCMovement.ensureGraph(bot);
 
         // Stay with the party. Most of these quests move between rooms by the players walking
         // through a portal, not by a script warping the team, so a bot that only ever works on

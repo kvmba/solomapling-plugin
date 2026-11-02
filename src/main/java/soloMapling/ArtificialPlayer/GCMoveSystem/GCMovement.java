@@ -1407,6 +1407,48 @@ public final class GCMovement {
                 new Point(x, y), BotMovementCapabilities.of(bot).teleport()) != null;
     }
 
+    /**
+     * Have this bot's exact-profile navigation graph ready NOW, building it on the calling thread
+     * if neither the memory nor the disk cache has it.
+     *
+     * <p>Quest bots call this and skip their tick until it answers: the warmup heuristic is not a
+     * substitute for navigation (no A* - a shelf whose x sits inside the bot's own platform is
+     * never even attempted), and joining the queued async warm would park the bot behind the
+     * server's whole cold-start map list, which is FIFO with no priority. Building here costs one
+     * map (measured on the LPQ rooms: median 105ms, p90 390ms, worst 1.9s; a deserialize when the
+     * disk cache is present) and never waits on a future this method does not own.
+     *
+     * <p>MACRO tick only: the shared 250ms combat sweep is one thread for every bot, so that path
+     * only checks with {@link #hasGraph}.
+     *
+     * <p>A build failure propagates to the caller's tick, which the tick wheel already logs and
+     * absorbs; it deliberately does NOT degrade to the heuristic (see the class comment there).
+     */
+    public static boolean ensureGraph(Character bot) {
+        if (bot == null || bot.getMap() == null) {
+            return false;
+        }
+        return BotNavigationGraphProvider.ensureGraphSync(bot.getMap(),
+                BotMovementProfile.fromCharacter(bot)) != null;
+    }
+
+    /**
+     * Whether the driver already has a graph for this map - exact profile, or the closest cached
+     * one it would serve instead. Never starts a build.
+     *
+     * <p>Map-only lookup on purpose. The driver's own fallback gate is
+     * {@code peekBestGraph(map, profile)}, which is "exact, else closest"; its null-check is
+     * therefore exactly "is any graph indexed for this map", and this form answers that without
+     * recomputing {@link BotMovementProfile} (party roster + equipped-shoe WZ lookup) four times a
+     * second per bot on the shared combat sweep.
+     */
+    public static boolean hasGraph(Character bot) {
+        if (bot == null || bot.getMap() == null) {
+            return false;
+        }
+        return BotNavigationGraphProvider.peekGraph(bot.getMap()) != null;
+    }
+
     /** Nearest reachable ground inside an interaction box; one peek-only graph traversal. */
     public static Point nearestReachableGround(Character bot, java.awt.Rectangle bounds) {
         MapleMap map = bot.getMap();

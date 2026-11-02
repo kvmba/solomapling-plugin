@@ -549,6 +549,40 @@ final class BotNavigationGraphProvider {
         return rebuildGraph(map, BotMovementProfile.base());
     }
 
+    /**
+     * The exact-profile graph for this map, made available on the CALLING thread.
+     *
+     * <p>Quest bots call this and skip their tick until it answers: the warmup heuristic is not a
+     * substitute for navigation (no A*, so a shelf whose x sits inside the bot's own platform is
+     * never attempted), and joining a queued async warm would park the bot behind the whole
+     * server's cold-start map list - that queue is FIFO with no priority, which is the very
+     * failure this method exists to remove.
+     *
+     * <p>No cross-caller dedup: a party of six entering together may each build this one map on
+     * their own tick thread. That is bounded work (median 105ms, p90 390ms, worst 1.9s on the
+     * LPQ maps; a deserialize when the disk cache is present) and it never waits on a future this
+     * method does not own.
+     */
+    static BotNavigationGraph ensureGraphSync(MapleMap map, BotMovementProfile movementProfile) {
+        if (map == null) {
+            return null;
+        }
+        movementProfile = canonicalProfile(map, movementProfile);
+        GraphCacheKey key = GraphCacheKey.from(map.getId(), movementProfile);
+        BotNavigationGraph cached = GRAPHS.get(key);
+        if (cached != null) {
+            return cached;
+        }
+        // loadOrBuildGraph prefers the disk cache, so a duplicate of an in-flight async build
+        // usually costs a deserialize rather than a bake.
+        BotNavigationGraph graph = loadOrBuildGraph(map, movementProfile, key);
+        GRAPHS.put(key, graph);
+        GRAPH_KEYS_BY_MAP_ID.computeIfAbsent(map.getId(), ignored -> ConcurrentHashMap.newKeySet())
+                .add(key);
+        BotPhysicsEngine.invalidateWalkRegionLookup(map.getId());
+        return graph;
+    }
+
     static BotNavigationGraph rebuildGraph(MapleMap map, BotMovementProfile movementProfile) {
         GraphCacheKey key = GraphCacheKey.from(map.getId(), movementProfile);
         BotNavigationGraph rebuilt = buildGraph(map, movementProfile);
