@@ -720,8 +720,16 @@ public class TrainingBot extends BotSM implements GrindTickRegistry.Participant 
             return;
         }
         BotWanderSystem.stop(chr);
-        GCMovement.travel(chr, SLEEPYWOOD_HOTEL, okHotel ->
-                GCMovement.travel(chr, homeMapId, okTown -> finishSaunaTrip()));
+        // Chain only on a LANDED hop. A trip can also end because it was ABORTED (the watchdog's
+        // cancelTravel, or a teardown), and that reports ok=false — starting the return trip from
+        // that callback would walk a bot the caller has already given up on, and would do it while
+        // the abort is still unwinding.
+        GCMovement.travel(chr, SLEEPYWOOD_HOTEL, okHotel -> {
+            if (!Boolean.TRUE.equals(okHotel) || !saunaTripActive) {
+                return;
+            }
+            GCMovement.travel(chr, homeMapId, okTown -> finishSaunaTrip());
+        });
     }
 
     private void finishSaunaTrip() {

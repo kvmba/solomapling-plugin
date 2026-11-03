@@ -160,6 +160,12 @@ final class GCTravel {
         long softLockSinceMs;   // when the current soft-lock window opened (0 = unset)
         long hopStartAtMs;      // when the current hop's map was entered — feeds the absolute ceiling
         int lastMapId = -1;
+        // The route from the CURRENT map to the destination, computed once per hop. The poll runs
+        // every 300 ms while walking one hop takes seconds, so recomputing it per poll repeated the
+        // same BFS per hop. GCWorldGraph's edge map is built once and never replaced, so the answer
+        // only changes when the bot changes map — which is exactly the invalidation key below.
+        List<Integer> route;
+        int routeMapId = -1;
         // Cab boarding: set once the bot has reached the cab NPC, then held for the dwell before the
         // bot "drives off". 0 = not boarding. Rides need this dwell to read as a ride — see GCTaxi.
         long boardingAtMs;
@@ -233,6 +239,12 @@ final class GCTravel {
         }
     }
 
+    /*
+     * Abandon a trip WITHOUT notifying its owner — the internal "a new command supersedes this
+     * trip" path (GCMovement.move/stop/farmHere/disable all hold this bot's movement monitor when
+     * they call here, and running a caller's callback under that monitor is the AB-BA shape
+     * BotDeath.adoptIfZeroHp dispatches to avoid). External aborts go through GCMovement.cancelTravel.
+     */
     static void cancel(Character bot) {
         if (bot == null) {
             return;
@@ -242,6 +254,25 @@ final class GCTravel {
         synchronized (st) {
             Trip t = TRIPS.remove(bot.getId());
             if (t != null && t.task != null) t.task.cancel(false);
+        }
+    }
+
+    /*
+     * End a trip from an EXTERNAL abort, with exactly the teardown an ordinary failure gets:
+     * drop it from the registry, clear its move intent, and report ok=false to its owner.
+     *
+     * <p>Mirroring {@link #finish} matters — the abort path used to remove the Trip and nothing
+     * else, so the abandoned hop's moveTarget survived (the bot kept walking one more order after
+     * the caller had given up on the trip) and the {@code ok ->} callback never ran, stranding
+     * SocialBot.strolling / TownWandererBot.traveling forever.
+     *
+     * <p>No trip in flight is a no-op. The caller must NOT hold the bot's movement monitor: the
+     * callback may take the bot's macro lock (AB-BA).
+     */
+    static void cancelAndFinish(Character bot) {
+        Trip trip = bot == null ? null : TRIPS.get(bot.getId());
+        if (trip != null) {
+            finish(trip, false); // idempotent: a racing poll's own finish() removes it exactly once
         }
     }
 
@@ -374,7 +405,14 @@ final class GCTravel {
             return;
         }
 
-        List<Integer> route = GCWorldGraph.route(cur, trip.destMapId, MAX_HOPS);
+        List<Integer> route;
+        if (trip.routeMapId == cur) {
+            route = trip.route; // same hop as the last poll: reuse the BFS result
+        } else {
+            route = GCWorldGraph.route(cur, trip.destMapId, MAX_HOPS);
+            trip.routeMapId = cur;
+            trip.route = route; // null warps the trip out below, so it can be cached as-is
+        }
         if (route == null) {
             // No walkable portal path at all (e.g. towns linked only by taxi/ferry, which
             // pure-movement scope drops) — warp the remainder to the destination.

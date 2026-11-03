@@ -196,11 +196,18 @@ public class TowerMazeExecutionSimTest {
     }
 
     /**
-     * THE REPORTED FAILURE, pre-fix geometry: from the -2132 box row the graph has NO path up
-     * to the -3378 island (the middle rope's bottom hangs above the -2461 row, unreachable from
-     * below). The engine must answer no-path — the PQ layer then exits via the bottom out01
-     * instead of stalling. Asserts the graph's verdict AND that the bot still ends the leg on
-     * the -2132 row (no bogus raw-steer descent).
+     * THE REPORTED FAILURE, pre-fix geometry: from the -2132 box row a body that can only WALK,
+     * JUMP, DROP and CLIMB has NO path up to the -3378 island (the middle rope's bottom hangs
+     * above the -2461 row, unreachable from below). The engine must answer no-path — the PQ layer
+     * then exits via the bottom out01 instead of stalling.
+     *
+     * <p>The walk-only body is the right subject since GRAPH_VERSION 73: one bake per map is
+     * CLASS-NEUTRAL, so the blink edges a 2nd-job+ mage can really perform are present in every
+     * map's graph and filtered per body at query time ({@code canBlink}). A mage therefore DOES
+     * have a legal way back up — three 快速移动 blinks lift it row by row onto the -2461 row, and
+     * the middle rope (x=15, y=-2500..-3376) reaches the island from there. Asserting "nobody can
+     * return" against the unfiltered graph pinned the old per-class bake, and started failing on
+     * the first mage-shaped query once the graphs merged.
      */
     @Test
     void graphKnowsTheDeepRowsCannotClimbBack() {
@@ -212,11 +219,19 @@ public class TowerMazeExecutionSimTest {
         System.out.println("501 regions deepRow=" + deepRow + " island=" + island);
         org.junit.jupiter.api.Assertions.assertNotEquals(island, deepRow,
                 "island and deep row must be distinct regions");
-        // No edge chain: findPath from the deep row must fail to reach the island's region.
-        List<BotNavigationGraph.Edge> path = BotNavigationManager.findPath(g, map,
-                new Point(-101, -2132), deepRow, island, new Point(-106, -3378));
-        org.junit.jupiter.api.Assertions.assertTrue(path == null || path.isEmpty(),
-                "no edge chain may lead from the deep rows back up to the island");
+        // No walking chain: findPath from the deep row must fail to reach the island's region.
+        List<BotNavigationGraph.Edge> walkOnly = BotNavigationManager.findPath(g, map,
+                new Point(-101, -2132), deepRow, island, new Point(-106, -3378), false);
+        org.junit.jupiter.api.Assertions.assertTrue(walkOnly == null || walkOnly.isEmpty(),
+                "no walk/jump/drop/climb chain may lead from the deep rows back up to the island");
+        // A blinker may use its own move set — but only TELEPORT edges may be the ones that differ.
+        List<BotNavigationGraph.Edge> blinking = BotNavigationManager.findPath(g, map,
+                new Point(-101, -2132), deepRow, island, new Point(-106, -3378), true);
+        org.junit.jupiter.api.Assertions.assertNotNull(blinking,
+                "a 2nd-job mage must be able to blink up out of the deep rows");
+        org.junit.jupiter.api.Assertions.assertTrue(
+                blinking.stream().anyMatch(e -> e.type == BotNavigationGraph.EdgeType.TELEPORT),
+                "the mage's way up is the blink it can actually cast");
     }
 
     /**

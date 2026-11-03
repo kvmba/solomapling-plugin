@@ -724,8 +724,22 @@ public final class GCMovement {
         return GCWorldGraph.portalNeighbors(mapId);
     }
 
+    /**
+     * Abandon an in-flight trip, with the same teardown and the same {@code ok=false} report an
+     * ordinary failed hop gets.
+     *
+     * <p>This is the entry every EXTERNAL aborter uses (a travel watchdog, a controller giving up,
+     * teardown). The {@code ok -> ...} callback handed to {@code travel()} is what clears the
+     * caller's own waiting state, so dropping the trip without it stranded that state permanently:
+     * a TownWandererBot stayed {@code traveling} and therefore never counted as available for
+     * ambient actions again, and a SocialBot stayed {@code strolling} — which also skipped the
+     * {@code GCMovement.disable()} that releases the shared movement lock.
+     *
+     * <p>The caller must NOT hold the bot's movement monitor: the callback may take the bot's
+     * macro lock (TrainingBot's moveDone/enterPhase, SocialBot's strollHome).
+     */
     public static void cancelTravel(Character bot) {
-        GCTravel.cancel(bot);
+        GCTravel.cancelAndFinish(bot);
     }
 
     /*
