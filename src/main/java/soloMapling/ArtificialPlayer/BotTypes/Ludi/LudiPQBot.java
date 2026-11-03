@@ -161,7 +161,7 @@ public class LudiPQBot extends PartyQuestBot {
             // the stage-2 trap room - that room has no stage NPC and no next00, so waiting
             // there is a freeze; it takes its own exit back to the tower. The wait also IS
             // the delivery post: the stock of passes in this bot's pockets is dropped at
-            // the leader's feet the moment he comes to the NPC for the turn-in.
+            // the stage NPC's feet the moment the leader comes there for the turn-in.
             sayStageClearOnce(getChr().getMapId());
             if (getChr().getMapId() == LudiPqData.TRAP_ROOM) {
                 LudiStages.exitTrapRoom(getChr());
@@ -296,7 +296,7 @@ public class LudiPQBot extends PartyQuestBot {
      * <p>Stage 1 is not a waiting room: the Red Balloon (NPC 2040036) hands the door to
      * stage 2 only to the party leader carrying 25 passes, and until that conversation
      * happens the lpq0 portal refuses everyone. The bot kills the Ratz, loots the passes it
-     * drops, and drops them at the leader's feet so he can make the turn-in - without that
+     * drops, and drops them at the stage NPC's feet so he can make the turn-in - without that
      * the run can never leave this room.
      *
      * <p>Sources: {@code scripts/npc/2040036.js} (25 x 4001022, leader-only) and

@@ -1400,7 +1400,7 @@ transit.onboard_plane.98: "下次再会"
 transit.onboard_plane.99: "系好安全带"
 
 # --- PQ 阶段台词（组队任务bot家族）---
-pq.passes_dropped: "通行证丢在队长脚边了！"
+pq.passes_dropped: "通行证丢在交任务NPC脚边了！"
 pq.stage_plan: "第{0}阶段：{1}"
 pq.kerning.pass_dropped: "我答完克洛托的问题了——通行证丢在队长脚边。"
 pq.ludi.stage1: "第1阶段：集25张通行证给红气球，队长负责上交——我去打怪了。"
