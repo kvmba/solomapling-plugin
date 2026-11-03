@@ -187,6 +187,119 @@ final class BotNavigationGraph implements Serializable {
             return findBestSegment(x).forbidFallDown;
         }
 
+        /**
+         * The segment whose own line passes through {@code (x, y)}, or null when none does.
+         *
+         * <p>Distinct from {@link #pointAt(int)} on purpose: {@code pointAt} answers the segment
+         * nearest on X alone, so on a region that unions several rows it reports the wrong one for
+         * a bot standing on a different row.
+         *
+         * <p>Tolerance is the one-pixel truncation artefact {@code GROUND_LINE_SLACK_PX} already
+         * covers, NOT {@code MAX_SLOPE_UP}: two shelf rows 13px apart would both be "on the slope"
+         * under the looser number, which is exactly the ambiguity this removes.
+         */
+        Segment segmentAt(int x, int y) {
+            if (isRopeRegion) {
+                return null;
+            }
+            Segment best = null;
+            int bestDy = Integer.MAX_VALUE;
+            for (Segment segment : segments) {
+                if (!segment.containsX(x)) {
+                    continue;
+                }
+                int dy = Math.abs(segment.pointAt(x).y - y);
+                if (dy <= BotPhysicsEngine.GROUND_LINE_SLACK_PX && dy < bestDy) {
+                    best = segment;
+                    bestDy = dy;
+                }
+            }
+            return best;
+        }
+
+        /** Whether two of this region's segments are joined by a legal walking step. */
+        static boolean adjacent(Segment a, Segment b) {
+            if (a == null || b == null || a.footholdId == b.footholdId) {
+                return false;
+            }
+            if (a.minX > b.maxX || b.minX > a.maxX) {
+                return false;
+            }
+            // The x-span test alone is NOT enough: on 922010800's r27 the y=118 tread (fh227,
+            // x 26..49) and the y=131 tread (fh233, x 41..106) overlap on x 41..49 while sitting
+            // 13px apart - a gap no walk crosses. Only the fh226 ramp joins them, at its two
+            // endpoints, which is the same test canWalkAcrossFootholds applied when it unioned
+            // them.
+            return endpointLandsOn(a.x1, a.y1, b)
+                    || endpointLandsOn(a.x2, a.y2, b)
+                    || endpointLandsOn(b.x1, b.y1, a)
+                    || endpointLandsOn(b.x2, b.y2, a);
+        }
+
+        private static boolean endpointLandsOn(int x, int y, Segment other) {
+            return other.containsX(x)
+                    && Math.abs(other.pointAt(x).y - y) <= BotPhysicsEngine.GROUND_LINE_SLACK_PX;
+        }
+
+        /**
+         * The next tread on the walk chain from {@code from} toward {@code to}, or null when they
+         * are not connected through this region.
+         *
+         * <p>Breadth-first over the region's own adjacency, so the answer is the literal next step
+         * a walking body takes. That is what lets a fold-back be expressed to an X-only steer.
+         */
+        Segment nextTreadToward(Segment from, Segment to) {
+            if (from == null || to == null || isRopeRegion || from.footholdId == to.footholdId) {
+                return null;
+            }
+            java.util.Map<Integer, java.util.List<Segment>> pathTo = new java.util.HashMap<>();
+            java.util.ArrayDeque<Segment> queue = new java.util.ArrayDeque<>();
+            pathTo.put(from.footholdId, java.util.List.of(from));
+            queue.add(from);
+            while (!queue.isEmpty()) {
+                Segment current = queue.poll();
+                java.util.List<Segment> path = pathTo.get(current.footholdId);
+                for (Segment next : segments) {
+                    if (pathTo.containsKey(next.footholdId) || !adjacent(current, next)) {
+                        continue;
+                    }
+                    java.util.List<Segment> extended = new java.util.ArrayList<>(path.size() + 1);
+                    extended.addAll(path);
+                    extended.add(next);
+                    if (next.footholdId == to.footholdId) {
+                        return extended.size() >= 2 ? extended.get(1) : null;
+                    }
+                    pathTo.put(next.footholdId, extended);
+                    queue.add(next);
+                }
+            }
+            return null;
+        }
+
+        /**
+         * The column where two adjacent treads actually join - the shared endpoint the walk chain
+         * used. Deterministic for a given pair, so the goal does not drift as the bot walks.
+         */
+        static int sharedColumnX(Segment a, Segment b) {
+            int[] ax = {a.x1, a.x2};
+            int[] ay = {a.y1, a.y2};
+            for (int i = 0; i < 2; i++) {
+                if (endpointLandsOn(ax[i], ay[i], b)) {
+                    return ax[i];
+                }
+            }
+            int[] bx = {b.x1, b.x2};
+            int[] by = {b.y1, b.y2};
+            for (int i = 0; i < 2; i++) {
+                if (endpointLandsOn(bx[i], by[i], a)) {
+                    return bx[i];
+                }
+            }
+            int lo = Math.max(a.minX, b.minX);
+            int hi = Math.min(a.maxX, b.maxX);
+            return lo <= hi ? (lo + hi) / 2 : a.minX;
+        }
+
         private Segment findBestSegment(int x) {
             // A single-segment region needs no table at all, and a two-segment one is cheaper to
             // scan than to index: the table costs 4 bytes per column up front.

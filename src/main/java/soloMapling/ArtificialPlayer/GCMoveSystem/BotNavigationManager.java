@@ -1032,7 +1032,63 @@ final class BotNavigationManager {
         int targetX = entry == null
                 ? edge.containsLaunchX(botPos.x) ? botPos.x : botPos.x < edge.launchMinX ? edge.launchMinX : edge.launchMaxX
                 : selectedJumpLaunchX(entry, graph, edge);
+        // Ours (shelf-step sway): when the launch window sits on a DIFFERENT ROW of this region and
+        // the walk to it is a fold-back, hand the steer the first leg of that fold-back instead of
+        // a pixel it can never reach.
+        //
+        // 922010800's r27 unions the y=118 row (fh169/fh192/fh227) with the y=131 row (fh233)
+        // through the fh226 ramp. From (45,131) the window at x 42..49 is only reachable by walking
+        // LEFT to the ramp foot at 41, UP to (26,118) and BACK RIGHT - a sequence no single X goal
+        // expresses: aimed at x=45 the steer sees zero error and parks, and around it every pixel
+        // re-targets the opposite way, so the bot paces until the 500 ms rescue hop (the reported
+        // "货架式台阶跳大平台时原地左右摆动N次, 持续N秒后才跳走").
+        //
+        // STRICTLY GATED: only a window on another ROW triggers this. Re-aiming ordinary ramp
+        // walking broke 108 shelf climbs when this ran unguarded.
+        Point rowChange = approachAcrossRows(fromRegion, botPos, edge);
+        if (rowChange != null) {
+            return rowChange;
+        }
         return fromRegion.pointAt(targetX);
+    }
+
+    /**
+     * When this edge's launch window sits on a different row than the feet, the first leg of the
+     * walk that changes rows - or null when the bot is already on the window's row.
+     *
+     * <p>Returns a fixed hand-off pixel (the join between the next tread and the one after), so the
+     * goal does not drift as the bot crosses a tread, which is what made an earlier version
+     * alternate between the two ends of the ramp.
+     */
+    private static Point approachAcrossRows(BotNavigationGraph.Region region,
+                                            Point botPos,
+                                            BotNavigationGraph.Edge edge) {
+        BotNavigationGraph.Segment own = region.segmentAt(botPos.x, botPos.y);
+        BotNavigationGraph.Segment window = region.segmentAt(edge.launchMinX, edge.startPoint.y);
+        if (own == null || window == null || own.footholdId == window.footholdId) {
+            return null; // already on the window's own tread
+        }
+        int windowY = window.pointAt(edge.launchMinX).y;
+        if (windowY == botPos.y) {
+            return null; // exactly level: the ordinary waypoint is correct
+        }
+        // A bot already ON the climbing ramp is mid-detour: keep it going to the ramp's top rather
+        // than re-aiming at its own column, which parks it half-way up (measured: stopped at
+        // (28,120) with the ramp top at (26,118)).
+        if (own.y1 != own.y2) {
+            int topY = Math.min(own.y1, own.y2);
+            int topX = own.pointAt(own.minX).y == topY ? own.minX : own.maxX;
+            return own.pointAt(topX);
+        }
+        BotNavigationGraph.Segment hop = region.nextTreadToward(own, window);
+        if (hop == null) {
+            return null; // not connected through this region: leave the ordinary waypoint alone
+        }
+        BotNavigationGraph.Segment after = region.nextTreadToward(hop, window);
+        int handOffX = after == null
+                ? Math.clamp(botPos.x, hop.minX, hop.maxX)
+                : BotNavigationGraph.Region.sharedColumnX(hop, after);
+        return hop.pointAt(handOffX);
     }
 
     static Point selectClimbWaypoint(BotMovementState entry, Point botPos, BotNavigationGraph.Edge edge) {
