@@ -11,6 +11,11 @@ import java.util.concurrent.ThreadLocalRandom;
  * level-70 2nd-job out-hits a level-35 one without erasing the tier jumps. Single/double-line
  * skills concentrate their damage into a bigger per-line hit (the heavy chunk that visibly shoves
  * a mob back); many-line flurries keep the base per-line band.
+ *
+ * The tier is capped by the LEVEL ({@link BotSkillLevelGate#tierForLevel}): a bot's job is rolled
+ * from its spawn-time band and can outlive a level override (the LPQ lobby pinned level-78 jobs to
+ * 38), and a level-38 "Chief Bandit" must hit like a 2nd job, not a 3rd. The cap lives HERE rather
+ * than at each strike site so every bot hit - swings, summons, mists, final attacks - agrees.
  */
 public final class BotDamageModel {
 
@@ -39,7 +44,8 @@ public final class BotDamageModel {
 
     /* One per-line damage roll for a bot of this job tier and level, on a swing of this many lines. */
     public static int rollLine(int jobTier, int level, int numDamageLines) {
-        int tier = Math.max(0, Math.min(TIER_BAND.length - 1, jobTier));
+        int tier = Math.max(0, Math.min(TIER_BAND.length - 1,
+                Math.min(jobTier, BotSkillLevelGate.tierForLevel(level))));
         int[] band = TIER_BAND[tier];
         ThreadLocalRandom rng = ThreadLocalRandom.current();
 

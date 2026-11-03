@@ -71,6 +71,22 @@ public final class BotSummonSystem {
     }
 
     /**
+     * Drop a bot's summon when the career it now holds no longer owns one (a level override that
+     * re-derived the advancement). Unlike {@link #remove} this keeps a summon the new career still
+     * qualifies for, so a lobby that raises levels never strips one.
+     */
+    public static void realignForCareer(Character bot) {
+        if (!enabled()) {
+            return;
+        }
+        try {
+            BotSummonController.realignForCareer(bot, config);
+        } catch (Throwable t) {
+            System.err.println("[BotSummonSystem] career realign failed for " + botId(bot) + ": " + t);
+        }
+    }
+
+    /**
      * GM 技能观测表演：为一个 bot 强制召唤指定的召唤兽（无视 spawnChance/minLevel
      * 等概率与门槛），技能等级按 bot 的角色等级补授（与 grant 的 teach 路径一致）。
      * 返回 false 表示该技能不是已注册召唤兽、无法解析或生成失败。

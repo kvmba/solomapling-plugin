@@ -8,6 +8,7 @@ import org.gms.server.maps.Summon;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.Set;
 import java.util.concurrent.ThreadLocalRandom;
 
 /**
@@ -88,6 +89,35 @@ public final class BotSummonController {
         // both run this beat (BotSummonRegrantIsolationTest's two periodic entries), so a check
         // taken here could be passed twice before either spawn registers (spawnIfAbsent).
         return BotSummonFollower.spawnIfAbsent(bot.getId(), () -> spawn(bot, skillId));
+    }
+
+    /**
+     * Bring a bot's summon back in line with its CURRENT job and level, after a career change
+     * (a level override that re-derives the advancement - see {@code BotDecorate.alignCareerToLevel}).
+     *
+     * <p>The spawn-time grant was rolled against the spawn-time job: a level-78 Ranger's hawk, or an
+     * Outlaw's octopus whose strike level came from that job. Re-running {@link #grantForBot} is not
+     * enough, because it is idempotent and would keep the old entity. So the summon is torn down
+     * whenever the career the bot now holds would not choose the SAME skill - a new career that owns
+     * a different summon (a Ranger's hawk becoming a Sniper's golden eagle) is as wrong as one that
+     * owns none, and keeping the old entity would leave a crossbowman flying a bowman's bird. The
+     * ordinary grant path then re-rolls against the career the bot actually has.
+     */
+    public static void realignForCareer(Character bot, BotSummonConfig config) {
+        if (bot == null) {
+            return;
+        }
+        Integer wanted = chooseSummon(bot.getJob() == null ? -1 : bot.getJob().getId());
+        if (wanted == null || bot.getLevel() < config.minLevel()) {
+            BotSummonSystem.remove(bot);
+            return;
+        }
+        // Only a summon the new career would not have chosen itself is stale; anything else keeps
+        // the entity it already has (its strike level re-derives live from the owner's level).
+        Set<Integer> showing = BotSummonFollower.trackedSkills(bot.getId());
+        if (!showing.isEmpty() && !showing.contains(wanted)) {
+            BotSummonSystem.remove(bot);
+        }
     }
 
     /**

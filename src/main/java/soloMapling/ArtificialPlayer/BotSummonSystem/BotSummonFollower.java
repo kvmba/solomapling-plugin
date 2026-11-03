@@ -24,8 +24,10 @@ import soloMapling.ArtificialPlayer.GCMoveSystem.GCMovement;
 import java.awt.Point;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.ThreadLocalRandom;
@@ -207,6 +209,25 @@ public final class BotSummonFollower {
     static boolean isTracked(int botId) {
         List<BotSummon> list = TRACKED.get(botId);
         return list != null && !list.isEmpty();
+    }
+
+    /** The summon skills this bot is currently showing (empty when it has none). */
+    static Set<Integer> trackedSkills(int botId) {
+        List<BotSummon> list = TRACKED.get(botId);
+        if (list == null || list.isEmpty()) {
+            return Set.of();
+        }
+        // Snapshot under the lock, exactly as the move tick does: register/despawnAll mutate this
+        // list on the bot's own lifecycle thread.
+        List<BotSummon> snapshot;
+        synchronized (LIFECYCLE_LOCK) {
+            snapshot = new ArrayList<>(list);
+        }
+        Set<Integer> out = new HashSet<>(snapshot.size());
+        for (BotSummon s : snapshot) {
+            out.add(s.skillId);
+        }
+        return out;
     }
 
     /** Add one freshly spawned summon to a bot's tracked list. */

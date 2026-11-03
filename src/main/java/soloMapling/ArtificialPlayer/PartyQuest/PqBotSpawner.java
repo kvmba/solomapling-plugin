@@ -139,11 +139,22 @@ public final class PqBotSpawner {
     }
 
     /**
-     * Put every bot's level inside the quest's band.
+     * Put every bot's level inside the quest's band - and its job back in line with that level.
      *
      * <p>Drawn from the band's low end upward rather than at random across the whole thing: the
      * high ends run to 255, and a lobby of level-250 bots standing in Henesys would look wrong
      * even though it is legal.
+     *
+     * <p>The job is re-rolled for the final level rather than kept from the spawn. A bot is
+     * decorated at the spawner's 10..80 default band, so a quest asking for 35-50 can pin a
+     * level-78 job (a "Chief Bandit", a "Hero") onto a level-38 character. Skill use is already
+     * gated by level (BotSkillLevelGate), but the LOOK and the damage tier are not - and a lobby
+     * of level-38 三转 bots standing next to a real 38-level player is exactly as wrong as the
+     * damage was. The base class is preserved (build the same class family - a warrior stays a
+     * warrior), only the advancement is re-derived from the level that was just drawn.
+     *
+     * <p>Re-rolling restyles the character, so the dress, weapon, title and level-derived detail
+     * data all have to follow: see {@link BotDecorate#alignCareerToLevel}.
      */
     private static void levelRange(List<Integer> botIds, int minLevel, int maxLevel) {
         int low = Math.max(1, minLevel);
@@ -159,11 +170,7 @@ public final class PqBotSpawner {
                 continue;
             }
             bot.setLevel(low + RANDOM.nextInt((high - low) + 1));
-            // The bot was dressed at its spawn-band level (createBotOn runs the
-            // 10..80 default band), so the level just drawn may be far above or
-            // below the gear it is wearing. Re-dress at the final level or the
-            // lobby reads as high-level bots in starter gear.
-            BotDecorate.redressBot(bot);
+            BotDecorate.alignCareerToLevel(bot);
         }
     }
 }

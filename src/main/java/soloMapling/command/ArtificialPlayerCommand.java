@@ -14,6 +14,7 @@ import soloMapling.ArtificialPlayer.BotAttackSystem.BotBuffEffects;
 import soloMapling.ArtificialPlayer.BotAttackSystem.BotComboOrb;
 import soloMapling.ArtificialPlayer.BotAttackSystem.BotEnergyCharge;
 import soloMapling.ArtificialPlayer.BotCommandsPack.MegaphoneCommands;
+import soloMapling.ArtificialPlayer.BotDecoratorSystem.BotDecorate;
 import soloMapling.ArtificialPlayer.BotDecoratorSystem.BotDecorateBody;
 import soloMapling.ArtificialPlayer.BotDecoratorSystem.BotDecorateEquips;
 import soloMapling.ArtificialPlayer.BotDecoratorSystem.BotDecorateNX;
@@ -37,6 +38,7 @@ import soloMapling.ArtificialPlayer.BotGeneration;
 import soloMapling.ArtificialPlayer.BotHelpers;
 import soloMapling.ArtificialPlayer.SkillShowSystem.SkillShowController;
 import soloMapling.ArtificialPlayer.BotSM;
+import soloMapling.ArtificialPlayer.BotSummonSystem.BotSummonSystem;
 import soloMapling.ArtificialPlayer.BotTypeManager;
 import soloMapling.ArtificialPlayer.SocialHotPotatoManager;
 import soloMapling.server.ExecutorServiceManager;
@@ -690,11 +692,23 @@ public class ArtificialPlayerCommand extends Command {
                     break;
                 }
                 fakechar.setLevel(input3);
-                // Level is a medal wearability requirement, so re-roll the title to match
-                // (a level-down must not leave an unwearable medal on).
+                // Keep the advancement inside what the new level can hold, or the bot hits above its
+                // tier (the 玩具塔101 report) and shows a class no player of that level can be.
+                // Deliberately does NOT re-dress: like setjob, this command changes state, not looks -
+                // a GM sets up a look with `equip` and must not have it wiped by a level tweak.
+                Job held = fakechar.getJob();
+                int family = (held == null) ? 0 : held.getJobNiche();
+                fakechar.setJob(Job.getById(
+                        BotDecorate.jobIdForLevel(family, fakechar.getLevel())));
+                // Level feeds the medal's reqPOP gate and the detail-window counts; the job feeds
+                // the medal's reqJob gate. Re-roll both to match the state just set.
                 BotMedal.reroll(fakechar);
-                BotDetailWindow.reroll(fakechar); // detail-window data is level-based too
-                player.yellowMessage("Set " + fakechar.getName() + " to level " + input3);
+                BotDetailWindow.reroll(fakechar);
+                // A summon belongs to the job, so a career the new level cannot hold must lose one
+                // it no longer owns (same rule the PQ lobbies follow).
+                BotSummonSystem.realignForCareer(fakechar);
+                player.yellowMessage("Set " + fakechar.getName() + " to level " + input3
+                        + " as " + fakechar.getJob() + " (use !bot setjob to pin a class)");
                 break;
             case "setclass":
             case "setjob": {
@@ -708,6 +722,9 @@ public class ArtificialPlayerCommand extends Command {
                 // Job feeds the medal's reqJob gate, so re-roll the title to match the new class.
                 BotMedal.reroll(fakechar);
                 BotDetailWindow.reroll(fakechar); // the medal collection filters by job too
+                // The summon belongs to the job: a class that owns none (or a different one) must
+                // lose the one it was carrying, exactly as a lobby re-derivation does.
+                BotSummonSystem.realignForCareer(fakechar);
                 player.yellowMessage("Set " + fakechar.getName() + " to job " + newJob + " (" + input3
                         + ") - buffs: " + BotBuffConfig.buffsForJob(newJob));
                 break;

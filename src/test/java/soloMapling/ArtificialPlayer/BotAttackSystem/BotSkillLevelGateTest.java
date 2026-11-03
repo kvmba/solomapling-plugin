@@ -53,4 +53,69 @@ class BotSkillLevelGateTest {
     void aBeginnerHasNoAdvancementGate() {
         assertEquals(0, BotSkillLevelGate.minLevelForJob(0));
     }
+
+    /** The inverse used to cap the damage band: a level cannot hold a tier above its own. */
+    @Test
+    void theTierAFloorsInverseIsTheHighestTierALevelCanHaveHeld() {
+        assertEquals(0, BotSkillLevelGate.tierForLevel(1));
+        assertEquals(0, BotSkillLevelGate.tierForLevel(7));
+        // The magician line advances at 8, and a level-8 magician really is a 1st job.
+        assertEquals(1, BotSkillLevelGate.tierForLevel(8));
+        assertEquals(1, BotSkillLevelGate.tierForLevel(9));
+        assertEquals(1, BotSkillLevelGate.tierForLevel(10));
+        assertEquals(1, BotSkillLevelGate.tierForLevel(29));
+        assertEquals(2, BotSkillLevelGate.tierForLevel(30));
+        assertEquals(2, BotSkillLevelGate.tierForLevel(69));
+        assertEquals(3, BotSkillLevelGate.tierForLevel(70));
+        assertEquals(3, BotSkillLevelGate.tierForLevel(119));
+        assertEquals(4, BotSkillLevelGate.tierForLevel(120));
+        assertEquals(4, BotSkillLevelGate.tierForLevel(200));
+    }
+
+    /**
+     * {@code tierForLevel} must invert {@code minLevelForJob} for EVERY job: at the lowest level a
+     * job can be held, the cap has to still allow that job's own tier. The magician line is the
+     * one exception that caught the first cut of this (floor 8, tier 1).
+     */
+    @Test
+    void everyJobsFloorStillAdmitsItsOwnTier() {
+        int[][] jobs = {{100, 1}, {110, 2}, {111, 3}, {112, 4},
+                {200, 1}, {210, 2}, {211, 3}, {212, 4},
+                {300, 1}, {310, 2}, {311, 3}, {312, 4},
+                {400, 1}, {410, 2}, {411, 3}, {412, 4},
+                {500, 1}, {510, 2}, {511, 3}, {512, 4}};
+        for (int[] pair : jobs) {
+            int floor = BotSkillLevelGate.minLevelForJob(pair[0]);
+            assertTrue(BotSkillLevelGate.tierForLevel(floor) >= pair[1],
+                    "job " + pair[0] + " (floor " + floor + ") must admit tier " + pair[1]
+                            + ", but the cap allows " + BotSkillLevelGate.tierForLevel(floor));
+        }
+    }
+
+    /**
+     * The report that started this: the LPQ lobby pins a spawn-band job onto a 35-50 level, so a
+     * level-38 "Chief Bandit" exists on paper. Its damage must come from the 2nd-job band, not the
+     * 3rd-job one - 900..2300/line was what made Alishar evaporate.
+     */
+    @Test
+    void aPinnedThirdJobAtLobbyLevelHitsInTheSecondJobBand() {
+        assertEquals(2, BotSkillLevelGate.tierForLevel(38), "level 38 is a 2nd-job level");
+        // Raw tier 3 (the job the bot actually holds) must still be capped to the 2nd-job band:
+        // 240..620 with the level ramp (1 + 38/250) is 276..714 per line.
+        for (int i = 0; i < 200; i++) {
+            int line = BotDamageModel.rollLine(3, 38, 6);
+            assertTrue(line >= 276 && line <= 714,
+                    "a level-38 3rd-job swing must roll in the 2nd-job band, got " + line);
+        }
+    }
+
+    /** A genuine 4th-job bot (level 130) keeps its own band - the cap must not flatten everyone. */
+    @Test
+    void aRealFourthJobberKeepsItsOwnBand() {
+        for (int i = 0; i < 200; i++) {
+            int line = BotDamageModel.rollLine(4, 130, 6);
+            assertTrue(line >= 2800 && line <= 9900,
+                    "level-130 4th-job swing stays in the 4th-job band, got " + line);
+        }
+    }
 }

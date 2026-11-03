@@ -43,4 +43,23 @@ final class BotSkillLevelGate {
     static int minLevelForSkill(int skillId) {
         return skillId <= 0 ? 0 : minLevelForJob(skillId / 10000);
     }
+
+    /**
+     * The highest job tier {@code level} can have advanced to (0 beginner .. 4 fourth job) - the
+     * inverse of {@link #minLevelForJob}, i.e. the best tier ANY job may hold at this level. The
+     * first-job floor is the magician's level 8, not 10: a level-8/9 magician is a real 1st job,
+     * and capping its damage to the beginner band would be wrong.
+     */
+    static int tierForLevel(int level) {
+        if (level >= FOURTH_JOB) {
+            return 4;
+        }
+        if (level >= THIRD_JOB) {
+            return 3;
+        }
+        if (level >= SECOND_JOB) {
+            return 2;
+        }
+        return level >= MAGICIAN_FIRST_JOB ? 1 : 0;
+    }
 }

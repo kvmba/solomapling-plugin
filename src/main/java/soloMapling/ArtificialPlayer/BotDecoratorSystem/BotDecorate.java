@@ -352,6 +352,56 @@ public class BotDecorate {
         BotEquipStats.alignToEquipped(bot);
     }
 
+    /**
+     * The job id {@link #alignCareerToLevel} writes for a bot of this class family and level.
+     *
+     * <p>Split out as a pure function so the invariant can be tested without a live
+     * {@code Character} (whose construction needs the host's Spring context): the PQ lobbies pin a
+     * level AFTER the decoration pass, and every one of them relies on the result being an
+     * advancement that level can really hold.</p>
+     *
+     * <p>The family is preserved (a warrior stays a warrior) so a lobby does not become a mix of
+     * classes; a classless bot (family 0) draws one, because a beginner cannot exist at a PQ band.</p>
+     */
+    public static int jobIdForLevel(int baseClass, int level) {
+        if (baseClass < 1 || baseClass > 5) {
+            baseClass = rollBaseClass();
+        }
+        return selectJobForClass(baseClass, level);
+    }
+
+    /**
+     * Re-derive a bot's job from its current level, keeping its class family, then re-dress and
+     * re-roll everything that was derived from the old level.
+     *
+     * <p>For a bot whose level was overridden after decoration (the PQ lobbies draw from a band
+     * that is far below the spawn-time 10..80). The spawn roll had already picked an advancement
+     * off the old level, so a 35-50 lobby can seat a level-38 三转 bot. Skill USE is gated by level
+     * ({@code BotSkillLevelGate}), but the class shown to players was not - and neither was the
+     * damage tier, which keys off {@code Job.getJobTier()}. This puts all three back in line by
+     * re-running the same {@code selectJobForClass} the spawn used, on the new level.
+     *
+     * <p>Beginners (below level 10) stay classless; the class family (1..5) is preserved so a
+     * warrior lobby does not become a mix of mages.
+     */
+    public static void alignCareerToLevel(Character bot) {
+        Job job = bot.getJob();
+        int baseClass = (job == null) ? 0 : job.getJobNiche();
+        bot.setJob(Job.getById(jobIdForLevel(baseClass, bot.getLevel())));
+        redressBot(bot);
+        // Fame, title and detail-window data were all rolled from the decoration-time level (and
+        // the medal's reqJob gate reads the job), so they follow the new career.
+        BotFame.apply(bot);
+        BotMedal.reroll(bot);
+        BotDetailWindow.reroll(bot);
+        // The summon was rolled against the spawn-time job (a level-78 Ranger's hawk, a Priest's
+        // dragon). A career derived from the lobby's 35-50 band no longer owns one, and the entity
+        // would otherwise stay on the map striking at the level-1 WZ row forever - grant is
+        // idempotent, so re-granting cannot take it away. Verified per bot: only a career that
+        // still qualifies keeps its summon.
+        soloMapling.ArtificialPlayer.BotSummonSystem.BotSummonSystem.realignForCareer(bot);
+    }
+
     public static void setBotVariables(Character bot) {
         BotTier tier = getRandomTier();
         bot.setTier(tier);
