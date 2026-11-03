@@ -111,6 +111,87 @@ public final class AmoriaPqData {
         };
     }
 
+    /**
+     * Stage 3's search space: five of the nine ropes, one body each.
+     *
+     * <p>{@code generateCombo2} names exactly five of nine areas, so this is the same shape as
+     * Ludi's crates and uses the same search
+     * ({@link soloMapling.ArtificialPlayer.PartyQuest.PositionCombination}). The answer is stored
+     * in {@code stage3combo}, but reading it would be a lookup a player cannot make.
+     */
+    public static List<soloMapling.ArtificialPlayer.PartyQuest.PositionCombination.Candidate>
+            stage3Candidates() {
+        List<soloMapling.ArtificialPlayer.PartyQuest.PositionCombination.Candidate> out =
+                new java.util.ArrayList<>();
+        for (int combo = 1; combo < (1 << ROPE_SPOTS.size()); combo++) {
+            if (Integer.bitCount(combo) != BODIES_ON_ROPES) {
+                continue;
+            }
+            List<Point> spots = new java.util.ArrayList<>(BODIES_ON_ROPES);
+            for (int area = 0; area < ROPE_SPOTS.size(); area++) {
+                if ((combo & (1 << area)) != 0) {
+                    spots.add(ROPE_SPOTS.get(area));
+                }
+            }
+            out.add(new soloMapling.ArtificialPlayer.PartyQuest.PositionCombination.Candidate(
+                    soloMapling.ArtificialPlayer.PartyQuest.PositionCombination
+                            .maskToPattern(combo), spots));
+        }
+        return out;
+    }
+
+    /**
+     * Stage 2's search space: the ways five bodies can be spread over its three areas.
+     *
+     * <p>{@code generateCombo1} builds a COUNT vector (the number of bodies per area, summing to
+     * five), so a pattern here carries counts rather than single bits. The space is the 21
+     * compositions of 5 into 3 parts - small enough to walk, unlike a per-body assignment.
+     */
+    public static List<soloMapling.ArtificialPlayer.PartyQuest.PositionCombination.Candidate>
+            stage2Candidates() {
+        List<soloMapling.ArtificialPlayer.PartyQuest.PositionCombination.Candidate> out =
+                new java.util.ArrayList<>();
+        for (long[] pattern : soloMapling.ArtificialPlayer.PartyQuest.PositionCombination
+                .countCandidates(STAGE_2_SPOTS.size(), BODIES_ON_ROPES)) {
+            List<Point> spots = new java.util.ArrayList<>(BODIES_ON_ROPES);
+            for (int area : soloMapling.ArtificialPlayer.PartyQuest.PositionCombination
+                    .areasOf(pattern[0])) {
+                if (area < STAGE_2_SPOTS.size()) {
+                    spots.add(STAGE_2_SPOTS.get(area));
+                }
+            }
+            out.add(new soloMapling.ArtificialPlayer.PartyQuest.PositionCombination.Candidate(
+                    pattern[0], spots));
+        }
+        return out;
+    }
+
+    /**
+     * The rope rooms' area rectangles, in the script's own order.
+     *
+     * <p>Amos reads the map's own {@code area} list ({@code map.getArea(y)}), so these come
+     * from WZ: three vertical strips on the stage-2 sub-rooms, nine rope strips on stage 3.
+     */
+    public static List<java.awt.Rectangle> areasFor(int stage) {
+        return switch (stage) {
+            case 2 -> STAGE_2_AREAS;
+            case 3 -> STAGE_3_AREAS;
+            default -> List.of();
+        };
+    }
+
+    private static final List<java.awt.Rectangle> STAGE_2_AREAS = List.of(
+            new java.awt.Rectangle(-672, -1892, 87, 241),
+            new java.awt.Rectangle(-92, -2010, 94, 298),
+            new java.awt.Rectangle(495, -2130, 90, 269));
+
+    private static final List<java.awt.Rectangle> STAGE_3_AREAS = List.of(
+            new java.awt.Rectangle(1420, 43, 90, 11), new java.awt.Rectangle(1587, 43, 89, 12),
+            new java.awt.Rectangle(1748, 44, 88, 10), new java.awt.Rectangle(1908, 43, 89, 11),
+            new java.awt.Rectangle(1333, 196, 91, 11), new java.awt.Rectangle(1500, 195, 87, 12),
+            new java.awt.Rectangle(1663, 196, 90, 12), new java.awt.Rectangle(1826, 194, 90, 12),
+            new java.awt.Rectangle(1985, 196, 91, 11));
+
     // =========================================================================
     // Combinations
     // =========================================================================

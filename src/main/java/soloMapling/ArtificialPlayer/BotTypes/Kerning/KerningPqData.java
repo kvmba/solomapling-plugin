@@ -83,8 +83,10 @@ public final class KerningPqData {
             new Point(862, -130), new Point(927, -130), new Point(998, -130));
 
     /**
-     * The instance property each area stage stores its answer in. The value is an index into
-     * that stage's combination table, not the combination itself - see {@link #combinationFor}.
+     * The instance property a stage stores its answer in.
+     *
+     * <p>Only its presence is ever checked - it exists once the intro talk happened, which is
+     * what makes a later talk a verdict rather than another intro. Its value is never read.
      */
     public static String answerPropertyFor(int stage) {
         return switch (stage) {
@@ -108,10 +110,13 @@ public final class KerningPqData {
     /**
      * The combination table for an area stage, transcribed from the quest script.
      *
-     * <p>Each row is one answer: a 1 means that spot wants a body on it, a 0 means it must be
-     * left empty. The quest compares the party's actual placement against the chosen row
-     * position by position, so a wrong guess is wrong for the whole party - which is why the
-     * bot reads the chosen row instead of trying rows in turn.
+     * <p>Each row is one answer: 1 means that spot wants a body on it, 0 that it must be left
+     * empty. The quest compares the party's actual placement against the chosen row position by
+     * position, so a wrong guess is wrong for the whole party.
+     *
+     * <p>The table is NOT used to look the answer up. It is the bot's candidate space: the
+     * scripts pick a row index when the leader first talks, and the bots walk the rows in order
+     * until one is accepted ({@link soloMapling.ArtificialPlayer.PartyQuest.PositionCombination}).
      */
     public static int[][] combinationsFor(int stage) {
         return switch (stage) {
@@ -139,6 +144,58 @@ public final class KerningPqData {
             {1, 0, 0, 1, 1, 0}, {1, 0, 1, 0, 0, 1}, {1, 0, 1, 0, 1, 0}, {1, 0, 1, 1, 0, 0},
             {1, 1, 0, 0, 0, 1}, {1, 1, 0, 0, 1, 0}, {1, 1, 0, 1, 0, 0}, {1, 1, 1, 0, 0, 0},
     };
+
+    /** Every row of an area stage as a candidate: the pattern of spots it wants, and where. */
+    public static List<soloMapling.ArtificialPlayer.PartyQuest.PositionCombination.Candidate>
+            candidatesFor(int stage) {
+        List<Point> spots = spotsFor(stage);
+        List<soloMapling.ArtificialPlayer.PartyQuest.PositionCombination.Candidate> out =
+                new java.util.ArrayList<>();
+        for (int[] row : combinationsFor(stage)) {
+            int mask = 0;
+            List<Point> wanted = new java.util.ArrayList<>();
+            for (int i = 0; i < row.length && i < spots.size(); i++) {
+                if (row[i] > 0) {
+                    mask |= 1 << i;
+                    wanted.add(spots.get(i));
+                }
+            }
+            out.add(new soloMapling.ArtificialPlayer.PartyQuest.PositionCombination.Candidate(
+                    soloMapling.ArtificialPlayer.PartyQuest.PositionCombination.maskToPattern(mask),
+                    wanted));
+        }
+        return out;
+    }
+
+    /**
+     * The stage's area rectangles, in the script's own order.
+     *
+     * <p>{@code 9020001.js} declares them as literals ({@code stage2Rects} ...) and compares
+     * against those, not against the map's {@code area} data - so they are transcribed here
+     * rather than read from WZ. Each is a narrow strip; its spots sit on the strip's upper edge.
+     */
+    public static List<java.awt.Rectangle> areasFor(int stage) {
+        return switch (stage) {
+            case 2 -> STAGE_2_AREAS;
+            case 3 -> STAGE_3_AREAS;
+            case 4 -> STAGE_4_AREAS;
+            default -> List.of();
+        };
+    }
+
+    private static final List<java.awt.Rectangle> STAGE_2_AREAS = List.of(
+            new java.awt.Rectangle(-755, -132, 4, 218), new java.awt.Rectangle(-721, -340, 4, 166),
+            new java.awt.Rectangle(-586, -326, 4, 150), new java.awt.Rectangle(-483, -181, 4, 222));
+
+    private static final List<java.awt.Rectangle> STAGE_3_AREAS = List.of(
+            new java.awt.Rectangle(608, -180, 140, 50), new java.awt.Rectangle(791, -117, 140, 45),
+            new java.awt.Rectangle(958, -180, 140, 50), new java.awt.Rectangle(876, -238, 140, 45),
+            new java.awt.Rectangle(702, -238, 140, 45));
+
+    private static final List<java.awt.Rectangle> STAGE_4_AREAS = List.of(
+            new java.awt.Rectangle(910, -236, 35, 5), new java.awt.Rectangle(877, -184, 35, 5),
+            new java.awt.Rectangle(946, -184, 35, 5), new java.awt.Rectangle(845, -132, 35, 5),
+            new java.awt.Rectangle(910, -132, 35, 5), new java.awt.Rectangle(981, -132, 35, 5));
 
     /**
      * The row the quest chose, or null when it has not been picked yet.

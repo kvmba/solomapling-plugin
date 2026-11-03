@@ -1,11 +1,11 @@
 package soloMapling.ArtificialPlayer.BotTypes.Kerning;
 
 import org.gms.client.Character;
+import soloMapling.ArtificialPlayer.PartyQuest.PositionCombination;
 import soloMapling.ArtificialPlayer.PartyQuest.PqActions;
 import soloMapling.Environment.BotMessages;
 
 import java.awt.Point;
-import java.util.List;
 
 import static soloMapling.ArtificialPlayer.BotHelpers.blockingSleep;
 
@@ -102,28 +102,23 @@ public final class KerningStages {
     // =========================================================================
 
     /**
-     * Stand where the quest's chosen row says this bot belongs.
+     * Stand where the party's current candidate says this bot belongs.
      *
-     * <p>Reads the row the quest stored rather than trying rows in turn, which is the whole
-     * advantage of being able to read the instance - the player has to guess and wait for the
-     * leader's feedback after each attempt.
+     * <p>Stages 2-4 are rope/platform/barrel puzzles: the party has to put bodies on the right
+     * areas and the quest answers only yes/no. The answer is stored in an instance property
+     * ({@code stgNProperty}), but reading it would be the one thing a player cannot do - so the
+     * bot searches the script's own row table instead
+     * ({@link PositionCombination}) and moves on only when a talk has provably judged the
+     * current row wrong.
      *
-     * <p>Returns a description of the plan so the caller can pass it on, or null when the
-     * quest has not picked a row yet (nobody has talked to Cloto on this stage, which is when
-     * the pick happens).
+     * <p>Returns a description of the plan so the caller can pass it on.
      */
     public static String takeMyPlace(Character bot, int stage, int botIndex) {
-        String published = PqActions.readEimString(bot, KerningPqData.answerPropertyFor(stage));
-        int[] combination = KerningPqData.chosenCombination(stage, published);
-        if (combination == null) {
-            return null;
-        }
-        List<Point> spots = KerningPqData.spotsFor(stage);
-        Point mine = KerningPqData.mySpotFor(combination, spots, botIndex);
-        if (mine != null) {
-            PqActions.holdArea(bot, mine, 1_200);
-        }
-        return describePlan(combination, spots);
+        PositionCombination.Plan plan = PositionCombination.standOn(bot, botIndex,
+                System.identityHashCode(bot.getMap()),
+                KerningPqData.candidatesFor(stage), KerningPqData.areasFor(stage),
+                stage, KerningPqData.answerPropertyFor(stage));
+        return describePlan(plan);
     }
 
     /** Whether the stage has been cleared, by the quest's own per-stage flags. */
@@ -138,17 +133,13 @@ public final class KerningStages {
      * real one, so the player has to take the spots the bots left untouched. A bot that stayed
      * quiet would leave him guessing exactly as he would have without any help.
      */
-    private static String describePlan(int[] combination, List<Point> spots) {
+    private static String describePlan(PositionCombination.Plan plan) {
         StringBuilder out = new StringBuilder("spots needing someone: ");
         boolean any = false;
-        for (int i = 0; i < combination.length && i < spots.size(); i++) {
-            if (combination[i] <= 0) {
-                continue;
-            }
+        for (Point spot : plan.spots()) {
             if (any) {
                 out.append(", ");
             }
-            Point spot = spots.get(i);
             out.append("(").append(spot.x).append(",").append(spot.y).append(")");
             any = true;
         }

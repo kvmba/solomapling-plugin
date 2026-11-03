@@ -1,6 +1,8 @@
 package soloMapling.ArtificialPlayer.BotTypes.Ludi;
 
 import org.junit.jupiter.api.Test;
+import soloMapling.ArtificialPlayer.PartyQuest.PositionCombination;
+import soloMapling.ArtificialPlayer.PartyQuest.PqActions;
 
 import java.awt.Point;
 import java.util.HashSet;
@@ -8,72 +10,66 @@ import java.util.List;
 import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Pins stage 8's crate allocation.
- *
- * <p>{@code 2040043.js} generates {@code stage8combo} only inside its
- * {@code playersOnCombo == 5} branch - i.e. only after five bodies already stand on crate
- * areas - so a bot that WAITED for the property deadlocked the stage ("stage 8 bots do nothing
- * at all"). The set used before the property exists must therefore be a full five DIFFERENT
- * crates: the bots have to produce that precondition themselves, then re-seat on the answer the
- * script keeps.
- *
- * <p>The allocation also has to leave the head slots free (the tail-first rule the real
- * combination already used), because the quest counts every body in the instance and rejects
- * anything but exactly five.
+ * Pins the stage-8 search space: the bots must find the five crates by submitting patterns and
+ * discarding the ones the quest judged wrong, never by reading the stored answer.
  */
 class LudiCrateAllocationTest {
 
     @Test
-    void thePreCombinationSetIsAFullFiveDifferentCrates() {
-        List<Point> guess = LudiPqData.guessCrates();
-        assertEquals(LudiPqData.CRATES_TO_STAND_ON, guess.size());
-        assertEquals(guess.size(), new HashSet<>(guess).size(),
-                "the pre-combination crate set repeats an area, so two bots would stack");
-        for (Point crate : guess) {
-            assertTrue(LudiPqData.CRATE_SPOTS.contains(crate),
-                    "the pre-combination set names a spot the map does not have: " + crate);
+    void everyPatternCanBeRuledOutExactlyOnce() {
+        List<PositionCombination.Candidate> candidates = LudiPqData.crateCandidates();
+        assertEquals(LudiPqData.COMBO_COUNT, candidates.size());
+        Set<Long> tried = new HashSet<>();
+        int index = 0;
+        for (int attempt = 0; attempt < LudiPqData.COMBO_COUNT; attempt++) {
+            index = PositionCombination.nextUntried(tried, candidates, index);
+            assertTrue(index >= 0, "ran out of candidates at attempt " + attempt);
+            assertTrue(tried.add(candidates.get(index).pattern()));
+        }
+        // All 126 retired: nothing left to present, which the caller treats as a broken ledger
+        // and restarts (never as "the answer is elsewhere").
+        assertEquals(-1, PositionCombination.nextUntried(tried, candidates, 0));
+        assertEquals(LudiPqData.COMBO_COUNT, tried.size());
+    }
+
+    @Test
+    void aFiveBotPartyCoversAllFiveCratesWithoutOverlap() {
+        for (int attempt = 0; attempt < LudiPqData.COMBO_COUNT; attempt++) {
+            List<Point> candidate = LudiPqData.candidateAt(attempt);
+            Set<Point> taken = new HashSet<>();
+            for (int bot = 0; bot < LudiPqData.CRATES_TO_STAND_ON; bot++) {
+                taken.add(PositionCombination.mine(candidate, bot));
+            }
+            assertEquals(5, taken.size(), "two bots took the same crate on attempt " + attempt);
         }
     }
 
     @Test
-    void thePreCombinationSetUsesTheTailSlots() {
-        // Same tail-first allocation as myCrate, so the head slots stay free for players.
-        List<Point> tail = LudiPqData.CRATE_SPOTS.subList(
-                LudiPqData.CRATE_SPOTS.size() - LudiPqData.CRATES_TO_STAND_ON,
-                LudiPqData.CRATE_SPOTS.size());
-        assertEquals(tail, LudiPqData.guessCrates());
-        // A real combination routes through the same rule: bot 0 takes the last wanted crate.
-        assertEquals(new Point(-83, -183), LudiPqData.myCrate("1,1,1,1,1,0,0,0,0", 0));
-    }
-
-    @Test
-    void aPartyOfFiveBotsCoversAllFiveCratesWithoutOverlap() {
-        String combo = "1,1,1,1,1,0,0,0,0";
-        Set<Point> taken = new HashSet<>();
-        for (int bot = 0; bot < LudiPqData.CRATES_TO_STAND_ON; bot++) {
-            taken.add(LudiPqData.myCrate(combo, bot));
+    void theCrateCandidatesCarryTheirOwnSpotLists() {
+        List<PositionCombination.Candidate> candidates = LudiPqData.crateCandidates();
+        for (int i = 0; i < candidates.size(); i++) {
+            PositionCombination.Candidate candidate = candidates.get(i);
+            assertEquals(5, PqActions.bodiesOf(candidate.pattern()));
+            assertEquals(5, candidate.spots().size());
+            assertEquals(LudiPqData.candidateAt(i), candidate.spots(),
+                    "candidate " + i + " disagrees with the index-based lookup");
+            assertEquals(PositionCombination.maskToPattern(LudiPqData.maskAt(i)),
+                    candidate.pattern());
         }
-        assertEquals(5, taken.size(), "two bots took the same crate");
     }
 
     @Test
-    void extraBodiesAreNotSentToCrates() {
-        // Six bodies would break the script's `playersOnCombo == 5` check; a sixth must stay off.
-        String combo = "1,1,1,1,1,0,0,0,0";
-        assertNull(LudiPqData.myCrate(combo, 5));
-        assertNull(LudiPqData.myCrate(combo, -1));
-        assertNull(LudiPqData.myCrate((String) null, 0));
-    }
-
-    @Test
-    void theCombinationStillMapsPositionally() {
-        String combo = "0,0,0,0,0,0,0,0,1";
-        List<Point> crates = LudiPqData.cratesIn(combo);
-        assertEquals(1, crates.size());
-        assertEquals(LudiPqData.CRATE_SPOTS.get(8), crates.get(0));
+    void theRoomAreasAreTheNineCratesInQuestOrder() {
+        // The script counts areas in map order; the crate table is in that same order, so with
+        // the real map data present the two must line up one for one.
+        List<java.awt.Rectangle> areas = LudiPqData.crateAreas(null);
+        assertEquals(LudiPqData.CRATE_SPOTS.size(), areas.size());
+        for (int i = 0; i < areas.size(); i++) {
+            assertTrue(areas.get(i).contains(LudiPqData.CRATE_SPOTS.get(i)),
+                    "crate " + i + " is outside its own fallback rectangle");
+        }
     }
 }

@@ -9,6 +9,7 @@ import org.gms.constants.skills.Brawler;
 import org.gms.constants.skills.Rogue;
 import soloMapling.ArtificialPlayer.BotAttackSystem.BotBuffConfig;
 import soloMapling.ArtificialPlayer.BotGrindSystem.MovementStylePolicy;
+import soloMapling.ArtificialPlayer.PartyQuest.PositionCombination;
 import soloMapling.ArtificialPlayer.PartyQuest.PqActions;
 import soloMapling.ArtificialPlayer.BotMessagingSystem.CharacterStorage;
 import soloMapling.Environment.BotMessages;
@@ -1269,66 +1270,19 @@ public final class LudiStages {
     // =========================================================================
 
     /**
-     * Stand on this bot's share of the crates the quest asked for.
+     * Stand on this bot's share of the crate pattern the party is submitting right now.
      *
-     * <p>Exactly five people have to be on crates and the pattern has to match, so the bots
-     * cannot simply take five boxes: the real player is one of the five the quest counts, and
-     * a bot that filled his crate would make the count come out at five on the wrong boxes.
-     * The bots therefore take from the far end of the list and leave the near end free.
-     *
-     * <p>The combination does not exist yet when the bots first arrive: {@code 2040043.js}
-     * generates {@code stage8combo} only inside its {@code playersOnCombo == 5} branch, i.e.
-     * only after five bodies are ALREADY standing on crates. Waiting for the property (the old
-     * behaviour) was a hard deadlock - the bots waited for a combination that the combination
-     * itself was waiting for them to produce. Before it exists the bots therefore take a
-     * deterministic guess set; the leader's conversation then generates the real combination,
-     * and the next tick re-reads it and moves the bots onto the real five.
-     *
-     * @return how many crates still need a body (5 minus the bots standing on one), or -1 when
-     *         the quest's plan is unusable. This is what the announcement must say: the plan's
-     *         total (always 5) read as "5 more needed" and made the player take a sixth crate,
-     *         which the script counts as a failed attempt.
+     * <p>The combination is NOT read from the quest. Stage 8 is a five-of-nine guess judged
+     * with a single yes/no ({@code 2040043.js}: {@code showWrongEffect()} on a miss,
+     * {@code clearStage} on a hit), so knowing the answer is the only way to skip the search -
+     * and skipping it is the one thing the bots must not do. The search itself lives in
+     * {@link PositionCombination}: this method only says what the 126 patterns are and where a
+     * body stands in each.
      */
-    public static int takeCrate(Character bot, int bodyIndex) {
-        String combo = PqActions.readEimString(bot, LudiPqData.COMBO_PROPERTY);
-        List<Point> wanted = combo == null
-                ? LudiPqData.guessCrates()
-                : LudiPqData.cratesIn(combo);
-        if (wanted.size() != LudiPqData.CRATES_TO_STAND_ON) {
-            // The quest builds its combination as exactly five of nine; anything else means
-            // the property was written by something other than the stage script.
-            return -1;
-        }
-        // Tail-first, so two bots never pick the same crate and the head slots stay free for
-        // whoever else fills the pattern (the same rule for a real combination and a guess).
-        Point mine = LudiPqData.crateAt(wanted, bodyIndex);
-        if (mine != null) {
-            PqActions.holdArea(bot, mine, 1_200);
-        }
-        // The announcement asks the HUMANS to fill the rest, so the count is "crates still
-        // unoccupied by a bot". Bots seat themselves tail-first and a party can hold more bots
-        // than crates (6 players, 5 crates), so the seated count is capped by the plan size -
-        // see seatedBots, which is also why this cannot go negative.
-        return Math.max(0, wanted.size() - seatedBots(bot));
-    }
-
-    /**
-     * How many of the plan's five crates the bots in this party can occupy: the bots take the
-     * TAIL of the list, so a party with more bots than crates fills the plan completely and the
-     * rest are simply not seated ({@link LudiPqData#crateAt} answers null past the end).
-     */
-    private static int seatedBots(Character bot) {
-        var party = bot.getParty();
-        if (party == null) {
-            return 1;
-        }
-        int bots = 0;
-        for (var member : party.getMembers()) {
-            if (CharacterStorage.getBotById(member.getId()) != null) {
-                bots++;
-            }
-        }
-        return Math.min(LudiPqData.CRATES_TO_STAND_ON, bots);
+    public static PositionCombination.Plan takeCrate(Character bot, int bodyIndex) {
+        return PositionCombination.standOn(bot, bodyIndex, mapInstanceOf(bot),
+                LudiPqData.crateCandidates(), LudiPqData.crateAreas(bot.getMap().getAreas()),
+                8, LudiPqData.COMBO_PROPERTY);
     }
 
     // =========================================================================

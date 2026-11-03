@@ -140,6 +140,19 @@ public final class OrbisPqData {
             new Point(-40,  -919),   // area 2: x in [-71,-10),   y in [-963,-876)
             new Point(78,   -813),   // area 3: x in [40,116),    y in [-850,-776)
     };
+    /**
+     * The same three areas as rectangles, in the order {@code getNumPlayersInArea(0..2)} reads
+     * them - which is the map's own {@code area} list. Transcribed from
+     * {@code wz/Map.wz/Map/Map9/920010500.img.xml} so the search does not depend on map data.
+     */
+    public static final java.util.List<java.awt.Rectangle> SEALED_AREA_RECTS = java.util.List.of(
+            new java.awt.Rectangle(-205, -850, 86, 83),
+            new java.awt.Rectangle(-71, -963, 61, 87),
+            new java.awt.Rectangle(40, -850, 76, 74));
+
+    /** The stage number of the sealed room, for its {@code 4stageclear} flag. */
+    public static final int STAGE_4 = 4;
+
     public static final int SEALED_PLAYERS = 3;
     public static final int SEALED_STONE_REACTOR = 2002012; // "stone4" - the prize box
 

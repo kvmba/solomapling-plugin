@@ -5,6 +5,7 @@ import soloMapling.ArtificialPlayer.BotGeneration;
 import soloMapling.Environment.BotMessages;
 import soloMapling.ArtificialPlayer.BotMessagingSystem.CharacterStorage;
 import soloMapling.ArtificialPlayer.PartyQuest.PartyQuestBot;
+import soloMapling.ArtificialPlayer.PartyQuest.PositionCombination;
 import soloMapling.ArtificialPlayer.PartyQuest.PqActions;
 
 /**
@@ -29,6 +30,9 @@ public class LudiPQBot extends PartyQuestBot {
 
     /** The stage whose plan was last announced, so the party is not spammed with it. */
     private int announcedStage = -1;
+
+    /** The crate attempt last announced, so a retry of the same five crates stays quiet. */
+    private int announcedCrateAttempt = -1;
 
     public LudiPQBot(Character character) {
         super(character);
@@ -84,7 +88,11 @@ public class LudiPQBot extends PartyQuestBot {
 
     @Override
     protected void releaseRoomState() {
+        super.releaseRoomState(); // drops the room's crate search
         LudiStages.releaseRoomState(getChr().getId());
+        // The announcements reset with the search, so the next run's first attempt is spoken.
+        announcedStage = -1;
+        announcedCrateAttempt = -1;
     }
 
     @Override
@@ -340,24 +348,25 @@ public class LudiPQBot extends PartyQuestBot {
     }
 
     /**
-     * Stand on this bot's share of the crates the quest asked for, and say which crates the
-     * party still has to fill.
+     * Stand on this bot's share of the crate pattern the party is submitting right now, and say
+     * which attempt it is.
      *
-     * <p>Exactly five bodies are needed and the player is one of them, so the plan is worth
-     * announcing - without it the player is guessing at a puzzle the bots have half solved.
+     * <p>The stage gives no hint beyond yes/no, so the bots search the 126 patterns in a fixed
+     * order and the player is the one who asks for the verdict. That makes the announcement the
+     * only thing standing between the party and a silent deadlock - without it nobody knows when
+     * to talk, or that the previous five were already ruled out.
      */
     private void standOnCrates() {
-        int wanted = LudiStages.takeCrate(getChr(), botIndex());
-        if (wanted < 0) {
-            return; // the quest has not picked the combination yet
+        PositionCombination.Plan plan = LudiStages.takeCrate(getChr(), botIndex());
+        if (announcedCrateAttempt == plan.attempt()) {
+            return; // same pattern, same line - do not spam the room
         }
-        if (announcedStage != 8) {
-            announcedStage = 8;
-            soloMapling.ArtificialPlayer.PartyQuest.PqActions.say(getChr(),
-                    wanted == 0
-                            ? BotMessages.get("pq.ludi.stage8_full")
-                            : BotMessages.get("pq.ludi.stage8", wanted));
-        }
+        announcedCrateAttempt = plan.attempt();
+        announcedStage = 8;
+        soloMapling.ArtificialPlayer.PartyQuest.PqActions.say(getChr(),
+                plan.free() == 0
+                        ? BotMessages.get("pq.ludi.stage8_full", plan.attempt())
+                        : BotMessages.get("pq.ludi.stage8", plan.attempt(), plan.free()));
     }
 
     /**

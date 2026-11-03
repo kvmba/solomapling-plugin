@@ -433,9 +433,17 @@ public abstract class PartyQuestBot extends BotSM implements GrindTickRegistry.P
 
     /**
      * Drop whatever room-scoped state this bot holds (stage-NPC wait spots, box claims).
-     * Quests that keep none override this to a no-op; the Ludi rooms hold both.
+     *
+     * <p>The placement-puzzle ledgers are released here for every quest, not just the ones that
+     * override: a search belongs to one run of one room, and carrying a stale "this pattern was
+     * already judged wrong" into the next run would silently skip a candidate that was never
+     * tried. Subclasses that keep their own state must call {@code super.releaseRoomState()}.
      */
     protected void releaseRoomState() {
+        Character bot = getChr();
+        if (bot != null && bot.getMap() != null) {
+            PositionCombination.release(System.identityHashCode(bot.getMap()));
+        }
     }
 
     /**

@@ -152,6 +152,7 @@ public class PapulatusPQBot extends PartyQuestBot {
      */
     @Override
     protected void releaseRoomState() {
+        super.releaseRoomState(); // drops the room's placement-puzzle ledger
         seenInsideRoom = false;
         Character bot = getChr();
         var eim = bot == null ? null : bot.getEventInstance();

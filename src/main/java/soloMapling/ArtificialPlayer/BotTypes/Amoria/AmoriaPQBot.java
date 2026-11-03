@@ -4,6 +4,7 @@ import org.gms.client.Character;
 import soloMapling.ArtificialPlayer.BotGeneration;
 import soloMapling.ArtificialPlayer.BotMessagingSystem.CharacterStorage;
 import soloMapling.ArtificialPlayer.PartyQuest.PartyQuestBot;
+import soloMapling.ArtificialPlayer.PartyQuest.PositionCombination;
 import soloMapling.ArtificialPlayer.PartyQuest.PqActions;
 
 /**
@@ -108,29 +109,24 @@ public class AmoriaPQBot extends PartyQuestBot {
     }
 
     /**
-     * Stand on a spot the quest's published combination asks for.
+     * Stand on this bot's share of the rope pattern the party is submitting.
      *
-     * <p>Each rope stage records how many bodies each of its areas should hold and compares that
-     * against where the party stands. The bot reads that stage's counts and takes a spot from the
-     * far end of the list - leaving the near slots for the player, whom the quest counts too.
+     * <p>Both rope stages are placement puzzles judged with a bare yes/no, and both store their
+     * answer in an instance property ({@code stage2combo} / {@code stage3combo}). Reading it
+     * would be a lookup a player cannot make, so the bot searches the candidate space instead
+     * ({@link PositionCombination}) and moves on only when a talk provably judged the current
+     * pattern wrong.
      *
-     * <p>Stage 3 is the nine-rope map {@code 670010400}; stage 2 is the three-area sub-room the
-     * stage-1 gate opens onto (its combination generator draws from only three slots). Each stage
-     * indexes its own area list, which {@link AmoriaPqData#spotsFor} supplies. (This replaced a
-     * stage-3 branch that modelled the puzzle as item counts {@code 4000000+i} - a rule the stage
-     * script never applies, which left the bot standing still on the real rope map.)
+     * <p>Stage 3 is the nine-rope map {@code 670010400} (five of nine, one body each); stage 2 is
+     * the three-area sub-room the stage-1 gate opens onto, whose generator draws a body COUNT per
+     * area summing to five.
      */
     private boolean ropePuzzle(int stage) {
-        String published = PqActions.readEimString(getChr(), AmoriaPqData.comboPropertyFor(stage));
-        int[] counts = AmoriaPqData.chosenCounts(published);
-        if (counts == null) {
-            return false; // Amos has not picked yet; the party has to talk to him first
-        }
-        var spot = AmoriaPqData.mySpot(counts, AmoriaPqData.spotsFor(stage), botIndex());
-        if (spot != null) {
-            PqActions.holdArea(getChr(), spot, 1_200);
-        }
-        return false;
+        PositionCombination.Plan plan = PositionCombination.standOn(getChr(), botIndex(),
+                System.identityHashCode(getChr().getMap()),
+                stage == 2 ? AmoriaPqData.stage2Candidates() : AmoriaPqData.stage3Candidates(),
+                AmoriaPqData.areasFor(stage), stage, AmoriaPqData.comboPropertyFor(stage));
+        return !plan.spots().isEmpty();
     }
 
     /** Which body this bot is, counted from character ids for a stable order. */

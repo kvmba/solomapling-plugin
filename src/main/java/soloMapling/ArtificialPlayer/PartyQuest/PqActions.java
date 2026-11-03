@@ -87,6 +87,66 @@ public final class PqActions {
         return bot == null ? null : bot.getEventInstance();
     }
 
+    /**
+     * What a placement puzzle's own check would see right now: the per-area body counts that a
+     * script builds as {@code objset}, and its {@code playersOnCombo} total.
+     *
+     * <p>The scripts' rule, quirks included on purpose: they walk the areas in map order, stop at
+     * the first containing rectangle and increment that area's count; and they do not check that
+     * a player is on this map at all. Reproducing the rule exactly is what makes "the pattern
+     * that was just judged" answerable without reading the answer.
+     *
+     * <p>{@code pattern} packs one 4-bit nibble per area ({@code area i -> bits 4i..4i+3}), so it
+     * describes both mask puzzles (every nibble 0 or 1) and count puzzles (Amoria's rope stages)
+     * with one value. {@code bodies} is the script's total, which can differ from the number of
+     * occupied areas when two people share one.
+     */
+    public record Pattern(long pattern, int bodies) {
+    }
+
+    /** How many bodies a packed pattern names in total. */
+    public static int bodiesOf(long pattern) {
+        int total = 0;
+        for (; pattern != 0; pattern >>>= 4) {
+            total += (int) (pattern & 0xF);
+        }
+        return total;
+    }
+
+    public static Pattern observedPattern(Character bot, List<java.awt.Rectangle> areas) {
+        List<Point> positions = new java.util.ArrayList<>();
+        EventInstanceManager eim = instanceOf(bot);
+        if (eim != null) {
+            for (Character member : eim.getPlayers()) {
+                positions.add(member.getPosition());
+            }
+        }
+        return observedPattern(positions, areas);
+    }
+
+    /** {@link #observedPattern(Character, List)} over explicit positions (tests, odd callers). */
+    public static Pattern observedPattern(List<Point> positions, List<java.awt.Rectangle> areas) {
+        long pattern = 0;
+        int bodies = 0;
+        for (Point position : positions) {
+            if (position == null) {
+                continue;
+            }
+            for (int area = 0; area < areas.size(); area++) {
+                java.awt.Rectangle rect = areas.get(area);
+                if (rect != null && rect.contains(position)) {
+                    int shift = area * 4;
+                    if (shift < Long.SIZE - 4) {
+                        pattern += 1L << shift; // one more body in this area
+                    }
+                    bodies++;
+                    break;
+                }
+            }
+        }
+        return new Pattern(pattern, bodies);
+    }
+
     // =========================================================================
     // N2 - movement inside the instance
     // =========================================================================

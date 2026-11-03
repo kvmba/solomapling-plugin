@@ -2,6 +2,7 @@ package soloMapling.ArtificialPlayer.BotTypes.OPQ;
 
 import org.gms.client.Character;
 import org.gms.server.maps.Reactor;
+import soloMapling.ArtificialPlayer.PartyQuest.PositionCombination;
 import soloMapling.ArtificialPlayer.PartyQuest.PqActions;
 
 import java.awt.Point;
@@ -140,43 +141,47 @@ public final class OrbisStages {
     // =========================================================================
 
     /**
-     * Put the party on the three platforms the quest asked for.
+     * Put this bot on the platform the party's current candidate assigns to it.
      *
-     * <p>The quest picks three numbers summing to 3 (published as {@code stage4_0..2}) and
-     * compares them against the player count inside each rectangle, so the party has to
-     * stand <em>exactly</em> so - someone in the wrong area makes the check fail rather than
-     * just wasting a spot. A bot can read the numbers, which is the whole advantage here:
-     * it moves itself to whichever area still needs a body instead of trial and error.
+     * <p>The quest picks three numbers summing to 3 and compares them against the player count
+     * inside each rectangle, so the party has to stand <em>exactly</em> so. Those numbers are
+     * published as {@code stage4_0..2}, but reading them is a lookup a player cannot make - so
+     * this searches the space instead: every spread of three bodies over three platforms is a
+     * candidate, walked in a fixed order ({@link PositionCombination}), and a candidate leaves
+     * the walk only when a talk provably judged it wrong.
      *
-     * <p>{@code index} is this bot's slot among the bots taking part, so several bots spread
-     * out instead of all piling onto the same platform.
+     * <p>{@code index} is this bot's slot among the bots taking part.
+     *
+     * @return true when a candidate has been chosen and this bot is standing on its share
      */
     public static boolean standOnSealedPlatform(Character bot, int index) {
-        int[] want = {
-                PqActions.readEimInt(bot, "stage4_0", -1),
-                PqActions.readEimInt(bot, "stage4_1", -1),
-                PqActions.readEimInt(bot, "stage4_2", -1),
-        };
-        if (want[0] < 0 || want[1] < 0 || want[2] < 0) {
-            return false;
-        }
-        // Walk the published layout into a list of area indices, one entry per body wanted.
-        int[] assignment = new int[OrbisPqData.SEALED_PLAYERS];
-        int at = 0;
-        for (int area = 0; area < want.length; area++) {
-            for (int i = 0; i < want[area] && at < assignment.length; i++) {
-                assignment[at++] = area;
+        PositionCombination.Plan plan = PositionCombination.standOn(bot, index,
+                System.identityHashCode(bot.getMap()),
+                sealedCandidates(), OrbisPqData.SEALED_AREA_RECTS, OrbisPqData.STAGE_4,
+                "stage4_0");
+        return !plan.spots().isEmpty();
+    }
+
+    /**
+     * Every way to put the room's three bodies on its three platforms.
+     *
+     * <p>The script accepts any layout whose total is exactly three
+     * ({@code total != 3 -> "There needs to be exactly 3 players on these platforms"}), so the
+     * space is the ten compositions of 3 into 3 parts - (3,0,0), (2,1,0) and so on - NOT the six
+     * one-per-platform permutations. Getting this wrong would hide most of the answers: a party
+     * that has to put all three bodies on one platform would never present it.
+     */
+    static List<PositionCombination.Candidate> sealedCandidates() {
+        List<PositionCombination.Candidate> out = new java.util.ArrayList<>();
+        for (long[] pattern : PositionCombination.countCandidates(
+                OrbisPqData.SEALED_PLAYERS, OrbisPqData.SEALED_PLAYERS)) {
+            List<Point> spots = new java.util.ArrayList<>(OrbisPqData.SEALED_PLAYERS);
+            for (int area : PositionCombination.areasOf(pattern[0])) {
+                spots.add(OrbisPqData.SEALED_AREAS[area]);
             }
+            out.add(new PositionCombination.Candidate(pattern[0], spots));
         }
-        if (at != assignment.length) {
-            return false; // the three numbers should sum to 3; anything else is not ours to guess
-        }
-        if (index < 0 || index >= assignment.length) {
-            return false;
-        }
-        Point spot = OrbisPqData.SEALED_AREAS[assignment[index]];
-        PqActions.holdArea(bot, spot, 1_200);
-        return true;
+        return out;
     }
 
     // =========================================================================

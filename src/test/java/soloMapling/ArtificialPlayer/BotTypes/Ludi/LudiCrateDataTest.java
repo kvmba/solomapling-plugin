@@ -1,11 +1,17 @@
 package soloMapling.ArtificialPlayer.BotTypes.Ludi;
 
 import org.junit.jupiter.api.Test;
+import soloMapling.ArtificialPlayer.PartyQuest.PositionCombination;
+import soloMapling.ArtificialPlayer.PartyQuest.PqActions;
 
 import java.awt.Point;
+import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -42,53 +48,78 @@ class LudiCrateDataTest {
     }
 
     @Test
-    void theComboNamesThreeOfNine() {
-        // The quest builds the combination as exactly five of nine 1s; the crate list is
-        // built from those 1s, so the count is the check that the parse worked at all.
-        assertEquals(5, LudiPqData.CRATES_TO_STAND_ON);
-        String combo = "1,0,1,0,1,0,1,0,1";
-        assertEquals(5, LudiPqData.cratesIn(combo).size());
+    void theCandidateSpaceIsEveryFiveOfNineExactlyOnce() {
+        // The whole "no cheating" story rests on this: 126 patterns, no repeats, no gaps, each
+        // exactly five distinct crates. A duplicate would waste a talk; a gap could hide the
+        // answer forever.
+        assertEquals(126, LudiPqData.COMBO_COUNT);
+        assertEquals(LudiPqData.COMBO_COUNT,
+                LudiPqData.combinations(LudiPqData.CRATE_SPOTS.size(), LudiPqData.CRATES_TO_STAND_ON));
+        Set<Integer> masks = new HashSet<>();
+        for (int i = 0; i < LudiPqData.COMBO_COUNT; i++) {
+            List<Point> candidate = LudiPqData.candidateAt(i);
+            assertEquals(LudiPqData.CRATES_TO_STAND_ON, candidate.size(), "attempt " + i);
+            assertEquals(candidate.size(), new HashSet<>(candidate).size(),
+                    "attempt " + i + " repeats a crate");
+            for (Point crate : candidate) {
+                assertTrue(LudiPqData.CRATE_SPOTS.contains(crate),
+                        "attempt " + i + " names a spot the map does not have: " + crate);
+            }
+            int mask = LudiPqData.maskAt(i);
+            assertEquals(LudiPqData.CRATES_TO_STAND_ON, Integer.bitCount(mask));
+            assertTrue(masks.add(mask), "attempt " + i + " repeats a pattern: " + mask);
+        }
+        assertEquals(LudiPqData.COMBO_COUNT, masks.size());
     }
 
     @Test
-    void cratesAreListedInAreaOrder() {
-        // Position i in the combination is the i-th crate area, so the mapping has to be
-        // positional: "1,0,..." means the first crate, not whichever one got found first.
-        String combo = "1,0,0,0,0,0,0,0,0";
-        List<Point> crates = LudiPqData.cratesIn(combo);
-        assertEquals(1, crates.size());
-        assertEquals(LudiPqData.CRATE_SPOTS.get(0), crates.get(0));
-    }
-
-    @Test
-    void theLastCrateIsSelectable() {
-        // The returned list is the wanted crates packed together, so a combination naming
-        // only the ninth area yields a one-entry list holding that area.
-        String combo = "0,0,0,0,0,0,0,0,1";
-        List<Point> crates = LudiPqData.cratesIn(combo);
-        assertEquals(1, crates.size());
-        assertEquals(LudiPqData.CRATE_SPOTS.get(8), crates.get(0));
+    void theWalkStartsAtTheFirstCombinationAndWrapsAround() {
+        assertEquals(List.of(LudiPqData.CRATE_SPOTS.get(0), LudiPqData.CRATE_SPOTS.get(1),
+                        LudiPqData.CRATE_SPOTS.get(2), LudiPqData.CRATE_SPOTS.get(3),
+                        LudiPqData.CRATE_SPOTS.get(4)),
+                LudiPqData.candidateAt(0));
+        // A 127th attempt is the 1st again, not an exception: the caller wraps the index.
+        assertEquals(LudiPqData.candidateAt(0), LudiPqData.candidateAt(126));
+        assertEquals(LudiPqData.candidateAt(125), LudiPqData.candidateAt(-1));
     }
 
     @Test
     void botsFillFromTheFarEndSoNoneTakesAnothersCrate() {
-        String combo = "1,1,1,1,1,0,0,0,0";
-        // Counting from the tail: bot 0 gets the last wanted crate, bot 1 the one before it.
-        Point first = LudiPqData.myCrate(combo, 0);
-        Point second = LudiPqData.myCrate(combo, 1);
+        List<Point> candidate = LudiPqData.candidateAt(0);
+        Point first = PositionCombination.mine(candidate, 0);
+        Point second = PositionCombination.mine(candidate, 1);
         assertNotNull(first);
         assertNotNull(second);
-        assertTrue(!first.equals(second), "two bots were sent to the same crate");
+        assertFalse(first.equals(second), "two bots were sent to the same crate");
+        assertEquals(candidate.get(candidate.size() - 1), first, "the tail is seated first");
     }
 
     @Test
     void aBodyWithNoCrateIsSentNowhere() {
         // Five crates cannot hold six bots; the extras must stay off rather than doubling up
         // on a crate the quest is counting.
-        String combo = "1,1,1,1,1,0,0,0,0";
-        assertNull(LudiPqData.myCrate(combo, 5));
-        assertNull(LudiPqData.myCrate(combo, -1));
-        assertNull(LudiPqData.myCrate(null, 0));
+        List<Point> candidate = LudiPqData.candidateAt(0);
+        assertNull(PositionCombination.mine(candidate, 5));
+        assertNull(PositionCombination.mine(candidate, -1));
+        assertNull(PositionCombination.mine(List.of(), 0));
+    }
+
+    @Test
+    void theObservedPatternMirrorsTheScriptsObjset() {
+        // 2040043.js walks the map's areas in order and stops at the first match, counting every
+        // instance player - including one standing in no area at all. The ledger reads the
+        // verdict off exactly this, so the rule has to be reproduced, not approximated.
+        List<java.awt.Rectangle> areas = new ArrayList<>();
+        for (Point crate : LudiPqData.CRATE_SPOTS) {
+            areas.add(new java.awt.Rectangle(crate.x - 10, crate.y - 10, 20, 20));
+        }
+        List<Point> bodies = new ArrayList<>();
+        bodies.add(LudiPqData.CRATE_SPOTS.get(2));
+        bodies.add(LudiPqData.CRATE_SPOTS.get(5));
+        bodies.add(new Point(0, 0)); // off the crates: counted by nobody
+        PqActions.Pattern pattern = PqActions.observedPattern(bodies, areas);
+        assertEquals(2, pattern.bodies(), "only the two bodies inside an area count");
+        assertEquals(PositionCombination.maskToPattern((1 << 2) | (1 << 5)), pattern.pattern());
     }
 
     @Test

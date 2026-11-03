@@ -178,9 +178,10 @@ public final class LudiPqData {
     // =========================================================================
 
     /**
-     * The nine crate areas, as the centres a body has to occupy. The quest stores its answer
-     * as nine comma-separated 0/1 values in {@code stage8combo} - exactly five of them 1 -
-     * and requires that five players are on crates and that the pattern matches.
+     * The nine crate areas, as the centres a body has to occupy. The quest stores its answer as
+     * nine comma-separated 0/1 values and requires that five players are on crates and that the
+     * pattern matches - see {@link #candidateAt} for how the bots search it without reading the
+     * answer.
      *
      * <p>Five is not a suggestion: the check is {@code playersOnCombo == 5}, so a party that
      * puts four or six people on crates fails even with the right boxes. That is also why the
@@ -191,64 +192,116 @@ public final class LudiPqData {
             new Point(-150, -182), new Point(-83, -183), new Point(-216, -143),
             new Point(-149, -143), new Point(-84, -144), new Point(-13, -143));
 
+    /**
+     * The instance property the stage stores its answer in.
+     *
+     * <p>Only its PRESENCE is ever checked - "has the intro talk happened yet" - so a later talk
+     * can be told apart from the intro. Its VALUE is never read by any bot: that would be the
+     * answer, and the search in {@link #candidateAt} is what keeps stage 8 a puzzle rather than a
+     * lookup.
+     */
     public static final String COMBO_PROPERTY = "stage8combo";
+
     public static final int CRATES_TO_STAND_ON = 5;
 
-    /**
-     * The crates the bots stand on while {@link #COMBO_PROPERTY} does not exist yet.
-     *
-     * <p>Stage 8's script generates its combination lazily, inside the branch it only enters
-     * once five bodies already stand on crate areas ({@code 2040043.js}: "if (playersOnCombo
-     * == 5 ...) { comboStr = generateCombo(); ... }"). A bot that waited for the property
-     * therefore waited for a precondition only it could create - the reported "stage 8 bots
-     * do nothing at all". The set is deterministic (no shuffle) so a cohort spreads over five
-     * DIFFERENT areas; the leader's next conversation then generates the real combination and
-     * the following tick re-seats the bots on it (a wrong guess only costs the script's own
-     * {@code showWrongEffect}, and the property persists for the retry).
-     *
-     * <p>Deliberately the LAST five of the nine, mirroring {@link #myCrate}'s tail-first
-     * allocation, so the head slots stay free when a party has more players than bots.
-     */
-    public static List<Point> guessCrates() {
-        return CRATE_SPOTS.subList(CRATE_SPOTS.size() - CRATES_TO_STAND_ON, CRATE_SPOTS.size());
-    }
+    /** How many distinct five-of-nine patterns the stage can ask for: {@code C(9,5)}. */
+    public static final int COMBO_COUNT = 126;
 
     /**
-     * The crate this body should stand on, or null when this body is not one of the five.
+     * The five crates of candidate {@code index}, walked in lexicographic area order.
      *
-     * <p>The quest counts every player in the instance, the real one included, so the bots
-     * cannot simply take the first five crates: that would leave the player nowhere to stand
-     * and the count would come out wrong. The bots take from the end of the list, leaving the
-     * head for whoever else is filling the pattern.
+     * <p>This is the whole of the bots' stage-8 knowledge. The stage is a five-of-nine
+     * combination judged with a single yes/no and no per-crate hint ({@code 2040043.js}:
+     * {@code showWrongEffect()} on a miss, {@code clearStage} on a hit), so reading its answer
+     * is the only way to skip the search - and skipping it is exactly what the bots must not do.
+     * Enumerating instead keeps them inside the puzzle the player is playing: they submit a
+     * pattern, and only a pattern the quest has actually judged wrong leaves the candidate space.
+     *
+     * <p>Lexicographic order is not a tactic, just a stable, gap-free walk of all 126 - the
+     * caller's failure ledger is what turns it into a search.
      */
-    public static Point myCrate(String combo, int bodyIndex) {
-        return crateAt(cratesIn(combo), bodyIndex);
-    }
-
-    /**
-     * The same tail-first allocation over an explicit crate list - the pre-combination guess uses
-     * it too, so both paths share one indexing rule (and neither can drift from the other).
-     */
-    public static Point crateAt(List<Point> wanted, int bodyIndex) {
-        if (bodyIndex < 0 || bodyIndex >= wanted.size()) {
-            return null;
-        }
-        return wanted.get(wanted.size() - 1 - bodyIndex);
-    }
-
-    /** Which crates the quest's stored combination wants, in area order. */
-    public static List<Point> cratesIn(String combo) {
-        java.util.ArrayList<Point> wanted = new java.util.ArrayList<>();
-        if (combo == null) {
-            return wanted;
-        }
-        String[] parts = combo.split(",");
-        for (int i = 0; i < parts.length && i < CRATE_SPOTS.size(); i++) {
-            if ("1".equals(parts[i].trim())) {
-                wanted.add(CRATE_SPOTS.get(i));
-            }
+    public static List<Point> candidateAt(int index) {
+        int[] areas = areasAt(index);
+        java.util.ArrayList<Point> wanted = new java.util.ArrayList<>(areas.length);
+        for (int area : areas) {
+            wanted.add(CRATE_SPOTS.get(area));
         }
         return wanted;
+    }
+
+    /** {@link #candidateAt} as an area mask, without building the point list. */
+    public static int maskAt(int index) {
+        int mask = 0;
+        for (int area : areasAt(index)) {
+            mask |= 1 << area;
+        }
+        return mask;
+    }
+
+    /** The area indices of candidate {@code index}, by unranking it in lexicographic order. */
+    private static int[] areasAt(int index) {
+        int k = CRATES_TO_STAND_ON;
+        int n = CRATE_SPOTS.size();
+        int rest = Math.floorMod(index, COMBO_COUNT);
+        int[] areas = new int[k];
+        int next = 0;
+        for (int slot = 0; slot < k; slot++) {
+            // Reserve room for the remaining slots, then take the first area whose subtree is
+            // bigger than the rank left over - standard combination unranking.
+            for (int area = next; area <= n - (k - slot); area++) {
+                int sub = combinations(n - area - 1, k - slot - 1);
+                if (rest < sub) {
+                    areas[slot] = area;
+                    next = area + 1;
+                    break;
+                }
+                rest -= sub;
+            }
+        }
+        return areas;
+    }
+
+    /** Every candidate the stage can ask for, as patterns plus the crate each body stands on. */
+    public static List<soloMapling.ArtificialPlayer.PartyQuest.PositionCombination.Candidate>
+            crateCandidates() {
+        List<soloMapling.ArtificialPlayer.PartyQuest.PositionCombination.Candidate> out =
+                new java.util.ArrayList<>(COMBO_COUNT);
+        for (int index = 0; index < COMBO_COUNT; index++) {
+            out.add(new soloMapling.ArtificialPlayer.PartyQuest.PositionCombination.Candidate(
+                    soloMapling.ArtificialPlayer.PartyQuest.PositionCombination
+                            .maskToPattern(maskAt(index)), candidateAt(index)));
+        }
+        return out;
+    }
+
+    /**
+     * The room's nine crate areas in the quest's own order, as rectangles.
+     *
+     * <p>The map data is authoritative when it carries all nine (it does on 922010800); the crate
+     * centres are the fallback, so a re-baked or stripped map still yields the same ordering the
+     * combination uses.
+     */
+    public static List<java.awt.Rectangle> crateAreas(List<java.awt.Rectangle> mapAreas) {
+        if (mapAreas != null && mapAreas.size() >= CRATE_SPOTS.size()) {
+            return mapAreas.subList(0, CRATE_SPOTS.size());
+        }
+        List<java.awt.Rectangle> out = new java.util.ArrayList<>(CRATE_SPOTS.size());
+        for (Point spot : CRATE_SPOTS) {
+            out.add(new java.awt.Rectangle(spot.x - 20, spot.y - 24, 40, 48));
+        }
+        return out;
+    }
+
+    /** C(n, k), for the tiny n the crate space needs. */
+    static int combinations(int n, int k) {
+        if (k < 0 || n < k) {
+            return 0;
+        }
+        long out = 1;
+        for (int i = 0; i < k; i++) {
+            out = out * (n - i) / (i + 1);
+        }
+        return (int) out;
     }
 
     // =========================================================================
