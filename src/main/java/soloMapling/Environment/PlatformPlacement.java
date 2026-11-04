@@ -387,6 +387,20 @@ public class PlatformPlacement {
      * (the picker returns an empty list), so a spawn is never silently dropped.
      */
     public static List<Integer> spawnBotsOnMap(int numBots, int mapId) {
+        return spawnBotsOnMap(numBots, mapId, 0);
+    }
+
+    /**
+     * Same as {@link #spawnBotsOnMap(int, int)}, but puts every bot on one channel.
+     *
+     * <p>Needed by anything that lives inside a single channel's world - a Monster Carnival field,
+     * an instance room - because those resolve their occupants through that channel's own player
+     * storage. The no-channel overload lets the router fall back to another channel when the
+     * preferred one is full, which would silently place a bot where the field cannot see it.
+     *
+     * @param channel 1-based channel id, or {@code <= 0} to let the router choose
+     */
+    public static List<Integer> spawnBotsOnMap(int numBots, int mapId, int channel) {
         MapleMap map = getMapleMapById(mapId);
         if (map == null || numBots <= 0) {
             return List.of();
@@ -403,7 +417,7 @@ public class PlatformPlacement {
         for (Point spawn : spots) {
             ExecutorServiceManager.runAsync(() -> {
                 try {
-                    Character fakechar = createBotWithRetry(spawn, mapId, 5);
+                    Character fakechar = createBotWithRetry(spawn, mapId, 5, channel);
                     if (fakechar != null) {
                         characterIds.add(fakechar.getId());
                     } else {
@@ -475,9 +489,18 @@ public class PlatformPlacement {
 
 
     public static Character createBotWithRetry(Point spawn, int mapId, int maxRetries) {
+        return createBotWithRetry(spawn, mapId, maxRetries, 0);
+    }
+
+    /**
+     * Same as {@link #createBotWithRetry(Point, int, int)}, pinned to one channel.
+     *
+     * @param channel 1-based channel id, or {@code <= 0} to let the router choose
+     */
+    public static Character createBotWithRetry(Point spawn, int mapId, int maxRetries, int channel) {
         for (int attempt = 1; attempt <= maxRetries; attempt++) {
             try {
-                Character fakechar = createBotPollReadiness(spawn, mapId);
+                Character fakechar = createBotPollReadiness(spawn, mapId, channel);
                 if (fakechar != null) {
                     return fakechar;
                 }

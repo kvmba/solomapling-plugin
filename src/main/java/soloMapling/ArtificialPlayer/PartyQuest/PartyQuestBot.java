@@ -5,7 +5,9 @@ import org.gms.server.maps.Portal;
 import soloMapling.ArtificialPlayer.BotCommandsPack.SocialCommands;
 import soloMapling.ArtificialPlayer.BotCommandsPack.WarpCommands;
 import soloMapling.ArtificialPlayer.BotDialogueHandler;
+import soloMapling.ArtificialPlayer.BotPartySystem.BotPartyCommands;
 import soloMapling.ArtificialPlayer.BotPartySystem.BotPartyLogic;
+import soloMapling.ArtificialPlayer.BotPartySystem.BotPartyQueue;
 import soloMapling.ArtificialPlayer.BotPartySystem.BotRecruitManager;
 import soloMapling.ArtificialPlayer.BotSM;
 import soloMapling.ArtificialPlayer.BotAttackSystem.BotAuraState;
@@ -132,12 +134,25 @@ public abstract class PartyQuestBot extends BotSM implements GrindTickRegistry.P
     @Override
     protected long lowPriorityDelayMs() {
         Character bot = getChr();
-        if (bot != null && bot.getMap() != null
-                && isInsideQuest(bot.getMapId())
-                && bot.getMap().getEventInstance() != null) {
+        if (bot != null && bot.getMap() != null && isInsideQuest(bot.getMapId())
+                && (bot.getMap().getEventInstance() != null || runsOnOwnClock())) {
             return IN_RUN_DELAY_MS;
         }
         return super.lowPriorityDelayMs();
+    }
+
+    /**
+     * Whether this run lives in a map that carries no {@code EventInstance}, yet still needs the
+     * fast in-run cadence.
+     *
+     * <p>The cadence gate above reads the map's event instance, which is what every scripted
+     * party quest registers. Monster Carnival is the exception: its arena is created with
+     * {@code MapManager.getDisposableMap}, so the map has no instance at all - and a bot left on
+     * the default 36-48s background cadence would summon roughly twice in a ten-minute match and
+     * read as a team that never played. Default false; the arena overrides it.
+     */
+    protected boolean runsOnOwnClock() {
+        return false;
     }
 
     @Override
@@ -364,7 +379,14 @@ public abstract class PartyQuestBot extends BotSM implements GrindTickRegistry.P
 
         // A pending invitation is answered even outside the quest - that is when they arrive.
         if (bot.getParty() == null) {
-            BotPartyLogic.checkPartyQueue(bot);
+            if (acceptsPartyInvites(bot)) {
+                BotPartyLogic.checkPartyQueue(bot);
+            } else if (BotPartyQueue.getInstance().hasPendingInvite(bot)) {
+                // Answer and clear rather than ignore: an unanswered invite would be re-read on
+                // every tick, and the inviter would never learn it was refused. Gated on there
+                // being one, so a bot that declines by policy pays nothing on an idle tick.
+                BotPartyCommands.botRejectPartyInvite(bot);
+            }
         }
 
         if (!isInsideQuest(bot.getMapId())) {
@@ -836,6 +858,23 @@ public abstract class PartyQuestBot extends BotSM implements GrindTickRegistry.P
      * follow beat does not yank it back out mid-exploration.
      */
     protected boolean isFollowingLeader() {
+        return true;
+    }
+
+    /**
+     * Whether a pending party invitation may be accepted.
+     *
+     * <p>True for every quest bot, because being recruited is how they join a run. A content type
+     * that fields its own team must say no instead: Monster Carnival's bots are the <em>opposing
+     * side</em>, and one that has been pulled into a player's party is no longer available when
+     * the arena needs six of them.
+     *
+     * <p>Declining is explicit rather than silent: the pending invite is answered
+     * ({@link BotPartyCommands#botRejectPartyInvite}) so the inviter is told, and the queue entry
+     * is cleared. Leaving it unanswered would make this bot re-evaluate the same invite every
+     * tick for its whole lifetime.
+     */
+    protected boolean acceptsPartyInvites(Character bot) {
         return true;
     }
 

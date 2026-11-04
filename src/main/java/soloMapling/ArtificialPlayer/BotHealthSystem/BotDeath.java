@@ -286,6 +286,13 @@ public final class BotDeath {
      *
      * <p>A sanctuary that is the very map it died on (or no sanctuary at all) simply leaves the
      * bot standing where it fell.
+     *
+     * <p><b>Monster Carnival is exempt from the trip home.</b> The engine's CPQ death path only
+     * deducts Carnival Points and leaves the character on the field, because the client's own
+     * revive keeps it in the match; there is no walk of shame back to town. The arena's
+     * {@code returnMap} is not a sanctuary either - it points at the field's waiting room, so
+     * carrying a corpse there would take the bot out of the match entirely (and the lobby reclaim
+     * would then send it home). Carnival bots therefore get up where they fell and keep playing.
      */
     private void carryHome() {
         Character chr = this.chr;
@@ -298,6 +305,10 @@ public final class BotDeath {
         int full = Math.max(1, chr.getCurrentMaxHp());
         BotClientBinding.runWithBoundPlayer(chr, () -> chr.updateHp(full));
         chr.updatePartyMemberHP();
+        if (staysOnDeath()) {
+            clearDown();
+            return;
+        }
         int homeId = sanctuaryOf(chr);
         if (homeId > 0 && homeId != chr.getMapId()) {
             BotClientBinding.runWithBoundPlayer(chr, () -> chr.changeMap(homeId));
@@ -340,6 +351,20 @@ public final class BotDeath {
     static int sanctuaryOf(Character chr) {
         int homeId = chr.getMap().getReturnMapId();
         return homeId != MapId.NONE ? homeId : 0;
+    }
+
+    /**
+     * Whether this death must be served where it happened instead of back in town.
+     *
+     * <p>True for the Monster Carnival arenas. Their death is a point penalty, not an ejection:
+     * {@code Character.playerDead} only deducts CP for a CPQ map and leaves the character in the
+     * arena, and the arena's {@code returnMap} is the field's <em>waiting room</em> - not a
+     * sanctuary at all - so the generic carry-home would drop the corpse outside the match and
+     * the lobby reclaim would finish the job. The bot gets up on the spot and keeps playing.
+     */
+    private boolean staysOnDeath() {
+        var map = chr.getMap();
+        return map != null && (map.isCPQMap() || map.isCPQMap2());
     }
 
     /**

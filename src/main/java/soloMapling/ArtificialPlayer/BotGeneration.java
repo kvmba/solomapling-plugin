@@ -619,9 +619,27 @@ public class BotGeneration {
     loop only kicks in as a fallback. If the bot isn't ready after 3000ms, returns null.
      */
     public static Character createBotPollReadiness(Point position, int mapId) {
-        int botId = BotGeneration.createBot(position, getMapleMapById(mapId));
+        return createBotPollReadiness(position, mapId, 0);
+    }
+
+    /**
+     * Same as {@link #createBotPollReadiness(Point, int)}, but pins the bot to one channel.
+     *
+     * <p>Content that lives on a single channel (a Monster Carnival field, an instance room) has
+     * to find its bots on <em>that</em> channel: the arena reads the field's party list from its
+     * own channel's storage. A bot routed to another channel by the capacity fallback would be
+     * invisible to it, so a caller that knows which channel it is filling asks for it here and
+     * gets {@code null} rather than a bot standing in the wrong place.
+     *
+     * @param channel 1-based channel id, or {@code <= 0} to let the router pick
+     */
+    public static Character createBotPollReadiness(Point position, int mapId, int channel) {
+        MapleMap map = getMapleMapById(mapId);
+        int botId = channel > 0
+                ? BotGeneration.createBotOnChannel(position, map, 0, 0, 0, 0, channel)
+                : BotGeneration.createBot(position, map);
         if (botId <= 0) {
-            return null; // every channel is at capacity - nothing was created to wait for
+            return null; // that channel is at capacity - nothing was created to wait for
         }
         for (int i = 0; i < 30; i++) { // 30 * 100ms = 3000ms max
             Character fakechar = BotHelpers.getCharFromChannelStorage(botId);

@@ -27,6 +27,8 @@ import soloMapling.ArtificialPlayer.BotMovementSystem.MovementCommands;
 import soloMapling.ArtificialPlayer.BotMovementSystem.MovementStructures.MovementRecording;
 import soloMapling.ArtificialPlayer.BotMessagingSystem.CharacterStorage;
 import soloMapling.ArtificialPlayer.BotTypes.Blackjack.BlackjackDealerBot;
+import soloMapling.ArtificialPlayer.BotTypes.Carnival.CarnivalArena;
+import soloMapling.ArtificialPlayer.BotTypes.Carnival.CarnivalPqData;
 import soloMapling.ArtificialPlayer.BotTypes.TrainingBot;
 import soloMapling.ArtificialPlayer.BotGrindSystem.MapMobIndex;
 import soloMapling.ArtificialPlayer.BotGrindSystem.RestSpotFinder;
@@ -187,6 +189,9 @@ public class ArtificialPlayerCommand extends Command {
             case "dcallmap":
             case "dchere":
                 removeBotsOnMyMap();
+                break;
+            case "cpqarena":
+                reportCarnivalArena(c.getPlayer());
                 break;
             case "hint":
                 List<String> lstr = List.of("Hey", "Test", "Cho");
@@ -1165,6 +1170,66 @@ public class ArtificialPlayerCommand extends Command {
         player.yellowMessage("Removed " + bots.size() + " bot(s) from map " + player.getMapId() + ".");
     }
 
+    /**
+     * Report the carnival fields this channel is running, and who is waiting in each.
+     *
+     * <p>The diagnostic exists because the arena is opened by a poll rather than by a command, so
+     * "nothing happened" has three very different causes - no player party in the field, no bot
+     * team, or a field still on cool-down - and they are invisible from the outside.
+     */
+    private static void reportCarnivalArena(Character user) {
+        if (user == null) {
+            return;
+        }
+        int channel = user.getClient().getChannel();
+        var channelServer = user.getClient().getChannelServer();
+        user.yellowMessage("== Monster Carnival fields (channel " + channel + ") ==");
+        for (boolean cpq2 : new boolean[]{false, true}) {
+            // CPQ2 ships three fields, CPQ1 six; asking for six of the former would probe ids
+            // that are not arenas at all.
+            for (int field = 0; field < CarnivalPqData.fieldCount(cpq2); field++) {
+                int lobbyId = cpq2
+                        ? CarnivalPqData.lobbyForField2(field) : CarnivalPqData.lobbyForField(field);
+                // Same "loaded?" guard as the poll: asking for the map unasked would load WZ for
+                // a field nobody is in, just to print a line about it.
+                if (!channelServer.getMapFactory().isMapLoaded(lobbyId)) {
+                    user.yellowMessage(String.format("  %s field %d (map %d): not loaded %s",
+                            cpq2 ? "CPQ2" : "CPQ1", field, lobbyId, fieldState(channelServer, cpq2, field)));
+                    continue;
+                }
+                var map = channelServer.getMapFactory().getMap(lobbyId);
+                int players = 0;
+                int bots = 0;
+                for (Character chr : map.getAllPlayers()) {
+                    if (BotHelpers.isBot(chr)) {
+                        bots++;
+                    } else {
+                        players++;
+                    }
+                }
+                user.yellowMessage(String.format("  %s field %d (map %d): players=%d bots=%d %s",
+                        cpq2 ? "CPQ2" : "CPQ1", field, lobbyId, players, bots,
+                        fieldState(channelServer, cpq2, field)));
+            }
+        }
+        user.yellowMessage("Place a party in a field lobby; a full bot team is fielded and the "
+                + "match opens after a short wait.");
+    }
+
+    /**
+     * Whether a field is occupied, using the same test the poll uses.
+     *
+     * <p>Not the room registry: the NPC's entry path registers `field + 1` and the plugin registers
+     * `field`, so probing either number leaves one path invisible - and probing both makes field N
+     * look busy because field N-1 is, which is exactly the bug the poll had to be cured of. Physical
+     * occupancy (anybody in the arena, or a real player in the lobby) is what both paths produce.
+     */
+    private static String fieldState(org.gms.net.server.channel.Channel channelServer,
+                                      boolean cpq2, int field) {
+        return CarnivalArena.fieldOccupied(channelServer, field, cpq2)
+                ? "[match running]" : "[free]";
+    }
+
     // Print the outcome of a forced bot attack (verb = "attack" / "attackaoe" / "attackult").
     private static void reportAttack(Character fakechar, BotAttackDriver.AttackResult res, String verb) {
         if (res.hit()) {
@@ -1188,6 +1253,7 @@ public class ArtificialPlayerCommand extends Command {
         player.yellowMessage("!bot manualstop <cid>            - stop bot manually");
         player.yellowMessage("!bot disconnect/dc/remove <cid>  - remove bot from server");
         player.yellowMessage("!bot dcmap/dchere                - remove ALL bots on your current map");
+        player.yellowMessage("!bot cpqarena                   - report the Monster Carnival fields on this channel");
         player.yellowMessage("!bot masscreate <start> <end>    - create multiple bots");
         player.yellowMessage("!bot massmanualstart <s> <e>     - start multiple bots");
         player.yellowMessage("!bot massmanualstop <s> <e>      - stop multiple bots");

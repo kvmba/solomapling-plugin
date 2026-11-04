@@ -430,6 +430,14 @@ public final class SoloMaplingExtension implements ServerExtension {
         if (startupTask != null) {
             startupTask.cancel(false);
         }
+        // Release every carnival field this plugin opened. Without this the poll keeps running
+        // against a torn-down plugin, and the bot parties it registered stay in the world's party
+        // table with nothing left that would ever disband them.
+        try {
+            soloMapling.ArtificialPlayer.BotTypes.Carnival.CarnivalArena.releaseAll();
+        } catch (Throwable ignored) {
+            // best-effort, same contract as the other shutdowns above
+        }
         runtime = null;
     }
 }

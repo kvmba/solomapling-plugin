@@ -17,6 +17,7 @@ import soloMapling.ArtificialPlayer.BotCommandsPack.BotAttack;
 import soloMapling.ArtificialPlayer.BotMovementSystem.MovementCommands;
 import soloMapling.ArtificialPlayer.BotStatusSystem.BotDebuffState;
 import soloMapling.ArtificialPlayer.GCMoveSystem.GCMovement;
+import soloMapling.ArtificialPlayer.PartyQuest.PqActions;
 
 import java.awt.Point;
 import java.awt.Rectangle;
@@ -484,7 +485,7 @@ public final class BotAttackDriver {
         Rectangle box = reachBox(botPos, profile, weapon, facingLeft);
         for (MapObject mo : bot.getMap().getMapObjectsInRange(botPos, SEEK_RANGE_SQ, MONSTER_TYPES)) {
             Monster m = (Monster) mo;
-            if (inReach(bot, botPos, box, profile.route, m)) {
+            if (PqActions.huntFilterAdmits(bot, m) && inReach(bot, botPos, box, profile.route, m)) {
                 found.add(m);
             }
         }
@@ -627,6 +628,12 @@ public final class BotAttackDriver {
         for (MapObject mo : bot.getMap().getMapObjectsInRange(botPos, SEEK_RANGE_SQ, MONSTER_TYPES)) {
             Monster m = (Monster) mo;
             if (!m.isAlive() || m.getPosition() == null) {
+                continue;
+            }
+            // Content whose room mixes both sides' summons (Monster Carnival) restricts which
+            // monsters this bot may hit; the swing must obey the same filter as the chase, or the
+            // bot would earn points off its own teammates' monsters.
+            if (!PqActions.huntFilterAdmits(bot, m)) {
                 continue;
             }
             double dsq = botPos.distanceSq(m.getPosition());

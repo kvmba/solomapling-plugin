@@ -22,8 +22,8 @@ import java.util.List;
  *       pairing, the red/blue split and the CP counters</li>
  *   <li>{@code org/gms/server/partyquest/MonsterCarnivalParty.java} - {@code summons}, the
  *       eight monsters each side may call, and {@code canSummon()}</li>
- *   <li>{@code org/gms/server/maps/MapleMap.java} - {@code isCPQMap()} / {@code isCPQMap2()} /
- *       {@code isCPQLobby()}, which the bot reuses instead of hard-coding map ids</li>
+ *   <li>{@code org/gms/server/maps/MapleMap.java} - {@code isCPQMap()} / {@code isCPQMap2()},
+ *       which the bot reuses instead of hard-coding map ids</li>
  *   <li>{@code Character.getCP()} / {@code gainCP(int)} - the score, awarded by the engine on
  *       each monster killed</li>
  * </ul>
@@ -39,13 +39,13 @@ public final class CarnivalPqData {
     public static final int CPQ2_MIN_LEVEL = 51;
     public static final int CPQ2_MAX_LEVEL = 70;
 
-    /** Each side may call eight monsters over a run. */
-    public static final int SUMMONS_PER_RUN = 8;
-
-    /** A run lasts ten minutes; the engine extends it by five for each tie. */
-    public static final long RUN_MILLIS = 10 * 60 * 1000;
-
-    /** Where the party waits before a match, and where both sides are sent afterwards. */
+    /**
+     * Where the party waits before a match, and where both sides are sent afterwards.
+     *
+     * <p>Deliberately no "summons per run" or "run length" constant here: both belong to the
+     * arena map, which declares its own {@code mobGenMax} and {@code timeDefault}. A copy in the
+     * plugin would be a second source of truth that drifts the moment a map is retuned.
+     */
     public static final int LOBBY_MAP = 980000000;
     public static final int LOBBY_MAP_CPQ2 = 980030000;
 
@@ -57,11 +57,6 @@ public final class CarnivalPqData {
         return map != null && (map.isCPQMap() || map.isCPQMap2());
     }
 
-    /** Whether a map is one of the pre-match lobbies. */
-    public static boolean isLobby(org.gms.server.maps.MapleMap map) {
-        return map != null && map.isCPQLobby();
-    }
-
     /** Which lobby a party of this level would be sent to. */
     public static int lobbyForLevel(int level) {
         return level >= CPQ2_MIN_LEVEL ? LOBBY_MAP_CPQ2 : LOBBY_MAP;
@@ -71,6 +66,101 @@ public final class CarnivalPqData {
     public static boolean levelEligible(int level) {
         return (level >= CPQ1_MIN_LEVEL && level <= CPQ1_MAX_LEVEL)
                 || (level >= CPQ2_MIN_LEVEL && level <= CPQ2_MAX_LEVEL);
+    }
+
+    /**
+     * The party the bot fills: a full CPQ team, always.
+     *
+     * <p>Six is the game's own party cap and every arena's {@code maxPlayers}, so a bot team is
+     * never the reason a match is refused. Note that the engine does <em>not</em> require the
+     * two sides to be the same size - only the NPC script's challenge dialog does - so a full bot
+     * team can meet a smaller player party (see {@code CarnivalArena}).
+     */
+    public static final int BOT_TEAM_SIZE = 6;
+
+    /**
+     * How many fields each edition runs.
+     *
+     * <p>Six for CPQ1 ({@code 2042001.js} lists {@code i < 6}) and three for CPQ2
+     * ({@code sendCPQMapLists2} loops {@code i < 3}). Kept apart because a single "six" would
+     * have the poll look for three CPQ2 fields that do not ship - opening on those ids would warp
+     * a party into a map that is not an arena.
+     */
+    public static final int FIELD_COUNT = 6;
+    public static final int FIELD_COUNT_CPQ2 = 3;
+
+    /** How many fields an edition runs. */
+    public static int fieldCount(boolean cpq2) {
+        return cpq2 ? FIELD_COUNT_CPQ2 : FIELD_COUNT;
+    }
+
+    /** The lobby a field's teams register in: {@code 980000100 + 100*field}. */
+    public static int lobbyForField(int field) {
+        return 980000100 + 100 * field;
+    }
+
+    /** The arena a field's match is played in: the lobby map plus one. */
+    public static int arenaForField(int field) {
+        return lobbyForField(field) + 1;
+    }
+
+    /**
+     * The CPQ2 equivalent of {@link #lobbyForField}: {@code 980031000 + 1000*field}.
+     *
+     * <p>CPQ2's fields are spaced by a thousand, not a hundred (the arena sits at
+     * {@code +100}, the winner and loser rooms at {@code +200}/{@code +300}), which is why this
+     * is a separate function rather than an offset on the CPQ1 one.
+     */
+    public static int lobbyForField2(int field) {
+        return 980031000 + 1000 * field;
+    }
+
+    /** The CPQ2 arena for a field. */
+    public static int arenaForField2(int field) {
+        return lobbyForField2(field) + 100;
+    }
+
+    /** Which field a CPQ lobby map belongs to, or -1 when it is not one. */
+    public static int fieldOfLobby(int mapId) {
+        if (mapId >= 980000100 && mapId <= 980000600 && (mapId - 980000100) % 100 == 0) {
+            return (mapId - 980000100) / 100;
+        }
+        // CPQ2 ships three fields at 980031xxx / 980032xxx / 980033xxx, a thousand apart.
+        if (mapId >= 980031000 && mapId <= 980033000 && (mapId - 980031000) % 1000 == 0) {
+            return (mapId - 980031000) / 1000;
+        }
+        return -1;
+    }
+
+    /**
+     * Whether a map belongs to the carnival's second edition.
+     *
+     * <p>Its maps run from the CPQ2 hall ({@code 980030000}) through the third field's loser room
+     * ({@code 980033400}); the upper bound is the last map the edition actually ships, not a
+     * generous round number, so a future map outside the range is not silently treated as CPQ2.
+     */
+    public static boolean isSecondEdition(int mapId) {
+        return mapId >= 980030000 && mapId <= 980033400;
+    }
+
+    /**
+     * Whether a map is one of the two post-match rooms.
+     *
+     * <p>Both editions park the finished teams in a pair of town-like rooms next to the arena: the
+     * engine's {@code finish()} uses {@code arena + 1} and {@code arena + 2} (i.e. {@code +2} and
+     * {@code +3} off the lobby) for CPQ1, {@code +200}/{@code +300} for CPQ2, while the map
+     * predicates name the opposite rooms as "winner"/"loser" - the host disagrees with itself
+     * there, so both are accepted and the distinction is never relied on. What matters for a bot is
+     * only that it is not still on the field: it reads the result for a beat and walks itself home.
+     *
+     * <p>Both rooms have a carnival NPC that warps back to the hall, which is why a bot standing
+     * in one must not be treated as having quit the run.
+     */
+    public static boolean isRewardMap(org.gms.server.maps.MapleMap map) {
+        if (map == null) {
+            return false;
+        }
+        return map.isCPQWinnerMap() || map.isCPQLoserMap();
     }
 
     /**

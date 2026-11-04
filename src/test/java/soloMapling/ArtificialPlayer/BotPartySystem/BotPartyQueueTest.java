@@ -97,11 +97,14 @@ class BotPartyQueueTest {
         Character inviter = bot("Inviter");
         queue.addPartyInvite(bot, inviter, 500);
 
+        // Aged to well inside the window rather than to its very edge. A one-millisecond margin
+        // is not a boundary test - it makes the assertion depend on how long the two calls take,
+        // so it failed whenever the scheduler paused between them.
         queue.addPartyInvite(bot, new BotPartyQueue.PartyInviteEntry(
-                inviter, 500, System.currentTimeMillis() - TimeUnit.MINUTES.toMillis(3) + 1));
+                inviter, 500, System.currentTimeMillis() - TimeUnit.MINUTES.toMillis(3) + 30_000));
 
         BotPartyQueue.PartyInviteEntry entry = queue.getPartyInvite(bot);
-        assertNotNull(entry, "one millisecond inside the window must still answer");
+        assertNotNull(entry, "an entry inside the window must still answer");
         assertEquals(500, entry.getPartyId());
         queue.removePartyInvite(bot);
     }

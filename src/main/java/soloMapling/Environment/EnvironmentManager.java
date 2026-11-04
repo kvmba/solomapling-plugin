@@ -291,6 +291,11 @@ public class EnvironmentManager {
             if (w7.pqLobbies()) {
                 tasks.add(PqBotSpawner::spawnAllQuestLobbies);
             }
+            // Monster Carnival's teams are NOT part of the recruit-lobby set: those bots are an
+            // opponent waiting to be challenged, not a member to be invited. Keeping the warm start
+            // outside the `pqLobbies` gate means turning off the recruiting crowds does not
+            // silently leave the carnival with no one to field.
+            tasks.add(PqBotSpawner::spawnCarnivalTeams);
             for (var m : w7.merchants()) {
                 tasks.add(() -> spawnMerchBotsBatch(m.platform(),
                         pop.scaled(m.selling()), pop.scaled(m.buying()), pop.scaled(m.nx())));
@@ -364,6 +369,10 @@ public class EnvironmentManager {
         BotDecorationQueue.start();
         BotEquipChecker.start();
         OpqLobbyRotation.start();
+        // Monster Carnival only opens a match once both sides stand in a field lobby, and its
+        // entry point is an NPC dialog, so the waiter is a poll. Started here with the rest of the
+        // ambient systems, and idempotent if init runs twice.
+        soloMapling.ArtificialPlayer.BotTypes.Carnival.CarnivalArena.ensureStarted();
 
         double totalSeconds = (System.currentTimeMillis() - startupStart) / 1000.0;
         System.out.println(String.format(

@@ -4,6 +4,7 @@ import org.gms.client.Character;
 import soloMapling.ArtificialPlayer.BotDecoratorSystem.BotDecorate;
 import soloMapling.ArtificialPlayer.BotHelpers;
 import soloMapling.ArtificialPlayer.BotTypeManager;
+import soloMapling.ArtificialPlayer.BotTypes.Carnival.CarnivalPqData;
 import soloMapling.Environment.PlatformPlacement;
 
 import java.util.List;
@@ -86,6 +87,61 @@ public final class PqBotSpawner {
         levelRange(all, point.minLevel(), point.maxLevel());
         BotTypeManager.setAndStartBots(all, type);
         return all;
+    }
+
+    /**
+     * Warm-start the carnival: a full team's worth of carnival bots in each edition's town hall.
+     *
+     * <p>The teams are built on demand when a field actually has a player party waiting (see
+     * {@code CarnivalArena}), which is also when they read as "the other team showed up". This
+     * only guarantees the brain exists so the first match does not pay for a cold spawn.
+     */
+    public static void spawnCarnivalTeams() {
+        // No teams to field if the server has the carnival switched off; the NPC gates on the same
+        // flag and the arena's poll returns immediately.
+        if (!org.gms.config.GameConfig.getServerBoolean("use_cpq")) {
+            return;
+        }
+        spawnCarnivalTeam(CarnivalPqData.BOT_TEAM_SIZE, CarnivalPqData.LOBBY_MAP, false);
+        spawnCarnivalTeam(CarnivalPqData.BOT_TEAM_SIZE, CarnivalPqData.LOBBY_MAP_CPQ2, true);
+    }
+
+    /**
+     * Put {@code want} carnival bots in a field lobby and convert them to the carnival brain.
+     *
+     * <p>Kept here rather than in the arena because it is the spawner that owns platform
+     * placement and level assignment; the arena only ever asks for bodies and gets ids back.
+     *
+     * @param want     how many bots to add (the caller tops up an existing team)
+     * @param lobbyId  the field lobby map the team registers in
+     * @param cpq2     whether the second edition's level band applies
+     * @param channel  the channel whose field is being filled; 0 lets the router choose
+     * @return the ids that were created, empty when the map or platforms were missing
+     */
+    public static List<Integer> spawnCarnivalTeam(int want, int lobbyId, boolean cpq2, int channel) {
+        if (want <= 0 || lobbyId <= 0) {
+            return List.of();
+        }
+        // Level BEFORE conversion, exactly as spawnFor does: the arena reads the level when it
+        // validates the field's parties, and a bot converted first runs a tick at the wrong one.
+        int low = cpq2 ? CarnivalPqData.CPQ2_MIN_LEVEL : CarnivalPqData.CPQ1_MIN_LEVEL;
+        int high = cpq2 ? CarnivalPqData.CPQ2_MAX_LEVEL : CarnivalPqData.CPQ1_MAX_LEVEL;
+        int budget = Math.max(1, Math.min(want, CarnivalPqData.BOT_TEAM_SIZE));
+
+        // Pinned to the field's channel: the arena drafts bots out of that channel's storage, so
+        // one routed elsewhere by the capacity fallback would never be seen.
+        List<Integer> ids = PlatformPlacement.spawnBotsOnMap(budget, lobbyId, channel);
+        if (ids.isEmpty()) {
+            return ids;
+        }
+        levelRange(ids, low, Math.min(high, low + 9));
+        BotTypeManager.setAndStartBots(ids, BotTypeManager.BotType.CARNIVAL_PQ_BOT);
+        return ids;
+    }
+
+    /** One field lobby's worth of carnival bots, on any channel. */
+    public static List<Integer> spawnCarnivalTeam(int want, int lobbyId, boolean cpq2) {
+        return spawnCarnivalTeam(want, lobbyId, cpq2, 0);
     }
 
     /**

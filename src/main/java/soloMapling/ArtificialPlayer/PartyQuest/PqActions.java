@@ -1896,7 +1896,8 @@ public final class PqActions {
         int sticky = state.targetOid;
         if (sticky >= 0) {
             MapObject mo = bot.getMap().getMapObject(sticky);
-            if (mo instanceof Monster m && isHuntTarget(m, pos) && isPathable(bot, m, state)) {
+            if (mo instanceof Monster m && isHuntTarget(m, pos) && huntFilterAdmits(bot, m)
+                    && isPathable(bot, m, state)) {
                 return m;
             }
             state.targetOid = -1; // gone, outside the stack, or unreachable
@@ -1906,7 +1907,7 @@ public final class PqActions {
         Monster nearestPathable = null;
         double nearestPathableSq = Double.MAX_VALUE;
         for (Monster m : bot.getMap().getAllMonsters()) {
-            if (!isHuntTarget(m, pos)) {
+            if (!isHuntTarget(m, pos) || !huntFilterAdmits(bot, m)) {
                 continue;
             }
             Point mp = m.getPosition();
@@ -1998,6 +1999,7 @@ public final class PqActions {
         }
         orphanProbeAtByBot.remove(botId);
         REACHABLE_ONLY_INTENT.remove(botId);
+        HUNT_FILTER.remove(botId);
         stageWalkShieldUntilByBot.remove(botId);
         SEEK_TRACE_UNTIL.remove(botId);
         nextSteppedOnPickupAtByBot.remove(botId);
@@ -2021,6 +2023,54 @@ public final class PqActions {
         }
         Point mp = m.getPosition();
         return mp != null && Math.abs(mp.y - pos.y) <= SEEK_STACK_RANGE_Y;
+    }
+
+    /**
+     * The hunt filter the current beat actually uses, layered over {@link #isHuntTarget}.
+     *
+     * <p>A content type whose room holds monsters on <em>your own</em> side needs this: Monster
+     * Carnival's arena contains both parties' summons in one map object list, and the engine
+     * awards CP for any kill without checking whose monster it was. A bot that simply hunts the
+     * nearest mob therefore farms its own side's summons instead of fighting the other side's.
+     * The predicate is per-bot and sticky, like the reachability policy, because the combat sweep
+     * runs on its own 250ms beat between stage ticks.
+     */
+    private static final Map<Integer, java.util.function.Predicate<Monster>> HUNT_FILTER =
+            new java.util.concurrent.ConcurrentHashMap<>();
+
+    /**
+     * Restrict (or clear, with {@code null}) which monsters this bot may hunt.
+     *
+     * <p>Called from the owning stage when entering a room, so it must stay cheap; the arena's
+     * own side predicate reads a captured team number and the monster's, both plain field reads.
+     */
+    public static void setHuntFilter(Character bot, java.util.function.Predicate<Monster> filter) {
+        if (bot == null) {
+            return;
+        }
+        int botId = bot.getId();
+        if (filter == null) {
+            HUNT_FILTER.remove(botId);
+        } else {
+            HUNT_FILTER.put(botId, filter);
+        }
+    }
+
+    /**
+     * Whether this bot's hunt filter admits the monster; true when it has no filter.
+     *
+     * <p>Public because the attack driver selects targets on its own path - the swing and the
+     * chase must agree on what is a legal target, or the bot would still hit its own side.
+     */
+    public static boolean huntFilterAdmits(Character bot, Monster m) {
+        // Fast path for every content type that never installs a filter: `isEmpty` on a concurrent
+        // map is a cheap size read, while the `get` below would hash a bot id on each of the
+        // sweep's 250ms beats for every monster in the room.
+        if (HUNT_FILTER.isEmpty()) {
+            return true;
+        }
+        java.util.function.Predicate<Monster> filter = HUNT_FILTER.get(bot.getId());
+        return filter == null || filter.test(m);
     }
 
     /**
