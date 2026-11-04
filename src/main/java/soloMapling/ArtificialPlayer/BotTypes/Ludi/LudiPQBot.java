@@ -2,6 +2,7 @@ package soloMapling.ArtificialPlayer.BotTypes.Ludi;
 
 import org.gms.client.Character;
 import soloMapling.ArtificialPlayer.BotGeneration;
+import soloMapling.ArtificialPlayer.BotSM;
 import soloMapling.Environment.BotMessages;
 import soloMapling.ArtificialPlayer.BotMessagingSystem.CharacterStorage;
 import soloMapling.ArtificialPlayer.PartyQuest.PartyQuestBot;
@@ -357,16 +358,78 @@ public class LudiPQBot extends PartyQuestBot {
      * to talk, or that the previous five were already ruled out.
      */
     private void standOnCrates() {
-        PositionCombination.Plan plan = LudiStages.takeCrate(getChr(), botIndex());
+        announceCratePlan(LudiStages.takeCrate(getChr(), botIndex()));
+    }
+
+    /**
+     * Speak this attempt's line, once, and only as the room's one voice.
+     *
+     * <p>Every bot in the room shares the crate search (the ledger is keyed by map instance), so
+     * they all compute the same attempt on the same tick; without a single speaker the whole
+     * cohort shouts the identical line at every judged attempt. The highest-level bot in the room
+     * speaks for everybody - it is the body a player is likeliest to be watching, and a tie falls
+     * to the lowest character id so exactly one bot wins. A speaker that dies, leaves the room or
+     * stops hands the voice to the next one instead of muting the stage.
+     *
+     * @return whether a line was spoken (the caller's contract is otherwise a no-op)
+     */
+    boolean announceCratePlan(PositionCombination.Plan plan) {
+        if (!canSpeakCratePlan() || stage8Speaker() != getChr()) {
+            return false;
+        }
         if (announcedCrateAttempt == plan.attempt()) {
-            return; // same pattern, same line - do not spam the room
+            return false; // same pattern, same line - do not spam the room
         }
         announcedCrateAttempt = plan.attempt();
         announcedStage = 8;
-        soloMapling.ArtificialPlayer.PartyQuest.PqActions.say(getChr(),
+        PqActions.say(getChr(),
                 plan.free() == 0
                         ? BotMessages.get("pq.ludi.stage8_full", plan.attempt())
                         : BotMessages.get("pq.ludi.stage8", plan.attempt(), plan.free()));
+        return true;
+    }
+
+    /**
+     * Whether this bot can be the room's stage-8 voice.
+     *
+     * <p>Deliberately the same test for self and for peers: every bot has to agree on the same
+     * candidate set, or the losers would each compute a different winner and the room double-shouts
+     * (or falls silent). The states mirror the macro tick's own gates - a paused bot does not tick
+     * the stage work at all, while a trading bot still does, so only PAUSE is excluded.
+     */
+    private boolean canSpeakCratePlan() {
+        return getRunning() && getState() != BotSM.BotState.PAUSE && !death().isCorpse();
+    }
+
+    /**
+     * The bot in this room that announces the crate plan: the highest level among the party's
+     * crate bots that can speak and stand on the same map instance, ties to the lowest character
+     * id. This bot when no peer outranks it.
+     */
+    private Character stage8Speaker() {
+        Character me = getChr();
+        var party = me.getParty();
+        if (party == null) {
+            return me;
+        }
+        Character best = me;
+        for (var member : party.getMembers()) {
+            // Only a peer that can actually speak for this stage: a companion or another quest's
+            // bot must never win the voice and leave the room silent.
+            if (!(CharacterStorage.getBotById(member.getId()) instanceof LudiPQBot speaker)
+                    || !speaker.canSpeakCratePlan()) {
+                continue;
+            }
+            Character chr = speaker.getChr();
+            if (chr == null || chr.getMap() == null || chr.getMap() != me.getMap()) {
+                continue; // another room's bot: it must not silence this one
+            }
+            if (chr.getLevel() > best.getLevel()
+                    || (chr.getLevel() == best.getLevel() && chr.getId() < best.getId())) {
+                best = chr;
+            }
+        }
+        return best;
     }
 
     /**
