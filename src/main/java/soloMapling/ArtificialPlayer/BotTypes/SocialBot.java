@@ -1004,6 +1004,14 @@ public class SocialBot extends BotSM {
         return fallback;
     }
 
+    /**
+     * Whether this bot may escalate to the harsh pool right now.
+     *
+     * <p>Also requires the pool to exist in the ACTIVE dialogue pack. The roast node ships only in
+     * some packs (the English one has {@code Banter} but no {@code SmackTalk}), and choosing a
+     * missing node burned the roll and the per-player cooldown while the reply path then found no
+     * line at all - the bot answered a clear provocation with silence.
+     */
     private boolean canSmackTalk(Character player) {
         Character chr = getChr();
         if (chr == null || player == null) {
@@ -1019,6 +1027,12 @@ public class SocialBot extends BotSM {
         }
         if (chr.getLevel() - player.getLevel() < SMACK_TALK_LEVEL_GAP) {
             return false;
+        }
+        // The roast pool exists only in some packs (the English one ships Banter but no SmackTalk).
+        // Asking for the node directly keeps the check honest without a new API: getDialogueCon
+        // caches a MISSING_NODE sentinel, so this costs one map lookup.
+        if (BotDialogueHandler.getDialogueCon(DIALOGUE_PATH, BOT_TYPE_KEY, "SmackTalk") == null) {
+            return false; // this pack has no roast pool - fall back to Banter
         }
         Long until = smackTalkCooldowns.get(player.getId());
         long now = System.currentTimeMillis();

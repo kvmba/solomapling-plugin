@@ -308,4 +308,17 @@ public class SellingMerchantBot extends BotSM {
         // FM 卖货商人：站在入口喊话卖东西（不摆摊），属于可动 bot，可骑宠。
         return true;
     }
+
+    // The platform shuffles run on GCMovement, which leases the shared movement lock and its own
+    // driver tick until the session is explicitly disabled. Nothing else tears that down: the host's
+    // removePlayer leaves the Character's map intact, so the driver would keep ticking a bot that
+    // was already removed from the world, holding its lock and its Character forever.
+    @Override
+    public synchronized void stopScheduledTask() {
+        Character chr = getChr();
+        if (chr != null) {
+            GCMovement.disable(chr);
+        }
+        super.stopScheduledTask();
+    }
 }

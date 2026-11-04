@@ -658,3 +658,8 @@ MerchantBot:
       - "You didn't accept the messenger invite... too bad noob."
     emote: 0
     wait: 1
+  NXCodeStoreFailed:
+    text:
+      - "My gift-card system just errored out. Sorry - keep your mesos, this one is on me."
+    emote: 0
+    wait: 1

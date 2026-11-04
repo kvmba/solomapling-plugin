@@ -34,6 +34,13 @@ import static soloMapling.server.SoloMaplingUtilities.rollChanceInverse;
 import static soloMapling.server.SoloMaplingUtilities.waitForCondition;
 
 public class NXMerchantBot extends BotSM {
+    /**
+     * How many times to redraw a gift-card code before telling the player this delivery failed.
+     * A draw can only fail to store on a duplicate row or a DB hiccup, so a retry is cheap; the
+     * player has already paid in the trade window by the time this runs.
+     */
+    private static final int NX_CODE_ATTEMPTS = 3;
+
     private NXState nxState = NXState.SETUP;
     private List<String> hint = Collections.singletonList(getChr().getName());
     private int advertiseCycles = 0;
@@ -99,21 +106,50 @@ public class NXMerchantBot extends BotSM {
         );
 
         if (accepted) {
-            String nxCode = generateGiftCardCode();
-            createCompleteNXCode(nxCode);
-
-            messengerLine("NXCodeHandoff", 3000);
-            botSendChatFull(getChr(), nxCode, 7000);
-            messengerLine("NXCodeThanks", 2000);
-
-            BotTiming.after(2000, () -> botLeaveMessenger(getChr()));
-            waitFor(2500); // hold CONVERT_BACK until the messenger leave lands
+            // Same retry policy the tutorial's GrantAdmin uses: a storage failure is usually
+            // transient (a duplicate draw, a DB hiccup), and the player has ALREADY paid in the
+            // trade window - one wasted round turn is much cheaper than a failed delivery.
+            String nxCode = null;
+            for (int attempt = 0; attempt < NX_CODE_ATTEMPTS && nxCode == null; attempt++) {
+                String candidate = generateGiftCardCode();
+                if (createCompleteNXCode(candidate) > 0) {
+                    nxCode = candidate;
+                }
+            }
+            if (nxCode == null) {
+                // Every draw failed to store, so reading one out would only hand the player a string
+                // that fails at redemption.
+                //
+                // The bot is already IN the player's messenger by now, so it must still walk out:
+                // the success path below ends with botLeaveMessenger, and leaving without it left
+                // the player with a member who never says anything again, plus the bot holding a
+                // messenger the next `!bot nxbot` round would have to share.
+                log("NXCodeHandoff aborted: no NX code could be stored after "
+                        + NX_CODE_ATTEMPTS + " attempts");
+                speakLine("NXCodeStoreFailed");
+                leaveMessengerAfterBeat();
+            } else {
+                messengerLine("NXCodeHandoff", 3000);
+                botSendChatFull(getChr(), nxCode, 7000);
+                messengerLine("NXCodeThanks", 2000);
+                leaveMessengerAfterBeat();
+            }
         } else {
             speakLine("NXInviteIgnored");
         }
 
         resetLastTradeResult();
         resetLastTradedCharacter();
+    }
+
+    /**
+     * Leave the player's Maple Messenger on a delayed beat, then hold this tick past it - the same
+     * choreography the successful hand-off used, now shared with the "code could not be stored"
+     * exit so every path that joined the messenger also leaves it.
+     */
+    private void leaveMessengerAfterBeat() {
+        BotTiming.after(2000, () -> botLeaveMessenger(getChr()));
+        waitFor(2500); // hold CONVERT_BACK until the messenger leave lands
     }
 
     // Dynamic movement lands on the exact picked pixel, so the old nudgeAwayFromOverlap
@@ -225,5 +261,16 @@ public class NXMerchantBot extends BotSM {
     public boolean allowsMount() {
         // FM NX 商人：站在入口喊话卖 NX（不摆摊），属于可动 bot，可骑宠。
         return true;
+    }
+
+    // See SellingMerchantBot.stopScheduledTask: the GC session owns a driver tick and the shared
+    // movement lock, and the host's map removal does not end it.
+    @Override
+    public synchronized void stopScheduledTask() {
+        Character chr = getChr();
+        if (chr != null) {
+            GCMovement.disable(chr);
+        }
+        super.stopScheduledTask();
     }
 }

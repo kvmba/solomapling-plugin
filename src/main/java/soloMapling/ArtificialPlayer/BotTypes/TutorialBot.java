@@ -48,6 +48,13 @@ import static soloMapling.BotLogger.log;
 import static soloMapling.server.SoloMaplingUtilities.random;
 
 public class TutorialBot extends BotSM {
+    /**
+     * How many times to redraw a gift-card code before telling the player this slot is unavailable.
+     * Codes are drawn from ~30^15 space, so a retry only matters for a storage failure (DB hiccup,
+     * or a duplicate row), and three draws is enough to ride that out without stalling the tutorial.
+     */
+    private static final int NX_CODE_ATTEMPTS = 3;
+
     private TutorialBotState tutorialBotState = TutorialBotState.RESET;
     private Boolean runTutorial;
     private Boolean tutPicked;
@@ -358,11 +365,31 @@ public class TutorialBot extends BotSM {
         player.updateMaxHpMaxMp(10000, 10000);
         player.updateHpMp(10000);
 
-        generatedNXCode = NXCodeManager.generateGiftCardCode();
-        NXCodeManager.createCompleteNXCode(generatedNXCode, 25000);
-
-        generatedNXCode2 = NXCodeManager.generateGiftCardCode();
-        NXCodeManager.createCompleteNXCode(generatedNXCode2, 25000);
+        // Same rule the NX merchant hand-off follows: never read out a code that was not stored.
+        // A failed insert (duplicate row, DB down) used to be discarded and the bot still recited
+        // both codes in the GrantAdmin dialogue, so the player wrote down strings that fail at
+        // redemption. Only codes that actually landed are announced; a failed slot is replaced by
+        // a line saying so, keeping %NX_CODE%/%NX_CODE_2% always filled.
+        generatedNXCode = null;
+        generatedNXCode2 = null;
+        for (int attempt = 0; attempt < NX_CODE_ATTEMPTS && generatedNXCode == null; attempt++) {
+            String candidate = NXCodeManager.generateGiftCardCode();
+            if (NXCodeManager.createCompleteNXCode(candidate, 25000) > 0) {
+                generatedNXCode = candidate;
+            }
+        }
+        for (int attempt = 0; attempt < NX_CODE_ATTEMPTS && generatedNXCode2 == null; attempt++) {
+            String candidate = NXCodeManager.generateGiftCardCode();
+            if (NXCodeManager.createCompleteNXCode(candidate, 25000) > 0) {
+                generatedNXCode2 = candidate;
+            }
+        }
+        if (generatedNXCode == null) {
+            generatedNXCode = BotMessages.get("tutorial.nx_code_unavailable");
+        }
+        if (generatedNXCode2 == null) {
+            generatedNXCode2 = BotMessages.get("tutorial.nx_code_unavailable");
+        }
 
         Map<String, String> replacements = Map.of(
                 "%NX_CODE%", generatedNXCode,

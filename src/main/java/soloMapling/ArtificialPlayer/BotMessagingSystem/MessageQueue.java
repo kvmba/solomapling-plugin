@@ -163,13 +163,15 @@ public class MessageQueue {
     public boolean removeMessageIfConditionMet(QueueType queueType, boolean condition) {
         BlockingQueue<ChatMessage> queue = queues.get(queueType);
         ChatMessage message = peekMessage(queueType);
-        if (message != null && condition) {
-            return queue.remove(message);
-        } else {
-            requeueMessage(queueType, queue.poll());
-            System.out.println(" skipped irrelevant message: " + message.getContent());
-            return false;
+        if (message == null) {
+            return false; // nothing queued - nothing to gate (the old code dereferenced this null)
         }
+        if (condition) {
+            return queue.remove(message);
+        }
+        // Leave the head in place. The old poll+offer moved it to the TAIL, so a false condition
+        // silently reordered every pending line behind it.
+        return false;
     }
 
     public boolean requeueMessage(ChatMessage message) {

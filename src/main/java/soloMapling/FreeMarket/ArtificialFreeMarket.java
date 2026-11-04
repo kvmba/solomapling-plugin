@@ -6,7 +6,6 @@ import org.gms.client.Job;
 import org.gms.net.server.Server;
 import org.gms.server.maps.HiredMerchant;
 import org.gms.server.maps.PlayerShop;
-import org.gms.server.maps.PlayerShopItem;
 import soloMapling.server.ExecutorServiceManager;
 import org.gms.util.PacketCreator;
 
@@ -111,6 +110,21 @@ public class ArtificialFreeMarket {
 //    }
 
 
+    /**
+     * Owner ids for the artificial shops.
+     *
+     * <p>They must be unique for the lifetime of the world: {@code World.activeMerchants} and
+     * {@code Channel.hiredMerchants} are keyed by it and BOTH refuse a second entry with the same
+     * key. The old {@code 20000 + random.nextInt(10001)} collided by the birthday paradox (a full
+     * FM holds ~550 shops in a 10000-value space, so roughly one collision in seven worlds), and a
+     * collision silently dropped the newer shop from the world registry while the channel map was
+     * overwritten - the loser was never closed, never saved and never removed from its map.
+     *
+     * <p>Kept clear of the bot id range ({@code BotGeneration.BOT_BASE_ID}+) so a shop owner id can
+     * never resolve to a live bot through {@code PlayerStorage.getCharacterById}.
+     */
+    private static final AtomicInteger NEXT_SHOP_OWNER_ID = new AtomicInteger(90_000);
+
     private static void spawnHiredMerchantStore(int mapId, Point position) {
         if (calculateSkippedSpot(mapId)) {
             return;
@@ -119,12 +133,17 @@ public class ArtificialFreeMarket {
         int world = 0;
         int channel = 1;
 
-        int ownerId = 20000 + random.nextInt(10001);
+        int ownerId = NEXT_SHOP_OWNER_ID.getAndIncrement();
         String ownerName = getRandomShopOwnerIGN();
         String description = "";
 
         int shop_item_id = hiredMerchantsList.get(random.nextInt(hiredMerchantsList.size())); // 5030000;
+        // The shop's channel is read off this client by HiredMerchant's constructor and the owl
+        // ("Minerva") search refuses a channel mismatch. Client.createMock() reports world/channel
+        // -123, so every shop built on it advertised channel -123 and was unreachable by owl search.
         Client cm = Client.createMock();
+        cm.setWorld(world);
+        cm.setChannel(channel);
         Character newchar = Character.getDefault(cm);
         newchar.setPosition(position);
         newchar.setMap(Server.getInstance().getChannel(world, channel).getMapFactory().getMap(mapId));
@@ -136,7 +155,16 @@ public class ArtificialFreeMarket {
 
     private static HiredMerchantArtificial generateHiredMerchantShopData(Character newchar, String ownerName, int ownerId, String description, int shop_item_id, int mapId) {
         HiredMerchantArtificial newMerch = createMerchantObject(newchar, ownerName, ownerId, description, shop_item_id);
+        stockMerchant(newMerch, mapId);
+        publishMerchant(newMerch, newchar);
+        return newMerch;
+    }
 
+    /**
+     * Fill a merchant object with its stock and description. Engine-free: works on an unpublished
+     * object, which is what {@code BotPlayerStorePermit} needs (it only consumes the items).
+     */
+    private static void stockMerchant(HiredMerchantArtificial newMerch, int mapId) {
         String tier = getTierForRoom(mapId);
 
         newMerch.setTier(tier);
@@ -169,7 +197,6 @@ public class ArtificialFreeMarket {
         applySpecialShopType(newMerch);
 
         appendRoomNumber(newMerch);
-        return newMerch;
     }
 
     private static void generatePrimaryShop(HiredMerchantArtificial.shopTypes choice, HiredMerchantArtificial merchant) {
@@ -297,13 +324,30 @@ public class ArtificialFreeMarket {
         }
     }
 
+    /**
+     * Build a stock, unregistered merchant.
+     *
+     * <p>Deliberately does NOT publish it into {@code World.activeMerchants} /
+     * {@code Channel.hiredMerchants}. Registering is the caller's job, and only the caller that
+     * actually puts the shop on a map may do it: a registered-but-never-shown merchant can never be
+     * visited, is never closed by {@code closeAllMerchants} unless it reached the channel map, and
+     * pins its whole item list for the life of the process. `BotPlayerStorePermit` used to leak one
+     * of these per stall because it only consumes the generated items.
+     */
     private static HiredMerchantArtificial createMerchantObject(Character newchar, String ownerName, int ownerId, String description, int shopItemId) {
-        // STEP 1 - CREATE MERCHANT OBJECT
         HiredMerchantArtificial merchant = new HiredMerchantArtificial(newchar, description, shopItemId, ownerId, ownerName);
         newchar.setHiredMerchant(merchant);
-        newchar.getWorldServer().registerHiredMerchant(merchant);
-        newchar.getWorldServer().getChannel(1).addHiredMerchant(newchar.getId(), merchant);
         return merchant;
+    }
+
+    /** Publish a fully-stocked merchant: world + channel registries, then put it on its map. */
+    private static void publishMerchant(HiredMerchantArtificial merchant, Character newchar) {
+        // Keyed by the SHOP's owner id, not the synthetic character's: Character.getDefault() leaves
+        // the character id at 0, so every shop used to collide on key 0 and only the first ever
+        // entered this channel map (the rest were silently dropped and never closed on shutdown).
+        int ownerId = merchant.getOwnerId();
+        newchar.getWorldServer().registerHiredMerchant(merchant);
+        newchar.getWorldServer().getChannel(1).addHiredMerchant(ownerId, merchant);
     }
 
     private static HiredMerchant addMerchantToChannel(Character newchar) {
@@ -384,6 +428,15 @@ public class ArtificialFreeMarket {
 
     // Bot Store Permits
 
+    /**
+     * Turns a live bot into a Free Market stall keeper.
+     *
+     * <p>The stall is the harness's own {@link PlayerShop} (the bot has no CASH permit inventory to
+     * spend), but it must still be published the way the host publishes a real one: registered with
+     * the world (that registry is what the owl search, {@code getAvailableItemBundles}, walks) and
+     * announced with {@code UPDATE_CHAR_BOX} so clients already on the map render the box - a plain
+     * {@code addMapObject} does neither, which left the stall invisible and unsearchable.
+     */
     public static void BotPlayerStorePermit(Character fakechar) {
         // A shop keeper does not walk around with a pet. The bot became a shop
         // keeper here (not at spawn), so this is where its pet is taken back.
@@ -392,21 +445,22 @@ public class ArtificialFreeMarket {
         soloMapling.ArtificialPlayer.BotSummonSystem.BotSummonSystem.remove(fakechar);
         String desc = "Test";
         Integer shopItemId = getRandomStorePermitId();
+        // Stock a throwaway merchant object purely to reuse the shop generators; it is never
+        // published (no world/channel registration, no map object), so nothing else can see it.
+        // Registering it here used to leak one invisible HiredMerchant - and its whole item list -
+        // per stall, because this path only consumes getItems().
+        HiredMerchantArtificial hma = createMerchantObject(fakechar, fakechar.getName(),
+                fakechar.getId(), desc, 5030000);
+        stockMerchant(hma, fakechar.getMapId());
         PlayerShop ps = new PlayerShop(fakechar, desc, shopItemId);
+        ps.setDescription(hma.getDescription());
+        ps.setItems(hma.getItems());
+        fakechar.setHiredMerchant(null); // createMerchantObject stashes it on the character
         fakechar.setPlayerShop(ps);
         fakechar.getMap().addMapObject(ps);
-
-        HiredMerchantArtificial hma = generateHiredMerchantShopData(fakechar, fakechar.getName(), fakechar.getId(), desc, 5030000, fakechar.getMapId());
-        String desc2 = hma.getDescription();
-        ps.setDescription(desc2);
-        List<PlayerShopItem> premadeShop = hma.getItems();
-        ps.setItems(premadeShop);
-
-        // open shop on map
-        PlayerShop fakecharplayershop = fakechar.getPlayerShop();
-        fakecharplayershop.setOpen(true);
-
-
+        fakechar.getWorldServer().registerPlayerShop(ps);
+        ps.setOpen(true);
+        fakechar.getMap().broadcastMessage(PacketCreator.updatePlayerShopBox(ps));
     }
 
 //    public static void testchoice() {

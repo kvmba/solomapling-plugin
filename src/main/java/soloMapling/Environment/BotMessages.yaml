@@ -109,6 +109,7 @@ tutorial.gifts_later: "No worries, the gifts will be waiting for you next time."
 tutorial.talk_again: "Talk to me again if you're ready."
 tutorial.trade_intro: "Here are some goodies to get you started!"
 tutorial.trade_summary: "1B mesos, potions, scrolls, stars, and gear. All yours!"
+tutorial.nx_code_unavailable: "(code unavailable - ask me again later)"
 
 # ---------------------------------------------------------------------------
 # Social bot

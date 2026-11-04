@@ -102,6 +102,9 @@ public class GameZoneHostBot extends BotSM {
         if (event.getType() == EventType.MAP_ENTERED) {
             String playerName = event.getPlayerName();
             String greetingLine = BotDialogueHandler.getRandomDialogueLine(this, "PassiveGreeting");
+            if (greetingLine == null) {
+                return; // the active dialogue pack ships no PassiveGreeting node
+            }
             greetingLine = greetingLine.replace("%PLAYER_NAME%", playerName);
             BotChatbubble(getChr(), greetingLine);
             BotEmote(getChr(), 2);

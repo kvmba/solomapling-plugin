@@ -136,6 +136,7 @@ tutorial.gifts_later: "没关系，礼物下次还给你留着。"
 tutorial.talk_again: "准备好了再来找我。"
 tutorial.trade_intro: "这些好东西送你起步用！"
 tutorial.trade_summary: "10亿金币、药水、卷轴、飞镖和装备。全是你的！"
+tutorial.nx_code_unavailable: "（兑换码生成失败，稍后再来找我）"
 
 # ---------------------------------------------------------------------------
 # Social bot

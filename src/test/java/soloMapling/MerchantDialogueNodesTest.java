@@ -70,8 +70,11 @@ class MerchantDialogueNodesTest {
     @Test
     void chinesePackDefinesNxHandoffNodes() throws Exception {
         SoloMaplingLanguageConfig.setLanguageTag("zh-CN");
+        // NXCodeStoreFailed is the line spoken when the gift-card insert fails, so the hand-off
+        // never reads out a code that was not stored. A pack that ships the other hand-off nodes
+        // but not this one would answer a failed sale with silence.
         for (String node : List.of("NXAdvertise", "NXContactNotice", "NXCodeHandoff",
-                "NXCodeThanks", "NXInviteIgnored")) {
+                "NXCodeThanks", "NXInviteIgnored", "NXCodeStoreFailed")) {
             List<String> lines = readNodeText("MerchantBotDialogue.yaml", "MerchantBot", node);
             assertNotNull(lines, node + " has no text entries");
             assertFalse(lines.isEmpty(), node + " has no text entries");

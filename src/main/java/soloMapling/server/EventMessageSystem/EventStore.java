@@ -31,15 +31,22 @@ public class EventStore {
     }
 
     public List<GameEvent> getEventsByType(EventType type) {
-        return getEventsByType(type, Long.MAX_VALUE);
+        // No lower bound. This used to pass Long.MAX_VALUE, and the filter is
+        // `timestamp >= sinceTimestamp` - so the overload that reads as "all events of this type"
+        // could only ever return an empty list.
+        return getEventsByType(type, Long.MIN_VALUE);
     }
 
     public List<GameEvent> getEventsByType(EventType type, long sinceTimestamp) {
         lock.readLock().lock();
         try {
             List<GameEvent> results = new ArrayList<>();
+            // Walk the ring in insertion order. The buffer wraps at `capacity`, so the live entries
+            // are the `size` slots ending at `head` - NOT buffer[0..size). The old loop read the
+            // stale slots the ring had already overwritten, and missed the newest ones.
+            int start = (head - size + capacity) % capacity;
             for (int i = 0; i < size; i++) {
-                GameEvent event = buffer[i];
+                GameEvent event = buffer[(start + i) % capacity];
                 if (event != null && event.getType() == type && event.getTimestamp() >= sinceTimestamp) {
                     results.add(event);
                 }
@@ -54,8 +61,9 @@ public class EventStore {
         lock.readLock().lock();
         try {
             List<GameEvent> results = new ArrayList<>();
+            int start = (head - size + capacity) % capacity;
             for (int i = 0; i < size; i++) {
-                GameEvent event = buffer[i];
+                GameEvent event = buffer[(start + i) % capacity];
                 if (event != null && event.getWorld() == world && event.getChannel() == channel
                         && (mapId == null || event.getMap().getId() == mapId)) {
                     results.add(event);

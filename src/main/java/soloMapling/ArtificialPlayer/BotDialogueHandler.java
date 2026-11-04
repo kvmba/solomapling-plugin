@@ -9,7 +9,6 @@ import java.util.concurrent.ConcurrentHashMap;
 
 import org.gms.client.Character;
 import com.esotericsoftware.yamlbeans.YamlReader;
-import soloMapling.ArtificialPlayer.BotTypes.DiceBot;
 import soloMapling.Environment.SoloMaplingLanguageConfig;
 
 import java.util.Map;
@@ -141,16 +140,8 @@ public class BotDialogueHandler {
     }
 
     public void listOptions(Character player, BotSM botSM) {
-        // Check if the instance is of type DiceBot
-        if (botSM instanceof DiceBot) {
-            System.out.println("Dice bot instance");
-            DiceBot diceBot = (DiceBot) botSM; // Downcast to DiceBot
-            diceBot.displayCommands(player);   // Now you can call DiceBot methods
-        } else {
-            System.out.println("Not a DiceBot instance");
-            botSM.displayCommands(player);
-        }
-
+        // displayCommands is virtual; every type that differs overrides it.
+        botSM.displayCommands(player);
     }
 
     public static Map<String, Object> readDialogueYaml(String dialoguePack, String dialogueType, String dialogueNode) {
@@ -295,6 +286,12 @@ public class BotDialogueHandler {
 
     public static DialogueConstructor getDialogueConWithReplacedStrings(String BotTypeDialoguePath, String BotType, String DialogueNodeName, Map<String, String> replacements) {
         DialogueConstructor og = getDialogueCon(BotTypeDialoguePath, BotType, DialogueNodeName);
+        if (og == null) {
+            // getDialogueCon returns null for a node the ACTIVE language pack does not ship (it caches
+            // a MISSING_NODE sentinel). Dereferencing it here threw NPE out of the caller's tick -
+            // a translation that lags one node behind would break that bot's whole FSM step.
+            return null;
+        }
         // withDialogue copies: the cached node must stay pristine for other bots.
         return og.withDialogue(replaceStrings(og.getDialogue(), replacements));
     }
@@ -316,8 +313,16 @@ public class BotDialogueHandler {
         return resultList;
     }
 
+    /**
+     * A random line from one node, or {@code null} when the ACTIVE language pack does not ship that
+     * node (or ships it empty). Callers already treat null as "say nothing", so a lagging translation
+     * degrades to silence instead of throwing out of the caller's tick.
+     */
     public static String getRandomDialogueLine(BotSM botSM, String DialogueNodeName) {
         DialogueConstructor dialog = getDialogueCon(botSM.dialoguePath, botSM.botType, DialogueNodeName);
+        if (dialog == null || dialog.getDialogue().isEmpty()) {
+            return null;
+        }
         return dialog.getDialogue().get(RANDOM.nextInt(dialog.getDialogue().size()));
     }
 

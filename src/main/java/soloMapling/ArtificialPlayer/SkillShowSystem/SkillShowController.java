@@ -207,10 +207,13 @@ public final class SkillShowController {
      */
     private static int generation;
 
+    /** The GM running this show, captured at {@link #start}; progress is reported to that character. */
+    private static Character gmCharacter;
+
     // ---- 命令入口（!bot skillshow） ----
 
     /** 开启。返回给 GM 的错误提示，null = 已开启。表演全程在 GM 所在频道进行。 */
-    public static synchronized String start(Point pos, int gmMapId, int gmChannel) {
+    public static synchronized String start(Point pos, int gmMapId, int gmChannel, Character gm) {
         if (phase != Phase.IDLE) {
             return "表演已在进行中（第 " + (jobIndex + 1) + "/" + jobTotal
                     + " 个职业），!bot skillshow stop 可停止。";
@@ -218,6 +221,7 @@ public final class SkillShowController {
         if (pos == null) {
             return "无法取得 GM 的位置。";
         }
+        gmCharacter = gm;
         mapId = gmMapId;
         channelId = gmChannel > 0 ? gmChannel : BotChannelRouter.DEFAULT_CHANNEL;
         jobIndex = -1;
@@ -249,15 +253,20 @@ public final class SkillShowController {
         jobIndex = -1;
         steps.clear();
         pending = null;
+        gmCharacter = null;
     }
 
     /**
      * 回喊 GM（dropMessage，不依赖 bot 存活）。控制台场景（GM 已下线）回喊
      * 静默降级为日志 —— 表演照常进行，诊断信息不丢。
+     *
+     * <p>Uses the GM captured by {@link #start}: read from a global last-command field, a second
+     * admin running any {@code !bot} command would redirect this show's whole progress feed (and
+     * its "stopped" notices) to themselves.
      */
     private static void say(String message) {
         BotLogger.log(message);
-        Character gm = soloMapling.command.ArtificialPlayerCommand.currentPlayer();
+        Character gm = gmCharacter;
         if (gm != null && gm.getMap() != null) {
             gm.dropMessage(message);
         }

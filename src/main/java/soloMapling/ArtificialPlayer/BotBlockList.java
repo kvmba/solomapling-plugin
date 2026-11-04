@@ -75,6 +75,15 @@ public class BotBlockList {
     }
 
     private static final BotBlockList botBlockList = new BotBlockList();
+
+    /**
+     * Guarded by {@code this}: {@link #addToBlockList} runs on one bot's tick while
+     * {@link #isBlocked} runs on ANOTHER bot's tick (BotTradeLogic.checkTradeQueue checks the
+     * inviter's blocks before accepting). An unsynchronised ArrayList let the two interleave -
+     * the sweep's iterator.remove() racing the writer's add() throws
+     * ConcurrentModificationException inside the whole bot tick, and the trade that tick was
+     * handling is dropped.
+     */
     private final List<BlockEntry> blockList;
 
     public BotBlockList() {
@@ -93,7 +102,7 @@ public class BotBlockList {
      * @param blockDurationSeconds How long the block should last in seconds
      * @return The created block entry
      */
-    public BlockEntry addToBlockList(Integer botId, Integer traderId, long blockDurationSeconds) {
+    public synchronized BlockEntry addToBlockList(Integer botId, Integer traderId, long blockDurationSeconds) {
         Instant now = Instant.now();
         Instant expirationTime = now.plusSeconds(blockDurationSeconds);
 
@@ -114,7 +123,7 @@ public class BotBlockList {
      * @param traderId The ID of the trader
      * @return true if the trader is blocked by the bot, false otherwise
      */
-    public boolean isBlocked(Integer botId, Integer traderId) {
+    public synchronized boolean isBlocked(Integer botId, Integer traderId) {
         Instant now = Instant.now();
 
         // Remove expired entries first
@@ -146,7 +155,7 @@ public class BotBlockList {
     /**
      * Removes all expired block entries from the list.
      */
-    public void removeExpiredEntries() {
+    public synchronized void removeExpiredEntries() {
         Instant now = Instant.now();
 
         Iterator<BlockEntry> iterator = blockList.iterator();

@@ -268,4 +268,15 @@ public class BuyingMerchantBot extends BotSM {
         // FM 买货商人：站在入口喊话收东西（不摆摊），属于可动 bot，可骑宠。
         return true;
     }
+
+    // See SellingMerchantBot.stopScheduledTask: the GC session owns a driver tick and the shared
+    // movement lock, and the host's map removal does not end it.
+    @Override
+    public synchronized void stopScheduledTask() {
+        Character chr = getChr();
+        if (chr != null) {
+            GCMovement.disable(chr);
+        }
+        super.stopScheduledTask();
+    }
 }

@@ -42,7 +42,10 @@ public class BotPartyQueue {
         }
     }
 
-    private final ConcurrentHashMap<Character, PartyInviteEntry> queues;
+    // Keyed by character ID, not Character: the host's Character has no equals/hashCode, so an
+    // object key silently stranded one entry per instance - a companion reloaded by loadPersistentBot
+    // got a NEW Character for the same character and could never see (or clear) its pending invite.
+    private final ConcurrentHashMap<Integer, PartyInviteEntry> queues;
     private static final BotPartyQueue instance = new BotPartyQueue();
 
     private BotPartyQueue() {
@@ -71,7 +74,7 @@ public class BotPartyQueue {
     synchronized void addPartyInvite(Character fakechar, PartyInviteEntry entry) {
         debugprint("addPartyInvite: bot=" + fakechar.getName() + ", inviter="
                 + entry.getInviter().getName() + ", partyId=" + entry.getPartyId());
-        queues.put(fakechar, entry);
+        queues.put(fakechar.getId(), entry);
         // Wake the bot's macro brain now so pollInvites drains this on the next ~immediate tick,
         // rather than waiting out its slow scheduled cadence while the armed window ticks away.
         BotRecruitManager.wakeBotForInvite(fakechar);
@@ -89,9 +92,9 @@ public class BotPartyQueue {
     private static final long INVITE_TTL_MS = 180_000L;
 
     public synchronized PartyInviteEntry getPartyInvite(Character fakechar) {
-        PartyInviteEntry entry = queues.get(fakechar);
+        PartyInviteEntry entry = queues.get(fakechar.getId());
         if (entry != null && System.currentTimeMillis() - entry.enqueuedAtMs() > INVITE_TTL_MS) {
-            queues.remove(fakechar);
+            queues.remove(fakechar.getId());
             debugprint("getPartyInvite: expired entry dropped for " + fakechar.getName());
             return null;
         }
@@ -99,10 +102,18 @@ public class BotPartyQueue {
     }
 
     public synchronized boolean hasPendingInvite(Character fakechar) {
-        return queues.containsKey(fakechar);
+        return queues.containsKey(fakechar.getId());
     }
 
     public synchronized void removePartyInvite(Character fakechar) {
-        queues.remove(fakechar);
+        queues.remove(fakechar.getId());
+    }
+
+    /**
+     * Drop a departed bot's entry. The queue outlives the bot, and an entry pins the inviter's
+     * Character (and, for a companion, keeps authorising an invite the bot can no longer answer).
+     */
+    public synchronized void forgetBot(int characterId) {
+        queues.remove(characterId);
     }
 }

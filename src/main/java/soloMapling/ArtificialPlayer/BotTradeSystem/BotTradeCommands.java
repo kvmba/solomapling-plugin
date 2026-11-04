@@ -277,6 +277,19 @@ public class BotTradeCommands {
         return getTradePartner(fakechar).getChr();
     }
 
+    /**
+     * The partner character, or null when the trade (or its other side) is already gone.
+     *
+     * <p>Trade teardown nulls both characters' trade objects, so any code that runs a tick later
+     * must tolerate the partner having vanished - {@code getTradePartnerCharacter} dereferences
+     * {@code getTrade()} unconditionally.
+     */
+    public static Character getTradePartnerCharacterOrNull(Character fakechar) {
+        Trade trade = fakechar == null ? null : fakechar.getTrade();
+        Trade partner = trade == null ? null : trade.getPartner();
+        return partner == null ? null : partner.getChr();
+    }
+
     // Flavor methods
 
     public static int readPartnerFame(Character fakechar) {

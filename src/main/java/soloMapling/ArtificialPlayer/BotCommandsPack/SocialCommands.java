@@ -244,6 +244,12 @@ public class SocialCommands {
     }
 
     public static void displayPlayerChatCommands(Character chr, ChatCommandResult msg1) {
+        // A closed client means the player is gone: the host clears Character.client five minutes
+        // after a disconnect while the bot may still hold them as its menu inquirer, and the menu's
+        // own 30s sweep then tries to repaint a balloon nobody can receive.
+        if (chr == null || chr.getClient() == null) {
+            return;
+        }
         int maxWidth = msg1.getMaxWidth();
         if (maxWidth < 5) {
             maxWidth = 60;
@@ -256,6 +262,9 @@ public class SocialCommands {
     }
 
     public static void expirePlayerChatCommands(Character chr) {
+        if (chr == null || chr.getClient() == null) {
+            return; // see displayPlayerChatCommands
+        }
         chr.getClient().sendPacket(PacketCreator.sendHint(".", 40, 0));
         chr.getClient().sendPacket(PacketCreator.enableActions());
     }
@@ -274,12 +283,22 @@ public class SocialCommands {
     }
 
     public static void botSetChalkboard(Character fakechar, String chalkboardMessage) {
+        if (fakechar == null || fakechar.getMap() == null) {
+            return;
+        }
         fakechar.setChalkboard(chalkboardMessage);
         fakechar.getMap().broadcastMessage(PacketCreator.useChalkboard(fakechar, false));
         fakechar.sendPacket(PacketCreator.enableActions());
     }
 
     public static void botClearChalkboard(Character fakechar) {
+        // A delayed clear outlives the bot: SocialHotPotatoManager arms one 5 minutes after setting
+        // the sign, which is exactly when the host's own releaseReferences (World's 1-minute timed
+        // sweep, 5 minutes after a disconnect) nulls Character.map. Dereferencing getMap() there
+        // threw NPE out of the timer thread and the sign stayed up for the next viewer.
+        if (fakechar == null || fakechar.getMap() == null) {
+            return; // already off the world - there is no sign left to broadcast
+        }
         fakechar.setChalkboard(null);
         fakechar.getMap().broadcastMessage(PacketCreator.useChalkboard(fakechar, true));
     }

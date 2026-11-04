@@ -1008,3 +1008,8 @@ MerchantBot:
       - "你没接受聊天邀请……那没办法了，菜。"
     emote: 0
     wait: 1
+  NXCodeStoreFailed:
+    text:
+      - "我的兑换码系统出故障了……抱歉，这次的钱你留着，算我请。"
+    emote: 0
+    wait: 1

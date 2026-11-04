@@ -724,6 +724,12 @@ public class EnvironmentManager {
         List<Integer> bots5 = spawnBotsOnMapOnPlatform(3, henesys_map, "m4_social"); // nana fairy area
         List<Integer> bots6 = spawnBotsOnMapOnPlatform(3, henesys_map, "m5_social");
         List<Integer> bots7 = spawnBotsOnMapOnPlatform(3, henesys_map, "m6_social");
+        // A created character is only a statue until a BotSM owns it: no FSM, no tick wheel entry,
+        // and every ambient scan (getBotById(...)) skips it. Start these three ledges like
+        // spawnHenesysBotsBatch does, as interactive social bots.
+        setAndStartBots(bots5, BotTypeManager.BotType.SOCIAL_BOT);
+        setAndStartBots(bots6, BotTypeManager.BotType.SOCIAL_BOT);
+        setAndStartBots(bots7, BotTypeManager.BotType.SOCIAL_BOT);
     }
 
     public static void spawnGachaBotsHenesys() {

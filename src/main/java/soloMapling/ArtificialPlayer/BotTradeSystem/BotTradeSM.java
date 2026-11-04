@@ -361,7 +361,14 @@ public class BotTradeSM {
         }
 
     protected void declineTradeOffer() {
-        BotBlockList.getInstance().addToBlockList(getChr().getId(), getTradePartnerCharacter(getChr()).getId());
+        // The partner can be gone by the time this runs: DECLINE is armed on one tick and executed
+        // on the next, and Trade.declineTrade/cancel nulls BOTH sides' trade objects on the way. The
+        // old code dereferenced the (now null) trade here, so a cancel in that window threw out of
+        // every subsequent tick and pinned the bot in DECLINE forever.
+        Character partner = BotTradeCommands.getTradePartnerCharacterOrNull(getChr());
+        if (partner != null) {
+            BotBlockList.getInstance().addToBlockList(getChr().getId(), partner.getId());
+        }
         BotTradeCommands.writeTradeChat(getChr(), BotMessages.get("trade.declined"));
         BotTiming.after(2000, () -> BotTradeCommands.declineTradeInvite(getChr()));
         getParent().waitFor(2500); // hold until the delayed decline lands

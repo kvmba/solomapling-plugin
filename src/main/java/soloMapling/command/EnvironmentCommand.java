@@ -68,11 +68,10 @@ public class EnvironmentCommand extends Command {
         setDescription("Environment Commands.");
     }
 
-    private static Character player;
     
     @Override
     public void execute(Client c, String[] params) {
-        player = c.getPlayer();
+        Character player = c.getPlayer();
         if (params.length == 0) {
             ExecutorServiceManager.getExecutorService().execute(() -> {
                 player.yellowMessage("No Command Parameter Found. Try !env help");
@@ -126,7 +125,7 @@ public class EnvironmentCommand extends Command {
                 } else if (isInteger(params[1])) {
                     int commandNum = Integer.parseInt(params[1]);
                     String commandString = params[2];
-                    handleStringIntStringCommand(params[0], commandNum, commandString);
+                    handleStringIntStringCommand(params[0], commandNum, commandString, player);
                 } else {
                     player.yellowMessage("Second input not an integer");
                 }
@@ -315,9 +314,10 @@ public class EnvironmentCommand extends Command {
     }
 
     public static void handleSingleInputCommand(String input, Client c) {
+        Character player = c.getPlayer();
         switch (input.toLowerCase()) {
             case "help":
-                printHelp();
+                printHelp(player);
                 break;
             case "loadenv":
                 environmentLoadStartup();
@@ -463,7 +463,7 @@ public class EnvironmentCommand extends Command {
                 dumpGrindProfile(c);
                 break;
             case "perf":
-                printPerfReport();
+                printPerfReport(player);
                 break;
             default:
                 player.yellowMessage("Invalid command - Direct Command");
@@ -472,6 +472,7 @@ public class EnvironmentCommand extends Command {
     }
 
     public static void handleStringIntIntCommand(String input, int input2, int input3, Client c) {
+        Character player = c.getPlayer();
         Character fakechar = BotHelpers.getCharFromChannelStorage(input2);
         if (fakechar == null) {
             player.yellowMessage("Bot null");
@@ -487,6 +488,7 @@ public class EnvironmentCommand extends Command {
     }
 
     public static void handleStringIntCommand(String input, int input2, Client c) {
+        Character player = c.getPlayer();
         switch (input.toLowerCase()) {
             case "attacktest":
                 player.yellowMessage("Spawning tier-" + input2 + " attack test bots on Henesys Hunting Ground 1...");
@@ -534,6 +536,7 @@ public class EnvironmentCommand extends Command {
     }
 
     public static void handleStringStringCommand(String input, String input2, Client c) {
+        Character player = c.getPlayer();
         switch (input.toLowerCase()) {
             case "Test":
                 break;
@@ -547,7 +550,7 @@ public class EnvironmentCommand extends Command {
         }
     }
 
-    public static void handleStringIntStringCommand(String input, int input2, String str) {
+    public static void handleStringIntStringCommand(String input, int input2, String str, Character player) {
         Character fakechar = BotHelpers.getCharFromChannelStorage(input2);
         if (fakechar == null) {
             player.yellowMessage("Bot null");
@@ -574,7 +577,7 @@ public class EnvironmentCommand extends Command {
 
     // Fable audit Phase 0: perf snapshot - threads, heap, tick rates (delta since the
     // previous readout), plus bot/tier counts. Run twice a few seconds apart for live rates.
-    private static void printPerfReport() {
+    private static void printPerfReport(Character player) {
         for (String line : BotPerfStats.report()) {
             player.yellowMessage(line);
         }
@@ -584,7 +587,7 @@ public class EnvironmentCommand extends Command {
                 LodCounts.fullMaps(), LodCounts.haloMaps(), LodCounts.activeMaps()));
     }
 
-    private static void printHelp() {
+    private static void printHelp(Character player) {
         player.yellowMessage("---- Environment Commands (!env) ----");
         player.yellowMessage("-- Diagnostics --");
         player.yellowMessage("!env perf                        - bot perf: threads, heap, tick rates, tiers");
@@ -670,6 +673,7 @@ public class EnvironmentCommand extends Command {
     // Used to calibrate DENSITY_HI/LO / GAP_LO / SPOT_RADIUS against real maps (§13.10 #1). Building it
     // warms the nav graph for the map if it isn't baked yet.
     private static void dumpGrindProfile(Client c) {
+        Character player = c.getPlayer();
         MapleMap map = c.getPlayer().getMap();
         MapGrindProfile p = SpotFinder.profile(map);
         if (p == null) {

@@ -510,4 +510,16 @@ public class FMBot extends BotSM {
         return true;
     }
 
+    // The shop walks run on GCMovement, which holds the shared movement lock and a driver tick
+    // until the session is explicitly disabled. Nothing else tears that session down - MapleMap
+    // .removePlayer leaves the Character's map intact, so the driver keeps ticking a removed bot.
+    @Override
+    public synchronized void stopScheduledTask() {
+        Character chr = getChr();
+        if (chr != null) {
+            GCMovement.disable(chr);
+        }
+        super.stopScheduledTask();
+    }
+
 }

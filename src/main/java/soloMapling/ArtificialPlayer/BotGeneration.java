@@ -531,6 +531,43 @@ public class BotGeneration {
         return fsm != null && fsm.getRunning();
     }
 
+    /**
+     * Retire a bot's Free Market stall from every registry that can still reach it.
+     *
+     * <p>{@code removeBotFromServer} never goes through the host's
+     * {@code Character.closePlayerInteractions()} - that path returns the remaining stock to the
+     * owner's inventory via {@code InventoryManipulator.addFromDrop(c, ...)}, which dereferences
+     * {@code c.getPlayer()} and NPEs for a bot (all bots share headless clients whose player slot
+     * holds some other character, if any). So the stall's world registration outlived the bot: the
+     * owl search and {@code FMBot}'s shop tour both walk {@code World.activePlayerShops}, and
+     * nothing ever removed this entry - the shop, its whole item list and its owner Character
+     * stayed reachable for the life of the process, and its goods kept being offered although the
+     * keeper was gone.
+     *
+     * <p>The stock is deliberately not returned to anyone: a bot's stall items are generated in
+     * memory and belong to nobody's inventory, so there is nothing to hand back. The shop is simply
+     * closed and unregistered, exactly like a sold-out stall (see {@code PlayerShop.botBuy}).
+     */
+    private static void closeBotStall(Character bot) {
+        // Look the stall up through the WORLD registry, not through bot.getPlayerShop(): a stall
+        // that sold out has already run owner.setPlayerShop(null) (PlayerShop.botBuy) while staying
+        // registered, so the field alone would miss exactly the stalls that need retiring most.
+        org.gms.net.server.world.World worldServer = bot.getWorldServer();
+        org.gms.server.maps.PlayerShop shop =
+                worldServer == null ? null : worldServer.getPlayerShop(bot.getId());
+        if (shop != null && shop.isOwner(bot)) {
+            shop.setOpen(false);
+            worldServer.unregisterPlayerShop(shop);
+            shop.closeShop(); // unmaps the box and clears the owner's reference
+            return;
+        }
+        // Not a keeper: the bot was only browsing somebody else's stall.
+        org.gms.server.maps.PlayerShop visited = bot.getPlayerShop();
+        if (visited != null && !visited.isOwner(bot)) {
+            visited.forceRemoveVisitor(bot);
+        }
+    }
+
     public static void removeBotFromServer(Character fakechar) {
         // Stop the FSM FIRST: the BotSM owns the tick-wheel entry, the shared combat-sweep
         // registration and the dynamic movement session, and NONE of them end with the
@@ -549,6 +586,7 @@ public class BotGeneration {
         // Detach the summon before the bot leaves the map: a stationary summon is NOT removed by
         // the host's own leave-map path, so it must be torn down here or it would linger as a ghost.
         soloMapling.ArtificialPlayer.BotSummonSystem.BotSummonSystem.remove(fakechar);
+        closeBotStall(fakechar);
         fakechar.getMap().removePlayer(fakechar);
         // Remove from the channel this bot actually lives on. Removing from a fixed channel
         // would leave a ghost entry behind on every other channel once bots are spread out.
@@ -571,6 +609,13 @@ public class BotGeneration {
         // A removed bot never converts back out, so its recruit handoffs would linger in the
         // static maps forever (and a reused character id could inherit them).
         BotRecruitManager.clearHandoffs(fakechar.getId());
+        // Pending invites are keyed by character id and outlive the Character they point at: without
+        // this the entry keeps the inviter's Character (and, for a re-loaded companion, an invite the
+        // bot can no longer answer) alive for the life of the process.
+        soloMapling.ArtificialPlayer.BotPartySystem.BotPartyQueue.getInstance()
+                .forgetBot(fakechar.getId());
+        soloMapling.ArtificialPlayer.BotTradeSystem.BotTradeQueue.getInstance()
+                .forgetBot(fakechar.getId());
         BotBuffDriver.clearBot(fakechar.getId());   // Phase 3a: release buff recast timers
         soloMapling.ArtificialPlayer.BotAttackSystem.BotAuraState.clearBot(fakechar.getId()); // release dash/disguise aura state
         BotBuffRequestHandler.clearBot(fakechar.getId());   // release chat-buff-request cooldown

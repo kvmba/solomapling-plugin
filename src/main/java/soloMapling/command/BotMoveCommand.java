@@ -32,11 +32,10 @@ public class BotMoveCommand extends Command {
         setDescription("Bot Movement Commands Test.");
     }
 
-    private static Character player;
 
     @Override
     public void execute(Client c, String[] params) {
-        player = c.getPlayer();
+        Character player = c.getPlayer();
         if (params.length == 0) {
             ExecutorServiceManager.getExecutorService().execute(() -> {
                 player.yellowMessage("Please input an integer for cid. Try !move help");
@@ -97,9 +96,10 @@ public class BotMoveCommand extends Command {
 
 
     public static void handleDirectCommand(String input, Client c) {
+        Character player = c.getPlayer();
         switch (input.toLowerCase()) {
             case "help":
-                printHelp();
+                printHelp(player);
                 break;
             case "stoprecording":
                 setMoveDataRecording(false);
@@ -133,6 +133,7 @@ public class BotMoveCommand extends Command {
     }
 
     public static void handleBotPointCommand(String input, int input2, String input3, Point point, Client c) {
+        Character player = c.getPlayer();
         Character fakechar = BotHelpers.getCharFromChannelStorage(input2);
         if (fakechar == null) {
             player.yellowMessage("Bot null");
@@ -158,6 +159,7 @@ public class BotMoveCommand extends Command {
     }
 
     public static void handleBotStringCommand(String input, int input2, String input3, Client c) {
+        Character player = c.getPlayer();
         Character fakechar = BotHelpers.getCharFromChannelStorage(input2);
         if (fakechar == null) {
             player.yellowMessage("Bot null");
@@ -200,6 +202,7 @@ public class BotMoveCommand extends Command {
     }
 
     public static void handleNumberedCommand(String input, int input2, Client c) {
+        Character player = c.getPlayer();
         Character fakechar = BotHelpers.getCharFromChannelStorage(input2);
         if (fakechar == null) {
             player.yellowMessage("Bot null");
@@ -291,7 +294,7 @@ public class BotMoveCommand extends Command {
         }
     }
 
-    private static void printHelp() {
+    private static void printHelp(Character player) {
         player.yellowMessage("---- Bot Movement Commands (!move) ----");
         player.yellowMessage("-- Player Position --");
         player.yellowMessage("!move whereami                   - get your position & foothold");
@@ -334,6 +337,7 @@ public class BotMoveCommand extends Command {
     }
 
     public static void handleTwoStringCommand(String input, String input2, Client c) {
+        Character player = c.getPlayer();
         switch (input.toLowerCase()) {
             case "startrecording":
                 String recMovementDataName = (input2);

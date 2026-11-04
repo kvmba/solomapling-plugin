@@ -115,4 +115,22 @@ class BotPartyQueueTest {
         when(character.getId()).thenReturn(Math.abs(name.hashCode()));
         return character;
     }
+
+    /**
+     * The queue is a process-wide singleton and now keys on the character ID. Leave no entry behind:
+     * other tests sharing this fork must not inherit one another's invites. Removing by the exact IDs
+     * the tests above used (rather than re-mocking the names) keeps this independent of Mockito's
+     * per-mock stubbing state.
+     */
+    @org.junit.jupiter.api.AfterEach
+    void clearQueue() {
+        BotPartyQueue queue = BotPartyQueue.getInstance();
+        queue.forgetBot(idOf("Alpha"));
+        queue.forgetBot(idOf("Stale"));
+        queue.forgetBot(idOf("Edge"));
+    }
+
+    private static int idOf(String name) {
+        return Math.abs(name.hashCode());
+    }
 }

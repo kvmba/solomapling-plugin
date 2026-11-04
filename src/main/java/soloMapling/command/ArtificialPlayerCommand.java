@@ -98,20 +98,17 @@ public class ArtificialPlayerCommand extends Command {
         setDescription("Artificial Player Commands Test.");
     }
 
-    private static Character player;
-
-    /** 表演系统等外部子系统的进度回喊口：最近一次 !bot 命令的发起者。 */
-    public static Character currentPlayer() {
-        return player;
-    }
 
     @Override
     public void execute(Client c, String[] params) {
-        player = c.getPlayer();
+        // Snapshot the caller on the command thread and bind it as this handler's local `player`.
+        // The handlers run on the shared pool; a static field let a second admin's command overwrite
+        // it mid-flight, so the first command's replies - and, for dcmap, the MAP IT ACTED ON -
+        // belonged to the other player.
+        Character player = c.getPlayer();
         if (params.length == 0) {
-            ExecutorServiceManager.getExecutorService().execute(() -> {
-                player.yellowMessage("Please input an integer for cid. Try !bot help");
-            });
+            ExecutorServiceManager.getExecutorService().execute(() ->
+                    player.yellowMessage("Please input an integer for cid. Try !bot help"));
             return;
         }
         // Class-spawn commands take string args (class name), so they can't go through
@@ -178,9 +175,10 @@ public class ArtificialPlayerCommand extends Command {
     }
 
     public static void handleDirectCommand(String input, Client c) {
+        Character player = c.getPlayer();
         switch (input.toLowerCase()) {
             case "help":
-                printHelp();
+                printHelp(player);
                 break;
             case "create":
                 BotTypeManager.createBots(c);
@@ -188,7 +186,7 @@ public class ArtificialPlayerCommand extends Command {
             case "dcmap":
             case "dcallmap":
             case "dchere":
-                removeBotsOnMyMap();
+                removeBotsOnMyMap(player);
                 break;
             case "cpqarena":
                 reportCarnivalArena(c.getPlayer());
@@ -226,13 +224,14 @@ public class ArtificialPlayerCommand extends Command {
      * Routing through {@link #convertBotType} stops the old FSM first, and also refuses to tear
      * down a live trade, so the player on the other side of the window is not stranded.
      */
-    private static void setBotType(Character fakechar, BotTypeManager.BotType botType) {
+    private static void setBotType(Character fakechar, BotTypeManager.BotType botType, Character player) {
         if (!convertBotType(fakechar, botType)) {
             player.yellowMessage("Bot " + fakechar.getName() + " is mid-trade - re-type refused.");
         }
     }
 
     public static void handleNumberedCommand(String input, int input2, Client c) {
+        Character player = c.getPlayer();
         Character fakechar = BotHelpers.getCharFromChannelStorage(input2);
         if (fakechar == null) {
             player.yellowMessage("Bot null");
@@ -256,15 +255,15 @@ public class ArtificialPlayerCommand extends Command {
                 break;
             }
             case "attack": { // force the single-target attack
-                reportAttack(fakechar, BotAttackDriver.forceSingle(fakechar), "attack");
+                reportAttack(fakechar, BotAttackDriver.forceSingle(fakechar), "attack", player);
                 break;
             }
             case "attackaoe": { // force the sustained AoE attack (or report the bot has none)
-                reportAttack(fakechar, BotAttackDriver.forceAoe(fakechar), "attackaoe");
+                reportAttack(fakechar, BotAttackDriver.forceAoe(fakechar), "attackaoe", player);
                 break;
             }
             case "attackult": { // force the throttled full-map ultimate (or report the bot has none)
-                reportAttack(fakechar, BotAttackDriver.forceUltimate(fakechar), "attackult");
+                reportAttack(fakechar, BotAttackDriver.forceUltimate(fakechar), "attackult", player);
                 break;
             }
             case "energy": { // inspect a brawler bot's 能量获得 (Energy Charge) bar
@@ -300,115 +299,115 @@ public class ArtificialPlayerCommand extends Command {
                 break;
             }
             case "dicebot":
-                setBotType(fakechar, DICE_BOT);
+                setBotType(fakechar, DICE_BOT, player);
                 break;
             case "tutorialbot":
             case "tutbot":
-                setBotType(fakechar, TUTORIAL_BOT);
+                setBotType(fakechar, TUTORIAL_BOT, player);
                 break;
             case "setfmbot":
             case "fmbot":
-                setBotType(fakechar, FM_BOT);
+                setBotType(fakechar, FM_BOT, player);
                 break;
             case "scrollingbot":
             case "scrollbot":
-                setBotType(fakechar, SCROLL_BOT);
+                setBotType(fakechar, SCROLL_BOT, player);
                 break;
             case "merchantbot":
             case "sellingbot":
-                setBotType(fakechar, SELLING_MERCHANT_BOT);
+                setBotType(fakechar, SELLING_MERCHANT_BOT, player);
                 break;
             case "buyingbot":
-                setBotType(fakechar, BUYING_MERCHANT_BOT);
+                setBotType(fakechar, BUYING_MERCHANT_BOT, player);
                 break;
             case "nxbot":
             case "nxmerchantbot":
-                setBotType(fakechar, NX_MERCHANT_BOT);
+                setBotType(fakechar, NX_MERCHANT_BOT, player);
                 break;
             case "gachabot":
-                setBotType(fakechar, GACHA_BOT);
+                setBotType(fakechar, GACHA_BOT, player);
                 break;
             case "henesysbot":
-                setBotType(fakechar, HENESYS_BOT);
+                setBotType(fakechar, HENESYS_BOT, player);
                 break;
             case "gamezonehost":
             case "gzhbot":
-                setBotType(fakechar, GAME_ZONE_HOST_BOT);
+                setBotType(fakechar, GAME_ZONE_HOST_BOT, player);
                 break;
             case "bjbot":
             case "bjdealerbot":
             case "blackjackbot":
-                setBotType(fakechar, BLACKJACK_DEALER);
+                setBotType(fakechar, BLACKJACK_DEALER, player);
                 break;
             case "dropgamebot":
             case "dgbot":
-                setBotType(fakechar, DROP_GAME_BOT);
+                setBotType(fakechar, DROP_GAME_BOT, player);
                 break;
             case "opqbot":
-                setBotType(fakechar, OPQ_BOT);
+                setBotType(fakechar, OPQ_BOT, player);
                 break;
             case "hpqbot":
             case "henesyspqbot":
-                setBotType(fakechar, BotTypeManager.BotType.HENESYS_PQ_BOT);
+                setBotType(fakechar, BotTypeManager.BotType.HENESYS_PQ_BOT, player);
                 break;
             case "kpqbot":
             case "kerningpqbot":
-                setBotType(fakechar, BotTypeManager.BotType.KERNING_PQ_BOT);
+                setBotType(fakechar, BotTypeManager.BotType.KERNING_PQ_BOT, player);
                 break;
             case "lpqbot":
             case "ludipqbot":
-                setBotType(fakechar, BotTypeManager.BotType.LUDI_PQ_BOT);
+                setBotType(fakechar, BotTypeManager.BotType.LUDI_PQ_BOT, player);
                 break;
             case "brpqbot":
             case "bossrushbot":
-                setBotType(fakechar, BotTypeManager.BotType.BOSS_RUSH_PQ_BOT);
+                setBotType(fakechar, BotTypeManager.BotType.BOSS_RUSH_PQ_BOT, player);
                 break;
             case "ppqbot":
             case "piratepqbot":
-                setBotType(fakechar, BotTypeManager.BotType.PIRATE_PQ_BOT);
+                setBotType(fakechar, BotTypeManager.BotType.PIRATE_PQ_BOT, player);
                 break;
             case "apqbot":
             case "amoriapqbot":
-                setBotType(fakechar, BotTypeManager.BotType.AMORIA_PQ_BOT);
+                setBotType(fakechar, BotTypeManager.BotType.AMORIA_PQ_BOT, player);
                 break;
             case "epqbot":
             case "ellinpqbot":
-                setBotType(fakechar, BotTypeManager.BotType.ELLIN_PQ_BOT);
+                setBotType(fakechar, BotTypeManager.BotType.ELLIN_PQ_BOT, player);
                 break;
             case "zpqbot":
             case "zakumpqbot":
-                setBotType(fakechar, BotTypeManager.BotType.ZAKUM_PQ_BOT);
+                setBotType(fakechar, BotTypeManager.BotType.ZAKUM_PQ_BOT, player);
                 break;
             case "htpqbot":
             case "horntailpqbot":
-                setBotType(fakechar, BotTypeManager.BotType.HORNTAIL_PQ_BOT);
+                setBotType(fakechar, BotTypeManager.BotType.HORNTAIL_PQ_BOT, player);
                 break;
             case "mpqbot":
             case "magatiapqbot":
-                setBotType(fakechar, BotTypeManager.BotType.MAGATIA_PQ_BOT);
+                setBotType(fakechar, BotTypeManager.BotType.MAGATIA_PQ_BOT, player);
                 break;
             case "cpqbot":
             case "carnivalbot":
-                setBotType(fakechar, BotTypeManager.BotType.CARNIVAL_PQ_BOT);
+                setBotType(fakechar, BotTypeManager.BotType.CARNIVAL_PQ_BOT, player);
                 break;
             case "pyramidbot":
             case "ppbot":
-                setBotType(fakechar, BotTypeManager.BotType.PYRAMID_PQ_BOT);
+                setBotType(fakechar, BotTypeManager.BotType.PYRAMID_PQ_BOT, player);
                 break;
             case "dojobot":
-                setBotType(fakechar, BotTypeManager.BotType.DOJO_PQ_BOT);
+                setBotType(fakechar, BotTypeManager.BotType.DOJO_PQ_BOT, player);
                 break;
             case "papulatusbot":
             case "papbot":
-                setBotType(fakechar, BotTypeManager.BotType.PAPULATUS_PQ_BOT);
+                setBotType(fakechar, BotTypeManager.BotType.PAPULATUS_PQ_BOT, player);
                 break;
             case "arpqbot":
             case "ariantbot":
-                setBotType(fakechar, BotTypeManager.BotType.ARIANT_PQ_BOT);
+                setBotType(fakechar, BotTypeManager.BotType.ARIANT_PQ_BOT, player);
                 break;
             case "jqbot":
             case "henesysjqbot":
-                setBotType(fakechar, HENESYS_JQ_BOT);
+                setBotType(fakechar, HENESYS_JQ_BOT, player);
                 break;
             case "trainbot":
             case "trainingbot":
@@ -418,7 +417,7 @@ public class ArtificialPlayerCommand extends Command {
                 break;
             case "roamerbot":
             case "roamer":
-                setBotType(fakechar, BotTypeManager.BotType.ROAMER_BOT);                player.yellowMessage("Bot " + fakechar.getId()
+                setBotType(fakechar, BotTypeManager.BotType.ROAMER_BOT, player);                player.yellowMessage("Bot " + fakechar.getId()
                         + " is now a RoamerBot (hunts low-level maps, roams freely).");
                 break;
             case "breaknow": {
@@ -460,10 +459,10 @@ public class ArtificialPlayerCommand extends Command {
                 manuallyStopBot(fakechar);
                 break;
             case "convertfmbot":
-                setBotType(fakechar, FM_BOT);
+                setBotType(fakechar, FM_BOT, player);
                 break;
             case "convertscrollbot":
-                setBotType(fakechar, SCROLL_BOT);
+                setBotType(fakechar, SCROLL_BOT, player);
                 break;
 
             case "loot":
@@ -636,6 +635,7 @@ public class ArtificialPlayerCommand extends Command {
     }
 
     public static void handleMassCommand(String input, int input2, int input3, Client c) {
+        Character player = c.getPlayer();
         player.yellowMessage("Mass Command: " + input + ", num: " + input2 + ", num2: " + input3);
         switch (input.toLowerCase()) {
             case "masscreate":
@@ -654,6 +654,7 @@ public class ArtificialPlayerCommand extends Command {
     }
 
     public static void handleTwoNumberedCommand(String input, int input2, int input3, Client c) {
+        Character player = c.getPlayer();
         Character fakechar = BotHelpers.getCharFromChannelStorage(input2);
         if (fakechar == null) {
             player.yellowMessage("Bot null");
@@ -803,6 +804,7 @@ public class ArtificialPlayerCommand extends Command {
 
     // String Int String
     public static void handleTwoObjectCommand(String input, int input2, String str, Client c) {
+        Character player = c.getPlayer();
         Character fakechar = BotHelpers.getCharFromChannelStorage(input2);
         if (fakechar == null) {
             player.yellowMessage("Bot null");
@@ -866,6 +868,7 @@ public class ArtificialPlayerCommand extends Command {
      * params: [0]=spawn|spawnatk  [1]=class  [2]=jobtier(1-4) or exact level(10-200)  [3]=count(optional)
      */
     private static void handleSpawn(String[] params, boolean autoAttack, Client c) {
+        Character player = c.getPlayer();
         String verb = params[0].toLowerCase();
         if (params.length < 3) {
             player.yellowMessage("Usage: !bot " + verb
@@ -976,6 +979,7 @@ public class ArtificialPlayerCommand extends Command {
      * 即插件侧实战会用的全部），演完退场、下一个职业接力，12 个终职演完自动结束。
      */
     private static void handleSkillShow(String[] params, Client c) {
+        Character player = c.getPlayer();
         String sub = params.length >= 2 ? params[1].toLowerCase() : "";
         switch (sub) {
             case "stop" -> {
@@ -987,8 +991,7 @@ public class ArtificialPlayerCommand extends Command {
                 player.yellowMessage(s != null ? s : "skillshow 未在进行。");
             }
             default -> {
-                String err = SkillShowController.start(c.getPlayer().getPosition(),
-                        c.getPlayer().getMapId(), c.getChannel());
+                String err = SkillShowController.start(player.getPosition(), player.getMapId(), c.getChannel(), player);
                 if (err != null) {
                     player.yellowMessage(err);
                 } else {
@@ -1006,6 +1009,7 @@ public class ArtificialPlayerCommand extends Command {
      * WITH MOBS (station-here no-ops in a town). <job> takes a name or a numeric job id.
      */
     private static void handleTrainHere(String[] params, Client c) {
+        Character player = c.getPlayer();
         if (params.length < 2) {
             player.yellowMessage("Usage: !bot trainhere <job> [level] [count]");
             player.yellowMessage("  job: name (hermit, nightlord, chiefbandit, shadower, assassin, bandit, "
@@ -1068,6 +1072,7 @@ public class ArtificialPlayerCommand extends Command {
      * PATROL/STACK join the list as their strategies land.
      */
     private static void handleGrindStyle(String[] params, Client c) {
+        Character player = c.getPlayer();
         if (params.length < 3) {
             player.yellowMessage("Usage: !bot grindstyle <cid|map> <camp|patrol|roam|stack|auto>");
             return;
@@ -1153,7 +1158,7 @@ public class ArtificialPlayerCommand extends Command {
     }
 
     /** Disconnect every bot currently on the command user's map (leaves bots on other maps alone). */
-    private static void removeBotsOnMyMap() {
+    private static void removeBotsOnMyMap(Character player) {
         if (player == null || player.getMap() == null) {
             return;
         }
@@ -1231,7 +1236,7 @@ public class ArtificialPlayerCommand extends Command {
     }
 
     // Print the outcome of a forced bot attack (verb = "attack" / "attackaoe" / "attackult").
-    private static void reportAttack(Character fakechar, BotAttackDriver.AttackResult res, String verb) {
+    private static void reportAttack(Character fakechar, BotAttackDriver.AttackResult res, String verb, Character player) {
         if (res.hit()) {
             player.yellowMessage(verb + " " + fakechar.getName() + " lv" + fakechar.getLevel()
                     + " -> hit '" + res.monsterName() + "' for " + res.damage()
@@ -1245,7 +1250,7 @@ public class ArtificialPlayerCommand extends Command {
         }
     }
 
-    private static void printHelp() {
+    private static void printHelp(Character player) {
         player.yellowMessage("---- Bot Commands (!bot) ----");
         player.yellowMessage("-- Creation & Lifecycle --");
         player.yellowMessage("!bot create                      - create bots");

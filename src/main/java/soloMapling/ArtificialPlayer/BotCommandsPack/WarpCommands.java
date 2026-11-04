@@ -2,6 +2,7 @@ package soloMapling.ArtificialPlayer.BotCommandsPack;
 
 import org.gms.client.Character;
 import org.gms.client.Client;
+import org.gms.constants.id.MapId;
 import org.gms.server.maps.MapObject;
 import org.gms.server.maps.MapleMap;
 import org.gms.server.maps.Portal;
@@ -15,6 +16,7 @@ import java.util.Map;
 import static soloMapling.ArtificialPlayer.BotClientHandler.getBotClient;
 import static soloMapling.ArtificialPlayer.BotMovementSystem.InPacketReader.getMovementRecording;
 import static soloMapling.ArtificialPlayer.BotMovementSystem.MovementCommands.BotMoveStreamOffset;
+import static soloMapling.DebugUtilities.debugprint;
 
 public class WarpCommands {
 
@@ -57,26 +59,46 @@ public class WarpCommands {
     Bot Enters the portal they're standing on. Does not require Map id's, portal id's, or coordinates.
      */
     public static void botWarpMapOnPortal(Character fakechar) {
-        Portal portal = fakechar.getMap().findClosestPortal(fakechar.getPosition());
-        MapleMap to;
-        if (fakechar.getEventInstance() == null) {
-            to = mapForBot(fakechar, portal.getTargetMapId());
-        } else {
-            to = fakechar.getEventInstance().getMapInstance(portal.getTargetMapId());
+        if (fakechar == null || fakechar.getMap() == null) {
+            return;
         }
-
-        Portal pto = to.getPortal(portal.getTarget());
-        if (pto == null) {// fallback for missing portals - no real life case anymore - interesting for not implemented areas
-            pto = to.getPortal(0);
+        Portal portal = fakechar.getMap().findClosestPortal(fakechar.getPosition());
+        if (portal == null) {
+            return;
+        }
+        // Mirror the host's own portal rule (GenericPortal.enterPortal): a portal whose tm is
+        // MapId.NONE (spawn points, exit/one-way pads) does not move the character at all. Without
+        // this the bot asked the map factory for map 999999999, which has no WZ image -
+        // MapFactory.loadMapFromWz dereferences the missing Data and throws NPE straight out of the
+        // bot's tick. A freshly spawned bot's nearest portal is usually such an "sp".
+        //
+        // A scripted portal is left to the host as well: running it here would need the bot bound to
+        // its client (see BotClientBinding), which is a different call path entirely.
+        if (portal.getScriptName() != null || portal.getTargetMapId() == MapId.NONE) {
+            return;
         }
         try {
+            MapleMap to = fakechar.getEventInstance() == null
+                    ? mapForBot(fakechar, portal.getTargetMapId())
+                    : fakechar.getEventInstance().getMapInstance(portal.getTargetMapId());
+            if (to == null) {
+                return; // the destination is not loadable on this bot's channel - leave it where it is
+            }
+            Portal pto = to.getPortal(portal.getTarget());
+            if (pto == null) {// fallback for missing portals - no real life case anymore - interesting for not implemented areas
+                pto = to.getPortal(0);
+            }
             fakechar.changeMap(to, pto);
             botEnterPortalDropDown(fakechar);
         } catch (Exception e) {
+            debugprint("botWarpMapOnPortal failed for " + fakechar.getName() + ": " + e);
         }
     }
 
     public static void botWarpMapOnPortal(Character fakechar, MapleMap warpMap, int portalId) {
+        if (fakechar == null || warpMap == null) {
+            return;
+        }
         fakechar.changeMap(warpMap, portalId);
         botEnterPortalDropDown(fakechar);
     }

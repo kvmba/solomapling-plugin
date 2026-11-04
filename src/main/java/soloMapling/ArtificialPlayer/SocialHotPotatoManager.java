@@ -295,9 +295,18 @@ public class SocialHotPotatoManager {
     }
 
     private void doMegaphone(Character bot) {
-        String category = selectWeightedMegaCategory();
-        String line = getRandomLine(MEGA_DIALOGUE_PATH, MEGA_BOT_TYPE, category);
-        if (line == null) return;
+        // A category this language pack does not ship (BeefCallouts exists only in some packs) used
+        // to be a silently wasted turn: the line lookup returned null and nothing was said at all
+        // (12% of all megaphones in an English world). Redraw instead of validating the pack here -
+        // the same weighted pool stays in charge, and a pack with none of the categories still
+        // bottoms out at the bounded loop.
+        String line = null;
+        for (int attempt = 0; attempt < MEGA_CATEGORIES.length && line == null; attempt++) {
+            line = getRandomLine(MEGA_DIALOGUE_PATH, MEGA_BOT_TYPE, selectWeightedMegaCategory());
+        }
+        if (line == null) {
+            return;
+        }
 
         if (random.nextInt(100) < 75) {
             BotSuperMegaphone(bot, line);
