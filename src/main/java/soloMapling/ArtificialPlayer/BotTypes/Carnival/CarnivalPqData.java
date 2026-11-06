@@ -108,8 +108,9 @@ public final class CarnivalPqData {
      * The CPQ2 equivalent of {@link #lobbyForField}: {@code 980031000 + 1000*field}.
      *
      * <p>CPQ2's fields are spaced by a thousand, not a hundred (the arena sits at
-     * {@code +100}, the winner and loser rooms at {@code +200}/{@code +300}), which is why this
-     * is a separate function rather than an offset on the CPQ1 one.
+     * {@code +100}, the winner and loser rooms at {@code +300}/{@code +400} - see
+     * {@code MonsterCarnival.finish}, which warps to {@code arena + 200} / {@code arena + 300}),
+     * which is why this is a separate function rather than an offset on the CPQ1 one.
      */
     public static int lobbyForField2(int field) {
         return 980031000 + 1000 * field;
@@ -130,6 +131,97 @@ public final class CarnivalPqData {
             return (mapId - 980031000) / 1000;
         }
         return -1;
+    }
+
+    /**
+     * How long a player party waits in a field lobby before the bot team's challenge arrives.
+     *
+     * <p>Long enough that the opposing team is seen walking in and standing there - the point of
+     * the wait is that the player watches the match being made, not that a match appears out of
+     * nowhere. Shown to both sides as the field's own countdown, and the match opens when it
+     * reaches zero.
+     */
+    public static final long MATCH_WAIT_MS = 60_000L;
+
+    /** The countdown value, in seconds, that the field's client clock shows. */
+    public static int matchWaitSeconds() {
+        return (int) (MATCH_WAIT_MS / 1000L);
+    }
+
+    /**
+     * Whether a field is unavailable because a match is already on it.
+     *
+     * <p>Deliberately only two facts: our own match record, and whether the arena instance holds
+     * anybody. The <b>lobby</b> must never count - a player party standing in it is the thing
+     * this whole poll is waiting for, and treating its presence as occupancy is exactly how the
+     * match failed to open at all.
+     */
+    public static boolean fieldBusy(boolean ownMatch, boolean arenaOccupied) {
+        return ownMatch || arenaOccupied;
+    }
+
+    /**
+     * The NPC a finished match's reward room offers as the way out, or -1 when the room has none.
+     *
+     * <p>CPQ1 ships 2042002 in all twelve rooms. CPQ2 puts 2042007 in field 0's pair only: its
+     * other fields' rooms are empty maps, so a bot there has nothing to walk up to and leaves for
+     * the hall after reading the result.
+     */
+    public static int rewardNpcId(int mapId) {
+        if (!isRewardRoomId(mapId)) {
+            return -1;
+        }
+        if (!isSecondEdition(mapId)) {
+            return 2042002;
+        }
+        return mapId == 980031300 || mapId == 980031400 ? 2042007 : -1;
+    }
+
+    /** Whether a map id is one of the post-match rooms of either edition. */
+    public static boolean isRewardRoomId(int mapId) {
+        // CPQ1: winner/loser are lobby + 3 / + 4 (arena sits at lobby + 1, and the engine's
+        // finish() jumps arena + 2/+3). CPQ2: arena is lobby + 100, so the rooms are +300/+400.
+        for (int field = 0; field < FIELD_COUNT; field++) {
+            int lobby = lobbyForField(field);
+            if (mapId == lobby + 3 || mapId == lobby + 4) {
+                return true;
+            }
+        }
+        for (int field = 0; field < FIELD_COUNT_CPQ2; field++) {
+            int lobby = lobbyForField2(field);
+            if (mapId == lobby + 300 || mapId == lobby + 400) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** Whether a map is one of the halls a party waits in before it picks a field. */
+    public static boolean isHall(int mapId) {
+        return mapId == LOBBY_MAP || mapId == LOBBY_MAP_CPQ2;
+    }
+
+    /** Whether a map belongs to the carnival at all: either hall, a field lobby, an arena, a room. */
+    public static boolean isCarnivalMap(int mapId) {
+        return isHall(mapId)
+                || fieldOfLobby(mapId) >= 0
+                || isArenaId(mapId)
+                || isRewardRoomId(mapId);
+    }
+
+    /** Whether a map id is one of the arenas either edition ships. */
+    public static boolean isArenaId(int mapId) {
+        for (int field = 0; field < FIELD_COUNT; field++) {
+            if (mapId == arenaForField(field)) {
+                return true;
+            }
+        }
+        for (int field = 0; field < FIELD_COUNT_CPQ2; field++) {
+            if (mapId == arenaForField2(field)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**

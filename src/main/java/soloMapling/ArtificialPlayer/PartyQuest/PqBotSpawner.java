@@ -90,11 +90,38 @@ public final class PqBotSpawner {
     }
 
     /**
-     * Warm-start the carnival: a full team's worth of carnival bots in each edition's town hall.
+     * How many full teams' worth of carnival bots each hall keeps.
      *
-     * <p>The teams are built on demand when a field actually has a player party waiting (see
-     * {@code CarnivalArena}), which is also when they read as "the other team showed up". This
-     * only guarantees the brain exists so the first match does not pay for a cold spawn.
+     * <p>The hall is a recruit lobby first: a player walks in with a party of any size and needs
+     * bots to invite, exactly like every other quest lobby. Six teams (36 bots) is the density that
+     * reads as a crowd rather than a matched set - the same "several parties' worth" the other
+     * quest lobbies use - and it leaves spare bodies while a team is out fighting a field.
+     *
+     * <p>{@code channel_capacity} is configured at 5000 on this server, so the crowd is not
+     * competing with the training cohorts for room.
+     */
+    private static final int HALL_TEAMS = 6;
+
+    /** Guards the warm start: {@code !env population reload} re-runs the whole wave plan. */
+    private static final java.util.concurrent.atomic.AtomicBoolean CARNIVAL_HALLS_SEEDED =
+            new java.util.concurrent.atomic.AtomicBoolean();
+
+    /**
+     * Warm-start the carnival: a crowd in each edition's hall, on every channel.
+     *
+     * <p>Two jobs, and the crowd serves both. In the hall the bots are <b>recruitable
+     * teammates</b> for a player party that is short of six. The arena also drafts its opponent
+     * team from these same bots, on demand, when a field actually has a player party waiting (see
+     * {@code CarnivalArena}) - which is when they read as "the other team showed up".
+     *
+     * <p>Every channel gets its own crowd because a field, and the draft that staffs it, belong to
+     * one channel: a player on channel 3 walking into field 0 must find bots there just like one
+     * on channel 1.
+     *
+     * <p>Seeded once per process. The whole wave plan can be re-run ({@code !env population
+     * reload}), and unlike the training cohorts - which self-discover field maps and spread out -
+     * a hall crowd that is added a second time simply doubles in place. The arena tops the crowd
+     * back up on demand, so one seeding is enough.
      */
     public static void spawnCarnivalTeams() {
         // No teams to field if the server has the carnival switched off; the NPC gates on the same
@@ -102,20 +129,34 @@ public final class PqBotSpawner {
         if (!org.gms.config.GameConfig.getServerBoolean("use_cpq")) {
             return;
         }
-        spawnCarnivalTeam(CarnivalPqData.BOT_TEAM_SIZE, CarnivalPqData.LOBBY_MAP, false);
-        spawnCarnivalTeam(CarnivalPqData.BOT_TEAM_SIZE, CarnivalPqData.LOBBY_MAP_CPQ2, true);
+        if (!CARNIVAL_HALLS_SEEDED.compareAndSet(false, true)) {
+            return;
+        }
+        int want = scaledAmbient(CarnivalPqData.BOT_TEAM_SIZE * HALL_TEAMS);
+        var world = org.gms.net.server.Server.getInstance()
+                .getWorld(soloMapling.server.SoloMaplingConstants.GameConstants.WORLD_SCANIA);
+        if (world == null) {
+            CARNIVAL_HALLS_SEEDED.set(false); // nothing was placed; let a later call try
+            return;
+        }
+        // Every channel that is up, by its own id: a channel that cannot take the spawn reports
+        // it and the next one is still tried.
+        for (var channel : world.getChannels()) {
+            spawnCarnivalTeam(want, CarnivalPqData.LOBBY_MAP, false, channel.getId());
+            spawnCarnivalTeam(want, CarnivalPqData.LOBBY_MAP_CPQ2, true, channel.getId());
+        }
     }
 
     /**
-     * Put {@code want} carnival bots in a field lobby and convert them to the carnival brain.
+     * Put {@code want} carnival bots in a map and convert them to the carnival brain.
      *
      * <p>Kept here rather than in the arena because it is the spawner that owns platform
      * placement and level assignment; the arena only ever asks for bodies and gets ids back.
      *
-     * @param want     how many bots to add (the caller tops up an existing team)
-     * @param lobbyId  the field lobby map the team registers in
+     * @param want     how many bots to add
+     * @param lobbyId  the map to place them on (a hall, or a field lobby being topped up)
      * @param cpq2     whether the second edition's level band applies
-     * @param channel  the channel whose field is being filled; 0 lets the router choose
+     * @param channel  the channel the bots must live on; 0 lets the router choose
      * @return the ids that were created, empty when the map or platforms were missing
      */
     public static List<Integer> spawnCarnivalTeam(int want, int lobbyId, boolean cpq2, int channel) {
@@ -126,10 +167,13 @@ public final class PqBotSpawner {
         // validates the field's parties, and a bot converted first runs a tick at the wrong one.
         int low = cpq2 ? CarnivalPqData.CPQ2_MIN_LEVEL : CarnivalPqData.CPQ1_MIN_LEVEL;
         int high = cpq2 ? CarnivalPqData.CPQ2_MAX_LEVEL : CarnivalPqData.CPQ1_MAX_LEVEL;
-        int budget = Math.max(1, Math.min(want, CarnivalPqData.BOT_TEAM_SIZE));
+        // A field lobby only ever holds one team (the arena's); a hall holds a crowd.
+        int budget = CarnivalPqData.isHall(lobbyId)
+                ? want
+                : Math.max(1, Math.min(want, CarnivalPqData.BOT_TEAM_SIZE));
 
-        // Pinned to the field's channel: the arena drafts bots out of that channel's storage, so
-        // one routed elsewhere by the capacity fallback would never be seen.
+        // Pinned to the channel: the arena drafts bots out of that channel's storage, so one
+        // routed elsewhere by the capacity fallback would never be seen.
         List<Integer> ids = PlatformPlacement.spawnBotsOnMap(budget, lobbyId, channel);
         if (ids.isEmpty()) {
             return ids;
@@ -142,6 +186,17 @@ public final class PqBotSpawner {
     /** One field lobby's worth of carnival bots, on any channel. */
     public static List<Integer> spawnCarnivalTeam(int want, int lobbyId, boolean cpq2) {
         return spawnCarnivalTeam(want, lobbyId, cpq2, 0);
+    }
+
+    /**
+     * Arm the hall seeding again (plugin unload/reload).
+     *
+     * <p>The crowd flag is process-wide state, and the plugin can be unloaded and loaded again in
+     * the same process: without this reset the second load would find the flag set and skip the
+     * seeding entirely, leaving a hall that has no bots to recruit.
+     */
+    public static void resetCarnivalHallsSeeded() {
+        CARNIVAL_HALLS_SEEDED.set(false);
     }
 
     /**

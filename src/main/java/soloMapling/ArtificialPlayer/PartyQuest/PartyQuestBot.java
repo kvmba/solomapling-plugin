@@ -395,6 +395,13 @@ public abstract class PartyQuestBot extends BotSM implements GrindTickRegistry.P
             // next run.
             wasInsideQuest = false;
             celebratedClearKey = Integer.MIN_VALUE;
+            // A party that moved by a warp rather than by a door is out of this bot's walking
+            // reach. Checked before the lobby beat: Monster Carnival's hall -> field chain has no
+            // portal between them at all, so a teammate recruited in the hall would otherwise
+            // stand there for the whole run.
+            if (followLeaderByWarp()) {
+                return; // moved; the lobby beat resumes from the new map next tick
+            }
             tickLobby(bot);
             return;
         }
@@ -864,18 +871,32 @@ public abstract class PartyQuestBot extends BotSM implements GrindTickRegistry.P
     /**
      * Whether a pending party invitation may be accepted.
      *
-     * <p>True for every quest bot, because being recruited is how they join a run. A content type
-     * that fields its own team must say no instead: Monster Carnival's bots are the <em>opposing
-     * side</em>, and one that has been pulled into a player's party is no longer available when
-     * the arena needs six of them.
-     *
-     * <p>Declining is explicit rather than silent: the pending invite is answered
-     * ({@link BotPartyCommands#botRejectPartyInvite}) so the inviter is told, and the queue entry
-     * is cleared. Leaving it unanswered would make this bot re-evaluate the same invite every
-     * tick for its whole lifetime.
+     * <p>Default is yes: being recruited is the point of every quest bot. A content type that
+     * fields its own team may say no instead, and then the pending invite is answered explicitly
+     * ({@link BotPartyCommands#botRejectPartyInvite}) so the inviter is told and the queue entry
+     * is cleared - leaving it unanswered would make the bot re-evaluate the same invite every tick
+     * for its whole lifetime.
      */
     protected boolean acceptsPartyInvites(Character bot) {
         return true;
+    }
+
+    /**
+     * Rejoin a party that moved by warp instead of by a door, in one hop.
+     *
+     * <p>{@link #followLeaderIntoNextRoom} walks a portal whose target is the leader's map, which
+     * is how quests advance. A few maps are not connected that way at all - Monster Carnival's
+     * lobby chain (hall -> field lobby -> arena) is entered by a script, so no portal leads from
+     * the hall to the field. A bot that joined the party in the hall would otherwise stand there
+     * for the whole run while its team fights.
+     *
+     * <p>Default off: warping is a bigger hammer than walking, and only the quest that needs it
+     * should opt in.
+     *
+     * @return true when this bot changed rooms
+     */
+    protected boolean followLeaderByWarp() {
+        return false;
     }
 
     /**

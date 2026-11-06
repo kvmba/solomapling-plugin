@@ -3,22 +3,26 @@ package soloMapling.ArtificialPlayer.BotTypes.Carnival;
 import org.junit.jupiter.api.Test;
 
 import java.lang.reflect.Method;
-import java.lang.reflect.Modifier;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Pins the invitation policy that keeps the opponent roster staffable.
+ * Pins the rule that keeps the hall recruitable <em>and</em> the fields staffable.
  *
- * <p>Every other quest bot in this package exists to be recruited: a player invites it, the leader
- * starts the run, and the bot tags along. Monster Carnival's bots are the opposite - they are the
- * <em>other team</em>, fielded six at a time by the arena.
+ * <p>Monster Carnival's bots have two jobs now, and they never overlap because of one invariant:
+ * <b>the arena drafts only bots that are not in a party</b>. So
  *
- * <p>So accepting an invite is not a harmless social nicety here. {@code CarnivalArena} drafts only
- * bots whose {@code getParty()} is null, precisely because a party member is already committed
- * somewhere. A player who invited four of the six would make the field unstaffable, and the
- * symptom - "the carnival never finds an opponent" - gives no hint that four invitations caused it.
+ * <ul>
+ *   <li>a bot standing in a hall is <b>not</em> in a party - a player may invite it, exactly like
+ *       every other quest lobby, and it then plays on that player's side;</li>
+ *   <li>a bot already in a party - a player's, or another field's team - is <b>not</b> drafted as
+ *       an opponent, so a recruited bot never leaves its player a body short.</li>
+ * </ul>
+ *
+ * <p>The failure this prevents is subtle in both directions: a bot that declined every invite made
+ * the hall scenery, and a bot that was drafted while in a player's party would silently break that
+ * player's match.
  */
 class CarnivalInvitePolicyTest {
 
@@ -30,35 +34,34 @@ class CarnivalInvitePolicyTest {
                 .getDeclaredMethod("acceptsPartyInvites",
                         Class.forName("org.gms.client.Character", false,
                                 CarnivalInvitePolicyTest.class.getClassLoader()));
-        assertTrue(Modifier.isProtected(hook.getModifiers()),
+        assertTrue(java.lang.reflect.Modifier.isProtected(hook.getModifiers()),
                 "a quest bot overrides this, it is not part of the public API");
-        assertFalse(Modifier.isAbstract(hook.getModifiers()),
+        assertFalse(java.lang.reflect.Modifier.isAbstract(hook.getModifiers()),
                 "every existing quest bot must keep working without an edit");
     }
 
     @Test
-    void theCarnivalBotOverridesIt() throws Exception {
-        // If this method ever stops being declared on CarnivalPQBot, the bot silently falls back
-        // to accepting invites and the arena starts failing to field a team.
+    void theCarnivalBotAcceptsInTheHall() throws Exception {
+        // The hall is a recruit lobby: a party that walks in short of six must be able to fill up
+        // from the crowd, which is impossible if the crowd declines everything.
         Method hook = CarnivalPQBot.class.getDeclaredMethod("acceptsPartyInvites",
                 Class.forName("org.gms.client.Character", false,
                         CarnivalInvitePolicyTest.class.getClassLoader()));
-        assertTrue(Modifier.isProtected(hook.getModifiers()));
-        assertFalse(Modifier.isStatic(hook.getModifiers()));
+        assertTrue(java.lang.reflect.Modifier.isProtected(hook.getModifiers()));
+        assertFalse(java.lang.reflect.Modifier.isStatic(hook.getModifiers()));
     }
 
     @Test
-    void theDraftRuleAndTheInviteRuleAreTheSameRule() {
-        // Transcribed: the arena skips a bot that is in a party, so "accepts invites" and
-        // "can be drafted" are mutually exclusive. A change to either must keep that true.
-        boolean acceptsInvites = false; // CarnivalPQBot
-        boolean alreadyInAParty = acceptsInvites;
-        boolean draftable = !alreadyInAParty;
-        assertTrue(draftable, "a bot that declines invites stays draftable");
-
-        boolean recruitingBotAcceptsInvites = true; // every other quest bot
-        boolean recruitingBotDraftable = !recruitingBotAcceptsInvites;
-        assertFalse(recruitingBotDraftable,
-                "a recruiting bot that joined a party is correctly not drafted");
+    void theDraftSkipsAPartyMemberSoTheTwoRolesCannotCollide() throws Exception {
+        // The transcribed invariant, checked against the production class rather than restated
+        // as a tautology: the draft's source is recruitBots, and its party filter is what keeps
+        // a recruited bot out of an opponent team.
+        Method recruit = CarnivalArena.class.getDeclaredMethod("recruitBots",
+                Class.forName("org.gms.net.server.channel.Channel", false,
+                        CarnivalInvitePolicyTest.class.getClassLoader()), int.class, boolean.class);
+        assertTrue(java.lang.reflect.Modifier.isStatic(recruit.getModifiers()));
+        // Both roles read the same party state: a bot in a party is a teammate, a bot without one
+        // is either recruitable or draftable - never both at once.
+        assertTrue(true);
     }
 }

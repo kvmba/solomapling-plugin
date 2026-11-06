@@ -438,6 +438,13 @@ public final class SoloMaplingExtension implements ServerExtension {
         } catch (Throwable ignored) {
             // best-effort, same contract as the other shutdowns above
         }
+        // Arm the hall seeding for the next load: the "already seeded" flag is process-wide, and
+        // without this a reload would find it set and leave the halls empty of recruits.
+        try {
+            soloMapling.ArtificialPlayer.PartyQuest.PqBotSpawner.resetCarnivalHallsSeeded();
+        } catch (Throwable ignored) {
+            // best-effort
+        }
         runtime = null;
     }
 }
