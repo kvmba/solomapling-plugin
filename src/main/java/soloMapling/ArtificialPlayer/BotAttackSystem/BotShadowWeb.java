@@ -115,7 +115,10 @@ public final class BotShadowWeb {
         Map<Integer, List<Integer>> mobDamage = new LinkedHashMap<>();
         int total = 0;
         for (Monster mob : targets) {
-            int dmg = BotDamageModel.rollLine(bot.getJob().getJobTier(), bot.getLevel(), 1);
+            // Shadow Web's WZ row is a status row (prop = hold chance); it carries no damage
+            // field, so the burst's cosmetic damage is a plain swing.
+            int dmg = BotDamageModel.rollLine(bot.getJob().getJobTier(), bot.getLevel(),
+                    BotDamageModel.PLAIN_SWING_PERCENT);
             mobDamage.put(mob.getObjectId(), List.of(dmg));
             total += dmg;
         }

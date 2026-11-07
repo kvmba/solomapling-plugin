@@ -26,7 +26,6 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ThreadLocalRandom;
 
 /*
  * Targeting and route-dispatch model adapted from GreenCatMS bot combat. Credit: NutNNut.
@@ -321,17 +320,17 @@ public final class BotAttackDriver {
 
         // Roll the profile's lines independently per mob; sum a total for the GM report.
         // Shadow Partner mirrors each throw, so the client draws double the stars - match the packet.
-        // Per line we roll a crit off the bot's class crit chance: a crit bumps the damage and is
+        // The line COUNT is the skill's own WZ attack count at the level this bot holds it, so a
+        // level-40 Bandit draws a partly-leveled Savage Blow and not the authored ceiling.
+        // Per line we roll against the class's WZ crit passive: a crit bumps the damage and is
         // encoded NEGATIVE in the packet (BotAttackData.encodeCritLine) so the viewer renders a yellow
         // crit and the mob recoils harder. We sum the real magnitude for the report; BotAttackEffects
         // decodes the lines back before applying HP.
-        int linesPerMob = shadowDoubled(bot, profile.numDamage);
-        double critChance = BotAttackConfig.critChanceFor(bot.getJob());
+        int linesPerMob = shadowDoubled(bot, profile.linesFor(bot.getLevel(), weapon));
         // WEAKEN halves-ish the bot's output; DARKNESS makes the whole swing whiff (every line 0, so
         // the viewer renders a MISS). Both are null-safe no-ops when the bot has no debuffs.
         double outFactor = status != null ? status.outFactor() : 1.0;
         boolean whiff = status != null && status.whiffs();
-        ThreadLocalRandom rng = ThreadLocalRandom.current();
         Map<Monster, List<Integer>> hits = new LinkedHashMap<>();
         int reported = 0;
         for (Monster mob : targets) {
@@ -341,11 +340,11 @@ public final class BotAttackDriver {
                     lines.add(0); // MISS row - no damage applied downstream
                     continue;
                 }
-                int dmg = profile.rollDamage(bot.getLevel(), bot.getJob());
+                int dmg = profile.rollDamage(bot.getLevel(), bot.getJob(), weapon);
                 if (outFactor < 1.0) {
                     dmg = (int) Math.max(1, Math.round(dmg * outFactor));
                 }
-                if (rng.nextDouble() < critChance) {
+                if (BotAttackConfig.rollsCrit(bot.getJob(), bot.getLevel())) {
                     dmg = (int) Math.round(dmg * BotAttackConfig.CRIT_MULTIPLIER);
                     lines.add(BotAttackData.encodeCritLine(dmg)); // negative -> client shows a crit
                 } else {
