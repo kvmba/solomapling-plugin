@@ -200,14 +200,28 @@ public final class CarnivalPqData {
     }
 
     /**
-     * How long a player party waits in a field lobby before the bot team's challenge arrives.
+     * How long the field's ten-second count runs before the arena opens.
      *
-     * <p>Long enough that the opposing team is seen walking in and standing there - the point of
-     * the wait is that the player watches the match being made, not that a match appears out of
-     * nowhere. Shown to both sides as the field's own countdown, and the match opens when it
-     * reaches zero.
+     * <p>The host's number, read off both entry paths: {@code NPCConversationManager.startCPQ}
+     * broadcasts {@code getClock(10)} and builds the {@code MonsterCarnival} at +11s, and
+     * {@code startCPQ2} does the same with the clock at +0 and the build at +10s. The count the
+     * player actually sees is ten seconds either way, so that is the count this class reproduces;
+     * the arena opens when it reaches zero.
      */
-    public static final long MATCH_WAIT_MS = 60_000L;
+    public static final long MATCH_WAIT_MS = 10_000L;
+
+    /**
+     * The host's own delay between arming the count and putting the clock on screen.
+     *
+     * <p>Both host entry paths show their field clock on a timer, not inline: {@code cpqLobby}
+     * sends its three-minute clock 1.5 seconds after the party warps in, and {@code startCPQ} sends
+     * the ten-second one 1.5 seconds after the challenge is accepted. The delay is load-bearing
+     * here, not cosmetic: that three-minute clock is a one-shot {@code cpqLobby} never keeps a
+     * handle on, so it cannot be cancelled, and a ten-second clock sent before it would simply be
+     * replaced on every client that had just walked in. One poll tick of margin past the host's
+     * 1.5s makes the order deterministic whichever way the two timers happen to race.
+     */
+    public static final long CLOCK_DELAY_MS = 2_000L;
 
     /** The countdown value, in seconds, that the field's client clock shows. */
     public static int matchWaitSeconds() {

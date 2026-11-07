@@ -37,9 +37,10 @@ import java.util.concurrent.ConcurrentHashMap;
  * </ul>
  *
  * <h2>What makes it look like a player-initiated match</h2>
- * The three things a player can see are: the opposing team walking into the field and waiting
- * there, the field's own countdown, and the notice both sides receive on acceptance. This class
- * reproduces all three - see {@link #MATCH_WAIT_MS} and {@link #announceChallenge}.
+ * The two things a player can see are: the opposing team walking into the field and waiting
+ * there, and the field's ten-second clock - the same count the host shows when a challenge is
+ * accepted. This class reproduces both, on the host's own timing - see
+ * {@link CarnivalPqData#MATCH_WAIT_MS} and {@link #announceChallenge}.
  */
 public final class CarnivalArena {
 
@@ -47,38 +48,56 @@ public final class CarnivalArena {
     }
 
     /**
-     * How long the player party waits in the field before the bot team's challenge lands.
+     * How long both sides wait in the field before the arena opens.
      *
-     * <p>This is a rule from the players' side of the feature, not a cosmetic delay: a party that
-     * walks into a field lobby sees its opponent walk in and stand there, watches the field's own
-     * countdown, and the match opens when it reaches zero. Anything shorter would be the match
-     * appearing out of nowhere, which is exactly what the previous jittered 8-15s opening looked
-     * like from inside the lobby.
+     * <p>The host's number, not a cosmetic delay: accepting a challenge has always meant "the
+     * field's clock drops from 10 to 0 and then you are in the arena". The bot-side counterpart of
+     * the NPC is this poll, and it reproduces the same wait so a player who has played the quest
+     * reads the countdown the same way.
      */
     private static final long MATCH_WAIT_MS = CarnivalPqData.MATCH_WAIT_MS;
 
     /** How often the fields are polled. Once a second is enough for a ten-minute match. */
     private static final long TICK_PERIOD_MS = 1_000L;
 
-    /** How long a field must stay quiet before its next match may open. */
-    private static final long FIELD_COOLDOWN_MS = 20_000L;
+    /**
+     * How long a field waits before the poll retries the same party after a start it could not
+     * open.
+     *
+     * <p>Deliberately not a game rule: the host has no cool-down after a match, and a finished
+     * match empties the lobby anyway ({@code MonsterCarnival.finish} warps both sides to their
+     * reward rooms), so a field is free the moment its own match ends. This exists only for the
+     * case the host cannot have - a poll that would otherwise rebuild and disband a six-bot team
+     * once a second against a start the engine keeps refusing (an arena with no WZ carnival data,
+     * a field already registered by a foreign match). The host's model is one attempt per accepted
+     * challenge; this is that attempt's retry floor, not an extra wait after a normal match.
+     */
+    private static final long FAILED_START_BACKOFF_MS = 20_000L;
 
     /**
      * One field's pending match: the player party waiting there, the bot team already standing in
      * the field with them, the field's own map (so the countdown clock can be taken off screen),
-     * and when the countdown runs out.
+     * when the ten-second clock is due, and when the arena opens.
+     *
+     * <p>The two times are separate because the count is anchored to when the clock reaches the
+     * client, not to when the poll noticed the party: the client runs the countdown itself from the
+     * value in the packet, so the arena must open MATCH_WAIT_MS after that packet, or the last
+     * seconds on screen would belong to a match that has already warped them.
      */
     private static final class PendingMatch {
         final Party players;
         final Party bots;
         final MapleMap lobby;
-        final long dueAtMs;
+        /** When to broadcast the ten-second clock; 0 once it has been sent. */
+        long clockAtMs;
+        /** When to open the arena; only meaningful once the clock has gone out. */
+        long dueAtMs;
 
-        PendingMatch(Party players, Party bots, MapleMap lobby, long dueAtMs) {
+        PendingMatch(Party players, Party bots, MapleMap lobby, long clockAtMs) {
             this.players = players;
             this.bots = bots;
             this.lobby = lobby;
-            this.dueAtMs = dueAtMs;
+            this.clockAtMs = clockAtMs;
         }
     }
 
@@ -88,22 +107,20 @@ public final class CarnivalArena {
     /** field key -> the live match on it, so a field is never opened twice. */
     private static final Map<Integer, MonsterCarnival> RUNNING = new ConcurrentHashMap<>();
 
-    /** field key -> epoch ms before which the field must not be re-opened. */
-    private static final Map<Integer, Long> COOLDOWN_UNTIL = new ConcurrentHashMap<>();
+    /**
+     * field key -> epoch ms before which the poll retries the same party after a start it could
+     * not open.
+     *
+     * <p>Deliberately not a field cool-down: the host has none, and a finished match empties the
+     * lobby anyway ({@code MonsterCarnival.finish} warps both sides to their reward rooms), so a
+     * field is free the moment its match ends. This is only the poll's own protection against
+     * rebuilding and disbanding a six-bot team once a second against a start the engine keeps
+     * refusing - one attempt per challenge is the host's model, and this is its analogue.
+     */
+    private static final Map<Integer, Long> RETRY_AFTER = new ConcurrentHashMap<>();
 
     /** field key -> the bot party that fields a team there, so it is reused across matches. */
     private static final Map<Integer, Party> BOT_PARTIES = new ConcurrentHashMap<>();
-
-    /**
-     * field keys seen busy on the previous poll.
-     *
-     * <p>Needed because the channel's own field registry is the only record of "a match is
-     * running", and it is cleared by whoever ends the match - so the first poll after any match
-     * sees a free field with no local trace of what just happened. Remembering the busy fields
-     * lets that transition be recognised as "a match just ended" and earn the cool-down instead
-     * of being re-matched on the spot.
-     */
-    private static final Map<Integer, Boolean> WAS_BUSY = new ConcurrentHashMap<>();
 
     /**
      * field keys with a bot-spawn request in flight.
@@ -277,18 +294,24 @@ public final class CarnivalArena {
     }
 
     /**
-     * Advance one field one tick: reap a finished match, advance a countdown, or arm a new one.
+     * Advance one field one tick: reap a finished match, advance the field's clock, or arm a
+     * challenge.
      *
      * <p>The three states a field can be in, in order:
      * <ol>
      *   <li><b>a match is running</b> - our own record, or anybody standing in the arena instance
      *       (the NPC's player-versus-player path lands there too). Left alone.</li>
-     *   <li><b>a countdown is running</b> - a player party is waiting and a bot team has already
-     *       walked into the field with them. The countdown is refreshed on the field's own clock;
-     *       when it expires the match opens.</li>
-     *   <li><b>nothing</b> - a waiting player party starts a countdown and a bot team is fielded
-     *       for it.</li>
+     *   <li><b>a challenge is counting down</b> - a player party is waiting and a bot team has
+     *       already walked into the field with them. The host's ten-second clock runs on the
+     *       clients; when it expires the match opens.</li>
+     *   <li><b>nothing</b> - a waiting player party gets a bot team walked in and the ten-second
+     *       count started, which is what a party sees when its challenge is accepted.</li>
      * </ol>
+     *
+     * <p>The host's other field clock - the three-minute "nobody challenged you, out you go" - is
+     * left to the host itself: {@code cpqLobby} installs it per character when the party enters,
+     * and it stays armed as the backstop until the match really opens, when {@link #openMatch}
+     * cancels it (the same cancellation {@code startCPQ} performs on acceptance).
      *
      * <p>What is deliberately NOT a busy signal: a real player standing in the lobby. That player
      * is the whole point of the poll - the previous cut treated lobby presence as occupancy and
@@ -306,7 +329,9 @@ public final class CarnivalArena {
         // behind the busy early-return and can never run, so our own finished match keeps the
         // field busy for the life of the process.
         if (reapOwnMatch(key)) {
-            COOLDOWN_UNTIL.put(key, System.currentTimeMillis() + FIELD_COOLDOWN_MS);
+            // No cool-down: the host has none. The engine has already warped both sides to their
+            // reward rooms, so the lobby is empty and the next poll simply finds nothing to do
+            // until a new party walks in.
             dropPending(key);
             return;
         }
@@ -317,28 +342,19 @@ public final class CarnivalArena {
         boolean ours = RUNNING.containsKey(key);
         if (CarnivalPqData.fieldBusy(ours, arenaOccupied(channel, cpq2, field))) {
             if (!ours) {
-                WAS_BUSY.put(key, Boolean.TRUE);
                 // Somebody else's match on this field: leave it alone and make sure our own
                 // pending attempt does not fight it.
                 abandonPending(key, channel, field, cpq2);
             }
             return;
         }
-        if (WAS_BUSY.remove(key) != null) {
-            // It was busy last poll and is free now without a record of ours ending: a foreign
-            // match (the NPC's) just finished. Cool the field down so the players who just played
-            // are not re-matched on the very next poll.
-            COOLDOWN_UNTIL.put(key, System.currentTimeMillis() + FIELD_COOLDOWN_MS);
-            dropPending(key);
-            return;
-        }
 
-        Long coolUntil = COOLDOWN_UNTIL.get(key);
-        if (coolUntil != null) {
-            if (System.currentTimeMillis() < coolUntil) {
+        Long retryAt = RETRY_AFTER.get(key);
+        if (retryAt != null) {
+            if (System.currentTimeMillis() < retryAt) {
                 return;
             }
-            COOLDOWN_UNTIL.remove(key);
+            RETRY_AFTER.remove(key);
         }
 
         // Never load a field lobby just to look at it. `getMap` loads WZ on a miss, and the poll
@@ -351,8 +367,10 @@ public final class CarnivalArena {
         MapleMap lobby = channel.getMapFactory().getMap(lobbyId);
 
         if (!hasHuman(lobby)) {
-            // The party left (or timed out): drop the countdown and send the waiting team home
-            // rather than parking six bots in a field nobody is queuing for.
+            // The party left (or was carried out by the field's own clock): drop the countdown
+            // and send the waiting team home rather than parking six bots in a field nobody is
+            // queuing for. A team still playing its result beat is not a waiting team - it is
+            // finishing the match this lobby hosted, and it walks itself home.
             abandonPending(key, channel, field, cpq2);
             return;
         }
@@ -361,8 +379,8 @@ public final class CarnivalArena {
         if (players == null) {
             // A party that is not whole yet (a member still walking in, or a recruited teammate
             // still on its way). No match is ever opened out of a half-assembled party, and the
-            // countdown restarts once the party is complete - but the bot team stays where it is:
-            // sending it home and back on every poll would make the field flicker.
+            // field's clock is measured from the moment it IS whole - but the bot team stays
+            // where it is: sending it home and back on every poll would make the field flicker.
             dropPending(key);
             return;
         }
@@ -370,22 +388,47 @@ public final class CarnivalArena {
         PendingMatch waiting = PENDING.get(key);
         long now = System.currentTimeMillis();
         if (waiting == null || waiting.players != players) {
-            // A new (or changed) party: field a bot team for it and start the countdown. The team
-            // is walked into the field in the same step, so the player sees the opponent arrive
-            // and wait with them rather than a match appearing.
+            // A new (or changed) party: field a bot team for it and start the field's own clock.
+            // The team is walked into the field in the same step, so the player sees the opponent
+            // arrive and wait with them.
             Party bots = botTeamFor(channel, field, cpq2);
             if (bots == null) {
-                // Not enough carnival bots yet - the spawn was handed off; arm nothing and let
-                // the next poll retry once they land.
+                // No team this tick. Either the previous one is still playing its result beat - in
+                // which case it must be left alone, not sent home - or there are not six carnival
+                // bots yet and the spawn was handed off. Both answers are "arm nothing and let a
+                // later poll retry".
                 abandonPending(key, channel, field, cpq2);
                 return;
             }
             moveTeamTo(bots, channel, lobbyId);
-            PENDING.put(key, new PendingMatch(players, bots, lobby, now + MATCH_WAIT_MS));
-            // ONE clock, not one per second: the client's CLOCK packet starts its own countdown
-            // from the value it carries, so re-sending `ceil(remaining)` every poll would reset
-            // the display to almost the same number each second and the countdown would appear
-            // frozen. Sending it once at the start is what makes the field show a live 60 -> 0.
+            // The player-visible order is the host's: the challenge is accepted, then (1.5s later)
+            // the clock counts ten seconds down, then the arena opens. The notice stands in for
+            // the challenge dialog a bot cannot show, and it is sent at the moment the host would
+            // finish it - before the count, not after the match has already begun.
+            announceChallenge(players, bots);
+            // The host's three-minute field escort stays armed through the count. The host cancels
+            // it at acceptance because it then owns the party's exit itself (startCPQ warps them
+            // in, and warpoutCPQLobby carries them out if the start fails); this poll leaves the
+            // NPC's own timer as the backstop rather than adding a second, duplicate escort of its
+            // own, and cancels it once the match really opens - see openMatch.
+            //
+            // The clock itself waits out the host's own 1.5s (see CLOCK_DELAY_MS): the field's
+            // three-minute clock reaches the client at that offset, so a count sent inline would be
+            // overwritten by 3:00 on every client that has just walked in.
+            PENDING.put(key, new PendingMatch(players, bots, lobby,
+                    now + CarnivalPqData.CLOCK_DELAY_MS));
+            return;
+        }
+        if (waiting.clockAtMs != 0L) {
+            if (now < waiting.clockAtMs) {
+                return; // the field's own three-minute clock is still the one on screen
+            }
+            // ONE clock, not one per second: the client's CLOCK packet runs its own countdown from
+            // the value it carries, so re-sending `ceil(remaining)` every poll would reset the
+            // display to almost the same number each second and the countdown would appear frozen.
+            // Sent once, it shows a live 10 -> 0, exactly the host's own count.
+            waiting.clockAtMs = 0L;
+            waiting.dueAtMs = now + MATCH_WAIT_MS;
             sendCountdown(lobby, CarnivalPqData.matchWaitSeconds());
             return;
         }
@@ -398,13 +441,13 @@ public final class CarnivalArena {
         //
         // The lobby's countdown is stopped here rather than left to the arena's own clock packet:
         // MonsterCarnival does broadcast one on entry, but only after both parties have been moved,
-        // so until then the field would be showing "60 seconds to a match" for a match that has
+        // so until then the field would be showing "10 seconds to a match" for a match that has
         // already started.
         dropPending(key);
         if (!openMatch(channel, players, waiting.bots, field, cpq2, key)) {
             // The door did not open (the arena has no carnival data, or the engine refused). The
-            // field is on a cool-down; send the team home and free it, or the next attempt would
-            // find six bots standing in a field nobody is fighting in.
+            // field backs off; send the team home and free it, or the next attempt would find six
+            // bots standing in a field nobody is fighting in.
             sendTeamHome(waiting.bots, channel, cpq2);
             Party team = BOT_PARTIES.remove(key);
             if (team != null) {
@@ -413,15 +456,23 @@ public final class CarnivalArena {
         }
     }
 
-    /** Start the field's countdown on every client waiting there. */
+    /** Show the host's ten-second count on every client waiting in the field. */
     private static void sendCountdown(MapleMap lobby, int seconds) {
         lobby.broadcastMessage(org.gms.util.PacketCreator.getClock(seconds));
     }
 
-    /** Clear a field's countdown bookkeeping, and take the clock off every waiting client. */
+    /**
+     * Clear a field's countdown bookkeeping, and take OUR clock off every waiting client.
+     *
+     * <p>Only when the ten-second clock was actually sent. Before that the field is showing the
+     * host's own three-minute clock ({@code cpqLobby} sent it, and the host's own return-to-hall
+     * timer is still armed), so a blanket {@code removeClock} here would leave a player with no
+     * clock at all while a three-minute warp they cannot see is still counting - the opposite of
+     * what the clear is for.
+     */
     private static void dropPending(int key) {
         PendingMatch waiting = PENDING.remove(key);
-        if (waiting != null) {
+        if (waiting != null && waiting.clockAtMs == 0L) {
             // A clock left on screen after the wait is abandoned keeps counting down to a match
             // that will never open. Cleared here rather than at each call site so every way the
             // wait can end (party left, half-assembled, match opened) behaves the same.
@@ -435,16 +486,22 @@ public final class CarnivalArena {
      * <p>For the countdown being abandoned (the player party left, or broke up): the bots were
      * walked into the field for that party, and a field lobby is a bot's own {@code lobbyMapId},
      * so nothing else would ever move them out. A live match owns its team and is left alone.
+     *
+     * <p>A team still standing in its reward rooms is left alone too. It is not a waiting team - it
+     * is finishing the match this field just hosted, and {@link #releaseIdleTeam} will disband it
+     * once it is back in a hall. Sending it home from here would cut that beat short for bots the
+     * previous party can still see.
      */
     private static void abandonPending(int key, Channel channel, int field, boolean cpq2) {
         dropPending(key);
         if (RUNNING.containsKey(key)) {
             return;
         }
-        Party team = BOT_PARTIES.remove(key);
-        if (team == null) {
+        Party team = BOT_PARTIES.get(key);
+        if (team == null || teamPlayingResultBeat(team)) {
             return;
         }
+        BOT_PARTIES.remove(key);
         // Home first, then released: a party the world no longer knows about would leave its
         // members pointing at it, and every later draft would skip them as "already committed".
         sendTeamHome(team, channel, cpq2);
@@ -704,7 +761,7 @@ public final class CarnivalArena {
             ARENA_HAS_DATA.put(arenaId, usable);
         }
         if (!usable) {
-            COOLDOWN_UNTIL.put(key, System.currentTimeMillis() + FIELD_COOLDOWN_MS);
+            RETRY_AFTER.put(key, System.currentTimeMillis() + FAILED_START_BACKOFF_MS);
             return false;
         }
 
@@ -732,16 +789,12 @@ public final class CarnivalArena {
                 // directly skips that, and the players would be yanked out three minutes in.
                 clearLobbyTimers(players);
                 RUNNING.put(key, run);
-                // Announced only now: telling the players "the opposing party accepted" before a
-                // constructor that can silently fail would leave them waiting for a match that
-                // was never going to start.
-                announceChallenge(players, bots);
                 BotLogger.log("CPQ field " + field + " opened: " + players.getMembers().size()
                         + " players vs " + bots.getMembers().size() + " bots");
                 return true;
             }
             BotLogger.log("CPQ field " + field + ": the engine refused to start the match");
-            COOLDOWN_UNTIL.put(key, System.currentTimeMillis() + FIELD_COOLDOWN_MS);
+            RETRY_AFTER.put(key, System.currentTimeMillis() + FAILED_START_BACKOFF_MS);
             // Undo what the constructor already assigned before it failed.
             players.setEnemy(null);
             bots.setEnemy(null);
@@ -758,7 +811,7 @@ public final class CarnivalArena {
             // parties may already have been made each other's enemy. Undo that here, or the next
             // attempt starts with both sides pointing at a match that never existed.
             BotLogger.log("CPQ field " + field + ": match start failed (" + e + ")");
-            COOLDOWN_UNTIL.put(key, System.currentTimeMillis() + FIELD_COOLDOWN_MS);
+            RETRY_AFTER.put(key, System.currentTimeMillis() + FAILED_START_BACKOFF_MS);
             players.setEnemy(null);
             bots.setEnemy(null);
             releaseFighters(players);
@@ -775,9 +828,11 @@ public final class CarnivalArena {
      * <p>Both failure branches above run AFTER {@code MonsterCarnival}'s constructor has already
      * force-warped every member into the arena (it moves the teams before the work that can
      * refuse). An arena map's portals are all the engine's no-map sentinel, so a party left there
-     * cannot walk out and the field's own three-minute lobby timer has been cancelled - they would
-     * be stranded until a relog. The field lobby is the map they came from and the one the quest
-     * NPC sends them to, so it is the honest place to put them back.
+     * cannot walk out - the host's own three-minute escort would eventually come for them, but a
+     * party whose start keeps failing must not spend the match with nothing to do. The field lobby
+     * is the map they came from and the one the quest NPC sends them to, so it is the honest place
+     * to put them back. (The host's own failed start warps the field to the hall; the field lobby
+     * is chosen here because it is also where a re-formed party queues again.)
      */
     private static void rescuePlayersFromArena(Party players, Channel channel, int field,
                                                boolean cpq2) {
@@ -870,10 +925,12 @@ public final class CarnivalArena {
     }
 
     /**
-     * Tell both sides the match was accepted.
+     * Tell both sides the match was accepted, which is when the host starts the ten-second count.
      *
-     * <p>A player who challenges another party sees a system notice on both clients; without one
-     * the arena would appear out of nowhere.
+     * <p>In the NPC path accepting the confirmation dialog is what puts the challenge into flight
+     * and what {@code cpqchallenge.js} answers; a bot team has no dialog, so this notice is the
+     * visible half of the same moment. It is sent when the count is armed, not when the arena
+     * opens - by then the host's players would already be counting.
      */
     private static void announceChallenge(Party players, Party bots) {
         for (PartyCharacter mpc : players.getPartyMembers()) {
@@ -886,25 +943,48 @@ public final class CarnivalArena {
 
     private static void notifyAccepted(Character mc) {
         if (mc != null) {
-            mc.dropMessage(6, "The opposing party accepted the challenge. The battle begins...");
+            // The host's own path shows the player a challenge dialog at this moment (cpqchallenge
+            // .js). A bot team has nobody to answer one, so the notice carries the same news and
+            // claims nothing more: the arena opens when the count reaches zero.
+            mc.dropMessage(6, "The opposing party accepted the challenge.");
         }
     }
 
     /**
-     * The bot party for a field: reused while it exists and its members are still around, and
-     * rebuilt (full size) when it is not.
+     * The bot party for a field: reused while it exists and can be walked in right now, and
+     * rebuilt (full size) when it cannot.
+     *
+     * <p>Three cases, all resolved without a timer:
+     * <ul>
+     *   <li><b>ready</b> - reuse it, so a re-match does not blink six bots off the field;</li>
+     *   <li><b>playing the result beat</b> - return null and let this poll skip the field. The team
+     *       is released by {@link #releaseIdleTeam} once it reaches the hall, and a later poll
+     *       fields a fresh one. Building a replacement here would leave the old party registered
+     *       nowhere (its entry would be overwritten) and its six bots committed to a party nothing
+     *       releases - undraftable for the rest of the process;</li>
+     *   <li><b>dead or short</b> - disband and rebuild, because nothing else will ever move those
+     *       members again.</li>
+     * </ul>
      */
     private static Party botTeamFor(Channel channel, int field, boolean cpq2) {
         int key = fieldKey(channel, cpq2, field);
         Party existing = BOT_PARTIES.get(key);
-        if (existing != null && liveTeamSize(existing) >= CarnivalPqData.BOT_TEAM_SIZE) {
-            return existing;
-        }
         if (existing != null) {
+            if (teamFieldReady(existing)) {
+                return existing;
+            }
+            if (teamPlayingResultBeat(existing)) {
+                return null; // it owns itself until it is back in a hall
+            }
             disband(existing);
             BOT_PARTIES.remove(key);
         }
+        return recruitTeam(channel, field, cpq2);
+    }
 
+    /** Build and register a brand-new bot team for a field. */
+    private static Party recruitTeam(Channel channel, int field, boolean cpq2) {
+        int key = fieldKey(channel, cpq2, field);
         List<Character> bots = recruitBots(channel, field, cpq2);
         if (bots.size() < CarnivalPqData.BOT_TEAM_SIZE) {
             return null;
@@ -929,19 +1009,64 @@ public final class CarnivalArena {
         return team;
     }
 
-    /** How many members of a party are still logged in, standing somewhere real and still in it. */
-    private static int liveTeamSize(Party party) {
-        int live = 0;
+    /**
+     * Whether a bot team is still playing the post-match beat - standing in the reward rooms (or
+     * the holding map) the engine parks a finished side in, rather than back in a hall.
+     *
+     * <p>The engine warps both sides out of the arena when a match finishes, and the bots then read
+     * the result, walk to the exit NPC and wait for their humans ({@link CarnivalPQBot}). That beat
+     * is the visible end of a match, so a team in it owns itself: the poll must neither walk it back
+     * into a field nor disband it.
+     *
+     * <p>Deliberately narrow. A team standing in an <b>arena</b> is not settling - every portal on
+     * an arena map carries the engine's no-map sentinel, so a side left there can never leave on its
+     * own - and a team walking home through town is not settling either. Both fall through to the
+     * normal rebuild/escort paths so they cannot be stranded.
+     */
+    private static boolean teamPlayingResultBeat(Party party) {
         for (PartyCharacter mpc : party.getPartyMembers()) {
             Character mc = mpc.getPlayer();
-            // The Party record can outlive its members: a bot that was re-typed or despawned keeps
-            // a stale PartyCharacter whose getPlayer() is null. Counting only live members is what
-            // makes the "team is still field-able" test honest.
-            if (mc != null && mc.getMap() != null && mc.getParty() == party) {
-                live++;
+            if (mc == null || mc.getMap() == null || mc.getParty() != party) {
+                continue; // gone or already released - not evidence of a live settlement
+            }
+            int mapId = mc.getMapId();
+            if (CarnivalPqData.isRewardRoomId(mapId)
+                    || mapId == CarnivalPqData.MATCH_OUT_MAP
+                    || mapId == CarnivalPqData.MATCH_OUT_MAP_CPQ2) {
+                return true;
             }
         }
-        return live;
+        return false;
+    }
+
+    /**
+     * Whether a bot team can be walked into a field right now: all six alive and each standing in
+     * a hall or a field lobby.
+     *
+     * <p>"Complete" is not enough. A team whose match just ended is complete and still standing in
+     * its reward rooms; walking it into the field for the next party would erase the result the
+     * previous players are reading, and it is not a case the host has an answer for either - its
+     * own field is simply occupied until the sides leave. Deliberately not a timed back-off: the
+     * team itself is the clock, and the poll retries on a later tick.
+     *
+     * <p>Only halls and field lobbies count. A team in an arena or on its way home is NOT fieldable
+     * and NOT settling (see {@link #teamPlayingResultBeat}), so it takes the rebuild path rather
+     * than being reused in place.
+     */
+    private static boolean teamFieldReady(Party party) {
+        int ready = 0;
+        for (PartyCharacter mpc : party.getPartyMembers()) {
+            Character mc = mpc.getPlayer();
+            if (mc == null || mc.getMap() == null || mc.getParty() != party) {
+                continue;
+            }
+            int mapId = mc.getMapId();
+            if (!CarnivalPqData.isHall(mapId) && CarnivalPqData.fieldOfLobby(mapId) < 0) {
+                return false;
+            }
+            ready++;
+        }
+        return ready >= CarnivalPqData.BOT_TEAM_SIZE;
     }
 
     /**
@@ -1214,8 +1339,7 @@ public final class CarnivalArena {
     static void forgetFields() {
         PENDING.clear();
         RUNNING.clear();
-        COOLDOWN_UNTIL.clear();
-        WAS_BUSY.clear();
+        RETRY_AFTER.clear();
         SPAWNING.clear();
         BOT_PARTIES.clear();
     }

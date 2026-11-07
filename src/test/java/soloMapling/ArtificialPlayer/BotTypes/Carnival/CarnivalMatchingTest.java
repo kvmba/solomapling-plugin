@@ -10,6 +10,8 @@ import java.util.Set;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -22,9 +24,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  *   <li><b>The lobby is not occupancy.</b> Treating a party standing in the field lobby as "this
  *       field is busy" makes the poll skip the one field that has a party waiting in it, so no
  *       match ever opens. Only the arena counts.</li>
- *   <li><b>The wait is 60 seconds and the field shows it.</b> The player must be able to watch the
- *       opposing team arrive and the countdown run out; the opening used to be an invisible
- *       jittered 8-15s with no clock at all.</li>
+ *   <li><b>The wait is the host's ten seconds and the field shows it.</b> Accepting a challenge
+ *       has always meant a 10-second clock and then the arena; the bot side must reproduce that
+ *       count rather than invent a longer one, and a count the player cannot see is worth
+ *       nothing.</li>
  *   <li><b>A bot in a party is not drafted.</b> The draft must never take a bot a player recruited
  *       in the hall, and must never take a bot from another field's team.</li>
  *   <li><b>The reward rooms are derived, not listed.</b> The engine warps to lobby+3/+4 (CPQ1) and
@@ -120,12 +123,95 @@ class CarnivalMatchingTest {
     }
 
     @Test
-    void theMatchWaitIsSixtySecondsAndShownInSeconds() {
-        assertEquals(60_000L, CarnivalPqData.MATCH_WAIT_MS);
-        assertEquals(60, CarnivalPqData.matchWaitSeconds());
+    void theMatchWaitIsTheHostsTenSecondsAndShownInSeconds() {
+        // The host's own count: NPCConversationManager.startCPQ broadcasts getClock(10) and builds
+        // MonsterCarnival 11s later; startCPQ2 does the same with the clock at once and the build
+        // at 10s. The player-visible count is 10 either way, so that is what the bot side shows.
+        assertEquals(10_000L, CarnivalPqData.MATCH_WAIT_MS);
+        assertEquals(10, CarnivalPqData.matchWaitSeconds());
         // The constant the arena actually waits on is the data class's, not a second copy that
         // could drift away from it.
-        assertEquals(CarnivalPqData.MATCH_WAIT_MS, 60_000L);
+        assertEquals(CarnivalPqData.MATCH_WAIT_MS, 10_000L);
+    }
+
+    @Test
+    void theClockIsDelayedPastTheHostsOwnThreeMinuteOne() {
+        // Both host entry paths put their field clock on a 1.5s timer, and that delay is
+        // load-bearing here: cpqLobby's uncancellable three-minute clock reaches the client at the
+        // same offset, so a ten-second clock sent inline would be overwritten by 3:00 on every
+        // client that just walked in. One poll tick of margin makes the order deterministic.
+        assertTrue(CarnivalPqData.CLOCK_DELAY_MS > 1_500L,
+                "the count must land after the host's own three-minute clock, not before it");
+        assertEquals(2_000L, CarnivalPqData.CLOCK_DELAY_MS);
+        assertTrue(CarnivalPqData.CLOCK_DELAY_MS < CarnivalPqData.MATCH_WAIT_MS,
+                "the delay is a rounding of the count, never longer than it");
+    }
+
+    @Test
+    void aTeamStillReadingItsResultIsNotWalkedBackIntoTheField() throws Exception {
+        // The engine warps both sides to their reward rooms when a match ends, and the bots play a
+        // result beat there (linger, walk to the NPC, wait for their humans). A new party walking
+        // into that field must get a FRESH team: pulling the settling one back would delete the
+        // beat from the match the previous players are still reading, and the alternative the old
+        // code took - replacing the registry entry - left its six bots in a party nothing releases.
+        Method ready = CarnivalArena.class.getDeclaredMethod("teamFieldReady",
+                Class.forName("org.gms.net.server.world.Party", false,
+                        CarnivalMatchingTest.class.getClassLoader()));
+        assertTrue(Modifier.isPrivate(ready.getModifiers()));
+        Method beat = CarnivalArena.class.getDeclaredMethod("teamPlayingResultBeat",
+                Class.forName("org.gms.net.server.world.Party", false,
+                        CarnivalMatchingTest.class.getClassLoader()));
+        assertTrue(Modifier.isPrivate(beat.getModifiers()));
+
+        // The map classes the predicates distinguish, stated as data: a hall and a field lobby are
+        // fieldable, a reward room is settling (and not fieldable), and an ARENA is neither - every
+        // arena portal is the engine's no-map sentinel, so a team left there must never be read as
+        // "settling" or it would be stranded on a dead map.
+        assertTrue(CarnivalPqData.isHall(CarnivalPqData.LOBBY_MAP));
+        assertTrue(CarnivalPqData.fieldOfLobby(CarnivalPqData.lobbyForField(0)) >= 0);
+        assertTrue(CarnivalPqData.isRewardRoomId(CarnivalPqData.lobbyForField(0) + 3));
+        assertEquals(-1, CarnivalPqData.fieldOfLobby(CarnivalPqData.lobbyForField(0) + 3),
+                "a reward room belongs to no field, so it never reads as fieldable");
+        assertFalse(CarnivalPqData.isRewardRoomId(CarnivalPqData.arenaForField(0)),
+                "an arena is not a reward room: a team there takes the rebuild path, not the wait");
+        assertFalse(CarnivalPqData.isRewardRoomId(CarnivalPqData.MATCH_OUT_MAP),
+                "the holding map is settling, but it is not one of the reward rooms");
+    }
+
+    @Test
+    void abandoningBeforeTheClockIsSentLeavesTheHostsClockAlone() throws Exception {
+        // dropPending clears OUR clock. Before the ten-second clock is sent the client is showing
+        // the host's three-minute one (with its warp timer still armed), so clearing it would
+        // leave a player with no clock while an invisible three-minute exit counts down.
+        var clockAt = CarnivalArena.class.getDeclaredClasses();
+        boolean sawPending = false;
+        for (Class<?> inner : clockAt) {
+            if (!inner.getSimpleName().equals("PendingMatch")) {
+                continue;
+            }
+            sawPending = true;
+            assertTrue(Modifier.isPrivate(inner.getModifiers()));
+            // The "was our clock sent?" marker and the deadline are separate state: the deadline is
+            // only armed when the clock actually goes out.
+            assertNotNull(inner.getDeclaredField("clockAtMs"));
+            assertNotNull(inner.getDeclaredField("dueAtMs"));
+        }
+        assertTrue(sawPending, "the field's wait record must stay an internal detail");
+    }
+
+    @Test
+    void theHostHasNoFieldCooldownAfterAMatch() throws Exception {
+        // A finished match warps both sides out (MonsterCarnival.finish), so the lobby is empty
+        // and the field is free at once - the poll must not add a wait the host never had. What
+        // the arena keeps instead is a retry floor for starts the engine refuses.
+        for (String name : new String[]{"COOLDOWN_UNTIL", "WAS_BUSY"}) {
+            assertThrows(NoSuchFieldException.class,
+                    () -> CarnivalArena.class.getDeclaredField(name),
+                    "the poll must not carry a field cool-down the host does not have");
+        }
+        assertTrue(Modifier.isPrivate(
+                        CarnivalArena.class.getDeclaredField("RETRY_AFTER").getModifiers()),
+                "only a failed-start retry floor remains, and it is internal bookkeeping");
     }
 
     @Test

@@ -11,8 +11,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  *
  * <p>{@code MonsterCarnival}'s constructor force-warps both parties into the disposable arena
  * before the work that can refuse the match, and every portal on an arena map carries the engine's
- * no-map sentinel. A party left there cannot walk out, and the field lobby's own three-minute exit
- * timer has already been cancelled by then - so a refused start would strand them until a relog.
+ * no-map sentinel. A party left there cannot walk out - the host's own three-minute escort may not
+ * still be armed, and a party parked in an arena must never wait on it anyway - so a refused start
+ * would strand them on a dead map.
  *
  * <p>The rescue target matters as much as the rescue: the arena's own {@code returnMap} points at
  * the field's holding map, and that map returns to the arena. A party parked there is walked
