@@ -2162,9 +2162,27 @@ final class BotPhysicsEngine {
         if (map == null || map.getFootholds() == null || previousPos == null || nextPos == null) {
             return AirCollision.none();
         }
-        AirCollision wall = findWallCollision(map, previousPos, nextPos);
-        AirCollision ceiling = findCeilingCollision(map, previousPos, nextPos);
-        AirCollision landing = findGroundCollision(map, previousPos, nextPos);
+        // Ours (CPQ prep map 980000100): judge the clamped step, not the raw one.
+        //
+        // Both ends are clamped because the airborne integrator can hold an out-of-range pixel for a
+        // frame (a wall stop, a knockback, a coarse jump issued while the body was still outside).
+        // Scanning from a raw out-of-range start answered "WALL at the step's END pixel, progress
+        // 0.0", and that answer beats the landing the step crosses (findGroundCollision reports it
+        // at progress 1.0, so the corner tie rule below cannot rescue it). Airborne integration then
+        // keeps the fall speed and the bot slides down the boundary column past the floor row and
+        // out of the map. Measured on this map (floor ends at x=495, VR ends at 491): a single pixel
+        // of overshoot decided it - next.x=495 landed on the floor, next.x=496 was swallowed as a wall.
+        //
+        // The clamp must NOT replace the boundary response: a step that merely drifts outward still
+        // has to be held ON the bound, or a body outside the extent would keep sliding away forever.
+        // So: clamp both ends, run the searches, and fall back to the old boundary WALL only when the
+        // clamped step truly hit nothing.
+        Point start = clampAirStepX(map, previousPos);
+        Point end = clampAirStepX(map, nextPos);
+        boolean sideClamped = end.x != nextPos.x;
+        AirCollision wall = findWallCollision(map, start, end);
+        AirCollision ceiling = findCeilingCollision(map, start, end);
+        AirCollision landing = findGroundCollision(map, start, end);
         AirCollision best = AirCollision.none();
         if (wall.type() != AirCollisionType.NONE) {
             best = wall;
@@ -2201,7 +2219,26 @@ final class BotPhysicsEngine {
                 best = landing;
             }
         }
+        if (best.type() == AirCollisionType.NONE && sideClamped) {
+            // Nothing on the clamped column: keep the old behaviour - hold the body ON the bound
+            // instead of letting it drift away through empty air.
+            best = new AirCollision(AirCollisionType.WALL, end, null, 0.0);
+        }
         return best;
+    }
+
+    /*
+     * One end of an airborne step with its X clamped into the map's X range. Y is never touched:
+     * the step's height is what the landing search needs.
+     */
+    private static Point clampAirStepX(MapleMap map, Point p) {
+        Rectangle area = map.getMapArea();
+        if (area == null || area.width <= 0 || area.height <= 0) {
+            return p;
+        }
+        int x = Math.max(effectiveLeftBoundaryX(map, area),
+                Math.min(effectiveRightBoundaryX(map, area), p.x));
+        return x == p.x ? p : new Point(x, p.y);
     }
 
     private static void launchAirborne(BotMovementState entry,
@@ -2817,49 +2854,66 @@ final class BotPhysicsEngine {
     }
 
     /*
-     * The bot's flight bound is the STANDABLE foothold AABB — the same boundary the real client
-     * walks: a player can only ever be where standable footholds exist, so the out-of-foothold
-     * margin many maps leave between their last platform and the VR wall (Eos Tower 920010100:
-     * VR right edge 359, standable extent 220, wall column 320 — a 39px full-height gap) must be
-     * unreachable, or a jump that crosses the platform edge enters a column with no foothold at
-     * any height and free-falls forever. Standable excludes wall columns (x1==x2): the tower's
-     * tree bounds reach x=320 but nothing can be stood on there — clamping to the tree bounds
-     * would strand the bot ON the wall column. The VR rect is only the fallback for trees
-     * without usable x bounds; "synthetic" VR is no longer special-cased — the foothold bound is
-     * correct for those too (the old code's max()/min() made REAL maps the buggy case: the
-     * boundary was pushed PAST the foothold wall into the void). The standable extent is cached
-     * on the per-tree collision index.
+     * The bot's flight bound: the STANDABLE foothold extent intersected with the map's VR x rect.
+     *
+     * <p>Both sources are needed:
+     * <ul>
+     *   <li><b>Standable</b> (walls excluded, x1!=x2): the only x where a body can be standing. A map
+     *       routinely leaves a full-height margin between its last platform and the VR wall (Eos
+     *       Tower 920010100: VR right 359, standable 220, wall column at 320 - a 39px column with no
+     *       foothold at any height). Clamping to the tree bounds instead would strand a bot ON the
+     *       wall column, which nothing can catch.</li>
+     *   <li><b>VR x rect</b>: the client's own map boundary. A foothold drawn outside it is data the
+     *       player can never reach, so a bound built from the raw foothold extent promises movement
+     *       to a pixel no player could occupy. 1554 of the 3097 shipped maps carry such footholds;
+     *       the CPQ prep maps are among them (980000100's floor reaches x=495, its VR ends at 491).</li>
+     * </ul>
+     *
+     * <p>An EMPTY intersection falls back to the standable extent. Every shipped map intersects
+     * non-emptily (0 of 3097), but synthetic fixtures and hand-built maps do not: a test geometry
+     * that puts its footholds outside its own VR rect would otherwise collapse the bound to a
+     * degenerate line and silently disable the escape logic that reads it.
      */
-    private static int effectiveLeftBoundaryX(MapleMap map, Rectangle area) {
+    private static Point boundaryX(MapleMap map, Rectangle area) {
         if (!hasUsableFootholdXBounds(map)) {
-            return area.x;
+            return new Point(area.x, area.x + area.width);
         }
-        return collisionIndex(map).standableMinX();
+        FootholdCollisionIndex index = collisionIndex(map);
+        int left = Math.max(index.standableMinX(), area.x);
+        int right = Math.min(index.standableMaxX(), area.x + area.width);
+        return left <= right
+                ? new Point(left, right)
+                : new Point(index.standableMinX(), index.standableMaxX());
+    }
+
+    private static int effectiveLeftBoundaryX(MapleMap map, Rectangle area) {
+        return boundaryX(map, area).x;
     }
 
     private static int effectiveRightBoundaryX(MapleMap map, Rectangle area) {
-        if (!hasUsableFootholdXBounds(map)) {
-            return area.x + area.width;
-        }
-        return collisionIndex(map).standableMaxX();
+        return boundaryX(map, area).y;
     }
 
     /**
-     * The standable x extent — the real bound a bot's body may occupy — or null when the map has no
-     * usable foothold columns.
+     * The x extent a bot's body may occupy: {@link #boundaryX}, i.e. the standable foothold extent
+     * intersected with the VR x rect - the same numbers the flight clamp enforces, so the watchdog
+     * and the physics can never disagree about where the map ends.
      *
-     * <p>Deliberately foothold-derived, never the VR rect: a map's VR box routinely extends PAST
-     * its last platform (LPQ 922010100: VR ±400, standable ±365), so a VR-based test declares a bot
-     * hovering in that gap "inside the map" and no recovery ever fires. The flight bound already
-     * uses these same numbers, which keeps the watchdog and the physics agreeing about where the
-     * map ends.
+     * <p>Null only when the map has no usable foothold columns, which is the caller's signal to fall
+     * back to the raw VR rect. Why not VR alone: the VR rect routinely extends PAST the last platform
+     * (LPQ 922010100: VR +-400, standable +-365), so a VR-only test would call a bot hovering in that
+     * gap "inside the map" and no recovery would ever fire.
      */
     static Point standableXBounds(MapleMap map) {
         if (map == null || !hasUsableFootholdXBounds(map)) {
             return null;
         }
-        FootholdCollisionIndex index = collisionIndex(map);
-        return new Point(index.standableMinX(), index.standableMaxX());
+        Rectangle area = map.getMapArea();
+        if (area == null || area.width <= 0 || area.height <= 0) {
+            FootholdCollisionIndex index = collisionIndex(map);
+            return new Point(index.standableMinX(), index.standableMaxX());
+        }
+        return boundaryX(map, area);
     }
 
     private static boolean hasUsableFootholdXBounds(MapleMap map) {
