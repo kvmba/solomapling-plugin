@@ -12,8 +12,9 @@ import org.gms.client.Disease;
  * table says which diseases freeze / disarm / slow / weaken / blind / poison, and by how much.
  *
  * Only the diseases a bot visibly reacts to are modelled here (STUN / SEDUCE / SEAL / SLOW / WEAKEN /
- * DARKNESS / POISON). Any other disease the plugin shows (CURSE, ...) is carried purely as a foreign
- * packet and has no behaviour - see BotDebuffState.
+ * DARKNESS / POISON). Any other disease the plugin tracks (CURSE, which the engine itself applies to
+ * a bot from a Monster Carnival opponent or a GM command) has no behaviour of its own - it is carried
+ * so its cancel is not lost and the engine's two-disease cap stays honest; see BotDebuffState.
  */
 public final class BotDebuffTable {
 
@@ -44,6 +45,17 @@ public final class BotDebuffTable {
 
     // Mirrors Character.giveDebuff's cap: a bot carries at most this many diseases at once.
     public static final int MAX_ACTIVE = 2;
+
+    /**
+     * How often a bot re-reads the engine's own disease list (see BotDebuffState.syncHostDiseases).
+     *
+     * <p>Reading it costs a fresh map built under the character's lock, and the movement tick runs at
+     * 20 Hz on observed maps - so an unthrottled read would be 20 allocations a second per debuffed
+     * bot. 250 ms is still six times finer than the 1500 ms expire pass the engine runs for real
+     * players ({@code Character.diseaseExpireTask}), so an adopted disease starts and ends within a
+     * fraction of the time the engine itself would take.
+     */
+    public static final long HOST_SYNC_INTERVAL_MS = 250L;
 
     /** Whether the disease itself is one a bot can suffer (used to accept or reject an apply). */
     public static boolean isDebuff(Disease d) {
