@@ -172,7 +172,10 @@ public final class BotEnergyCharge {
         // cross-thread edge where a cast landed between the scan and this strike - and it then
         // keeps the "an attack breaks the hide" rule true at every swing site.
         BotAuraState.cancelHidesForAction(bot);
-        int damage = BotDamageModel.rollLine(bot.getJob().getJobTier(), bot.getLevel(), 1);
+        // Energy Charge's WZ `damage` is the charged-state BOOST (+5% at lv1 .. +200% at lv40),
+        // not an attack percentage - the touch strike is a plain swing, as it always was.
+        int damage = BotDamageModel.rollLine(bot.getJob().getJobTier(), bot.getLevel(),
+                BotDamageModel.PLAIN_SWING_PERCENT);
         return BotAttackEffects.bodyStrike(bot, mob, damage);
     }
 

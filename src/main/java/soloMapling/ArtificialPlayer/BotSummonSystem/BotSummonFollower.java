@@ -818,7 +818,8 @@ public final class BotSummonFollower {
         List<BotSummonBroadcast.Strike> hits = new ArrayList<>(targets.size());
         for (Monster target : targets) {
             hits.add(new BotSummonBroadcast.Strike(target.getObjectId(),
-                    BotDamageModel.rollLine(tier, bot.getLevel(), Math.max(1, s.spec.attackLines()))));
+                    BotDamageModel.rollLine(tier, bot.getLevel(),
+                            BotDamageModel.skillPercent(s.spec.skillId(), bot.getLevel()))));
         }
 
         try {

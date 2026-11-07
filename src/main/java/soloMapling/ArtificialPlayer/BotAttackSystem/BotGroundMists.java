@@ -109,7 +109,8 @@ public final class BotGroundMists {
         Map<Integer, List<Integer>> mobDamage = new LinkedHashMap<>();
         int total = 0;
         for (Monster mob : targets) {
-            int dmg = BotDamageModel.rollLine(bot.getJob().getJobTier(), bot.getLevel(), 1);
+            int dmg = BotDamageModel.rollLine(bot.getJob().getJobTier(), bot.getLevel(),
+                    BotDamageModel.skillPercent(FPMage.POISON_MIST, bot.getLevel()));
             mobDamage.put(mob.getObjectId(), List.of(dmg));
             total += dmg;
         }

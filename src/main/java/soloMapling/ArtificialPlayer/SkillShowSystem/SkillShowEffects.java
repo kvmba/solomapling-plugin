@@ -79,7 +79,8 @@ public final class SkillShowEffects {
     private static Map<Integer, List<Integer>> singleLine(Character bot, Monster mob) {
         Map<Integer, List<Integer>> dmg = new LinkedHashMap<>();
         dmg.put(mob.getObjectId(), List.of(
-                BotDamageModel.rollLine(bot.getJob().getJobTier(), bot.getLevel(), 1)));
+                BotDamageModel.rollLine(bot.getJob().getJobTier(), bot.getLevel(),
+                        BotDamageModel.PLAIN_SWING_PERCENT)));
         return dmg;
     }
 

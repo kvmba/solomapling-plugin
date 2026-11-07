@@ -277,8 +277,10 @@ public final class BotMesoBomb {
         if (bags.size() > bagCap) {
             bags = bags.subList(0, bagCap);
         }
-        int perBag = BotDamageModel.rollLine(bot.getJob().getJobTier(), bot.getLevel(), 6)
-                * effect.getX() / 100; // x = % per bag: 500 at lv1 .. 1000 at lv30
+        // `x` is already this skill's WZ per-bag percentage (500 at lv1 .. 1000 at lv30), so the
+        // roll below is a PLAIN swing scaled by x - applying skillPercent on top would square it.
+        int perBag = BotDamageModel.rollLine(bot.getJob().getJobTier(), bot.getLevel(),
+                BotDamageModel.PLAIN_SWING_PERCENT) * effect.getX() / 100;
 
         Map<Integer, List<Integer>> mobDamage = new LinkedHashMap<>();
         int idx = 0;

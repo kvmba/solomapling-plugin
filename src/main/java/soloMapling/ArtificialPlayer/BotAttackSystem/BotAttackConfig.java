@@ -167,39 +167,33 @@ public final class BotAttackConfig {
 
     private BotAttackConfig() {}
 
-    // ---- per-class critical-hit identity ----
-    // Crit is a class trait, not a per-attack one: it mirrors the engine's job-gated canCrit
-    // (AbstractDealDamageHandler:738) but graded - thieves/bowmen crit often, warriors seldom,
-    // mages rarely. A crit only bumps the displayed/applied damage (and so the knockback); it's
-    // combat feel, not balance, so tune these freely. critChanceFor resolves by job lineage, so
-    // advanced jobs (Night Lord, Hero, Bishop, ...) inherit their branch's chance.
-    private static final double CRIT_THIEF   = 0.50;
-    private static final double CRIT_BOWMAN  = 0.50;
-    private static final double CRIT_WARRIOR = 0.01;
-    private static final double CRIT_MAGE    = 0.01;
-    private static final double CRIT_DEFAULT = 0.01; // beginners / unlisted
-
     /* A crit shows ~this multiple of the rolled damage (bigger number -> stronger client knockback). */
     public static final double CRIT_MULTIPLIER = 1.5;
 
-    /* This job's per-line critical-hit chance (0..1), by class branch. */
-    public static double critChanceFor(Job job) {
+    // ---- per-class critical-hit identity ----
+    // Crit comes from the class's own WZ passive - 精准暗器 (Critical Throw, 4100001) / 精准弓
+    // (Critical Shot, 3000001) - whose prop grows with the skill's level: Critical Throw is 21% at
+    // skill level 1 and 50% at 30, Critical Shot 12% at 1 and 40% at 20. Reading the passive through
+    // the bot's derived skill level means a lobby-level thief crits on a partly-leveled skill instead
+    // of a maxed one, and warriors/mages/pirates (no crit passive in v83) never crit at all.
+    private static final int CRITICAL_THROW = 4100001;
+    private static final int CRITICAL_SHOT = 3000001;
+
+    /**
+     * Whether one line of this job's swing crits, rolled from the class's WZ crit passive at the
+     * level the bot holds it. Jobs without such a passive never crit - v83 gives them no prop.
+     */
+    public static boolean rollsCrit(Job job, int botLevel) {
         if (job == null) {
-            return 0.0;
+            return false;
         }
+        int passive = 0;
         if (job.isA(Job.ASSASSIN) || job.isA(Job.HERMIT) || job.isA(Job.NIGHTLORD)) {
-            return CRIT_THIEF;
+            passive = CRITICAL_THROW;
+        } else if (job.isA(Job.BOWMAN)) {
+            passive = CRITICAL_SHOT;
         }
-        if (job.isA(Job.BOWMAN)) {
-            return CRIT_BOWMAN;
-        }
-        if (job.isA(Job.WARRIOR)) {
-            return CRIT_WARRIOR;
-        }
-        if (job.isA(Job.MAGICIAN)) {
-            return CRIT_MAGE;
-        }
-        return CRIT_DEFAULT;
+        return passive != 0 && BotDamageModel.rollsChance(passive, botLevel);
     }
 
     // A job with no ultimate leaves that slot null; the two-profile overload keeps the many

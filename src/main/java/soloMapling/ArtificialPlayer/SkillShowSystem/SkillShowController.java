@@ -36,7 +36,6 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.concurrent.ThreadLocalRandom;
 
 /**
  * GM 技能观测表演：4 转 bot 逐个登场（job id 升序），把自己的职业体系技能
@@ -136,13 +135,15 @@ public final class SkillShowController {
 
         WeaponType weapon = BotAttack.resolveEquippedWeaponType(bot);
         int skill = profile.skillFor(weapon);
-        int lines = profile.numDamage;
+        // The line count is the skill's own WZ attack count at this bot's level, so the show-wave
+        // renders the same swing a real player of that level would.
+        int lines = profile.linesFor(bot.getLevel(), weapon);
         int facingMask = MovementCommands.facingLeft(bot) ? BotAttackData.FACING_LEFT_MASK : BotAttackData.FACING_RIGHT_MASK;
         int bodyActionId = BotAttackData.actionFor(skill, weapon);
         List<Integer> damage = new ArrayList<>(lines);
         for (int i = 0; i < lines; i++) {
-            int dmg = profile.rollDamage(bot.getLevel(), bot.getJob());
-            damage.add(ThreadLocalRandom.current().nextDouble() < BotAttackConfig.critChanceFor(bot.getJob())
+            int dmg = profile.rollDamage(bot.getLevel(), bot.getJob(), weapon);
+            damage.add(BotAttackConfig.rollsCrit(bot.getJob(), bot.getLevel())
                     ? BotAttackData.encodeCritLine(dmg) : dmg);
         }
         Map<Monster, List<Integer>> hits = new LinkedHashMap<>();

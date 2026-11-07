@@ -104,11 +104,24 @@ public final class BotAttackProfile {
 
     /*
      * Roll one per-line damage for a bot of this job and level. The band comes from the bot's job
-     * tier (beginner..4th job) with a gentle level ramp, and single/double-line swings concentrate
-     * into a heavier per-line hit - all owned by BotDamageModel, the one place damage is tuned.
+     * tier (beginner..4th job) with a gentle level ramp, scaled by the skill's own WZ damage
+     * percentage - all owned by BotDamageModel, the one place damage is tuned.
+     *
+     * <p>Takes the weapon so the percentage reads off the SAME skill the packet renders: a warrior's
+     * sword and axe forms (Sword Panic / Axe Panic) are separate WZ rows.
      */
-    public int rollDamage(int level, Job job) {
+    public int rollDamage(int level, Job job, org.gms.client.inventory.WeaponType weapon) {
         int tier = (job != null) ? job.getJobTier() : 0;
-        return BotDamageModel.rollLine(tier, level, numDamage);
+        return BotDamageModel.rollLine(tier, level,
+                BotDamageModel.skillPercent(skillFor(weapon), level));
+    }
+
+    /*
+     * How many lines this swing draws, after the skill's own WZ attack count at the level the bot
+     * holds it. The profile authors the ceiling; the actual row count comes from WZ, so a level-40
+     * Bandit swings a partly-leveled Savage Blow instead of a maxed one.
+     */
+    public int linesFor(int level, org.gms.client.inventory.WeaponType weapon) {
+        return BotDamageModel.linesFor(skillFor(weapon), level, numDamage);
     }
 }

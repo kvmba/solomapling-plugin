@@ -109,7 +109,10 @@ public final class BotFinalAttack {
 
         int skillId = skill.getId();
         int skillLevel = resolveSkillLevel(bot, skill);
-        int damage = BotDamageModel.rollLine(bot.getJob().getJobTier(), bot.getLevel(), 1);
+        // The final-attack passive row carries no attack percentage; the follow-up blow is a
+        // plain swing (its frequency, not its size, is what the passive buys).
+        int damage = BotDamageModel.rollLine(bot.getJob().getJobTier(), bot.getLevel(),
+                BotDamageModel.PLAIN_SWING_PERCENT);
 
         // The follow-up swing renders immediately (a real client's final attack needs no travel time
         // for melee and the projectile is cosmetic for bowmen), one line on one mob.
