@@ -57,6 +57,16 @@ public class CarnivalPQBot extends PartyQuestBot {
     /** How long the walk to the reward room's NPC may take before the bot reads in place. */
     private static final long REWARD_ROOM_WALK_TIMEOUT_MS = 8_000L;
 
+    /**
+     * How far from its feet the bot collects the props the arena's monsters drop.
+     *
+     * <p>Same neighbourhood as LPQ's {@code LOOT_RADIUS_PX}: a kill lands its drop at the mob's
+     * feet, so a walk-up-and-take radius keeps a bot on its own share instead of racing the rest
+     * of the team across the arena. Anything farther is left to the combat beat as the bot walks
+     * on into the fight.
+     */
+    private static final int ARENA_LOOT_RADIUS_PX = 260;
+
     /** When this bot's reward-room walk started (0 = not walking); the walk's own deadline. */
     private long rewardWalkSinceMs;
 
@@ -251,9 +261,30 @@ public class CarnivalPQBot extends PartyQuestBot {
 
         // Then fight, which is what the match is scored on.
         if (!map.getMonsters().isEmpty()) {
-            PqActions.seekAndAttack(getChr());
+            PqActions.seekAndAttack(getChr(), false, CarnivalPqData.ARENA_CONSUMABLES);
         }
+        // The arena's monsters drop consume-on-pickup props (Carnival Points, party cures, the
+        // debuff cubes, potions) on every kill. They are this quest's equivalent of LPQ's passes:
+        // the bot must walk over and take them instead of leaving them for the match clock to
+        // expire - including the pile the LAST kill left behind, which is why the sweep is outside
+        // the "room still has monsters" branch.
+        PqActions.loot(getChr(), getChr().getPosition(), ARENA_LOOT_RADIUS_PX,
+                CarnivalPqData.ARENA_CONSUMABLES);
         return false;
+    }
+
+    /**
+     * The props the arena's monsters drop, scooped by the shared 250ms combat beat as the bot
+     * walks over them.
+     *
+     * <p>Restricted to the arena: a reward room is an ordinary map with no match loot, and its
+     * floor belongs to the party's humans (the same rule LPQ's bonus rooms follow). Returning the
+     * ids only inside a live arena also keeps a bot that has just been carried out of the match
+     * from hoovering a town map.
+     */
+    @Override
+    protected int[] steppedOnLootIds() {
+        return CarnivalPqData.isArena(getChr().getMap()) ? CarnivalPqData.ARENA_CONSUMABLES : new int[0];
     }
 
     /**

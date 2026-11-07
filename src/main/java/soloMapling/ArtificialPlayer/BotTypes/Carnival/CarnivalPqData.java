@@ -50,6 +50,30 @@ public final class CarnivalPqData {
     public static final int LOBBY_MAP_CPQ2 = 980030000;
 
     /**
+     * The consume-on-pickup props the arena's monsters drop: the CPQ counterpart of LPQ's passes.
+     *
+     * <p>Every one of them is a drop-table row on all twenty arena monsters and carries both
+     * {@code info/mcType} and {@code spec/consumeOnPickup=1} in WZ, so the engine consumes it the
+     * moment it is picked up. What it grants is the point of the fight: the three Carnival Point
+     * packs pay CP straight into the match budget ({@code spec/cp}), the four party items heal the
+     * team, the two cubes and the stunner sicken the opposing side ({@code spec/nuffSkill}), and the
+     * five potions restore HP/MP. A bot that walks past them fights with half a kit while the
+     * player beside it does not, which is what the CPQ loot report describes.
+     *
+     * <p>Listed by id rather than derived from WZ on purpose: this is the set the quest's own
+     * arena produces, and the base class's sweep contract is an explicit id list so a quest can
+     * never eat another mechanic's floor item (HPQ seeds, OPQ springs). Deliberately NOT the
+     * arena's other drops - equips, scrolls, Maple Coins and the like are ordinary loot, not this
+     * quest's props, and are not what the report is about.
+     */
+    public static final int[] ARENA_CONSUMABLES = {
+            2022157, 2022158, 2022159,                         // Carnival Point 1-3 (CP on pickup)
+            2022160, 2022161, 2022162, 2022163,                // Party Mana/Elixir/Power All-Cure
+            2022164, 2022165, 2022166,                         // Mini Cube / Cube of Darkness / Stunner
+            2022174, 2022175, 2022176, 2022177, 2022178,       // White Potion / Elixir / Power Elixir / Mana / All-Cure
+    };
+
+    /**
      * Where a team is parked after its match is disposed.
      *
      * <p>These are the two ids {@code MonsterCarnival.dispose(true)} warps to (one per edition),
