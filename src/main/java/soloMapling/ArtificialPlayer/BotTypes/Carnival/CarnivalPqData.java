@@ -50,6 +50,48 @@ public final class CarnivalPqData {
     public static final int LOBBY_MAP_CPQ2 = 980030000;
 
     /**
+     * Where a team is parked after its match is disposed.
+     *
+     * <p>These are the two ids {@code MonsterCarnival.dispose(true)} warps to (one per edition),
+     * and each has a NPC that offers the way back to the hall. Deliberately NOT the arena's own
+     * {@code returnMap}: that points at the field's holding map, which returns to the arena, so
+     * anything parked there is pulled straight back into a map whose footholds may already be gone.
+     */
+    public static final int MATCH_OUT_MAP = 980000010;
+    public static final int MATCH_OUT_MAP_CPQ2 = 980030010;
+
+    /**
+     * The field-lobby map a party is returned to when a start fails, by edition and field.
+     *
+     * <p>Deliberately a FIELD lobby (a party's waiting room), not the arena's returnMap: the arena
+     * returns to its holding map, and the holding map returns to the arena - a party parked there
+     * would be walked straight back into the map that just failed to open. The party's OWN field
+     * is used when it is known, so a group that queued for field 3 lands back in field 3's lobby
+     * rather than someone else's.
+     */
+    public static int rescueMap(boolean cpq2, int field) {
+        return cpq2 ? lobbyForField2(field) : lobbyForField(field);
+    }
+
+    /**
+     * Where a short field's replacement bots are spawned: that edition's hall.
+     *
+     * <p>A freshly created bot has no party yet, and {@code CarnivalPQBot.lobbyMapId} only treats
+     * a field lobby as home while the bot belongs to a party waiting there. Spawning a top-up in
+     * the field lobby therefore made it reclaim itself to the hall on its first tick, and the
+     * field kept waiting for bodies it had already been given. The draft scans the whole channel's
+     * storage, so a hall body is picked up exactly like a field one.
+     */
+    public static int topUpSpawnMap(boolean cpq2) {
+        return cpq2 ? LOBBY_MAP_CPQ2 : LOBBY_MAP;
+    }
+
+    /** The post-match holding map of the edition {@code arenaOrOutMapId} belongs to. */
+    public static int outMapFor(int arenaOrOutMapId) {
+        return isSecondEdition(arenaOrOutMapId) ? MATCH_OUT_MAP_CPQ2 : MATCH_OUT_MAP;
+    }
+
+    /**
      * Whether a map is an arena rather than a lobby, using the engine's own test so a map
      * added to either version later is picked up without an edit here.
      */

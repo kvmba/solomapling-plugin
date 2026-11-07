@@ -747,6 +747,10 @@ public final class CarnivalArena {
             bots.setEnemy(null);
             releaseFighters(players);
             releaseFighters(bots);
+            // The constructor force-warped both sides into the disposable arena BEFORE it gave up,
+            // and every portal on an arena map is tm=999999999 - so without this the players would
+            // stand in a map nothing will ever end (no clock, no timer, no exit).
+            rescuePlayersFromArena(players, channel, field, cpq2);
             return false;
         } catch (RuntimeException e) {
             // The constructor swallows most of its own failures, but the party lookup before it
@@ -759,8 +763,39 @@ public final class CarnivalArena {
             bots.setEnemy(null);
             releaseFighters(players);
             releaseFighters(bots);
+            rescuePlayersFromArena(players, channel, field, cpq2);
             channel.finishMonsterCarnival(!cpq2, room);
             return false;
+        }
+    }
+
+    /**
+     * Bring a player party back to the field lobby after a match failed to open.
+     *
+     * <p>Both failure branches above run AFTER {@code MonsterCarnival}'s constructor has already
+     * force-warped every member into the arena (it moves the teams before the work that can
+     * refuse). An arena map's portals are all the engine's no-map sentinel, so a party left there
+     * cannot walk out and the field's own three-minute lobby timer has been cancelled - they would
+     * be stranded until a relog. The field lobby is the map they came from and the one the quest
+     * NPC sends them to, so it is the honest place to put them back.
+     */
+    private static void rescuePlayersFromArena(Party players, Channel channel, int field,
+                                               boolean cpq2) {
+        MapleMap lobby = channel.getMapFactory().getMap(CarnivalPqData.rescueMap(cpq2, field));
+        if (lobby == null) {
+            return; // no lobby to return to: dropping the warp is worse than a failed one
+        }
+        for (PartyCharacter mpc : players.getPartyMembers()) {
+            Character mc = mpc.getPlayer();
+            if (mc == null || mc.getMap() == null
+                    || !CarnivalPqData.isArena(mc.getMap())) {
+                continue; // never reached the arena, or already back somewhere real
+            }
+            try {
+                mc.changeMap(lobby, lobby.getPortal(0));
+            } catch (RuntimeException e) {
+                BotLogger.log("CPQ: could not return " + mc.getName() + " to the lobby (" + e + ")");
+            }
         }
     }
 
@@ -918,11 +953,19 @@ public final class CarnivalArena {
      * while the stale records still say they are committed. A leader's leave disbands the whole
      * party in one operation, which is what clears all of them.
      *
+     * <p><b>A live match must be settled first.</b> {@code MonsterCarnival} settles its result by
+     * walking each side's {@code getParty().getMembers()} from its own timer; disbanding the party
+     * under it nulls every member's party, so that walk throws NPE, the constructor's timer ends
+     * without ever calling {@code dispose()}, and the field stays registered in the channel's room
+     * table for the life of the process. {@link #settleMatchIfRunning} runs the engine's own
+     * teardown while the parties are still intact.
+     *
      * <p>The per-member release runs even when that call throws: a party record the world no
      * longer knows about must not leave its members pointing at it, or every later match finds
      * them "already committed" and never drafts them again.
      */
     private static void disband(Party party) {
+        settleMatchIfRunning(party);
         party.setEnemy(null);
         try {
             PartyCharacter leader = party.getLeader();
@@ -939,6 +982,109 @@ public final class CarnivalArena {
                 Character mc = mpc.getPlayer();
                 if (mc != null) {
                     mc.setParty(null);
+                }
+            }
+        }
+    }
+
+    /**
+     * Run the engine's own end-of-match teardown for this party, if it is in one.
+     *
+     * <p>{@code MonsterCarnival.exit()} is {@code dispose(false)}: it resets every member's
+     * team/CP, disposes the disposable arena map, and — the part nothing else can do — removes the
+     * field from the channel's {@code usedMC} registry via {@code finishMonsterCarnival}. Without
+     * that call the NPC's own entry path keeps seeing the room as taken, and a plugin unload
+     * during a live match leaves a permanently busy field plus a leaked arena instance.
+     *
+     * <p><b>Everyone must leave the arena BEFORE the dispose.</b> {@code dispose(false)} deletes
+     * the map's footholds and portals but does NOT warp anybody out (the {@code warpout=true} form
+     * is only reachable through the disconnect path), and it nulls every member's match pointer -
+     * so a character still standing there afterwards cannot walk, cannot be found by a later
+     * settle, and is stuck on a dead map until a relog. Getting them out first also matches what
+     * the engine's own end-of-run does for a timed-out match, which sends both sides to the
+     * holding map.
+     *
+     * <p>Runs before the party is dissolved, and resolves the match once per team: a team shares
+     * one {@code MonsterCarnival}, so the first member that has it settles everybody.
+     */
+    private static void settleMatchIfRunning(Party party) {
+        if (party == null || party.getEnemy() == null) {
+            return; // never paired: nothing was opened for this party
+        }
+        MonsterCarnival run = null;
+        for (PartyCharacter mpc : new ArrayList<>(party.getPartyMembers())) {
+            Character mc = mpc.getPlayer();
+            if (mc != null && mc.getMonsterCarnival() != null) {
+                run = mc.getMonsterCarnival();
+                break;
+            }
+        }
+        if (run == null) {
+            return; // the match already ended on its own - nothing left to settle
+        }
+        // Out of the arena first: dispose() invalidates the map under them, and its
+        // warpout=false form does not move anybody. BOTH sides must go, not just this party:
+        // dispose() resets every member of both teams, so an opponent left standing in the
+        // arena would be stranded on the same dead map.
+        //
+        // The destination is the engine's own "out" map for a disposed match (dispose(true)
+        // uses exactly these two ids), NOT the arena's returnMap: that points at the field's
+        // holding map, which itself returns to the arena - anything parked there is pulled
+        // straight back into a map whose footholds are gone.
+        Party enemy = party.getEnemy();
+        for (Party team : partiesToEvacuate(party)) {
+            evacuateFromArena(team);
+        }
+        try {
+            run.exit();
+        } catch (RuntimeException e) {
+            BotLogger.log("CPQ: could not settle the match (" + e + ")");
+            releaseMatchPointers(party, enemy);
+        }
+    }
+
+    /**
+     * The parties a settled run owns: this one and its opponent.
+     *
+     * <p>A {@code MonsterCarnival} is shared by two parties, and {@code dispose()} resets every
+     * member of BOTH - so pulling only the party we happen to be disbanding out of the arena would
+     * leave the opponent standing on the dead map. Kept as a pure function because the pair is
+     * the part worth stating: one team is not "the match".
+     */
+    static List<Party> partiesToEvacuate(Party self) {
+        if (self == null) {
+            return List.of();
+        }
+        Party enemy = self.getEnemy();
+        return enemy == null || enemy == self ? List.of(self) : List.of(self, enemy);
+    }
+
+    /** Move every member of {@code team} that is still standing in an arena to the out map. */
+    private static void evacuateFromArena(Party team) {
+        for (PartyCharacter mpc : new ArrayList<>(team.getPartyMembers())) {
+            Character mc = mpc.getPlayer();
+            if (mc == null || mc.getMap() == null || !CarnivalPqData.isArena(mc.getMap())) {
+                continue;
+            }
+            try {
+                mc.changeMap(CarnivalPqData.outMapFor(mc.getMapId()));
+            } catch (RuntimeException e) {
+                BotLogger.log("CPQ: could not evacuate " + mc.getName() + " (" + e + ")");
+            }
+        }
+    }
+
+    /** Last-resort reset when the engine's own dispose threw before it could clear the teams. */
+    private static void releaseMatchPointers(Party... teams) {
+        for (Party team : teams) {
+            if (team == null) {
+                continue;
+            }
+            for (PartyCharacter mpc : new ArrayList<>(team.getPartyMembers())) {
+                Character mc = mpc.getPlayer();
+                if (mc != null) {
+                    mc.setMonsterCarnival(null);
+                    mc.setTeam(-1);
                 }
             }
         }
@@ -991,20 +1137,25 @@ public final class CarnivalArena {
      * <p>One request per field is in flight at a time; a second poll that still finds the team
      * short does not stack another spawn on top of the first, which would double the population
      * the moment the first batch lands.
+     *
+     * <p>The bots are spawned into the <b>hall</b>, never the field lobby. A freshly created
+     * carnival bot has no party yet, and {@code CarnivalPQBot.lobbyMapId} only treats a field
+     * lobby as home while the bot belongs to a party waiting there - so a bot spawned in the
+     * field immediately reclaims itself to the hall on its first tick, and the field would wait
+     * three more polls for the topped-up body it had already been given. The draft walks the
+     * whole channel's storage, so a hall body is picked up just as well.
      */
     private static void requestTeamSpawn(Channel channel, int field, boolean cpq2, int want) {
         int key = fieldKey(channel, cpq2, field);
         if (SPAWNING.putIfAbsent(key, Boolean.TRUE) != null) {
             return;
         }
-        int lobbyId = cpq2
-                ? CarnivalPqData.lobbyForField2(field)
-                : CarnivalPqData.lobbyForField(field);
+        int hallId = CarnivalPqData.topUpSpawnMap(cpq2);
         int channelId = channel.getId();
         soloMapling.server.ExecutorServiceManager.runAsync(() -> {
             try {
                 soloMapling.ArtificialPlayer.PartyQuest.PqBotSpawner
-                        .spawnCarnivalTeam(want, lobbyId, cpq2, channelId);
+                        .spawnCarnivalTeam(want, hallId, cpq2, channelId);
             } catch (RuntimeException e) {
                 BotLogger.log("CPQ field " + field + ": spawn failed (" + e + ")");
             } finally {

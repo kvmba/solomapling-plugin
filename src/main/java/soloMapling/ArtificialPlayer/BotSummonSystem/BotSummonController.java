@@ -100,11 +100,21 @@ public final class BotSummonController {
      * enough, because it is idempotent and would keep the old entity. So the summon is torn down
      * whenever the career the bot now holds would not choose the SAME skill - a new career that owns
      * a different summon (a Ranger's hawk becoming a Sniper's golden eagle) is as wrong as one that
-     * owns none, and keeping the old entity would leave a crossbowman flying a bowman's bird. The
-     * ordinary grant path then re-rolls against the career the bot actually has.
+     * owns none, and keeping the old entity would leave a crossbowman flying a bowman's bird.
+     *
+     * <p>A career that still owns A summon gets its own back, not just a teardown: the level
+     * override that triggers this runs right after the spawn grant (a PQ lobby pins the level
+     * during the same spawn wave), so dropping a Ranger's hawk for a Sniper career and then
+     * stopping would leave that bot permanently without the summon it had already been given.
+     * Only a bot that HAD a summon is re-granted - a bot that lost the original
+     * {@code spawnChance} roll stays without one, so a level tweak never inflates the population.
      */
     public static void realignForCareer(Character bot, BotSummonConfig config) {
         if (bot == null) {
+            return;
+        }
+        if (config.spawnChance() <= BotSummonConfig.CHANCE_DISABLED) {
+            BotSummonSystem.remove(bot); // the operator switched summons off entirely
             return;
         }
         Integer wanted = chooseSummon(bot.getJob() == null ? -1 : bot.getJob().getId());
@@ -115,9 +125,40 @@ public final class BotSummonController {
         // Only a summon the new career would not have chosen itself is stale; anything else keeps
         // the entity it already has (its strike level re-derives live from the owner's level).
         Set<Integer> showing = BotSummonFollower.trackedSkills(bot.getId());
-        if (!showing.isEmpty() && !showing.contains(wanted)) {
-            BotSummonSystem.remove(bot);
+        switch (realignAction(showing, wanted)) {
+            case KEEP -> { /* the entity the bot already has is the one this career would choose */ }
+            case DROP -> BotSummonSystem.remove(bot); // the new career owns no summon at all
+            case SWAP -> {
+                BotSummonSystem.remove(bot); // a different career's summon goes first
+                // Re-grant for the career the bot actually holds. spawn() re-derives the skill
+                // level from the CURRENT character level, so a level-down also shrinks the
+                // summon's WZ row correctly. The chance roll is deliberately skipped: this bot
+                // already WON that roll for its old career, so a level tweak must not strip a
+                // summon it had earned (and must not inflate the population either - a bot with
+                // no summon never reaches this branch).
+                BotSummonFollower.spawnIfAbsent(bot.getId(), () -> spawn(bot, wanted));
+            }
         }
+    }
+
+    /** What a career change must do with the summon the bot is already showing. */
+    enum Realign { KEEP, DROP, SWAP }
+
+    /**
+     * The realign decision as a pure function, so the contract is testable without a live
+     * character or a Skill.wz row.
+     *
+     * @param showing the skills the bot is currently showing (empty when it carries none)
+     * @param wanted  the skill the career the bot now holds would choose (non-null)
+     */
+    static Realign realignAction(java.util.Collection<Integer> showing, int wanted) {
+        if (showing.contains(wanted)) {
+            return Realign.KEEP;
+        }
+        if (showing.isEmpty()) {
+            return Realign.DROP; // never granted: the spawn roll alone decides, and nothing is on the field
+        }
+        return Realign.SWAP; // a summon this career would not choose: tear down and re-grant
     }
 
     /**
