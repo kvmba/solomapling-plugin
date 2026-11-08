@@ -68,6 +68,18 @@ public final class BotAttackDriver {
     // within this slack (px).
     private static final int SYMMETRY_SLACK = 24;
 
+    // The shot's arc. The reach box is a flat rectangle with no slope sense at all, so its corners
+    // describe absurd angles: a mob straight overhead (dx=0, dy=150) counted as "in reach" and the
+    // bot fired into the platform/floor between them (the report). Allowed vertical gap per
+    // horizontal gap is 1:1 (45 degrees) - the diagonal, i.e. "no near-vertical shots". This is
+    // DELIBERATELY stricter than the host's own player-side check, which is a squared-distance
+    // radius (AbstractDealDamageHandler distanceToDetect) and would let a player hit a body
+    // straight overhead: a bot's flat shot into a ceiling reads as broken, and bots are
+    // decorative, so the conservative arc costs nothing. A swing is bounded by its own box and the
+    // ledge rule, and a cast may legitimately come straight down (Meteor Shower, Heal) - only the
+    // RANGED route is arc-limited.
+    private static final int ARC_SLOPE = 1;
+
     // Cleric Heal (2301002) damages undead as an AoE in v83 (client-authoritative). A cleric-line bot
     // casts it at an undead pack instead of its normal bolt; the MAGIC route renders the heal and applies
     // real damage like any bot magic attack. Heal is not a charge skill, so magicChargeFor(-1) already fits.
@@ -167,6 +179,30 @@ public final class BotAttackDriver {
         return p != null && p.route != BotAttackProfile.Route.CLOSE;
     }
 
+    /*
+     * The shot's arc: the vertical gap may not exceed the horizontal one scaled by ARC_SLOPE. A
+     * boss is large and multi-bodied, so its padded body height counts as reach - the same
+     * BOSS_Y_PAD the reach box gives it. Public because the grind layer resolves "is this kit
+     * arc-limited" once per episode and then asks this per mob (BotAttackConfig.resolve is too
+     * costly per candidate), and the Hermit's Shadow Meso coin (same package) reads it too - one
+     * rule for every projectile.
+     */
+    public static boolean withinRangedArc(Point from, Point target, boolean boss) {
+        int dy = Math.abs(target.y - from.y) - (boss ? BOSS_Y_PAD : 0);
+        return dy <= Math.abs(target.x - from.x) * ARC_SLOPE;
+    }
+
+    /*
+     * Whether this bot's kit is arc-limited (see withinRangedArc). Only a thrown/launched
+     * projectile (RANGED: bow, crossbow, gun, claw) is: a swing is bounded by its own box and the
+     * ledge rule, and a cast may legitimately come straight down (Meteor Shower, Heal). Callers
+     * that gate "in range" per mob resolve this once and pair it with withinRangedArc.
+     */
+    public static boolean isArcLimited(Character bot) {
+        BotAttackProfile p = primaryProfile(bot);
+        return p != null && p.route == BotAttackProfile.Route.RANGED;
+    }
+
     /** Whether the current AUTO selection includes this mob, ignoring the per-swing cooldown. */
     public static boolean canReach(Character bot, Monster mob) {
         if (bot == null || mob == null || bot.getMap() == null || GCMovement.isClimbing(bot)) return false;
@@ -188,6 +224,12 @@ public final class BotAttackDriver {
      * altar - ask for 弓/弩/镖/子弹. A cast is rendered through the magic packet and is
      * not that role: giving it this same remote firing ledge made mages snipe across the whole
      * room, so the search now answers only for Route.RANGED.
+     *
+     * <p>The box is the SHOOTER's area and honours the shot's arc: the near-vertical lane around
+     * the target (|dx| &lt; reachY / ARC_SLOPE) is cut out, because a projectile cannot climb to a
+     * body almost straight above. Two bands remain, one on each side; the one on the bot's own
+     * side is returned, so walking to it never crosses the target. Every point in the band
+     * satisfies withinRangedArc for the target, so a bot standing anywhere in it can actually fire.
      */
     public static Rectangle firingPositions(Character bot, Monster mob) {
         WeaponType weapon = BotAttack.resolveEquippedWeaponType(bot);
@@ -196,10 +238,16 @@ public final class BotAttackDriver {
         Rectangle box = reachBox(new Point(), profile, weapon, false);
         if (mob.isBoss()) box = new Rectangle(box.x, box.y - BOSS_Y_PAD, box.width, box.height + 2 * BOSS_Y_PAD);
         Point target = mob.getPosition();
-        // Projectiles may face either way. Rectangle upper bounds are exclusive, so invert
-        // integer hit coordinates with +1 rather than silently losing the last legal row.
-        return new Rectangle(target.x - profile.reachX + 1, target.y - box.y - box.height + 1,
-                profile.reachX * 2, box.height);
+        // The lane half-width is the profile's vertical reach split by the arc slope: at that
+        // horizontal gap every row of the shooter box is still legal (including a boss's padded
+        // body, whose padding cancels out of withinRangedArc). Rectangle upper bounds are
+        // exclusive, so the far edge is 1 shorter rather than losing the last legal column.
+        int lane = profile.reachY / ARC_SLOPE;
+        Point pos = bot.getPosition();
+        boolean leftSide = pos == null || pos.x <= target.x;
+        int left = leftSide ? target.x - profile.reachX + 1 : target.x + lane + 1;
+        return new Rectangle(left, target.y - box.y - box.height + 1,
+                profile.reachX - lane, box.height);
     }
 
     private static BotAttackProfile primaryProfile(Character bot) {
@@ -515,7 +563,8 @@ public final class BotAttackDriver {
         // hit a mob standing on a separate platform overhead/below. Drop melee mobs on a different
         // ledge than the bot (bosses exempt, and ranged/magic are exempt by route - see
         // onAttackableSurface). Cheap (peek-only) and only run for box-passing mobs.
-        return test.contains(mp) && onAttackableSurface(bot.getMap(), botPos, m, route);
+        return test.contains(mp) && onAttackableSurface(bot.getMap(), botPos, m, route)
+                && (route != BotAttackProfile.Route.RANGED || withinRangedArc(botPos, mp, m.isBoss()));
     }
 
     /*
@@ -694,8 +743,11 @@ public final class BotAttackDriver {
         }
         Rectangle box = reachBox(bot, profile, weapon, facingLeft);
         Point np = nearest.getPosition();
+        String where = profile.route == BotAttackProfile.Route.RANGED
+                && !withinRangedArc(botPos, np, nearest.isBoss())
+                ? " outside the shot's arc (too steep: |dy| > |dx| * " + ARC_SLOPE + ")"
+                : " outside reach x[" + box.x + ".." + (box.x + box.width) + "] y[" + box.y + ".." + (box.y + box.height) + "]";
         return "nearest '" + nearest.getName() + "' at dx=" + (np.x - botPos.x) + " dy=" + (np.y - botPos.y)
-                + " outside reach x[" + box.x + ".." + (box.x + box.width) + "] y[" + box.y + ".." + (box.y + box.height)
-                + "] facing " + (facingLeft ? "left" : "right");
+                + where + " facing " + (facingLeft ? "left" : "right");
     }
 }

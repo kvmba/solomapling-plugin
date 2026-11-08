@@ -215,8 +215,11 @@ class LpqReviewRegressionTest {
         MapleMap map = map(922019988);
         floor(map, 1, -100, 0, 800);
         createBot(map, new Point(0, 0), Job.HUNTER);
-        Monster first = monster(9300005, 99121, new Point(100, -180));
-        Monster second = monster(9300005, 99122, new Point(200, -180));
+        // dx kept >= dy: a shot's arc (BotAttackDriver.withinRangedArc) forbids near-vertical
+        // shots, and these two are only here to prove the TALLER pack box is what admits a
+        // dy=-180 pack (the single profile's reachY is 150). Geometry, not the rule under test.
+        Monster first = monster(9300005, 99121, new Point(200, -180));
+        Monster second = monster(9300005, 99122, new Point(300, -180));
         inject(map, first); inject(map, second);
         try (var effects = mockStatic(BotAttackEffects.class)) {
             assertTrue(BotAttackDriver.canReach(bot, first), "AUTO chooses the taller pack box");

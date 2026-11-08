@@ -101,7 +101,10 @@ public final class BotShadowMeso {
         for (MapObject mo : map.getMapObjectsInRange(pos, (double) SCAN_RADIUS_PX * SCAN_RADIUS_PX,
                 List.of(MapObjectType.MONSTER))) {
             Monster m = (Monster) mo;
-            if (m.isAlive() && box.contains(m.getPosition())) {
+            // A thrown coin is a projectile like any claw star: it cannot reach a body almost
+            // straight above or below (BotAttackDriver's shot arc), even when the WZ box encloses it.
+            if (m.isAlive() && box.contains(m.getPosition())
+                    && BotAttackDriver.withinRangedArc(pos, m.getPosition(), m.isBoss())) {
                 mobs.add(m);
             }
         }
