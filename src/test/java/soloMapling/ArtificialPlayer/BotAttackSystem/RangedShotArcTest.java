@@ -21,7 +21,7 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
-import org.junit.jupiter.params.provider.ValueSource;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.mockito.MockedStatic;
 import org.springframework.context.ApplicationContext;
 import soloMapling.ArtificialPlayer.BotCommandsPack.BotAttack;
@@ -114,9 +114,9 @@ class RangedShotArcTest {
     @Test
     void aShelfShotWithEnoughHorizontalOffsetStillLands() throws Exception {
         createBot(Job.HUNTER, new Point(0, 0));
-        Monster shelf = inject(monster(9300170, 99403, new Point(220, -140)));
+        Monster shelf = inject(monster(9300170, 99403, new Point(300, -140)));
         assertTrue(BotAttackDriver.canReach(bot, shelf),
-                "220 across and 140 up is a real shelf shot (|dy| <= |dx| * 2)");
+                "300 across and 140 up is a real shelf shot (|dy| * 2 <= |dx|)");
     }
 
     /** Just inside the box but on the same row: the ordinary case is untouched. */
@@ -128,16 +128,23 @@ class RangedShotArcTest {
     }
 
     /**
-     * The diagonal is the boundary itself: |dy| == |dx| is the steepest legal shot.
-     * Off-by-one here means either a one-pixel band of legal shots is lost, or the rule leaks.
+     * The arc threshold is |dy| * ARC_SLOPE <= |dx|, i.e. ~26.6 degrees. Cases are chosen to sit
+     * strictly INSIDE the reach box (reachY=150 for the single profile) so each one can only pass
+     * or fail on the arc, never on the box.
      */
-    @ParameterizedTest
-    @ValueSource(ints = {99, 100, 101})
-    void theDiagonalIsTheExactBoundary(int dy) throws Exception {
+    @ParameterizedTest(name = "dx={0} dy={1} legal={2}")
+    @CsvSource({
+            "300, 150, true",   // exactly on the arc: 150*2 == 300
+            "300, 149, true",   // just inside
+            "300, 151, false",  // just outside (and just past the box, kept for completeness)
+            "200, 150, false",  // inside the box, but too steep for the arc
+            "440, 150, true",   // full horizontal reach, shallow angle
+    })
+    void theArcThresholdIsExact(int dx, int dy, boolean legal) throws Exception {
         createBot(Job.HUNTER, new Point(0, 0));
-        Monster mob = inject(monster(9300170, 99420 + dy, new Point(100, -dy)));
-        assertEquals(dy <= 100, BotAttackDriver.canReach(bot, mob),
-                "|dy|=" + dy + " against |dx|=100: legal up to and including the diagonal");
+        Monster mob = inject(monster(9300170, 99420 + dx + dy, new Point(dx, -dy)));
+        assertEquals(legal, BotAttackDriver.canReach(bot, mob),
+                "dx=" + dx + " dy=" + dy + " (arc is |dy|*2 <= |dx|)");
     }
 
     /** Bosses get the body padding, not a blanket exemption. */
