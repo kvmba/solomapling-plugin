@@ -5,6 +5,7 @@ import org.gms.net.server.channel.Channel;
 import org.gms.net.server.world.Party;
 import org.gms.net.server.world.PartyCharacter;
 import org.gms.server.maps.MapleMap;
+import org.gms.server.maps.Portal;
 import org.gms.server.partyquest.MonsterCarnival;
 import soloMapling.ArtificialPlayer.BotMessagingSystem.CharacterStorage;
 import soloMapling.ArtificialPlayer.BotPartySystem.BotPartyCommands;
@@ -916,11 +917,21 @@ public final class CarnivalArena {
         if (target == null) {
             return;
         }
+        // Spread the team across the map's own spawn doors instead of stacking all six on portal
+        // 0. The slot is the member's index in the party, so with three or more doors the whole
+        // team lands on different pixels (a 5/6/9-door lobby spreads all six); the same index
+        // also keeps a member on its own door across a field entry and the walk home. The door
+        // list is resolved once: filtering and sorting it per member would re-walk the map's
+        // portals six times for one warp.
+        // A null door is a map with no spawn door, and changeMap already falls back to portal 0.
+        List<Portal> doors = CarnivalPqData.spawnDoors(target.getPortals());
+        int slot = 0;
         for (PartyCharacter mpc : bots.getPartyMembers()) {
             Character mc = mpc.getPlayer();
             if (mc != null && mc.getMapId() != mapId) {
-                mc.changeMap(target, target.getPortal(0));
+                mc.changeMap(target, CarnivalPqData.doorAt(doors, slot));
             }
+            slot++;
         }
     }
 

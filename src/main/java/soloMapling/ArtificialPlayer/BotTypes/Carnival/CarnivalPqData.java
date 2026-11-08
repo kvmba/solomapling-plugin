@@ -1,5 +1,11 @@
 package soloMapling.ArtificialPlayer.BotTypes.Carnival;
 
+import org.gms.constants.id.MapId;
+import org.gms.server.maps.Portal;
+
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Comparator;
 import java.util.List;
 
 /**
@@ -113,6 +119,53 @@ public final class CarnivalPqData {
     /** The post-match holding map of the edition {@code arenaOrOutMapId} belongs to. */
     public static int outMapFor(int arenaOrOutMapId) {
         return isSecondEdition(arenaOrOutMapId) ? MATCH_OUT_MAP_CPQ2 : MATCH_OUT_MAP;
+    }
+
+    /**
+     * The spawn doors of a carnival map, in portal-id order.
+     *
+     * <p>A "spawn door" is {@code pt=0} with the engine's no-map target - the set
+     * {@code MapleMap.getRandomPlayerSpawnpoint} draws from, narrowed to type 0 because the type-1
+     * entries on an arena ({@code blue00}, {@code red00}, {@code *_revive}) are the teams' own side
+     * doors: landing a bot on one puts it on its opponent's half of the field.
+     *
+     * <p>The maps this quest warps into carry several of these where it matters most - a hall has
+     * three, a CPQ1 field lobby five (CPQ2's six), the CPQ1 holding map nine - which is what makes
+     * them usable for spreading a party out. An <b>arena</b> is the exception: it ships a single
+     * type-0 door ({@code sp}), so a team warped straight in has nothing to spread over and the
+     * host's own entry would put it there anyway. Stage exits ({@code st00}), holding-map doors
+     * ({@code out00}) and {@code pt=7} pads are deliberately excluded: they lead somewhere, so a
+     * warp onto one is not an arrival.
+     */
+    public static List<Portal> spawnDoors(Collection<Portal> portals) {
+        if (portals == null || portals.isEmpty()) {
+            return List.of();
+        }
+        List<Portal> doors = new ArrayList<>();
+        for (Portal portal : portals) {
+            if (portal != null && portal.getType() == 0 && portal.getTargetMapId() == MapId.NONE) {
+                doors.add(portal);
+            }
+        }
+        doors.sort(Comparator.comparingInt(Portal::getId));
+        return doors;
+    }
+
+    /**
+     * The spawn door {@code slot} arrives on, or null when the map ships none.
+     *
+     * <p>Round-robin on purpose: a party of six warped in one tick must not all stand on the same
+     * pixel, and modulo gives each member a different door for as long as the party is no larger
+     * than the door count - a random pick would still collide about half the time at three doors.
+     * A caller with no party slot to speak of (one bot following its leader home) passes a stable
+     * per-bot number, which scatters the crowd the same way without coordination.
+     *
+     * <p>Takes the already-filtered list so a caller warping a whole team computes it once rather
+     * than re-filtering and re-sorting per member.
+     */
+    public static Portal doorAt(List<Portal> doors, int slot) {
+        return doors == null || doors.isEmpty()
+                ? null : doors.get(Math.floorMod(slot, doors.size()));
     }
 
     /**

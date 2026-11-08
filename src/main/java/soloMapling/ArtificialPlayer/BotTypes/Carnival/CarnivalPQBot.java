@@ -4,6 +4,7 @@ import org.gms.client.Character;
 import org.gms.net.server.world.PartyCharacter;
 import org.gms.server.maps.Foothold;
 import org.gms.server.maps.MapleMap;
+import org.gms.server.maps.Portal;
 import org.gms.util.Pair;
 import soloMapling.ArtificialPlayer.BotGeneration;
 import soloMapling.ArtificialPlayer.GCMoveSystem.GCMovement;
@@ -190,9 +191,24 @@ public class CarnivalPQBot extends PartyQuestBot {
         if (map == null) {
             return false;
         }
-        bot.changeMap(map, map.getPortal(0));
+        // A null door (a map with no spawn door) is fine: changeMap falls back to portal 0.
+        bot.changeMap(map, CarnivalPqData.doorAt(CarnivalPqData.spawnDoors(map.getPortals()),
+                bot.getId()));
         nextWarpFollowAtMs = now + WARP_FOLLOW_GAP_MS;
         return bot.getMapId() == target;
+    }
+
+    /**
+     * The door this bot takes when the run sends it back to its lobby.
+     *
+     * <p>Same rule as the leader-follow warp: the lobby ships several spawn doors (a carnival hall
+     * has three, a field lobby five), and a team walking home one body at a time would otherwise
+     * pile onto portal 0 - the doorway clump the hall's stroll then has to undo. Keyed on the
+     * bot's id so the spread survives a re-entry.
+     */
+    @Override
+    protected Portal lobbyArrivalPortal(Character bot, MapleMap lobby) {
+        return CarnivalPqData.doorAt(CarnivalPqData.spawnDoors(lobby.getPortals()), bot.getId());
     }
 
     /**

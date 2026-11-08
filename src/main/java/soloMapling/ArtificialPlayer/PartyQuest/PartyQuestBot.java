@@ -1,6 +1,7 @@
 package soloMapling.ArtificialPlayer.PartyQuest;
 
 import org.gms.client.Character;
+import org.gms.server.maps.MapleMap;
 import org.gms.server.maps.Portal;
 import soloMapling.ArtificialPlayer.BotCommandsPack.SocialCommands;
 import soloMapling.ArtificialPlayer.BotCommandsPack.WarpCommands;
@@ -980,7 +981,21 @@ public abstract class PartyQuestBot extends BotSM implements GrindTickRegistry.P
         if (lobby == null) {
             return; // a lobby id that does not resolve is a data error, not a reason to wander
         }
-        bot.changeMap(lobby, lobby.getPortal(0));
+        // A null answer (a lobby whose WZ data names no spawn door) is fine: Character.changeMap
+        // resolves a null portal to the map's portal 0.
+        bot.changeMap(lobby, lobbyArrivalPortal(bot, lobby));
+    }
+
+    /**
+     * The door this bot arrives on when the run sends it back to its lobby.
+     *
+     * <p>Default is portal 0, the arrival every quest shipped with (and what
+     * {@code Character.changeMap} resolves a null portal to). A quest whose lobby ships several
+     * spawn doors can answer with another one so a returning party does not land six bodies on one
+     * pixel - see {@code CarnivalPQBot}.
+     */
+    protected Portal lobbyArrivalPortal(Character bot, MapleMap lobby) {
+        return lobby.getPortal(0);
     }
 
     /**
