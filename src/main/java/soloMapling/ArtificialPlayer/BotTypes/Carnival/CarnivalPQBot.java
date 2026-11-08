@@ -2,12 +2,15 @@ package soloMapling.ArtificialPlayer.BotTypes.Carnival;
 
 import org.gms.client.Character;
 import org.gms.net.server.world.PartyCharacter;
+import org.gms.server.maps.Foothold;
 import org.gms.server.maps.MapleMap;
 import org.gms.util.Pair;
 import soloMapling.ArtificialPlayer.BotGeneration;
+import soloMapling.ArtificialPlayer.GCMoveSystem.GCMovement;
 import soloMapling.ArtificialPlayer.PartyQuest.PartyQuestBot;
 import soloMapling.ArtificialPlayer.PartyQuest.PqActions;
 
+import java.awt.Point;
 import java.util.List;
 
 /**
@@ -301,19 +304,23 @@ public class CarnivalPQBot extends PartyQuestBot {
      * false for a target it cannot path to (a missing foothold, a stripped WZ); sharing one
      * timestamp with the linger would either cut the pause short once the walk used it up, or let
      * a failed walk restart the pause forever. Two clocks, one for each beat.
+     *
+     * <p>The goal is the floor under the NPC, never the NPC's own sprite anchor, and a room whose
+     * NPC stands on a surface this body cannot reach does not get a walk at all - see
+     * {@link #rewardPost}.
      */
     private void workRewardRoom() {
         MapleMap map = getChr().getMap();
         long now = System.currentTimeMillis();
         int npcId = CarnivalPqData.rewardNpcId(getChr().getMapId());
         var npc = (map == null || npcId <= 0) ? null : map.getNPCById(npcId);
-        if (npc != null && npc.getPosition() != null
-                && !PqActions.withinPickupReach(getChr(), npc.getPosition())) {
+        Point post = rewardPost(getChr(), (npc == null) ? null : npc.getPosition());
+        if (post != null && !PqActions.withinPickupReach(getChr(), post)) {
             if (rewardWalkSinceMs == 0L) {
                 rewardWalkSinceMs = now;
             }
             if (now - rewardWalkSinceMs < REWARD_ROOM_WALK_TIMEOUT_MS) {
-                PqActions.walkTo(getChr(), npc.getPosition());
+                PqActions.walkTo(getChr(), post);
                 return;
             }
             // Unreachable (or wedged): give up on the NPC and read the result where it stands.
@@ -332,6 +339,72 @@ public class CarnivalPQBot extends PartyQuestBot {
         }
         rewardRoomSinceMs = 0L;
         returnToLobby("carnival match finished");
+    }
+
+    /**
+     * Where this bot stands to read the result: the first floor under the reward NPC this body can
+     * WALK to, or null when there is none.
+     *
+     * <p>The NPC's authored position is a sprite anchor, which these rooms routinely place off the
+     * walkable surface: on 98000013 it sits 8px above its ledge, on 98000033 13px above the floor,
+     * and the CPQ1 field-4/5 and CPQ2 winner rooms put it on an island 142-192px above a floor
+     * with no rope, no upward step and no walkable link. Aiming a walk at that pixel asked the
+     * movement layer for a point no body can stand on, and every way it could answer was wrong:
+     * the analytic (unobserved) path snapped the sprite straight onto the pixel, the dead-pit
+     * guard hauled the bot onto the only livable surface above it (that island, i.e. beside the
+     * NPC), and a mage blinked up. The human standing next to the bot could do none of those:
+     * {@code NPCTalkHandler} never checks range, so for a player the NPC is a conversation across
+     * the gap from the floor below.
+     *
+     * <p>So: take the highest floor on the NPC's own column that this body can WALK to - the stand
+     * a player takes when the NPC is a conversation across a gap - and answer null when no floor on
+     * that column is walkable. Deliberately on foot rather than {@code canPathTo}: a mage's blink
+     * makes almost any island "reachable", and blinking up to read a result is exactly the
+     * behaviour being removed. A null result is not a failure: the caller reads the result in
+     * place, exactly like a room that ships no NPC.
+     */
+    private static Point rewardPost(Character bot, Point npc) {
+        MapleMap map = bot == null ? null : bot.getMap();
+        if (map == null || map.getFootholds() == null || npc == null) {
+            return null;
+        }
+        // Floors that cross the NPC's column AND sit at or below the NPC's own row (y grows
+        // downward). Highest first, so the nearest stand under the NPC wins: the floor that is
+        // below the NPC is where a player stands when the NPC is a conversation across the gap,
+        // and floors ABOVE the NPC are unrelated shelves on another storey.
+        List<Foothold> column = new java.util.ArrayList<>();
+        for (Foothold foothold : map.getFootholds().getAllFootholds()) {
+            if (foothold.isWall()) {
+                continue;
+            }
+            int lo = Math.min(foothold.getX1(), foothold.getX2());
+            int hi = Math.max(foothold.getX1(), foothold.getX2());
+            if (npc.x >= lo && npc.x <= hi && surfaceYAt(foothold, npc.x) >= npc.y) {
+                column.add(foothold);
+            }
+        }
+        column.sort(java.util.Comparator.comparingInt(
+                (Foothold foothold) -> surfaceYAt(foothold, npc.x)));
+        for (Foothold foothold : column) {
+            Point stand = new Point(npc.x, surfaceYAt(foothold, npc.x));
+            if (GCMovement.canReachOnFoot(bot, stand.x, stand.y)) {
+                return stand;
+            }
+        }
+        return null;
+    }
+
+    /** A foothold's real surface height at {@code x}, linear between its endpoints (as WZ authors it). */
+    private static int surfaceYAt(Foothold foothold, int x) {
+        int y1 = foothold.getY1();
+        int y2 = foothold.getY2();
+        int x1 = foothold.getX1();
+        int x2 = foothold.getX2();
+        if (y1 == y2 || x1 == x2) {
+            return Math.min(y1, y2);
+        }
+        long dy = (long) (y2 - y1) * (x - x1);
+        return y1 + (int) (dy / (x2 - x1));
     }
 
     /**

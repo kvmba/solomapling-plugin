@@ -1394,6 +1394,26 @@ public final class GCMovement {
      * prize mobs parked on ledges no edge climbs to, and aim for the floor under them instead.
      * (The graph provider and MovementPlan are package-private; this is their public seam.) */
     public static boolean canPathTo(Character bot, int x, int y) {
+        return canReach(bot, x, y, BotMovementCapabilities.of(bot).teleport());
+    }
+
+    /**
+     * As {@link #canPathTo}, asking only about ordinary traversal - walking, jumping, dropping and
+     * ropes, with this body's class movement skill filtered out.
+     *
+     * <p>The distinction is real and load-bearing wherever the answer becomes a STANDING SPOT
+     * rather than a route: a mage's blink can cross a 150px step no walk crosses, so
+     * {@code canPathTo} calls an island only a blink reaches "reachable", and a caller that then
+     * walks there either gets a blink (fine for chasing a mob, wrong for parking at a quest NPC -
+     * the reported "the bots fly up to the NPC the moment they land") or a wedged walk. A quest
+     * room's exit NPC is a conversation, not a platform to leap to, so that question is asked
+     * without the skill.
+     */
+    public static boolean canReachOnFoot(Character bot, int x, int y) {
+        return canReach(bot, x, y, false);
+    }
+
+    private static boolean canReach(Character bot, int x, int y, boolean canBlink) {
         var map = bot == null ? null : bot.getMap();
         if (map == null || bot.getPosition() == null) {
             return true;
@@ -1418,7 +1438,7 @@ public final class GCMovement {
         // question, and the per-bot route jitter would make the answer depend on which of two
         // equally-priced routes that bot happens to prefer.
         return BotNavigationManager.findPath(graph, map, bot.getPosition(), from, to,
-                new Point(x, y), BotMovementCapabilities.of(bot).teleport()) != null;
+                new Point(x, y), canBlink) != null;
     }
 
     /**

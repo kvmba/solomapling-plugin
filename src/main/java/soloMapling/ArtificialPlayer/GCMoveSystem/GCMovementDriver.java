@@ -562,19 +562,28 @@ final class GCMovementDriver {
             MovementPlan plan = MovementPlan.inMap(graph, bot.getMap(), bot.getPosition(), target,
                     BotMovementCapabilities.of(bot).teleport());
             if (plan == null) {
-                // Null plan means BOTH "same region — walk straight there" and "no path / no
-                // region". Only the first is an arrival: teleporting to the goal on a no-path
-                // plan was a silent cross-map warp the macro brain read as a real arrival (the
-                // goal could sit on a floor two regions up). Same-region is decided exactly the
-                // way MovementPlan decides it — region ids on the plan's graph; an unresolvable
-                // region falls through to the throttled physics, whose own navigation handles it.
+                // A null plan means EITHER "same region — walk straight there" OR "no path / no
+                // region", and the two need different answers. Teleporting to the goal on the
+                // latter was a silent cross-map warp the macro brain read as a real arrival (the
+                // goal could sit on a floor two regions up). The former is not an arrival either:
+                // it is an ordinary walk across one platform, and treating it as one snapped the
+                // body onto the goal's pixel — the reported "the whole bot team is yanked to the
+                // NPC the instant it lands in the reward room", and the same silent jump on any
+                // unobserved map whose goal sits on the bot's own ledge. Model it as the walk it
+                // is; the analytic clock then carries it at the body's own pace.
                 int goalRegion = graph.findRegionId(bot.getMap(), target);
                 int botRegion = graph.findRegionId(bot.getMap(), bot.getPosition());
-                if (goalRegion >= 0 && goalRegion == botRegion) {
-                    arriveCoarse(entry, bot, target);
-                    return true;
+                if (goalRegion < 0 || goalRegion != botRegion) {
+                    return false; // no path / no region: the throttled physics owns it
                 }
-                return false;
+                plan = MovementPlan.surfaceWalk(bot.getMap(), bot.getPosition(), target,
+                        entry.movementProfile.walkVelocityPxs());
+                if (plan == null) {
+                    // Same pixels, or no floor under the route: nothing the analytic path can
+                    // carry on its own. Physics walks the rest (it simply does not move for an
+                    // already-reached goal).
+                    return false;
+                }
             }
             entry.coarsePlan = plan;
             entry.coarsePlanStartMs = now;
@@ -592,10 +601,18 @@ final class GCMovementDriver {
         return true;
     }
 
-    /* Finish a coarse trip: snap to the goal, clear the plan + move target, fire the arrival callback. */
+    /* Finish a coarse trip: settle on the plan's own last waypoint, clear the plan + move target,
+     * fire the arrival callback. The waypoint, not the raw order: a plan walks the FLOOR, and the
+     * order can name a pixel in the air (a mob's sprite anchor, an NPC above its ledge) - snapping
+     * onto that would put the unobserved bot back off the surface, which is the same silent jump
+     * this path exists to stop. */
     private static void arriveCoarse(BotMovementState entry, Character bot, Point target) {
-        if (target != null) {
-            bot.setPosition(new Point(target));
+        MovementPlan plan = entry.coarsePlan;
+        Point arrival = (plan != null && !plan.edges.isEmpty())
+                ? plan.edges.get(plan.edges.size() - 1).endPoint
+                : target;
+        if (arrival != null) {
+            bot.setPosition(new Point(arrival));
         }
         entry.coarsePlan = null;
         entry.coarsePlanTarget = null;

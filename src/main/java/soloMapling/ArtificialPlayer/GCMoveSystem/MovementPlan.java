@@ -58,6 +58,77 @@ final class MovementPlan {
     }
 
     /*
+     * A walk across ONE region - the plan A* cannot express.
+     *
+     * <p>A* answers a same-region target with an EMPTY edge list ("walk directly there"), which
+     * {@link #inMap(int, List)} deliberately reports as "no plan". The coarse path read that null
+     * as "already there" and wrote the body onto the goal's pixel - a silent teleport of up to a
+     * whole platform length on any map nobody was watching (the reported "the whole bot team is
+     * yanked to the NPC the instant the match ends"). A direct walk is a real trip, so it is
+     * modelled as one: WALK edges laid along the floor, each priced at this body's own pace so the
+     * analytic clock and the physics path disagree only by the usual fraction of a tick.
+     *
+     * <p>The route is sampled every {@value #SURFACE_SAMPLE_PX}px and each sample is snapped DOWN
+     * to the ground under it, so an interpolated position is always a point the surface really
+     * carries - the same contract the baked WALK edges keep (an unobserved position is what a
+     * joining player is shown, and a diagonal lerp across a step would show them a bot in the
+     * air). A sample with no ground under it aborts the plan: the caller falls back to physics.
+     *
+     * Returns null when there is nothing to walk (the caller treats that as an arrival).
+     */
+    static MovementPlan surfaceWalk(MapleMap map, Point from, Point to, double walkPxPerSecond) {
+        if (map == null || from == null || to == null || from.equals(to)) {
+            return null;
+        }
+        int dx = to.x - from.x;
+        int steps = Math.max(1, (int) Math.ceil(Math.abs(dx) / (double) SURFACE_SAMPLE_PX));
+        List<Point> waypoints = new java.util.ArrayList<>(steps + 1);
+        // The start is snapped too: the plan's first frame is what a joining player is shown, so it
+        // must already be a floor point even if the caller passed a mid-slope pixel.
+        Point cursor = BotPhysicsEngine.findGroundPoint(map, from);
+        if (cursor == null) {
+            return null;
+        }
+        waypoints.add(cursor);
+        // Each sample is probed from the PREVIOUS sample's row, so a long ramp is followed one
+        // in-band step at a time instead of being judged against the start row's absolute height.
+        for (int i = 1; i <= steps; i++) {
+            if (i == steps) {
+                Point end = BotPhysicsEngine.findGroundPoint(map, to);
+                waypoints.add(end != null ? end : new Point(to));
+                break;
+            }
+            int x = from.x + (int) Math.round(dx * (double) i / steps);
+            Point ground = BotPhysicsEngine.findGroundPoint(map, new Point(x, cursor.y));
+            if (ground == null) {
+                return null; // no floor under the route: not a walk the analytic path can carry
+            }
+            waypoints.add(ground);
+            cursor = ground;
+        }
+        double pace = Math.max(1.0, walkPxPerSecond);
+        List<BotNavigationGraph.Edge> edges = new java.util.ArrayList<>(waypoints.size() - 1);
+        for (int i = 1; i < waypoints.size(); i++) {
+            Point a = waypoints.get(i - 1);
+            Point b = waypoints.get(i);
+            // One walk step never climbs more than the slope band or drops more than the snap
+            // band (the same bounds the baked WALK edges keep). A sample pair that breaks either
+            // is a ledge / a hole, not a walk: hand the trip back to physics.
+            int dy = b.y - a.y;
+            if (dy > BotPhysicsEngine.cfg.MAX_SNAP_DROP || dy < -BotPhysicsEngine.cfg.MAX_SLOPE_UP) {
+                return null;
+            }
+            int cost = (int) Math.max(1L, Math.round(a.distance(b) / pace * 1000.0));
+            edges.add(new BotNavigationGraph.Edge(
+                    0, 0, BotNavigationGraph.EdgeType.WALK, a, b, 0, 0, 0, 0, 0, 0, 0, cost));
+        }
+        return inMap(map.getId(), edges);
+    }
+
+    /** Ground-sampling stride for {@link #surfaceWalk}: short enough that a step-up is a real step. */
+    private static final int SURFACE_SAMPLE_PX = 40;
+
+    /*
      * Plan an in-map route on a live map+graph from startPos to targetPos. Resolves
      * both endpoints to nav regions and runs the same A* the physics path uses, so the analytic and
      * physics routes match. Returns null when either endpoint has no region or no path exists.
