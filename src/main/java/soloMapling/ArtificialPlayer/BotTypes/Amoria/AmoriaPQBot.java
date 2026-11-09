@@ -112,20 +112,22 @@ public class AmoriaPQBot extends PartyQuestBot {
      * Stand on this bot's share of the rope pattern the party is submitting.
      *
      * <p>Both rope stages are placement puzzles judged with a bare yes/no, and both store their
-     * answer in an instance property ({@code stage2combo} / {@code stage3combo}). Reading it
-     * would be a lookup a player cannot make, so the bot searches the candidate space instead
-     * ({@link PositionCombination}) and moves on only when a talk provably judged the current
-     * pattern wrong.
+     * answer in an instance property ({@code stage2combo} / {@code stage3combo}). The bot mostly
+     * searches the candidate space instead ({@link PositionCombination}) and moves on only when a
+     * talk provably judged the current pattern wrong; each round may also peek at the property,
+     * starting at 0% on the first round and growing 0.5% per failed one.
      *
      * <p>Stage 3 is the nine-rope map {@code 670010400} (five of nine, one body each); stage 2 is
      * the three-area sub-room the stage-1 gate opens onto, whose generator draws a body COUNT per
      * area summing to five.
      */
     private boolean ropePuzzle(int stage) {
+        String answerProperty = AmoriaPqData.comboPropertyFor(stage);
         PositionCombination.Plan plan = PositionCombination.standOn(getChr(), botIndex(),
                 System.identityHashCode(getChr().getMap()),
                 stage == 2 ? AmoriaPqData.stage2Candidates() : AmoriaPqData.stage3Candidates(),
-                AmoriaPqData.areasFor(stage), stage, AmoriaPqData.comboPropertyFor(stage));
+                AmoriaPqData.areasFor(stage), stage, answerProperty,
+                PositionCombination.comboAnswer(answerProperty));
         return !plan.spots().isEmpty();
     }
 

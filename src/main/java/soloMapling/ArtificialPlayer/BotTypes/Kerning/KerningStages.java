@@ -106,18 +106,21 @@ public final class KerningStages {
      *
      * <p>Stages 2-4 are rope/platform/barrel puzzles: the party has to put bodies on the right
      * areas and the quest answers only yes/no. The answer is stored in an instance property
-     * ({@code stgNProperty}), but reading it would be the one thing a player cannot do - so the
-     * bot searches the script's own row table instead
+     * ({@code stgNProperty}); the bot mostly searches the script's own row table
      * ({@link PositionCombination}) and moves on only when a talk has provably judged the
-     * current row wrong.
+     * current row wrong, with each round allowed to peek at the property - 0% on the first and
+     * 0.5% more after every failed one.
      *
      * <p>Returns a description of the plan so the caller can pass it on.
      */
     public static String takeMyPlace(Character bot, int stage, int botIndex) {
+        var candidates = KerningPqData.candidatesFor(stage);
+        String answerProperty = KerningPqData.answerPropertyFor(stage);
         PositionCombination.Plan plan = PositionCombination.standOn(bot, botIndex,
                 System.identityHashCode(bot.getMap()),
-                KerningPqData.candidatesFor(stage), KerningPqData.areasFor(stage),
-                stage, KerningPqData.answerPropertyFor(stage));
+                candidates, KerningPqData.areasFor(stage),
+                stage, answerProperty,
+                PositionCombination.indexAnswer(answerProperty, candidates));
         return describePlan(plan);
     }
 

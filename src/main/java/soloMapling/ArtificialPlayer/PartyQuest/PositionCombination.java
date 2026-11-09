@@ -10,6 +10,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ThreadLocalRandom;
 
 /**
  * The honest search for a body-placement puzzle: the party puts bodies on areas and the quest
@@ -27,9 +28,11 @@ import java.util.concurrent.ConcurrentHashMap;
  * an instance property, and compares it against the party's placement on every later talk; a miss
  * is {@code showWrongEffect()} and nothing else - no hint about which area was wrong.
  *
- * <p>Reading that property would turn the stage into a lookup, which is exactly what a player
- * cannot do, so no bot here reads it. The search walks the candidates in a fixed order and
- * retires one only when a talk has provably judged it wrong; see {@link #judgedPattern}.
+ * <p>Reading that property outright would turn the stage into a lookup, which is not the puzzle a
+ * player plays, so the search walks the candidates in a fixed order and retires one only when a
+ * talk has provably judged it wrong; see {@link #judgedPattern}. Each round may additionally
+ * peek at the answer: the first round never does, and every pattern already retired adds 0.5%
+ * to the next round's chance - see {@link #peekChance} and {@link #peekedIndex}.
  *
  * <p>State is per room, not per bot: every bot in the room stands on its share of the same
  * candidate, so they must all see the same ledger.
@@ -43,9 +46,23 @@ public final class PositionCombination {
      */
     private static final long SETTLE_MS = 2_500L;
 
+    /**
+     * How much each failed round adds to the next round's chance of peeking at the answer:
+     * round {@code n} (1-based) peeks with probability {@code (n - 1) * 0.5%}, so the first
+     * round never does and a long search keeps growing without a cap.
+     */
+    static final double PEEK_STEP = 0.005;
+
     /** One room's search: what is ruled out, what is presented, and what the stage has told us. */
     static final class Ledger {
         final Set<Long> tried = new HashSet<>();
+        /**
+         * The round whose peek has been rolled. The round is {@code tried.size() + 1}, so this
+         * key is what keeps the roll to ONE per round instead of once per tick.
+         */
+        int peekRound = -1;
+        /** The candidate the current round presents because it peeked, or {@code -1}. */
+        int peekIndex = -1;
         /** Index of the candidate being presented. */
         int index;
         /** The pattern presented, and when the party was first seen standing on it. */
@@ -80,7 +97,78 @@ public final class PositionCombination {
     public record Plan(List<Point> spots, int free, int attempt) {
     }
 
+    /**
+     * The answer a stage published, as its packed pattern, or a non-positive value when this
+     * bot cannot read it (no instance, no answer yet, a shape the parser does not know).
+     */
+    @FunctionalInterface
+    public interface Answer {
+        long patternOf(Character bot);
+    }
+
     private PositionCombination() {
+    }
+
+    /**
+     * The answer encoded as one comma-separated property - Ludi's {@code stage8combo}, Amoria's
+     * {@code stage2combo}/{@code stage3combo} - packed into the nibble form candidates use.
+     *
+     * <p>A missing or non-numeric value yields {@code -1}; the stages themselves blank the
+     * property when they discard an answer, so this is a real state, not a defensive check.
+     */
+    public static Answer comboAnswer(String property) {
+        return bot -> {
+            String published = PqActions.readEimString(bot, property);
+            if (published == null || published.isBlank()) {
+                return -1;
+            }
+            String[] parts = published.split(",");
+            int[] counts = new int[parts.length];
+            for (int i = 0; i < parts.length; i++) {
+                try {
+                    counts[i] = Integer.parseInt(parts[i].trim());
+                } catch (NumberFormatException e) {
+                    return -1;
+                }
+            }
+            return countsToPattern(counts);
+        };
+    }
+
+    /** The answer encoded as one integer per property - Orbis stage 4's {@code stage4_0..2}. */
+    public static Answer countsAnswer(String... properties) {
+        return bot -> {
+            int[] counts = new int[properties.length];
+            for (int i = 0; i < properties.length; i++) {
+                String published = PqActions.readEimString(bot, properties[i]);
+                if (published == null || published.isBlank()) {
+                    return -1;
+                }
+                try {
+                    counts[i] = Integer.parseInt(published.trim());
+                } catch (NumberFormatException e) {
+                    return -1;
+                }
+            }
+            return countsToPattern(counts);
+        };
+    }
+
+    /** The answer encoded as an index into the candidate list - Kerning's {@code stgNProperty}. */
+    public static Answer indexAnswer(String property, List<Candidate> candidates) {
+        return bot -> {
+            String published = PqActions.readEimString(bot, property);
+            if (published == null || published.isBlank()) {
+                return -1;
+            }
+            int index;
+            try {
+                index = Integer.parseInt(published.trim());
+            } catch (NumberFormatException e) {
+                return -1;
+            }
+            return index >= 0 && index < candidates.size() ? candidates.get(index).pattern() : -1;
+        };
     }
 
     /** Drop one room's search (the party left the stage, or the run ended). */
@@ -99,13 +187,15 @@ public final class PositionCombination {
      * @param stage      the stage number, for the {@code <stage>stageclear} flag
      * @param answerProperty the instance property the stage stores its answer in. Only its
      *     PRESENCE is used - it being set means the intro talk happened, so a later talk is a
-     *     real verdict. Its value is never read: that would be the answer.
+     *     real verdict. Its value is never read by this path, so it carries no peek.
+     * @param answer     how to read the answer for the round's peek, or {@code null} to
+     *     search honestly in every round
      */
     public static Plan standOn(Character bot, int bodyIndex, int roomKey,
                                List<Candidate> candidates, List<Rectangle> areas, int stage,
-                               String answerProperty) {
+                               String answerProperty, Answer answer) {
         Plan plan = decide(bot, roomKey, candidates, areas, stage, answerProperty,
-                seatedBots(bot));
+                seatedBots(bot), answer);
         Point mine = mine(plan.spots(), bodyIndex);
         if (mine != null) {
             PqActions.holdArea(bot, mine, 1_200);
@@ -117,15 +207,55 @@ public final class PositionCombination {
      * The decision half of {@link #standOn}, with no movement: observe the room, fold in any
      * verdict, and pick the candidate to present. Split out so the judgement wiring is testable
      * without a navigation graph behind the map (the tests have none).
+     *
+     * <p>The peek is rolled by {@link #plan}, once per round. The round is the same attempt number
+     * the plan reports - {@code tried.size() + 1} - so round 1 is a hard 0% and every verdict that
+     * retires a pattern moves the chance one step of 0.5%.
      */
     public static Plan decide(Character bot, int roomKey, List<Candidate> candidates,
                               List<Rectangle> areas, int stage, String answerProperty,
-                              int seated) {
+                              int seated, Answer answer) {
         Ledger ledger = LEDGERS.computeIfAbsent(roomKey, ignored -> new Ledger());
         synchronized (ledger) {
             observeJudgement(bot, ledger, areas, stage, answerProperty);
-            return plan(ledger, candidates, seated);
+            return plan(ledger, candidates, seated, bot, answer);
         }
+    }
+
+    /**
+     * The chance that round {@code round} (1-based) peeks at the answer instead of searching:
+     * {@code (round - 1) * 0.5%}, uncapped, and clamped to certainty.
+     */
+    static double peekChance(int round) {
+        return Math.min(1.0, Math.max(0, round - 1) * PEEK_STEP);
+    }
+
+    /**
+     * Whether a roll wins the round's peek. {@code roll} is uniform in [0, 1).
+     *
+     * <p>Pure so the hard zero is testable: at round 1 the chance is 0%, so no roll can win -
+     * not even the smallest representable one.
+     */
+    static boolean peekWins(int round, double roll) {
+        return roll < peekChance(round);
+    }
+
+    /**
+     * The candidate the answer names, or {@code -1} when the peek cannot be presented.
+     *
+     * <p>Two things disqualify it: no candidate has that pattern (a stale property from another
+     * run, a shape this puzzle never asks for), and the pattern is one a talk already judged
+     * wrong. Presenting the latter would fail again and never advance the round, so the party
+     * would loop forever - the honest walk has to carry the round instead.
+     */
+    static int peekedIndex(List<Candidate> candidates, Set<Long> tried, long answerPattern) {
+        for (int i = 0; i < candidates.size(); i++) {
+            long pattern = candidates.get(i).pattern();
+            if (pattern == answerPattern && !tried.contains(pattern)) {
+                return i;
+            }
+        }
+        return -1;
     }
 
     /**
@@ -277,8 +407,12 @@ public final class PositionCombination {
      * may now be the answer - and the stage could never be finished.
      */
     static void resetSearch(Ledger ledger) {
+        // The round is derived from the ruled-out set, so clearing it puts the next submission
+        // back on round 1 (a hard 0%); the roll key goes with it.
         ledger.tried.clear();
         ledger.index = 0;
+        ledger.peekRound = -1;
+        ledger.peekIndex = -1;
         ledger.presentedPattern = -1;
         ledger.firstSeenAtMs = 0L;
         ledger.stageAnswered = false;
@@ -297,9 +431,18 @@ public final class PositionCombination {
         return talkNow > lastTalkAt;
     }
 
-    /** Whether the stage has already published its answer (its value is never read). */
+    /**
+     * Whether the stage has already published its answer (its value is never read here).
+     *
+     * <p>An EMPTY value counts as "not answered": Amoria stage 2 blanks {@code stage2combo} with
+     * {@code ""} when it discards a wrong combination, so a null check alone would read the
+     * discarded state as still answered and {@link #resetSearch} would never fire.
+     */
     static boolean stageAnswered(Character bot, String answerProperty) {
-        return answerProperty != null && PqActions.readEimString(bot, answerProperty) != null;
+        String published = answerProperty == null
+                ? null
+                : PqActions.readEimString(bot, answerProperty);
+        return published != null && !published.isBlank();
     }
 
     /** The first candidate from {@code from} that no judged talk has ruled out, wrapping once. */
@@ -313,24 +456,73 @@ public final class PositionCombination {
         return -1;
     }
 
-    static Plan plan(Ledger ledger, List<Candidate> candidates, int seated) {
-        int index = nextUntried(ledger.tried, candidates, ledger.index);
-        if (index < 0) {
+    /**
+     * Pick the candidate the party presents, rolling the peek when a new round starts.
+     *
+     * <p>A round is one candidate the party actually submits, and the round number counts
+     * PRESENTATIONS - deliberately not verdicts. The judge may swallow a real submission (the
+     * talk that first publishes the answer is treated as the intro, and some stages both publish
+     * and judge in that same talk), so counting verdicts would leave the second submission at
+     * round 1 and keep its chance at 0%. Counting here keeps "round 1 = 0%" exact for every
+     * quest regardless of how its own script phrases the intro.
+     *
+     * <p>The roll happens when a round ends, which is the only moment the next candidate is
+     * chosen - never once per tick.
+     *
+     * <p>A peeked candidate is used only while it is unretired, and it never writes to
+     * {@code tried}: the honest walk keeps its own order, so the party can never lose a candidate
+     * it has not presented honestly.
+     */
+    static Plan plan(Ledger ledger, List<Candidate> candidates, int seated,
+                     Character bot, Answer answer) {
+        int honest = nextUntried(ledger.tried, candidates, ledger.index);
+        if (honest < 0) {
             // Every pattern ruled out means the ledger, not the quest, is wrong (a stale entry
             // from an interrupted run). Sweeping again is the only honest move left.
             ledger.tried.clear();
-            index = nextUntried(ledger.tried, candidates, 0);
+            honest = nextUntried(ledger.tried, candidates, 0);
         }
-        ledger.index = index;
-        Candidate candidate = candidates.get(index);
+        ledger.index = honest;
+        // The round is the attempt the party is on - the same number the plan already reports
+        // and the chat line already speaks ({@code tried.size() + 1}). Using it as the peek's
+        // input keeps one definition of "round" for the whole feature.
+        int round = ledger.tried.size() + 1;
+        if (ledger.peekRound != round) {
+            // One roll per round: a party standing on a candidate must not re-roll each tick.
+            ledger.peekRound = round;
+            ledger.peekIndex = peekedIndex(bot, ledger, candidates, round, answer);
+        }
+        // A peek is spent by its round; once a talk retires it, the honest walk carries on.
+        if (ledger.peekIndex >= 0
+                && ledger.tried.contains(candidates.get(ledger.peekIndex).pattern())) {
+            ledger.peekIndex = -1;
+        }
+        Candidate presented = ledger.peekIndex >= 0
+                ? candidates.get(ledger.peekIndex)
+                : candidates.get(honest);
         // NOTE: the settle clock is NOT touched here. It belongs to the OBSERVATION, which
         // sampleWindow owns - and the room has not moved yet, so the old reading is still the
         // truth. The candidate changes what we ask the party to stand on; the clock starts when
         // they actually get there.
-        ledger.presentedPattern = candidate.pattern();
-        int seatedNow = Math.min(seated, candidate.spots().size());
-        return new Plan(candidate.spots(), candidate.spots().size() - seatedNow,
-                ledger.tried.size() + 1);
+        ledger.presentedPattern = presented.pattern();
+        int seatedNow = Math.min(seated, presented.spots().size());
+        return new Plan(presented.spots(), presented.spots().size() - seatedNow, round);
+    }
+
+    /**
+     * Roll one round's peek, returning the candidate it names or {@code -1}.
+     *
+     * <p>The answer is read only when the roll wins: an honest round must not touch it at all.
+     */
+    private static int peekedIndex(Character bot, Ledger ledger, List<Candidate> candidates,
+                                   int round, Answer answer) {
+        if (bot == null || answer == null
+                || !peekWins(round, ThreadLocalRandom.current().nextDouble())) {
+            return -1;
+        }
+        // The answer was not in the candidate space, or names one already ruled out: the honest
+        // walk carries this round. The unused roll is not retried (that would inflate the chance).
+        return peekedIndex(candidates, ledger.tried, answer.patternOf(bot));
     }
 
     /**

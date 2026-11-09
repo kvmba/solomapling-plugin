@@ -1272,17 +1272,17 @@ public final class LudiStages {
     /**
      * Stand on this bot's share of the crate pattern the party is submitting right now.
      *
-     * <p>The combination is NOT read from the quest. Stage 8 is a five-of-nine guess judged
-     * with a single yes/no ({@code 2040043.js}: {@code showWrongEffect()} on a miss,
-     * {@code clearStage} on a hit), so knowing the answer is the only way to skip the search -
-     * and skipping it is the one thing the bots must not do. The search itself lives in
-     * {@link PositionCombination}: this method only says what the 126 patterns are and where a
-     * body stands in each.
+     * <p>Stage 8 is a five-of-nine guess judged with a single yes/no ({@code 2040043.js}:
+     * {@code showWrongEffect()} on a miss, {@code clearStage} on a hit). The bots mostly search
+     * for it - {@link PositionCombination} walks the 126 patterns and retires one only when a
+     * talk provably judged it wrong - but each round may also peek at {@code stage8combo}: the
+     * chance is 0% on the first round and grows 0.5% per failed one.
      */
     public static PositionCombination.Plan takeCrate(Character bot, int bodyIndex) {
         return PositionCombination.standOn(bot, bodyIndex, mapInstanceOf(bot),
                 LudiPqData.crateCandidates(), LudiPqData.crateAreas(bot.getMap().getAreas()),
-                8, LudiPqData.COMBO_PROPERTY);
+                8, LudiPqData.COMBO_PROPERTY,
+                PositionCombination.comboAnswer(LudiPqData.COMBO_PROPERTY));
     }
 
     // =========================================================================

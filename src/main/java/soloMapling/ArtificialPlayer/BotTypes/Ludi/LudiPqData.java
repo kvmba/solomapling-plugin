@@ -195,10 +195,9 @@ public final class LudiPqData {
     /**
      * The instance property the stage stores its answer in.
      *
-     * <p>Only its PRESENCE is ever checked - "has the intro talk happened yet" - so a later talk
-     * can be told apart from the intro. Its VALUE is never read by any bot: that would be the
-     * answer, and the search in {@link #candidateAt} is what keeps stage 8 a puzzle rather than a
-     * lookup.
+     * <p>The judge only checks its PRESENCE - "has the intro talk happened yet" - so a later talk
+     * can be told apart from the intro. Its VALUE is read by exactly one thing: the round's peek
+     * in {@link PositionCombination}, whose chance starts at 0% and grows 0.5% per failed round.
      */
     public static final String COMBO_PROPERTY = "stage8combo";
 
@@ -210,12 +209,12 @@ public final class LudiPqData {
     /**
      * The five crates of candidate {@code index}, walked in lexicographic area order.
      *
-     * <p>This is the whole of the bots' stage-8 knowledge. The stage is a five-of-nine
-     * combination judged with a single yes/no and no per-crate hint ({@code 2040043.js}:
-     * {@code showWrongEffect()} on a miss, {@code clearStage} on a hit), so reading its answer
-     * is the only way to skip the search - and skipping it is exactly what the bots must not do.
-     * Enumerating instead keeps them inside the puzzle the player is playing: they submit a
-     * pattern, and only a pattern the quest has actually judged wrong leaves the candidate space.
+     * <p>This is the whole of the bots' stage-8 knowledge while a round searches honestly. The
+     * stage is a five-of-nine combination judged with a single yes/no and no per-crate hint
+     * ({@code 2040043.js}: {@code showWrongEffect()} on a miss, {@code clearStage} on a hit).
+     * Enumerating keeps them inside the puzzle the player is playing: they submit a pattern, and
+     * only a pattern the quest has actually judged wrong leaves the candidate space. A round may
+     * additionally peek at the answer (0% on the first, +0.5% per failed round).
      *
      * <p>Lexicographic order is not a tactic, just a stable, gap-free walk of all 126 - the
      * caller's failure ledger is what turns it into a search.

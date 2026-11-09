@@ -117,7 +117,7 @@ public final class AmoriaPqData {
      * <p>{@code generateCombo2} names exactly five of nine areas, so this is the same shape as
      * Ludi's crates and uses the same search
      * ({@link soloMapling.ArtificialPlayer.PartyQuest.PositionCombination}). The answer is stored
-     * in {@code stage3combo}, but reading it would be a lookup a player cannot make.
+     * in {@code stage3combo} and is read only by the round's peek, starting at 0%.
      */
     public static List<soloMapling.ArtificialPlayer.PartyQuest.PositionCombination.Candidate>
             stage3Candidates() {

@@ -145,10 +145,11 @@ public final class OrbisStages {
      *
      * <p>The quest picks three numbers summing to 3 and compares them against the player count
      * inside each rectangle, so the party has to stand <em>exactly</em> so. Those numbers are
-     * published as {@code stage4_0..2}, but reading them is a lookup a player cannot make - so
-     * this searches the space instead: every spread of three bodies over three platforms is a
-     * candidate, walked in a fixed order ({@link PositionCombination}), and a candidate leaves
-     * the walk only when a talk provably judged it wrong.
+     * published as {@code stage4_0..2}; this searches the space instead - every spread of three
+     * bodies over three platforms is a candidate, walked in a fixed order
+     * ({@link PositionCombination}), and a candidate leaves the walk only when a talk provably
+     * judged it wrong - with each round allowed to peek at the published numbers, 0% on the
+     * first and 0.5% more after every failed one.
      *
      * <p>{@code index} is this bot's slot among the bots taking part.
      *
@@ -158,7 +159,8 @@ public final class OrbisStages {
         PositionCombination.Plan plan = PositionCombination.standOn(bot, index,
                 System.identityHashCode(bot.getMap()),
                 sealedCandidates(), OrbisPqData.SEALED_AREA_RECTS, OrbisPqData.STAGE_4,
-                "stage4_0");
+                "stage4_0", PositionCombination.countsAnswer(
+                        "stage4_0", "stage4_1", "stage4_2"));
         return !plan.spots().isEmpty();
     }
 

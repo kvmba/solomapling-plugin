@@ -85,8 +85,8 @@ public final class KerningPqData {
     /**
      * The instance property a stage stores its answer in.
      *
-     * <p>Only its presence is ever checked - it exists once the intro talk happened, which is
-     * what makes a later talk a verdict rather than another intro. Its value is never read.
+     * <p>Its PRESENCE is what makes a later talk a verdict rather than another intro; its value
+     * is read only by the round's peek in {@code PositionCombination}, never by the judge.
      */
     public static String answerPropertyFor(int stage) {
         return switch (stage) {
