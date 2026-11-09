@@ -276,40 +276,55 @@ public class PqStageNpcPostTest {
      * to {@code stageNpcSpot} itself, so a six-body party plus the leader rendered as one sprite
      * on the turn-in NPC (the reported crowding).
      *
-     * <p>{@code parkSpot} is the private seam that decides where a waiter stands. The contract
-     * pinned here is deliberately weak - the drift is a cosmetic offset, not a placement
-     * guarantee - but it must hold concretely:
+     * <p>Driven over every LPQ room (the nine stages plus the bonus tail) against the real WZ
+     * geometry, because the ledges differ wildly. The contract asserted is the one the report is
+     * about, and it deliberately does NOT pin which foothold a waiter lands on - a neighbouring
+     * board is a fine place to wait:
      * <ul>
-     *   <li>different bots get different spots (the whole point of the change);</li>
-     *   <li>the spot stays on the NPC's own ledge row;</li>
-     *   <li>it stays inside the pickup reach, so a bot holding passes still delivers where it
-     *       stands instead of walking to the NPC and back every tick.</li>
+     *   <li>six waiters get at least five different spots;</li>
+     *   <li>every spot is real ground (a foothold answers under it) and within
+     *       {@link #PARK_VERTICAL_TOLERANCE_PX} of the NPC's row, so nobody is sent downstairs;</li>
+     *   <li>every spot stays inside the pickup reach of the NPC, so a bot holding passes still
+     *       delivers where it stands instead of walking back and forth every tick.</li>
      * </ul>
      */
     @Test
     void waitersStandOffTheNpcInsteadOfAllOnItsPixel() throws Exception {
         org.junit.jupiter.api.Assumptions.assumeTrue(wzAvailable(), "Map.wz needed");
-        int stageNpc = LudiPqData.stageNpcId(1);
-        MapleMap map = mapWithWzNpcs(922010100);
-        NPC npc = map.getNPCById(stageNpc);
-        assertNotNull(npc, "stage-1 turn-in NPC must be in the room");
-        Character probe = botOn(map, npc.getPosition());
-        Point npcSpot = invokeStageNpcSpot(probe, stageNpc);
-        assertNotNull(npcSpot, "the post must resolve");
+        int[] rooms = {922010100, 922010200, 922010300, 922010400, 922010500,
+                922010600, 922010700, 922010800, 922010900, 922011100};
+        int[] npcs = {2040036, 2040037, 2040038, 2040039, 2040040,
+                2040041, 2040042, 2040043, 2040044, 2040035};
 
-        java.util.Set<Point> spots = new java.util.HashSet<>();
-        for (int id = 9400; id < 9406; id++) {
-            Point spot = invokeParkSpot(probe, npcSpot, id);
-            assertNotNull(spot, "bot " + id + " must get a spot");
-            assertEquals(npcSpot.y, spot.y,
-                    "the park spot must stay on the NPC's ledge, got " + spot);
-            assertTrue(Math.hypot(spot.x - npcSpot.x, spot.y - npcSpot.y) <= 150.0,
-                    "bot " + id + " parked at " + spot + ", outside the delivery reach of "
-                            + npcSpot + " - it would walk back to deliver every tick");
-            spots.add(spot);
+        for (int i = 0; i < rooms.length; i++) {
+            MapleMap map = mapWithWzNpcs(rooms[i]);
+            NPC npc = map.getNPCById(npcs[i]);
+            assertNotNull(npc, "room " + rooms[i] + " must hold NPC " + npcs[i]);
+            Character probe = botOn(map, npc.getPosition());
+            Point npcSpot = invokeStageNpcSpot(probe, npcs[i]);
+            assertNotNull(npcSpot, "room " + rooms[i] + " must resolve a post");
+
+            java.util.Set<Point> spots = new java.util.HashSet<>();
+            for (int id = 9400; id < 9406; id++) {
+                Point spot = invokeParkSpot(probe, npcSpot, id);
+                assertNotNull(spot, "room " + rooms[i] + ": bot " + id + " must get a spot");
+                assertNotNull(soloMapling.ArtificialPlayer.GCMoveSystem.GCMovement
+                                .groundFoothold(map, spot),
+                        "room " + rooms[i] + ": bot " + id + " was parked at " + spot
+                                + ", which is not standing ground");
+                assertTrue(Math.abs(spot.y - npcSpot.y) <= 60,
+                        "room " + rooms[i] + ": bot " + id + " parked at " + spot
+                                + ", a different storey from the NPC at " + npcSpot);
+                assertTrue(spot.distanceSq(npcSpot) <= 150 * 150,
+                        "room " + rooms[i] + ": bot " + id + " parked at " + spot
+                                + ", outside the delivery reach of " + npcSpot
+                                + " - it would walk back to deliver every tick");
+                spots.add(spot);
+            }
+            assertTrue(spots.size() >= 5,
+                    "room " + rooms[i] + ": six waiters got only " + spots.size()
+                            + " different spots: " + spots);
         }
-        assertTrue(spots.size() >= 5,
-                "six waiters must occupy at least five different spots, got " + spots);
     }
 
     /** {@code parkSpot(Character, Point)} is the private seam the wait offsets come from. */

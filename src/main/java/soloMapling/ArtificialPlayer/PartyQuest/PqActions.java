@@ -2505,6 +2505,13 @@ public final class PqActions {
      */
     private static final int PARK_DRIFT_PX = 60;
 
+    /**
+     * How far off the NPC's row a drifted landing may sit and still count as "beside the NPC".
+     * Big enough for a neighbouring board one step up or down (LPQ stacks ledges 13-22px apart),
+     * small enough that the far storeys (measured 300+px away on the tower maps) are rejected.
+     */
+    private static final int PARK_VERTICAL_TOLERANCE_PX = 60;
+
     /** map instance -> the wait spots already claimed (the NPC pixel is the first). */
     private static final Map<Integer, java.util.Set<Point>> WAIT_SPOT_CLAIMS = new java.util.concurrent.ConcurrentHashMap<>();
 
@@ -2548,19 +2555,26 @@ public final class PqActions {
     /**
      * A few steps off the NPC, chosen by the bot's own id so a party stands in different spots.
      *
-     * <p>The step is taken only when the ground under it is still the NPC's ledge - a short
-     * shelf, a hole in the floor or the ledge's end keeps the bot on the NPC pixel rather than
-     * walking it off the edge. The drift stays inside {@link #PICKUP_REACH_SQ} so a bot holding
-     * passes still satisfies the delivery post's reach test without walking, which is what keeps
-     * {@link #handItemsToLeaderAfterStage} and this park from pulling the bot back and forth.
+     * <p>Any legal foothold will do - a neighbouring ledge or a board one step up or down is fine,
+     * since the point of the wait is that six bodies do not share one pixel. Two bounds keep the
+     * step a STEP and not a walk-away:
+     * <ul>
+     *   <li>no ground under the drifted column (a gap) keeps the NPC pixel rather than walking
+     *       into the air;</li>
+     *   <li>a landing more than {@link #PARK_VERTICAL_TOLERANCE_PX} off the NPC's row is a
+     *       different storey - measured, those answers came 300+px away on the tower maps - so
+     *       the bot keeps the NPC pixel instead of teleporting the wait downstairs.</li>
+     * </ul>
+     * The drift is bounded by {@link #PARK_DRIFT_PX} and therefore inside the pickup reach, so a
+     * bot holding passes still delivers from where it stands instead of walking back and forth.
      */
     private static Point parkSpot(Character bot, Point npc) {
         int drift = Math.floorMod(bot.getId() * 37, 2 * PARK_DRIFT_PX + 1) - PARK_DRIFT_PX;
         Point ground = GCMovement.groundPointBelow(bot.getMap(), npc.x + drift, npc.y);
-        if (ground != null && Math.abs(ground.y - npc.y) <= RING_FLOOR_TOLERANCE_PX) {
-            return ground;
+        if (ground == null || Math.abs(ground.y - npc.y) > PARK_VERTICAL_TOLERANCE_PX) {
+            return new Point(npc);
         }
-        return new Point(npc);
+        return ground;
     }
 
     /**
