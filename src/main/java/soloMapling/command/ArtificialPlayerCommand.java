@@ -1217,8 +1217,9 @@ public class ArtificialPlayerCommand extends Command {
                         fieldState(channelServer, cpq2, field)));
             }
         }
-        user.yellowMessage("Place a party in a field lobby; a full bot team is fielded and the "
-                + "match opens after the 10-second count, as it does when a challenge is accepted.");
+        user.yellowMessage("Place a party in a field lobby; a full bot team joins after a random "
+                + "10-60s wait and the match opens after the 10-second count, as it does when a "
+                + "challenge is accepted.");
     }
 
     /**

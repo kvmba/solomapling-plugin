@@ -40,8 +40,10 @@ import java.util.concurrent.ConcurrentHashMap;
  * <h2>What makes it look like a player-initiated match</h2>
  * The two things a player can see are: the opposing team walking into the field and waiting
  * there, and the field's ten-second clock - the same count the host shows when a challenge is
- * accepted. This class reproduces both, on the host's own timing - see
- * {@link CarnivalPqData#MATCH_WAIT_MS} and {@link #announceChallenge}.
+ * accepted. And, before both, a hesitation: a party that has just walked into the field waits
+ * alone for a rolled 10-60s before the opposing team arrives, because an opponent that
+ * materialises in the same second reads as scenery rather than as another party queuing. See
+ * {@link #JOIN_DELAY_MIN_MS} and {@link CarnivalPqData#MATCH_WAIT_MS}.
  */
 public final class CarnivalArena {
 
@@ -76,30 +78,66 @@ public final class CarnivalArena {
     private static final long FAILED_START_BACKOFF_MS = 20_000L;
 
     /**
-     * One field's pending match: the player party waiting there, the bot team already standing in
-     * the field with them, the field's own map (so the countdown clock can be taken off screen),
-     * when the ten-second clock is due, and when the arena opens.
+     * One field's pending match: the player party waiting there, the field's own map (so the
+     * countdown clock can be taken off screen), when the opposing team is due to walk in, the team
+     * once it has, when the ten-second clock is due, and when the arena opens.
      *
-     * <p>The two times are separate because the count is anchored to when the clock reaches the
-     * client, not to when the poll noticed the party: the client runs the countdown itself from the
-     * value in the packet, so the arena must open MATCH_WAIT_MS after that packet, or the last
+     * <p>{@link #bots} stays null while the party waits for an opponent. A team that materialises
+     * in the same second a party sets foot in the field reads as scenery rather than as an
+     * opponent, so the join is deadline-driven - see {@link #rollJoinDelayMs()}.
+     *
+     * <p>The two clock times are separate because the count is anchored to when the clock reaches
+     * the client, not to when the poll noticed the party: the client runs the countdown itself from
+     * the value in the packet, so the arena must open MATCH_WAIT_MS after that packet, or the last
      * seconds on screen would belong to a match that has already warped them.
      */
     private static final class PendingMatch {
         final Party players;
-        final Party bots;
         final MapleMap lobby;
-        /** When to broadcast the ten-second clock; 0 once it has been sent. */
+        /** When the opposing team walks in; only meaningful while {@link #bots} is null. */
+        final long joinAtMs;
+        /** The team, once it has walked in; null while the party is still waiting for one. */
+        Party bots;
+        /** When to broadcast the ten-second clock; 0 before the join walks the team in. */
         long clockAtMs;
-        /** When to open the arena; only meaningful once the clock has gone out. */
+        /** When to open the arena; 0 until the clock has actually been broadcast. */
         long dueAtMs;
 
-        PendingMatch(Party players, Party bots, MapleMap lobby, long clockAtMs) {
+        PendingMatch(Party players, MapleMap lobby, long joinAtMs) {
             this.players = players;
-            this.bots = bots;
             this.lobby = lobby;
-            this.clockAtMs = clockAtMs;
+            this.joinAtMs = joinAtMs;
         }
+
+        /**
+         * Whether OUR ten-second clock has been put on screen (and so needs clearing).
+         *
+         * <p>{@code dueAtMs} is armed in the same step that broadcasts the count, and only there:
+         * before that the client is showing the host's own three-minute escort (or, during the
+         * join wait, no clock at all), and clearing it would leave a player with no clock while an
+         * invisible three-minute warp still counts down.
+         */
+        boolean clockSent() {
+            return dueAtMs != 0L;
+        }
+    }
+
+    /**
+     * How long a party waits in a field before the opposing team walks in.
+     *
+     * <p>The host's own model has the opponent appear the moment a challenge is accepted, but a
+     * bot team that shows up in the same second a player walks into the field gives the trick
+     * away. The roll is a human-length hesitation between "somebody is queuing" and "the opposing
+     * team is here", and its upper bound still leaves the field's own three-minute escort
+     * ({@code cpqLobby}) comfortably ahead of the match opening.
+     */
+    static final long JOIN_DELAY_MIN_MS = 10_000L;
+    static final long JOIN_DELAY_MAX_MS = 60_000L;
+
+    /** A uniform wait in {@code [JOIN_DELAY_MIN_MS, JOIN_DELAY_MAX_MS]}. */
+    static long rollJoinDelayMs() {
+        return java.util.concurrent.ThreadLocalRandom.current()
+                .nextLong(JOIN_DELAY_MIN_MS, JOIN_DELAY_MAX_MS + 1);
     }
 
     /** field key -> pending match. */
@@ -298,15 +336,18 @@ public final class CarnivalArena {
      * Advance one field one tick: reap a finished match, advance the field's clock, or arm a
      * challenge.
      *
-     * <p>The three states a field can be in, in order:
+     * <p>The four states a field can be in, in order:
      * <ol>
      *   <li><b>a match is running</b> - our own record, or anybody standing in the arena instance
      *       (the NPC's player-versus-player path lands there too). Left alone.</li>
+     *   <li><b>an opposing team is due</b> - a player party is waiting alone in the field and a
+     *       join delay has been rolled; when it expires the bot team walks in and the field's
+     *       clock is armed.</li>
      *   <li><b>a challenge is counting down</b> - a player party is waiting and a bot team has
      *       already walked into the field with them. The host's ten-second clock runs on the
      *       clients; when it expires the match opens.</li>
-     *   <li><b>nothing</b> - a waiting player party gets a bot team walked in and the ten-second
-     *       count started, which is what a party sees when its challenge is accepted.</li>
+     *   <li><b>nothing</b> - a waiting player party gets a join delay rolled, which is what the
+     *       host's field looks like between "a party queued" and "an opponent accepted".</li>
      * </ol>
      *
      * <p>The host's other field clock - the three-minute "nobody challenged you, out you go" - is
@@ -389,16 +430,33 @@ public final class CarnivalArena {
         PendingMatch waiting = PENDING.get(key);
         long now = System.currentTimeMillis();
         if (waiting == null || waiting.players != players) {
-            // A new (or changed) party: field a bot team for it and start the field's own clock.
-            // The team is walked into the field in the same step, so the player sees the opponent
-            // arrive and wait with them.
+            // A new (or changed) party: arm the wait. The opposing team is NOT walked in yet -
+            // it joins after a rolled human-length hesitation (see JOIN_DELAY_MIN_MS), because a
+            // team that appears in the same second the party walks in reads as a spawn, not as an
+            // opponent that was queuing too. Drafting is left to the deadline as well: a team held
+            // in a party during the wait would look committed and be undraftable/uninvitable by the
+            // players sharing this hall.
+            //
+            // The previous wait (a party that has since changed) is simply replaced, not cleared:
+            // its ten-second clock, if it had one on screen, is superseded by this wait's own
+            // count within CLOCK_DELAY_MS anyway, while an explicit removeClock here would also
+            // wipe the three-minute escort clock the NEW party is currently looking at.
+            PENDING.put(key, new PendingMatch(players, lobby, now + rollJoinDelayMs()));
+            return;
+        }
+        if (waiting.bots == null) {
+            if (now < waiting.joinAtMs) {
+                return; // the party waits alone: the opponent is still on its way
+            }
+            // The join is due: field a bot team and walk it into the field. From here the field's
+            // own clock runs, exactly as the host's does once a challenge is accepted.
             Party bots = botTeamFor(channel, field, cpq2);
             if (bots == null) {
-                // No team this tick. Either the previous one is still playing its result beat - in
-                // which case it must be left alone, not sent home - or there are not six carnival
-                // bots yet and the spawn was handed off. Both answers are "arm nothing and let a
-                // later poll retry".
-                abandonPending(key, channel, field, cpq2);
+                // No team yet. Either the previous one is still playing its result beat - in which
+                // case it must be left alone, not sent home - or there are not six carnival bots
+                // yet and the spawn was handed off. Keep the wait (and its roll) so the join is
+                // attempted again on the next poll: dropping the entry here would re-roll the
+                // delay and push the join further past the window the party was told to expect.
                 return;
             }
             moveTeamTo(bots, channel, lobbyId);
@@ -416,8 +474,8 @@ public final class CarnivalArena {
             // The clock itself waits out the host's own 1.5s (see CLOCK_DELAY_MS): the field's
             // three-minute clock reaches the client at that offset, so a count sent inline would be
             // overwritten by 3:00 on every client that has just walked in.
-            PENDING.put(key, new PendingMatch(players, bots, lobby,
-                    now + CarnivalPqData.CLOCK_DELAY_MS));
+            waiting.bots = bots;
+            waiting.clockAtMs = now + CarnivalPqData.CLOCK_DELAY_MS;
             return;
         }
         if (waiting.clockAtMs != 0L) {
@@ -465,15 +523,16 @@ public final class CarnivalArena {
     /**
      * Clear a field's countdown bookkeeping, and take OUR clock off every waiting client.
      *
-     * <p>Only when the ten-second clock was actually sent. Before that the field is showing the
-     * host's own three-minute clock ({@code cpqLobby} sent it, and the host's own return-to-hall
-     * timer is still armed), so a blanket {@code removeClock} here would leave a player with no
-     * clock at all while a three-minute warp they cannot see is still counting - the opposite of
-     * what the clear is for.
+     * <p>Only when the ten-second clock was actually sent (see {@link PendingMatch#clockSent()}).
+     * Before that the field is showing the host's own three-minute clock ({@code cpqLobby} sent
+     * it, and the host's own return-to-hall timer is still armed) - or, earlier still, no clock at
+     * all while the party waits alone for its opponent - so a blanket {@code removeClock} here
+     * would leave a player with no clock at all while a three-minute warp they cannot see is still
+     * counting: the opposite of what the clear is for.
      */
     private static void dropPending(int key) {
         PendingMatch waiting = PENDING.remove(key);
-        if (waiting != null && waiting.clockAtMs == 0L) {
+        if (waiting != null && waiting.clockSent()) {
             // A clock left on screen after the wait is abandoned keeps counting down to a match
             // that will never open. Cleared here rather than at each call site so every way the
             // wait can end (party left, half-assembled, match opened) behaves the same.
@@ -544,8 +603,12 @@ public final class CarnivalArena {
      */
     private static void releaseIdleTeam(int key) {
         Party team = BOT_PARTIES.get(key);
+        // A wait that is still counting down has no team of its own yet - but it will take whatever
+        // team this field has at the deadline. Releasing that team underneath the wait would force
+        // a rebuild (spawn-inclusive) exactly when the opponents are supposed to walk in. The wait
+        // is bounded by the field's own three-minute escort, so nothing is parked indefinitely.
         if (team == null || RUNNING.containsKey(key) || PENDING.containsKey(key)) {
-            return; // no team, a live match owns it, or it is standing in the field waiting
+            return; // no team, a live match owns it, or a wait is about to field one
         }
         for (PartyCharacter mpc : team.getPartyMembers()) {
             Character mc = mpc.getPlayer();
