@@ -214,20 +214,21 @@ class LpqReviewRegressionTest {
     void autoReachIncludesThePackProfileAndItsTargetCap() throws Exception {
         MapleMap map = map(922019988);
         floor(map, 1, -100, 0, 800);
-        createBot(map, new Point(0, 0), Job.HUNTER);
-        // Geometry, not the rule under test: these two only have to prove the TALLER pack box is
-        // what admits a dy=-180 pack (the single profile's reachY is 150), so dx must clear the
-        // shot's arc as well (|dy| * 2 <= |dx| => dx >= 360). Keep the pack inside reachX=450.
-        Monster first = monster(9300005, 99121, new Point(380, -180));
-        Monster second = monster(9300005, 99122, new Point(440, -180));
+        createBot(map, new Point(0, 0), Job.WARRIOR);
+        // Geometry is not the rule under test: this case proves AUTO picks the TALLER pack box
+        // (melee 130x80 vs single 90x60) and that the pack cap admits the second body. The
+        // projectile routes cannot express that any more - the 1:4 shot arc caps the vertical
+        // gap below the single profile's reachY, so range, not the pack box, would decide.
+        Monster first = monster(9300005, 99121, new Point(60, -70));
+        Monster second = monster(9300005, 99122, new Point(110, -70));
         inject(map, first); inject(map, second);
         try (var effects = mockStatic(BotAttackEffects.class)) {
             assertTrue(BotAttackDriver.canReach(bot, first), "AUTO chooses the taller pack box");
             assertTrue(BotAttackDriver.canReach(bot, second));
             assertTrue(BotAttackDriver.botAttack(bot).hit());
-            effects.verify(() -> BotAttackEffects.rangedStrike(eq(bot),
+            effects.verify(() -> BotAttackEffects.meleeStrike(eq(bot),
                     argThat(hits -> hits.containsKey(first) && hits.containsKey(second)),
-                    anyInt(), anyInt(), anyInt(), anyInt(), anyInt(), anyInt(), anyShort()));
+                    anyInt(), anyInt(), anyInt(), anyInt(), anyInt(), anyShort()));
         }
     }
 
@@ -265,8 +266,13 @@ class LpqReviewRegressionTest {
         }
     }
 
+    /**
+     * The steepest shot that still lands from this room's firing ledge. At 1:4 the arc, not the
+     * reach box, is the vertical limit: 450px of horizontal reach allows 112px of lift, so the
+     * boundary cases sit there (they used to sit at the box's 150 because 1:2 was looser than it).
+     */
     @ParameterizedTest
-    @ValueSource(ints = {-150, -145, 149})
+    @ValueSource(ints = {-112, -110, 111})
     void legalVerticalBoundaryShotsAreNotFilteredOut(int targetY) throws Exception {
         MapleMap map = map(922019982 + targetY + 150);
         floor(map, 1, 0, 0, 300);
@@ -333,7 +339,9 @@ class LpqReviewRegressionTest {
     void enteringAttackRangeMidFlightKeepsItsLandingOrder() throws Exception {
         MapleMap map = map(922019991);
         floor(map, 1, -100, 0, 800);
-        createBot(map, new Point(100, -40), Job.HUNTER);
+        // In range under the 1:4 arc (dx=100 allows 25px of lift) so the beat is about the
+        // landing order, not about whether the shot is legal.
+        createBot(map, new Point(100, -20), Job.HUNTER);
         Monster target = monster(9300170, 99129, new Point(200, 0));
         inject(map, target);
         GCMovement.move(bot, 100, 0); // the landing order the arc is flying to

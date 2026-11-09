@@ -1485,6 +1485,17 @@ public final class GCMovement {
 
     /** Nearest reachable ground inside an interaction box; one peek-only graph traversal. */
     public static Point nearestReachableGround(Character bot, java.awt.Rectangle bounds) {
+        return nearestReachableGround(bot, bounds, point -> true);
+    }
+
+    /**
+     * Nearest reachable ground inside a box that also passes the caller's own rule. The box is a
+     * spatial prefilter for callers whose legal set is not a rectangle (a shot's wedge); the
+     * predicate is what decides. Candidates are filtered while walking, so the nearest LEGAL
+     * surface wins rather than an illegal one closer to the bot.
+     */
+    public static Point nearestReachableGround(Character bot, java.awt.Rectangle bounds,
+                                               java.util.function.Predicate<Point> accept) {
         MapleMap map = bot.getMap();
         Point from = bot.getPosition();
         BotNavigationGraph graph = BotNavigationGraphProvider.peekBestGraph(map, BotMovementProfile.fromCharacter(bot));
@@ -1514,9 +1525,12 @@ public final class GCMovement {
                 // Inset X where space permits: a precise walk can settle up to 8px early.
                 // Do not shrink Y: a platform fixes the feet's row, even at the last legal pixel.
                 int inset = Math.min(8, (right - left) / 2);
-                Point candidate = segment.pointAt(Math.clamp(from.x, left + inset, right - inset));
+                Point candidate = legalPoint(segment, Math.clamp(from.x, left + inset, right - inset),
+                        left, right, accept);
+                if (candidate == null) continue;
                 candidate = BotPhysicsEngine.findGroundPoint(map, candidate);
-                if (candidate == null || !bounds.contains(candidate) || graph.findRegionId(map, candidate) != id) continue;
+                if (candidate == null || !bounds.contains(candidate) || graph.findRegionId(map, candidate) != id
+                        || !accept.test(candidate)) continue;
                 double cost = from.distanceSq(candidate);
                 if (cost < bestSq) {
                     best = candidate;
@@ -1532,6 +1546,31 @@ public final class GCMovement {
             }
         }
         return best;
+    }
+
+    /**
+     * The point of {@code segment} nearest {@code preferredX} that {@code accept} allows, searching
+     * outward one pixel at a time. The box is only a prefilter for callers whose legal set is not a
+     * rectangle (a shot's wedge), so the nearest x that is inside the box can still be rejected
+     * while a further one on the same foothold is legal. With an always-true predicate this answers
+     * the preferred x immediately, so the box-only callers are unaffected.
+     */
+    private static Point legalPoint(BotNavigationGraph.Segment segment, int preferredX,
+                                    int left, int right, java.util.function.Predicate<Point> accept) {
+        int limit = Math.max(preferredX - left, right - preferredX);
+        for (int radius = 0; radius <= limit; radius++) {
+            int lower = preferredX - radius;
+            if (lower >= left) {
+                Point point = segment.pointAt(lower);
+                if (accept.test(point)) return point;
+            }
+            int upper = preferredX + radius;
+            if (radius > 0 && upper <= right) {
+                Point point = segment.pointAt(upper);
+                if (accept.test(point)) return point;
+            }
+        }
+        return null;
     }
 
     /**

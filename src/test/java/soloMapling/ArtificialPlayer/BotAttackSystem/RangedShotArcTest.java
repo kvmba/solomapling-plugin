@@ -114,9 +114,9 @@ class RangedShotArcTest {
     @Test
     void aShelfShotWithEnoughHorizontalOffsetStillLands() throws Exception {
         createBot(Job.HUNTER, new Point(0, 0));
-        Monster shelf = inject(monster(9300170, 99403, new Point(300, -140)));
+        Monster shelf = inject(monster(9300170, 99403, new Point(300, -70)));
         assertTrue(BotAttackDriver.canReach(bot, shelf),
-                "300 across and 140 up is a real shelf shot (|dy| * 2 <= |dx|)");
+                "300 across and 70 up is a real shelf shot (|dy| * 4 <= |dx|)");
     }
 
     /** Just inside the box but on the same row: the ordinary case is untouched. */
@@ -128,23 +128,25 @@ class RangedShotArcTest {
     }
 
     /**
-     * The arc threshold is |dy| * ARC_SLOPE <= |dx|, i.e. ~26.6 degrees. Cases are chosen to sit
+     * The arc threshold is |dy| * ARC_SLOPE <= |dx|, i.e. ~14 degrees. Cases are chosen to sit
      * strictly INSIDE the reach box (reachY=150 for the single profile) so each one can only pass
      * or fail on the arc, never on the box.
      */
     @ParameterizedTest(name = "dx={0} dy={1} legal={2}")
     @CsvSource({
-            "300, 150, true",   // exactly on the arc: 150*2 == 300
-            "300, 149, true",   // just inside
-            "300, 151, false",  // just outside (and just past the box, kept for completeness)
-            "200, 150, false",  // inside the box, but too steep for the arc
-            "440, 150, true",   // full horizontal reach, shallow angle
+            "300, 75, true",   // exactly on the arc: 75*4 == 300
+            "300, 74, true",   // just inside
+            "300, 76, false",  // just outside
+            "200, 50, true",   // exact at a shorter range
+            "200, 51, false",  // inside the box, but too steep for the arc
+            "440, 110, true",  // full horizontal reach, shallow angle
+            "440, 111, false", // one pixel over the arc at the same range
     })
     void theArcThresholdIsExact(int dx, int dy, boolean legal) throws Exception {
         createBot(Job.HUNTER, new Point(0, 0));
         Monster mob = inject(monster(9300170, 99420 + dx + dy, new Point(dx, -dy)));
         assertEquals(legal, BotAttackDriver.canReach(bot, mob),
-                "dx=" + dx + " dy=" + dy + " (arc is |dy|*2 <= |dx|)");
+                "dx=" + dx + " dy=" + dy + " (arc is |dy|*4 <= |dx|)");
     }
 
     /** Bosses get the body padding, not a blanket exemption. */
@@ -176,35 +178,48 @@ class RangedShotArcTest {
                 "a cast may come straight down; the arc rule is a projectile rule only");
     }
 
-    /** The remote-firing search must not offer a ledge from which the shot's arc fails. */
+    /**
+     * The remote-firing search returns a spatial PREFILTER, not the legal set: at 1:4 the wedge
+     * needs reachY * ARC_SLOPE = 600px of room against reachX = 450, so no rectangle can express
+     * it (see BotAttackDriver.firingPositions). The box must stay on the bot's own side of the
+     * target so walking to it never crosses the target.
+     */
     @Test
-    void firingPositionsExcludeTheNearVerticalLane() throws Exception {
+    void firingBoxStaysOnTheBotsOwnSideOfTheTarget() throws Exception {
         createBot(Job.HUNTER, new Point(0, 0));
         Monster target = inject(monster(9300170, 99407, new Point(600, -400)));
         Rectangle shooters = BotAttackDriver.firingPositions(bot, target);
         assertNotNull(shooters);
+        assertTrue(shooters.width > 0 && shooters.height > 0, "never a degenerate box");
         assertFalse(shooters.contains(new Point(600, -400)), "never stand on the target's own column");
-        assertFalse(shooters.intersects(new Rectangle(560, -900, 80, 800)),
-                "the whole near-vertical lane is cut, not just the target's pixel");
+        assertTrue(shooters.x + shooters.width <= 600,
+                "the whole box is on the bot's side, so walking to it never crosses the target");
         assertTrue(shooters.contains(new Point(200, -400)),
                 "the lateral band on the bot's own side stays available");
     }
 
-    /** Every legal shooter point must satisfy the same arc the swing applies. */
+    /**
+     * The prefilter must never DROP a legal shot: every point the arc allows inside reach must be
+     * inside the box, or the ledge search would rule out a position the swing would have accepted.
+     * (The other direction - the box also contains illegal points - is by design; PqActions
+     * filters the point it picks with withinRangedArc.)
+     */
     @Test
-    void everyFiringPositionSurvivesTheHitTest() throws Exception {
+    void thePrefilterBoxNeverDropsALegalShot() throws Exception {
         createBot(Job.HUNTER, new Point(0, 0));
         Monster target = inject(monster(9300170, 99408, new Point(600, -400)));
         Rectangle shooters = BotAttackDriver.firingPositions(bot, target);
         Point tp = target.getPosition();
-        // Resolve the rule ONCE: isArcLimited re-reads the equipped weapon, the job's attack table
-        // and the skill gates on every call, so asking it per pixel made this the class's slowest
-        // case (5.2s of its 6.0s) while answering the same thing 100k times.
         assertTrue(BotAttackDriver.isArcLimited(bot), "a bowman's shot is arc-limited");
-        for (int x = shooters.x; x < shooters.x + shooters.width; x++) {
-            for (int y = shooters.y; y < shooters.y + shooters.height; y++) {
-                assertTrue(BotAttackDriver.withinRangedArc(new Point(x, y), tp, false),
-                        "firing box offers a shot outside the arc at (" + x + "," + y + ")");
+        // dx starts at 1: dx=0 is legal only at dy=0, i.e. the target's own pixel, which is not
+        // a position to shoot FROM (and the box deliberately stops at the target's column).
+        for (int dx = 1; dx <= 450; dx++) {
+            for (int dy = 0; dy <= 150; dy += 5) {
+                if (dy * 4 > dx) continue; // not a legal shot in the first place
+                assertTrue(shooters.contains(new Point(tp.x - dx, tp.y - dy)),
+                        "legal shot at dx=" + dx + " dy=" + dy + " was pruned by the prefilter");
+                assertTrue(shooters.contains(new Point(tp.x - dx, tp.y + dy)),
+                        "legal shot at dx=" + dx + " dy=-" + dy + " was pruned by the prefilter");
             }
         }
     }

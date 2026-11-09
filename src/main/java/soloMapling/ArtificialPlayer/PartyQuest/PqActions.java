@@ -1976,10 +1976,18 @@ public final class PqActions {
         return pathable;
     }
 
-    /** Search actual standable surfaces inside the attack box, not the mob's inaccessible floor. */
+    /**
+     * Search actual standable surfaces inside the attack box, not the mob's inaccessible floor.
+     * The box is only a prefilter: the shottable set is a wedge, so the point GCMovement settles
+     * on is checked against withinRangedArc before it is offered as a ledge.
+     */
     private static Point findFiringPosition(Character bot, Monster mob) {
         java.awt.Rectangle bounds = BotAttackDriver.firingPositions(bot, mob);
-        return bounds == null ? null : GCMovement.nearestReachableGround(bot, bounds);
+        if (bounds == null) return null;
+        Point target = mob.getPosition();
+        boolean boss = mob.isBoss();
+        return GCMovement.nearestReachableGround(bot, bounds,
+                shot -> BotAttackDriver.withinRangedArc(shot, target, boss));
     }
 
     /**
