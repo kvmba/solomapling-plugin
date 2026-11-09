@@ -2495,6 +2495,16 @@ public final class PqActions {
     /** How far (px) below the NPC a floor may sit and still count as the NPC's wait ring. */
     private static final int RING_FLOOR_TOLERANCE_PX = 30;
 
+    /**
+     * How far along the NPC's ledge a waiter may drift from the NPC pixel. Each bot derives its
+     * own offset from its id, so a party stands in different places instead of all walking to
+     * the same pixel (which rendered as one body on the turn-in NPC). Derived rather than
+     * rolled on purpose: a fresh random step every macro tick would walk the bot back and forth
+     * for as long as the wait lasts. Two waiters drifting to the same spot is fine - touching
+     * bodies still read as a pair of people waiting.
+     */
+    private static final int PARK_DRIFT_PX = 60;
+
     /** map instance -> the wait spots already claimed (the NPC pixel is the first). */
     private static final Map<Integer, java.util.Set<Point>> WAIT_SPOT_CLAIMS = new java.util.concurrent.ConcurrentHashMap<>();
 
@@ -2518,10 +2528,13 @@ public final class PqActions {
         if (bot == null || bot.getMap() == null) {
             return;
         }
-        Point spot = stageNpcSpot(bot, stageNpcId);
-        if (spot == null) {
+        Point npc = stageNpcSpot(bot, stageNpcId);
+        if (npc == null) {
             return;
         }
+        // Wait a few steps off the NPC rather than on its pixel: every waiter walking to one
+        // point is what made a finished stage read as a single body on the turn-in NPC.
+        Point spot = parkSpot(bot, npc);
         if (yieldsToLiveWalk(bot, spot)) {
             return;
         }
@@ -2530,6 +2543,24 @@ public final class PqActions {
         // may steer at whatever spawns nearby and - critically - the 250ms beat keeps the
         // bot's swings alive while it stands (a shield renewed every macro tick read as a
         // 100% combat blackout for the whole wait).
+    }
+
+    /**
+     * A few steps off the NPC, chosen by the bot's own id so a party stands in different spots.
+     *
+     * <p>The step is taken only when the ground under it is still the NPC's ledge - a short
+     * shelf, a hole in the floor or the ledge's end keeps the bot on the NPC pixel rather than
+     * walking it off the edge. The drift stays inside {@link #PICKUP_REACH_SQ} so a bot holding
+     * passes still satisfies the delivery post's reach test without walking, which is what keeps
+     * {@link #handItemsToLeaderAfterStage} and this park from pulling the bot back and forth.
+     */
+    private static Point parkSpot(Character bot, Point npc) {
+        int drift = Math.floorMod(bot.getId() * 37, 2 * PARK_DRIFT_PX + 1) - PARK_DRIFT_PX;
+        Point ground = GCMovement.groundPointBelow(bot.getMap(), npc.x + drift, npc.y);
+        if (ground != null && Math.abs(ground.y - npc.y) <= RING_FLOOR_TOLERANCE_PX) {
+            return ground;
+        }
+        return new Point(npc);
     }
 
     /**

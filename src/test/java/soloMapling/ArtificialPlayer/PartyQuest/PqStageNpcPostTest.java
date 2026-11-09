@@ -92,6 +92,9 @@ public class PqStageNpcPostTest {
                 .getData(mapPath(mapId));
         MapleMap map = new MapleMap(mapId, 0, 0, 920010000, 0.0f);
         map.setMapLineBoundings(-4000, 600, -3000, 3000);
+        // The real footholds: the wait-spot drift grounds its step on them (groundPointBelow),
+        // so a foothold-less stub map would silently fall back to the NPC pixel every time.
+        map.setFootholds(footholdsOf(mapData));
         Data life = mapData.getChildByPath("life");
         if (life != null) {
             for (Data entry : life) {
@@ -109,6 +112,29 @@ public class PqStageNpcPostTest {
             }
         }
         return map;
+    }
+
+    /** The room's real footholds, walked straight out of the WZ foothold tree. */
+    private static org.gms.server.maps.FootholdTree footholdsOf(Data mapData) {
+        org.gms.server.maps.FootholdTree tree = new org.gms.server.maps.FootholdTree(
+                new Point(-4000, -4000), new Point(4000, 4000));
+        Data footholdData = mapData.getChildByPath("foothold");
+        if (footholdData == null) {
+            return tree;
+        }
+        for (Data footRoot : footholdData) {
+            for (Data footCategory : footRoot) {
+                for (Data fh : footCategory) {
+                    tree.insert(new org.gms.server.maps.Foothold(
+                            new Point(DataTool.getInt(fh.getChildByPath("x1")),
+                                    DataTool.getInt(fh.getChildByPath("y1"))),
+                            new Point(DataTool.getInt(fh.getChildByPath("x2")),
+                                    DataTool.getInt(fh.getChildByPath("y2"))),
+                            Integer.parseInt(fh.getName())));
+                }
+            }
+        }
+        return tree;
     }
 
     /** The NPC ids the real WZ room holds. */
@@ -243,5 +269,54 @@ public class PqStageNpcPostTest {
         Method m = PqActions.class.getDeclaredMethod("stageNpcSpot", Character.class, int.class);
         m.setAccessible(true);
         return (Point) m.invoke(null, bot, stageNpcId);
+    }
+
+    /**
+     * The waiting party must not all stand on the NPC pixel. Before the fix every waiter walked
+     * to {@code stageNpcSpot} itself, so a six-body party plus the leader rendered as one sprite
+     * on the turn-in NPC (the reported crowding).
+     *
+     * <p>{@code parkSpot} is the private seam that decides where a waiter stands. The contract
+     * pinned here is deliberately weak - the drift is a cosmetic offset, not a placement
+     * guarantee - but it must hold concretely:
+     * <ul>
+     *   <li>different bots get different spots (the whole point of the change);</li>
+     *   <li>the spot stays on the NPC's own ledge row;</li>
+     *   <li>it stays inside the pickup reach, so a bot holding passes still delivers where it
+     *       stands instead of walking to the NPC and back every tick.</li>
+     * </ul>
+     */
+    @Test
+    void waitersStandOffTheNpcInsteadOfAllOnItsPixel() throws Exception {
+        org.junit.jupiter.api.Assumptions.assumeTrue(wzAvailable(), "Map.wz needed");
+        int stageNpc = LudiPqData.stageNpcId(1);
+        MapleMap map = mapWithWzNpcs(922010100);
+        NPC npc = map.getNPCById(stageNpc);
+        assertNotNull(npc, "stage-1 turn-in NPC must be in the room");
+        Character probe = botOn(map, npc.getPosition());
+        Point npcSpot = invokeStageNpcSpot(probe, stageNpc);
+        assertNotNull(npcSpot, "the post must resolve");
+
+        java.util.Set<Point> spots = new java.util.HashSet<>();
+        for (int id = 9400; id < 9406; id++) {
+            Point spot = invokeParkSpot(probe, npcSpot, id);
+            assertNotNull(spot, "bot " + id + " must get a spot");
+            assertEquals(npcSpot.y, spot.y,
+                    "the park spot must stay on the NPC's ledge, got " + spot);
+            assertTrue(Math.hypot(spot.x - npcSpot.x, spot.y - npcSpot.y) <= 150.0,
+                    "bot " + id + " parked at " + spot + ", outside the delivery reach of "
+                            + npcSpot + " - it would walk back to deliver every tick");
+            spots.add(spot);
+        }
+        assertTrue(spots.size() >= 5,
+                "six waiters must occupy at least five different spots, got " + spots);
+    }
+
+    /** {@code parkSpot(Character, Point)} is the private seam the wait offsets come from. */
+    private static Point invokeParkSpot(Character bot, Point npc, int botId) throws Exception {
+        when(bot.getId()).thenReturn(botId);
+        Method m = PqActions.class.getDeclaredMethod("parkSpot", Character.class, Point.class);
+        m.setAccessible(true);
+        return (Point) m.invoke(null, bot, npc);
     }
 }
