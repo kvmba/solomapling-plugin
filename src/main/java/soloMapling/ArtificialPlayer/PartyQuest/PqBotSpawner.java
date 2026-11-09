@@ -93,14 +93,12 @@ public final class PqBotSpawner {
      * How many full teams' worth of carnival bots each hall keeps.
      *
      * <p>The hall is a recruit lobby first: a player walks in with a party of any size and needs
-     * bots to invite, exactly like every other quest lobby. Six teams (36 bots) is the density that
-     * reads as a crowd rather than a matched set - the same "several parties' worth" the other
-     * quest lobbies use - and it leaves spare bodies while a team is out fighting a field.
-     *
-     * <p>{@code channel_capacity} is configured at 5000 on this server, so the crowd is not
-     * competing with the training cohorts for room.
+     * bots to invite, exactly like every other quest lobby. Four teams (24 bots) still reads as a
+     * crowd rather than a matched set - the same "several parties' worth" the other quest lobbies
+     * use - and leaves spare bodies while a team is out fighting a field. Six teams read as too
+     * many bodies in one room; the arena tops the crowd up on demand when more fields need teams.
      */
-    private static final int HALL_TEAMS = 6;
+    private static final int HALL_TEAMS = 4;
 
     /** Guards the warm start: {@code !env population reload} re-runs the whole wave plan. */
     private static final java.util.concurrent.atomic.AtomicBoolean CARNIVAL_HALLS_SEEDED =
