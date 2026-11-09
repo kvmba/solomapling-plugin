@@ -21,6 +21,13 @@ import java.util.concurrent.ThreadLocalRandom;
  * Both are merged and drawn from together - a quest may cover only the beats it has
  * something to say about, and a bot that never set {@code questName} rides the generic pool
  * alone.
+ *
+ * <p>That merge is what constrains the generic pool: every line in it can be spoken in ANY
+ * quest's room, so it must not assume one. It cannot promise a monster to fight, a spawn point
+ * to avoid, a boss ahead or a potion going dry - several quests are box-breaking, climbing and
+ * placement puzzles whose rooms hold nothing to attack at all, and a combat line there reads as
+ * the bot narrating a fight that is not happening. The quest's own pool is where room-specific
+ * talk belongs; the generic pool stays true for a silent, empty puzzle room.
  */
 public final class PqStageChat {
 

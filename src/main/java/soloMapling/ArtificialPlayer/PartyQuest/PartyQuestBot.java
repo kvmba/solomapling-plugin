@@ -596,10 +596,11 @@ public abstract class PartyQuestBot extends BotSM implements GrindTickRegistry.P
      * The gate order matters: the quiet-until is consumed first, so a beat silenced by it
      * stays silent rather than being deferred into the next one.
      *
-     * <p>Lines come from the message pack: {@code pq.chat.<questName>.<beat>.<n>} first,
-     * the shared {@code pq.chat.generic.<beat>.<n>} pool otherwise, and a quest with neither
-     * for a beat simply says nothing - which is why a bot that never set {@link #questName}
-     * still works, riding the generic pool.
+     * <p>Lines come from the message pack: {@code pq.chat.<questName>.<beat>.<n>} and the
+     * shared {@code pq.chat.generic.<beat>.<n>}, merged into ONE pool and drawn from
+     * together ({@link PqStageChat#line}). A quest may cover only the beats it has
+     * something to say about, and a bot that never set {@link #questName} rides the generic
+     * pool alone - which is why the generic lines must stay true for every quest's rooms.
      */
     private void maybeQuestChat(Beat beat) {
         Character bot = getChr();

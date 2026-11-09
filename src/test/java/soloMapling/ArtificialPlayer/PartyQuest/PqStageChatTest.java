@@ -136,6 +136,52 @@ class PqStageChatTest {
     }
 
     @Test
+    void theGenericPoolNeverAssumesSomethingToFight() {
+        // THE contract of the shared pool: PqStageChat merges it into every quest's draw, so a
+        // generic line can land in ANY quest's room - including the ones that hold nothing to
+        // attack (the Abandoned Tower's box, trap, climb and crate stages; Kerning's placement
+        // rooms; Zakum's mine; Ellin's maze and frog room). A line that promises a monster, a
+        // spawn point, a boss or a potion going dry narrates a fight that is not happening,
+        // which is the reported "the chatter does not match the stage".
+        //
+        // Quest-specific talk belongs in that quest's own pool, which is only drawn for that
+        // quest. This test is what stops the generic pool from drifting back into combat talk.
+        List<String> offenders = new ArrayList<>();
+        for (PartyQuestBot.Beat beat : PartyQuestBot.Beat.values()) {
+            String base = "pq.chat.generic." + beat.name().toLowerCase();
+            int n = poolSize(base);
+            for (int i = 1; i <= n; i++) {
+                String line = BotMessages.get(base + "." + i);
+                if (COMBAT_ASSUMPTION.matcher(line).find()) {
+                    offenders.add(base + "." + i + " -> " + line);
+                }
+            }
+        }
+        assertTrue(offenders.isEmpty(),
+                "generic lines are drawn for every quest, including rooms with nothing to "
+                        + "fight, so they must not assume one: " + offenders);
+    }
+
+    /**
+     * Words that only make sense in a room with something to attack. Deliberately about
+     * {@code generic} only - a quest's own pool is welcome to name its own mobs and bosses.
+     *
+     * <p>HONESTLY A REGRESSION SENTINEL, NOT A PROOF. The list catches the vocabulary the
+     * generic pool actually drifted into, so a later edit that reintroduces it fails loudly.
+     * It cannot decide the real contract: "still true in a room with nothing to fight" is a
+     * judgement about meaning, and no word list makes it - an implicit reference ("watch the
+     * big one") slips past a regex while ordinary words ("stay sharp") trip a careless one.
+     * The list is a floor to stand on, not a fence around the whole field.
+     */
+    private static final java.util.regex.Pattern COMBAT_ASSUMPTION =
+            java.util.regex.Pattern.compile(
+                    "\\b(respawn\\w*|spawns?|spawn point|aggro|focus fire|focus the|casters?|"
+                            + "bait|marked one|boss|hit harder|hit fast|hit together|hits? twice|"
+                            + "nice hit|lands a hit|mid-fight|big hits|big skills|"
+                            + "the big one|stragglers?)\\b",
+                    java.util.regex.Pattern.CASE_INSENSITIVE);
+
+    @Test
     void anUnknownQuestFallsBackToTheGenericPool() {
         String line = PqStageChat.line("NoSuchQuestPQ", PartyQuestBot.Beat.START);
         assertNotNull(line);
