@@ -197,10 +197,13 @@ class RangedShotArcTest {
         Monster target = inject(monster(9300170, 99408, new Point(600, -400)));
         Rectangle shooters = BotAttackDriver.firingPositions(bot, target);
         Point tp = target.getPosition();
+        // Resolve the rule ONCE: isArcLimited re-reads the equipped weapon, the job's attack table
+        // and the skill gates on every call, so asking it per pixel made this the class's slowest
+        // case (5.2s of its 6.0s) while answering the same thing 100k times.
+        assertTrue(BotAttackDriver.isArcLimited(bot), "a bowman's shot is arc-limited");
         for (int x = shooters.x; x < shooters.x + shooters.width; x++) {
             for (int y = shooters.y; y < shooters.y + shooters.height; y++) {
-                assertTrue(!BotAttackDriver.isArcLimited(bot)
-                                || BotAttackDriver.withinRangedArc(new Point(x, y), tp, false),
+                assertTrue(BotAttackDriver.withinRangedArc(new Point(x, y), tp, false),
                         "firing box offers a shot outside the arc at (" + x + "," + y + ")");
             }
         }

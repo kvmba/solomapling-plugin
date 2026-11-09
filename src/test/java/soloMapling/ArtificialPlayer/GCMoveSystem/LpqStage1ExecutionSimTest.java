@@ -15,22 +15,20 @@ import java.awt.Point;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
 
-import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.RETURNS_DEEP_STUBS;
 import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.when;
 
 /**
  * Execution-level simulation of LPQ stage 1 (922010100) on the REAL WZ geometry, driving the
- * PRODUCTION driver tick ({@code GCMovementDriver.tick}) over a mocked Character so the whole
+ * PRODUCTION driver tick ({@code GCMovementDriver.tick}) over a Character double so the whole
  * nav+physics pipeline runs: graph planning, edge execution, jump/climb physics, arrival.
  *
  * Regression sims for the LPQ stage-1 tower (922010100): the full spawn-ground -> first-Ratz
  * climb (ropes + exit row + rope grab), the post-kill vertical perch chain (fh323/324/325,
  * 60-68px perches) from every kill spot, and the graph-warmup fallback window. Each sim drives
- * the PRODUCTION driver tick over the REAL WZ geometry with a mocked Character, mirroring the
- * PQ macro tick's periodic move re-issue.
+ * the PRODUCTION driver tick over the REAL WZ geometry with a {@link CharacterDouble}, mirroring
+ * the PQ macro tick's periodic move re-issue.
  */
 public class LpqStage1ExecutionSimTest {
 
@@ -125,41 +123,16 @@ public class LpqStage1ExecutionSimTest {
         BotNavigationGraphProvider.getGraph(map, profile);
 
         AtomicReference<Point> pos = new AtomicReference<>(new Point(0, 130));
-        org.gms.client.Character bot = mock(org.gms.client.Character.class, RETURNS_DEEP_STUBS);
-        when(bot.getMap()).thenReturn(map);
-        when(bot.getMapId()).thenReturn(922010100);
-        when(bot.getId()).thenReturn(777);
-        when(bot.getHp()).thenReturn(5000);
-        when(bot.getChair()).thenReturn(0);
-        when(bot.getPosition()).thenAnswer(inv -> pos.get());
-        // Pin every accessor the driver reads on EVERY tick to a concrete value.
-        //
-        // With RETURNS_DEEP_STUBS an unstubbed call does not return a cached stub: it builds a new
-        // mock chain on the spot (~5-20us each). The driver touches stance/job/stats/buffs dozens of
-        // times per tick, which measured ~1.5ms per tick of pure Mockito overhead - the reason these
-        // sims took minutes. Pinning them is also more faithful: a deep-stub getJob() answers a
-        // garbage job, not a real level-35-50 adventurer.
-        when(bot.getStance()).thenReturn(0); // STAND: not climbing, not swimming
-        when(bot.getBuffedValue(org.mockito.ArgumentMatchers.any())).thenReturn(null);
-        when(bot.getTotalMoveSpeedStat()).thenReturn(100);
-        when(bot.getTotalJumpStat()).thenReturn(100);
-        // NOTE: a real Inventory stub, NOT null. BotAttack.resolveEquippedWeaponType calls
-        // chr.getInventory(InventoryType.EQUIPPED).getItem(...) with no null check, so a
-        // null here NPEs the combat beat. An empty stub keeps the no-weapon path (the same
-        // thing RETURNS_DEEP_STUBS used to hand back) without the per-call mock-chain cost.
-        when(bot.getInventory(org.mockito.ArgumentMatchers.any())).thenReturn(
-                mock(org.gms.client.inventory.Inventory.class, RETURNS_DEEP_STUBS));
-        when(bot.getParty()).thenReturn(null);
-        org.mockito.Mockito.doAnswer(inv -> {
-            pos.set(new Point(inv.getArgument(0)));
-            return null;
-        }).when(bot).setPosition(any());
+        // A real Character double, not a deep-stub mock: see CharacterDouble for why the mock made
+        // this class the suite's most expensive pure simulation (~19s of Mockito dispatch, plus it
+        // mocked java.awt.Point process-wide and slowed every later class).
+        org.gms.client.Character bot = new CharacterDouble(777, map,
+                () -> new Point(pos.get()), p -> pos.set(new Point(p)));
 
         BotMovementState st = new BotMovementState(bot, null);
         st.movementProfile = profile;
-        // Freeze the 20s profile recompute: the mock Character's stat accessors return deep-stub
-        // garbage, which would wreck the profile (and thus the graph key) on the first tick.
-        // Real characters recompute to their own real stats, which is a no-op on the bucket.
+        // Freeze the 20s profile recompute: the double answers a fixed 100/100, but the sims key
+        // their graph on the profile they pass in, so a recompute would swap the key mid-run.
         st.lastProfileRefreshMs = Long.MAX_VALUE / 4;
         st.lastMap = map;
         st.fhIndex = BotMovementManager.buildFhIndex(map);

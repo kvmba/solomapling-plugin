@@ -1323,8 +1323,9 @@ class LpqReviewRegressionTest {
 
     private void createBot(MapleMap map, Point initial, Job job) throws Exception {
         // Synthetic rooms reuse some real map ids to exercise map-scoped policy. Their
-        // geometry must replace any earlier in-memory graph, never load an unrelated disk cache.
-        BotNavigationGraphProvider.rebuildGraph(map, BotMovementProfile.base());
+        // geometry must replace any earlier in-memory graph, never load an unrelated disk cache -
+        // but a room whose geometry this class already baked does not need to be baked again.
+        TestGraphBake.ensure(map, BotMovementProfile.base());
         AtomicReference<Point> position = new AtomicReference<>(initial);
         bot = mock(Character.class, RETURNS_DEEP_STUBS);
         when(bot.getId()).thenReturn(BOT_ID); when(bot.getMap()).thenReturn(map);

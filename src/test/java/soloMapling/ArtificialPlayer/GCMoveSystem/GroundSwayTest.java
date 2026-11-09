@@ -102,32 +102,40 @@ class GroundSwayTest {
     private static Settle settle(int speedStat, int startX, int targetX, int stopDist, int warm) {
         Walker w = new Walker(new BotMovementProfile(speedStat, 100), startX);
         int ticks = warm + 1000;
-        int[] tail = new int[1000];
-        int[] dirs = new int[1000];
-        for (int t = 0; t < ticks; t++) {
-            int dir = w.tick(targetX, stopDist);
-            if (t >= warm) {
-                tail[t - warm] = w.x();
-                dirs[t - warm] = dir;
-            }
+        // Warm-up: approach the target. The full span is kept on purpose - a bot that is still
+        // hunting near the target can look "at rest" for a tick and then continue, so cutting the
+        // warm-up short hides exactly the sway this class exists to catch (measured: offset=16
+        // travelled 3px past the band).
+        for (int t = 0; t < warm; t++) {
+            w.tick(targetX, stopDist);
         }
         int min = Integer.MAX_VALUE;
         int max = Integer.MIN_VALUE;
         int reversals = 0;
         int prev = 0;
-        for (int v : tail) {
-            min = Math.min(min, v);
-            max = Math.max(max, v);
-        }
-        for (int d : dirs) {
-            if (d != 0) {
-                if (prev != 0 && d != prev) {
+        for (int t = warm; t < ticks; t++) {
+            int dir = w.tick(targetX, stopDist);
+            int x = w.x();
+            min = Math.min(min, x);
+            max = Math.max(max, x);
+            if (dir != 0) {
+                if (prev != 0 && dir != prev) {
                     reversals++;
                 }
-                prev = d;
+                prev = dir;
+            }
+            // Standing still inside the band is a FIXED POINT of both halves under test: with
+            // |dx| <= stopDist, calcStepX answers 0 whatever wasMovingX says, and groundStep with
+            // hspeed 0 and dir 0 cannot create motion. Neither reads a clock or a random source, so
+            // every remaining tick would sample this same pixel and this same "no direction".
+            // Ending the sweep here is therefore exactly equivalent to running it out. The one
+            // pathology an early exit could hide, "the fix kills the sway by stalling short of the
+            // band", is pinned separately by theBotStopsInsideItsOwnBand, which reads finalX.
+            if (dir == 0 && w.state.hspeed == 0.0 && Math.abs(targetX - w.x()) <= stopDist) {
+                break;
             }
         }
-        return new Settle(max - min, reversals, w.x());
+        return new Settle(min > max ? 0 : max - min, reversals, w.x());
     }
 
     @Test

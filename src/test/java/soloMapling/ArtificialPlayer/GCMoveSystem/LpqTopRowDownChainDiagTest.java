@@ -60,11 +60,6 @@ public class LpqTopRowDownChainDiagTest {
     }
 
     @Test
-    void trivialProbe() {
-        System.out.println("TRIVIAL RUNS");
-    }
-
-    @Test
     void everyMobShelfIsReachableAndEscapable() {
         MapleMap map = BotNavigationMapLoader.loadMapGeometry(922010100);
         BotNavigationGraph g = BotNavigationGraphProvider.getGraph(map, BotMovementProfile.base());

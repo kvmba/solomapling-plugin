@@ -288,15 +288,19 @@ class LudiStageRootCauseTest {
             tick();
         }
         assertTrue(arrived(npc), "the NPC must be reachable by walking; ended at " + bot.getPosition());
+        // The approach arms the pause as soon as the bot is within PICKUP reach (150px), while
+        // "arrived" is 24px, so a slow final leg can outlast the whole pause. Drop the clock so the
+        // pause below is measured from the arrival - which is what this case is about.
+        LudiStages.releaseRoomState(BOT_ID);
         assertFalse(LudiStages.takeBonusReward(bot), "the conversation beat is not instant");
 
-        long until = System.currentTimeMillis() + 4_000L;
+        // The pause is measured on the shared movement clock, so advance THAT (a real sleep would
+        // make this test cost the 2-3.2s the conversation lasts, and it would be testing the wall
+        // clock rather than the beat's own timing). BONUS_TALK is 2s + up to 1.2s of per-bot jitter.
         boolean done = false;
-        while (System.currentTimeMillis() < until && !done) {
+        for (int tick = 0; tick < 100 && !done; tick++) {
+            MovementClock.advance(50);
             done = LudiStages.takeBonusReward(bot);
-            if (!done) {
-                Thread.sleep(200);
-            }
         }
         assertTrue(done, "the beat must end on its own so the bot can leave the run");
     }

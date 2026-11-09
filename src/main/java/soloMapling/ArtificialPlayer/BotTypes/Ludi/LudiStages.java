@@ -1375,7 +1375,10 @@ public final class LudiStages {
             bonusTalkUntil.remove(bot.getId());
             return false;
         }
-        long now = System.currentTimeMillis();
+        // The shared movement clock, not System.currentTimeMillis(): this beat runs on the driver
+        // tick, and an execution sim advances MovementClock instead of the wall clock. A wall-clock
+        // read here left the only way to test the pause as a real multi-second sleep.
+        long now = GCMovement.movementNowMs();
         Long until = bonusTalkUntil.get(bot.getId());
         if (until == null) {
             // Arrived: stand and read. Jittered per bot so a cohort does not warp in lockstep.
