@@ -1401,6 +1401,128 @@ final class BotPhysicsEngine {
         return simulateWalkOffLanding(map, from, desiredDir, initialGroundTravelState(from), profile);
     }
 
+    /*
+     * Why a walk-off simulation can return null, and which of the two readings is true.
+     *
+     * simulateWalkOffLanding returns null whenever the "hold the direction and walk" simulation
+     * never leaves the ground. Two different shapes produce that, and only one of them means
+     * "there is no drop here":
+     *
+     *   LIP   - the platform really ENDS at the stall pixel. The executor's own void guard would
+     *           fall from there, so the historical fall-based edge is legitimate and must be kept.
+     *
+     *   BOUND - the step is REFUSED while solid walkable ground is still underfoot. Nothing at that
+     *           pixel would make a player fall, so a fall-based edge is a move the executor can
+     *           never perform: every tick is wall-blocked, the bot never leaves the pixel, and a
+     *           route through the edge ping-pongs forever. This is the 药店 220000002 report (f1
+     *           spans the map's whole standable x extent, so its end caps pin against the bound)
+     *           and the same failure 玩具塔 221020000 shows one extent inwards (floors ending at
+     *           x=+-265, inside VR +-400).
+     */
+    enum WalkOffStall {
+        /** Not stalled: the walk either descended or is still in progress. */
+        NONE,
+        /** Ground genuinely ends at the stall pixel: a fall-based edge is the right fallback. */
+        LIP,
+        /** Ground continues past the stall pixel but the step was refused: there is no drop here. */
+        BOUND
+    }
+
+    /*
+     * Classify a rejected walk-off. Call only after simulateWalkOffLanding returned null.
+     *
+     * A stall is a ground step that produces NO displacement (stepX == 0) while ground is still
+     * underfoot; a lost-ground step is a lip, not a stall. Momentum makes the approach gradual, so
+     * the walk is replayed here to reach the same pixel the executor reaches.
+     */
+    static WalkOffStall classifyWalkOffStall(MapleMap map, Point from, int desiredDir,
+                                             BotMovementProfile profile) {
+        if (map == null || from == null || desiredDir == 0) {
+            return WalkOffStall.NONE;
+        }
+        Foothold foothold = findGroundFoothold(map, from);
+        if (foothold == null) {
+            return WalkOffStall.NONE;
+        }
+        Point cursor = new Point(from);
+        Foothold currentFoothold = foothold;
+        GroundTravelState state = initialGroundTravelState(from);
+        for (int i = 0; i < 256; i++) {
+            GroundStepResult step = simulateGroundMotion(map, cursor, currentFoothold, desiredDir, state, profile);
+            if (step.stepX() == 0) {
+                // No displacement this step. A lost-ground collapse is a lip by definition (the
+                // caller's own null came from that branch); otherwise the walk stalled with ground
+                // underfoot and the map extent decides what it hit.
+                return step.lostGround() ? WalkOffStall.LIP
+                        : walkStalledOverSolidGround(map, cursor, desiredDir, profile);
+            }
+            if (step.lostGround()) {
+                // Left the ground with real displacement: the walk DOES step off a ledge. Whatever
+                // null the caller saw came from the fall probe past the lip, not from a stall.
+                return WalkOffStall.NONE;
+            }
+            cursor = step.point();
+            currentFoothold = step.foothold() != null ? step.foothold() : currentFoothold;
+            state = step.state();
+        }
+        return WalkOffStall.NONE;
+    }
+
+    /*
+     * Did the walk stop because the ground would not let it go, with solid ground still underfoot?
+     *
+     * When a walk-off pins, either
+     *   - the platform ENDS here and the step off is clamped exactly on the lip - the executor is
+     *     over the void and its own void guard falls from this pixel, so a fall-based edge is real;
+     *   - or the step is REFUSED while the bot still stands on walkable ground - nothing here makes
+     *     a player fall, so a fall-based edge is a move the executor can never perform, and a route
+     *     through it ping-pongs forever.
+     *
+     * Only the second shape is a bug. It is answered by the executor's own predicate, but the probe
+     * must NOT start from the stall pixel: momentum decides where the walk dies (-397 from one
+     * approach, -394 from another on the same platform), and the wall band starts a few pixels
+     * inside the end of the ground, so a stall pixel can legitimately sit OUTSIDE the band. The
+     * question that is invariant to that is "is the ground in this direction blocked at the FURTHEST
+     * point still on this ground?" - i.e. walk the direction to its last walkable pixel and ask the
+     * wall predicate there.
+     *
+     * Both observed shapes answer the same way, which is why one predicate covers them: 药店
+     * 220000002's f1 pins against the map VR side bound, and 玩具塔 221020000's floors pin against
+     * the end of the authored footholds. The exact numbers are separated by a fixed ~5px walk-step
+     * band in both (bound -400, blocked from -395; foothold end -265, blocked from -260).
+     */
+    private static WalkOffStall walkStalledOverSolidGround(MapleMap map, Point stallPoint, int desiredDir,
+                                                            BotMovementProfile profile) {
+        int step = Math.max(1, walkStep(map, profile));
+        // Walk the direction to the last pixel that still moves, then ask the wall predicate with a
+        // FULL step from there. The last moving pixel is invariant to where the sweep started and
+        // lands inside the same blocked band regardless of momentum.
+        Foothold foothold = findGroundFoothold(map, stallPoint);
+        if (foothold == null) {
+            return WalkOffStall.LIP;
+        }
+        Point last = new Point(stallPoint);
+        Foothold current = foothold;
+        GroundTravelState state = initialGroundTravelState(stallPoint);
+        for (int i = 0; i < 256; i++) {
+            GroundStepResult stepResult =
+                    simulateGroundMotion(map, last, current, desiredDir, state, profile);
+            if (stepResult.lostGround()) {
+                // The ground genuinely ends ahead: a real ledge, keep the fall-based edge.
+                return WalkOffStall.LIP;
+            }
+            if (stepResult.stepX() == 0) {
+                break; // last walkable pixel reached
+            }
+            last = stepResult.point();
+            current = stepResult.foothold() != null ? stepResult.foothold() : current;
+            state = stepResult.state();
+        }
+        return isGroundStepBlockedByWall(map, last, step * desiredDir)
+                ? WalkOffStall.BOUND
+                : WalkOffStall.LIP;
+    }
+
     static WalkOffLanding simulateWalkOffLanding(MapleMap map,
                                                  Point from,
                                                  int desiredDir,
