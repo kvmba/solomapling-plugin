@@ -70,7 +70,7 @@ public class OPQBot extends BotSM {
 
     public OPQBot(Character character) {
         super(character);
-        dialoguePath = "OPQBotDialogue.yaml"; // TODO: add YAML or fall back gracefully
+        dialoguePath = PARTY_QUEST_DIALOGUE_PATH;
         botType = "OPQBot";
         // Move off the shared per-channel client before doing any engine work: the PQ's
         // reactor callbacks fire seconds after the call that arms them, on a timer thread,

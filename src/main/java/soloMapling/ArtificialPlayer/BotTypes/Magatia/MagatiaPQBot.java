@@ -33,7 +33,7 @@ public class MagatiaPQBot extends PartyQuestBot {
 
     public MagatiaPQBot(Character character) {
         super(character);
-        dialoguePath = "MagatiaPQBotDialogue.yaml";
+        dialoguePath = PARTY_QUEST_DIALOGUE_PATH;
         botType = "MagatiaPQBot";
         questName = "MagatiaPQ";
         // The stage scripts resolve their speaker through client.getPlayer() when they run,

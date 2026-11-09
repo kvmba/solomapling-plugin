@@ -22,7 +22,7 @@ public class PiratePQBot extends PartyQuestBot {
 
     public PiratePQBot(Character character) {
         super(character);
-        dialoguePath = "PiratePQBotDialogue.yaml";
+        dialoguePath = PARTY_QUEST_DIALOGUE_PATH;
         botType = "PiratePQBot";
         questName = "PiratePQ";
         // The quest's box scripts resolve their player through client.getPlayer() when they

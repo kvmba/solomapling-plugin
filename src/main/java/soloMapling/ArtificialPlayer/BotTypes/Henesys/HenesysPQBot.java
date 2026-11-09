@@ -28,7 +28,7 @@ public class HenesysPQBot extends PartyQuestBot {
 
     public HenesysPQBot(Character character) {
         super(character);
-        dialoguePath = "HenesysPQBotDialogue.yaml";
+        dialoguePath = PARTY_QUEST_DIALOGUE_PATH;
         botType = "HenesysPQBot";
         questName = "HenesysPQ";
         // The quest's reactors resolve their player through client.getPlayer() when they

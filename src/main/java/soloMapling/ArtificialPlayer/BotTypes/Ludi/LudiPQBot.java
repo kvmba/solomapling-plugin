@@ -37,7 +37,7 @@ public class LudiPQBot extends PartyQuestBot {
 
     public LudiPQBot(Character character) {
         super(character);
-        dialoguePath = "LudiPQBotDialogue.yaml";
+        dialoguePath = PARTY_QUEST_DIALOGUE_PATH;
         botType = "LudiPQBot";
         questName = "LudiPQ";
         // The stage scripts resolve their speaker through client.getPlayer() when they run,

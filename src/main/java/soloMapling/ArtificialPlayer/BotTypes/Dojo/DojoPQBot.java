@@ -23,7 +23,7 @@ public class DojoPQBot extends PartyQuestBot {
 
     public DojoPQBot(Character character) {
         super(character);
-        dialoguePath = "DojoPQBotDialogue.yaml";
+        dialoguePath = PARTY_QUEST_DIALOGUE_PATH;
         botType = "DojoPQBot";
         questName = "Dojo";
         // The tower's spawns and the party warps resolve their player through

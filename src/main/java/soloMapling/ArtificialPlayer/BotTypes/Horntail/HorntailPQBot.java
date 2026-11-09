@@ -22,7 +22,7 @@ public class HorntailPQBot extends PartyQuestBot {
 
     public HorntailPQBot(Character character) {
         super(character);
-        dialoguePath = "HorntailPQBotDialogue.yaml";
+        dialoguePath = PARTY_QUEST_DIALOGUE_PATH;
         botType = "HorntailPQBot";
         questName = "HorntailPQ";
         // The rooms' reactor scripts resolve their player through client.getPlayer() when

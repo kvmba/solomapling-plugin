@@ -26,7 +26,7 @@ public class AmoriaPQBot extends PartyQuestBot {
 
     public AmoriaPQBot(Character character) {
         super(character);
-        dialoguePath = "AmoriaPQBotDialogue.yaml";
+        dialoguePath = PARTY_QUEST_DIALOGUE_PATH;
         botType = "AmoriaPQBot";
         questName = "AmoriaPQ";
         // The stage NPC resolves its speaker through client.getPlayer() when it runs, so this

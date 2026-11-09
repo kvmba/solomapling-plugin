@@ -567,9 +567,15 @@ public abstract class BotSM implements EventSubscriber {
 
     // The shared pool of social lines every conversational type falls back to when its own pack
     // has no node for what just happened. Protected so a type whose pack is intentionally thin
-    // (the party-quest bots ship none at all) can answer from the same pool rather than going
-    // silent.
+    // can answer from the same pool rather than going silent.
     protected static final String SOCIAL_DIALOGUE_PATH = "SocialBotDialogue.yaml";
+
+    // The one lobby pack every party-quest type shares. All sixteen ask for the same twelve nodes
+    // (recruit accept/decline, trade decline, the nine social intents), so the lines live in one
+    // file keyed by an anchored block rather than sixteen near-identical copies - see the pack's
+    // header. A per-quest file of the same name still wins if one is added later, because
+    // DialoguePackPaths resolves whatever name the bot holds.
+    protected static final String PARTY_QUEST_DIALOGUE_PATH = "PartyQuestBotDialogue.yaml";
 
     // Per-player cooldown so one player cannot make this bot (and the handful of others near them)
     // answer the same spam line over and over. Cleaned lazily when it grows.

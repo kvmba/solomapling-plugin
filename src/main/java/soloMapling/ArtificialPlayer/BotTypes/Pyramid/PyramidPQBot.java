@@ -22,7 +22,7 @@ public class PyramidPQBot extends PartyQuestBot {
 
     public PyramidPQBot(Character character) {
         super(character);
-        dialoguePath = "PyramidPQBotDialogue.yaml";
+        dialoguePath = PARTY_QUEST_DIALOGUE_PATH;
         botType = "PyramidPQBot";
         questName = "Pyramid";
         // The pyramid's gauge and its spawned monsters resolve their player through

@@ -92,7 +92,7 @@ public class CarnivalPQBot extends PartyQuestBot {
 
     public CarnivalPQBot(Character character) {
         super(character);
-        dialoguePath = "CarnivalPQBotDialogue.yaml";
+        dialoguePath = PARTY_QUEST_DIALOGUE_PATH;
         botType = "CarnivalPQBot";
         questName = "CarnivalPQ";
         // The arena resolves its player through client.getPlayer() when awarding CP and when

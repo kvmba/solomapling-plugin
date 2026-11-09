@@ -43,7 +43,7 @@ public class PapulatusPQBot extends PartyQuestBot {
 
     public PapulatusPQBot(Character character) {
         super(character);
-        dialoguePath = "PapulatusPQBotDialogue.yaml";
+        dialoguePath = PARTY_QUEST_DIALOGUE_PATH;
         botType = "PapulatusPQBot";
         questName = "PapulatusBattle";
         // The reactor's act() resolves its player through client.getPlayer() when the drop

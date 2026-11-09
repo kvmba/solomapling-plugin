@@ -56,7 +56,7 @@ public class KerningPQBot extends PartyQuestBot {
 
     public KerningPQBot(Character character) {
         super(character);
-        dialoguePath = "KerningPQBotDialogue.yaml";
+        dialoguePath = PARTY_QUEST_DIALOGUE_PATH;
         botType = "KerningPQBot";
         questName = "KerningPQ";
         // The stage scripts resolve their speaker through client.getPlayer() when they run,

@@ -23,7 +23,7 @@ public class AriantPQBot extends PartyQuestBot {
 
     public AriantPQBot(Character character) {
         super(character);
-        dialoguePath = "AriantPQBotDialogue.yaml";
+        dialoguePath = PARTY_QUEST_DIALOGUE_PATH;
         botType = "AriantPQBot";
         questName = "AriantPQ";
         // The arena awards its score through client.getPlayer() when a catch succeeds, so this

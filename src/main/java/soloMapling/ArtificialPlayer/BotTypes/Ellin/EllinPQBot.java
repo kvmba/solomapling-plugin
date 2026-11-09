@@ -27,7 +27,7 @@ public class EllinPQBot extends PartyQuestBot {
 
     public EllinPQBot(Character character) {
         super(character);
-        dialoguePath = "EllinPQBotDialogue.yaml";
+        dialoguePath = PARTY_QUEST_DIALOGUE_PATH;
         botType = "EllinPQBot";
         questName = "EllinPQ";
         // The quest's reactor scripts resolve their player through client.getPlayer() when

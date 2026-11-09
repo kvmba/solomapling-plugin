@@ -23,7 +23,7 @@ public class ZakumPQBot extends PartyQuestBot {
 
     public ZakumPQBot(Character character) {
         super(character);
-        dialoguePath = "ZakumPQBotDialogue.yaml";
+        dialoguePath = PARTY_QUEST_DIALOGUE_PATH;
         botType = "ZakumPQBot";
         questName = "ZakumPQ";
         // The crates' state changes are read through the reactor API, which resolves its
