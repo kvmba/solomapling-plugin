@@ -234,7 +234,7 @@ public abstract class PartyQuestBot extends BotSM implements GrindTickRegistry.P
         if (bot == null || bot.getMap() == null
                 || !getRunning()
                 || death().isCorpse() || status().isFrozen()
-                || bot.getParty() == null
+                || !inRunGroup(bot)
                 || !fightsOnSweep()
                 || !isInsideQuest(bot.getMapId())) {
             return;
@@ -333,6 +333,18 @@ public abstract class PartyQuestBot extends BotSM implements GrindTickRegistry.P
         return bot != null && PqActions.movementShielded(bot.getId());
     }
 
+    /**
+     * Whether this bot is a member of the run it is standing in.
+     *
+     * <p>Almost every quest is entered by a party, so the default asks for one. The exception is
+     * Ariant Coliseum, which the engine runs as an <em>expedition</em> and refuses to start while
+     * any competitor is in a party - a bot there is a member of the expedition and never has a
+     * party, so the party test alone would walk it out of a run it is playing.
+     */
+    protected boolean inRunGroup(Character bot) {
+        return bot.getParty() != null;
+    }
+
     /** Where the run happens: the map that proves the bot is inside the quest. */
     protected abstract boolean isInsideQuest(int mapId);
 
@@ -410,7 +422,7 @@ public abstract class PartyQuestBot extends BotSM implements GrindTickRegistry.P
             wasInsideQuest = true;
             noteEnteredQuest();
         }
-        if (bot.getParty() == null) {
+        if (!inRunGroup(bot)) {
             returnToLobby("no longer in a party");
             return;
         }
@@ -516,7 +528,7 @@ public abstract class PartyQuestBot extends BotSM implements GrindTickRegistry.P
         // already in reads as noise.
         if (now >= nextRecruitShoutAtMs) {
             nextRecruitShoutAtMs = now + RECRUIT_SHOUT_INTERVAL_MS + jitter(RECRUIT_SHOUT_JITTER_MS);
-            if (bot.getParty() == null && lobbyHasListener(bot)) {
+            if (!inRunGroup(bot) && lobbyHasListener(bot)) {
                 sayRecruitLine(bot);
             }
         }

@@ -445,6 +445,14 @@ public final class SoloMaplingExtension implements ServerExtension {
         } catch (Throwable ignored) {
             // best-effort
         }
+        // Stop the Ariant expedition poll for the same reason as the carnival arena poll above:
+        // an un-cancelled poll keeps enrolling bots into a torn-down plugin, and a reload would
+        // find its "already running" handle set and schedule nothing.
+        try {
+            soloMapling.ArtificialPlayer.BotTypes.Ariant.AriantExpedition.release();
+        } catch (Throwable ignored) {
+            // best-effort
+        }
         runtime = null;
     }
 }

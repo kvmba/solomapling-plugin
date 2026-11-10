@@ -7,11 +7,13 @@ import org.gms.server.maps.MapObject;
 import org.gms.server.maps.Reactor;
 import soloMapling.ArtificialPlayer.BotCommandsPack.DropCommands;
 import soloMapling.ArtificialPlayer.BotCommandsPack.SocialCommands;
+import soloMapling.ArtificialPlayer.BotDialogueHandler;
 import soloMapling.ArtificialPlayer.BotGeneration;
 import soloMapling.ArtificialPlayer.BotLogic;
 import soloMapling.ArtificialPlayer.BotMessagingSystem.ChatMessage;
 import soloMapling.ArtificialPlayer.BotMessagingSystem.MessageQueue;
 import soloMapling.ArtificialPlayer.BotPartySystem.BotPartyLogic;
+import soloMapling.ArtificialPlayer.BotPartySystem.BotRecruitManager;
 import soloMapling.ArtificialPlayer.BotSM;
 import soloMapling.ArtificialPlayer.GCMoveSystem.GCMovement;
 import soloMapling.ArtificialPlayer.PartyQuest.PqActions;
@@ -290,6 +292,50 @@ public class OPQBot extends BotSM {
     @Override
     public void displayCommands(Character chr) {
         SocialCommands.displayPlayerChatCommands(chr, hint);
+    }
+
+    // =========================================================================
+    // Shout recruiting
+    // =========================================================================
+
+    /**
+     * Answer a stranger's open recruit shout ("anyone want to party?").
+     *
+     * <p>This bot extends {@link BotSM} rather than {@code PartyQuestBot} - its FSM predates the
+     * shared quest skeleton - so it never inherited that class's recruit answer and the default
+     * in {@code BotSM} is silence. In practice the Orbis lobby was the one quest lobby a player
+     * could not recruit by shouting: the crowd stood there, shouted its own lines, and ignored
+     * the player.
+     *
+     * <p>Only while waiting for a run. {@code RECRUITMENT} is the bot's own "standing in the
+     * lobby, no party yet" state, so a bot idling in {@code IN_PARTY_IDLE} (already recruited)
+     * or working a stage stays quiet, exactly like the shared skeleton's {@code offerRecruit}.
+     * The accept window the roll arms is what the existing {@code checkPartyQueue} poll answers,
+     * so a yes here is immediately actionable.
+     */
+    @Override
+    public boolean offerRecruit(Character player, String content) {
+        if (opqBotState != OPQBotState.RECRUITMENT || isInParty()) {
+            return false; // already committed, or inside a run - the shout is not for us
+        }
+        BotRecruitManager.RecruitAnswer answer = BotRecruitManager.rollPartyAsk(
+                getChr(), player, BotRecruitManager.SOCIAL_ACCEPT_CHANCE, false);
+        if (answer == BotRecruitManager.RecruitAnswer.ON_COOLDOWN
+                || answer == BotRecruitManager.RecruitAnswer.FOLLOWERS_FULL) {
+            return false; // said no to this player recently; leave the slot to another bot
+        }
+        String node = answer == BotRecruitManager.RecruitAnswer.ACCEPTED
+                ? "PartyAccept" : "PartyDecline";
+        String line = BotDialogueHandler.getRandomResolvedLine(
+                dialoguePath, botType, node, getChr(), null);
+        if (line == null) {
+            line = BotDialogueHandler.getRandomResolvedLine(
+                    SOCIAL_DIALOGUE_PATH, "SocialBot", node, getChr(), null);
+        }
+        if (line != null) {
+            SocialCommands.BotSpeak(getChr(), line);
+        }
+        return true;
     }
 
     @Override

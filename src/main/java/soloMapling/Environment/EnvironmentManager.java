@@ -373,6 +373,9 @@ public class EnvironmentManager {
         // entry point is an NPC dialog, so the waiter is a poll. Started here with the rest of the
         // ambient systems, and idempotent if init runs twice.
         soloMapling.ArtificialPlayer.BotTypes.Carnival.CarnivalArena.ensureStarted();
+        // Ariant Coliseum runs over an expedition rather than a party, so its lobby crowd is
+        // enrolled by a poll instead of a party invite (see AriantExpedition).
+        soloMapling.ArtificialPlayer.BotTypes.Ariant.AriantExpedition.start();
 
         double totalSeconds = (System.currentTimeMillis() - startupStart) / 1000.0;
         System.out.println(String.format(

@@ -40,8 +40,13 @@ public class BossRushPQBot extends PartyQuestBot {
 
     @Override
     protected boolean isInsideQuest(int mapId) {
-        return BossRushPqData.isFightRoom(mapId) || BossRushPqData.isRestSpot(mapId)
-                || mapId == BossRushPqData.HOST_MAP;
+        // The host map is NOT part of the run, even though the quest's own script uses it as
+        // both recruit and exit map: it is the room a player walks into to assemble a party,
+        // so a bot standing there has to be recruitable. Treating it as in-run (the old shape)
+        // made awaitingRecruit() false in its own lobby, which silenced both the recruit shout
+        // and the answer to a player's "anyone want to party?" - the crowd was there and
+        // unreachable except by right-click invite.
+        return BossRushPqData.isFightRoom(mapId) || BossRushPqData.isRestSpot(mapId);
     }
 
     @Override

@@ -62,10 +62,14 @@ class PartyQuestCatchUpCadenceTest {
     }
 
     /**
-     * A recruit lobby must not be pushed onto the fast wheel. Three quests list a public map in
-     * {@code isInsideQuest}: BossRush's host map (970030000, which is also its recruit point),
-     * Carnival's two lobbies and Ariant's coliseum lobby. Those maps carry no instance, so the
-     * instance gate is what keeps a hall full of idle runners on the background cadence.
+     * A recruit lobby must not be pushed onto the fast wheel. Two quests still list a public map
+     * in {@code isInsideQuest}: Carnival's two lobbies and Ariant's queue halls. Those maps carry
+     * no instance, so the instance gate is what keeps a hall full of idle runners on the
+     * background cadence.
+     *
+     * <p>Boss Rush's host map used to be the third example; it is no longer inside the run at all
+     * (a bot standing in its own recruit room has to be recruitable), so it now takes the ordinary
+     * lobby beat instead.
      *
      * <p>The MAP's instance is the right one to read, not the character's: a room-to-room walk
      * unregisters and re-registers the character mid-warp, so the character's field is null for a

@@ -76,7 +76,12 @@ public final class PqRecruitPoints {
             new Point("MagatiaPQ_Z",  261000011,  71,  85, 4, 4),
             new Point("ZakumPQ",      211042300,  50, 255, 1, 6),
             new Point("HorntailPQ",   240050000, 120, 255, 6, 6),
-            new Point("BossRushPQ",   970030000,   1, 255, 1, 6),
+            // Boss Rush's own script accepts any level, but a character below 10 cannot be
+            // invited to a party at all - the host refuses the invite outright - so a level-1..9
+            // bot standing in the host map is a body nobody can recruit. The floor is the host's
+            // own party requirement, not the quest's, and it is the one number here that does not
+            // come from the event script.
+            new Point("BossRushPQ",   970030000,  10, 255, 1, 6),
             // Duarte's menu map (the Pyramid Dunes), where Nett's Pyramid is applied for. The
             // party version needs two members standing here, so a bot has to be one of them.
             // Level band 40-60 is Duarte's own; the spawn's low-third draw leaves bots 40-49.
@@ -87,6 +92,12 @@ public final class PqRecruitPoints {
             // take them. (A player far outside the bots' levels simply cannot use them - the
             // master refuses a too-broad party - which is the quest's own rule, not a bot fault.)
             new Point("Dojo",         925020001,  25,  55, 2, 5),
+            // Ariant Coliseum's public lobby. The engine runs the match over an *expedition* and
+            // refuses to start while any competitor is in a party, so these bots are never
+            // party-invited: they enrol in the player's ARIANT expedition (see AriantExpedition)
+            // and are warped into the arena with the team. The band is the expedition's own
+            // 20-30 (the spawner's low-third draw seats them at 20-29).
+            new Point("AriantPQ",     980010000,  20,  30, 2, 7),
             // The clocktower's machine room. Its script accepts 1-255, which is not a band worth
             // spawning from: a bot drawn at the script's floor would stand under a clock with
             // 23,000,000 HP and contribute nothing. 95-145 keeps them in the third-job band the
