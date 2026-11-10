@@ -39,7 +39,16 @@ final class BotMobHitboxProvider {
     private static final String[] FRAME_GROUP_FALLBACK = {"stand", "move", "fly"};
 
     private static final Map<Integer, Rectangle> boundsByMobId = new ConcurrentHashMap<>();
-    private static volatile Path cachedMobRoot = null;
+    // The WZ mob root, resolved once per process. WZ files are immutable while the server runs
+    // (no runtime add/remove), and WZFiles.getFile() reads a Spring-bound config property that is
+    // only set at startup, so this value cannot change under us. Resolving it is expensive -
+    // a Spring getBean(), two Path.of allocations and a Files.exists() stat syscall (measured
+    // ~1.9us) - and getMobBounds() used to pay that on EVERY call, i.e. per candidate mob per
+    // contact tick. Resolved lazily under MOB_ROOT_LOCK, which is never held across a
+    // boundsByMobId update.
+    private static volatile Path mobRoot = null;
+    /** Guards {@link #mobRoot} only; never held while a mapping function runs. */
+    private static final Object MOB_ROOT_LOCK = new Object();
 
     private BotMobHitboxProvider() {
     }
@@ -53,7 +62,7 @@ final class BotMobHitboxProvider {
     }
 
     static Rectangle getMobBounds(int mobId, Point position, boolean facingLeft) {
-        ensureCurrentMobRoot();
+        mobRoot(); // resolve once, OUTSIDE the map's computeIfAbsent (see mobRoot())
         Rectangle modelBounds = boundsByMobId.computeIfAbsent(mobId, BotMobHitboxProvider::loadMobBounds);
         if (modelBounds == UNRESOLVED_BOUNDS) {
             return null;
@@ -62,19 +71,23 @@ final class BotMobHitboxProvider {
         return calculateWorldBounds(modelBounds, position, facingLeft);
     }
 
-    private static void ensureCurrentMobRoot() {
-        Path currentMobRoot = WZFiles.MOB.getFile();
-        Path previousMobRoot = cachedMobRoot;
-        if (previousMobRoot != null && previousMobRoot.equals(currentMobRoot)) {
-            return;
+    /**
+     * The WZ mob root, resolved once per process (see the field note).
+     *
+     * <p>Called before {@code boundsByMobId.computeIfAbsent} on purpose: the mapping function
+     * ({@code loadMobBounds}) reads this too, and ConcurrentHashMap forbids re-entering its own
+     * update path from a mapping function. Resolving first keeps the two locks disjoint.
+     */
+    private static Path mobRoot() {
+        Path root = mobRoot;
+        if (root != null) {
+            return root;
         }
-
-        synchronized (boundsByMobId) {
-            if (cachedMobRoot != null && cachedMobRoot.equals(currentMobRoot)) {
-                return;
+        synchronized (MOB_ROOT_LOCK) {
+            if (mobRoot == null) {
+                mobRoot = WZFiles.MOB.getFile();
             }
-            boundsByMobId.clear();
-            cachedMobRoot = currentMobRoot;
+            return mobRoot;
         }
     }
 
@@ -136,7 +149,7 @@ final class BotMobHitboxProvider {
 
     private static Path resolveMobFile(int mobId) {
         String fileName = String.format("%07d.img.xml", mobId);
-        Path preferred = WZFiles.MOB.getFile().resolve(fileName);
+        Path preferred = mobRoot().resolve(fileName);
         if (Files.isRegularFile(preferred)) {
             return preferred;
         }
