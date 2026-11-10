@@ -197,14 +197,28 @@ public final class PqActions {
         java.util.concurrent.CountDownLatch arrived = new java.util.concurrent.CountDownLatch(1);
         StageWalkShield shield;
         synchronized (control) {
-            clearReactorBeat(bot.getId()); // stage walking supersedes box work
-            stageWalkShieldUntilByBot.remove(bot.getId());
             Point here = bot.getPosition();
             if (Math.abs(here.x - target.x) <= ARRIVAL_EPS_PX
                     && Math.abs(here.y - target.y) <= ARRIVAL_EPS_PX) {
-                GCMovement.stop(bot);
+                // "I am already here" stands down THIS walk only, never someone else's.
+                //
+                // stopIfTarget, not stop: a quest tick issues more than one walk. The macro tick
+                // runs the follow beat first and the stage work second, and both can ask for a
+                // walk in the same tick (the follow beat to the chain door, the cleared stage's
+                // park beat to the NPC post). When the park target is where the bot already
+                // stands, this shortcut used to stop the driver outright - and the driver has ONE
+                // goal slot, so that stop discarded the follow order issued moments earlier. The
+                // next tick re-issued it and this shortcut cancelled it again: a pair that can
+                // repeat for as long as the stage stays cleared.
+                //
+                // The guard that normally keeps the two apart (yieldsToLiveWalk, in the park
+                // helpers) only fires when the bot is OFF its park spot, so this shortcut is the
+                // one seam left where a park can reach a live follow order and cancel it.
+                GCMovement.stopIfTarget(bot, target);
                 return true;
             }
+            clearReactorBeat(bot.getId()); // stage walking supersedes box work
+            stageWalkShieldUntilByBot.remove(bot.getId());
             shield = armStageWalkShield(bot);
             GCMovement.move(bot, target.x, target.y, () -> {
                 stageWalkShieldUntilByBot.remove(bot.getId(), shield);
