@@ -130,7 +130,7 @@ public final class PqBotSpawner {
         if (!CARNIVAL_HALLS_SEEDED.compareAndSet(false, true)) {
             return;
         }
-        int want = scaledAmbient(CarnivalPqData.BOT_TEAM_SIZE * HALL_TEAMS);
+        int want = scaledAmbient(CarnivalPqData.MAX_TEAM_SIZE * HALL_TEAMS);
         var world = org.gms.net.server.Server.getInstance()
                 .getWorld(soloMapling.server.SoloMaplingConstants.GameConstants.WORLD_SCANIA);
         if (world == null) {
@@ -168,7 +168,7 @@ public final class PqBotSpawner {
         // A field lobby only ever holds one team (the arena's); a hall holds a crowd.
         int budget = CarnivalPqData.isHall(lobbyId)
                 ? want
-                : Math.max(1, Math.min(want, CarnivalPqData.BOT_TEAM_SIZE));
+                : Math.max(1, Math.min(want, CarnivalPqData.MAX_TEAM_SIZE));
 
         // Pinned to the channel: the arena drafts bots out of that channel's storage, so one
         // routed elsewhere by the capacity fallback would never be seen.

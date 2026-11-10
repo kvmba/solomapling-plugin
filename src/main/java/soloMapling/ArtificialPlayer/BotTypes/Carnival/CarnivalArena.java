@@ -18,7 +18,7 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * Opens Monster Carnival matches between a real party and a full team of bots.
+ * Opens Monster Carnival matches between a real party and a team of bots.
  *
  * <p>Why this exists at all: the quest's own entry path cannot be driven by a bot. Its challenge
  * dialog ({@code cpqchallenge.js}) is answered by the player who receives it, and the accepted
@@ -29,10 +29,11 @@ import java.util.concurrent.ConcurrentHashMap;
  *
  * <p>The contract with the rest of the plugin:
  * <ul>
- *   <li>a bot team is always {@link CarnivalPqData#BOT_TEAM_SIZE} bots, and its leader is a bot;</li>
+ *   <li>a bot team holds {@link CarnivalPqData#botTeamSizeFor(int)} bodies - one fewer than the
+ *       player party, never fewer than one - and its leader is a bot;</li>
  *   <li>the player side is whatever party is standing in the same field lobby;</li>
- *   <li>the two sides do not have to be the same size - the engine enforces no such rule, and
- *       a bot team of six against a party of two is a legal match;</li>
+ *   <li>the engine enforces no size rule of its own, so the arena's count is what a player sees:
+ *       a lone player meets one bot, a party of five meets four;</li>
  *   <li>the match is only opened while the player party's leader stands in the lobby, so a
  *       half-assembled party is never dropped into an arena alone.</li>
  * </ul>
@@ -70,10 +71,11 @@ public final class CarnivalArena {
      * <p>Deliberately not a game rule: the host has no cool-down after a match, and a finished
      * match empties the lobby anyway ({@code MonsterCarnival.finish} warps both sides to their
      * reward rooms), so a field is free the moment its own match ends. This exists only for the
-     * case the host cannot have - a poll that would otherwise rebuild and disband a six-bot team
-     * once a second against a start the engine keeps refusing (an arena with no WZ carnival data,
-     * a field already registered by a foreign match). The host's model is one attempt per accepted
-     * challenge; this is that attempt's retry floor, not an extra wait after a normal match.
+     * case the host cannot have - a poll that would otherwise rebuild and disband the field's bot
+     * team once a second against a start the engine keeps refusing (an arena with no WZ carnival
+     * data, a field already registered by a foreign match). The host's model is one attempt per
+     * accepted challenge; this is that attempt's retry floor, not an extra wait after a normal
+     * match.
      */
     private static final long FAILED_START_BACKOFF_MS = 20_000L;
 
@@ -153,7 +155,7 @@ public final class CarnivalArena {
      * <p>Deliberately not a field cool-down: the host has none, and a finished match empties the
      * lobby anyway ({@code MonsterCarnival.finish} warps both sides to their reward rooms), so a
      * field is free the moment its match ends. This is only the poll's own protection against
-     * rebuilding and disbanding a six-bot team once a second against a start the engine keeps
+     * rebuilding and disbanding the field's bot team once a second against a start the engine keeps
      * refusing - one attempt per challenge is the host's model, and this is its analogue.
      */
     private static final Map<Integer, Long> RETRY_AFTER = new ConcurrentHashMap<>();
@@ -378,7 +380,7 @@ public final class CarnivalArena {
             return;
         }
         // A team whose match is over and whose members are all back in a hall is no longer needed
-        // here: release the party so its six bots rejoin the hall's recruitable crowd instead of
+        // here: release the party so its bots rejoin the hall's recruitable crowd instead of
         // staying locked to a field nobody is fighting in.
         releaseIdleTeam(key);
         boolean ours = RUNNING.containsKey(key);
@@ -410,7 +412,7 @@ public final class CarnivalArena {
 
         if (!hasHuman(lobby)) {
             // The party left (or was carried out by the field's own clock): drop the countdown
-            // and send the waiting team home rather than parking six bots in a field nobody is
+            // and send the waiting team home rather than parking a team in a field nobody is
             // queuing for. A team still playing its result beat is not a waiting team - it is
             // finishing the match this lobby hosted, and it walks itself home.
             abandonPending(key, channel, field, cpq2);
@@ -449,12 +451,15 @@ public final class CarnivalArena {
                 return; // the party waits alone: the opponent is still on its way
             }
             // The join is due: field a bot team and walk it into the field. From here the field's
-            // own clock runs, exactly as the host's does once a challenge is accepted.
-            Party bots = botTeamFor(channel, field, cpq2);
+            // own clock runs, exactly as the host's does once a challenge is accepted. The team is
+            // sized from the roster standing here - one body fewer than the player side, never
+            // fewer than one - so a two-player party is not met by a full six.
+            int want = CarnivalPqData.botTeamSizeFor(players.getPartyMembers().size());
+            Party bots = botTeamFor(channel, field, cpq2, want);
             if (bots == null) {
                 // No team yet. Either the previous one is still playing its result beat - in which
-                // case it must be left alone, not sent home - or there are not six carnival bots
-                // yet and the spawn was handed off. Keep the wait (and its roll) so the join is
+                // case it must be left alone, not sent home - or the channel is short of carnival
+                // bots and the spawn was handed off. Keep the wait (and its roll) so the join is
                 // attempted again on the next poll: dropping the entry here would re-roll the
                 // delay and push the join further past the window the party was told to expect.
                 return;
@@ -505,7 +510,7 @@ public final class CarnivalArena {
         dropPending(key);
         if (!openMatch(channel, players, waiting.bots, field, cpq2, key)) {
             // The door did not open (the arena has no carnival data, or the engine refused). The
-            // field backs off; send the team home and free it, or the next attempt would find six
+            // field backs off; send the team home and free it, or the next attempt would find the
             // bots standing in a field nobody is fighting in.
             sendTeamHome(waiting.bots, channel, cpq2);
             Party team = BOT_PARTIES.remove(key);
@@ -595,7 +600,7 @@ public final class CarnivalArena {
     /**
      * Release a field's bot team once every member is back in a hall.
      *
-     * <p>A released party lets its six bots rejoin the recruitable crowd and be drafted by the next
+     * <p>A released party lets its bots rejoin the recruitable crowd and be drafted by the next
      * match. Waiting for "all members in a hall" is what keeps the reward-room beat intact: the
      * engine warps a finished team to its reward rooms, and disbanding the moment the match ends
      * would make {@code tickPartyQuest} see "no longer in a party" and send the bots straight home
@@ -745,7 +750,7 @@ public final class CarnivalArena {
      */
     private static boolean playersIneffective(Party party, MapleMap lobby) {
         List<PartyCharacter> members = party.getPartyMembers();
-        if (members.isEmpty() || members.size() > CarnivalPqData.BOT_TEAM_SIZE) {
+        if (members.isEmpty() || members.size() > CarnivalPqData.MAX_TEAM_SIZE) {
             return true;
         }
         for (PartyCharacter mpc : members) {
@@ -776,8 +781,8 @@ public final class CarnivalArena {
      * <p>The bot team is already standing in the field with the players (it was walked in when the
      * countdown started), so this only has to create the engine's match object. It is created
      * through the same seam a real party uses, so every party-bound structure the arena reads - the
-     * member list, the map's party registry, the leader - is populated exactly as it would be for
-     * six players. Nothing here talks to an NPC.
+     * member list, the map's party registry, the leader - is populated exactly as it would be for a
+     * player party. Nothing here talks to an NPC.
      *
      * @return true when the match really started (and is recorded in {@code RUNNING})
      */
@@ -798,7 +803,7 @@ public final class CarnivalArena {
         // change while the server is up, and re-reading it on every poll of every field would be
         // pure waste. Absent (or false) means "not yet known" and triggers the probe.
         //
-        // Runs BEFORE the bot team is built: a field that cannot host a match must not leave six
+        // Runs BEFORE the bot team is built: a field that cannot host a match must not leave
         // bots bound to it in a party that will never fight.
         Boolean usable = ARENA_HAS_DATA.get(arenaId);
         if (usable == null) {
@@ -829,8 +834,12 @@ public final class CarnivalArena {
             return false;
         }
 
-        if (bots.getMembers().size() < CarnivalPqData.BOT_TEAM_SIZE) {
-            BotLogger.log("CPQ field " + field + ": could not field a full bot team, skipping");
+        if (bots.getPartyMembers().isEmpty()) {
+            // The side was sized when it walked in, and it is not re-sized here: the players must
+            // not lose the opponent already standing in front of them because their own roster
+            // changed during the count. A side with no members left is the one case that cannot
+            // play - `MonsterCarnival` would warp both parties into the arena and then give up.
+            BotLogger.log("CPQ field " + field + ": bot team is empty, skipping");
             return false;
         }
 
@@ -960,7 +969,7 @@ public final class CarnivalArena {
      *
      * <p>Needed after a match fails to start: the team has already been moved into the field lobby,
      * and that lobby is the bot's own {@code lobbyMapId} - so the base class's "outside the quest
-     * and outside the lobby" reclaim will never move it out. Without this the six bots sit in a
+     * and outside the lobby" reclaim will never move it out. Without this the bots sit in a
      * field nobody is fighting in, unusable by any other field because they still look committed.
      */
     private static void sendTeamHome(Party bots, Channel channel, boolean cpq2) {
@@ -980,12 +989,12 @@ public final class CarnivalArena {
         if (target == null) {
             return;
         }
-        // Spread the team across the map's own spawn doors instead of stacking all six on portal
+        // Spread the team across the map's own spawn doors instead of stacking the team on portal
         // 0. The slot is the member's index in the party, so with three or more doors the whole
-        // team lands on different pixels (a 5/6/9-door lobby spreads all six); the same index
-        // also keeps a member on its own door across a field entry and the walk home. The door
-        // list is resolved once: filtering and sorting it per member would re-walk the map's
-        // portals six times for one warp.
+        // team lands on different pixels (a 5/6/9-door lobby spreads the whole side); the same
+        // index also keeps a member on its own door across a field entry and the walk home. The
+        // door list is resolved once: filtering and sorting it per member would re-walk the map's
+        // portals once per member for one warp.
         // A null door is a map with no spawn door, and changeMap already falls back to portal 0.
         List<Portal> doors = CarnivalPqData.spawnDoors(target.getPortals());
         int slot = 0;
@@ -1025,26 +1034,29 @@ public final class CarnivalArena {
     }
 
     /**
-     * The bot party for a field: reused while it exists and can be walked in right now, and
-     * rebuilt (full size) when it cannot.
+     * The bot party for a field: reused while it exists, matches the wanted size and can be walked
+     * in right now; rebuilt when it cannot.
      *
      * <p>Three cases, all resolved without a timer:
      * <ul>
-     *   <li><b>ready</b> - reuse it, so a re-match does not blink six bots off the field;</li>
+     *   <li><b>ready</b> - reuse it, so a re-match does not blink the team off the field;</li>
      *   <li><b>playing the result beat</b> - return null and let this poll skip the field. The team
      *       is released by {@link #releaseIdleTeam} once it reaches the hall, and a later poll
      *       fields a fresh one. Building a replacement here would leave the old party registered
-     *       nowhere (its entry would be overwritten) and its six bots committed to a party nothing
+     *       nowhere (its entry would be overwritten) and its bots committed to a party nothing
      *       releases - undraftable for the rest of the process;</li>
-     *   <li><b>dead or short</b> - disband and rebuild, because nothing else will ever move those
-     *       members again.</li>
+     *   <li><b>dead, short, or the wrong size</b> - disband and rebuild, because nothing else will
+     *       ever move those members again, and a team sized for the previous party must not fight
+     *       the next one.</li>
      * </ul>
+     *
+     * @param want the side this party should meet (see {@link CarnivalPqData#botTeamSizeFor})
      */
-    private static Party botTeamFor(Channel channel, int field, boolean cpq2) {
+    private static Party botTeamFor(Channel channel, int field, boolean cpq2, int want) {
         int key = fieldKey(channel, cpq2, field);
         Party existing = BOT_PARTIES.get(key);
         if (existing != null) {
-            if (teamFieldReady(existing)) {
+            if (existing.getPartyMembers().size() == want && teamFieldReady(existing)) {
                 return existing;
             }
             if (teamPlayingResultBeat(existing)) {
@@ -1053,14 +1065,14 @@ public final class CarnivalArena {
             disband(existing);
             BOT_PARTIES.remove(key);
         }
-        return recruitTeam(channel, field, cpq2);
+        return recruitTeam(channel, field, cpq2, want);
     }
 
-    /** Build and register a brand-new bot team for a field. */
-    private static Party recruitTeam(Channel channel, int field, boolean cpq2) {
+    /** Build and register a brand-new bot team of {@code want} bodies for a field. */
+    private static Party recruitTeam(Channel channel, int field, boolean cpq2, int want) {
         int key = fieldKey(channel, cpq2, field);
-        List<Character> bots = recruitBots(channel, field, cpq2);
-        if (bots.size() < CarnivalPqData.BOT_TEAM_SIZE) {
+        List<Character> bots = recruitBots(channel, field, cpq2, want);
+        if (bots.size() < want) {
             return null;
         }
         Character leader = bots.get(0);
@@ -1071,7 +1083,7 @@ public final class CarnivalArena {
         if (team == null) {
             return null;
         }
-        for (int i = 1; i < CarnivalPqData.BOT_TEAM_SIZE; i++) {
+        for (int i = 1; i < want; i++) {
             if (!Party.joinParty(bots.get(i), team.getId(), true)) {
                 // A join that fails leaves the team short; better to drop the whole attempt than
                 // to field an undersized side.
@@ -1114,8 +1126,8 @@ public final class CarnivalArena {
     }
 
     /**
-     * Whether a bot team can be walked into a field right now: all six alive and each standing in
-     * a hall or a field lobby.
+     * Whether every member of a bot team can be walked into a field right now: all of them alive
+     * and each standing in a hall or a field lobby.
      *
      * <p>"Complete" is not enough. A team whose match just ended is complete and still standing in
      * its reward rooms; walking it into the field for the next party would erase the result the
@@ -1128,8 +1140,9 @@ public final class CarnivalArena {
      * than being reused in place.
      */
     private static boolean teamFieldReady(Party party) {
+        List<PartyCharacter> members = party.getPartyMembers();
         int ready = 0;
-        for (PartyCharacter mpc : party.getPartyMembers()) {
+        for (PartyCharacter mpc : members) {
             Character mc = mpc.getPlayer();
             if (mc == null || mc.getMap() == null || mc.getParty() != party) {
                 continue;
@@ -1140,7 +1153,7 @@ public final class CarnivalArena {
             }
             ready++;
         }
-        return ready >= CarnivalPqData.BOT_TEAM_SIZE;
+        return !members.isEmpty() && ready == members.size();
     }
 
     /**
@@ -1291,12 +1304,14 @@ public final class CarnivalArena {
 
     /**
      * Pick the bots that will fight here: the carnival bots that already exist on this channel,
-     * topped up by spawning more when there are not six.
+     * topped up by spawning more when there are not {@code want}.
      *
      * <p>Only {@code CARNIVAL_PQ_BOT} characters are drafted - a grind bot or a town wanderer is
      * not a carnival opponent, and mixing them in would show as a team that does not fight.
+     *
+     * @param want the side to field (see {@link CarnivalPqData#botTeamSizeFor})
      */
-    private static List<Character> recruitBots(Channel channel, int field, boolean cpq2) {
+    private static List<Character> recruitBots(Channel channel, int field, boolean cpq2, int want) {
         List<Character> out = new ArrayList<>();
         for (Character chr : channel.getPlayerStorage().getAllCharacters()) {
             if (chr == null || !soloMapling.ArtificialPlayer.BotHelpers.isBot(chr)) {
@@ -1317,17 +1332,15 @@ public final class CarnivalArena {
         }
         out.sort(Comparator.comparingInt(Character::getId));
 
-        if (out.size() < CarnivalPqData.BOT_TEAM_SIZE) {
+        if (out.size() < want) {
             // Spawning is NOT done on this thread. PlatformPlacement.spawnBotsOnMap blocks on a
             // latch for up to two minutes and retries with sleeps, and this method runs on the
             // single poll thread - one slow spawn would freeze the reaping and opening of every
             // field on every channel for that whole time. The request is handed off and the field
             // simply opens on a later poll, once the new bots are in the channel's storage.
-            requestTeamSpawn(channel, field, cpq2, CarnivalPqData.BOT_TEAM_SIZE - out.size());
+            requestTeamSpawn(channel, field, cpq2, want - out.size());
         }
-        return out.size() > CarnivalPqData.BOT_TEAM_SIZE
-                ? out.subList(0, CarnivalPqData.BOT_TEAM_SIZE)
-                : out;
+        return out.size() > want ? out.subList(0, want) : out;
     }
 
     /**
@@ -1374,7 +1387,7 @@ public final class CarnivalArena {
      *
      * <p>The bot parties are actually dissolved rather than only forgotten: they are registered in
      * the world's party table and in their map's party list, so clearing the map without leaving
-     * the parties would strand six characters in a party nothing owns - and they would keep
+     * the parties would strand their members in a party nothing owns - and they would keep
      * failing to be drafted, because they look committed.
      */
     /**
@@ -1382,7 +1395,7 @@ public final class CarnivalArena {
      *
      * <p>The bot parties are actually dissolved rather than only forgotten: they are registered in
      * the world's party table and in their map's party list, so clearing the map without leaving
-     * the parties would strand six characters in a party nothing owns - and they would keep
+     * the parties would strand their members in a party nothing owns - and they would keep
      * failing to be drafted, because they look committed.
      *
      * <p>The poll is cancelled too. It reads the world and the channel map factories, and after an

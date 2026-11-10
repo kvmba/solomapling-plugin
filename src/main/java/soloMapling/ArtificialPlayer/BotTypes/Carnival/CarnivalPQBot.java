@@ -25,8 +25,9 @@ import java.util.List;
  * opponent's debuffs when they are worth the points.
  *
  * <p>The same brain also plays a bot the player invited in the hall, because CPQ's own rules make
- * that the other way a team gets filled: the party cap is six, a match is six against six, and the
- * player may bring fewer friends than that. Such a bot is on the player's side - the engine assigns
+ * that the other way a team gets filled: the party cap is six, and the player may bring fewer
+ * friends than that (the arena meets such a party with one bot fewer than its own size). Such a
+ * bot is on the player's side - the engine assigns
  * the side in the match, and everything below reads it from there - so the hunt filter and the
  * summons follow the team it actually got, not the one it was recruited for.
  *
@@ -427,7 +428,7 @@ public class CarnivalPQBot extends PartyQuestBot {
      * Whether a human on this bot's OWN side is still standing in the reward room.
      *
      * <p>Only a bot that played on a player's side should wait here. The opponent team is all bots
-     * and has nobody to wait for: making it wait as well would park six bots in a reward room for
+     * and has nobody to wait for: making it wait as well would park the team in a reward room for
      * as long as any human happened to stand there - including the players it just beat.
      */
     private boolean waitingForPlayerInRewardRoom() {
@@ -466,10 +467,10 @@ public class CarnivalPQBot extends PartyQuestBot {
      * Drop this bot's own match state without ending the match for everybody else.
      *
      * <p>Deliberately NOT {@code MonsterCarnival.exit()}: that is {@code dispose()}, which settles
-     * the result and warps both sides out. Retiring one bot must not do that - the other five and
-     * the opposing party are still playing. Clearing the character's pointer is enough: the arena
-     * skips a member whose {@code getPlayer()} is null, and CP awards stop routing here because
-     * {@code gainCP} is gated on the pointer being set.
+     * the result and warps both sides out. Retiring one bot must not do that - the rest of its
+     * team and the opposing party are still playing. Clearing the character's pointer is enough:
+     * the arena skips a member whose {@code getPlayer()} is null, and CP awards stop routing here
+     * because {@code gainCP} is gated on the pointer being set.
      */
     private void detachFromCarnival() {
         if (getChr().getMonsterCarnival() != null) {

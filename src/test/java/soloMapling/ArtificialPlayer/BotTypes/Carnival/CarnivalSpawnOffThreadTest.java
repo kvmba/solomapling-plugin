@@ -40,7 +40,7 @@ class CarnivalSpawnOffThreadTest {
         Method recruit = CarnivalArena.class.getDeclaredMethod("recruitBots",
                 Class.forName("org.gms.net.server.channel.Channel", false,
                         CarnivalSpawnOffThreadTest.class.getClassLoader()),
-                int.class, boolean.class);
+                int.class, boolean.class, int.class);
         assertNotNull(recruit);
         assertTrue(Modifier.isStatic(recruit.getModifiers()));
     }

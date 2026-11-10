@@ -233,7 +233,8 @@ class CarnivalMatchingTest {
         // fights or a player whose teammate vanished.
         Method recruit = CarnivalArena.class.getDeclaredMethod("recruitBots",
                 Class.forName("org.gms.net.server.channel.Channel", false,
-                        CarnivalMatchingTest.class.getClassLoader()), int.class, boolean.class);
+                        CarnivalMatchingTest.class.getClassLoader()), int.class, boolean.class,
+                int.class);
         assertTrue(Modifier.isPrivate(recruit.getModifiers()));
         assertTrue(Modifier.isStatic(recruit.getModifiers()));
 

@@ -94,8 +94,8 @@ class CarnivalArenaLayoutTest {
     void aBotTeamIsAFullPartyAndEveryFieldCanHostOne() {
         // Six is the party cap and every arena's maxPlayers; a team of six is never the reason a
         // match is refused.
-        assertEquals(6, CarnivalPqData.BOT_TEAM_SIZE);
-        assertTrue(CarnivalPqData.BOT_TEAM_SIZE >= 2, "a match needs two sides");
+        assertEquals(6, CarnivalPqData.MAX_TEAM_SIZE);
+        assertTrue(CarnivalPqData.MAX_TEAM_SIZE >= 2, "a match needs two sides");
     }
 
     @Test

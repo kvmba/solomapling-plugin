@@ -188,14 +188,32 @@ public final class CarnivalPqData {
     }
 
     /**
-     * The party the bot fills: a full CPQ team, always.
+     * The largest side a carnival match can hold.
      *
-     * <p>Six is the game's own party cap and every arena's {@code maxPlayers}, so a bot team is
-     * never the reason a match is refused. Note that the engine does <em>not</em> require the
-     * two sides to be the same size - only the NPC script's challenge dialog does - so a full bot
-     * team can meet a smaller player party (see {@code CarnivalArena}).
+     * <p>Six is the game's own party cap, and {@code Party.joinParty} refuses a seventh member, so
+     * no side the arena builds can be the reason a match is refused. It bounds the hall crowd
+     * sizing and the player party the arena accepts; the opposing bot team is sized by
+     * {@link #botTeamSizeFor(int)} instead.
      */
-    public static final int BOT_TEAM_SIZE = 6;
+    public static final int MAX_TEAM_SIZE = 6;
+
+    /**
+     * The bot team a player party faces: one body fewer than the player side, never fewer than one.
+     *
+     * <p>The opponent used to be a full six every time, which made a two-player party fight a side
+     * three times its size - the reported "the bot team is always full". This is the arena's own
+     * sizing rule, not the quest NPC's: {@code cpqchallenge.js} only lets two challenges through
+     * when both parties have the same member count, which a bot team can never count on here. The
+     * engine's {@code MonsterCarnival} requires neither side to be empty and nothing more, so the
+     * arena is free to field the smaller side the players are told to expect: one fewer bot, and a
+     * lone player still gets an opponent.
+     *
+     * <p>The count is the whole party roster, not just its human members: a bot recruited in the
+     * hall is a teammate, so it counts toward the side the opposing team is sized against.
+     */
+    public static int botTeamSizeFor(int playerPartySize) {
+        return Math.max(1, playerPartySize - 1);
+    }
 
     /**
      * How many fields each edition runs.

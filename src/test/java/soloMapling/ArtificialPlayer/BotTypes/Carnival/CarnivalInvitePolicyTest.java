@@ -58,7 +58,8 @@ class CarnivalInvitePolicyTest {
         // a recruited bot out of an opponent team.
         Method recruit = CarnivalArena.class.getDeclaredMethod("recruitBots",
                 Class.forName("org.gms.net.server.channel.Channel", false,
-                        CarnivalInvitePolicyTest.class.getClassLoader()), int.class, boolean.class);
+                        CarnivalInvitePolicyTest.class.getClassLoader()), int.class, boolean.class,
+                int.class);
         assertTrue(java.lang.reflect.Modifier.isStatic(recruit.getModifiers()));
         // Both roles read the same party state: a bot in a party is a teammate, a bot without one
         // is either recruitable or draftable - never both at once.

@@ -3,6 +3,7 @@
 ## 0.4.0-SNAPSHOT
 
 ### Fixes
+- **怪物嘉年华的 bot 队伍按玩家队伍人数配平（每队比玩家少 1 人，最低 1 人）.** 对手此前恒为满编 6 人，两人队伍要打三倍于自己的阵容（反馈“bot 队伍始终满编”）。人数改由 `CarnivalPqData.botTeamSizeFor(玩家队伍人数)` 决定：整队成员（含玩家在大厅招募的 bot 队友）每多一人则对手多一人，始终比玩家少 1、且不少于 1，所以单人也有对手、五人队伍遇到四人。这是本插件自己的配平规则，不是任务 NPC 的规则——`cpqchallenge.js` 要求两队人数相等，而 `MonsterCarnival` 只要求两队非空。人数在**进场那一刻**按大厅里站着的队伍确定一次并贯穿整条链：`botTeamFor`/`recruitTeam` 只组建该规模（既有队伍规模不符则重建）、`recruitBots` 只按缺口补生成、`teamFieldReady` 按队伍自身人数判定可用；`openMatch` **不再重新计算**（玩家在 10 秒倒计时期间补人时，不会把已经站在场上的对手撤走再重掷 10-60s 等待），只在队伍已被清空时拒绝开赛。原 `BOT_TEAM_SIZE` 拆为 `MAX_TEAM_SIZE = 6`（仅作上限：大厅人群投放、玩家队伍校验）。Pinned by `CarnivalBotTeamSizeTest`（4 例：人数映射与下限、进场链只按 `want` 组队、匹配阶段不重新定人；变异验证：`want` 换回 `MAX_TEAM_SIZE` 或给 `openMatch` 加回 `botTeamSizeFor` 均变红）。
 - **组队任务招募大厅三处"有人却招不到"的根因修复 + 阿里安特竞技场补齐（Boss Rush / 奥比斯 / 阿里安特）.** 静态核查发现四个大厅的 bot 摆设问题，都修在各自的"招募路径"上而不是加特例：
   - **Boss Rush：自己大厅里不可招募（`isInsideQuest` 把招募点算成 run 内）.** `BossRushPQBot.isInsideQuest` 曾把 `HOST_MAP`(970030000) 也算作任务内，而该图同时是脚本的 `recruitMap`/`exitMap`。于是 `awaitingRecruit()`（等价于 `!isInsideQuest`）恒为 false：`offerRecruit()` 一进来就返回、`tickLobby` 的喊话也被跳过——15 只 bot 站在那里，只能右键邀请，喊"组队/来人"没人应。修复：`isInsideQuest` 只认战斗房与休息点。`getEligibleParty` 与 `EventInstanceManager.registerParty` 都不读这个方法，所以进任务不受影响；队伍成员留在 host map 时 `tickLobby` 的 `inRunGroup` 判断会让它停止喊话。
   - **Boss Rush：1-9 级 bot 邀请必被拒（招募表下限取脚本的 1）.** 宿主 `PartyOperationHandler` 对 10 级以下的邀请直接回"不满足要求"，`BotRecruitManager.rollPartyAsk` 也会主动 decline。修复：`PqRecruitPoints` 的 BossRushPQ 行下限改为 10（唯一一处不取自事件脚本的数字；Boss Rush 自身没有等级差限制，10-255 仍能过 `getEligibleParty`）。
