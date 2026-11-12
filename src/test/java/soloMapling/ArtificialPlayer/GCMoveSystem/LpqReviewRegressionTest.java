@@ -1688,6 +1688,45 @@ class LpqReviewRegressionTest {
         verify(bot, never()).safeAddHP(anyInt());
     }
 
+    @ParameterizedTest
+    @CsvSource({"100, 51, true", "200, 151, false"})
+    void aRangedRetreatMustStayOnTheWalkableSideOfTheTowerWall(int x, int mobX, boolean canRetreat) throws Exception {
+        MapleMap map = realMap(922010300);
+        createBot(map, new Point(x, -1247), Job.HUNTER);
+        Monster mob = monster(9300007, 99123, new Point(mobX, -1247));
+        inject(map, mob);
+        try (var attacks = mockStatic(BotAttackDriver.class)) {
+            attacks.when(() -> BotAttackDriver.canReach(bot, mob)).thenReturn(true);
+            attacks.when(() -> BotAttackDriver.isProjectile(bot)).thenReturn(true);
+            attacks.when(() -> BotAttackDriver.attackReachX(bot)).thenReturn(300);
+            attacks.when(() -> BotAttackDriver.attackReachY(bot)).thenReturn(80);
+            PqActions.seekAndAttack(bot);
+        }
+        assertEquals(canRetreat ? new Point(x + 90, -1247) : null, state.moveTarget,
+                "a same-height foothold beyond FH268 must not become a tracked retreat goal");
+    }
+
+    @ParameterizedTest
+    @CsvSource({"-60, 0, 0, false", "-20, 0, 0, true", "0, 60, 0, true", "-60, 0, 100, false"})
+    void walkRegionConnectivityMatchesThePhysicalWallEndpoint(int top, int bottom, int leftY, boolean walkable) throws Exception {
+        MapleMap map = map(922019930 + top + 60 + leftY);
+        Foothold left = new Foothold(new Point(-100, leftY), new Point(0, 0), 1);
+        Foothold right = new Foothold(new Point(0, 0), new Point(100, 0), 2);
+        left.setNext(2);
+        right.setPrev(1);
+        Foothold wall = new Foothold(new Point(0, top), new Point(0, bottom), 3);
+        Foothold wallFoot = new Foothold(new Point(0, bottom), new Point(100, bottom), 4);
+        wall.setNext(4);
+        for (Foothold foothold : List.of(left, right, wall, wallFoot)) map.getFootholds().insert(foothold);
+        createBot(map, new Point(-50, leftY / 2), Job.BEGINNER);
+        BotNavigationGraph graph = BotNavigationGraphProvider.getGraph(map, BotMovementProfile.base());
+        boolean blocked = BotPhysicsEngine.isGroundStepBlockedByWall(map, new Point(-1, leftY / 100), 2)
+                || BotPhysicsEngine.isGroundStepBlockedByWall(map, new Point(1, 0), -2);
+        assertEquals(!walkable, blocked);
+        assertEquals(walkable, graph.findRegionId(map, new Point(-50, leftY / 2))
+                == graph.findRegionId(map, new Point(50, 0)));
+    }
+
     private void tick() throws Exception {
         ObserverTracker.markObservedNow(bot.getMapId());
         runTick();

@@ -535,8 +535,8 @@ final class DeadPitGuard {
             parent.put(fh.getId(), fh.getId());
         }
         for (Foothold fh : all) {
-            unionWalkable(parent, fh, byId.get(fh.getPrev()));
-            unionWalkable(parent, fh, byId.get(fh.getNext()));
+            unionWalkable(map, parent, fh, byId.get(fh.getPrev()));
+            unionWalkable(map, parent, fh, byId.get(fh.getNext()));
         }
         Map<Integer, Integer> roots = new java.util.HashMap<>(parent.size() * 2);
         for (Foothold fh : all) {
@@ -545,11 +545,8 @@ final class DeadPitGuard {
         return roots;
     }
 
-    private static void unionWalkable(Map<Integer, Integer> parent, Foothold first, Foothold second) {
-        if (first == null || second == null || first.isWall() || second.isWall()) {
-            return;
-        }
-        if (!BotPhysicsEngine.canWalkAcrossFootholds(first, second)) {
+    private static void unionWalkable(MapleMap map, Map<Integer, Integer> parent, Foothold first, Foothold second) {
+        if (!BotPhysicsEngine.canWalkAcrossFootholds(map, first, second)) {
             return;
         }
         int ra = findRoot(parent, first.getId());

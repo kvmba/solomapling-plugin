@@ -1758,7 +1758,8 @@ public final class PqActions {
         Point ground = GCMovement.groundPointBelow(bot.getMap(), pos.x + dir * step, pos.y);
         // Only a row the bot can already stand on: a point over the ledge edge would walk it off
         // the platform instead of backing away, so an edge honestly reads as "no room to retreat".
-        if (ground == null || Math.abs(ground.y - pos.y) > STANDOFF_ROW_PX) return null;
+        if (ground == null || Math.abs(ground.y - pos.y) > STANDOFF_ROW_PX
+                || GCMovement.onDifferentLedge(bot.getMap(), pos.x, pos.y, ground.x, ground.y)) return null;
         state.spacing.retreated(now);
         return ground;
     }

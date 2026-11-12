@@ -526,7 +526,7 @@ final class BotPhysicsEngine {
 
     // Canonical walk-connectivity rule shared by graph region merging and runtime ground traversal.
     // If two foothold endpoints form a walkable local step, they must be in the same walk region.
-    static boolean canWalkAcrossFootholds(Foothold first, Foothold second) {
+    static boolean canWalkAcrossFootholds(MapleMap map, Foothold first, Foothold second) {
         if (first == null || second == null || first.isWall() || second.isWall()) {
             return false;
         }
@@ -547,7 +547,33 @@ final class BotPhysicsEngine {
             return false;
         }
 
-        return true;
+        return !isWalkConnectionBlockedByWall(map, first, second);
+    }
+
+    static boolean isWalkConnectionBlockedByWall(MapleMap map, Foothold first, Foothold second) {
+        EndpointConnection connection = closestEndpointConnection(first, second);
+        // Probe from inside both pieces: a shared endpoint has zero width, so testing only
+        // the endpoint pair misses a wall on the seam (LPQ stage 3, FH267/FH269 at x=265).
+        Point from = insideFootholdEndpoint(first, connection.from());
+        Point to = insideFootholdEndpoint(second, connection.to());
+        // Ground motion checks walls at the source height before snapping onto a slope.
+        Point forward = new Point(to.x, from.y);
+        Point reverse = new Point(from.x, to.y);
+        int minX = Math.min(connection.from().x, connection.to().x);
+        int maxX = Math.max(connection.from().x, connection.to().x);
+        for (Foothold wall : collisionIndex(map).collidableWalls()) {
+            // The inset may reach the OTHER end of a 1px ledge. That wall blocks leaving
+            // the ledge, not entering it through this seam (LPQ stage 7's tiny end caps).
+            if (wall.getX1() < minX || wall.getX1() > maxX) continue;
+            if (wallCollision(wall, from, forward, true).type() == AirCollisionType.WALL
+                    || wallCollision(wall, to, reverse, true).type() == AirCollisionType.WALL) return true;
+        }
+        return false;
+    }
+
+    private static Point insideFootholdEndpoint(Foothold foothold, Point endpoint) {
+        int x = endpoint.x + Integer.signum(foothold.getX1() + foothold.getX2() - 2 * endpoint.x);
+        return new Point(x, foothold.getY1() == foothold.getY2() ? foothold.getY1() : slopeYAt(foothold, x));
     }
 
     private record EndpointConnection(Point from, Point to) {

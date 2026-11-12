@@ -8,6 +8,7 @@ import org.gms.server.maps.MapleMap;
 import org.gms.service.ConfigService;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
@@ -21,7 +22,10 @@ import java.util.List;
 import java.util.Locale;
 import java.util.concurrent.atomic.AtomicReference;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -90,6 +94,47 @@ class LpqStage3PickupExecutionTest {
                 drive(profile, new Point(start[0], start[1]), new Point(drop[0], drop[1]));
             }
         }
+    }
+
+    @Test
+    void theBoxPlatformAndTheShelfBeyondItsWallAreNotOneWalkRegion() throws Exception {
+        BotNavigationGraph graph = BotNavigationGraphProvider.getGraph(map, BotMovementProfile.base());
+        Point inside = new Point(200, -1247);
+        Point outside = new Point(290, -1247);
+        assertTrue(BotPhysicsEngine.isGroundStepBlockedByWall(map, new Point(264, -1247), 7));
+        assertNotEquals(graph.findRegionId(map, inside), graph.findRegionId(map, outside),
+                "FH268 blocks the connection between FH267 and FH269");
+        List<BotNavigationGraph.Edge> path = BotNavigationManager.findPath(graph, map, inside,
+                graph.findRegionId(map, inside), graph.findRegionId(map, outside), outside, false);
+        assertNotNull(path, "the outer shelf remains reachable by going around the wall");
+        assertFalse(path.isEmpty(), "the outer shelf must not be treated as a direct walk");
+        drive(BotMovementProfile.base(), inside, outside);
+    }
+
+    @ParameterizedTest
+    @CsvSource({"100, 100", "105, 110", "120, 123"})
+    void leavingBoxFourReachesTheNextBoxAndLowerFloorsWithoutRecovery(int speed, int jump) throws Exception {
+        BotMovementProfile profile = new BotMovementProfile(speed, jump);
+        BotNavigationGraphProvider.rebuildGraph(map, profile);
+        for (int x : new int[]{151, 220, 264}) {
+            for (Point target : List.of(new Point(-139, -1135), new Point(151, -943), new Point(220, -640))) {
+                drive(profile, new Point(x, -1247), target);
+            }
+        }
+    }
+
+    @ParameterizedTest
+    @CsvSource({
+            "922010700, 327, 328", "922010700, 332, 334",
+            "922010700, 335, 336", "922010700, 341, 342",
+            "922011000, 472, 473", "922011000, 551, 552",
+            "922011000, 554, 555", "926110000, 92, 93"
+    })
+    void aWallAtTheFarEndOfATinyLedgeDoesNotBlockItsOtherConnection(int mapId, int first, int second) {
+        MapleMap geometry = BotNavigationMapLoader.loadMapGeometry(mapId);
+        BotNavigationGraph graph = BotNavigationGraphProvider.getGraph(geometry, BotMovementProfile.base());
+        assertEquals(graph.regionIdByFootholdId.get(first), graph.regionIdByFootholdId.get(second),
+                "only a wall on the shared seam may split the linked ground");
     }
 
     private static void drive(BotMovementProfile profile, Point start, Point target) throws Exception {
