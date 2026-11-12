@@ -1072,17 +1072,14 @@ final class BotNavigationManager {
         if (windowY == botPos.y) {
             return null; // exactly level: the ordinary waypoint is correct
         }
-        // A bot already ON the climbing ramp is mid-detour: keep it going to the ramp's top rather
-        // than re-aiming at its own column, which parks it half-way up (measured: stopped at
-        // (28,120) with the ramp top at (26,118)).
-        if (own.y1 != own.y2) {
-            int topY = Math.min(own.y1, own.y2);
-            int topX = own.pointAt(own.minX).y == topY ? own.minX : own.maxX;
-            return own.pointAt(topX);
-        }
         BotNavigationGraph.Segment hop = region.nextTreadToward(own, window);
         if (hop == null) {
             return null; // not connected through this region: leave the ordinary waypoint alone
+        }
+        // Leave a ramp through the join toward the launch row, uphill OR downhill. Always
+        // choosing its top reverses a descent; clamping X to an overlapping row can stop mid-ramp.
+        if (own.y1 != own.y2) {
+            return own.pointAt(BotNavigationGraph.Region.sharedColumnX(own, hop));
         }
         BotNavigationGraph.Segment after = region.nextTreadToward(hop, window);
         int handOffX = after == null
