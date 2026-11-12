@@ -231,7 +231,7 @@ public final class BotMesoBomb {
      * when nothing is worth blowing up (the caller swings normally).
      */
     public static Blast tryDetonate(Character bot, boolean facingLeft) {
-        if (bot == null || bot.getMap() == null || !bot.getJob().isA(Job.CHIEFBANDIT)
+        if (bot == null || bot.getMap() == null || GCMovement.isClimbing(bot) || !bot.getJob().isA(Job.CHIEFBANDIT)
                 || bot.getLevel() < BotSkillLevelGate.minLevelForSkill(ChiefBandit.MESO_EXPLOSION)) {
             return null;
         }
@@ -295,14 +295,14 @@ public final class BotMesoBomb {
             maxLines = Math.max(maxLines, lines.size());
         }
         int facingMask = facingLeft ? BotAttackData.FACING_LEFT_MASK : BotAttackData.FACING_RIGHT_MASK;
+        int bodyActionId = BotAttackData.actionFor(ChiefBandit.MESO_EXPLOSION, null);
         // The host's own close-range writer: addAttackBody special-cases 4211006 with the
         // per-entry bag-count byte, so this frame is byte-identical to a real player's explosion,
         // prone2 pose included (BotAttackData.actionFor resolves it).
-        bot.getMap().broadcastMessage(bot, PacketCreator.closeRangeAttack(bot,
+        if (!GCMovement.broadcastActiveAttack(bot, PacketCreator.closeRangeAttack(bot,
                 ChiefBandit.MESO_EXPLOSION, level, facingMask, (mobDamage.size() << 4) | maxLines,
                 mobDamage, BotAttackData.DEFAULT_ATTACK_SPEED,
-                BotAttackData.actionFor(ChiefBandit.MESO_EXPLOSION, null), 0), false);
-        GCMovement.markAlerted(bot);
+                bodyActionId, 0), BotAttackData.animationDurationMs(bodyActionId))) return null;
 
         int total = 0;
         boolean killed = false;

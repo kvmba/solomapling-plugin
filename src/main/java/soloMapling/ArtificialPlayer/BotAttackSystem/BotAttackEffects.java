@@ -63,6 +63,8 @@ public final class BotAttackEffects {
 
     private BotAttackEffects() {}
 
+    public enum StrikeResult { REJECTED, HIT, KILLED }
+
     /*
      * Credits to NutNNut for Packet IDs
      * Land a melee hit on one or more mobs: broadcast the swing carrying each mob's damage
@@ -78,26 +80,26 @@ public final class BotAttackEffects {
      * @param hitDelay     ms before the damage numbers land (attack packet only; loot
      *                    timing comes from the die1 animation, see applyDamageAndLoot)
      */
-    public static boolean meleeStrike(Character bot, Map<Monster, List<Integer>> hits, int skillId,
+    public static StrikeResult meleeStrike(Character bot, Map<Monster, List<Integer>> hits, int skillId,
                                       int skillLevel, int bodyActionId, int facingMask, int speed, short hitDelay) {
         if (notReady(bot, hits)) {
-            return false;
+            return StrikeResult.REJECTED;
         }
         Packet packet = PacketCreator.closeRangeAttack(bot, skillId, skillLevel, facingMask,
                 numAttackedAndDamage(hits), toTargets(hits, hitDelay), speed, bodyActionId, 0);
-        return broadcastAndApply(bot, packet, hits, skillId, hitDelay);
+        return broadcastAndApply(bot, packet, hits, skillId, hitDelay, bodyActionId);
     }
 
     /* Ranged version (bow/crossbow/gun/claw): like melee, plus the flying projectile. */
-    public static boolean rangedStrike(Character bot, Map<Monster, List<Integer>> hits, int skillId,
+    public static StrikeResult rangedStrike(Character bot, Map<Monster, List<Integer>> hits, int skillId,
                                        int skillLevel, int projectile, int bodyActionId, int facingMask,
                                        int speed, short hitDelay) {
         if (notReady(bot, hits)) {
-            return false;
+            return StrikeResult.REJECTED;
         }
         Packet packet = PacketCreator.rangedAttack(bot, skillId, skillLevel, facingMask,
                 numAttackedAndDamage(hits), projectile, toTargets(hits, hitDelay), speed, bodyActionId, 0);
-        return broadcastAndApply(bot, packet, hits, skillId, hitDelay);
+        return broadcastAndApply(bot, packet, hits, skillId, hitDelay, bodyActionId);
     }
 
     /*
@@ -105,19 +107,19 @@ public final class BotAttackEffects {
      * int is -1 for normal skills but a real value for keydown CHARGE skills (Big Bang) - the
      * client over-reads the packet and crashes if a charge skill is sent without it.
      */
-    public static boolean magicStrike(Character bot, Map<Monster, List<Integer>> hits, int skillId,
+    public static StrikeResult magicStrike(Character bot, Map<Monster, List<Integer>> hits, int skillId,
                                       int skillLevel, int bodyActionId, int facingMask, int speed, short hitDelay) {
         if (notReady(bot, hits)) {
-            return false;
+            return StrikeResult.REJECTED;
         }
         Packet packet = PacketCreator.magicAttack(bot, skillId, skillLevel, facingMask,
                 numAttackedAndDamage(hits), toTargets(hits, hitDelay),
                 BotAttackData.magicChargeFor(skillId), speed, bodyActionId, 0);
-        return broadcastAndApply(bot, packet, hits, skillId, hitDelay);
+        return broadcastAndApply(bot, packet, hits, skillId, hitDelay, bodyActionId);
     }
 
     private static boolean notReady(Character bot, Map<Monster, List<Integer>> hits) {
-        return bot == null || bot.getMap() == null || hits == null || hits.isEmpty();
+        return bot == null || bot.getMap() == null || hits == null || hits.isEmpty() || GCMovement.isClimbing(bot);
     }
 
     /* numAttacked (mobs, high nibble) | numDamage (lines per mob, low nibble). */
@@ -135,11 +137,12 @@ public final class BotAttackEffects {
         return targets;
     }
 
-    /* Broadcast once, then apply each mob's summed damage + loot. True if any mob died. */
-    private static boolean broadcastAndApply(Character bot, Packet packet,
-                                             Map<Monster, List<Integer>> hits, int skillId, short hitDelay) {
-        bot.getMap().broadcastMessage(bot, packet, /* repeatToSource */ false);
-        GCMovement.markAlerted(bot); // hold the 5s ALERT pose so the bot's own idle/move broadcasts don't cancel it
+    /* Rejection is distinct from a landed attack that did not kill a mob. */
+    private static StrikeResult broadcastAndApply(Character bot, Packet packet,
+                                             Map<Monster, List<Integer>> hits, int skillId, short hitDelay, int bodyActionId) {
+        if (!GCMovement.broadcastActiveAttack(bot, packet, BotAttackData.animationDurationMs(bodyActionId))) {
+            return StrikeResult.REJECTED;
+        }
         boolean anyKilled = false;
         for (Map.Entry<Monster, List<Integer>> hit : hits.entrySet()) {
             int total = 0;
@@ -160,7 +163,7 @@ public final class BotAttackEffects {
         // The 独行客 pair: with Pickpocket rolled, scatter the meso bags the host's own damage
         // handler would drop for these lines (BotMesoBomb also owns their later detonation).
         BotMesoBomb.onAttackLanded(bot, skillId, hits);
-        return anyKilled;
+        return anyKilled ? StrikeResult.KILLED : StrikeResult.HIT;
     }
 
     /*
@@ -192,6 +195,7 @@ public final class BotAttackEffects {
         int facingMask = bot.isFacingLeft() ? BotAttackData.FACING_LEFT_MASK : BotAttackData.FACING_RIGHT_MASK;
         Map<Integer, List<Integer>> targets = new HashMap<>();
         targets.put(mob.getObjectId(), List.of(damage));
+        // Passive contact retaliation is allowed while walking/climbing and never locks movement.
         bot.getMap().broadcastMessage(bot, PacketCreator.energyAttack(bot,
                 skill, skillLevel, facingMask,
                 /* numAttackedAndDamage */ (1 << 4) | 1,

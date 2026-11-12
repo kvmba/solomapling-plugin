@@ -120,8 +120,10 @@ final class GCMovementSkills {
         int hdir = dest.x >= origin.x ? 1 : -1;
         boolean downward = dest.y > origin.y + 8;
         int stance = downward ? proneStance(hdir) : standStance(hdir);
+        long attackUntilMs = st.attackMovementLockUntilMs;
         BotPhysicsEngine.teleportTo(st, bot, dest);
         BotMovementManager.resetEntryStateAfterTeleport(st);
+        st.attackMovementLockUntilMs = attackUntilMs; // a skill blink does not cancel the attack animation
         if (ObserverTracker.isActiveMap(bot.getMapId())) {
             broadcastTeleport(bot, origin, dest, stance);
         }
@@ -138,7 +140,7 @@ final class GCMovementSkills {
             return false;
         }
         Point origin = bot.getPosition();
-        if (origin == null || st.inAir || st.climbing) {
+        if (origin == null || st.inAir || st.climbing || MovementClock.nowMs() < st.attackMovementLockUntilMs) {
             return false; // no position, or already airborne/on a rope — don't stack a dash
         }
         int dir = targetX >= origin.x ? 1 : -1;
@@ -164,7 +166,8 @@ final class GCMovementSkills {
     // and the platform fit, so real travel distances can be measured against FJ_TRAVEL_PX.
     static boolean execFlashJumpForced(BotMovementState st, Character bot, int dir, float scale) {
         Point origin = bot.getPosition();
-        if (bot.getMap() == null || origin == null || st.inAir || st.climbing) {
+        if (bot.getMap() == null || origin == null || st.inAir || st.climbing
+                || MovementClock.nowMs() < st.attackMovementLockUntilMs) {
             return false;
         }
         BotMovementManager.initiateJump(st, bot, dir >= 0 ? 1 : -1);

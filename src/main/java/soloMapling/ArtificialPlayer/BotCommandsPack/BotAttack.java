@@ -8,9 +8,7 @@ import org.gms.client.inventory.InventoryType;
 import org.gms.client.inventory.WeaponType;
 import org.gms.server.ItemInformationProvider;
 import soloMapling.ArtificialPlayer.BotAttackSystem.BotAttackData;
-import soloMapling.ArtificialPlayer.BotAttackSystem.BotAuraState;
 import org.gms.util.PacketCreator;
-import soloMapling.ArtificialPlayer.BotMountSystem.BotMount;
 import soloMapling.ArtificialPlayer.GCMoveSystem.GCMovement;
 
 import java.util.Collections;
@@ -51,17 +49,15 @@ public final class BotAttack {
      * application (e.g. reactor hit). The animation is selected based on the
      * bot's currently equipped weapon class.
      */
-    public static void basicSwing(Character chr) {
-        if (chr == null || GCMovement.isClimbing(chr)) return;
-        BotMount.cancelForAction(chr); // an attack is never made from the saddle
-        BotAuraState.cancelHidesForAction(chr); // 伪装/隐身术 break on the attack key
+    public static boolean basicSwing(Character chr) {
+        if (chr == null || chr.getMap() == null || GCMovement.isClimbing(chr)) return false;
 
         int facingMask = facingLeft(chr) ? BotAttackData.FACING_LEFT_MASK : BotAttackData.FACING_RIGHT_MASK;
         WeaponType weaponType = resolveEquippedWeaponType(chr);
         int bodyActionId = BotAttackData.randomActionFor(weaponType);
 
         Map<Integer, List<Integer>> emptyTargets = Collections.emptyMap();
-        chr.getMap().broadcastMessage(
+        return GCMovement.broadcastActiveAttack(
                 chr,
                 PacketCreator.closeRangeAttack(
                         chr,
@@ -73,8 +69,7 @@ public final class BotAttack {
                         /* speed        */ BotAttackData.DEFAULT_ATTACK_SPEED,
                         /* direction    */ bodyActionId,
                         /* display      */ 0
-                ),
-                /* repeatToSource */ false
+                ), BotAttackData.animationDurationMs(bodyActionId)
         );
     }
 
@@ -86,22 +81,19 @@ public final class BotAttack {
      * the weapon default. Pure visual. For magic-class skills use {@link #magicSwing} instead.
      */
     public static void skillSwing(Character chr, int skillId) {
-        if (chr == null || chr.getMap() == null) return;
+        if (chr == null || chr.getMap() == null || GCMovement.isClimbing(chr)) return;
         if (skillId <= 0) { basicSwing(chr); return; }
-        BotMount.cancelForAction(chr); // an attack is never made from the saddle
-        BotAuraState.cancelHidesForAction(chr); // 伪装/隐身术 break on the attack key
 
         int facingMask = facingLeft(chr) ? BotAttackData.FACING_LEFT_MASK : BotAttackData.FACING_RIGHT_MASK;
         WeaponType weaponType = resolveEquippedWeaponType(chr);
         int bodyActionId = BotAttackData.actionFor(skillId, weaponType);
 
         Map<Integer, List<Integer>> emptyTargets = Collections.emptyMap();
-        chr.getMap().broadcastMessage(
+        GCMovement.broadcastActiveAttack(
                 chr,
                 PacketCreator.closeRangeAttack(chr, skillId, resolveSkillLevel(skillId), facingMask,
                         /* numAttackedAndDamage */ 0, emptyTargets, BotAttackData.DEFAULT_ATTACK_SPEED,
-                        bodyActionId, /* display */ 0),
-                false
+                        bodyActionId, /* display */ 0), BotAttackData.animationDurationMs(bodyActionId)
         );
     }
 
@@ -115,9 +107,7 @@ public final class BotAttack {
      * bot), so the arrow/bolt/star the viewers see matches the bot's build. Pure visual.
      */
     public static void rangedSwing(Character chr, int skillId) {
-        if (chr == null || chr.getMap() == null || skillId <= 0) return;
-        BotMount.cancelForAction(chr); // an attack is never made from the saddle
-        BotAuraState.cancelHidesForAction(chr); // 伪装/隐身术 break on the attack key
+        if (chr == null || chr.getMap() == null || skillId <= 0 || GCMovement.isClimbing(chr)) return;
 
         int facingMask = facingLeft(chr) ? BotAttackData.FACING_LEFT_MASK : BotAttackData.FACING_RIGHT_MASK;
         WeaponType weaponType = resolveEquippedWeaponType(chr);
@@ -125,12 +115,12 @@ public final class BotAttack {
         int projectile = BotAttackData.projectileFor(weaponType, chr);
 
         Map<Integer, List<Integer>> emptyTargets = Collections.emptyMap();
-        chr.getMap().broadcastMessage(
+        GCMovement.broadcastActiveAttack(
                 chr,
                 PacketCreator.rangedAttack(chr, skillId, resolveSkillLevel(skillId), facingMask,
                         /* numAttackedAndDamage */ 0, projectile, emptyTargets,
                         BotAttackData.speedFor(weaponType, BotAttackData.DEFAULT_ATTACK_SPEED), bodyActionId, /* display */ 0),
-                false
+                BotAttackData.animationDurationMs(bodyActionId)
         );
     }
 
@@ -141,21 +131,18 @@ public final class BotAttack {
      * Pure visual.
      */
     public static void magicSwing(Character chr, int skillId) {
-        if (chr == null || chr.getMap() == null || skillId <= 0) return;
-        BotMount.cancelForAction(chr); // an attack is never made from the saddle
-        BotAuraState.cancelHidesForAction(chr); // 伪装/隐身术 break on the attack key
+        if (chr == null || chr.getMap() == null || skillId <= 0 || GCMovement.isClimbing(chr)) return;
 
         int facingMask = facingLeft(chr) ? BotAttackData.FACING_LEFT_MASK : BotAttackData.FACING_RIGHT_MASK;
         WeaponType weaponType = resolveEquippedWeaponType(chr);
         int bodyActionId = BotAttackData.actionFor(skillId, weaponType);
 
         Map<Integer, List<Integer>> emptyTargets = Collections.emptyMap();
-        chr.getMap().broadcastMessage(
+        GCMovement.broadcastActiveAttack(
                 chr,
                 PacketCreator.magicAttack(chr, skillId, resolveSkillLevel(skillId), facingMask,
                         /* numAttackedAndDamage */ 0, emptyTargets, BotAttackData.magicChargeFor(skillId),
-                        BotAttackData.DEFAULT_ATTACK_SPEED, bodyActionId, /* display */ 0),
-                false
+                        BotAttackData.DEFAULT_ATTACK_SPEED, bodyActionId, /* display */ 0), BotAttackData.animationDurationMs(bodyActionId)
         );
     }
 

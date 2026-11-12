@@ -289,6 +289,9 @@ public final class BotAttackDriver {
         if (!force && now < nextAttackByBot.getOrDefault(bot.getId(), 0L)) {
             return AttackResult.miss("on cooldown");
         }
+        if (!force && GCMovement.isAttacking(bot)) {
+            return AttackResult.miss("attack animation");
+        }
 
         WeaponType weapon = BotAttack.resolveEquippedWeaponType(bot);
         BotAttackConfig.JobAttacks atks = BotAttackConfig.resolve(bot.getJob(), weapon, bot.getLevel());
@@ -401,15 +404,7 @@ public final class BotAttackDriver {
             hits.put(mob, lines);
         }
 
-        // An attack is never made from the saddle: drop the mount right before the swing
-        // broadcasts (after the "would this actually hit?" gates, so a mount only comes
-        // off for a real strike, not every targeting tick).
-        soloMapling.ArtificialPlayer.BotMountSystem.BotMount.cancelForAction(bot);
-        // 伪装 / 隐身术 break the moment the attack key is pressed (the client's own rule): cancel
-        // both hide auras here too, alongside the mount.
-        BotAuraState.cancelHidesForAction(bot);
-
-        boolean killed = switch (profile.route) {
+        BotAttackEffects.StrikeResult result = switch (profile.route) {
             case CLOSE  -> BotAttackEffects.meleeStrike(bot, hits, skillId, profile.skillLevel,
                     bodyActionId, facingMask, profile.speed, profile.hitDelayMs);
             case RANGED -> BotAttackEffects.rangedStrike(bot, hits, skillId, profile.skillLevel,
@@ -418,6 +413,9 @@ public final class BotAttackDriver {
             case MAGIC  -> BotAttackEffects.magicStrike(bot, hits, skillId, profile.skillLevel,
                     bodyActionId, facingMask, profile.speed, profile.hitDelayMs);
         };
+        if (result == BotAttackEffects.StrikeResult.REJECTED) {
+            return AttackResult.miss("attack rejected by movement state");
+        }
 
         // The Fire/Ice Demon rider: the host's damage handler rolls the attack effect's own
         // monster statuses per hit mob after a landed swing (AbstractDealDamageHandler's
@@ -442,7 +440,7 @@ public final class BotAttackDriver {
         String label = targets.size() > 1
                 ? targets.size() + " mobs (nearest '" + targets.get(0).getName() + "')"
                 : targets.get(0).getName();
-        return AttackResult.hit(label, reported, killed);
+        return AttackResult.hit(label, reported, result == BotAttackEffects.StrikeResult.KILLED);
     }
 
     private record AttackSelection(BotAttackProfile profile, List<Monster> targets,

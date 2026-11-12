@@ -60,7 +60,7 @@ public final class BotGroundMists {
      * caller swings normally) - the same contract as BotMesoBomb.tryDetonate.
      */
     public static BotMesoBomb.Blast tryCast(Character bot, boolean facingLeft) {
-        if (bot == null || bot.getMap() == null || bot.getJob() == null
+        if (bot == null || bot.getMap() == null || GCMovement.isClimbing(bot) || bot.getJob() == null
                 || !bot.getJob().isA(Job.FP_MAGE)
                 || bot.getLevel() < BotSkillLevelGate.minLevelForSkill(FPMage.POISON_MIST)) {
             return null;
@@ -98,12 +98,6 @@ public final class BotGroundMists {
             return null; // nothing to poison - let the regular swing handle targeting
         }
 
-        // An attack is never made from the saddle, and the hide auras break the moment the
-        // cast key is pressed - the driver's own rule, applied once the cast is committed (the
-        // early-return beats above spent nothing, so a null return never tears a disguise off).
-        soloMapling.ArtificialPlayer.BotMountSystem.BotMount.cancelForAction(bot);
-        BotAuraState.cancelHidesForAction(bot);
-
         // The cast's cosmetic damage, one line per mob - the host's mist cast is a magic
         // attack first (the cloud is the aftermath); bot damage reads like every other swing.
         Map<Integer, List<Integer>> mobDamage = new LinkedHashMap<>();
@@ -116,13 +110,13 @@ public final class BotGroundMists {
         }
 
         int facingMask = facingLeft ? BotAttackData.FACING_LEFT_MASK : BotAttackData.FACING_RIGHT_MASK;
+        int bodyActionId = BotAttackData.actionFor(FPMage.POISON_MIST, null);
         // The host's own magic writer - the same frame a real F/P mage's mist cast produces.
-        bot.getMap().broadcastMessage(bot, PacketCreator.magicAttack(bot,
+        if (!GCMovement.broadcastActiveAttack(bot, PacketCreator.magicAttack(bot,
                 FPMage.POISON_MIST, level, facingMask, (mobDamage.size() << 4) | 1,
                 mobDamage, BotAttackData.magicChargeFor(FPMage.POISON_MIST),
                 BotAttackData.DEFAULT_ATTACK_SPEED,
-                BotAttackData.actionFor(FPMage.POISON_MIST, null), 0), false);
-        GCMovement.markAlerted(bot);
+                bodyActionId, 0), BotAttackData.animationDurationMs(bodyActionId))) return null;
 
         // The cloud: the host's own Mist object through the host's own spawnMist - the poison
         // scheduler (2.5s prop rolls, the per-second drain, the expiry broadcast) is the host's

@@ -61,7 +61,7 @@ public final class BotShadowMeso {
      * swings normally) - the same contract as BotMesoBomb.tryDetonate.
      */
     public static BotMesoBomb.Blast tryThrow(Character bot, WeaponType weapon, boolean facingLeft) {
-        if (bot == null || bot.getMap() == null || bot.getJob() == null
+        if (bot == null || bot.getMap() == null || GCMovement.isClimbing(bot) || bot.getJob() == null
                 || !bot.getJob().isA(Job.HERMIT)
                 || bot.getLevel() < BotSkillLevelGate.minLevelForSkill(Hermit.SHADOW_MESO)) {
             return null;
@@ -116,21 +116,11 @@ public final class BotShadowMeso {
         if (targets.isEmpty()) {
             return null; // nothing in reach - let the regular swing handle targeting
         }
-        // An attack is never made from the saddle, and the hide auras (Dark Sight / Oak
-        // Barrel) break the moment the attack key is pressed - the driver's own rule before
-        // every swing. Cancelling here, after the reach check, mirrors it: the early-return
-        // beats above spent nothing, so a null return never tears a disguise off.
-        soloMapling.ArtificialPlayer.BotMountSystem.BotMount.cancelForAction(bot);
-        BotAuraState.cancelHidesForAction(bot);
-
         // The host's charge rules: moneyCon with a small random top-up, clamped at the
         // wallet, and the throw happens even when broke (the charge simply floors at 0).
         // Mirror all three - a broke bot still throws, the wallet just stops draining.
         int money = moneyCon + ThreadLocalRandom.current().nextInt(Math.max(1, moneyCon / 2));
         int charge = Math.min(money, bot.getMeso());
-        if (charge > 0) {
-            bot.gainMeso(-charge, false);
-        }
         // The host's SHADOW_MESO line price, keyed on the level-table moneyCon.
         int perLine = (int) Math.floor(moneyCon * 10 * 1.5);
 
@@ -140,13 +130,16 @@ public final class BotShadowMeso {
         }
 
         int facingMask = facingLeft ? BotAttackData.FACING_LEFT_MASK : BotAttackData.FACING_RIGHT_MASK;
+        int bodyActionId = BotAttackData.actionFor(Hermit.SHADOW_MESO, weapon);
         // The host's own ranged writer with projectile 0 - the same frame a real Hermit's
         // throw produces (the client draws the coin sprites; no star is consumed or rendered).
-        bot.getMap().broadcastMessage(bot, PacketCreator.rangedAttack(bot,
+        if (!GCMovement.broadcastActiveAttack(bot, PacketCreator.rangedAttack(bot,
                 Hermit.SHADOW_MESO, level, facingMask, (mobDamage.size() << 4) | 1,
                 0, mobDamage, BotAttackData.DEFAULT_ATTACK_SPEED,
-                BotAttackData.actionFor(Hermit.SHADOW_MESO, weapon), 0), false);
-        GCMovement.markAlerted(bot);
+                bodyActionId, 0), BotAttackData.animationDurationMs(bodyActionId))) return null;
+        if (charge > 0) {
+            bot.gainMeso(-charge, false);
+        }
 
         boolean killed = false;
         for (Monster mob : targets) {

@@ -25,6 +25,10 @@ import org.gms.constants.skills.Pirate;
 import org.gms.constants.skills.Priest;
 import org.gms.constants.skills.Rogue;
 import org.gms.constants.skills.Shadower;
+import org.gms.provider.Data;
+import org.gms.provider.DataProviderFactory;
+import org.gms.provider.DataTool;
+import org.gms.provider.wz.WZFiles;
 
 import java.util.Map;
 import java.util.Set;
@@ -193,6 +197,86 @@ public final class BotAttackData {
     public static int actionFor(int skillId, WeaponType weaponType) {
         Integer override = SKILL_ACTION.get(skillId);
         return override != null ? override : randomActionFor(weaponType);
+    }
+
+    /** Hold for the transmitted body action's raw WZ frame duration plus 200 ms. */
+    public static int animationDurationMs(int bodyActionId) {
+        return AnimationDurations.MS[bodyActionId] + 200;
+    }
+
+    private static final class AnimationDurations {
+        private static final int[] MS = load();
+
+        private static int[] load() {
+            Data body = DataProviderFactory.getDataProvider(WZFiles.CHARACTER).getData("00002000.img");
+            if (body == null) throw new IllegalStateException("Missing Character.wz/00002000.img");
+            int[] durations = new int[160];
+            for (int id = 0; id < durations.length; id++) {
+                String name = switch (id) {
+                    case SWING_O1 -> "swingO1";
+                    case SWING_O2 -> "swingO2";
+                    case SWING_O3 -> "swingO3";
+                    case SWING_T1 -> "swingT1";
+                    case SWING_T2 -> "swingT2";
+                    case SWING_T3 -> "swingT3";
+                    case SWING_P1 -> "swingP1";
+                    case STAB_T1 -> "stabT1";
+                    case STAB_O1 -> "stabO1";
+                    case STAB_O2 -> "stabO2";
+                    case SHOOT_1 -> "shoot1";
+                    case SHOOT_2 -> "shoot2";
+                    case SHOT -> "shot";
+                    case CLAW_1, CLAW_2, CLAW_3 -> "swingO1"; // no named claw/wand node: conservative basic-body hold
+                    case WAND_1 -> "swingO1";
+                    case WAND_2 -> "swingO2";
+                    case SAVAGE -> "savage";
+                    case ALERT_3 -> "alert3";
+                    case MAGIC_1 -> "magic1";
+                    case MAGIC_2 -> "magic2";
+                    case MAGIC_3 -> "magic3";
+                    case BURSTER_2 -> "burster2";
+                    case AVENGER -> "avenger";
+                    case PRONE2 -> "prone2";
+                    case ALERT_5 -> "alert5";
+                    case ASSASSINATION -> "assassination";
+                    case BRANDISH_1 -> "brandish1";
+                    case SANCTUARY -> "sanctuary";
+                    case METEOR -> "meteor";
+                    case BLIZZARD -> "blizzard";
+                    case GENESIS -> "genesis";
+                    case BLAST -> "blast";
+                    case STRAIGHT -> "straight";
+                    case SOMERSAULT -> "somersault";
+                    case DOUBLEFIRE -> "doublefire";
+                    case TRIPLEFIRE -> "triplefire";
+                    case BACKSPIN -> "backspin";
+                    case DOUBLEUPPER -> "doubleupper";
+                    case SCREW -> "screw";
+                    case EBURSTER -> "eburster";
+                    case EDRAIN -> "edrain";
+                    case SHOCKWAVE_P -> "shockwave";
+                    case FIST -> "fist";
+                    case DEMOLITION_P -> "demolition";
+                    case DRAGONSTRIKE -> "dragonstrike";
+                    case EORB -> "eorb";
+                    case SNATCH -> "snatch";
+                    case FLAMEBURNER -> "fireburner";
+                    case COOLINGEFFECT -> "coolingeffect";
+                    case HOMING -> "homing";
+                    case RAPIDFIRE -> "rapidfire";
+                    case CANNON -> "cannon";
+                    case TORPEDO -> "torpedo";
+                    default -> null;
+                };
+                if (name == null) continue;
+                Data action = body.getChildByPath(name);
+                if (action == null) throw new IllegalStateException("Missing body action " + name);
+                for (Data frame : action) {
+                    durations[id] += Math.abs(DataTool.getInt("delay", frame, 100));
+                }
+            }
+            return durations;
+        }
     }
 
     // Big Bang (F/P, I/L, Bishop) is a keydown CHARGE skill: its MAGIC_ATTACK packet carries a

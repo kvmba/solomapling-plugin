@@ -3,9 +3,12 @@ package soloMapling.ArtificialPlayer.GCMoveSystem;
 import org.gms.client.Character;
 import org.gms.client.Job;
 import org.gms.client.inventory.Item;
+import org.gms.client.inventory.WeaponType;
+import org.gms.constants.game.CharacterStance;
 import org.gms.config.GameConfig;
 import org.gms.dao.entity.GameConfigDO;
 import org.gms.manager.ServerManager;
+import org.gms.net.packet.Packet;
 import org.gms.property.ServiceProperty;
 import org.gms.server.life.Monster;
 import org.gms.server.maps.Foothold;
@@ -16,6 +19,7 @@ import org.gms.server.maps.MapObjectType;
 import org.gms.server.maps.MapleMap;
 import org.gms.server.maps.Portal;
 import org.gms.server.maps.Reactor;
+import org.gms.server.maps.Rope;
 import org.gms.service.ConfigService;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.AfterAll;
@@ -29,11 +33,20 @@ import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.context.ApplicationContext;
 import soloMapling.ArtificialPlayer.BotAttackSystem.BotAttackDriver;
+import soloMapling.ArtificialPlayer.BotAttackSystem.BotAttackData;
+import soloMapling.ArtificialPlayer.BotAttackSystem.BotDemonRider;
 import soloMapling.ArtificialPlayer.BotAttackSystem.BotAttackEffects;
 import soloMapling.ArtificialPlayer.BotAttackSystem.BotAuraState;
 import soloMapling.ArtificialPlayer.BotAttackSystem.BotBuffEffects;
+import soloMapling.ArtificialPlayer.BotAttackSystem.BotEnergyCharge;
+import soloMapling.ArtificialPlayer.BotAttackSystem.BotFinalAttack;
+import soloMapling.ArtificialPlayer.BotAttackSystem.BotGroundMists;
+import soloMapling.ArtificialPlayer.BotAttackSystem.BotMesoBomb;
+import soloMapling.ArtificialPlayer.BotAttackSystem.BotShadowMeso;
+import soloMapling.ArtificialPlayer.BotAttackSystem.BotShadowWeb;
 import soloMapling.ArtificialPlayer.BotCommandsPack.BotAttack;
 import soloMapling.ArtificialPlayer.BotCommandsPack.DropCommands;
+import soloMapling.ArtificialPlayer.BotMovementSystem.MovementCommands;
 import soloMapling.ArtificialPlayer.BotGrindSystem.CombatSpacing;
 import soloMapling.ArtificialPlayer.BotHealthSystem.BotDeath;
 import soloMapling.ArtificialPlayer.BotStatusSystem.BotDebuffState;
@@ -60,6 +73,7 @@ import static org.junit.jupiter.api.Assertions.*;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
+import static soloMapling.ArtificialPlayer.BotAttackSystem.BotAttackEffects.StrikeResult.*;
 
 /** Behavioural regressions from the review of 2f37975 / 17d4145. */
 class LpqReviewRegressionTest {
@@ -115,6 +129,7 @@ class LpqReviewRegressionTest {
         LudiStages.releaseRoomState(BOT_ID);
         BotAttackDriver.clearBot(BOT_ID);
         BotAuraState.clearBot(BOT_ID);
+        BotEnergyCharge.clearBot(BOT_ID);
         MovementClock.reset();
     }
 
@@ -135,6 +150,366 @@ class LpqReviewRegressionTest {
         state.unstuckCooldownMs = 0;
         assertTrue(BotMovementManager.selfHealDeadPit(state), "a cached dead verdict still requires rescue");
         assertEquals(new Point(0, -500), bot.getPosition());
+    }
+
+    @ParameterizedTest
+    @EnumSource(value = Job.class, names = {"BEGINNER", "HUNTER", "CLERIC"})
+    void anAttackPausesTheLiveChaseAndResumesAfterTheAnimation(Job job) throws Exception {
+        MapleMap map = map(922019994);
+        floor(map, 1, -100, 0, 800);
+        createBot(map, new Point(0, 0), job);
+        state.alertResetScheduled = true; // virtual time: no real delayed alert-reset task
+        AtomicInteger arrivals = new AtomicInteger();
+        GCMovement.move(bot, 600, 0, arrivals::incrementAndGet);
+        state.moveDir = 1;
+        BotPhysicsEngine.applyGroundMotion(state, bot, BotPhysicsEngine.findGroundFoothold(map, bot.getPosition()));
+        assertNotEquals(0, state.movementVelX, "start with a real walk already in flight");
+        Point attackPosition = new Point(bot.getPosition());
+        inject(map, monster(9300005, 99150, new Point(attackPosition.x + 50, 0)));
+
+        assertTrue(BotAttackDriver.forceSingle(bot).hit());
+        assertEquals(0.0, state.hspeed);
+        assertEquals(0, state.moveDir);
+        assertEquals(0, state.movementVelX);
+        assertEquals(new Point(600, 0), state.moveTarget, "the attack pauses rather than cancels the order");
+        GCMovement.jumpInPlace(bot);
+        GCMovement.jumpToward(bot, 1);
+        assertFalse(state.inAir, "a new jump must not start halfway through a grounded attack");
+        while (MovementClock.nowMs() < state.attackMovementLockUntilMs) {
+            tick();
+            assertEquals(attackPosition, bot.getPosition(), "must not slide through the swing");
+            assertEquals(0, state.stuckMs, "the animation hold is not a navigation stall");
+        }
+        tick();
+        assertTrue(bot.getPosition().x > attackPosition.x, "walking resumes when the lock expires");
+        for (int frame = 0; frame < 200 && arrivals.get() == 0; frame++) tick();
+        assertEquals(1, arrivals.get(), "the paused move retains its arrival callback");
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void climbingRejectsActiveCombatAndCosmeticAttacks(boolean ladder) throws Exception {
+        MapleMap map = attackMap();
+        createBot(map, new Point(0, -50), Job.BEGINNER);
+        BotPhysicsEngine.attachToRope(state, bot, new Rope(0, -200, 0, ladder), -50);
+        Monster mob = monster(9300005, 99151, new Point(30, -50));
+        inject(map, mob);
+        Map<Monster, List<Integer>> hits = Map.of(mob, List.of(100));
+        clearInvocations(map);
+
+        assertFalse(BotAttackDriver.botAttack(bot).hit());
+        assertFalse(BotAttackDriver.forceSingle(bot).hit());
+        assertFalse(BotAttackDriver.forceAoe(bot).hit());
+        assertFalse(BotAttackDriver.forceUltimate(bot).hit());
+        BotAttack.basicSwing(bot);
+        BotAttack.skillSwing(bot, 1001004);
+        BotAttack.rangedSwing(bot, 3001004);
+        BotAttack.magicSwing(bot, 2001004);
+        assertEquals(REJECTED, BotAttackEffects.meleeStrike(bot, hits, 0, 0, 5, 0, 4, (short) 300));
+        assertEquals(REJECTED, BotAttackEffects.rangedStrike(bot, hits, 3001004, 1, 0, 22, 0, 4, (short) 300));
+        assertEquals(REJECTED, BotAttackEffects.magicStrike(bot, hits, 2001004, 1, 28, 0, 4, (short) 300));
+        when(bot.getLevel()).thenReturn(120);
+        when(bot.getJob()).thenReturn(Job.FIGHTER);
+        BotFinalAttack.maybeTrigger(bot, WeaponType.SWORD1H, 5, 0, hits);
+        when(bot.getJob()).thenReturn(Job.CHIEFBANDIT);
+        assertNull(BotMesoBomb.tryDetonate(bot, false));
+        when(bot.getJob()).thenReturn(Job.HERMIT);
+        assertNull(BotShadowMeso.tryThrow(bot, WeaponType.CLAW, false));
+        assertNull(BotShadowWeb.tryCast(bot, false));
+        when(bot.getJob()).thenReturn(Job.FP_MAGE);
+        assertNull(BotGroundMists.tryCast(bot, false));
+        assertFalse(GCMovement.broadcastActiveAttack(bot, mock(Packet.class), 800));
+
+        verify(map, never()).broadcastMessage(eq(bot), any(Packet.class), eq(false));
+        verify(mob, never()).damage(any(Character.class), anyInt(), anyBoolean());
+        assertEquals(0L, state.attackMovementLockUntilMs);
+        assertTrue(state.climbing, "rejecting an attack must not dismount the climber");
+    }
+
+    @ParameterizedTest
+    @ValueSource(ints = {0, 1, 2})
+    void passiveEnergyRetaliationDoesNotInterruptWalkingOrClimbing(int pose) throws Exception {
+        MapleMap map = attackMap();
+        createBot(map, new Point(0, 0), Job.MARAUDER);
+        when(bot.getLevel()).thenReturn(120);
+        when(bot.getEnergyBar()).thenReturn(15_000);
+        GCMovement.move(bot, 600, 0);
+        if (pose == 0) {
+            state.moveDir = 1;
+            BotPhysicsEngine.applyGroundMotion(state, bot, BotPhysicsEngine.findGroundFoothold(map, bot.getPosition()));
+        } else {
+            BotPhysicsEngine.attachToRope(state, bot, new Rope(0, -200, 0, pose == 2), -50);
+        }
+        Point position = new Point(bot.getPosition());
+        int moveDir = state.moveDir;
+        int velocity = state.movementVelX;
+        double hspeed = state.hspeed;
+        Monster mob = monster(9300005, 99153, new Point(30, position.y));
+        when(mob.getStati(any())).thenReturn(null);
+        clearInvocations(map);
+
+        assertTrue(BotEnergyCharge.claimRetaliationBeat(bot), "a passive retaliation is legal in every pose");
+        BotEnergyCharge.strike(bot, mob);
+
+        verify(map).broadcastMessage(eq(bot), any(Packet.class), eq(false));
+        verify(mob).damage(eq(bot), intThat(damage -> damage > 0), eq(false));
+        assertEquals(position, bot.getPosition());
+        assertEquals(pose != 0, state.climbing);
+        assertEquals(moveDir, state.moveDir);
+        assertEquals(velocity, state.movementVelX);
+        assertEquals(hspeed, state.hspeed);
+        assertEquals(0L, state.attackMovementLockUntilMs, "a passive retaliation must not arm the active-attack lock");
+        assertEquals(new Point(600, 0), state.moveTarget);
+    }
+
+    @Test
+    void aRopeGrabBetweenAttackPreparationAndBroadcastRejectsTheStrike() throws Exception {
+        MapleMap map = attackMap();
+        createBot(map, new Point(0, 0), Job.BEGINNER);
+        Monster mob = monster(9300005, 99152, new Point(30, 0));
+        Packet packet = mock(Packet.class);
+        clearInvocations(map);
+        try (var packets = mockStatic(org.gms.util.PacketCreator.class)) {
+            packets.when(() -> org.gms.util.PacketCreator.closeRangeAttack(eq(bot), anyInt(), anyInt(),
+                    anyInt(), anyInt(), anyMap(), anyInt(), anyInt(), anyInt())).thenAnswer(inv -> {
+                BotPhysicsEngine.attachToRope(state, bot, new Rope(0, -200, 0, false), -50);
+                return packet;
+            });
+            assertEquals(REJECTED, BotAttackEffects.meleeStrike(bot, Map.of(mob, List.of(100)),
+                    0, 0, 5, 0, 4, (short) 300));
+        }
+        verify(map, never()).broadcastMessage(eq(bot), any(Packet.class), eq(false));
+        verify(mob, never()).damage(any(Character.class), anyInt(), anyBoolean());
+        assertTrue(state.climbing);
+    }
+
+    @Test
+    void aGroundedAttackPublishesItsStopBeforeTheAttackUnderThePhysicsLock() throws Exception {
+        MapleMap map = attackMap();
+        createBot(map, new Point(0, 0), Job.BEGINNER);
+        state.alertResetScheduled = true;
+        state.moveDir = 1;
+        state.movementVelX = 140;
+        state.hspeed = 7.0;
+        ObserverTracker.markObservedNow(map.getId());
+        Packet attack = mock(Packet.class);
+        clearInvocations(map);
+        doAnswer(inv -> {
+            assertTrue(Thread.holdsLock(state), "pose check, stop and attack share the physics lock");
+            assertEquals(0, state.movementVelX);
+            return null;
+        }).when(map).broadcastMessage(eq(bot), any(Packet.class), eq(false));
+
+        assertTrue(GCMovement.broadcastActiveAttack(bot, attack, 800));
+
+        var order = inOrder(map);
+        order.verify(map).broadcastMessage(eq(bot), argThat(packet -> packet != attack), eq(false));
+        order.verify(map).broadcastMessage(bot, attack, false);
+    }
+
+    @Test
+    void aJumpAttackKeepsItsFlightButCannotGrabARopeDuringTheSwing() throws Exception {
+        MapleMap geometry = map(922019997);
+        floor(geometry, 1, -100, 0, 800);
+        Rope rope = new Rope(0, -200, 100, false);
+        geometry.addRope(rope);
+        TestGraphBake.ensure(geometry, BotMovementProfile.base());
+        MapleMap map = spy(geometry);
+        createBot(map, new Point(0, 0), Job.BEGINNER);
+        state.alertResetScheduled = true;
+        BotPhysicsEngine.beginGroundJump(state, bot, 0);
+        state.climbUpIntent = true;
+        float takeoffVelocity = state.velY;
+
+        assertTrue(GCMovement.broadcastActiveAttack(bot, mock(Packet.class), 800));
+        assertTrue(state.inAir);
+        assertEquals(takeoffVelocity, state.velY, "attacking must not freeze the jump");
+        BotMovementManager.tickAirborne(state, new Point(0, -100));
+        assertTrue(state.inAir);
+        assertFalse(state.climbing);
+        assertTrue(bot.getPosition().y < 0, "gravity and the jump arc continue during an attack");
+        MovementClock.advance(800);
+        BotMovementManager.tickAirborne(state, new Point(0, -100));
+        assertTrue(state.climbing, "rope grabbing resumes after the attack animation");
+    }
+
+    @Test
+    void recordedMovementClimbingStancesAlsoRejectAttacks() throws Exception {
+        MapleMap map = attackMap();
+        createBot(map, new Point(0, 0), Job.BEGINNER);
+        states().remove(BOT_ID);
+        clearInvocations(map);
+        for (int stance : new int[]{CharacterStance.ROPE_STANCE, CharacterStance.LADDER_STANCE}) {
+            when(bot.getStance()).thenReturn(stance);
+            assertTrue(GCMovement.isClimbing(bot));
+            assertFalse(BotAttackDriver.forceSingle(bot).hit());
+            assertFalse(GCMovement.broadcastActiveAttack(bot, mock(Packet.class), 800));
+            BotAttack.skillSwing(bot, 1001004);
+        }
+        verify(map, never()).broadcastMessage(eq(bot), any(Packet.class), eq(false));
+    }
+
+    @Test
+    void aKnockbackDuringTheAttackHoldStillRunsItsPhysics() throws Exception {
+        MapleMap map = map(922019999);
+        floor(map, 1, -100, 0, 800);
+        createBot(map, new Point(0, 0), Job.BEGINNER);
+        state.alertResetScheduled = true;
+        assertTrue(GCMovement.broadcastActiveAttack(bot, mock(Packet.class), 800));
+        BotPhysicsEngine.beginKnockback(state, bot, bot.getPosition(), -10f, 4);
+        tick();
+        assertTrue(state.inAir);
+        assertTrue(bot.getPosition().x > 0, "an attack lock must not pin a real recoil in place");
+        assertTrue(bot.getPosition().y < 0);
+    }
+
+    @ParameterizedTest
+    @EnumSource(value = Job.class, names = {"BEGINNER", "HUNTER", "CLERIC"})
+    void aRejectedDriverStrikeHasNoHitCooldownOrLandedHitEffects(Job job) throws Exception {
+        MapleMap map = attackMap();
+        createBot(map, new Point(0, 0), job);
+        Monster mob = monster(9300005, 99154, new Point(50, 0));
+        inject(map, mob);
+        Packet packet = mock(Packet.class);
+        try (var packets = mockStatic(org.gms.util.PacketCreator.class);
+             var demon = mockStatic(BotDemonRider.class);
+             var followup = mockStatic(BotFinalAttack.class);
+             var mount = mockStatic(soloMapling.ArtificialPlayer.BotMountSystem.BotMount.class);
+             var auras = mockStatic(BotAuraState.class)) {
+            org.mockito.stubbing.Answer<Packet> grab = inv -> {
+                BotPhysicsEngine.attachToRope(state, bot, new Rope(0, -200, 0, false), -50);
+                return packet;
+            };
+            packets.when(() -> org.gms.util.PacketCreator.closeRangeAttack(eq(bot), anyInt(), anyInt(),
+                    anyInt(), anyInt(), anyMap(), anyInt(), anyInt(), anyInt())).thenAnswer(grab);
+            packets.when(() -> org.gms.util.PacketCreator.rangedAttack(eq(bot), anyInt(), anyInt(),
+                    anyInt(), anyInt(), anyInt(), anyMap(), anyInt(), anyInt(), anyInt())).thenAnswer(grab);
+            packets.when(() -> org.gms.util.PacketCreator.magicAttack(eq(bot), anyInt(), anyInt(),
+                    anyInt(), anyInt(), anyMap(), anyInt(), anyInt(), anyInt(), anyInt())).thenAnswer(grab);
+            var result = BotAttackDriver.forceSingle(bot);
+            assertFalse(result.hit());
+            assertEquals(0, result.damage());
+            assertEquals(0L, BotAttackDriver.nextAttackEpochMs(BOT_ID));
+            demon.verifyNoInteractions();
+            followup.verifyNoInteractions();
+            mount.verify(() -> soloMapling.ArtificialPlayer.BotMountSystem.BotMount.cancelForAction(bot), never());
+            auras.verify(() -> BotAuraState.cancelHidesForAction(bot), never());
+            verify(mob, never()).damage(any(Character.class), anyInt(), anyBoolean());
+        }
+    }
+
+    @Test
+    void aRejectedSwingCannotHitTheReactor() throws Exception {
+        MapleMap map = attackMap();
+        createBot(map, new Point(0, 0), Job.BEGINNER);
+        Reactor box = reactor(2202003, 99155, new Point(20, 0));
+        inject(map, box);
+        try (var packets = mockStatic(org.gms.util.PacketCreator.class);
+             var reactors = mockStatic(CustomReactor.class)) {
+            packets.when(() -> org.gms.util.PacketCreator.closeRangeAttack(eq(bot), anyInt(), anyInt(),
+                    anyInt(), anyInt(), anyMap(), anyInt(), anyInt(), anyInt())).thenAnswer(inv -> {
+                BotPhysicsEngine.attachToRope(state, bot, new Rope(0, -200, 0, false), -50);
+                return mock(Packet.class);
+            });
+            assertFalse(PqActions.hitReactorIfInReach(bot, box.getObjectId()));
+            reactors.verifyNoInteractions();
+        }
+    }
+
+    @Test
+    void aMageBlinkKeepsTheRemainingAttackLock() throws Exception {
+        MapleMap map = attackMap();
+        createBot(map, new Point(0, 0), Job.CLERIC);
+        state.alertResetScheduled = true;
+        GCMovement.move(bot, 600, 0);
+        assertTrue(GCMovement.broadcastActiveAttack(bot, mock(Packet.class), 800));
+        long deadline = state.attackMovementLockUntilMs;
+        assertTrue(GCMovement.teleport(bot, 150, 0));
+        assertEquals(deadline, state.attackMovementLockUntilMs);
+        Point landing = new Point(bot.getPosition());
+        tick();
+        assertEquals(landing, bot.getPosition());
+    }
+
+    @Test
+    void flashJumpCannotStartInsideAnActiveGroundAttack() throws Exception {
+        MapleMap map = attackMap();
+        createBot(map, new Point(0, 0), Job.HERMIT);
+        state.alertResetScheduled = true;
+        assertTrue(GCMovement.broadcastActiveAttack(bot, mock(Packet.class), 800));
+        assertFalse(GCMovement.flashJump(bot, 600, 1f));
+        assertFalse(GCMovement.debugFlashJump(bot, 1, 1f));
+        assertFalse(state.inAir);
+        MovementClock.advance(800);
+        assertTrue(GCMovement.flashJump(bot, 600, 1f));
+    }
+
+    @Test
+    void recordedMovementAndActiveAttacksShareTheSameLease() throws Exception {
+        MapleMap map = attackMap();
+        createBot(map, new Point(0, 0), Job.BEGINNER);
+        states().remove(BOT_ID);
+        assertTrue(MovementCommands.tryAcquireMovementLock(bot));
+        try {
+            assertFalse(GCMovement.broadcastActiveAttack(bot, mock(Packet.class), 800));
+        } finally {
+            MovementCommands.releaseMovementLock(bot);
+        }
+        assertTrue(GCMovement.broadcastActiveAttack(bot, mock(Packet.class), 800));
+        assertFalse(MovementCommands.tryAcquireMovementLock(bot));
+        MovementClock.advance(800);
+        assertTrue(MovementCommands.tryAcquireMovementLock(bot));
+        MovementCommands.releaseMovementLock(bot);
+    }
+
+    @Test
+    void disablingDynamicMovementPreservesTheRemainingAttackLease() throws Exception {
+        MapleMap map = attackMap();
+        createBot(map, new Point(0, 0), Job.BEGINNER);
+        state.alertResetScheduled = true;
+        assertTrue(MovementCommands.tryAcquireMovementLock(bot, state));
+        assertTrue(GCMovement.broadcastActiveAttack(bot, mock(Packet.class), 800));
+        GCMovement.disable(bot);
+        assertFalse(GCMovement.isEnabled(bot));
+        assertTrue(GCMovement.isAttacking(bot));
+        assertFalse(MovementCommands.tryAcquireMovementLock(bot));
+        MovementClock.advance(800);
+        assertTrue(MovementCommands.tryAcquireMovementLock(bot));
+        MovementCommands.releaseMovementLock(bot);
+    }
+
+    @Test
+    void aLongActionHoldsMovementAndAutomaticAttacksPastTheOldHalfSecond() throws Exception {
+        MapleMap map = attackMap();
+        createBot(map, new Point(0, 0), Job.BEGINNER);
+        state.alertResetScheduled = true;
+        int duration = BotAttackData.animationDurationMs(BotAttackData.actionFor(
+                org.gms.constants.skills.FPArchMage.METEOR_SHOWER, null));
+        assertTrue(duration > 2000, "the test must exercise a long WZ body action");
+        GCMovement.move(bot, 600, 0);
+        assertTrue(GCMovement.broadcastActiveAttack(bot, mock(Packet.class), duration));
+        MovementClock.advance(800);
+        tick();
+        assertEquals(new Point(0, 0), bot.getPosition());
+        assertEquals("attack animation", BotAttackDriver.botAttack(bot).reason());
+        MovementClock.advance(duration);
+        tick();
+        assertTrue(bot.getPosition().x > 0);
+    }
+
+    @Test
+    void movementHoldUsesBodyFramesPlusTwoHundredMilliseconds() {
+        var body = org.gms.provider.DataProviderFactory.getDataProvider(org.gms.provider.wz.WZFiles.CHARACTER)
+                .getData("00002000.img");
+        for (var action : Map.of(5, "swingO1", 55, "savage", 69, "genesis", 66, "meteor").entrySet()) {
+            int duration = 0;
+            for (var frame : body.getChildByPath(action.getValue())) {
+                duration += Math.abs(org.gms.provider.DataTool.getInt("delay", frame, 100));
+            }
+            assertEquals(duration + 200, BotAttackData.animationDurationMs(action.getKey()));
+            assertTrue(duration > 0);
+        }
+        assertTrue(BotAttackData.animationDurationMs(66) > BotAttackData.animationDurationMs(5));
     }
 
     @Test
@@ -537,7 +912,7 @@ class LpqReviewRegressionTest {
                     anyInt(), anyInt(), anyInt(), anyInt(), anyShort())).thenAnswer(inv -> {
                 when(first.isAlive()).thenReturn(false);
                 inject(map, drop);
-                return true;
+                return KILLED;
             });
             pq.grindTick();
             MovementClock.advance(250);
@@ -903,6 +1278,7 @@ class LpqReviewRegressionTest {
         createBot(map, new Point(590, 0), Job.BEGINNER);
         inject(map, reactor(2201003, 99106, new Point(599, 0)));
         try (var swings = mockStatic(BotAttack.class); var reactors = mockStatic(CustomReactor.class)) {
+            swings.when(() -> BotAttack.basicSwing(bot)).thenReturn(true);
             LudiStages.fightBoss(bot);
             reactors.verify(() -> CustomReactor.hitReactorWithScript(map, 99106, bot));
             swings.verify(() -> BotAttack.basicSwing(bot));
@@ -1008,13 +1384,13 @@ class LpqReviewRegressionTest {
                 monster(9300169, 99126, new Point(219, -1276)), monster(9300171, 99127, new Point(228, -1543))};
         for (Monster mob : mobs) inject(map, mob);
         AtomicInteger kills = new AtomicInteger();
-        org.mockito.stubbing.Answer<Boolean> landHits = inv -> {
+        org.mockito.stubbing.Answer<BotAttackEffects.StrikeResult> landHits = inv -> {
             Map<Monster, ?> hits = inv.getArgument(1);
             for (Monster mob : hits.keySet()) {
                 if (mob.isAlive()) kills.incrementAndGet();
                 doReturn(false).when(mob).isAlive();
             }
-            return true;
+            return KILLED;
         };
         try (var effects = mockStatic(BotAttackEffects.class)) {
             effects.when(() -> BotAttackEffects.rangedStrike(eq(bot), anyMap(), anyInt(), anyInt(), anyInt(),
@@ -1335,9 +1711,10 @@ class LpqReviewRegressionTest {
         // but a room whose geometry this class already baked does not need to be baked again.
         TestGraphBake.ensure(map, BotMovementProfile.base());
         AtomicReference<Point> position = new AtomicReference<>(initial);
+        int mapId = map.getId();
         bot = mock(Character.class, RETURNS_DEEP_STUBS);
         when(bot.getId()).thenReturn(BOT_ID); when(bot.getMap()).thenReturn(map);
-        when(bot.getMapId()).thenReturn(map.getId()); when(bot.getJob()).thenReturn(job);
+        when(bot.getMapId()).thenReturn(mapId); when(bot.getJob()).thenReturn(job);
         when(bot.getLevel()).thenReturn(40); when(bot.getHp()).thenReturn(5000);
         when(bot.getTotalMoveSpeedStat()).thenReturn(100); when(bot.getTotalJumpStat()).thenReturn(100);
         when(bot.getPosition()).thenAnswer(inv -> position.get());
@@ -1359,6 +1736,13 @@ class LpqReviewRegressionTest {
         map.setMapLineBoundings(-4000, 4000, -4000, 4000);
         map.setFootholds(new FootholdTree(new Point(-4000, -4000), new Point(4000, 4000)));
         return map;
+    }
+
+    private static MapleMap attackMap() {
+        MapleMap map = map(922019995);
+        floor(map, 1, -100, 0, 800);
+        TestGraphBake.ensure(map, BotMovementProfile.base()); // bake real geometry before Mockito wraps hot accessors
+        return spy(map);
     }
 
     private static MapleMap realMap(int id) {

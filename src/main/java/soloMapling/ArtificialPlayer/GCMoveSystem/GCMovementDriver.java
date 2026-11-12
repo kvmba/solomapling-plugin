@@ -431,6 +431,21 @@ final class GCMovementDriver {
         // when no real player shares the bot's map) and on the i-frame window.
         BotContactDamage.tickMobDamage(entry, bot);
 
+        // Pause the live order, not just new commands. Airborne attacks keep their physics, but
+        // navigation must not mount a rope or launch another action through the attack animation.
+        if (MovementClock.nowMs() < entry.attackMovementLockUntilMs && !entry.climbing) {
+            entry.moveProgressAtMs = MovementClock.nowMs();
+            entry.stuckMs = 0;
+            if (entry.inAir) {
+                tickMovementPhase(entry, bot.getPosition(), false);
+                tickFallOffMapRecovery(entry);
+            } else {
+                BotPhysicsEngine.idleOnGround(entry, bot);
+                broadcastIfObserved(entry);
+            }
+            return;
+        }
+
         // Dead-pit self-heal: a bot that cannot get from the surface it stands on to the surface its
         // goal is on is teleported to the nearest livable ground. Deliberately here, in the PHYSICAL
         // part of the tick, and not in the stuck-detection path: every net down there asks "is this

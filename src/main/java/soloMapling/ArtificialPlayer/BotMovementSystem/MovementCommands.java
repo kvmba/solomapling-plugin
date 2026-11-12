@@ -1,6 +1,7 @@
 package soloMapling.ArtificialPlayer.BotMovementSystem;
 
 import org.gms.client.Character;
+import org.gms.constants.game.CharacterStance;
 import org.gms.net.packet.InPacket;
 import org.gms.server.maps.Foothold;
 import org.gms.server.maps.Portal;
@@ -808,6 +809,7 @@ public class MovementCommands {
     private static final class MovementLock {
         Object owner;
         int holds;
+        long attackUntilMs;
     }
 
     private static final ConcurrentHashMap<Integer, MovementLock> movementLocks = new ConcurrentHashMap<>();
@@ -820,10 +822,30 @@ public class MovementCommands {
     public static boolean tryAcquireMovementLock(Character bot, Object owner) {
         MovementLock lock = movementLocks.computeIfAbsent(bot.getId(), k -> new MovementLock());
         synchronized (lock) {
+            if (lock.owner == null && GCMovement.movementNowMs() < lock.attackUntilMs) return false;
             if (lock.owner != null && lock.owner != owner) return false;
+            lock.attackUntilMs = 0L;
             lock.owner = owner;
             lock.holds++;
             return true;
+        }
+    }
+
+    // A recorded replay owns the lease for its whole path. Do not interleave active attacks with it.
+    public static boolean tryStartAttack(Character bot, long untilMs) {
+        MovementLock lock = movementLocks.computeIfAbsent(bot.getId(), k -> new MovementLock());
+        synchronized (lock) {
+            if (lock.owner != null || CharacterStance.isClimbing(bot.getStance())) return false;
+            lock.attackUntilMs = Math.max(lock.attackUntilMs, untilMs);
+            return true;
+        }
+    }
+
+    public static boolean isAttacking(Character bot) {
+        MovementLock lock = movementLocks.get(bot.getId());
+        if (lock == null) return false;
+        synchronized (lock) {
+            return GCMovement.movementNowMs() < lock.attackUntilMs;
         }
     }
 
@@ -832,9 +854,14 @@ public class MovementCommands {
     }
 
     public static void releaseMovementLock(Character bot, Object owner) {
+        releaseMovementLock(bot, owner, 0L);
+    }
+
+    public static void releaseMovementLock(Character bot, Object owner, long attackUntilMs) {
         MovementLock lock = movementLocks.get(bot.getId());
         synchronized (lock) {
             if (lock.owner != owner) throw new IllegalMonitorStateException("Not the bot's movement owner");
+            lock.attackUntilMs = Math.max(lock.attackUntilMs, attackUntilMs);
             if (--lock.holds == 0) lock.owner = null;
         }
     }

@@ -140,6 +140,7 @@ class LpqBoxDescentExecutionTest {
     void theBoxCanStillBeStruckFromItsOwnPlatform() throws Exception {
         createBot(tower, new Point(-150, -1860), new BotMovementProfile(120, 123));
         try (var swings = mockStatic(BotAttack.class); var hits = mockStatic(CustomReactor.class)) {
+            swings.when(() -> BotAttack.basicSwing(bot)).thenReturn(true);
             assertTrue(PqActions.hitReactor(bot, BOX_OID));
             swings.verify(() -> BotAttack.basicSwing(bot));
             hits.verify(() -> CustomReactor.hitReactorWithScript(tower, BOX_OID, bot));

@@ -57,7 +57,7 @@ public final class BotShadowWeb {
      * normally) - the same contract as BotMesoBomb.tryDetonate.
      */
     public static BotMesoBomb.Blast tryCast(Character bot, boolean facingLeft) {
-        if (bot == null || bot.getMap() == null || bot.getJob() == null
+        if (bot == null || bot.getMap() == null || GCMovement.isClimbing(bot) || bot.getJob() == null
                 || !bot.getJob().isA(Job.HERMIT)
                 || bot.getLevel() < BotSkillLevelGate.minLevelForSkill(Hermit.SHADOW_WEB)) {
             return null;
@@ -106,11 +106,6 @@ public final class BotShadowWeb {
         int mobCount = effect.getMobCount();
         List<Monster> targets = mobs.size() <= mobCount ? mobs : mobs.subList(0, mobCount);
 
-        // An attack is never made from the saddle, and the hide auras break the moment the
-        // attack key is pressed - the driver's own rule, once the cast is committed.
-        soloMapling.ArtificialPlayer.BotMountSystem.BotMount.cancelForAction(bot);
-        BotAuraState.cancelHidesForAction(bot);
-
         // The burst's cosmetic damage - one line per mob, bot damage like every other swing.
         Map<Integer, List<Integer>> mobDamage = new LinkedHashMap<>();
         int total = 0;
@@ -124,12 +119,12 @@ public final class BotShadowWeb {
         }
 
         int facingMask = facingLeft ? BotAttackData.FACING_LEFT_MASK : BotAttackData.FACING_RIGHT_MASK;
+        int bodyActionId = BotAttackData.actionFor(Hermit.SHADOW_WEB, null);
         // The host's own melee writer with the web's swingO1 pose.
-        map.broadcastMessage(bot, PacketCreator.closeRangeAttack(bot,
+        if (!GCMovement.broadcastActiveAttack(bot, PacketCreator.closeRangeAttack(bot,
                 Hermit.SHADOW_WEB, level, facingMask, (mobDamage.size() << 4) | 1,
                 mobDamage, BotAttackData.DEFAULT_ATTACK_SPEED,
-                BotAttackData.actionFor(Hermit.SHADOW_WEB, null), 0), false);
-        GCMovement.markAlerted(bot);
+                bodyActionId, 0), BotAttackData.animationDurationMs(bodyActionId))) return null;
 
         // Per-mob status roll, the host's generic attack branch: chance first (the WZ prop,
         // 42-46% by level), then applyStatus with the effect's own monster statuses. The web

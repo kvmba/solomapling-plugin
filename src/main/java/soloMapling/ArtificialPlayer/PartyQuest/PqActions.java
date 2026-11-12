@@ -514,7 +514,7 @@ public final class PqActions {
         }
         // Play the swing, or the reactor breaks by itself while the bot stands idle - the
         // player watches boxes pop open with nobody touching them. basicSwing also breaks hides.
-        BotAttack.basicSwing(bot);
+        if (!BotAttack.basicSwing(bot)) return false;
         CustomReactor.hitReactorWithScript(bot.getMap(), reactorOid, bot);
         return true;
     }
@@ -527,7 +527,7 @@ public final class PqActions {
         Point pos = bot.getPosition();
         Point at = reactor.getPosition();
         if (!atApproachFloor(bot, pos, at)) return false;
-        BotAttack.basicSwing(bot);
+        if (!BotAttack.basicSwing(bot)) return false;
         CustomReactor.hitReactorWithScript(bot.getMap(), reactorOid, bot);
         return true;
     }

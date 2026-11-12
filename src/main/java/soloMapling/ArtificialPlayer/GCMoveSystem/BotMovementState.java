@@ -119,7 +119,7 @@ class BotMovementState {
     // climb-idle hold on (even though grinding is still set) and makes the driver freeze the hang so no
     // nav/reaction/fidget layer dislodges it. Set/cleared via GCMovement.setRestHold.
     volatile boolean resting = false;
-    int attackCooldownMs = 0;
+    long attackMovementLockUntilMs = 0L;  // input lock for a committed attack, independent of swing cooldown
     volatile boolean shopVisitPending = false;
     int followTravelTargetMapId = -1;
 

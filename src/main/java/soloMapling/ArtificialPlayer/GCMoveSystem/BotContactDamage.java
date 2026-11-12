@@ -495,7 +495,7 @@ final class BotContactDamage {
 
     // Cancel the current walk/nav action so a knockback recoil isn't immediately overridden.
     private static void clearActionState(BotMovementState entry) {
-        entry.attackCooldownMs = 0;
+        entry.attackMovementLockUntilMs = 0L;
         BotMovementManager.clearNavigationState(entry);
         entry.movementBroadcastValid = false;
     }

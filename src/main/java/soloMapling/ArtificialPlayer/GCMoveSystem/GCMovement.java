@@ -2,11 +2,14 @@ package soloMapling.ArtificialPlayer.GCMoveSystem;
 
 import org.gms.client.Character;
 import org.gms.constants.game.CharacterStance;
+import org.gms.net.packet.Packet;
 import org.gms.server.maps.Foothold;
 import org.gms.server.maps.MapleMap;
 import org.gms.server.maps.Portal;
 import org.gms.server.maps.Rope;
 import soloMapling.ArtificialPlayer.BotAttackSystem.BotDashBurst;
+import soloMapling.ArtificialPlayer.BotAttackSystem.BotAuraState;
+import soloMapling.ArtificialPlayer.BotMountSystem.BotMount;
 import soloMapling.ArtificialPlayer.BotMovementSystem.MovementCommands;
 
 import java.awt.Point;
@@ -128,7 +131,7 @@ public final class GCMovement {
         ARRIVAL_CALLBACKS.remove(bot.getId());
         FAILURE_CALLBACKS.remove(bot.getId());
         STATES.remove(bot.getId(), st);
-        MovementCommands.releaseMovementLock(bot, st);
+        MovementCommands.releaseMovementLock(bot, st, st.attackMovementLockUntilMs);
     }
 
     /*
@@ -553,6 +556,41 @@ public final class GCMovement {
         }
     }
 
+    /** Commit an active attack under the physics lock; passive contact retaliation bypasses this path. */
+    public static boolean broadcastActiveAttack(Character bot, Packet packet, int durationMs) {
+        if (bot == null) return false;
+        BotMovementState st = STATES.get(bot.getId());
+        synchronized (st != null ? st : bot) {
+            if (bot.getMap() == null) return false;
+            if (st != null ? st.tickStopped || st.climbing : CharacterStance.isClimbing(bot.getStance())) return false;
+            long until = MovementClock.nowMs() + durationMs;
+            if (st == null && !MovementCommands.tryStartAttack(bot, until)) return false;
+            BotMount.cancelForAction(bot);
+            BotAuraState.cancelHidesForAction(bot);
+            if (st != null) {
+                st.attackMovementLockUntilMs = Math.max(st.attackMovementLockUntilMs, until);
+                st.coarsePlan = null;
+                st.coarsePlanTarget = null;
+                st.coarseActive = false;
+                BotContactDamage.markAlerted(st);
+                if (isGrounded(st) && st.portalDropAtMs == 0L) {
+                    BotPhysicsEngine.idleOnGround(st, bot);
+                    BotMovementManager.broadcastMovement(st); // stop frame must precede the attack
+                }
+            }
+            bot.getMap().broadcastMessage(bot, packet, false);
+            return true;
+        }
+    }
+
+    public static boolean isAttacking(Character bot) {
+        BotMovementState st = STATES.get(bot.getId());
+        if (st == null) return MovementCommands.isAttacking(bot);
+        synchronized (st) {
+            return MovementClock.nowMs() < st.attackMovementLockUntilMs;
+        }
+    }
+
     /* Mage blink toward a point on the current map: pick a same-ledge landing up to ~150px toward it and
      * broadcast the teleport (or blink down to a lower platform). Returns true if it blinked, false if there's
      * no valid landing (caller walks). The caller (MovementStylePolicy / grind approach) decides who may
@@ -836,11 +874,11 @@ public final class GCMovement {
         return (st != null && st.lastEdgeBlockReason != null) ? st.lastEdgeBlockReason : "-";
     }
 
-    /* True while the bot is on a rope/ladder (cleared only once it's back on a foothold). Combat holds
-     * off attacking until then so the bot doesn't swing from the rope when a mob is near the rope top. */
+    /* True while the bot is on a rope/ladder. The dynamic state owns the pose when enabled;
+     * recorded movement and a disabled rope hang use Character.stance instead. */
     public static boolean isClimbing(Character bot) {
         BotMovementState st = bot == null ? null : STATES.get(bot.getId());
-        if (st == null) return false;
+        if (st == null) return bot != null && CharacterStance.isClimbing(bot.getStance());
         synchronized (st) {
             return st.climbing;
         }
@@ -1039,7 +1077,10 @@ public final class GCMovement {
         BotMovementState st = bot == null ? null : STATES.get(bot.getId());
         if (st != null) {
             synchronized (st) {
-                if (!st.tickStopped && !st.inAir && !st.climbing) BotMovementManager.initiateJump(st, bot, 0);
+                if (!st.tickStopped && !st.inAir && !st.climbing
+                        && MovementClock.nowMs() >= st.attackMovementLockUntilMs) {
+                    BotMovementManager.initiateJump(st, bot, 0);
+                }
             }
         }
     }
@@ -1052,7 +1093,10 @@ public final class GCMovement {
         BotMovementState st = bot == null ? null : STATES.get(bot.getId());
         if (st != null) {
             synchronized (st) {
-                if (!st.tickStopped && !st.inAir && !st.climbing) BotMovementManager.initiateJump(st, bot, dx);
+                if (!st.tickStopped && !st.inAir && !st.climbing
+                        && MovementClock.nowMs() >= st.attackMovementLockUntilMs) {
+                    BotMovementManager.initiateJump(st, bot, dx);
+                }
             }
         }
     }

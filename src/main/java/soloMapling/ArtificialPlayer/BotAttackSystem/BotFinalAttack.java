@@ -10,6 +10,7 @@ import org.gms.constants.skills.Hunter;
 import org.gms.constants.skills.Page;
 import org.gms.constants.skills.Spearman;
 import soloMapling.ArtificialPlayer.BotStatusSystem.BotDebuffState;
+import soloMapling.ArtificialPlayer.GCMoveSystem.GCMovement;
 import org.gms.server.life.Monster;
 import org.gms.server.maps.MapleMap;
 import org.gms.util.PacketCreator;
@@ -64,7 +65,8 @@ public final class BotFinalAttack {
      */
     public static void maybeTrigger(Character bot, WeaponType weapon, int bodyActionId, int facingMask,
                                     Map<Monster, List<Integer>> hits) {
-        if (bot == null || bot.getMap() == null || weapon == null || hits == null || hits.isEmpty()) {
+        if (bot == null || bot.getMap() == null || weapon == null || hits == null || hits.isEmpty()
+                || GCMovement.isClimbing(bot)) {
             return;
         }
         // A mob debuff that disarms the bot (STUN/SEDUCE/SEAL) also disarms the follow-up: it is a
@@ -118,9 +120,9 @@ public final class BotFinalAttack {
         // for melee and the projectile is cosmetic for bowmen), one line on one mob.
         Map<Integer, List<Integer>> targets = new HashMap<>();
         targets.put(target.getObjectId(), List.of(damage));
-        bot.getMap().broadcastMessage(bot, PacketCreator.closeRangeAttack(bot, skillId, skillLevel,
+        if (!GCMovement.broadcastActiveAttack(bot, PacketCreator.closeRangeAttack(bot, skillId, skillLevel,
                 facingMask, (1 << 4) | 1, targets, BotAttackData.DEFAULT_ATTACK_SPEED, bodyActionId, 0),
-                false);
+                BotAttackData.animationDurationMs(bodyActionId))) return;
         BotAttackEffects.applyExternalHit(bot, target, damage);
 
         // The host's orb-gain branch runs on the final-attack packet too (its own

@@ -98,6 +98,7 @@ public final class SkillShowEffects {
      * 每秒扣血、到期消失全部是宿主代码，表演里不重写。
      */
     public static boolean castMist(Character bot) {
+        if (GCMovement.isClimbing(bot)) return false;
         Monster mob = target(bot);
         if (mob == null) {
             return false;
@@ -106,18 +107,18 @@ public final class SkillShowEffects {
         if (effect == null) {
             return false;
         }
-        preCast(bot);
         Point pos = bot.getPosition();
         boolean left = facingLeft(bot);
         Rectangle box = effect.hasBoundingBox()
                 ? effect.calculateBoundingBox(pos, left)
                 : new Rectangle(pos.x - 110, pos.y - 82, 220, 165);
         Map<Integer, List<Integer>> dmg = singleLine(bot, mob);
-        bot.getMap().broadcastMessage(bot, PacketCreator.magicAttack(bot,
+        int bodyActionId = BotAttackData.actionFor(FPMage.POISON_MIST, null);
+        if (!GCMovement.broadcastActiveAttack(bot, PacketCreator.magicAttack(bot,
                 FPMage.POISON_MIST, levelOf(FPMage.POISON_MIST), facingMask(left),
                 (dmg.size() << 4) | 1, dmg, BotAttackData.magicChargeFor(FPMage.POISON_MIST),
                 BotAttackData.DEFAULT_ATTACK_SPEED,
-                BotAttackData.actionFor(FPMage.POISON_MIST, null), 0), false);
+                bodyActionId, 0), BotAttackData.animationDurationMs(bodyActionId))) return false;
         bot.getMap().spawnMist(new Mist(box, bot, effect, levelOf(FPMage.POISON_MIST)),
                 effect.getDuration(), true, false, false);
         // 发包只是视觉：真实伤害必须落地，否则木桩血条不动、数字与血量不一致
@@ -131,6 +132,7 @@ public final class SkillShowEffects {
      * {@code BotShadowWeb.tryCast} 同款帧；网住怪物的状态由宿主管。
      */
     public static boolean castWeb(Character bot) {
+        if (GCMovement.isClimbing(bot)) return false;
         Monster mob = target(bot);
         if (mob == null) {
             return false;
@@ -138,13 +140,13 @@ public final class SkillShowEffects {
         if (resolveEffect(Hermit.SHADOW_WEB) == null) {
             return false;
         }
-        preCast(bot);
         boolean left = facingLeft(bot);
         Map<Integer, List<Integer>> dmg = singleLine(bot, mob);
-        bot.getMap().broadcastMessage(bot, PacketCreator.closeRangeAttack(bot,
+        int bodyActionId = BotAttackData.actionFor(Hermit.SHADOW_WEB, null);
+        if (!GCMovement.broadcastActiveAttack(bot, PacketCreator.closeRangeAttack(bot,
                 Hermit.SHADOW_WEB, levelOf(Hermit.SHADOW_WEB), facingMask(left),
                 (dmg.size() << 4) | 1, dmg, BotAttackData.DEFAULT_ATTACK_SPEED,
-                BotAttackData.actionFor(Hermit.SHADOW_WEB, null), 0), false);
+                bodyActionId, 0), BotAttackData.animationDurationMs(bodyActionId))) return false;
         // 与 BotShadowWeb.tryCast 同序：先按 WZ prop 掷网住状态，再落地伤害。
         StatEffect effect = resolveEffect(Hermit.SHADOW_WEB);
         if (effect.makeChanceResult()) {
@@ -162,6 +164,7 @@ public final class SkillShowEffects {
      * 与 {@code BotShadowMeso.tryThrow} 同款；实战的钱包价格在表演里免了。
      */
     public static boolean throwShadowMeso(Character bot) {
+        if (GCMovement.isClimbing(bot)) return false;
         Monster mob = target(bot);
         if (mob == null) {
             return false;
@@ -169,14 +172,14 @@ public final class SkillShowEffects {
         if (resolveEffect(Hermit.SHADOW_MESO) == null) {
             return false;
         }
-        preCast(bot);
         boolean left = facingLeft(bot);
         Map<Integer, List<Integer>> dmg = singleLine(bot, mob);
-        bot.getMap().broadcastMessage(bot, PacketCreator.rangedAttack(bot,
+        int bodyActionId = BotAttackData.actionFor(Hermit.SHADOW_MESO, null);
+        if (!GCMovement.broadcastActiveAttack(bot, PacketCreator.rangedAttack(bot,
                 Hermit.SHADOW_MESO, levelOf(Hermit.SHADOW_MESO), facingMask(left),
                 (dmg.size() << 4) | 1, /* projectile */ 0, dmg,
                 BotAttackData.DEFAULT_ATTACK_SPEED,
-                BotAttackData.actionFor(Hermit.SHADOW_MESO, null), 0), false);
+                bodyActionId, 0), BotAttackData.animationDurationMs(bodyActionId))) return false;
         BotAttackEffects.applyExternalHit(bot, mob, dmg.get(mob.getObjectId()).get(0));
         return true;
     }

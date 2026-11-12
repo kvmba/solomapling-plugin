@@ -26,9 +26,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * attack-emitting method in the plugin must contain a {@code cancelHidesForAction} call, either
  * directly or in the caller it delegates the swing to.</p>
  *
- * <p>The three {@code BotAttackEffects.*Strike} builders are exempt individually: the attack driver
- * (their only caller) cancels once before dispatching any of them, and a second call inside each
- * builder would be redundant. {@code BotSummonFollower} is exempt by rule: the summon attacks, not
+ * <p>The three {@code BotAttackEffects.*Strike} builders delegate to {@code broadcastAndApply},
+ * which routes through the movement layer's accepted-attack gate. {@code BotSummonFollower} is
+ * exempt by rule: the summon attacks, not
  * the bot, and no summon-owning line (archer / mage / dark knight / pirate turret) can hold a hide
  * aura (橡木伪装 is brawler-line, 隐身术 is thief-line) - nor does the official client cancel a
  * player's hide when the summon strikes.</p>
@@ -39,14 +39,13 @@ class HideCancelAuditTest {
 
     /** Methods that broadcast a bot attack packet (the swing sites), keyed by the file holding them. */
     private static final List<SwingSite> SWING_SITES = List.of(
-            // The four cosmetic swing helpers - each cancels inside its own body.
+            // Active attacks cancel only after the movement layer accepts the swing.
+            new SwingSite("soloMapling/ArtificialPlayer/GCMoveSystem/GCMovement.java", "broadcastActiveAttack("),
             new SwingSite("soloMapling/ArtificialPlayer/BotCommandsPack/BotAttack.java", "basicSwing"),
             new SwingSite("soloMapling/ArtificialPlayer/BotCommandsPack/BotAttack.java", "skillSwing"),
             new SwingSite("soloMapling/ArtificialPlayer/BotCommandsPack/BotAttack.java", "rangedSwing"),
             new SwingSite("soloMapling/ArtificialPlayer/BotCommandsPack/BotAttack.java", "magicSwing"),
-            // The attack driver - one cancel covers its melee/ranged/magic strike dispatch.
-            new SwingSite("soloMapling/ArtificialPlayer/BotAttackSystem/BotAttackDriver.java",
-                    "private static AttackResult attack("),
+            new SwingSite("soloMapling/ArtificialPlayer/BotAttackSystem/BotAttackEffects.java", "private static StrikeResult broadcastAndApply("),
             // The energy-charge touch retaliation - a real ENERGY_ATTACK strike of its own.
             new SwingSite("soloMapling/ArtificialPlayer/BotAttackSystem/BotEnergyCharge.java", "strike("),
             // The PQ stage scripts hit reactors without a swing - a reactor hit is still an attack.
@@ -64,6 +63,7 @@ class HideCancelAuditTest {
             }
             if (!body.contains("cancelHidesForAction")
                     && !body.contains("cancelDisguiseForAction")
+                    && !body.contains("broadcastActiveAttack")
                     && !body.contains("BotAttack.")) {
                 // A site that routes the swing through a BotAttack helper inherits that helper's
                 // cancel (e.g. a stage script that swings before hitting the reactor).
