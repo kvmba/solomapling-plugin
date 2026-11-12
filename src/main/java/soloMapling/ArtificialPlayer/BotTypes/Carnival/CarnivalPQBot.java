@@ -2,6 +2,7 @@ package soloMapling.ArtificialPlayer.BotTypes.Carnival;
 
 import org.gms.client.Character;
 import org.gms.net.server.world.PartyCharacter;
+import org.gms.server.life.Monster;
 import org.gms.server.maps.Foothold;
 import org.gms.server.maps.MapleMap;
 import org.gms.server.maps.Portal;
@@ -12,7 +13,12 @@ import soloMapling.ArtificialPlayer.PartyQuest.PartyQuestBot;
 import soloMapling.ArtificialPlayer.PartyQuest.PqActions;
 
 import java.awt.Point;
+import java.util.Collections;
+import java.util.IdentityHashMap;
 import java.util.List;
+import java.util.Set;
+import java.util.concurrent.ThreadLocalRandom;
+import java.util.function.Predicate;
 
 /**
  * Plays Monster Carnival - either as the opposing team, or as a teammate a player recruited in the
@@ -90,6 +96,9 @@ public class CarnivalPQBot extends PartyQuestBot {
 
     /** Earliest time this bot may follow its leader by warp again. */
     private long nextWarpFollowAtMs;
+
+    /** Arena-scoped target policy, installed before either combat entry can select a monster. */
+    private WaveReaction waveReaction;
 
     public CarnivalPQBot(Character character) {
         super(character);
@@ -268,10 +277,6 @@ public class CarnivalPQBot extends PartyQuestBot {
             // A fresh arena: the purchase rotation restarts with it, so a re-match does not begin
             // halfway through the price list.
             CarnivalSummons.resetChoice(getChr().getId());
-            // Only the opposing side's summons may be hit - the arena holds both teams' monsters
-            // and the engine's kill path awards CP for any of them. Installed once per arena
-            // rather than per beat: the side is fixed for the run.
-            PqActions.setHuntFilter(getChr(), enemyMonsterOf(getChr()));
         }
 
         // Spend before fighting: CP is earned by kills, so the earliest purchase is the one that
@@ -280,17 +285,69 @@ public class CarnivalPQBot extends PartyQuestBot {
         tryDebuff();
 
         // Then fight, which is what the match is scored on.
-        if (!map.getMonsters().isEmpty()) {
+        if (fightsOnSweep()) {
             PqActions.seekAndAttack(getChr(), false, CarnivalPqData.ARENA_CONSUMABLES);
         }
         // The arena's monsters drop consume-on-pickup props (Carnival Points, party cures, the
         // debuff cubes, potions) on every kill. They are this quest's equivalent of LPQ's passes:
         // the bot must walk over and take them instead of leaving them for the match clock to
         // expire - including the pile the LAST kill left behind, which is why the sweep is outside
-        // the "room still has monsters" branch.
+        // the combat branch.
         PqActions.loot(getChr(), getChr().getPosition(), ARENA_LOOT_RADIUS_PX,
                 CarnivalPqData.ARENA_CONSUMABLES);
         return false;
+    }
+
+    @Override
+    protected synchronized boolean fightsOnSweep() {
+        MapleMap map = getChr().getMap();
+        if (!CarnivalPqData.isArena(map)) {
+            return false;
+        }
+        if (waveReaction == null || waveReaction.map != map) {
+            WaveReaction reaction = new WaveReaction(map, enemyMonsterOf(getChr()));
+            waveReaction = reaction;
+            PqActions.setHuntFilter(getChr(), monster -> reaction.admits(monster, System.currentTimeMillis()));
+        }
+        return true; // waiting restricts targets, never the sweep's loot or quiet-room cleanup
+    }
+
+    /** Separate from the bot monitor: target filters run while the chase's own state is locked. */
+    static final class WaveReaction {
+        private final MapleMap map;
+        private final Predicate<Monster> side;
+        private final Set<Monster> enemies = Collections.newSetFromMap(new IdentityHashMap<>());
+        private long readyAtMs;
+
+        WaveReaction(MapleMap map, Predicate<Monster> side) {
+            this.map = map;
+            this.side = side;
+        }
+
+        synchronized boolean admits(Monster monster, long nowMs) {
+            if (!isEnemy(monster)) {
+                return false;
+            }
+            if (!enemies.contains(monster)) {
+                enemies.removeIf(enemy -> !enemy.isAlive());
+                if (enemies.isEmpty()) {
+                    readyAtMs = nowMs + ThreadLocalRandom.current().nextLong(300L, 2_001L);
+                }
+                // Remember the whole live pack, not just the selected target: a normal retarget
+                // must not restart the reaction, even when the selected monster died off-beat.
+                for (Monster current : map.getAllMonsters()) {
+                    if (isEnemy(current)) {
+                        enemies.add(current);
+                    }
+                }
+                enemies.add(monster);
+            }
+            return nowMs >= readyAtMs;
+        }
+
+        private boolean isEnemy(Monster monster) {
+            return side.test(monster) && monster.getMap() == map && monster.isAlive();
+        }
     }
 
     /**
@@ -447,12 +504,13 @@ public class CarnivalPQBot extends PartyQuestBot {
     }
 
     @Override
-    protected void releaseRoomState() {
+    protected synchronized void releaseRoomState() {
         super.releaseRoomState();
         rewardRoomSinceMs = 0L;
         rewardWalkSinceMs = 0L;
         lastArenaMapId = -1;
         nextWarpFollowAtMs = 0L;
+        waveReaction = null;
         CarnivalSummons.release(getChr().getId());
         // The filter is only meaningful inside an arena; leaving it set would keep a bot that has
         // gone back to town from hitting plain map mobs.

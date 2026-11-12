@@ -82,15 +82,14 @@ class CarnivalLootTest {
     @Test
     void theMacroTickAlsoWalksUpToDropsTheFightLeftBehind() throws Exception {
         String bot = javaSource(CARNIVAL_BOT);
-        int branch = bot.indexOf("if (!map.getMonsters().isEmpty()) {");
+        int branch = bot.indexOf("if (fightsOnSweep()) {");
         int fight = bot.indexOf("PqActions.seekAndAttack(getChr(), false, CarnivalPqData.ARENA_CONSUMABLES)");
         int loot = bot.indexOf("PqActions.loot(getChr(), getChr().getPosition(), ARENA_LOOT_RADIUS_PX,");
         assertTrue(branch >= 0 && fight > branch, "the fight must pass the ids, so a pickup precedes the chase");
         assertTrue(loot > fight, "the walk-up pass must follow the fight order");
-        // The loot pass must sit OUTSIDE that branch: a drop the last kill left behind lands when the
-        // room has no monsters left, and a sweep inside the branch would never run again.
+        // Keep collection outside the combat gate, including while a fresh wave's reaction is pending.
         assertTrue(loot > matchingBrace(bot, branch),
-                "the loot pass must sit outside the 'room has monsters' branch");
+                "the loot pass must sit outside the combat gate");
     }
 
     @Test
