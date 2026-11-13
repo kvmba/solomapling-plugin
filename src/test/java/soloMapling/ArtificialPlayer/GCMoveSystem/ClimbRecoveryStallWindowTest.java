@@ -144,11 +144,11 @@ public class ClimbRecoveryStallWindowTest {
 
         // The clock starts on the first sample (climbStallSinceMs == 0), so the window is
         // measured from there: 4 further samples = 1.0s, still inside 1.2s.
-        ObserverTracker.markObservedNow(MAP_ID);
+        ObserverTracker.markObservedNow(sim.st().bot.getMap());
         brain.tick(sim.st().bot);              // t=0ms, arms the window
         for (int i = 0; i < 4; i++) {
             MovementClock.advance(250);
-            ObserverTracker.markObservedNow(MAP_ID); // the force TTL is 2s on the same clock
+            ObserverTracker.markObservedNow(sim.st().bot.getMap()); // the force TTL is 2s on the same clock
             brain.tick(sim.st().bot);          // t=250..1000ms
         }
         assertTrue(sim.st().climbing,
@@ -158,7 +158,7 @@ public class ClimbRecoveryStallWindowTest {
 
         // cross the window: 1.25s
         MovementClock.advance(250);
-        ObserverTracker.markObservedNow(MAP_ID);
+        ObserverTracker.markObservedNow(sim.st().bot.getMap());
         brain.tick(sim.st().bot);
         assertFalse(sim.st().climbing,
                 "past 1.2s the stall net must dismount the parked climber");
@@ -171,7 +171,7 @@ public class ClimbRecoveryStallWindowTest {
         Sim sim = simOnLadder(-2000, true, true, false);
         GrindBrain brain = new GrindBrain(msg -> { });
         for (int i = 0; i < 40; i++) { // 10s
-            ObserverTracker.markObservedNow(MAP_ID);
+            ObserverTracker.markObservedNow(sim.st().bot.getMap());
             brain.tick(sim.st().bot);
             MovementClock.advance(250);
         }
@@ -189,7 +189,7 @@ public class ClimbRecoveryStallWindowTest {
         for (int i = 0; i < 40; i++) {
             // one climb step per sample: >= CLIMB_PROGRESS_EPS over the window
             sim.pos().set(new Point(LADDER_X, sim.p().y - 10));
-            ObserverTracker.markObservedNow(MAP_ID);
+            ObserverTracker.markObservedNow(sim.st().bot.getMap());
             brain.tick(sim.st().bot);
             MovementClock.advance(250);
             assertTrue(sim.st().climbing, "a genuine climb was cut short at sample " + i);

@@ -59,7 +59,7 @@ public final class BotFlavor {
             return;
         }
         // Hard gate: only ever express when a real player is actually on the map to see it.
-        if (!GCMovement.isMapObserved(chr.getMapId())) {
+        if (!GCMovement.isMapObserved(chr.getMap())) {
             return;
         }
         // Hard gate: never while on a rope or ladder. A SKILL_SWING mid-climb casts off the rope -

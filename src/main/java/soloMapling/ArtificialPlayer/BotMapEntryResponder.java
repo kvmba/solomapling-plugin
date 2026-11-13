@@ -64,7 +64,7 @@ public final class BotMapEntryResponder implements EventSubscriber {
             if (map == null) {
                 return;
             }
-            GCMovement.markObservedNow(map.getId()); // instant FULL for the GC movement/combat LOD
+            GCMovement.markObservedNow(map); // instant FULL for this map instance
             ExecutorServiceManager.runAsync(() -> nudgeBotsOnMap(map, event.getMapleCharacter()));
         } catch (Throwable ignored) {
             // never let a responder failure propagate into MapleMap.addPlayer
@@ -178,6 +178,7 @@ public final class BotMapEntryResponder implements EventSubscriber {
     }
 
     private void nudge(Character botChr) {
+        GCMovement.wake(botChr);
         BotSM bot = CharacterStorage.getAllBots().get(botChr.getId());
         if (bot == null || !bot.getRunning()) {
             return;

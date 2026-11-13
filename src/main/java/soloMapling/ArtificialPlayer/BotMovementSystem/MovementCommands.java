@@ -330,7 +330,7 @@ public class MovementCommands {
         // Fable Phase 1 (F4): don't build/broadcast the idle refresh when no real player
         // can see the map. On promotion the map-entry nudge pulls the next macro tick
         // (and this refresh) forward, so nothing looks stale when someone walks in.
-        if (LodCounts.trackerRunning() && !LodCounts.isMapActive(fakechar.getMapId())) {
+        if (LodCounts.trackerRunning() && !LodCounts.isMapActive(fakechar.getMap())) {
             return;
         }
         soloMapling.server.BotPerfStats.IDLE_BROADCASTS.increment();
@@ -445,7 +445,7 @@ public class MovementCommands {
         // but the packet is LOD-gated like every other recorded-engine broadcast: nobody can see the map,
         // so there is nothing to re-anchor, and the first observed tick re-announces the position anyway.
         // This mirrors BotIdleStandingUpdate's gate.
-        if (!LodCounts.trackerRunning() || LodCounts.isMapActive(fakechar.getMapId())) {
+        if (!LodCounts.trackerRunning() || LodCounts.isMapActive(fakechar.getMap())) {
             BotIdleStandingUpdateForced(fakechar);
         }
     }

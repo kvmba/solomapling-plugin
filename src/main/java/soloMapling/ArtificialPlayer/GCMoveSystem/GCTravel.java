@@ -867,7 +867,7 @@ final class GCTravel {
         }
         trip.nextWaitChatterAtMs = now + ThreadLocalRandom.current()
                     .nextLong(WAIT_CHATTER_MIN_MS, WAIT_CHATTER_MAX_MS);
-        if (!GCMovement.isMapObserved(bot.getMapId())) {
+        if (!GCMovement.isMapObserved(bot.getMap())) {
             return; // no observer — nothing worth saying
         }
         int count = chatterLineCount(chatterSet);

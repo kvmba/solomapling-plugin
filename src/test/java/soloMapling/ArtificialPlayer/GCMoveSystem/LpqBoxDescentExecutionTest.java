@@ -232,7 +232,7 @@ class LpqBoxDescentExecutionTest {
     }
 
     private void tick() throws Exception {
-        ObserverTracker.markObservedNow(bot.getMapId());
+        ObserverTracker.markObservedNow(bot.getMap());
         try {
             TICK.invoke(null, state);
         } catch (InvocationTargetException e) {

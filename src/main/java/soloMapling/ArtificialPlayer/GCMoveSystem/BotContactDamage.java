@@ -142,7 +142,7 @@ final class BotContactDamage {
     // Per bot per tick: if a hostile mob is touching the bot, apply a hit. LOD-gated (skips entirely
     // when no real player shares the bot's map) and i-frame-gated. Called from GCMovementDriver.tick.
     static void tickMobDamage(BotMovementState entry, Character bot) {
-        if (!GCMovement.isMapObserved(bot.getMapId())) {
+        if (!GCMovement.isMapObserved(bot.getMap())) {
             entry.mobHitCooldownMs = 0; // reset i-frames so the first hit on re-entry is instant
             // No tile of the walk that happened while nobody watched may survive into the next
             // observed tick: unobserved bots are advanced ANALYTICALLY (tryCoarseAdvance writes the
@@ -374,7 +374,7 @@ final class BotContactDamage {
     // BotPhysicsEngine tracks via entry.fallPeakPhysY. LOD- and threshold-gated. Called from
     // BotPhysicsEngine's landing transition.
     static void applyFallDamage(BotMovementState entry, Character bot, float fallDistancePx) {
-        if (!GCMovement.isMapObserved(bot.getMapId())) {
+        if (!GCMovement.isMapObserved(bot.getMap())) {
             return;
         }
         if (BotAuraState.isMonsterImmune(bot)) {

@@ -315,7 +315,7 @@ public class SocialBot extends BotSM {
             return; // an earlier tick step (e.g. chatter) may have engaged this bot
         }
         Character chr = getChr();
-        if (chr == null || chr.getMap() == null || !GCMovement.isMapObserved(chr.getMapId())) {
+        if (chr == null || chr.getMap() == null || !GCMovement.isMapObserved(chr.getMap())) {
             return;
         }
         long now = System.currentTimeMillis();

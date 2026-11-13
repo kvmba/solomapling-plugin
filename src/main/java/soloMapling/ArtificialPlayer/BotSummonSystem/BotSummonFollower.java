@@ -251,7 +251,10 @@ public final class BotSummonFollower {
             s.expireAtMs = System.currentTimeMillis() + buffMs + jitter;
         }
         synchronized (LIFECYCLE_LOCK) {
-            TRACKED.computeIfAbsent(botId, k -> new ArrayList<>()).add(s);
+            List<BotSummon> previous = TRACKED.get(botId);
+            List<BotSummon> updated = previous == null ? new ArrayList<>() : new ArrayList<>(previous);
+            updated.add(s);
+            TRACKED.put(botId, List.copyOf(updated));
         }
     }
 
@@ -347,7 +350,7 @@ public final class BotSummonFollower {
     private static void tick() {
         BotSummonConfig cfg = config;
         regrantIfDue(cfg);
-        for (Integer botId : new ArrayList<>(TRACKED.keySet())) {
+        for (Integer botId : TRACKED.keySet()) {
             try {
                 tickBot(botId, cfg);
             } catch (Throwable t) {
@@ -402,7 +405,7 @@ public final class BotSummonFollower {
             REGRANT_DUE_AT.remove(botId);
             return; // the bot is gone from the world; nothing left to recast for
         }
-        if (!GCMovement.isMapObserved(bot.getMapId())) {
+        if (!GCMovement.isMapObserved(bot.getMap())) {
             // Dark map: nobody can watch the recast, so try again once the map has players.
             REGRANT_DUE_AT.put(botId, nowMs + cfg.lifetimeRefreshWindowMs());
             return;
@@ -439,13 +442,9 @@ public final class BotSummonFollower {
             return;
         }
 
-        boolean observed = GCMovement.isMapObserved(bot.getMapId());
+        boolean observed = GCMovement.isMapObserved(bot.getMap());
         MapleMap botMap = bot.getMap();
-        // Snapshot: register/despawnAll may touch the list on the bot's own lifecycle thread.
-        List<BotSummon> snapshot;
-        synchronized (LIFECYCLE_LOCK) {
-            snapshot = new ArrayList<>(summons);
-        }
+        // Registration publishes immutable lists; ticks need neither a lock nor a full copy.
         // Player-parity lifetime (an expiry armed by register, not the host buff pipeline this
         // system deliberately bypasses): when the clock runs out the summon ends the way a
         // player's does - removal broadcast, no dramatics - and the bot recasts after the
@@ -454,11 +453,11 @@ public final class BotSummonFollower {
         // arrival) and torn-down bots never arm (a keeper keeps its summon; despawnAll also
         // clears any armed entry).
         if (observed) {
-            for (BotSummon s : snapshot) {
+            for (BotSummon s : summons) {
                 if (s.expireAtMs > 0 && now() >= s.expireAtMs) {
                     synchronized (LIFECYCLE_LOCK) {
                         if (TRACKED.get(botId) == summons) {
-                            despawnSummons(bot, botId, snapshot);
+                            despawnSummons(bot, botId, summons);
                         }
                     }
                     REGRANT_DUE_AT.put(botId,
@@ -468,7 +467,7 @@ public final class BotSummonFollower {
                 }
             }
         }
-        for (BotSummon s : snapshot) {
+        for (BotSummon s : summons) {
             // Re-homing is pure cleanup + spawn and MUST run whether or not the map is observed: a
             // stationary summon is not removed by the host's own leave-map path, so skipping it on an
             // unobserved map would ghost the entity on the old map until a player walked in. A null
@@ -681,13 +680,20 @@ public final class BotSummonFollower {
         Point cur = summon.getPosition();
         Point owner = bot.getPosition();
         boolean facingLeft = CharacterStance.isFacingLeft(bot.getStance());
+        if (!observed) {
+            int x = followTargetX(owner.x, cur.x, s.followDistancePx);
+            int y = owner.y + cfg.hoverOffsetY();
+            if (cur.x != x || cur.y != y) summon.setPosition(new Point(x, y));
+            summon.setStance(flyAction(facingLeft));
+            return; // keep spawn coordinates fresh, but never animate an unseen flyer
+        }
         long tickMs = Math.max(100L, cfg.moveTickMs());
         double elapsedSec = System.currentTimeMillis() / 1000.0;
         // The bob-free slot is what the dead zone and the re-seat threshold judge (judging the
         // bobbed point would ping-pong the summon between the bob's extremes); the bob rides the
         // glide target, so it shows while the summon is actually moving.
-        Point base = followTarget(owner.x, owner.y, cur.x, s.followDistancePx, cfg.hoverOffsetY(),
-                s.phaseRad, elapsedSec, 0.0, 0.0);
+        Point base = new Point(followTargetX(owner.x, cur.x, s.followDistancePx),
+                owner.y + cfg.hoverOffsetY());
         if (cur.distance(base) > cfg.snapDistance()) {
             // The owner just teleported (or the summon fell implausibly far behind): re-seat the
             // entity at its slot. One same-point frame carries it straight there instead of

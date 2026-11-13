@@ -84,7 +84,7 @@ public final class BotPotionSim {
         // the recovery read as a potion rather than an invisible HP tick. Gated on the map
         // being observed: MapleMap.broadcastMessage skips artificial characters itself, but
         // early-returning avoids building the packet at all when nobody can see it.
-        if (GCMovement.isMapObserved(bot.getMapId())) {
+        if (GCMovement.isMapObserved(bot.getMap())) {
             bot.getMap().broadcastMessage(bot,
                     PacketCreator.itemEffect(bot.getId(), POTION_EFFECT_ITEM), false);
         }

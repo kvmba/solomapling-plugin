@@ -4,6 +4,7 @@ import org.gms.client.Character;
 import org.gms.net.server.Server;
 import org.gms.net.server.world.World;
 import org.gms.server.maps.MapleMap;
+import org.gms.server.maps.MapManager;
 import org.gms.server.maps.Portal;
 import soloMapling.ArtificialPlayer.BotHelpers;
 
@@ -21,14 +22,14 @@ import java.util.concurrent.atomic.AtomicBoolean;
 
 /*
  * Observability tracker for the GCMoveSystem LOD layer. A single ~1s poll over the online real
- * players (id ≤ 20000) maintains two sets of map ids:
+ * players maintains two sets of live map instances, isolated by world/channel/event:
  * 
  *   fullMaps — a real player is on the map (FULL tier: physics + broadcast).
  *   haloMaps — a portal-adjacent map a real player is standing near the entrance to (HALO: pre-warm
  *              physics on the map they're about to walk into).
  *
  *
- * The driver/scheduler reads .isActiveMap(int) to decide whether a bot's map is worth full
+ * The driver/scheduler reads .isActiveMap(MapleMap) to decide whether a bot's map is worth full
  * fidelity. Polling (rather than hooking MapleMap.addPlayer/removePlayer) keeps this entirely
  * additive — no Cosmic base file is touched. Halo is proximity-gated: a neighbour is warmed only while
  * a player is within HALO_PORTAL_RADIUS_PX of the portal leading to it — this bounds hub fan-out (a
@@ -54,11 +55,12 @@ final class ObserverTracker {
     private static final double HALO_PORTAL_RADIUS_SQ =
             (double) HALO_PORTAL_RADIUS_PX * HALO_PORTAL_RADIUS_PX;
 
-    private static volatile Set<Integer> fullMaps = Set.of();   // raw: a real player is on the map
-    private static volatile Set<Integer> haloMaps = Set.of();   // proximity: a player is near the portal to it
+    // Map identity isolates channels, worlds and event instances without allocating keys on hot reads.
+    private static volatile Set<MapleMap> fullMaps = Set.of();
+    private static volatile Set<MapleMap> haloMaps = Set.of();
 
     // The sticky "active" set (full ∪ halo, held for DWELL_MS after observation) — the dwell hysteresis.
-    private static final TierDwell DWELL = new TierDwell(DWELL_MS);
+    private static final TierDwell<MapleMap> DWELL = new TierDwell<>(DWELL_MS);
 
     private static final AtomicBoolean STARTED = new AtomicBoolean(false);
 
@@ -66,7 +68,7 @@ final class ObserverTracker {
     // that map observed immediately so FULL behaviour (visible spawn, broadcast, combat) starts the
     // same tick instead of waiting up to one poll. Short TTL (> POLL_MS) so the poll takes back over.
     private static final long FORCE_TTL_MS = 2_000;
-    private static final Map<Integer, Long> forcedFull = new ConcurrentHashMap<>();
+    private static final Map<MapleMap, Long> forcedFull = new ConcurrentHashMap<>();
 
     // A real (non-bot) player is on this map right now — a live check, not the cached poll.
     static boolean hasRealPlayerNow(MapleMap map) {
@@ -81,18 +83,18 @@ final class ObserverTracker {
         return false;
     }
 
-    // Treat mapId as observed (FULL) immediately for a short window, regardless of the 1s poll.
-    static void markObservedNow(int mapId) {
-        forcedFull.put(mapId, MovementClock.nowMs() + FORCE_TTL_MS);
+    // Treat this map instance as FULL immediately, regardless of the 1s poll.
+    static void markObservedNow(MapleMap map) {
+        forcedFull.put(map, MovementClock.nowMs() + FORCE_TTL_MS);
     }
 
-    private static boolean forced(int mapId) {
-        Long until = forcedFull.get(mapId);
+    private static boolean forced(MapleMap map) {
+        Long until = forcedFull.get(map);
         if (until == null) {
             return false;
         }
         if (until < MovementClock.nowMs()) {
-            forcedFull.remove(mapId);
+            forcedFull.remove(map, until);
             return false;
         }
         return true;
@@ -117,21 +119,21 @@ final class ObserverTracker {
     }
 
     /* A real player is on this map (FULL tier). */
-    static boolean isFull(int mapId) {
-        return fullMaps.contains(mapId) || forced(mapId);
+    static boolean isFull(MapleMap map) {
+        return map != null && (fullMaps.contains(map) || forced(map));
     }
 
     /* A real player is standing near the portal leading to this map (HALO tier). */
-    static boolean isHalo(int mapId) {
-        return haloMaps.contains(mapId);
+    static boolean isHalo(MapleMap map) {
+        return map != null && haloMaps.contains(map);
     }
 
     /*
      * The map is worth full-fidelity physics (and is exempt from LOD throttling/coarse): FULL or HALO
      * now, OR within the post-observation dwell window. This is the set the driver gates on.
      */
-    static boolean isActiveMap(int mapId) {
-        return DWELL.isActive(mapId) || forced(mapId);
+    static boolean isActiveMap(MapleMap map) {
+        return map != null && (DWELL.isActive(map) || forced(map));
     }
 
     static int fullCount() {
@@ -149,12 +151,18 @@ final class ObserverTracker {
 
     /* Snapshot of the maps currently FULL (a real player present) — diagnostics/inspection only. */
     static Set<Integer> fullMaps() {
-        return fullMaps;
+        return mapIds(fullMaps);
     }
 
     /* Snapshot of the maps currently HALO (portal-adjacent to a real player) — diagnostics/inspection only. */
     static Set<Integer> haloMaps() {
-        return haloMaps;
+        return mapIds(haloMaps);
+    }
+
+    private static Set<Integer> mapIds(Set<MapleMap> maps) {
+        Set<Integer> ids = new HashSet<>();
+        for (MapleMap map : maps) ids.add(map.getId());
+        return Set.copyOf(ids);
     }
 
     private static void safeRefresh() {
@@ -170,15 +178,15 @@ final class ObserverTracker {
         if (server == null) {
             return;
         }
-        Set<Integer> full = new HashSet<>();
+        Set<MapleMap> full = new HashSet<>();
         List<Character> realPlayers = new ArrayList<>();
         for (World world : server.getWorlds()) {
             if (world == null) {
                 continue;
             }
             for (Character chr : world.getPlayerStorage().getAllCharacters()) {
-                if (chr != null && !BotHelpers.isBot(chr)) {
-                    full.add(chr.getMapId());
+                if (chr != null && chr.getMap() != null && !BotHelpers.isBot(chr)) {
+                    full.add(chr.getMap());
                     realPlayers.add(chr);
                 }
             }
@@ -187,28 +195,39 @@ final class ObserverTracker {
         // HALO is proximity-gated: warm a neighbour only while a player is standing near the portal that
         // leads to it, instead of warming every neighbour of an occupied map (which warms a whole region
         // from a hub town). Only fill from an already-built world graph — never force the ~5k-map scan.
-        Set<Integer> halo = new HashSet<>();
+        Set<MapleMap> halo = new HashSet<>();
         if (GCWorldGraph.isReady()) {
             for (Character chr : realPlayers) {
                 addNearbyPortalMaps(chr, full, halo);
             }
         }
 
-        // Hysteresis: feed the observed (full ∪ halo) maps into the dwell machine, which keeps each
-        // active for DWELL_MS past its last observation — so demotion lags but promotion is immediate.
-        Set<Integer> observed = new HashSet<>(full);
+        observe(full, halo, MovementClock.nowMs());
+    }
+
+    // Single poll writer; explicit time also keeps promotion/demotion tests deterministic.
+    static void observe(Set<MapleMap> full, Set<MapleMap> halo, long now) {
+        Set<MapleMap> previous = DWELL.active();
+        Set<MapleMap> observed = new HashSet<>(full);
         observed.addAll(halo);
-        DWELL.observe(observed, MovementClock.nowMs());
+        DWELL.observe(observed, now);
+        forcedFull.entrySet().removeIf(e -> e.getValue() < now);
 
         fullMaps = full.isEmpty() ? Set.of() : Set.copyOf(full);
         haloMaps = halo.isEmpty() ? Set.of() : Set.copyOf(halo);
+        for (MapleMap map : observed) {
+            if (previous.contains(map)) continue;
+            for (Character chr : map.getAllPlayers()) {
+                if (BotHelpers.isBot(chr)) GCMovement.wake(chr);
+            }
+        }
     }
 
     // Add to `halo` the walkable target maps of any portal on the player's map within
     // HALO_PORTAL_RADIUS of the player. Intersecting each portal's target with GCWorldGraph's portal
     // neighbours keeps the filtering (doors / scripted / version-gated / no-target portals excluded)
     // consistent with the rest of the LOD layer, and gives the portal positions the graph doesn't carry.
-    private static void addNearbyPortalMaps(Character chr, Set<Integer> full, Set<Integer> halo) {
+    private static void addNearbyPortalMaps(Character chr, Set<MapleMap> full, Set<MapleMap> halo) {
         MapleMap map = chr.getMap();
         if (map == null) {
             return;
@@ -221,17 +240,20 @@ final class ObserverTracker {
         if (pos == null) {
             return;
         }
+        MapManager maps = map.getEventInstance() == null
+                ? map.getChannelServer().getMapFactory() : map.getEventInstance().getMapFactory();
         for (Portal portal : map.getPortals()) {
             if (portal == null) {
                 continue;
             }
             int target = portal.getTargetMapId();
-            if (target <= 0 || full.contains(target) || !contains(walkable, target)) {
+            if (target <= 0 || !contains(walkable, target)) {
                 continue;
             }
             Point pp = portal.getPosition();
-            if (pp != null && pos.distanceSq(pp) <= HALO_PORTAL_RADIUS_SQ) {
-                halo.add(target);
+            if (pp != null && pos.distanceSq(pp) <= HALO_PORTAL_RADIUS_SQ && maps.isMapLoaded(target)) {
+                MapleMap neighbor = maps.getMap(target);
+                if (!full.contains(neighbor)) halo.add(neighbor);
             }
         }
     }

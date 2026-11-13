@@ -150,7 +150,7 @@ public class EosTowerGrindRopeHangReproTest {
     private static void tickN(Sim sim, int ticks, int mapId) {
         for (int i = 0; i < ticks; i++) {
             if (i % 30 == 0) {
-                ObserverTracker.markObservedNow(mapId);
+                ObserverTracker.markObservedNow(sim.st().bot.getMap());
             }
             try {
                 TICK.invoke(null, sim.st());

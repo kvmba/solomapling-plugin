@@ -145,7 +145,7 @@ public class DeepDropRopeLegalityTest {
 
         for (int i = 0; i < 600; i++) {
             if (i % 20 == 0) {
-                ObserverTracker.markObservedNow(MAP_ID);
+                ObserverTracker.markObservedNow(st.bot.getMap());
             }
             try {
                 TICK.invoke(null, st);

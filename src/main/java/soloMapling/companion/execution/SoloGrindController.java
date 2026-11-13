@@ -206,7 +206,7 @@ public final class SoloGrindController {
                     endSession(companion, now); // warped away mid-session
                     return;
                 }
-                if (GCMovement.isMapObserved(companion.getMapId())) {
+                if (GCMovement.isMapObserved(companion.getMap())) {
                     // A player can see it: let the real combat tick own the
                     // fighting, and don't double-pay with simulated kills.
                     lastAccrualMs = now;
@@ -340,7 +340,7 @@ public final class SoloGrindController {
                         * (SESSION_MAX_MS - SESSION_MIN_MS));
         log.info("Companion solo grind started cid={} map={} mobLevel={} observed={}",
                 companion.getId(), companion.getMapId(), targetMobLevel,
-                GCMovement.isMapObserved(companion.getMapId()));
+                GCMovement.isMapObserved(companion.getMap()));
     }
 
     private void endSession(Character companion, long now) {

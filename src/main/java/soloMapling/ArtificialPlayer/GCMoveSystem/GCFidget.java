@@ -108,6 +108,8 @@ final class GCFidget {
             return; // our own nudge/return is still in flight
         }
         s.fidgetMoveActive = false;
+        // Keep command bookkeeping above, but never generate unseen cosmetic input.
+        if (!ObserverTracker.isActiveMap(bot.getMap())) return;
 
         Point pos = bot.getPosition();
         if (s.base == null) {

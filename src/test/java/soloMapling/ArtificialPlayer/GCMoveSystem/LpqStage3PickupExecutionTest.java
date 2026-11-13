@@ -157,7 +157,7 @@ class LpqStage3PickupExecutionTest {
 
         boolean neededRecovery = false;
         for (int i = 0; i < 200 && state.moveTarget != null; i++) {
-            if (i % 20 == 0) ObserverTracker.markObservedNow(map.getId());
+            if (i % 20 == 0) ObserverTracker.markObservedNow(map);
             tick.invoke(null, state);
             MovementClock.advance(BotPhysicsEngine.cfg.TICK_MS);
             neededRecovery |= state.unstuckCooldownMs > 0;

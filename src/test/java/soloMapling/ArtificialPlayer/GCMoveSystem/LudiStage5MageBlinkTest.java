@@ -175,7 +175,7 @@ public class LudiStage5MageBlinkTest {
             sim.st().moveBestDist = Integer.MAX_VALUE;
             sim.st().moveProgressAtMs = MovementClock.nowMs();
             for (int t = 0; t < ticksPerBeat; t++) {
-                if (t % 30 == 0) ObserverTracker.markObservedNow(MAP);
+                if (t % 30 == 0) ObserverTracker.markObservedNow(sim.st().bot.getMap());
                 try {
                     TICK.invoke(null, sim.st());
                 } catch (ReflectiveOperationException e) {
@@ -267,7 +267,7 @@ public class LudiStage5MageBlinkTest {
                 warrior.st().moveBestDist = Integer.MAX_VALUE;
                 warrior.st().moveProgressAtMs = MovementClock.nowMs();
             }
-            if (t % 30 == 0) ObserverTracker.markObservedNow(MAP);
+            if (t % 30 == 0) ObserverTracker.markObservedNow(warrior.st().bot.getMap());
             try {
                 TICK.invoke(null, warrior.st());
             } catch (ReflectiveOperationException e) {
@@ -307,7 +307,7 @@ public class LudiStage5MageBlinkTest {
                 sim.st().moveBestDist = Integer.MAX_VALUE;
                 sim.st().moveProgressAtMs = MovementClock.nowMs();
             }
-            if (t % 30 == 0) ObserverTracker.markObservedNow(MAP);
+            if (t % 30 == 0) ObserverTracker.markObservedNow(sim.st().bot.getMap());
             try {
                 TICK.invoke(null, sim.st());
             } catch (ReflectiveOperationException e) {

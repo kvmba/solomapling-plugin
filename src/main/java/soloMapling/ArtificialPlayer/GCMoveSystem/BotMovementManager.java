@@ -1546,7 +1546,7 @@ class BotMovementManager {
         // airborne/climbing/no-graph bots - skip the foothold lookup + packet build +
         // broadcast when nobody can see the map, and invalidate the dedup snapshot so
         // the first observed tick always re-broadcasts the current position.
-        if (!ObserverTracker.isActiveMap(bot.getMapId())) {
+        if (!ObserverTracker.isActiveMap(bot.getMap())) {
             entry.movementBroadcastValid = false;
             return;
         }
@@ -1718,7 +1718,7 @@ class BotMovementManager {
         if (bot == null || bot.getMap() == null) {
             return;
         }
-        if (!ObserverTracker.isActiveMap(bot.getMapId())) {
+        if (!ObserverTracker.isActiveMap(bot.getMap())) {
             broadcastMovement(entry); // self-gates: no-op + invalidates the dedup snapshot
             return;
         }

@@ -16,10 +16,10 @@ import java.util.Set;
  * .observe is driven by the single observer-poll thread; .isActive/.active
  * read the published immutable snapshot and are safe to call from any thread.
  */
-final class TierDwell {
+final class TierDwell<T> {
     private final long dwellMs;
-    private final Map<Integer, Long> stickyUntil = new HashMap<>();
-    private volatile Set<Integer> active = Set.of();
+    private final Map<T, Long> stickyUntil = new HashMap<>();
+    private volatile Set<T> active = Set.of();
 
     TierDwell(long dwellMs) {
         this.dwellMs = dwellMs;
@@ -30,20 +30,20 @@ final class TierDwell {
      * map's dwell deadline is refreshed to now + dwellMs, and any map whose deadline has passed
      * is dropped. The surviving keys are the active set.
      */
-    void observe(Set<Integer> observed, long nowMs) {
+    void observe(Set<T> observed, long nowMs) {
         long deadline = nowMs + dwellMs;
-        for (int mapId : observed) {
-            stickyUntil.put(mapId, deadline);
+        for (T map : observed) {
+            stickyUntil.put(map, deadline);
         }
         stickyUntil.entrySet().removeIf(e -> e.getValue() <= nowMs);
         active = stickyUntil.isEmpty() ? Set.of() : Set.copyOf(stickyUntil.keySet());
     }
 
-    boolean isActive(int mapId) {
-        return active.contains(mapId);
+    boolean isActive(T map) {
+        return active.contains(map);
     }
 
-    Set<Integer> active() {
+    Set<T> active() {
         return active;
     }
 

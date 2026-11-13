@@ -1,5 +1,7 @@
 package soloMapling.ArtificialPlayer.GCMoveSystem;
 
+import org.gms.server.maps.MapleMap;
+
 // Ours (not part of the GreenCatMS port). Public read-only bridge so code outside
 // this package (!env perf) can read observation-tier counts without widening
 // ObserverTracker's package-private surface. Lives here only because it must
@@ -33,12 +35,12 @@ public final class LodCounts {
     }
 
     // A real player is on this map right now (FULL tier).
-    public static boolean isMapFull(int mapId) {
-        return ObserverTracker.isFull(mapId);
+    public static boolean isMapFull(MapleMap map) {
+        return ObserverTracker.isFull(map);
     }
 
     // FULL or HALO or inside the post-observation dwell - "someone can (nearly) see this map".
-    public static boolean isMapActive(int mapId) {
-        return ObserverTracker.isActiveMap(mapId);
+    public static boolean isMapActive(MapleMap map) {
+        return ObserverTracker.isActiveMap(map);
     }
 }

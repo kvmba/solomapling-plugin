@@ -796,7 +796,7 @@ public class TrainingBot extends BotSM implements GrindTickRegistry.Participant 
         firstTrip = false;
         boolean migrates = chr.getMapId() != pick.mapId();
         if (wasFirstTrip && migrates
-                && !GCMovement.isMapObserved(chr.getMapId())
+                && !GCMovement.isMapObserved(chr.getMap())
                 && rng.nextDouble() < FIRST_TRIP_TELEPORT_CHANCE) {
             debugChat("DECIDE: first-trip warp -> map " + pick.mapId());
             midSessionGrind = true; // warped in -> reads as already-grinding -> shortened first session
@@ -907,7 +907,7 @@ public class TrainingBot extends BotSM implements GrindTickRegistry.Participant 
         long nowMs = now();
         double elapsedSec = (nowMs - lastExpAccrualMs) / 1000.0;
         lastExpAccrualMs = nowMs;
-        if (elapsedSec > 0 && !GCMovement.isMapObserved(chr.getMapId()) && currentMobLevel > 0) {
+        if (elapsedSec > 0 && !GCMovement.isMapObserved(chr.getMap()) && currentMobLevel > 0) {
             accrueAbstractExp(currentMobLevel, elapsedSec);
         }
 
@@ -951,7 +951,7 @@ public class TrainingBot extends BotSM implements GrindTickRegistry.Participant 
     // A landed hit (heartbeat refresh) drops it back below the threshold and resets the ladder. Returns true
     // only when it changed phase (left the map), so doGrind skips its own grind-timer transition that tick.
     private boolean grindWatchdog(Character chr) {
-        if (chr == null || !GCMovement.isMapObserved(chr.getMapId())) {
+        if (chr == null || !GCMovement.isMapObserved(chr.getMap())) {
             return false; // unobserved bots don't fight (abstract EXP) — they can't be physically stuck
         }
         if (recruitingNow()) {
@@ -1006,7 +1006,7 @@ public class TrainingBot extends BotSM implements GrindTickRegistry.Participant 
         if (recruitingNow()) {
             return false; // mid-recruit: hold the map until the exchange resolves
         }
-        if (!CROWD_BAIL_UNOBSERVED && !GCMovement.isMapObserved(chr.getMapId())) {
+        if (!CROWD_BAIL_UNOBSERVED && !GCMovement.isMapObserved(chr.getMap())) {
             return false; // old gate: only relieve crowding a player can actually see
         }
         if (!grind.mapSaturated() || crowdHopsThisEpisode >= MAX_MAP_HOPS_PER_EPISODE) {
@@ -1159,7 +1159,7 @@ public class TrainingBot extends BotSM implements GrindTickRegistry.Participant 
             return;
         }
         nextChatterMs = t + AMBIENT_MIN_MS + (long) (rng.nextDouble() * (AMBIENT_MAX_MS - AMBIENT_MIN_MS));
-        if (!GCMovement.isMapObserved(chr.getMapId())) {
+        if (!GCMovement.isMapObserved(chr.getMap())) {
             return; // gate advanced so we don't re-roll every tick; nothing worth saying unobserved
         }
         sayContext("GrindAmbient", chr, null);
@@ -1173,7 +1173,7 @@ public class TrainingBot extends BotSM implements GrindTickRegistry.Participant 
         if (now() < nextBuffMs) {
             return;
         }
-        if (!GCMovement.isMapObserved(chr.getMapId())) {
+        if (!GCMovement.isMapObserved(chr.getMap())) {
             return; // hold the timer until it's worth showing.
         }
         if (!GCMovement.isGrounded(chr)) {
@@ -1188,7 +1188,7 @@ public class TrainingBot extends BotSM implements GrindTickRegistry.Participant 
     // off the macro thread so the line's hold never blocks the tick. Biased toward plain lines over
     // {TOKEN} ones (CONTEXT_LINE_CHANCE). player may be null (self-only nodes).
     void sayContext(String node, Character chr, Character player) { // package-visible: GrindBreakRoutine speaks through the bot
-        if (chr == null || !GCMovement.isMapObserved(chr.getMapId())) {
+        if (chr == null || !GCMovement.isMapObserved(chr.getMap())) {
             return;
         }
         ExecutorServiceManager.runAsync(() ->
@@ -1504,7 +1504,7 @@ public class TrainingBot extends BotSM implements GrindTickRegistry.Participant 
             total++;
             int mapId = chr.getMapId();
             trainByMap.merge(mapId, 1, Integer::sum);
-            switch (GCMovement.lodTier(mapId)) {
+            switch (GCMovement.lodTier(chr.getMap())) {
                 case "full" -> full++;
                 case "halo" -> halo++;
                 case "dwell" -> dwell++;

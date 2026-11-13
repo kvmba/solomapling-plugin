@@ -176,7 +176,7 @@ public final class GrindBrain {
             }
             return;
         }
-        if (!GCMovement.isMapObserved(chr.getMapId())) {
+        if (!GCMovement.isMapObserved(chr.getMap())) {
             wasObserved = false; // map went quiet; the next observed tick starts a fresh stuck window
             return;
         }

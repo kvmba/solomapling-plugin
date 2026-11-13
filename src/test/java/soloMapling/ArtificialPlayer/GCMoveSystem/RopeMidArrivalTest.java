@@ -151,7 +151,7 @@ public class RopeMidArrivalTest {
         int dismountY = Integer.MIN_VALUE;
         for (int i = 0; i < ticks; i++) {
             if (i % 20 == 0) {
-                ObserverTracker.markObservedNow(MAP_ID);
+                ObserverTracker.markObservedNow(sim.st().bot.getMap());
             }
             boolean before = sim.st().climbing;
             try {

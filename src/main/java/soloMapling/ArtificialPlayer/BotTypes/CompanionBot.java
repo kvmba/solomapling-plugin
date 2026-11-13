@@ -594,7 +594,7 @@ public final class CompanionBot extends BotSM implements
             // isGrindingOn also carries the phase check: a companion walking to
             // its ground, or resting between sessions, is not fighting here.
             if (!soloGrind.isGrindingOn(companion.getMapId())
-                    || !GCMovement.isMapObserved(companion.getMapId())) {
+                    || !GCMovement.isMapObserved(companion.getMap())) {
                 // The sweep runs at 4Hz while the state machine that would
                 // unregister us runs every few seconds, so drop off here rather
                 // than waiting a whole tick to be told we are done.
@@ -617,11 +617,11 @@ public final class CompanionBot extends BotSM implements
             log.info("Companion combat tick cid={} map={} position={} monsters={} observed={} style={} spot={} progressAgeMs={}",
                     companion.getId(), companion.getMapId(), companion.getPosition(),
                     companion.getMap().getAllMonsters().size(),
-                    GCMovement.isMapObserved(companion.getMapId()),
+                    GCMovement.isMapObserved(companion.getMap()),
                     grind.activeStyle(), grind.spotLabel(), grind.msSinceProgress());
         }
         long progressAgeMs = grind.msSinceProgress();
-        boolean mapObserved = GCMovement.isMapObserved(companion.getMapId());
+        boolean mapObserved = GCMovement.isMapObserved(companion.getMap());
         CompanionCombatRecoveryPolicy.Recovery recovery =
                 CompanionCombatRecoveryPolicy.choose(
                         progressAgeMs, now >= nextCombatRepairAt);

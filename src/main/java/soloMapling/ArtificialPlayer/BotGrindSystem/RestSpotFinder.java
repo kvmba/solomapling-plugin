@@ -106,7 +106,7 @@ public class RestSpotFinder {
     // Main entry. null => no safe spot worth traveling to right now; the caller skips the break and keeps
     // grinding (only happens unobserved — an observed bot always gets a safe spot, trekking if it must).
     public static RestSpot find(Character chr) {
-        boolean observed = chr.getMap() != null && GCMovement.isMapObserved(chr.getMapId());
+        boolean observed = chr.getMap() != null && GCMovement.isMapObserved(chr.getMap());
         if (observed) {
             Point s = bestSafe(chr, OBS_MAX_CLIMB_PX, OBS_TRAVEL_WEIGHT, true);
             if (s == null) {
@@ -122,7 +122,7 @@ public class RestSpotFinder {
     // re-targets to something it can walk to instead of sitting among the mobs. Never null (the break
     // already committed).
     public static RestSpot findLocal(Character chr) {
-        boolean observed = chr.getMap() != null && GCMovement.isMapObserved(chr.getMapId());
+        boolean observed = chr.getMap() != null && GCMovement.isMapObserved(chr.getMap());
         Point s = bestSafe(chr, LOCAL_MAX_CLIMB_PX, UNOBS_TRAVEL_WEIGHT, observed);
         return RestSpot.ground(s != null ? s : portalFallback(chr));
     }
@@ -134,7 +134,7 @@ public class RestSpotFinder {
     public static RestSpot findRope(Character chr) {
         MapleMap map = chr != null ? chr.getMap() : null;
         Point cur = chr != null ? chr.getPosition() : null;
-        if (map == null || cur == null || !GCMovement.isMapObserved(chr.getMapId())) {
+        if (map == null || cur == null || !GCMovement.isMapObserved(map)) {
             return null;
         }
         Set<Integer> reachable = GCMovement.reachableRegions(map, cur.x, cur.y);
@@ -201,7 +201,7 @@ public class RestSpotFinder {
     // static/irrelevant, and packets — what actually shows — are gated on observation).
     public static boolean isSpotMobOccupied(Character chr, Point spot) {
         MapleMap map = chr != null ? chr.getMap() : null;
-        if (map == null || spot == null || !GCMovement.isMapObserved(chr.getMapId())) {
+        if (map == null || spot == null || !GCMovement.isMapObserved(map)) {
             return false;
         }
         double veto = inflationRadius(map) * LIVE_VETO_SCALE;
@@ -250,7 +250,7 @@ public class RestSpotFinder {
             out.add("restspot: no map / position");
             return out;
         }
-        boolean observed = GCMovement.isMapObserved(chr.getMapId());
+        boolean observed = GCMovement.isMapObserved(chr.getMap());
         int budget = observed ? OBS_MAX_CLIMB_PX : UNOBS_MAX_CLIMB_PX;
         double tw = observed ? OBS_TRAVEL_WEIGHT : UNOBS_TRAVEL_WEIGHT;
         int inflation = inflationRadius(map);

@@ -417,7 +417,7 @@ public final class BotAuraState {
         if (dashSkill == 0 && !hasHide) {
             return; // no state-bound aura for this bot (the overwhelming majority)
         }
-        boolean observed = GCMovement.isMapObserved(bot.getMapId());
+        boolean observed = GCMovement.isMapObserved(bot.getMap());
         boolean mounted = bot.getBuffedValue(BuffStat.MONSTER_RIDING) != null;
 
         // 变身 / 海盗船: the attack-enabler pose owns the body and its expiry is enforced here.

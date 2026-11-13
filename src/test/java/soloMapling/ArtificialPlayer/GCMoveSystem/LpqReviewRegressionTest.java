@@ -291,7 +291,7 @@ class LpqReviewRegressionTest {
         state.moveDir = 1;
         state.movementVelX = 140;
         state.hspeed = 7.0;
-        ObserverTracker.markObservedNow(map.getId());
+        ObserverTracker.markObservedNow(map);
         Packet attack = mock(Packet.class);
         clearInvocations(map);
         doAnswer(inv -> {
@@ -1641,7 +1641,7 @@ class LpqReviewRegressionTest {
         inject(map, monster(9300013, 99121, new Point(-80, -441)));
 
         // One observed contact beat at the landing: the sweep anchor is a real neighbouring pixel.
-        ObserverTracker.markObservedNow(map.getId());
+        ObserverTracker.markObservedNow(map);
         BotContactDamage.tickMobDamage(state, bot);
         assertNotNull(state.lastMobTouchCheckPos, "sanity: an observed beat seeds the anchor");
         verify(bot, never()).safeAddHP(anyInt());
@@ -1657,7 +1657,7 @@ class LpqReviewRegressionTest {
                 "an unobserved stretch is not a walk: its anchor must not survive into the next sweep");
 
         // The player walks in: the first observed beat must not read that crossing as a walk.
-        ObserverTracker.markObservedNow(map.getId());
+        ObserverTracker.markObservedNow(map);
         BotContactDamage.tickMobDamage(state, bot);
         verify(bot, never()).safeAddHP(anyInt());
     }
@@ -1675,7 +1675,7 @@ class LpqReviewRegressionTest {
         createBot(map, new Point(179, -223), Job.THIEF);
         when(bot.getCurrentMaxHp()).thenReturn(5000);
         inject(map, monster(9300013, 99122, new Point(-80, -441)));
-        ObserverTracker.markObservedNow(map.getId());
+        ObserverTracker.markObservedNow(map);
         BotContactDamage.tickMobDamage(state, bot);
         assertNotNull(state.lastMobTouchCheckPos, "sanity: an observed beat seeds the anchor");
 
@@ -1728,7 +1728,7 @@ class LpqReviewRegressionTest {
     }
 
     private void tick() throws Exception {
-        ObserverTracker.markObservedNow(bot.getMapId());
+        ObserverTracker.markObservedNow(bot.getMap());
         runTick();
     }
 

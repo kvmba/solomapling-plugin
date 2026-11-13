@@ -220,7 +220,7 @@ public final class BotWanderSystem {
         // and freezing the whole loop here would leave it - and every later arrival - stacked on the
         // door until a player happens to look. Take a single off-door step on the first unobserved
         // tick (once), then go dormant exactly as before.
-        if (!GCMovement.isMapObserved(bot.getMapId())) {
+        if (!GCMovement.isMapObserved(bot.getMap())) {
             if (!w.portalCleared) {
                 w.portalCleared = true;
                 clearPortalWhileUnobserved(w, bot);

@@ -347,7 +347,7 @@ public class LpqLiveMobChaseRealSeekTest {
         BotMovementState st = freshState(map, bot, 88, -450);
         registerState(st);
         when(bot.getStance()).thenReturn(org.gms.constants.game.CharacterStance.STAND_RIGHT_STANCE);
-        ObserverTracker.markObservedNow(922010100);
+        ObserverTracker.markObservedNow(map);
         org.mockito.Mockito.clearInvocations(bot);
         try {
             soloMapling.ArtificialPlayer.BotMovementSystem.MovementCommands.BotIdleStandingUpdate(bot);

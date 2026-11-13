@@ -155,7 +155,7 @@ public class LpqStage1ExecutionSimTest {
     private static void tickN(Sim sim, int ticks, boolean keepActive) {
         for (int i = 0; i < ticks; i++) {
             if (keepActive && i % 30 == 0) {
-                ObserverTracker.markObservedNow(922010100);
+                ObserverTracker.markObservedNow(sim.st().bot.getMap());
             }
             try {
                 TICK.invoke(null, sim.st());

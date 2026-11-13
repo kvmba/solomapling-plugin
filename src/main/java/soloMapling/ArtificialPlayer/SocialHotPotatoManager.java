@@ -202,12 +202,14 @@ public class SocialHotPotatoManager {
 
     private Character selectRandomFillerBot(boolean requireObserved) {
         List<Character> fillerBots = new ArrayList<>();
+        Set<Integer> observed = requireObserved ? GCMovement.observedFullMaps() : Set.of();
 
         for (int mapId : ambientMapIds) {
-            if (requireObserved && !GCMovement.isMapObserved(mapId)) continue; // skip unwatched maps entirely
+            if (requireObserved && !observed.contains(mapId)) continue;
             try {
                 MapleMap map = soloMapling.server.SoloMaplingUtilities.getMapleMapById(mapId);
                 if (map == null) continue;
+                if (requireObserved && !GCMovement.isMapObserved(map)) continue;
                 for (Character chr : map.getAllPlayers()) {
                     if (!isBot(chr)) continue;
                     BotSM bot = CharacterStorage.getBotById(chr.getId());

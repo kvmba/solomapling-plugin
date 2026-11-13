@@ -464,6 +464,6 @@ public final class BotDebuffState {
     }
 
     private boolean observed() {
-        return chr != null && chr.getMap() != null && GCMovement.isMapObserved(chr.getMapId());
+        return chr != null && chr.getMap() != null && GCMovement.isMapObserved(chr.getMap());
     }
 }

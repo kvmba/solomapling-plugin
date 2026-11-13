@@ -137,7 +137,7 @@ public class TowerMazeRopeAnchorProgressTest {
     }
 
     private static void tick(Sim sim, int mapId) {
-        ObserverTracker.markObservedNow(mapId);
+        ObserverTracker.markObservedNow(sim.st().bot.getMap());
         try {
             TICK.invoke(null, sim.st());
         } catch (ReflectiveOperationException e) {

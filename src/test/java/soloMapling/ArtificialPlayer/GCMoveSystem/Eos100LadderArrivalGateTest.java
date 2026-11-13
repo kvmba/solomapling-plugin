@@ -252,7 +252,7 @@ public class Eos100LadderArrivalGateTest {
     private static void tick(Sim sim, int i) {
         // The grind tick is gated to the observed map; mark it like a real player standing there.
         if (i % 20 == 0) {
-            ObserverTracker.markObservedNow(MAP_ID);
+            ObserverTracker.markObservedNow(sim.st().bot.getMap());
         }
         try {
             TICK.invoke(null, sim.st());

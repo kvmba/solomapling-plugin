@@ -55,11 +55,11 @@ final class LodMetrics {
             } else {
                 idle++;
             }
-            if (ObserverTracker.isFull(mapId)) {
+            if (ObserverTracker.isFull(bot.getMap())) {
                 tierFull++;
-            } else if (ObserverTracker.isHalo(mapId)) {
+            } else if (ObserverTracker.isHalo(bot.getMap())) {
                 tierHalo++;
-            } else if (ObserverTracker.isActiveMap(mapId)) {
+            } else if (ObserverTracker.isActiveMap(bot.getMap())) {
                 tierDwell++; // recently observed — held at full physics through the hysteresis dwell
             } else {
                 tierCoarse++;

@@ -615,7 +615,7 @@ public abstract class BotSM implements EventSubscriber {
     // (no GC-movement bot enabled, e.g. bare dev spawns).
     public boolean checkMainPlayersOnMap() {
         if (LodCounts.trackerRunning()) {
-            return LodCounts.isMapFull(character.getMapId());
+            return LodCounts.isMapFull(character.getMap());
         }
         Collection<Character> charsOnMap = character.getMap().getCharacters();
         for (Character chrs : charsOnMap) {

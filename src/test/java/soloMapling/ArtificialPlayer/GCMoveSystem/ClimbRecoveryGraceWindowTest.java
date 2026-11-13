@@ -148,7 +148,7 @@ public class ClimbRecoveryGraceWindowTest {
 
         // park it: 1.25s of stillness trips the 1.2s stall net and dismounts
         for (int i = 0; i < 6; i++) {
-            ObserverTracker.markObservedNow(MAP_ID);
+            ObserverTracker.markObservedNow(sim.bot().getMap());
             sim.brain().tick(sim.bot());
             MovementClock.advance(250);
         }

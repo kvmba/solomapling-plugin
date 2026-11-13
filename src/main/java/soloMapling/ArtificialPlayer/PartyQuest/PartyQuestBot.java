@@ -549,7 +549,7 @@ public abstract class PartyQuestBot extends BotSM implements GrindTickRegistry.P
      * so nothing is lost by staying quiet while nobody is there.
      */
     private boolean lobbyHasListener(Character bot) {
-        return GCMovement.isMapObserved(bot.getMapId());
+        return GCMovement.isMapObserved(bot.getMap());
     }
 
     /** Per-bot jitter so a cohort does not shout and shuffle on the same frame. */
@@ -627,7 +627,7 @@ public abstract class PartyQuestBot extends BotSM implements GrindTickRegistry.P
         if (ThreadLocalRandom.current().nextDouble() >= beat.chance) {
             return;
         }
-        if (!GCMovement.isMapObserved(bot.getMapId())) {
+        if (!GCMovement.isMapObserved(bot.getMap())) {
             return;
         }
         String line = PqStageChat.line(questName, beat);

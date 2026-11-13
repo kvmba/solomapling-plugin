@@ -224,6 +224,12 @@ public final class GCMovement {
         return bot == null ? null : STATES.get(bot.getId());
     }
 
+    /** Pull a background movement deadline forward without starting a second tick chain. */
+    public static void wake(Character bot) {
+        BotMovementState st = stateOf(bot);
+        if (st != null) GCMovementDriver.wake(st);
+    }
+
     // A travel poll is already the active command producer; do not cancel it on each hop.
     static void moveForTravel(Character bot, int x, int y) {
         BotMovementState st = stateOf(bot);
@@ -371,6 +377,7 @@ public final class GCMovement {
         } else {
             ARRIVAL_CALLBACKS.remove(st.bot.getId());
         }
+        if (changed) GCMovementDriver.wake(st);
     }
 
     /* Anchor at (x,y): walk there and hold position (sentry). */
@@ -529,7 +536,7 @@ public final class GCMovement {
             Point dest = (ground != null) ? ground : new Point(x, y);
             BotPhysicsEngine.teleportTo(st, bot, dest);
             BotMovementManager.resetEntryStateAfterTeleport(st);
-            switch (TeleportCutPolicy.choose(ObserverTracker.isActiveMap(bot.getMapId()), origin, dest)) {
+            switch (TeleportCutPolicy.choose(ObserverTracker.isActiveMap(bot.getMap()), origin, dest)) {
                 case ANIMATED -> GCMovementSkills.teleportCut(st, bot, origin, dest);
                 case NONE -> {
                     // Leave the snapshot stale so the first observed tick re-announces it.
@@ -1037,7 +1044,10 @@ public final class GCMovement {
         BotMovementState st = STATES.get(bot.getId());
         if (st != null) {
             synchronized (st) {
-                st.resting = resting;
+                if (st.resting != resting) {
+                    st.resting = resting;
+                    GCMovementDriver.wake(st);
+                }
             }
         }
     }
@@ -1185,8 +1195,8 @@ public final class GCMovement {
      * real combat only on observed maps). Wraps the package-private ObserverTracker; never
      * forces the observer poll to start (it is started by .enable).
      */
-    public static boolean isMapObserved(int mapId) {
-        return ObserverTracker.isFull(mapId);
+    public static boolean isMapObserved(MapleMap map) {
+        return ObserverTracker.isFull(map);
     }
 
     /* The oid of the mob that last actually hurt this bot (still inside its retaliation memory
@@ -1217,8 +1227,8 @@ public final class GCMovement {
      * poll - so visible movement / combat / broadcast resume the same tick a real player arrives,
      * instead of up to one poll later. Used by BotMapEntryResponder when a real player enters a map.
      */
-    public static void markObservedNow(int mapId) {
-        ObserverTracker.markObservedNow(mapId);
+    public static void markObservedNow(MapleMap map) {
+        ObserverTracker.markObservedNow(map);
     }
 
     /*
@@ -1226,14 +1236,14 @@ public final class GCMovement {
      * a portal-adjacent map), "dwell" (recently observed, still held at full physics by the hysteresis
      * window), or "coarse" (unobserved). Diagnostics — see !gcmove lod train.
      */
-    public static String lodTier(int mapId) {
-        if (ObserverTracker.isFull(mapId)) {
+    public static String lodTier(MapleMap map) {
+        if (ObserverTracker.isFull(map)) {
             return "full";
         }
-        if (ObserverTracker.isHalo(mapId)) {
+        if (ObserverTracker.isHalo(map)) {
             return "halo";
         }
-        if (ObserverTracker.isActiveMap(mapId)) {
+        if (ObserverTracker.isActiveMap(map)) {
             return "dwell";
         }
         return "coarse";

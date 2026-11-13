@@ -124,7 +124,7 @@ final class GCMovementSkills {
         BotPhysicsEngine.teleportTo(st, bot, dest);
         BotMovementManager.resetEntryStateAfterTeleport(st);
         st.attackMovementLockUntilMs = attackUntilMs; // a skill blink does not cancel the attack animation
-        if (ObserverTracker.isActiveMap(bot.getMapId())) {
+        if (ObserverTracker.isActiveMap(bot.getMap())) {
             broadcastTeleport(bot, origin, dest, stance);
         }
         return true;

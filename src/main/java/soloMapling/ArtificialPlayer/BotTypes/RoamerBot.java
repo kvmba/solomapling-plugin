@@ -330,7 +330,7 @@ public class RoamerBot extends BotSM implements GrindTickRegistry.Participant {
         }
 
         long nowMs = now();
-        if (currentMobLevel > 0 && !GCMovement.isMapObserved(chr.getMapId())) {
+        if (currentMobLevel > 0 && !GCMovement.isMapObserved(chr.getMap())) {
             double sec = (nowMs - lastExpAccrualMs) / 1000.0;
             if (sec > 0) {
                 accrueAbstractExp(currentMobLevel, sec);
@@ -370,14 +370,14 @@ public class RoamerBot extends BotSM implements GrindTickRegistry.Participant {
             return;
         }
         nextChatterMs = t + AMBIENT_MIN_MS + (long) (rng.nextDouble() * (AMBIENT_MAX_MS - AMBIENT_MIN_MS));
-        if (!GCMovement.isMapObserved(chr.getMapId())) {
+        if (!GCMovement.isMapObserved(chr.getMap())) {
             return; // gate advanced; nothing worth saying unobserved
         }
         sayContext("GrindAmbient", chr);
     }
 
     private void maybeSelfBuff(Character chr) {
-        if (now() < nextBuffMs || !GCMovement.isMapObserved(chr.getMapId()) || !GCMovement.isGrounded(chr)) {
+        if (now() < nextBuffMs || !GCMovement.isMapObserved(chr.getMap()) || !GCMovement.isGrounded(chr)) {
             return;
         }
         soloMapling.ArtificialPlayer.BotAttackSystem.BotBuffDriver.forceBuff(chr, silentNextBuff);
@@ -388,7 +388,7 @@ public class RoamerBot extends BotSM implements GrindTickRegistry.Participant {
     // Fires a context-token dialogue node, but only when a real player can see it (observed map), and off
     // the macro thread so the line's hold never blocks the tick. A missing node is not an error.
     private void sayContext(String node, Character chr) {
-        if (chr == null || !GCMovement.isMapObserved(chr.getMapId())) {
+        if (chr == null || !GCMovement.isMapObserved(chr.getMap())) {
             return;
         }
         soloMapling.server.ExecutorServiceManager.runAsync(() ->
@@ -443,7 +443,7 @@ public class RoamerBot extends BotSM implements GrindTickRegistry.Participant {
     private long lastRepairMs = 0L;
 
     private boolean grindWatchdog(Character chr) {
-        if (chr == null || !GCMovement.isMapObserved(chr.getMapId())) {
+        if (chr == null || !GCMovement.isMapObserved(chr.getMap())) {
             return false; // unobserved bots don't fight (abstract EXP) — they can't be physically stuck
         }
         if (status().isFrozen()) {

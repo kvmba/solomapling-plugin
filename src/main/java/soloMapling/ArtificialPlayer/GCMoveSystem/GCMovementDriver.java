@@ -43,11 +43,8 @@ final class GCMovementDriver {
     // 20 Hz wakeups. The analytic CoarseExecutor is pure wall-clock, so the slower cadence yields
     // identical positions.
     private static final int UNOBSERVED_TICK_MS = 1000;
-    // Ours (Fable Phase 3): an unobserved bot with no movement job at all doesn't need
-    // the UNOBSERVED_TICK_MS coarse cadence either. A job started while idling begins up to one
-    // idle period late (~4s), which is invisible on a map nobody can see; on promotion the next
-    // tick returns to TICK_MS. At ~1200 mostly-idle background bots this cuts the constant
-    // movement wakeups roughly 16x.
+    // Jobless bots and explicit rope rests need only an idle heartbeat while unseen.
+    // New move orders, rest changes and observation promotion wake the pending deadline.
     private static final int UNOBSERVED_IDLE_TICK_MS = 4000;
     // Coarse "arrived" box: within this of the goal, hold (and fire arrival) instead of replanning.
     private static final int COARSE_ARRIVE_PX = 12;
@@ -123,6 +120,16 @@ final class GCMovementDriver {
         }
     }
 
+    static void wake(BotMovementState entry) {
+        synchronized (entry) {
+            if (entry.tickStopped || entry.task == null
+                    || entry.task.getDelay(TimeUnit.MILLISECONDS) <= BotPhysicsEngine.cfg.TICK_MS) return;
+            cancelScheduledTick(entry);
+            long generation = ++entry.tickGeneration;
+            scheduleNext(entry, generation, System.nanoTime());
+        }
+    }
+
     private static void cancelScheduledTick(BotMovementState entry) {
         if (entry.task != null) {
             entry.task.cancel(false);
@@ -188,13 +195,15 @@ final class GCMovementDriver {
         return next + missedSlots * cadence;
     }
 
-    private static long nextCadenceMs(BotMovementState entry) {
+    static long nextCadenceMs(BotMovementState entry) {
         Character bot = entry.bot;
         boolean active = bot != null && bot.getMap() != null
-                && ObserverTracker.isActiveMap(bot.getMapId());
+                && ObserverTracker.isActiveMap(bot.getMap());
         if (active) {
             return BotPhysicsEngine.cfg.TICK_MS;
         }
+        // An explicit rope rest holds a pose, not step-based climbing physics.
+        if (entry.resting && entry.climbing && !entry.inAir) return UNOBSERVED_IDLE_TICK_MS;
         // Airborne or on a rope: never drop to the slow cadence. The physics integrator is
         // step-based, so at 1s per tick a bot hangs in the air for ~20 seconds before it lands -
         // which is what "stuck in the jump pose" and "standing in mid-air" are. It also keeps
@@ -457,7 +466,7 @@ final class GCMovementDriver {
             return;
         }
 
-        boolean active = ObserverTracker.isActiveMap(bot.getMapId());
+        boolean active = ObserverTracker.isActiveMap(bot.getMap());
 
         // LOD promotion (M2): the bot was moving analytically (coarse) and a player just arrived —
         // rebuild the physics shadow at its current interpolated position so physics resumes cleanly
@@ -1100,7 +1109,7 @@ final class GCMovementDriver {
         // If a real player is already on this map, mark it observed NOW so the visible spawn (float →
         // drop, jump stance) and FULL combat start this tick instead of waiting up to one observer poll.
         if (ObserverTracker.hasRealPlayerNow(map)) {
-            ObserverTracker.markObservedNow(bot.getMapId());
+            ObserverTracker.markObservedNow(map);
             // Ours: the movement above is already instant - also wake the arriving bot's macro brain so
             // it acts promptly instead of on its slow 2-6s/10s wheel. See BotMapEntryResponder (B).
             soloMapling.ArtificialPlayer.BotMapEntryResponder.onBotArrivedObserved(bot);
@@ -1114,7 +1123,7 @@ final class GCMovementDriver {
         // maps just land on the floor (nobody's watching, and it keeps coarse travel from stalling
         // ~1.5s per hop). The hold + release runs in tick(); beginPortalDrop hands off to the
         // airborne integrator.
-        if (ground != null && ObserverTracker.isActiveMap(bot.getMapId())) {
+        if (ground != null && ObserverTracker.isActiveMap(map)) {
             // Float at the SAME y the room was already shown: the host's entering-field SPAWN_PLAYER
             // writes position.y - ENTRY_RAISE_PX (42) and a jump pose, and GCMovement.enterPortal arms
             // that pose so the host omits the foothold and the client cannot snap the sprite back down.
@@ -1157,7 +1166,7 @@ final class GCMovementDriver {
      * the unobserved tick throttle.
      */
     private static void broadcastIfObserved(BotMovementState entry) {
-        if (entry.bot != null && ObserverTracker.isActiveMap(entry.bot.getMapId())) {
+        if (entry.bot != null && ObserverTracker.isActiveMap(entry.bot.getMap())) {
             BotMovementManager.broadcastMovement(entry);
         }
     }
@@ -1258,7 +1267,7 @@ final class GCMovementDriver {
      * map a bare absolute fragment is a one-frame sprite jump, so cut like a blink instead.
      */
     private static void renderRecoveryCut(BotMovementState entry, Character bot, Point origin, Point dest) {
-        switch (TeleportCutPolicy.choose(ObserverTracker.isActiveMap(bot.getMapId()), origin, dest)) {
+        switch (TeleportCutPolicy.choose(ObserverTracker.isActiveMap(bot.getMap()), origin, dest)) {
             case ANIMATED -> GCMovementSkills.teleportCut(entry, bot, origin, dest);
             case NONE -> BotMovementManager.invalidateBroadcastSnapshot(entry);
             default -> broadcastIfObserved(entry);

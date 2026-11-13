@@ -63,7 +63,7 @@ public class SocialCommands {
         if (fakechar == null || fakechar.getMap() == null) {
             return;
         }
-        if (!GCMovement.isMapObserved(fakechar.getMapId())) {
+        if (!GCMovement.isMapObserved(fakechar.getMap())) {
             return; // nobody watching - the expression is just a packet, don't pay for it
         }
         if (ThreadLocalRandom.current().nextDouble() < SPEAK_EMOTE_CHANCE) {

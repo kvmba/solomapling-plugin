@@ -156,7 +156,7 @@ public class LpqRopeHeadBallisticExitReproTest {
 
     private static void tickN(Sim sim, int ticks) {
         for (int i = 0; i < ticks; i++) {
-            if (i % 30 == 0) ObserverTracker.markObservedNow(922010100);
+            if (i % 30 == 0) ObserverTracker.markObservedNow(sim.st().bot.getMap());
             try {
                 TICK.invoke(null, sim.st());
                 MovementClock.advance(BotPhysicsEngine.cfg.TICK_MS);

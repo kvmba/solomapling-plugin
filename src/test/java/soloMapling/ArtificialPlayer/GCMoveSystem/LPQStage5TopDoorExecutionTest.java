@@ -130,7 +130,7 @@ public class LPQStage5TopDoorExecutionTest {
     }
 
     private static void tickOnce(Sim sim) {
-        ObserverTracker.markObservedNow(MAP);
+        ObserverTracker.markObservedNow(sim.st().bot.getMap());
         try {
             TICK.invoke(null, sim.st());
         } catch (ReflectiveOperationException e) {

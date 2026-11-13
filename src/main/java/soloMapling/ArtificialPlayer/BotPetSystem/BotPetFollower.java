@@ -366,10 +366,9 @@ public final class BotPetFollower {
         // (an unwatched world of thousands of bots stays cheap). But FIRST keep every pet's POSITION
         // fresh: the host reads pet.getPos() to spawn a pet for a joining player
         // (spawnPlayerMapObject), so a wholly frozen position would land the pet wherever it was when
-        // the map went dark and make it snap/teleport on the next tick. The snapshot is one INDEXED
-        // ground probe per pet (the same the observed tick lands on) plus arithmetic — no host tree
-        // query, no packet (see syncUnobservedPositions).
-        boolean observed = GCMovement.isMapObserved(chr.getMapId());
+        // the map went dark and make it snap/teleport on the next tick. The snapshot reuses settled
+        // footing and probes only when needed — no host tree query or packet (see syncUnobservedPositions).
+        boolean observed = GCMovement.isMapObserved(chr.getMap());
         if (!observed) {
             syncUnobservedPositions(chr, config);
         }
@@ -1295,9 +1294,9 @@ public final class BotPetFollower {
      */
     private static void syncUnobservedPositions(Character chr, BotPetConfig config) {
         Pet[] pets = chr.getPets();
-        int[] followX = computeFollowTargetXs(chr, pets, GCMovement.isMoving(chr));
+        boolean ownerMoving = GCMovement.isMoving(chr);
         MapleMap map = chr.getMap();
-        int ownerY = chr.getPosition().y;
+        Point owner = chr.getPosition();
         // Owner on a rope/ladder or in water: the observed tick neither probes nor moves the pet on
         // the ground, so the snapshot inherits that instead of probing the ground beneath a rope it
         // must stay on. Climbing and swimming differ in y: a climber hangs at the owner's own y, a
@@ -1310,19 +1309,28 @@ public final class BotPetFollower {
             if (pet == null) {
                 continue;
             }
-            int x = followX[i];
+            Point position = pet.getPos();
+            int x = ownerClimbing ? owner.x
+                    : followTargetX(owner.x, position.x, currentFollowDistance(pet, i), ownerMoving);
+            boolean left = isPetFacingLeft(pet);
+            pet.setStance(ownerClimbing ? (left ? PET_HANG_LEFT : PET_HANG_RIGHT)
+                    : ownerSwimming ? (left ? PET_SWIM_LEFT : PET_SWIM_RIGHT)
+                    : (left ? PET_STAND_LEFT : PET_STAND_RIGHT));
             int y;
             int fh;
             if (ownerOffGround) {
-                y = ownerClimbing ? ownerY : ownerY - config.swimOffset();
+                y = ownerClimbing ? owner.y : owner.y - config.swimOffset();
                 fh = 0;
             } else {
+                // Geometry is immutable. A grounded pet already at its leash slot needs no probe.
+                // Map entry clears fh in the host, so even same-id instance changes re-probe once.
+                if (x == position.x && pet.getFh() > 0) continue;
                 // The floor under the slot, via the same probe + tolerance (findStandingFoothold) the observed
                 // tick lands the pet with — so the snapshot IS where the observed tick will put it.
                 // Probed from the pet's own last footing, not the owner's y: a jumping owner would
                 // strand the pet in mid-air. No footing within a step (the slot is over a ledge/gap)
                 // leaves the pet where it is; the observed tick's lost-ground fall handles it.
-                int footing = pet.getPos().y;
+                int footing = position.y;
                 Foothold below = findStandingFoothold(map, new Point(x, footing));
                 if (below != null) {
                     y = below.calculateFooting(x);
@@ -1332,12 +1340,7 @@ public final class BotPetFollower {
                     fh = 0;
                 }
             }
-            pet.setPos(new Point(x, y));
-            // Keep the pet's OWN facing, exactly as the observed tick does (it derives the stance
-            // from the pet, never the owner): the pet does not react to the owner turning, so the
-            // snapshot must not flip it either, or a joining player sees it spawn facing a direction
-            // the next observed tick never asked for.
-            pet.setStance(isPetFacingLeft(pet) ? PET_STAND_LEFT : PET_STAND_RIGHT);
+            if (position.x != x || position.y != y) pet.setPos(new Point(x, y));
             pet.setFh(fh);
         }
     }

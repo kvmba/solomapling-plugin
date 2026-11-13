@@ -217,7 +217,7 @@ public class PqGraphGateTest {
             sim.st().moveBestDist = Integer.MAX_VALUE;
             sim.st().moveProgressAtMs = MovementClock.nowMs();
             for (int i = 0; i < 30; i++) {
-                if (i % 30 == 0) ObserverTracker.markObservedNow(STAGE_1);
+                if (i % 30 == 0) ObserverTracker.markObservedNow(map);
                 TICK.invoke(null, sim.st());
                 MovementClock.advance(BotPhysicsEngine.cfg.TICK_MS);
             }

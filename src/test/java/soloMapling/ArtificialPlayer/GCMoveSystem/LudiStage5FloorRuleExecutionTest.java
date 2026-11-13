@@ -139,7 +139,7 @@ class LudiStage5FloorRuleExecutionTest {
     }
 
     private void tick() throws Exception {
-        ObserverTracker.markObservedNow(bot.getMapId());
+        ObserverTracker.markObservedNow(bot.getMap());
         Method tick = GCMovementDriver.class.getDeclaredMethod("tick", BotMovementState.class);
         tick.setAccessible(true);
         try {

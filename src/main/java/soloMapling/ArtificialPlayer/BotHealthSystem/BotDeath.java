@@ -252,7 +252,7 @@ public final class BotDeath {
         }
         nextGrumbleAtMs = now + GRUMBLE_MIN_MS
                 + ThreadLocalRandom.current().nextLong(GRUMBLE_MAX_MS - GRUMBLE_MIN_MS);
-        if (!GCMovement.isMapObserved(chr.getMapId())) {
+        if (!GCMovement.isMapObserved(chr.getMap())) {
             return; // nobody watching — advance the clock without paying for a line
         }
         BotDialogueHandler.SpokenLine spoken =

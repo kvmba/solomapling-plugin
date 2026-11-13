@@ -144,7 +144,7 @@ public class RopeArrivalRuleScopeTest {
 
         for (int i = 0; i < 400 && st.climbing; i++) {
             if (i % 20 == 0) {
-                ObserverTracker.markObservedNow(MAP_ID);
+                ObserverTracker.markObservedNow(st.bot.getMap());
             }
             try {
                 TICK.invoke(null, st);
@@ -187,7 +187,7 @@ public class RopeArrivalRuleScopeTest {
         boolean landed = false;
         for (int i = 0; i < 600; i++) {
             if (i % 20 == 0) {
-                ObserverTracker.markObservedNow(MAP_ID);
+                ObserverTracker.markObservedNow(st.bot.getMap());
             }
             try {
                 TICK.invoke(null, st);
