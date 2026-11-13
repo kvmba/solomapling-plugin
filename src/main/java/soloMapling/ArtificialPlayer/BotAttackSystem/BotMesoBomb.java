@@ -16,6 +16,7 @@ import org.gms.server.maps.MapObject;
 import org.gms.server.maps.MapObjectType;
 import org.gms.util.PacketCreator;
 import soloMapling.ArtificialPlayer.GCMoveSystem.GCMovement;
+import soloMapling.ArtificialPlayer.PartyQuest.PqActions;
 import soloMapling.server.BotTiming;
 
 import java.awt.Point;
@@ -358,7 +359,10 @@ public final class BotMesoBomb {
         double radiusSq = (double) SCAN_RADIUS_PX * SCAN_RADIUS_PX;
         for (MapObject mo : map.getMapObjectsInRange(pos, radiusSq, List.of(MapObjectType.MONSTER))) {
             Monster m = (Monster) mo;
-            if (m.isAlive() && box.contains(m.getPosition())) {
+            // The blast honours the bot's hunt filter: Monster Carnival mixes both sides'
+            // summons in one map object list, and a detonation that skipped the filter would
+            // kill the bot's own side's monsters for the opponent's benefit.
+            if (m.isAlive() && PqActions.huntFilterAdmits(bot, m) && box.contains(m.getPosition())) {
                 mobs.add(m);
             }
         }

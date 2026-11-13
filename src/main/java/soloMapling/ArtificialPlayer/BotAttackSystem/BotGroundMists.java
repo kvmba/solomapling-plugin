@@ -12,6 +12,7 @@ import org.gms.server.maps.MapObject;
 import org.gms.server.maps.MapObjectType;
 import org.gms.util.PacketCreator;
 import soloMapling.ArtificialPlayer.GCMoveSystem.GCMovement;
+import soloMapling.ArtificialPlayer.PartyQuest.PqActions;
 
 import java.awt.Point;
 import java.awt.Rectangle;
@@ -147,7 +148,10 @@ public final class BotGroundMists {
         for (MapObject mo : bot.getMap().getMapObjectsInRange(pos,
                 (double) SCAN_RADIUS_PX * SCAN_RADIUS_PX, List.of(MapObjectType.MONSTER))) {
             Monster m = (Monster) mo;
-            if (m.isAlive() && box.contains(m.getPosition())) {
+            // The cloud poisons only what the bot may hunt (the Carnival hunt filter, same
+            // rule the swing obeys): a mist that skipped it would drain the bot's own side's
+            // summons.
+            if (m.isAlive() && PqActions.huntFilterAdmits(bot, m) && box.contains(m.getPosition())) {
                 mobs.add(m);
             }
         }

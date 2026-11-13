@@ -14,6 +14,7 @@ import org.gms.server.maps.MapObject;
 import org.gms.server.maps.MapObjectType;
 import org.gms.util.PacketCreator;
 import soloMapling.ArtificialPlayer.GCMoveSystem.GCMovement;
+import soloMapling.ArtificialPlayer.PartyQuest.PqActions;
 
 import java.awt.Point;
 import java.awt.Rectangle;
@@ -95,7 +96,9 @@ public final class BotShadowWeb {
         for (MapObject mo : map.getMapObjectsInRange(pos, (double) SCAN_RADIUS_PX * SCAN_RADIUS_PX,
                 List.of(MapObjectType.MONSTER))) {
             Monster m = (Monster) mo;
-            if (m.isAlive() && box.contains(m.getPosition())) {
+            // The web honours the bot's hunt filter (the Carnival hunt filter, same rule the
+            // swing obeys): webbing a monster is webbing the party fighting it.
+            if (m.isAlive() && PqActions.huntFilterAdmits(bot, m) && box.contains(m.getPosition())) {
                 mobs.add(m);
             }
         }
