@@ -1,0 +1,822 @@
+{
+ "meta": {
+  "module": "`Angel.exe",
+  "table_va": "0x00BEC620",
+  "entry_size": 24,
+  "initializer_va": "0x004A38E7",
+  "lookup_va": "0x004A8CE6",
+  "count": 162
+ },
+ "actions": [
+  {
+   "code": 0,
+   "stringpool_index": 1008,
+   "name": "walk1"
+  },
+  {
+   "code": 1,
+   "stringpool_index": 1009,
+   "name": "walk2"
+  },
+  {
+   "code": 2,
+   "stringpool_index": 1037,
+   "name": "stand1"
+  },
+  {
+   "code": 3,
+   "stringpool_index": 1038,
+   "name": "stand2"
+  },
+  {
+   "code": 4,
+   "stringpool_index": 1010,
+   "name": "alert"
+  },
+  {
+   "code": 5,
+   "stringpool_index": 1012,
+   "name": "swingO1"
+  },
+  {
+   "code": 6,
+   "stringpool_index": 1013,
+   "name": "swingO2"
+  },
+  {
+   "code": 7,
+   "stringpool_index": 1014,
+   "name": "swingO3"
+  },
+  {
+   "code": 8,
+   "stringpool_index": 1015,
+   "name": "swingOF"
+  },
+  {
+   "code": 9,
+   "stringpool_index": 1016,
+   "name": "swingT1"
+  },
+  {
+   "code": 10,
+   "stringpool_index": 1017,
+   "name": "swingT2"
+  },
+  {
+   "code": 11,
+   "stringpool_index": 1018,
+   "name": "swingT3"
+  },
+  {
+   "code": 12,
+   "stringpool_index": 1019,
+   "name": "swingTF"
+  },
+  {
+   "code": 13,
+   "stringpool_index": 1020,
+   "name": "swingP1"
+  },
+  {
+   "code": 14,
+   "stringpool_index": 1021,
+   "name": "swingP2"
+  },
+  {
+   "code": 15,
+   "stringpool_index": 1022,
+   "name": "swingPF"
+  },
+  {
+   "code": 16,
+   "stringpool_index": 1023,
+   "name": "stabO1"
+  },
+  {
+   "code": 17,
+   "stringpool_index": 1024,
+   "name": "stabO2"
+  },
+  {
+   "code": 18,
+   "stringpool_index": 1025,
+   "name": "stabOF"
+  },
+  {
+   "code": 19,
+   "stringpool_index": 1026,
+   "name": "stabT1"
+  },
+  {
+   "code": 20,
+   "stringpool_index": 1027,
+   "name": "stabT2"
+  },
+  {
+   "code": 21,
+   "stringpool_index": 1028,
+   "name": "stabTF"
+  },
+  {
+   "code": 22,
+   "stringpool_index": 1031,
+   "name": "shoot1"
+  },
+  {
+   "code": 23,
+   "stringpool_index": 1032,
+   "name": "shoot2"
+  },
+  {
+   "code": 24,
+   "stringpool_index": 1012,
+   "name": "swingO1"
+  },
+  {
+   "code": 25,
+   "stringpool_index": 1013,
+   "name": "swingO2"
+  },
+  {
+   "code": 26,
+   "stringpool_index": 1014,
+   "name": "swingO3"
+  },
+  {
+   "code": 27,
+   "stringpool_index": 1034,
+   "name": "shootF"
+  },
+  {
+   "code": 28,
+   "stringpool_index": 1012,
+   "name": "swingO1"
+  },
+  {
+   "code": 29,
+   "stringpool_index": 1014,
+   "name": "swingO3"
+  },
+  {
+   "code": 30,
+   "stringpool_index": 1023,
+   "name": "stabO1"
+  },
+  {
+   "code": 31,
+   "stringpool_index": 5629,
+   "name": "heal"
+  },
+  {
+   "code": 32,
+   "stringpool_index": 1029,
+   "name": "proneStab"
+  },
+  {
+   "code": 33,
+   "stringpool_index": 1030,
+   "name": "prone"
+  },
+  {
+   "code": 34,
+   "stringpool_index": 1040,
+   "name": "fly"
+  },
+  {
+   "code": 35,
+   "stringpool_index": 5635,
+   "name": "jump"
+  },
+  {
+   "code": 36,
+   "stringpool_index": 1041,
+   "name": "ladder"
+  },
+  {
+   "code": 37,
+   "stringpool_index": 1043,
+   "name": "rope"
+  },
+  {
+   "code": 38,
+   "stringpool_index": 5623,
+   "name": "dead"
+  },
+  {
+   "code": 39,
+   "stringpool_index": 1045,
+   "name": "sit"
+  },
+  {
+   "code": 40,
+   "stringpool_index": 1046,
+   "name": "tired"
+  },
+  {
+   "code": 41,
+   "stringpool_index": 1011,
+   "name": "alert2"
+  },
+  {
+   "code": 42,
+   "stringpool_index": 1081,
+   "name": "alert3"
+  },
+  {
+   "code": 43,
+   "stringpool_index": 1082,
+   "name": "alert4"
+  },
+  {
+   "code": 44,
+   "stringpool_index": 1083,
+   "name": "alert5"
+  },
+  {
+   "code": 45,
+   "stringpool_index": 5069,
+   "name": "alert6"
+  },
+  {
+   "code": 46,
+   "stringpool_index": 1042,
+   "name": "ladder2"
+  },
+  {
+   "code": 47,
+   "stringpool_index": 1044,
+   "name": "rope2"
+  },
+  {
+   "code": 48,
+   "stringpool_index": 1033,
+   "name": "shoot6"
+  },
+  {
+   "code": 49,
+   "stringpool_index": 1048,
+   "name": "magic1"
+  },
+  {
+   "code": 50,
+   "stringpool_index": 2732,
+   "name": "magic2"
+  },
+  {
+   "code": 51,
+   "stringpool_index": 2733,
+   "name": "magic3"
+  },
+  {
+   "code": 52,
+   "stringpool_index": 2734,
+   "name": "magic5"
+  },
+  {
+   "code": 53,
+   "stringpool_index": 1086,
+   "name": "burster1"
+  },
+  {
+   "code": 54,
+   "stringpool_index": 1087,
+   "name": "burster2"
+  },
+  {
+   "code": 55,
+   "stringpool_index": 1047,
+   "name": "savage"
+  },
+  {
+   "code": 56,
+   "stringpool_index": 1084,
+   "name": "avenger"
+  },
+  {
+   "code": 57,
+   "stringpool_index": 1085,
+   "name": "assaulter"
+  },
+  {
+   "code": 58,
+   "stringpool_index": 1088,
+   "name": "prone2"
+  },
+  {
+   "code": 59,
+   "stringpool_index": 1089,
+   "name": "assassination"
+  },
+  {
+   "code": 60,
+   "stringpool_index": 1090,
+   "name": "assassinationS"
+  },
+  {
+   "code": 61,
+   "stringpool_index": 1091,
+   "name": "rush"
+  },
+  {
+   "code": 62,
+   "stringpool_index": 1092,
+   "name": "rush2"
+  },
+  {
+   "code": 63,
+   "stringpool_index": 3865,
+   "name": "brandish1"
+  },
+  {
+   "code": 64,
+   "stringpool_index": 3866,
+   "name": "brandish2"
+  },
+  {
+   "code": 65,
+   "stringpool_index": 3833,
+   "name": "sanctuary"
+  },
+  {
+   "code": 66,
+   "stringpool_index": 3859,
+   "name": "meteor"
+  },
+  {
+   "code": 67,
+   "stringpool_index": 3868,
+   "name": "paralyze"
+  },
+  {
+   "code": 68,
+   "stringpool_index": 3861,
+   "name": "blizzard"
+  },
+  {
+   "code": 69,
+   "stringpool_index": 3869,
+   "name": "genesis"
+  },
+  {
+   "code": 70,
+   "stringpool_index": 3864,
+   "name": "ninjastorm"
+  },
+  {
+   "code": 71,
+   "stringpool_index": 3867,
+   "name": "blast"
+  },
+  {
+   "code": 72,
+   "stringpool_index": 3862,
+   "name": "holyshield"
+  },
+  {
+   "code": 73,
+   "stringpool_index": 3863,
+   "name": "showdown"
+  },
+  {
+   "code": 74,
+   "stringpool_index": 3842,
+   "name": "resurrection"
+  },
+  {
+   "code": 75,
+   "stringpool_index": 3860,
+   "name": "chainlightning"
+  },
+  {
+   "code": 76,
+   "stringpool_index": 3844,
+   "name": "smokeshell"
+  },
+  {
+   "code": 77,
+   "stringpool_index": 1093,
+   "name": "handgun"
+  },
+  {
+   "code": 78,
+   "stringpool_index": 1094,
+   "name": "somersault"
+  },
+  {
+   "code": 79,
+   "stringpool_index": 1095,
+   "name": "straight"
+  },
+  {
+   "code": 80,
+   "stringpool_index": 1096,
+   "name": "eburster"
+  },
+  {
+   "code": 81,
+   "stringpool_index": 1097,
+   "name": "backspin"
+  },
+  {
+   "code": 82,
+   "stringpool_index": 1098,
+   "name": "eorb"
+  },
+  {
+   "code": 83,
+   "stringpool_index": 1099,
+   "name": "screw"
+  },
+  {
+   "code": 84,
+   "stringpool_index": 1100,
+   "name": "doubleupper"
+  },
+  {
+   "code": 85,
+   "stringpool_index": 1101,
+   "name": "dragonstrike"
+  },
+  {
+   "code": 86,
+   "stringpool_index": 1102,
+   "name": "doublefire"
+  },
+  {
+   "code": 87,
+   "stringpool_index": 1103,
+   "name": "triplefire"
+  },
+  {
+   "code": 88,
+   "stringpool_index": 1104,
+   "name": "fake"
+  },
+  {
+   "code": 89,
+   "stringpool_index": 1105,
+   "name": "airstrike"
+  },
+  {
+   "code": 90,
+   "stringpool_index": 1106,
+   "name": "edrain"
+  },
+  {
+   "code": 91,
+   "stringpool_index": 1107,
+   "name": "octopus"
+  },
+  {
+   "code": 92,
+   "stringpool_index": 1108,
+   "name": "backstep"
+  },
+  {
+   "code": 93,
+   "stringpool_index": 1109,
+   "name": "shot"
+  },
+  {
+   "code": 94,
+   "stringpool_index": 5648,
+   "name": "recovery"
+  },
+  {
+   "code": 95,
+   "stringpool_index": 1115,
+   "name": "fireburner"
+  },
+  {
+   "code": 96,
+   "stringpool_index": 1116,
+   "name": "coolingeffect"
+  },
+  {
+   "code": 97,
+   "stringpool_index": 1117,
+   "name": "fist"
+  },
+  {
+   "code": 98,
+   "stringpool_index": 1118,
+   "name": "timeleap"
+  },
+  {
+   "code": 99,
+   "stringpool_index": 1119,
+   "name": "rapidfire"
+  },
+  {
+   "code": 100,
+   "stringpool_index": 1120,
+   "name": "homing"
+  },
+  {
+   "code": 101,
+   "stringpool_index": 1121,
+   "name": "ghostwalk"
+  },
+  {
+   "code": 102,
+   "stringpool_index": 1122,
+   "name": "ghoststand"
+  },
+  {
+   "code": 103,
+   "stringpool_index": 1123,
+   "name": "ghostjump"
+  },
+  {
+   "code": 104,
+   "stringpool_index": 1124,
+   "name": "ghostproneStab"
+  },
+  {
+   "code": 105,
+   "stringpool_index": 1127,
+   "name": "ghostfly"
+  },
+  {
+   "code": 106,
+   "stringpool_index": 1125,
+   "name": "ghostladder"
+  },
+  {
+   "code": 107,
+   "stringpool_index": 1126,
+   "name": "ghostrope"
+  },
+  {
+   "code": 108,
+   "stringpool_index": 1128,
+   "name": "ghostsit"
+  },
+  {
+   "code": 109,
+   "stringpool_index": 1129,
+   "name": "cannon"
+  },
+  {
+   "code": 110,
+   "stringpool_index": 1130,
+   "name": "torpedo"
+  },
+  {
+   "code": 111,
+   "stringpool_index": 1131,
+   "name": "darksight"
+  },
+  {
+   "code": 112,
+   "stringpool_index": 1132,
+   "name": "bamboo"
+  },
+  {
+   "code": 113,
+   "stringpool_index": 5351,
+   "name": "pyramid"
+  },
+  {
+   "code": 114,
+   "stringpool_index": 1133,
+   "name": "wave"
+  },
+  {
+   "code": 115,
+   "stringpool_index": 1134,
+   "name": "blade"
+  },
+  {
+   "code": 116,
+   "stringpool_index": 5084,
+   "name": "souldriver"
+  },
+  {
+   "code": 117,
+   "stringpool_index": 1136,
+   "name": "firestrike"
+  },
+  {
+   "code": 118,
+   "stringpool_index": 5073,
+   "name": "flamegear"
+  },
+  {
+   "code": 119,
+   "stringpool_index": 5085,
+   "name": "stormbreak"
+  },
+  {
+   "code": 120,
+   "stringpool_index": 1139,
+   "name": "vampire"
+  },
+  {
+   "code": 121,
+   "stringpool_index": 5627,
+   "name": "float"
+  },
+  {
+   "code": 122,
+   "stringpool_index": 5088,
+   "name": "swingT2PoleArm"
+  },
+  {
+   "code": 123,
+   "stringpool_index": 5086,
+   "name": "swingP1PoleArm"
+  },
+  {
+   "code": 124,
+   "stringpool_index": 5087,
+   "name": "swingP2PoleArm"
+  },
+  {
+   "code": 125,
+   "stringpool_index": 5326,
+   "name": "doubleSwing"
+  },
+  {
+   "code": 126,
+   "stringpool_index": 5360,
+   "name": "tripleSwing"
+  },
+  {
+   "code": 127,
+   "stringpool_index": 5074,
+   "name": "fullSwingDouble"
+  },
+  {
+   "code": 128,
+   "stringpool_index": 5075,
+   "name": "fullSwingTriple"
+  },
+  {
+   "code": 129,
+   "stringpool_index": 5077,
+   "name": "overSwingDouble"
+  },
+  {
+   "code": 130,
+   "stringpool_index": 5078,
+   "name": "overSwingTriple"
+  },
+  {
+   "code": 131,
+   "stringpool_index": 5352,
+   "name": "rollingSpin"
+  },
+  {
+   "code": 132,
+   "stringpool_index": 5324,
+   "name": "comboSmash"
+  },
+  {
+   "code": 133,
+   "stringpool_index": 5323,
+   "name": "comboFenrir"
+  },
+  {
+   "code": 134,
+   "stringpool_index": 5325,
+   "name": "comboTempest"
+  },
+  {
+   "code": 135,
+   "stringpool_index": 5333,
+   "name": "finalCharge"
+  },
+  {
+   "code": 136,
+   "stringpool_index": 5071,
+   "name": "combatStep"
+  },
+  {
+   "code": 137,
+   "stringpool_index": 5332,
+   "name": "finalBlow"
+  },
+  {
+   "code": 138,
+   "stringpool_index": 5334,
+   "name": "finalToss"
+  },
+  {
+   "code": 139,
+   "stringpool_index": 5490,
+   "name": "magicmissile"
+  },
+  {
+   "code": 140,
+   "stringpool_index": 5491,
+   "name": "dragonSpark"
+  },
+  {
+   "code": 141,
+   "stringpool_index": 5493,
+   "name": "dragonBreathe"
+  },
+  {
+   "code": 142,
+   "stringpool_index": 5495,
+   "name": "breathe_prepare"
+  },
+  {
+   "code": 143,
+   "stringpool_index": 5492,
+   "name": "dragonIceBreathe"
+  },
+  {
+   "code": 144,
+   "stringpool_index": 5494,
+   "name": "icebreathe_prepare"
+  },
+  {
+   "code": 145,
+   "stringpool_index": 5496,
+   "name": "infinityExplosion"
+  },
+  {
+   "code": 146,
+   "stringpool_index": 5497,
+   "name": "superMagicmissile"
+  },
+  {
+   "code": 147,
+   "stringpool_index": 5498,
+   "name": "illusion"
+  },
+  {
+   "code": 148,
+   "stringpool_index": 5499,
+   "name": "magicFlare"
+  },
+  {
+   "code": 149,
+   "stringpool_index": 5504,
+   "name": "elementalReset"
+  },
+  {
+   "code": 150,
+   "stringpool_index": 5505,
+   "name": "elementalRegistance"
+  },
+  {
+   "code": 151,
+   "stringpool_index": 5506,
+   "name": "dragonAura"
+  },
+  {
+   "code": 152,
+   "stringpool_index": 5500,
+   "name": "magicBooster"
+  },
+  {
+   "code": 153,
+   "stringpool_index": 5501,
+   "name": "dragonShield"
+  },
+  {
+   "code": 154,
+   "stringpool_index": 5502,
+   "name": "dragonFury"
+  },
+  {
+   "code": 155,
+   "stringpool_index": 5503,
+   "name": "dragonFly"
+  },
+  {
+   "code": 156,
+   "stringpool_index": 5507,
+   "name": "dragonSkin"
+  },
+  {
+   "code": 157,
+   "stringpool_index": 1110,
+   "name": "shockwave"
+  },
+  {
+   "code": 158,
+   "stringpool_index": 1111,
+   "name": "demolition"
+  },
+  {
+   "code": 159,
+   "stringpool_index": 1114,
+   "name": "snatch"
+  },
+  {
+   "code": 160,
+   "stringpool_index": 5091,
+   "name": "windspear"
+  },
+  {
+   "code": 161,
+   "stringpool_index": 1113,
+   "name": "windshot"
+  }
+ ]
+}
