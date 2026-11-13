@@ -122,4 +122,19 @@ public class EllinPQBot extends PartyQuestBot {
         mazeExitAsked = getChr().getMapId();
         PqActions.talkTo(getChr(), MAZE_NPC, 0);
     }
+
+    /**
+     * Drop the per-visit maze latch when the run ends.
+     *
+     * <p>The latch is keyed on the maze map id, so normally "same map" is enough to recognise a
+     * re-visit inside one run - but the id survives between runs, and the maze is always the same
+     * room. On the next run the bot would arrive at {@code mazeExitAsked == MAZE_MAP} already and
+     * skip the one talk that opens the way out, leaving the whole party stuck in the maze. The
+     * base class calls this when a run ends or the bot is stopped/retyped.
+     */
+    @Override
+    protected void releaseRoomState() {
+        super.releaseRoomState();
+        mazeExitAsked = -1;
+    }
 }

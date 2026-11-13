@@ -141,4 +141,18 @@ public class KerningPQBot extends PartyQuestBot {
         announcedStage = stage;
         PqActions.say(getChr(), BotMessages.get("pq.stage_plan", stage, plan));
     }
+
+    /**
+     * Forget the last announced stage when the run ends.
+     *
+     * <p>{@code announcedStage} is compared against the stage number only, and stage 2 of the next
+     * run is the same number as stage 2 of this one - so without the reset the bot stays silent
+     * about the new run's rope plan, which is exactly the line the player needs to solve it. The
+     * same seam Ludi resets its two announcement flags at.
+     */
+    @Override
+    protected void releaseRoomState() {
+        super.releaseRoomState();
+        announcedStage = -1;
+    }
 }

@@ -5,8 +5,6 @@ import soloMapling.ArtificialPlayer.PartyQuest.PositionCombination;
 import soloMapling.ArtificialPlayer.PartyQuest.PqActions;
 import soloMapling.Environment.BotMessages;
 
-import java.awt.Point;
-
 import static soloMapling.ArtificialPlayer.BotHelpers.blockingSleep;
 
 /**
@@ -135,18 +133,23 @@ public final class KerningStages {
      * <p>Worth saying out loud: the quest counts every player in the instance including the
      * real one, so the player has to take the spots the bots left untouched. A bot that stayed
      * quiet would leave him guessing exactly as he would have without any help.
+     *
+     * <p>Spots are named by their position in the room's own layout ("第 2 处"), not by their
+     * map coordinates: the coordinates this used to print were both untranslated and unreadable
+     * in-game - a player cannot turn {@code (-721,-340)} into "the second rope from the left".
+     * The number matches the order the room lists its ropes/platforms/barrels, which is the same
+     * order {@code spotsFor} hands them to the search.
      */
     private static String describePlan(PositionCombination.Plan plan) {
-        StringBuilder out = new StringBuilder("spots needing someone: ");
-        boolean any = false;
-        for (Point spot : plan.spots()) {
-            if (any) {
-                out.append(", ");
+        StringBuilder out = new StringBuilder();
+        int total = plan.spots().size();
+        for (int i = 0; i < total; i++) {
+            if (i > 0) {
+                out.append(BotMessages.get("pq.kerning.spot_separator"));
             }
-            out.append("(").append(spot.x).append(",").append(spot.y).append(")");
-            any = true;
+            out.append(BotMessages.get("pq.kerning.spot", i + 1));
         }
-        return any ? out.toString() : null;
+        return total > 0 ? out.toString() : null;
     }
 
     // =========================================================================

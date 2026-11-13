@@ -31,6 +31,9 @@ public class MagatiaPQBot extends PartyQuestBot {
      */
     private final int lobbyMap;
 
+    /** The stage-6 combination last spoken, so the once-per-tick read does not repeat it. */
+    private String announcedCombination;
+
     public MagatiaPQBot(Character character) {
         super(character);
         dialoguePath = PARTY_QUEST_DIALOGUE_PATH;
@@ -56,6 +59,18 @@ public class MagatiaPQBot extends PartyQuestBot {
     @Override
     protected boolean isInsideQuest(int mapId) {
         return MagatiaPqData.isQuestRoom(mapId);
+    }
+
+    /**
+     * Forget the spoken combination when the run ends.
+     *
+     * <p>The property is republished per run, and {@code stage6_comb1} can easily come out the same
+     * two runs in a row; a stale value would silence the one line the party needs.
+     */
+    @Override
+    protected void releaseRoomState() {
+        super.releaseRoomState();
+        announcedCombination = null;
     }
 
     @Override
@@ -86,6 +101,10 @@ public class MagatiaPQBot extends PartyQuestBot {
      * <p>Each {@code stage6_combN} property is a ten-digit string of digits 0-3, not a number -
      * the stage's climbing puzzle reads one digit per row. So it is read as a string and spoken
      * back as one, and only the properties the quest actually writes are read.
+     *
+     * <p>Spoken once per combination, not once per tick: {@link #workStage} runs every 2.5s in a
+     * run, so an unguarded {@code say} here repeated the same six strings forty times a minute -
+     * the bot's single most spammy line in the whole quest family.
      */
     private void readCombination() {
         StringBuilder plan = new StringBuilder();
@@ -99,7 +118,12 @@ public class MagatiaPQBot extends PartyQuestBot {
             }
             plan.append(digits);
         }
-        PqActions.say(getChr(), BotMessages.get("pq.stage_plan", 6, plan));
+        String spoken = plan.toString();
+        if (spoken.equals(announcedCombination)) {
+            return; // same combination, same line - do not spam the room
+        }
+        announcedCombination = spoken;
+        PqActions.say(getChr(), BotMessages.get("pq.stage_plan", 6, spoken));
     }
 
     /** Kill what is here and break what is breakable, which covers the early stages. */

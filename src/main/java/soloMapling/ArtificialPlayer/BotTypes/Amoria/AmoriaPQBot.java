@@ -120,15 +120,20 @@ public class AmoriaPQBot extends PartyQuestBot {
      * <p>Stage 3 is the nine-rope map {@code 670010400} (five of nine, one body each); stage 2 is
      * the three-area sub-room the stage-1 gate opens onto, whose generator draws a body COUNT per
      * area summing to five.
+     *
+     * <p>Always returns false: a rope stage is never the end of the run. The candidate space is
+     * non-empty by construction, so returning "did I get a spot" here - as this used to - answered
+     * the caller's "is the whole run over" question with yes on every tick, and the base class
+     * walked the bot out of the instance the moment it reached stage 2.
      */
     private boolean ropePuzzle(int stage) {
         String answerProperty = AmoriaPqData.comboPropertyFor(stage);
-        PositionCombination.Plan plan = PositionCombination.standOn(getChr(), botIndex(),
+        PositionCombination.standOn(getChr(), botIndex(),
                 System.identityHashCode(getChr().getMap()),
                 stage == 2 ? AmoriaPqData.stage2Candidates() : AmoriaPqData.stage3Candidates(),
                 AmoriaPqData.areasFor(stage), stage, answerProperty,
                 PositionCombination.comboAnswer(answerProperty));
-        return !plan.spots().isEmpty();
+        return false;
     }
 
     /** Which body this bot is, counted from character ids for a stable order. */

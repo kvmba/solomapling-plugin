@@ -56,6 +56,22 @@ public class HenesysPQBot extends PartyQuestBot {
         return HenesysPqData.LOBBY_MAP;
     }
 
+    /**
+     * Forget which half of the quest the last visit was in.
+     *
+     * <p>{@code guarding} is a per-run latch, and the bot object outlives the run: the same
+     * instance is recruited for the next party, so without this reset the second visit starts
+     * already believing the flowers are planted and skips straight to guarding Moon Bunny - which
+     * never spawns until six seeds are planted, leaving the bot standing in an empty field for the
+     * whole run. The base class calls this on every run end (and on stop/retype), which is the
+     * same seam Ludi's announcement flags reset at.
+     */
+    @Override
+    protected void releaseRoomState() {
+        super.releaseRoomState();
+        guarding = false;
+    }
+
     @Override
     protected boolean workStage() {
         if (!guarding && HenesysStages.flowersBloomed(getChr()) < HenesysPqData.FLOWERS_TO_BLOOM) {
