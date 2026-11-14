@@ -107,7 +107,7 @@ public final class BotShadowMeso {
             // The throw honours the bot's hunt filter (the Carnival hunt filter, same rule the
             // swing obeys) - charging it on the bot's own side's summons would spend their HP.
             if (m.isAlive() && PqActions.huntFilterAdmits(bot, m) && box.contains(m.getPosition())
-                    && BotAttackDriver.withinRangedArc(pos, m.getPosition(), m.isBoss())) {
+                    && BotAttackDriver.withinRangedArc(pos, m.getPosition(), m)) {
                 mobs.add(m);
             }
         }

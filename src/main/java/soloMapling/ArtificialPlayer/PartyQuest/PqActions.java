@@ -2008,9 +2008,8 @@ public final class PqActions {
         java.awt.Rectangle bounds = BotAttackDriver.firingPositions(bot, mob);
         if (bounds == null) return null;
         Point target = mob.getPosition();
-        boolean boss = mob.isBoss();
         return GCMovement.nearestReachableGround(bot, bounds,
-                shot -> BotAttackDriver.withinRangedArc(shot, target, boss));
+                shot -> BotAttackDriver.withinRangedArc(shot, target, mob));
     }
 
     /**

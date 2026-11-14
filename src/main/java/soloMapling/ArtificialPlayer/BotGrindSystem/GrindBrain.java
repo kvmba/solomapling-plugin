@@ -253,7 +253,7 @@ public final class GrindBrain {
             if (mp == null || Math.abs(mp.x - pos.x) > reachX || Math.abs(mp.y - pos.y) > reachY) {
                 continue;
             }
-            if (arcLimited && !BotAttackDriver.withinRangedArc(pos, mp, m.isBoss())) {
+            if (arcLimited && !BotAttackDriver.withinRangedArc(pos, mp, m)) {
                 continue; // a shot cannot climb to a body almost straight above (bow/crossbow/gun/claw)
             }
             if (GCMovement.onDifferentLedge(chr.getMap(), pos.x, pos.y, mp.x, mp.y)) {
@@ -548,7 +548,7 @@ public final class GrindBrain {
         Point mp = mob.getPosition();
         return pos != null && mp != null
                 && Math.abs(mp.x - pos.x) <= approachX && Math.abs(mp.y - pos.y) <= approachY
-                && (!approachArcLimited || BotAttackDriver.withinRangedArc(pos, mp, mob.isBoss()));
+                && (!approachArcLimited || BotAttackDriver.withinRangedArc(pos, mp, mob));
     }
 
     // ── Approach-progress tracking (no-progress give-up on an unreachable target/spot) ──

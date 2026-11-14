@@ -10,6 +10,7 @@ import org.gms.constants.skills.Hermit;
 import org.gms.constants.skills.Warrior;
 import org.gms.server.StatEffect;
 import org.gms.server.life.Monster;
+import org.gms.server.life.MonsterStats;
 import org.gms.server.maps.MapObject;
 import org.gms.server.maps.MapObjectType;
 import org.gms.server.maps.MapleMap;
@@ -62,8 +63,13 @@ public final class BotAttackDriver {
     // of it counts; mobs clearly behind are excluded (e.g. a crossbow won't fire backwards).
     private static final int BACK_MARGIN = 25;
     // Bosses are large and multi-bodied - Zakum's arms sit well above the bot's foothold - so
-    // their part positions are tested against a vertically padded copy of the reach box.
-    private static final int BOSS_Y_PAD = 300;
+    // their part positions are tested against a vertically padded copy of the reach box. The pad
+    // is the boss body's own height above its foothold (WZ bbox), capped here: Zakum's arms
+    // stack up to ~409px above the shared spawn point, and the cap keeps a corrupt bbox from
+    // making the whole column "reach". A small boss-flagged mob (Monster Carnival's arena mobs
+    // carry boss=1 at 61-83px tall) gets a pad of its own size, not the legacy full 300 - a
+    // blanket pad there voided the arc rule entirely (dy - 300 went negative, so dx=0 passed).
+    private static final int BOSS_Y_PAD_CAP = 300;
     // Two horizontal extents count as "centred on the bot" (a surround attack) when they match
     // within this slack (px).
     private static final int SYMMETRY_SLACK = 24;
@@ -182,15 +188,32 @@ public final class BotAttackDriver {
 
     /*
      * The shot's arc: the vertical gap may not exceed the horizontal one divided by ARC_SLOPE
-     * (1:4, ~14 degrees). A boss is large and multi-bodied, so its padded body height counts as
-     * reach - the same BOSS_Y_PAD the reach box gives it. Public because the grind layer resolves
+     * (1:4, ~14 degrees). A multi-bodied boss's height above its foothold counts as reach - the
+     * same pad the reach box gives it (bossYPad). Public because the grind layer resolves
      * "is this kit arc-limited" once per episode and then asks this per mob (BotAttackConfig.resolve
      * is too costly per candidate), and the Hermit's Shadow Meso coin (same package) reads it too -
      * one rule for every projectile.
      */
-    public static boolean withinRangedArc(Point from, Point target, boolean boss) {
-        int dy = Math.abs(target.y - from.y) - (boss ? BOSS_Y_PAD : 0);
+    public static boolean withinRangedArc(Point from, Point target, Monster mob) {
+        int dy = Math.abs(target.y - from.y) - bossYPad(mob);
         return dy * ARC_SLOPE <= Math.abs(target.x - from.x);
+    }
+
+    /*
+     * How far a boss's body extends above the foothold its position names: the WZ bbox's upward
+     * span, capped at BOSS_Y_PAD_CAP. Zakum's eight arms and body all spawn at ONE point (the
+     * altar reactor's foothold), so the arms' 80..409px of stacked body is what a bot beside the
+     * altar must be credited for; a small boss-flagged mob gets its own (much smaller) height.
+     * Non-bosses pad 0. A boss whose WZ row ships neither bbox nor frame size pads 0 - the arc
+     * then judges its position pixel alone, the same as any normal mob.
+     */
+    private static int bossYPad(Monster mob) {
+        if (mob == null || !mob.isBoss()) {
+            return 0;
+        }
+        MonsterStats stats = mob.getStats();
+        int height = stats.hasBbox() ? -stats.getBboxMinY() : stats.getImgheight();
+        return Math.max(0, Math.min(BOSS_Y_PAD_CAP, height));
     }
 
     /*
@@ -233,7 +256,7 @@ public final class BotAttackDriver {
      * The caller therefore applies the wedge per candidate point (PqActions.findFiringPosition).
      *
      * <p>The box covers the bot's own side of the target only, so walking to the ledge never
-     * crosses it, and a boss's padded body widens it vertically by the same BOSS_Y_PAD that
+     * crosses it, and a boss's padded body widens it vertically by the same bossYPad that
      * withinRangedArc discounts.
      */
     public static Rectangle firingPositions(Character bot, Monster mob) {
@@ -241,7 +264,7 @@ public final class BotAttackDriver {
         BotAttackProfile profile = gateProfile(bot, primaryProfile(bot), weapon);
         if (profile == null || profile.route != BotAttackProfile.Route.RANGED) return null;
         Point target = mob.getPosition();
-        int reachY = profile.reachY + (mob.isBoss() ? BOSS_Y_PAD : 0);
+        int reachY = profile.reachY + bossYPad(mob);
         Point pos = bot.getPosition();
         boolean leftSide = pos == null || pos.x <= target.x;
         int left = leftSide ? target.x - profile.reachX : target.x + 1;
@@ -551,16 +574,19 @@ public final class BotAttackDriver {
             return false;
         }
         // Bosses are big and multi-bodied: test their part positions against a vertically
-        // padded box so e.g. Zakum's elevated arms still register as in-reach.
-        Rectangle test = m.isBoss()
-                ? new Rectangle(box.x, box.y - BOSS_Y_PAD, box.width, box.height + 2 * BOSS_Y_PAD)
+        // padded box so e.g. Zakum's elevated arms still register as in-reach. The pad is the
+        // boss's own height above its foothold (bossYPad), not a blanket constant - a blanket
+        // pad swallowed whole shelf gaps on arenas whose small mobs carry the boss flag.
+        int pad = bossYPad(m);
+        Rectangle test = pad > 0
+                ? new Rectangle(box.x, box.y - pad, box.width, box.height + 2 * pad)
                 : box;
         // The reach box is a flat rectangle with no terrain sense, so a tall box would let the bot
         // hit a mob standing on a separate platform overhead/below. Drop melee mobs on a different
         // ledge than the bot (bosses exempt, and ranged/magic are exempt by route - see
         // onAttackableSurface). Cheap (peek-only) and only run for box-passing mobs.
         return test.contains(mp) && onAttackableSurface(bot.getMap(), botPos, m, route)
-                && (route != BotAttackProfile.Route.RANGED || withinRangedArc(botPos, mp, m.isBoss()));
+                && (route != BotAttackProfile.Route.RANGED || withinRangedArc(botPos, mp, m));
     }
 
     /*
@@ -740,7 +766,7 @@ public final class BotAttackDriver {
         Rectangle box = reachBox(bot, profile, weapon, facingLeft);
         Point np = nearest.getPosition();
         String where = profile.route == BotAttackProfile.Route.RANGED
-                && !withinRangedArc(botPos, np, nearest.isBoss())
+                && !withinRangedArc(botPos, np, nearest)
                 ? " outside the shot's arc (too steep: |dy| * " + ARC_SLOPE + " > |dx|)"
                 : " outside reach x[" + box.x + ".." + (box.x + box.width) + "] y[" + box.y + ".." + (box.y + box.height) + "]";
         return "nearest '" + nearest.getName() + "' at dx=" + (np.x - botPos.x) + " dy=" + (np.y - botPos.y)
