@@ -11,6 +11,12 @@ party.declined: "{0} 拒绝了你的组队邀请。"
 party.join_failed: "{0} 无法加入你的队伍（队伍已满或已解散）——请重新邀请。"
 
 # ---------------------------------------------------------------------------
+# 怪物嘉年华（CPQ）- bot 队伍走进战场接受挑战时，发给战场双方聊天栏的提示。
+# {1} 秒数与战场随后显示的倒时钟一致（CarnivalPqData.matchWaitSeconds()）。
+# ---------------------------------------------------------------------------
+carnival.challenge.accepted: "[怪物嘉年华] {0} 队伍加入了挑战！战斗将在 {1} 秒后开始，请做好准备。"
+
+# ---------------------------------------------------------------------------
 # Option menus (labels shown in the hint balloon)
 #
 # IMPORTANT: these labels are display-only. The keywords a player can type live in

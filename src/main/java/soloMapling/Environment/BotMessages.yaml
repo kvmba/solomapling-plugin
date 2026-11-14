@@ -18,6 +18,14 @@ party.declined: "{0} has declined your party request."
 party.join_failed: "{0} couldn't join your party (it was full or disbanded) - try inviting again."
 
 # ---------------------------------------------------------------------------
+# Monster Carnival (CPQ) - the notice sent to both field lobbies when the bot team
+# walks in and accepts the waiting party's challenge. The count matches the clock
+# the field then shows (CarnivalPqData.matchWaitSeconds()).
+# ---------------------------------------------------------------------------
+carnival.challenge.accepted: "[Carnival] Team {0} has joined the challenge! The battle begins in {1}s - get ready."
+carnival.challenge.team: "The opposing party"
+
+# ---------------------------------------------------------------------------
 # Option menus (labels shown in the hint balloon)
 #
 # NOTE: the labels below are display-only. Each menu also carries keyword lists in

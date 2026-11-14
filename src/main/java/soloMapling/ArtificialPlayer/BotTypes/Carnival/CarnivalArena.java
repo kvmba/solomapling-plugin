@@ -10,6 +10,7 @@ import org.gms.server.partyquest.MonsterCarnival;
 import soloMapling.ArtificialPlayer.BotMessagingSystem.CharacterStorage;
 import soloMapling.ArtificialPlayer.BotPartySystem.BotPartyCommands;
 import soloMapling.BotLogger;
+import soloMapling.Environment.BotMessages;
 
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -1016,20 +1017,29 @@ public final class CarnivalArena {
      * opens - by then the host's players would already be counting.
      */
     private static void announceChallenge(Party players, Party bots) {
+        String teamName = challengeTeamName(bots);
         for (PartyCharacter mpc : players.getPartyMembers()) {
-            notifyAccepted(mpc.getPlayer());
+            notifyAccepted(mpc.getPlayer(), teamName);
         }
         for (PartyCharacter mpc : bots.getPartyMembers()) {
-            notifyAccepted(mpc.getPlayer());
+            notifyAccepted(mpc.getPlayer(), teamName);
         }
     }
 
-    private static void notifyAccepted(Character mc) {
+    /** The bot team's display name: its leader's name, or a generic label when the team has none. */
+    private static String challengeTeamName(Party bots) {
+        PartyCharacter leader = bots.getLeader();
+        return leader == null ? BotMessages.getOr("carnival.challenge.team", "The opposing party")
+                : leader.getName();
+    }
+
+    private static void notifyAccepted(Character mc, String teamName) {
         if (mc != null) {
             // The host's own path shows the player a challenge dialog at this moment (cpqchallenge
             // .js). A bot team has nobody to answer one, so the notice carries the same news and
             // claims nothing more: the arena opens when the count reaches zero.
-            mc.dropMessage(6, "The opposing party accepted the challenge.");
+            mc.dropMessage(6, BotMessages.get("carnival.challenge.accepted",
+                    teamName, CarnivalPqData.matchWaitSeconds()));
         }
     }
 

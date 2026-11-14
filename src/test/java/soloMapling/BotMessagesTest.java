@@ -64,6 +64,16 @@ class BotMessagesTest {
     }
 
     @Test
+    void carnivalChallengeNoticeIsLocalizedInBothLanguages() {
+        SoloMaplingLanguageConfig.setLanguageTag("en-US");
+        assertEquals("[Carnival] Team Rasp has joined the challenge! The battle begins in 10s - get ready.",
+                BotMessages.get("carnival.challenge.accepted", "Rasp", 10));
+        SoloMaplingLanguageConfig.setLanguageTag("zh-CN");
+        assertEquals("[怪物嘉年华] Rasp 队伍加入了挑战！战斗将在 10 秒后开始，请做好准备。",
+                BotMessages.get("carnival.challenge.accepted", "Rasp", 10));
+    }
+
+    @Test
     void missingArgumentLeavesPlaceholderVisibleRatherThanBlank() {
         SoloMaplingLanguageConfig.setLanguageTag("en-US");
         // Two placeholders, one argument: the second stays literal so the gap is obvious in-game
