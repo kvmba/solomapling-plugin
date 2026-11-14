@@ -2934,9 +2934,9 @@ final class BotPhysicsEngine {
         }
 
         AirCollision best = bound;
-        // A wall can only be crossed when its column lies strictly inside the swept x span:
-        // wallCollision's own gate is progress > 0 && progress <= 1, i.e. dxWall * dirX in
-        // (0, |spanX|]. Sweeping every collidable wall of the map on every airborne tick is the
+        // Include the starting column: a body on a wall face can still move into its solid side.
+        // wallCollision decides whether a zero-progress departure actually enters the wall.
+        // Sweeping every collidable wall of the map on every airborne tick is the
         // hottest item in a bake (a 500-foothold map carries ~100 wall columns and one arc flies
         // ~17 ticks), so this integer span test drops almost all of them without any float math.
         int spanX = nextPos.x - previousPos.x;
@@ -2944,7 +2944,7 @@ final class BotPhysicsEngine {
         int absSpanX = Math.abs(spanX);
         for (Foothold foothold : collisionIndex(map).collidableWalls()) {
             int dxWall = (foothold.getX1() - previousPos.x) * dirX;
-            if (dxWall <= 0 || dxWall > absSpanX) {
+            if (dxWall < 0 || dxWall > absSpanX) {
                 continue;
             }
             AirCollision collision = wallCollision(foothold, previousPos, nextPos, allowWalkableGroundEndpoint);
@@ -3387,9 +3387,7 @@ final class BotPhysicsEngine {
         }
 
         double progress = (wallX - startX) / (double) (endX - startX);
-        // Ignore the wall exactly at the takeoff point; this is the ledge-edge case
-        // where a drop would otherwise look like an immediate side collision.
-        if (progress <= 0.0 || progress > 1.0) {
+        if (progress < 0.0 || progress > 1.0) {
             return AirCollision.none();
         }
 
@@ -3404,6 +3402,13 @@ final class BotPhysicsEngine {
         }
 
         int dir = Integer.compare(endX, startX);
+        // WZ walls have solid ground on their directed right-hand side. Starting on the face
+        // only blocks entry into that side; leaving it or clearing a vertical end remains legal.
+        if (progress == 0.0 && (dir != Integer.compare(wall.getY1(), wall.getY2())
+                || (yAtWall == minY && nextPos.y < minY)
+                || (yAtWall == maxY && nextPos.y > maxY))) {
+            return AirCollision.none();
+        }
         int safeX = wallX - dir;
         return new AirCollision(AirCollisionType.WALL,
                 new Point(safeX, (int) Math.round(yAtWall)),

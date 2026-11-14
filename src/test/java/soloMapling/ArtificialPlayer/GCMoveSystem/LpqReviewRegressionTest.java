@@ -1707,6 +1707,55 @@ class LpqReviewRegressionTest {
     }
 
     @ParameterizedTest
+    @CsvSource({"-175, -126", "175, 126", "-260, -211", "260, 211"})
+    void stage7RetreatCannotRunPastItsLandingPlatform(int x, int mobX) throws Exception {
+        MapleMap map = realMap(922010700);
+        createBot(map, new Point(x, -211), Job.HUNTER);
+        state.alertResetScheduled = true;
+        Monster mob = monster(9300010, 99131, new Point(mobX, -211));
+        inject(map, mob);
+        try (var attacks = mockStatic(BotAttackDriver.class)) {
+            attacks.when(() -> BotAttackDriver.canReach(bot, mob)).thenReturn(true);
+            attacks.when(() -> BotAttackDriver.isProjectile(bot)).thenReturn(true);
+            attacks.when(() -> BotAttackDriver.attackReachX(bot)).thenReturn(300);
+            attacks.when(() -> BotAttackDriver.attackReachY(bot)).thenReturn(80);
+            LudiStages.applyChasePolicy(bot);
+            for (int frame = 0; frame < 100; frame++) {
+                if (frame % 5 == 0) PqActions.seekAndAttack(bot, true);
+                tick();
+                assertFalse(state.inAir, "voluntary retreat left the platform at " + bot.getPosition()
+                        + "; goal=" + state.moveTarget + "; speed=" + state.hspeed);
+                assertEquals(-211, bot.getPosition().y);
+            }
+        }
+    }
+
+    @ParameterizedTest
+    @CsvSource({"-265, HUNTER", "-264, HUNTER", "264, HUNTER", "265, HUNTER", "-265, CLERIC", "265, CLERIC"})
+    void stage7ContactRecoilCannotFallThroughTheBottomFloor(int x, Job job) throws Exception {
+        MapleMap map = realMap(922010700);
+        int dir = Integer.signum(x);
+        createBot(map, new Point(job == Job.CLERIC ? x - dir * 150 : x, -211), job);
+        state.alertResetScheduled = true;
+        if (job == Job.CLERIC) {
+            assertTrue(GCMovement.teleport(bot, x, -211));
+            assertEquals(new Point(x, -211), bot.getPosition(), "a real blink can land on the wall column");
+        }
+        Method damage = BotContactDamage.class.getDeclaredMethod("applyDamage", BotMovementState.class,
+                Character.class, int.class, int.class, int.class, int.class, int.class);
+        damage.setAccessible(true);
+        damage.invoke(null, state, bot, 10, -1, 9300010, dir > 0 ? 1 : 0, dir * 9);
+        for (int frame = 0; frame < 80 && state.inAir; frame++) {
+            BotMovementManager.tickAirborne(state, bot.getPosition());
+            MovementClock.advance(50);
+            assertTrue(bot.getPosition().y <= -211,
+                    "recoil fell below the Rombard floor at " + bot.getPosition());
+        }
+        assertFalse(state.inAir);
+        assertEquals(-211, bot.getPosition().y);
+    }
+
+    @ParameterizedTest
     @CsvSource({"-60, 0, 0, false", "-20, 0, 0, true", "0, 60, 0, true", "-60, 0, 100, false"})
     void walkRegionConnectivityMatchesThePhysicalWallEndpoint(int top, int bottom, int leftY, boolean walkable) throws Exception {
         MapleMap map = map(922019930 + top + 60 + leftY);
