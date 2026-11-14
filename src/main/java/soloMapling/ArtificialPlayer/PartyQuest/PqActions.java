@@ -11,10 +11,12 @@ import org.gms.server.maps.Portal;
 import org.gms.server.maps.Reactor;
 import org.gms.server.life.NPC;
 import org.gms.constants.inventory.ItemConstants;
+import org.gms.client.inventory.Item;
 import org.gms.client.inventory.manipulator.InventoryManipulator;
 import org.gms.scripting.npc.NPCScriptManager;
 import soloMapling.ArtificialPlayer.BotSM;
 import soloMapling.ArtificialPlayer.BotAttackSystem.BotAttackDriver;
+import soloMapling.ArtificialPlayer.BotAttackSystem.BotMesoBomb;
 import soloMapling.ArtificialPlayer.BotClientBinding;
 import soloMapling.ArtificialPlayer.BotAttackSystem.BotAuraState;
 import soloMapling.ArtificialPlayer.BotCommandsPack.BotAttack;
@@ -1463,6 +1465,12 @@ public final class PqActions {
 
     private static boolean canCollectFloorDrop(Character bot, MapItem drop) {
         if (!isFloorLoot(drop) || !DropCommands.botCanLoot(bot, drop)) return false;
+        // A Chief Bandit's Pickpocket bags are bomb fuel, not loot: botCanLoot passes them (they
+        // are the bot's own drops) and they register the instant they land, so without this gate
+        // the sweep eats them long before BAG_MIN_AGE_MS makes them detonable. The grind layer's
+        // sweep carries the same exclusion (GrindLoot.isDetonationBag); here one gate covers every
+        // PQ loot path - loot, lootSteppedOn, pickupBeforeChase, the orphan probe.
+        if (BotMesoBomb.isDetonationBag(bot.getId(), drop)) return false;
         SeekState control = seekStates.get(bot.getId());
         if (control == null) return true;
         synchronized (control) {
@@ -2452,9 +2460,14 @@ public final class PqActions {
     /**
      * Whether a floor drop is ordinary loot a bot may pocket: a single piece (reactor stacks
      * are matched by identity) and not an addressed hand-off pile (permanent owner).
+     *
+     * <p>A meso drop carries no {@code Item} at all ({@code getItem()} is null), so it is a
+     * single piece by construction - the null check is what keeps a meso drop from NPEing here,
+     * not defensive padding.
      */
     static boolean isFloorLoot(MapItem drop) {
-        return drop.getItem().getQuantity() <= 1 && !DropCommands.isPermanentOwnerLocked(drop);
+        Item item = drop.getItem();
+        return (item == null || item.getQuantity() <= 1) && !DropCommands.isPermanentOwnerLocked(drop);
     }
 
     // =========================================================================

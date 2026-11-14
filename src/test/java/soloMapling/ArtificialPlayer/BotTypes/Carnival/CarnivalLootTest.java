@@ -1,6 +1,7 @@
 package soloMapling.ArtificialPlayer.BotTypes.Carnival;
 
 import org.junit.jupiter.api.Test;
+import soloMapling.ArtificialPlayer.BotLogic;
 
 import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
@@ -37,7 +38,7 @@ class CarnivalLootTest {
      * ({@code Item.wz/Consume/0202.img.xml}, {@code spec/consumeOnPickup=1}) and the engine's drop
      * table ({@code drop_data} rows 9300127-36 and 9300315-24).
      */
-    private static final int[] EXPECTED = {
+    private static final int[] EXPECTED_PROPS = {
             2022157, 2022158, 2022159,                         // Carnival Point 1-3 (CP on pickup)
             2022160, 2022161, 2022162, 2022163,                // party mana / elixir / power / all-cure
             2022164, 2022165, 2022166,                         // mini cube / cube of darkness / stunner
@@ -46,7 +47,14 @@ class CarnivalLootTest {
 
     @Test
     void theConsumableListIsExactlyTheArenasConsumeOnPickupSet() {
-        assertArrayEquals(EXPECTED, CarnivalPqData.ARENA_CONSUMABLES);
+        // The list is the props PLUS meso (id 0, the engine's own drop-table id for meso): the
+        // arena's monsters carry meso rows too, and a bot that leaves every kill's coins on the
+        // floor until despawn is the reported defect. Meso drops carry no Item at all, which is
+        // why it is a filter id rather than a WZ prop.
+        assertEquals(BotLogic.MESO_DROP_ID, CarnivalPqData.ARENA_CONSUMABLES[0]);
+        assertArrayEquals(EXPECTED_PROPS,
+                java.util.Arrays.copyOfRange(CarnivalPqData.ARENA_CONSUMABLES, 1,
+                        CarnivalPqData.ARENA_CONSUMABLES.length));
         Set<Integer> unique = new HashSet<>();
         for (int id : CarnivalPqData.ARENA_CONSUMABLES) {
             assertTrue(unique.add(id), "duplicate id " + id);
@@ -57,10 +65,15 @@ class CarnivalLootTest {
     void everyListedItemIsActuallyAConsumeOnPickupProp() throws Exception {
         // The point of the list is that the ENGINE consumes these on pickup (CP is paid by
         // spec/cp, cures by spec/party). A plain potion would merely be pocketed - and a bot with
-        // a full use-inventory would then fail the pickup outright.
+        // a full use-inventory would then fail the pickup outright. MESO (id 0) is exempt: it is
+        // the drop-table filter id for coins, not a prop, and the engine's meso branch in
+        // Character.pickupItem needs no WZ spec.
         String xml = consumeWz();
         assumeTrue(xml != null, "Item.wz/Consume not resolvable from this working directory");
         for (int id : CarnivalPqData.ARENA_CONSUMABLES) {
+            if (id == BotLogic.MESO_DROP_ID) {
+                continue;
+            }
             assertTrue(section(xml, id).contains("consumeOnPickup"),
                     id + " must carry spec/consumeOnPickup in WZ");
         }

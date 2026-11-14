@@ -65,6 +65,13 @@ public class BotLogic {
     /** Default reach of the at-feet floor scans: the same kill-neighbourhood scale the PQ loot sweeps use (260-400px). */
     private static final int ITEM_SCAN_RANGE_PX = 300;
 
+    /**
+     * The id a floor-scan filter uses to ask for MESO drops. A meso drop carries no {@code Item}
+     * (its {@code getItemId()} returns the drop's amount), so callers opt in with {@code 0} -
+     * the same id the engine's own drop tables use for meso.
+     */
+    public static final int MESO_DROP_ID = 0;
+
     public static List<MapObject> checkForItemsOnFloor(Character chr, Point location, int[] itemIds) {
         return checkForItemsOnFloor(chr, location, ITEM_SCAN_RANGE_PX, itemIds);
     }
@@ -112,8 +119,12 @@ public class BotLogic {
         // Returns list of items on Floor that ONLY contains items in filterList
         Iterator<MapObject> iterator = items.iterator();
         List<Integer> itemFilterList = Arrays.stream(filterList).boxed().collect(Collectors.toList());
+        boolean allowMeso = itemFilterList.contains(MESO_DROP_ID); // a caller that asks for meso...
         while (iterator.hasNext()) {
             MapItem mapItem = (MapItem) iterator.next();
+            if (allowMeso && mapItem.getMeso() > 0) {
+                continue; // ...gets every meso drop: getItemId() is the AMOUNT on a meso drop, so exact-id matching can never see it
+            }
             if (!itemFilterList.contains(mapItem.getItemId())) {
                 iterator.remove();
             }

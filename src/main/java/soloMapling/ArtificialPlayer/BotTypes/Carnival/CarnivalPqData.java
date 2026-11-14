@@ -2,6 +2,7 @@ package soloMapling.ArtificialPlayer.BotTypes.Carnival;
 
 import org.gms.constants.id.MapId;
 import org.gms.server.maps.Portal;
+import soloMapling.ArtificialPlayer.BotLogic;
 
 import java.util.ArrayList;
 import java.util.Collection;
@@ -69,10 +70,15 @@ public final class CarnivalPqData {
      * <p>Listed by id rather than derived from WZ on purpose: this is the set the quest's own
      * arena produces, and the base class's sweep contract is an explicit id list so a quest can
      * never eat another mechanic's floor item (HPQ seeds, OPQ springs). Deliberately NOT the
-     * arena's other drops - equips, scrolls, Maple Coins and the like are ordinary loot, not this
-     * quest's props, and are not what the report is about.
+     * arena's other drops - equips, scrolls and Maple Coins are ordinary loot, not this quest's
+     * props, and are not what the report is about. MESO is the one opt-in beyond the props:
+     * the arena's monsters carry meso rows too, and a Chief Bandit's Pickpocket bags live and
+     * die by being left on the floor - the shared sweep refuses a bag registered for detonation
+     * (see {@code PqActions.canCollectFloorDrop}), so this entry opens the door for coins only,
+     * never for the bomb's fuel.
      */
     public static final int[] ARENA_CONSUMABLES = {
+            BotLogic.MESO_DROP_ID,                             // meso rows on the arena's drop tables
             2022157, 2022158, 2022159,                         // Carnival Point 1-3 (CP on pickup)
             2022160, 2022161, 2022162, 2022163,                // Party Mana/Elixir/Power All-Cure
             2022164, 2022165, 2022166,                         // Mini Cube / Cube of Darkness / Stunner
