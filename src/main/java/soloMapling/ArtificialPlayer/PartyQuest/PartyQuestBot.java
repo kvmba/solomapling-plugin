@@ -1,6 +1,7 @@
 package soloMapling.ArtificialPlayer.PartyQuest;
 
 import org.gms.client.Character;
+import org.gms.scripting.event.EventInstanceManager;
 import org.gms.server.maps.MapleMap;
 import org.gms.server.maps.Portal;
 import soloMapling.ArtificialPlayer.BotCommandsPack.SocialCommands;
@@ -20,7 +21,6 @@ import soloMapling.ArtificialPlayer.GCMoveSystem.GCMovement;
 import soloMapling.BotLogger;
 import soloMapling.Environment.BotMessages;
 import soloMapling.Environment.PlatformPlacement;
-import org.gms.net.server.world.PartyCharacter;
 
 import java.awt.Point;
 import java.util.concurrent.ThreadLocalRandom;
@@ -678,43 +678,34 @@ public abstract class PartyQuestBot extends BotSM implements GrindTickRegistry.P
         maybeQuestChat(Beat.DOOR);
     }
 
-    /**
-     * The highest-level bot still standing in this room (this bot included) speaks for the
-     * rearguard when the leader has already gone through: the party is only leaving because
-     * he left, and the oldest body is the one who says so. Null when there is nobody to
-     * claim the line (leaderless stray, or everyone left already).
-     */
-    private PartyQuestBot rearguardSpeaker() {
-        var party = getChr().getParty();
-        if (party == null) {
-            return null;
-        }
-        BotSM speaker = null;
-        int bestLevel = Integer.MIN_VALUE;
-        for (PartyCharacter mpc : party.getPartyMembers()) {
-            Character member = mpc.getPlayer();
-            if (member == null || !soloMapling.ArtificialPlayer.BotHelpers.isBot(member)
-                    || member.getMapId() != getChr().getMapId()) {
-                continue;
-            }
-            BotSM bot = CharacterStorage.getBotById(member.getId());
-            if (bot instanceof PartyQuestBot pq && member.getLevel() > bestLevel) {
-                bestLevel = member.getLevel();
-                speaker = pq;
-            }
-        }
-        return speaker instanceof PartyQuestBot pq ? pq : null;
-    }
-
-    /** The one rearguard line the party's oldest bot says as it follows the leader out. */
-    private void sayRearguardLine() {
-        PartyQuestBot speaker = rearguardSpeaker();
-        if (speaker == null) {
+    /** Speak once on the actual clear event, while the leader can still hear the room. */
+    public static void sayRearguardLine(EventInstanceManager instance, MapleMap map) {
+        Character leader = instance.getLeader();
+        if (leader == null || leader.getMap() != map || leader.getParty() == null) {
             return;
         }
-        String line = BotMessages.getOr("pq.rearguard", null);
-        if (line != null) {
-            SocialCommands.BotSpeak(speaker.getChr(), line);
+        int mapId = map.getId();
+        Character speaker = null;
+        for (var member : leader.getParty().getMembers()) {
+            if (!(CharacterStorage.getBotById(member.getId()) instanceof PartyQuestBot pq)
+                    || !pq.getRunning() || pq.getState() == BotState.PAUSE
+                    || pq.death().isCorpse() || !pq.isInsideQuest(mapId)) {
+                continue;
+            }
+            Character bot = pq.getChr();
+            if (bot.getMap() != map) {
+                continue;
+            }
+            if (speaker == null || bot.getLevel() > speaker.getLevel()
+                    || (bot.getLevel() == speaker.getLevel() && bot.getId() < speaker.getId())) {
+                speaker = bot;
+            }
+        }
+        // The instance owns the claim: repeated effects and concurrent callbacks share it,
+        // while a new run gets a fresh claim even when it reuses the same map id.
+        if (speaker != null
+                && instance.setProperty("solomapling.rearguard." + mapId, "true", true) == null) {
+            SocialCommands.BotSpeak(speaker, BotMessages.get("pq.rearguard"));
         }
     }
 
@@ -864,7 +855,6 @@ public abstract class PartyQuestBot extends BotSM implements GrindTickRegistry.P
         }
         BotLogger.log("PQ bot " + getChr().getName() + " following the leader from "
                 + here + " to " + leaderMap + " through portal " + exit.getName());
-        sayRearguardLine();
         sayDoorLine();
         if (PqActions.walkTo(getChr(), exit.getPosition())) {
             PqActions.enterPortal(getChr(), exit);
