@@ -149,25 +149,65 @@ class RangedShotArcTest {
                 "dx=" + dx + " dy=" + dy + " (arc is |dy|*4 <= |dx|)");
     }
 
-    /** Bosses get the body padding, not a blanket exemption. */
+    /**
+     * The arc judges the mob's FOOTHOLD point and reads NO boss pad - the foothold IS the body's
+     * closest edge across a platform gap, so any pad would let a short boss pass at a steep
+     * angle. A Zakum-scale body is reached the honest way: stand beside it (dy≈0) and let the
+     * reach BOX's pad confirm the swing, not the arc.
+     */
     @Test
     void aBossStillNeedsTheArcBeyondItsPadding() throws Exception {
         createBot(Job.HUNTER, new Point(0, 0));
-        Monster boss = monster(9300012, 99430, new Point(0, -500));
-        when(boss.isBoss()).thenReturn(true);
+        Monster boss = bossMonster(9300012, 99430, new Point(0, -500), 400);
         inject(boss);
         assertFalse(BotAttackDriver.canReach(bot, boss),
-                "BOSS_Y_PAD is 300: dy=500 at dx=0 is still far outside the arc");
+                "the arc reads the foothold: dy=500 at dx=0 is far outside the wedge");
     }
 
     @Test
-    void aBossOverheadIsStillReachable() throws Exception {
+    void aBossOverheadIsNotReachableEvenWithABody() throws Exception {
         createBot(Job.HUNTER, new Point(0, 0));
-        Monster boss = monster(9300012, 99405, new Point(0, -260));
-        when(boss.isBoss()).thenReturn(true);
+        Monster boss = bossMonster(9300012, 99405, new Point(0, -260), 400);
+        inject(boss);
+        assertFalse(BotAttackDriver.canReach(bot, boss),
+                "a 400px body does not buy the arc: dy=260 at dx=0 is a vertical shot");
+    }
+
+    /** A boss standing BESIDE the shooter (dy≈0, the Zakum altar case) is the legal hit. */
+    @Test
+    void aBossBesideTheShooterIsReachable() throws Exception {
+        createBot(Job.HUNTER, new Point(0, 0));
+        Monster boss = bossMonster(9300012, 99434, new Point(150, 0), 400);
         inject(boss);
         assertTrue(BotAttackDriver.canReach(bot, boss),
-                "a multi-bodied boss is padded by BOSS_Y_PAD, so its upper chain is a legal target");
+                "dy=0 at dx=150: the shared foothold shot the Zakum floor fight is");
+    }
+
+    /**
+     * THE REGRESSION: Monster Carnival's arena mobs carry the WZ boss flag at 61-83px tall on
+     * 66-91px shelf gaps. Any pad canceling dy re-admitted near-vertical shots; the arc now
+     * demands the full 1:4 horizontal room at every vertical gap.
+     */
+    @Test
+    void aSmallBossFlaggedMobDirectlyOverheadIsNotAHit() throws Exception {
+        createBot(Job.HUNTER, new Point(0, 0));
+        Monster arenaMob = bossMonster(9300315, 99431, new Point(0, -91), 83);
+        inject(arenaMob);
+        assertFalse(BotAttackDriver.canReach(bot, arenaMob),
+                "dy=91 at dx=0: a shot through the shelf, not a hit");
+    }
+
+    @Test
+    void aSmallBossFlaggedMobNeedsTheShallowAngleLikeAnyMob() throws Exception {
+        createBot(Job.HUNTER, new Point(0, 0));
+        Monster arenaMob = bossMonster(9300315, 99432, new Point(60, -91), 83);
+        inject(arenaMob);
+        assertFalse(BotAttackDriver.canReach(bot, arenaMob),
+                "dy=91 needs dx>=364; dx=60 is still a steep shot through the platform edge");
+        Monster shallow = bossMonster(9300315, 99435, new Point(400, -91), 83);
+        inject(shallow);
+        assertTrue(BotAttackDriver.canReach(bot, shallow),
+                "dy=91 at dx=400 is the 14-degree shelf shot, boss flag or not");
     }
 
     @Test
@@ -267,6 +307,20 @@ class RangedShotArcTest {
         when(mob.getPosition()).thenReturn(position);
         when(mob.isAlive()).thenReturn(true);
         when(mob.getName()).thenReturn("arc target");
+        return mob;
+    }
+
+    /**
+     * A boss-flagged mob whose body stands {@code bodyHeight} above its foothold (the WZ bbox's
+     * upward span): the geometry the boss pad is derived from.
+     */
+    private static Monster bossMonster(int id, int oid, Point position, int bodyHeight) {
+        Monster mob = monster(id, oid, position);
+        when(mob.isBoss()).thenReturn(true);
+        when(mob.getStats().hasBbox()).thenReturn(bodyHeight > 0);
+        when(mob.getStats().getBboxMinY()).thenReturn(-bodyHeight);
+        when(mob.getStats().getImgheight()).thenReturn(bodyHeight);
+        when(mob.getName()).thenReturn("boss target");
         return mob;
     }
 
