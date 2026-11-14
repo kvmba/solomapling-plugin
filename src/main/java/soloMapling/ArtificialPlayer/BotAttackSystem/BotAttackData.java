@@ -94,6 +94,7 @@ public final class BotAttackData {
     private static final int BLAST = 71;                               // "blast" (Paladin Blast)
 
     // ----- Pirate poses (canonical v83 enum, from the client's action table) -----
+    private static final int HANDGUN = 77;                             // "handgun" (gun melee strike)
     private static final int STRAIGHT = 79;                            // "straight" (Flash Fist / basic brawl punch)
     private static final int SOMERSAULT = 78;                          // "somersault" (Somersault Kick)
     private static final int DOUBLEFIRE = 86;                          // "doublefire" (Double Shot, 1st-job gun)
@@ -245,6 +246,7 @@ public final class BotAttackData {
                     case BLIZZARD -> "blizzard";
                     case GENESIS -> "genesis";
                     case BLAST -> "blast";
+                    case HANDGUN -> "handgun";
                     case STRAIGHT -> "straight";
                     case SOMERSAULT -> "somersault";
                     case DOUBLEFIRE -> "doublefire";
@@ -304,6 +306,15 @@ public final class BotAttackData {
     /* Real magnitude of a packet damage line: crit lines arrive negative-encoded, normal lines pass through. */
     public static int decodeDamageLine(int line) {
         return line < 0 ? line + Integer.MAX_VALUE : line;
+    }
+
+    /** A basic close-range swing, not the shooting default of a ranged weapon. */
+    public static int meleeActionFor(WeaponType weaponType) {
+        return switch (weaponType) {
+            case BOW, CROSSBOW -> SWING_T1;
+            case GUN -> HANDGUN;
+            case null, default -> randomActionFor(weaponType);
+        };
     }
 
     /* Random body-action id appropriate for the given weapon class. */

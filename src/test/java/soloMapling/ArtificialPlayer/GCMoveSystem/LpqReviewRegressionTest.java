@@ -416,6 +416,45 @@ class LpqReviewRegressionTest {
         }
     }
 
+    @ParameterizedTest
+    @CsvSource({
+            "BOW, 9, 22, 1000, false",
+            "CROSSBOW, 9, 23, 1000, false",
+            "GUN, 77, 93, 980, false",
+            "BOW, 9, 22, 1000, true",
+            "CROSSBOW, 9, 23, 1000, true",
+            "GUN, 77, 93, 980, true"
+    })
+    void reactorHitsUseMeleeActionsWithRangedWeapons(WeaponType weaponType, int meleeAction,
+                                                   int rangedAction, int durationMs, boolean inReachOnly) throws Exception {
+        MapleMap map = attackMap();
+        createBot(map, new Point(0, 0), Job.BEGINNER);
+        state.alertResetScheduled = true;
+        Reactor box = reactor(2202003, 99155, new Point(20, 0));
+        inject(map, box);
+        AtomicInteger bodyAction = new AtomicInteger(-1);
+        Packet attack = mock(Packet.class);
+        try (var attacks = mockStatic(BotAttack.class, CALLS_REAL_METHODS);
+             var packets = mockStatic(org.gms.util.PacketCreator.class);
+             var reactors = mockStatic(CustomReactor.class)) {
+            attacks.when(() -> BotAttack.resolveEquippedWeaponType(bot)).thenReturn(weaponType);
+            packets.when(() -> org.gms.util.PacketCreator.closeRangeAttack(eq(bot), anyInt(), anyInt(),
+                    anyInt(), anyInt(), anyMap(), anyInt(), anyInt(), anyInt())).thenAnswer(inv -> {
+                bodyAction.set(inv.getArgument(7));
+                return attack;
+            });
+            assertTrue(inReachOnly ? PqActions.hitReactorIfInReach(bot, box.getObjectId())
+                    : PqActions.hitReactor(bot, box.getObjectId()));
+            assertEquals(meleeAction, bodyAction.get(), "reactor hits must use the weapon's melee action");
+            assertEquals(MovementClock.nowMs() + durationMs, state.attackMovementLockUntilMs,
+                    "the movement hold must include the melee action's WZ frames and padding");
+            verify(map).broadcastMessage(bot, attack, false);
+            reactors.verify(() -> CustomReactor.hitReactorWithScript(map, box.getObjectId(), bot));
+        }
+        assertEquals(rangedAction, BotAttackData.randomActionFor(weaponType),
+                "normal ranged attacks must keep their shooting action");
+    }
+
     @Test
     void aMageBlinkKeepsTheRemainingAttackLock() throws Exception {
         MapleMap map = attackMap();

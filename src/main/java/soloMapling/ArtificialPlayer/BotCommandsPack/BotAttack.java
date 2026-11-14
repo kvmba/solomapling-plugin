@@ -44,17 +44,17 @@ public final class BotAttack {
     private BotAttack() {}
 
     /**
-     * Broadcast a basic Ctrl-attack swing animation. Pure visual; no damage,
+     * Broadcast a basic close-range swing animation. Pure visual; no damage,
      * no targets, no skill. Caller is responsible for any follow-up damage
      * application (e.g. reactor hit). The animation is selected based on the
-     * bot's currently equipped weapon class.
+     * bot's currently equipped weapon class, using its melee action even for ranged weapons.
      */
     public static boolean basicSwing(Character chr) {
         if (chr == null || chr.getMap() == null || GCMovement.isClimbing(chr)) return false;
 
         int facingMask = facingLeft(chr) ? BotAttackData.FACING_LEFT_MASK : BotAttackData.FACING_RIGHT_MASK;
         WeaponType weaponType = resolveEquippedWeaponType(chr);
-        int bodyActionId = BotAttackData.randomActionFor(weaponType);
+        int bodyActionId = BotAttackData.meleeActionFor(weaponType);
 
         Map<Integer, List<Integer>> emptyTargets = Collections.emptyMap();
         return GCMovement.broadcastActiveAttack(
