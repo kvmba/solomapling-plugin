@@ -72,7 +72,7 @@ public final class GrindBrain {
     int lastMoveTargetX = Integer.MIN_VALUE;
     private int approachX = -1;              // lazy attack-reach cache
     private int approachY = -1;
-    private boolean approachArcLimited = false; // lazy: a RANGED kit's shot cannot climb straight up/down
+    private boolean approachArcLimited = false; // lazy: the primary shot cannot climb straight up/down
     MovementStyle style = MovementStyle.PLANTED;
     float fjCap = 1f;                        // level-tier flash-jump dash cap (FlashJumpTiers)
     long attackWalkLockUntil = 0L;           // hold walking until this time after a swing (bypassed by blink/dash)
@@ -536,8 +536,8 @@ public final class GrindBrain {
 
     // Lazily derive (and cache) the stop-and-swing distance from this bot's attack reach so ranged/magic
     // bots fire from afar. Floored at the melee values for short attacks. The shot's own arc is part
-    // of "in range": a bow/crossbow/gun/claw cannot hit a body (almost) straight above or below, so
-    // treating one as "in range" would plant the bot on a target it can never hit.
+    // of "in range": a projectile or single-target spell cannot hit a body almost straight above/below.
+    // Magic AoE/Heal can still land there; ask the actual AUTO selection only when the primary arc fails.
     boolean inAttackRange(Character chr, Monster mob) {
         if (approachX < 0) {
             approachX = CombatSpacing.approachX(chr);
@@ -548,7 +548,8 @@ public final class GrindBrain {
         Point mp = mob.getPosition();
         return pos != null && mp != null
                 && Math.abs(mp.x - pos.x) <= approachX && Math.abs(mp.y - pos.y) <= approachY
-                && (!approachArcLimited || BotAttackDriver.withinRangedArc(pos, mp, mob));
+                && (!approachArcLimited || BotAttackDriver.withinRangedArc(pos, mp, mob)
+                || BotAttackDriver.canReach(chr, mob));
     }
 
     // ── Approach-progress tracking (no-progress give-up on an unreachable target/spot) ──

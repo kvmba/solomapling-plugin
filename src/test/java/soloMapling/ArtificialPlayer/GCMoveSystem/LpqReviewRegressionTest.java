@@ -592,8 +592,7 @@ class LpqReviewRegressionTest {
         createBot(map, new Point(0, 0), Job.WARRIOR);
         // Geometry is not the rule under test: this case proves AUTO picks the TALLER pack box
         // (melee 130x80 vs single 90x60) and that the pack cap admits the second body. The
-        // projectile routes cannot express that any more - the 1:4 shot arc caps the vertical
-        // gap below the single profile's reachY, so range, not the pack box, would decide.
+        // projectile routes have a slope constraint too, so range, not just the pack box, would decide.
         Monster first = monster(9300005, 99121, new Point(60, -70));
         Monster second = monster(9300005, 99122, new Point(110, -70));
         inject(map, first); inject(map, second);
@@ -642,12 +641,11 @@ class LpqReviewRegressionTest {
     }
 
     /**
-     * The steepest shot that still lands from this room's firing ledge. At 1:4 the arc, not the
-     * reach box, is the vertical limit: 450px of horizontal reach allows 112px of lift, so the
-     * boundary cases sit there (they used to sit at the box's 150 because 1:2 was looser than it).
+     * At 20 degrees the 150px reach box is tighter than the arc near full horizontal reach.
+     * Its top edge is inclusive and its bottom edge exclusive; both legal extremes need a ledge.
      */
     @ParameterizedTest
-    @ValueSource(ints = {-112, -110, 111})
+    @ValueSource(ints = {-150, -149, 149})
     void legalVerticalBoundaryShotsAreNotFilteredOut(int targetY) throws Exception {
         MapleMap map = map(922019982 + targetY + 150);
         floor(map, 1, 0, 0, 300);
@@ -670,17 +668,20 @@ class LpqReviewRegressionTest {
     }
 
     @ParameterizedTest
-    @ValueSource(ints = {-449, 450})
-    void firingBoxAndActualSwingAgreeAtBothHorizontalEdges(int shooterX) throws Exception {
+    @CsvSource({
+            "-450, 0, false", "-449, 0, true", "450, 0, true", "451, 0, false",
+            "-440, 150, true", "-440, -149, true", "-440, -150, false", "-440, 151, false"
+    })
+    void firingBoxAndActualSwingAgreeAtReachEdges(int shooterX, int shooterY, boolean legal) throws Exception {
         MapleMap map = map(922019987);
         floor(map, 1, -600, 0, 600);
-        createBot(map, new Point(shooterX, 0), Job.HUNTER);
+        createBot(map, new Point(shooterX, shooterY), Job.HUNTER);
         Monster target = monster(9300170, 99120, new Point(0, 0));
         inject(map, target);
-        assertTrue(BotAttackDriver.firingPositions(bot, target).contains(bot.getPosition()));
+        assertEquals(legal, BotAttackDriver.firingPositions(bot, target).contains(bot.getPosition()));
         try (var effects = mockStatic(BotAttackEffects.class)) {
-            assertTrue(BotAttackDriver.canReach(bot, target));
-            assertTrue(BotAttackDriver.botAttack(bot).hit());
+            assertEquals(legal, BotAttackDriver.canReach(bot, target));
+            assertEquals(legal, BotAttackDriver.botAttack(bot).hit());
         }
     }
 
@@ -714,7 +715,7 @@ class LpqReviewRegressionTest {
     void enteringAttackRangeMidFlightKeepsItsLandingOrder() throws Exception {
         MapleMap map = map(922019991);
         floor(map, 1, -100, 0, 800);
-        // In range under the 1:4 arc (dx=100 allows 25px of lift) so the beat is about the
+        // In range under the 20-degree arc (dx=100 allows 36px of lift) so the beat is about the
         // landing order, not about whether the shot is legal.
         createBot(map, new Point(100, -20), Job.HUNTER);
         Monster target = monster(9300170, 99129, new Point(200, 0));
