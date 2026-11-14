@@ -13,11 +13,14 @@ import soloMapling.ArtificialPlayer.BotPartySystem.BotRecruitManager;
 import soloMapling.ArtificialPlayer.BotSM;
 import soloMapling.ArtificialPlayer.BotAttackSystem.BotAuraState;
 import soloMapling.ArtificialPlayer.BotHealthSystem.BotPotionSim;
+import soloMapling.ArtificialPlayer.BotMessagingSystem.CharacterStorage;
 import soloMapling.ArtificialPlayer.BotMessagingSystem.ChatMessage;
 import soloMapling.ArtificialPlayer.BotGrindSystem.GrindTickRegistry;
 import soloMapling.ArtificialPlayer.GCMoveSystem.GCMovement;
 import soloMapling.BotLogger;
+import soloMapling.Environment.BotMessages;
 import soloMapling.Environment.PlatformPlacement;
+import org.gms.net.server.world.PartyCharacter;
 
 import java.awt.Point;
 import java.util.concurrent.ThreadLocalRandom;
@@ -676,6 +679,46 @@ public abstract class PartyQuestBot extends BotSM implements GrindTickRegistry.P
     }
 
     /**
+     * The highest-level bot still standing in this room (this bot included) speaks for the
+     * rearguard when the leader has already gone through: the party is only leaving because
+     * he left, and the oldest body is the one who says so. Null when there is nobody to
+     * claim the line (leaderless stray, or everyone left already).
+     */
+    private PartyQuestBot rearguardSpeaker() {
+        var party = getChr().getParty();
+        if (party == null) {
+            return null;
+        }
+        BotSM speaker = null;
+        int bestLevel = Integer.MIN_VALUE;
+        for (PartyCharacter mpc : party.getPartyMembers()) {
+            Character member = mpc.getPlayer();
+            if (member == null || !soloMapling.ArtificialPlayer.BotHelpers.isBot(member)
+                    || member.getMapId() != getChr().getMapId()) {
+                continue;
+            }
+            BotSM bot = CharacterStorage.getBotById(member.getId());
+            if (bot instanceof PartyQuestBot pq && member.getLevel() > bestLevel) {
+                bestLevel = member.getLevel();
+                speaker = pq;
+            }
+        }
+        return speaker instanceof PartyQuestBot pq ? pq : null;
+    }
+
+    /** The one rearguard line the party's oldest bot says as it follows the leader out. */
+    private void sayRearguardLine() {
+        PartyQuestBot speaker = rearguardSpeaker();
+        if (speaker == null) {
+            return;
+        }
+        String line = BotMessages.getOr("pq.rearguard", null);
+        if (line != null) {
+            SocialCommands.BotSpeak(speaker.getChr(), line);
+        }
+    }
+
+    /**
      * Whether this bot is available to be recruited: outside every room of the run.
      *
      * <p>Deliberately "not inside the quest" rather than "exactly in the lobby map": a bot that
@@ -821,6 +864,7 @@ public abstract class PartyQuestBot extends BotSM implements GrindTickRegistry.P
         }
         BotLogger.log("PQ bot " + getChr().getName() + " following the leader from "
                 + here + " to " + leaderMap + " through portal " + exit.getName());
+        sayRearguardLine();
         sayDoorLine();
         if (PqActions.walkTo(getChr(), exit.getPosition())) {
             PqActions.enterPortal(getChr(), exit);

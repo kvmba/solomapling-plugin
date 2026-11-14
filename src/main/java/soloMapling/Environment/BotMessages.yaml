@@ -25,6 +25,10 @@ party.join_failed: "{0} couldn't join your party (it was full or disbanded) - tr
 carnival.challenge.accepted: "[Carnival] Team {0} has joined the challenge! The battle begins in {1}s - get ready."
 carnival.challenge.team: "The opposing party"
 
+# The line the party's highest-level bot says as it follows the leader through the
+# stage door (the leader left first; the bots are the passive rearguard).
+pq.rearguard: "Lead the way, we'll bring up the rear."
+
 # ---------------------------------------------------------------------------
 # Option menus (labels shown in the hint balloon)
 #
