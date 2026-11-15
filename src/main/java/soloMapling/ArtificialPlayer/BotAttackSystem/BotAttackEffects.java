@@ -57,7 +57,8 @@ public final class BotAttackEffects {
      * Do NOT pass the attack hitDelay here. killMonster 4th arg is the animation byte written
      * straight into the KILL_MONSTER packet (PacketCreator writes it with writeByte, so 300ms
      * truncates to 44 - an animation the client has no death sequence for, and the mob pops out
-     * of existence instead of playing die1). The hit delay belongs to the attack packet only.
+     * of existence instead of playing die1). The hit delay schedules a surviving mob's hit pose,
+     * not its death animation.
      */
     private static final int DEATH_ANIMATION_FADE_OUT = 1;
 
@@ -77,8 +78,7 @@ public final class BotAttackEffects {
      * @param bodyActionId the per-weapon swing animation id (from BotAttackData)
      * @param facingMask   the stance/facing byte (0x00 right / 0x80 left)
      * @param speed        the attack-speed byte (2..9)
-     * @param hitDelay     ms before the damage numbers land (attack packet only; loot
-     *                    timing comes from the die1 animation, see applyDamageAndLoot)
+     * @param hitDelay     ms until a surviving mob's hit pose; loot timing comes from die1
      */
     public static StrikeResult meleeStrike(Character bot, Map<Monster, List<Integer>> hits, int skillId,
                                       int skillLevel, int bodyActionId, int facingMask, int speed, short hitDelay) {
@@ -86,7 +86,7 @@ public final class BotAttackEffects {
             return StrikeResult.REJECTED;
         }
         Packet packet = PacketCreator.closeRangeAttack(bot, skillId, skillLevel, facingMask,
-                numAttackedAndDamage(hits), toTargets(hits, hitDelay), speed, bodyActionId, 0);
+                numAttackedAndDamage(hits), toTargets(hits), speed, bodyActionId, 0);
         return broadcastAndApply(bot, packet, hits, skillId, hitDelay, bodyActionId);
     }
 
@@ -98,7 +98,7 @@ public final class BotAttackEffects {
             return StrikeResult.REJECTED;
         }
         Packet packet = PacketCreator.rangedAttack(bot, skillId, skillLevel, facingMask,
-                numAttackedAndDamage(hits), projectile, toTargets(hits, hitDelay), speed, bodyActionId, 0);
+                numAttackedAndDamage(hits), projectile, toTargets(hits), speed, bodyActionId, 0);
         return broadcastAndApply(bot, packet, hits, skillId, hitDelay, bodyActionId);
     }
 
@@ -113,7 +113,7 @@ public final class BotAttackEffects {
             return StrikeResult.REJECTED;
         }
         Packet packet = PacketCreator.magicAttack(bot, skillId, skillLevel, facingMask,
-                numAttackedAndDamage(hits), toTargets(hits, hitDelay),
+                numAttackedAndDamage(hits), toTargets(hits),
                 BotAttackData.magicChargeFor(skillId), speed, bodyActionId, 0);
         return broadcastAndApply(bot, packet, hits, skillId, hitDelay, bodyActionId);
     }
@@ -129,7 +129,7 @@ public final class BotAttackEffects {
     }
 
     /* Packet target map: each mob's object id -> its damage line(s). */
-    private static Map<Integer, List<Integer>> toTargets(Map<Monster, List<Integer>> hits, short hitDelay) {
+    private static Map<Integer, List<Integer>> toTargets(Map<Monster, List<Integer>> hits) {
         Map<Integer, List<Integer>> targets = new HashMap<>();
         for (Map.Entry<Monster, List<Integer>> hit : hits.entrySet()) {
             targets.put(hit.getKey().getObjectId(), hit.getValue());
@@ -146,10 +146,13 @@ public final class BotAttackEffects {
         boolean anyKilled = false;
         for (Map.Entry<Monster, List<Integer>> hit : hits.entrySet()) {
             int total = 0;
+            int hitDamage = 0;
             for (int line : hit.getValue()) {
-                total += BotAttackData.decodeDamageLine(line); // crit lines arrive negative-encoded
+                int damage = BotAttackData.decodeDamageLine(line); // crit lines arrive negative-encoded
+                total += damage;
+                hitDamage = Math.max(hitDamage, damage);
             }
-            if (applyDamageAndLoot(bot, hit.getKey(), total, hitDelay)) {
+            if (applyDamageAndLoot(bot, hit.getKey(), total, hitDamage, hitDelay)) {
                 anyKilled = true;
             }
         }
@@ -200,7 +203,7 @@ public final class BotAttackEffects {
                 skill, skillLevel, facingMask,
                 /* numAttackedAndDamage */ (1 << 4) | 1,
                 targets, BotAttackData.DEFAULT_ATTACK_SPEED, bodyActionId, /* display */ 0), false);
-        return applyDamageAndLoot(bot, mob, damage, (short) 0);
+        return applyDamageAndLoot(bot, mob, damage, damage, (short) 0);
     }
 
     /*
@@ -212,11 +215,11 @@ public final class BotAttackEffects {
         if (bot == null || bot.getMap() == null || target == null || !target.isAlive() || damage <= 0) {
             return false;
         }
-        return applyDamageAndLoot(bot, target, damage, (short) 0);
+        return applyDamageAndLoot(bot, target, damage, damage, (short) 0);
     }
 
     /* Apply HP damage; on death, credit EXP + the death broadcast (no vanilla drops) and spawn our own loot. */
-    private static boolean applyDamageAndLoot(Character bot, Monster target, int damage, short hitDelay) {
+    private static boolean applyDamageAndLoot(Character bot, Monster target, int damage, int hitDamage, short hitDelay) {
         MapleMap map = bot.getMap();
         Map<Integer, Integer> expBefore = companionPartyExp(bot);
 
@@ -233,6 +236,9 @@ public final class BotAttackEffects {
                 : bot.getParty() != null ? 1 : 0);
 
         boolean killed = target.damage(bot, damage, false); // register damage; false = allow death
+        if (!killed && hitDamage > 0) {
+            target.showHitReaction(bot, hitDamage, hitDelay);
+        }
         if (killed) {
             // withDrops=false: keep the EXP distribution + death broadcast, skip the
             // vanilla drop step (which yields nothing for a bot-only kill). We spawn the

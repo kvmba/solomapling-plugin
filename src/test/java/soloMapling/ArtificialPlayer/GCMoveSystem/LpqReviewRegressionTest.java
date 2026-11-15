@@ -11,6 +11,8 @@ import org.gms.manager.ServerManager;
 import org.gms.net.packet.Packet;
 import org.gms.property.ServiceProperty;
 import org.gms.server.life.Monster;
+import org.gms.server.life.LifeFactory;
+import org.gms.server.life.MonsterInformationProvider;
 import org.gms.server.maps.Foothold;
 import org.gms.server.maps.FootholdTree;
 import org.gms.server.maps.MapObject;
@@ -151,6 +153,96 @@ class LpqReviewRegressionTest {
         state.unstuckCooldownMs = 0;
         assertTrue(BotMovementManager.selfHealDeadPit(state), "a cached dead verdict still requires rescue");
         assertEquals(new Point(0, -500), bot.getPosition());
+    }
+
+    @ParameterizedTest
+    @ValueSource(ints = {0, 1, 2})
+    void everyActiveAttackRouteRelaysTheLargestDecodedLineForTheMobHit(int route) throws Exception {
+        MapleMap map = attackMap();
+        createBot(map, new Point(0, 0), Job.BEGINNER);
+        state.alertResetScheduled = true;
+        Monster mob = monster(9300005, 99170, new Point(30, 0));
+        when(mob.getStati(any())).thenReturn(null);
+        int criticalLine = BotAttackData.encodeCritLine(150);
+        int criticalDamage = BotAttackData.decodeDamageLine(criticalLine);
+        Map<Monster, List<Integer>> hits = Map.of(mob,
+                List.of(0, criticalLine, 50));
+
+        var result = switch (route) {
+            case 0 -> BotAttackEffects.meleeStrike(bot, hits, 0, 0, 5, 0, 4, (short) 300);
+            case 1 -> BotAttackEffects.rangedStrike(bot, hits, 3001004, 1, 0, 22, 0, 4, (short) 300);
+            default -> BotAttackEffects.magicStrike(bot, hits, 2001004, 1, 28, 0, 4, (short) 300);
+        };
+        assertEquals(HIT, result);
+        verify(mob).damage(bot, criticalDamage + 50, false);
+        verify(mob).showHitReaction(bot, criticalDamage, 300);
+    }
+
+    @Test
+    void aMissDoesNotInventAMobHitReaction() throws Exception {
+        MapleMap map = attackMap();
+        createBot(map, new Point(0, 0), Job.BEGINNER);
+        state.alertResetScheduled = true;
+        Monster mob = monster(9300005, 99171, new Point(30, 0));
+        when(mob.getStati(any())).thenReturn(null);
+        assertEquals(HIT, BotAttackEffects.meleeStrike(bot, Map.of(mob, List.of(0, 0)),
+                0, 0, 5, 0, 4, (short) 300));
+        verify(mob).damage(bot, 0, false);
+        verify(mob, never()).showHitReaction(any(), anyInt(), anyInt());
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void passiveAndExternalHitsUseTheSameReactionPath(boolean passive) throws Exception {
+        MapleMap map = attackMap();
+        createBot(map, new Point(0, 0), Job.BEGINNER);
+        Monster mob = monster(9300005, 99172, new Point(30, 0));
+        when(mob.getStati(any())).thenReturn(null);
+        assertFalse(passive ? BotAttackEffects.bodyStrike(bot, mob, 150)
+                : BotAttackEffects.applyExternalHit(bot, mob, 150));
+        verify(mob).damage(bot, 150, false);
+        verify(mob).showHitReaction(bot, 150, 0);
+    }
+
+    @Test
+    void aKillingBlowUsesTheDeathAnimationNotAPendingHit() throws Exception {
+        MapleMap map = attackMap();
+        createBot(map, new Point(0, 0), Job.BEGINNER);
+        Monster mob = monster(9300005, 99173, new Point(30, 0));
+        when(mob.getStati(any())).thenReturn(null);
+        when(mob.dropsDisabled()).thenReturn(true);
+        when(mob.damage(bot, 150, false)).thenReturn(true);
+        doNothing().when(map).killMonster(mob, bot, false, 1);
+        try (var config = mockStatic(GameConfig.class)) {
+            assertTrue(BotAttackEffects.applyExternalHit(bot, mob, 150));
+        }
+        verify(map).killMonster(mob, bot, false, 1);
+        verify(mob, never()).showHitReaction(any(), anyInt(), anyInt());
+    }
+
+    @Test
+    void mobHitFramesComeFromTheRealWzIncludingVisualLinksAndStationaryBosses() {
+        try (var drops = mockStatic(MonsterInformationProvider.class)) {
+            drops.when(MonsterInformationProvider::getInstance)
+                    .thenReturn(mock(MonsterInformationProvider.class));
+            Monster snail = LifeFactory.getMonster(100100);
+            assertNotNull(snail);
+            assertEquals(1, snail.getStats().getPushedDamage());
+            assertEquals(1, snail.getStats().getHitAnimationCount());
+            assertTrue(snail.getStats().getHitAnimationTime(0) > 0);
+
+            Monster linked = LifeFactory.getMonster(9300005);
+            Monster visual = LifeFactory.getMonster(3110102);
+            assertNotNull(linked);
+            assertNotNull(visual);
+            assertTrue(linked.getStats().getHitAnimationCount() > 0);
+            assertEquals(visual.getStats().getHitAnimationTime(0),
+                    linked.getStats().getHitAnimationTime(0));
+            Monster zakum = LifeFactory.getMonster(8800000);
+            assertNotNull(zakum);
+            assertEquals(0, zakum.getStats().getHitAnimationCount(),
+                    "a stationary boss must not acquire an ordinary hit movement");
+        }
     }
 
     @ParameterizedTest
