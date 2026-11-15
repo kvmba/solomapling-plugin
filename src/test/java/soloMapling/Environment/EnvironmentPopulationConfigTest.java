@@ -7,6 +7,8 @@ import java.io.File;
 import java.nio.file.Files;
 import java.nio.file.Path;
 
+import soloMapling.ArtificialPlayer.BotDecoratorSystem.BotDecorate;
+import soloMapling.ArtificialPlayer.BotGrindSystem.TrainingRegions;
 import soloMapling.ArtificialPlayer.BotTownSystem.TownPresenceConfig;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -45,6 +47,20 @@ class EnvironmentPopulationConfigTest {
         int wanderers = towns.stream().mapToInt(t -> t.wanderers()).sum();
         assertEquals(1407, social);
         assertEquals(272, wanderers);
+    }
+
+    @Test
+    void beginnerIslandCohortsCannotSpawnAdvancedJobs() {
+        var cohorts = EnvironmentPopulationConfig.reload().training().cohorts().stream()
+                .filter(c -> TrainingRegions.isBeginnerIsland(c.mapId())).toList();
+        assertFalse(cohorts.isEmpty());
+        for (var cohort : cohorts) {
+            assertTrue(cohort.levelLo() >= 1 && cohort.levelHi() < 10,
+                    "beginner island spawn band: " + cohort);
+            for (int family = 1; family <= 5; family++) {
+                assertEquals(0, BotDecorate.selectJobForClass(family, cohort.levelHi()));
+            }
+        }
     }
 
     // Every town should have 1-3 GachaBots - the ones that spray junk on the floor and pick it back

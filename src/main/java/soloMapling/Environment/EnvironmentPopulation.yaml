@@ -104,7 +104,7 @@ waves:
       # Beginner island (彩虹岛): where bots start, and where they grind the few levels they need
       # before Sanks rows them out. Nobody lives here — it gets training cohorts but no townsfolk,
       # since a bot that stays on the island is a bot that never left.
-      - {map: 50001, count: 5, level_lo: 1, level_hi: 10}    # 南港西郊平原
+      - {map: 50001, count: 5, level_lo: 1, level_hi: 9}     # 南港西郊平原（未转职）
       - {map: 40000, count: 8,  level_lo: 1, level_hi: 8}     # 小树林
       - {map: 2,     count: 6,  level_lo: 1, level_hi: 6}     # 番茄田
       # Hunting-ground continents that were missing any hub at all.
