@@ -60,6 +60,7 @@ import java.awt.Point;
 import java.lang.reflect.Field;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
@@ -420,10 +421,10 @@ class LpqReviewRegressionTest {
     @CsvSource({
             "BOW, 9, 22, 1000, false",
             "CROSSBOW, 9, 23, 1000, false",
-            "GUN, 77, 93, 980, false",
+            "GUN, 9, 93, 1000, false",
             "BOW, 9, 22, 1000, true",
             "CROSSBOW, 9, 23, 1000, true",
-            "GUN, 77, 93, 980, true"
+            "GUN, 9, 93, 1000, true"
     })
     void reactorHitsUseMeleeActionsWithRangedWeapons(WeaponType weaponType, int meleeAction,
                                                    int rangedAction, int durationMs, boolean inReachOnly) throws Exception {
@@ -453,6 +454,30 @@ class LpqReviewRegressionTest {
         }
         assertEquals(rangedAction, BotAttackData.randomActionFor(weaponType),
                 "normal ranged attacks must keep their shooting action");
+    }
+
+    @ParameterizedTest
+    @CsvSource({"BOW, 1452009", "CROSSBOW, 1462004", "GUN, 1492006"})
+    void reactorMeleeActionsHaveDrawableBodyAndWeaponFrames(WeaponType weaponType, int weaponId) throws Exception {
+        String actionPrefix = BotAttackData.meleeActionFor(weaponType) + "\t";
+        String actionName;
+        try (var lines = Files.lines(Path.of("docs/client/data/actions.tsv"))) {
+            String row = lines.filter(line -> line.startsWith(actionPrefix)).findFirst().orElseThrow();
+            actionName = row.substring(row.lastIndexOf('\t') + 1);
+        }
+        var provider = org.gms.provider.DataProviderFactory.getDataProvider(org.gms.provider.wz.WZFiles.CHARACTER);
+        var bodyAction = provider.getData("00002000.img").getChildByPath(actionName);
+        assertTrue(bodyAction.getChildren().size() > 1, "a melee swing needs multiple body frames");
+        for (var frame : bodyAction) {
+            assertNotNull(frame.getChildByPath("body"),
+                    actionName + "/" + frame.getName() + " must draw a melee body frame, not alias a shot pose");
+        }
+        var weaponAction = provider.getData("Weapon/0" + weaponId + ".img").getChildByPath(actionName);
+        assertNotNull(weaponAction, "the equipped weapon must support " + actionName);
+        for (var frame : bodyAction) {
+            assertNotNull(weaponAction.getChildByPath(frame.getName() + "/weapon"),
+                    actionName + "/" + frame.getName() + " must draw the equipped weapon");
+        }
     }
 
     @Test
