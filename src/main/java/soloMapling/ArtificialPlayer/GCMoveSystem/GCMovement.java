@@ -9,6 +9,7 @@ import org.gms.server.maps.Portal;
 import org.gms.server.maps.Rope;
 import soloMapling.ArtificialPlayer.BotAttackSystem.BotDashBurst;
 import soloMapling.ArtificialPlayer.BotAttackSystem.BotAuraState;
+import soloMapling.ArtificialPlayer.BotHelpers;
 import soloMapling.ArtificialPlayer.BotMountSystem.BotMount;
 import soloMapling.ArtificialPlayer.BotMovementSystem.MovementCommands;
 
@@ -17,6 +18,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.BooleanSupplier;
 
 /*
  * Public façade for GCMoveSystem — the GreenCat dynamic (calculation-based) movement engine.
@@ -463,6 +465,79 @@ public final class GCMovement {
      */
     static Point entrySpawnPoint(Point spawn) {
         return new Point(spawn.x, spawn.y - ENTRY_RAISE_PX);
+    }
+
+    /** Warp across maps without racing physics or giving the raised spawn frame a ground foothold. */
+    public static void changeMap(Character bot, MapleMap target, Portal portal) {
+        transferMap(bot, () -> {
+            MapleMap before = bot.getMap();
+            if (before == target) return false; // another admitted warp already brought this bot here
+            bot.changeMap(target, portal);
+            return bot.getMap() != before;
+        });
+    }
+
+    /** Keep the host's map-id resolution and random spawn selection for an ordinary warp. */
+    public static void changeMap(Character bot, int mapId) {
+        transferMap(bot, () -> {
+            MapleMap before = bot.getMap();
+            bot.changeMap(mapId);
+            return bot.getMap() != before;
+        });
+    }
+
+    /** Manual spawn/OPQ placement must retain this exact map instance, even without an EventInstance. */
+    public static void placeOnMap(Character bot, Point position, MapleMap map) {
+        transferMap(bot, () -> {
+            if (bot.getMap() == map) map.removePlayer(bot);
+            bot.setMap(map);
+            bot.setPosition(position);
+            map.addPlayer(bot);
+            return true; // even a same-map, same-point placement emitted a new spawn
+        });
+        if (!isEnabled(bot)) bot.setStance(CharacterStance.STAND_LEFT_STANCE);
+        // Publish HP after the physical entry is finalized, even if this separate notification fails.
+        bot.updatePartyMemberHP();
+    }
+
+    private static void transferMap(Character bot, BooleanSupplier transfer) {
+        // Carnival rescue/evacuation also carries real party members; leave their client-owned pose alone.
+        if (!BotHelpers.isBot(bot)) {
+            transfer.getAsBoolean();
+            return;
+        }
+        BotMovementState st = STATES.get(bot.getId());
+        synchronized (st != null ? st : bot) {
+            if (st != null && st.tickStopped) return;
+            MapleMap before = bot.getMap();
+            Point positionBefore = bot.getPosition();
+            int stanceBefore = bot.getStance();
+            boolean entered = false;
+            Throwable transferFailure = null;
+            // The host chooses the spawn foothold from Character.stance, not the packet's entry pose.
+            bot.setStance(bot.isFacingLeft()
+                    ? CharacterStance.JUMP_LEFT_STANCE : CharacterStance.JUMP_RIGHT_STANCE);
+            try {
+                entered = transfer.getAsBoolean();
+            } catch (RuntimeException | Error failure) {
+                transferFailure = failure;
+                throw failure;
+            } finally {
+                bot.setStance(stanceBefore);
+                if (st != null && (entered || bot.getMap() != before
+                        || !bot.getPosition().equals(positionBefore))) {
+                    try {
+                        // Also reconcile a partial transfer that threw after changing the map/position.
+                        if (bot.getMap() == before) clearMoveIntent(bot);
+                        GCMovementDriver.onMapChange(st, bot);
+                        GCMovementDriver.wake(st);
+                    } catch (RuntimeException | Error failure) {
+                        if (transferFailure == null) throw failure;
+                        transferFailure.addSuppressed(failure);
+                    }
+                }
+            }
+        }
     }
 
     /** Enter a scripted quest portal without racing the physics tick, including same-map warps. */

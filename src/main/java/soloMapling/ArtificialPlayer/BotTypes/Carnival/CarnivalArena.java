@@ -9,6 +9,7 @@ import org.gms.server.maps.Portal;
 import org.gms.server.partyquest.MonsterCarnival;
 import soloMapling.ArtificialPlayer.BotMessagingSystem.CharacterStorage;
 import soloMapling.ArtificialPlayer.BotPartySystem.BotPartyCommands;
+import soloMapling.ArtificialPlayer.GCMoveSystem.GCMovement;
 import soloMapling.BotLogger;
 import soloMapling.Environment.BotMessages;
 
@@ -921,7 +922,7 @@ public final class CarnivalArena {
                 continue; // never reached the arena, or already back somewhere real
             }
             try {
-                mc.changeMap(lobby, lobby.getPortal(0));
+                GCMovement.changeMap(mc, lobby, lobby.getPortal(0));
             } catch (RuntimeException e) {
                 BotLogger.log("CPQ: could not return " + mc.getName() + " to the lobby (" + e + ")");
             }
@@ -1002,7 +1003,7 @@ public final class CarnivalArena {
         for (PartyCharacter mpc : bots.getPartyMembers()) {
             Character mc = mpc.getPlayer();
             if (mc != null && mc.getMapId() != mapId) {
-                mc.changeMap(target, CarnivalPqData.doorAt(doors, slot));
+                GCMovement.changeMap(mc, target, CarnivalPqData.doorAt(doors, slot));
             }
             slot++;
         }
@@ -1289,7 +1290,7 @@ public final class CarnivalArena {
                 continue;
             }
             try {
-                mc.changeMap(CarnivalPqData.outMapFor(mc.getMapId()));
+                GCMovement.changeMap(mc, CarnivalPqData.outMapFor(mc.getMapId()));
             } catch (RuntimeException e) {
                 BotLogger.log("CPQ: could not evacuate " + mc.getName() + " (" + e + ")");
             }

@@ -1030,7 +1030,7 @@ public abstract class PartyQuestBot extends BotSM implements GrindTickRegistry.P
         }
         // A null answer (a lobby whose WZ data names no spawn door) is fine: Character.changeMap
         // resolves a null portal to the map's portal 0.
-        bot.changeMap(lobby, lobbyArrivalPortal(bot, lobby));
+        GCMovement.changeMap(bot, lobby, lobbyArrivalPortal(bot, lobby));
     }
 
     /**

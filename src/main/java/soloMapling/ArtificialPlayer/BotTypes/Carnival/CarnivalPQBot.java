@@ -202,7 +202,7 @@ public class CarnivalPQBot extends PartyQuestBot {
             return false;
         }
         // A null door (a map with no spawn door) is fine: changeMap falls back to portal 0.
-        bot.changeMap(map, CarnivalPqData.doorAt(CarnivalPqData.spawnDoors(map.getPortals()),
+        GCMovement.changeMap(bot, map, CarnivalPqData.doorAt(CarnivalPqData.spawnDoors(map.getPortals()),
                 bot.getId()));
         nextWarpFollowAtMs = now + WARP_FOLLOW_GAP_MS;
         return bot.getMapId() == target;

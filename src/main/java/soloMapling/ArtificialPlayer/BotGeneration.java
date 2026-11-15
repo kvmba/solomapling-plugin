@@ -409,19 +409,7 @@ public class BotGeneration {
     }
 
     private static void placeBotOnMap(Character fakechar, Point pos, MapleMap map) {
-        if (fakechar.getMap() == map) {
-            fakechar.getMap().removePlayer(fakechar);
-        }
-        fakechar.setMap(map);
-        fakechar.setPosition(pos);
-        fakechar.setStance(5);
-        map.addPlayer(fakechar);
-        // A real changeMap publishes the mover's HP to same-map party members
-        // (Character.changeMapInternal -> updatePartyMemberHPInternal). This manual
-        // placement bypasses that path, so a bot warping into a party quest after the
-        // player is already there never sends UPDATE_PARTYMEMBER_HP and the client
-        // renders its teammate bar as 0. Republish here; a party-less bot is a no-op.
-        fakechar.updatePartyMemberHP();
+        GCMovement.placeOnMap(fakechar, pos, map);
     }
 
     /**

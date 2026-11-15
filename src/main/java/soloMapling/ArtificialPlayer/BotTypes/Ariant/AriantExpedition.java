@@ -8,6 +8,7 @@ import org.gms.server.maps.MapleMap;
 import soloMapling.ArtificialPlayer.BotCommandsPack.WarpCommands;
 import soloMapling.ArtificialPlayer.BotMessagingSystem.CharacterStorage;
 import soloMapling.ArtificialPlayer.BotSM;
+import soloMapling.ArtificialPlayer.GCMoveSystem.GCMovement;
 import soloMapling.BotLogger;
 import soloMapling.server.BotChannelRouter;
 import soloMapling.server.ExecutorServiceManager;
@@ -174,7 +175,7 @@ public final class AriantExpedition {
         }
         MapleMap queue = queueMapId > 0 ? WarpCommands.mapForBot(chr, queueMapId) : null;
         if (queue != null) {
-            chr.changeMap(queue, 0); // the same warp the NPC performs for a joining member
+            GCMovement.changeMap(chr, queue, queue.getPortal(0));
             BotLogger.log("Ariant: " + chr.getName() + " enrolled in " + exped.getType()
                     + " (queue map " + queueMapId + ")");
         }

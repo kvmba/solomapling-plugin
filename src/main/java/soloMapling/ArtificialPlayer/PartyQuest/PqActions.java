@@ -169,7 +169,7 @@ public final class PqActions {
         if (target == null) {
             return false;
         }
-        bot.changeMap(target, target.getPortal(portal));
+        GCMovement.changeMap(bot, target, target.getPortal(portal));
         return true;
     }
 
@@ -2892,7 +2892,8 @@ public final class PqActions {
         if (bot == null || bot.getMap() == null) {
             return;
         }
-        bot.changeMap(bot.getWarpMap(bot.getMap().getPortal(portalId).getTargetMapId()), portalId);
+        MapleMap target = bot.getWarpMap(bot.getMap().getPortal(portalId).getTargetMapId());
+        GCMovement.changeMap(bot, target, target.getPortal(portalId));
     }
 
     /**
