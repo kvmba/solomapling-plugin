@@ -2367,6 +2367,17 @@ final class BotPhysicsEngine {
                 best = landing;
             }
         }
+        // A wall clamp retains vertical travel on the bot's side. Sweep that path too: the
+        // original sweep can pick a floor past the wall's face at a shared endpoint, missing
+        // the floor under the clamp pixel and consuming the fall through it as a WALL.
+        // A zero-progress hit has no pre-impact travel to sweep.
+        if (best.type() == AirCollisionType.WALL && best.progress() > 0.0) {
+            AirCollision wallSideLanding = findGroundCollision(map, start, best.point());
+            if (wallSideLanding.type() == AirCollisionType.LAND) {
+                best = new AirCollision(AirCollisionType.LAND, wallSideLanding.point(),
+                        wallSideLanding.foothold(), wallSideLanding.progress() * best.progress());
+            }
+        }
         if (best.type() == AirCollisionType.NONE && sideClamped) {
             // Nothing on the clamped column: keep the old behaviour - hold the body ON the bound
             // instead of letting it drift away through empty air.
