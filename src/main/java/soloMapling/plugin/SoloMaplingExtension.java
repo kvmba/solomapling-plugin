@@ -398,6 +398,7 @@ public final class SoloMaplingExtension implements ServerExtension {
     @Override
     public void onUnload() {
         log.info("SoloMapling plugin onUnload");
+        soloMapling.ArtificialPlayer.PartyQuest.PqLobbyRotation.stop();
         try {
             soloMapling.ArtificialPlayer.BotPetSystem.BotPetSystem.shutdown();
         } catch (Throwable ignored) {

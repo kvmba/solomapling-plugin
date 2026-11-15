@@ -1,14 +1,23 @@
 package soloMapling.ArtificialPlayer.PartyQuest;
 
 import org.gms.client.Character;
+import org.gms.net.server.Server;
+import org.gms.net.server.channel.Channel;
 import soloMapling.ArtificialPlayer.BotDecoratorSystem.BotDecorate;
+import soloMapling.ArtificialPlayer.BotGeneration;
+import soloMapling.ArtificialPlayer.BotGrindSystem.BotSpotPicker;
 import soloMapling.ArtificialPlayer.BotHelpers;
 import soloMapling.ArtificialPlayer.BotTypeManager;
 import soloMapling.ArtificialPlayer.BotTypes.Carnival.CarnivalPqData;
 import soloMapling.Environment.PlatformPlacement;
+import soloMapling.server.BotChannelRouter;
+import soloMapling.server.SoloMaplingConstants;
 
+import java.awt.Point;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Random;
+import java.util.concurrent.ThreadLocalRandom;
 
 /**
  * Puts quest bots where a player can actually recruit them.
@@ -23,9 +32,8 @@ import java.util.Random;
  * that fill a party. The counts come from the quest's {@code maxPlayers}, since quests generally
  * take the whole party in.
  *
- * <p>The mechanism is the same one the long-standing Orbis spawner uses - platform placement,
- * then a level assignment, then bot-type conversion - kept general so each quest is a row in
- * {@link PqRecruitPoints} rather than another method here.
+ * <p>Each channel gets every eligible career path, pinned before decoration and conversion.
+ * Quests are rows in {@link PqRecruitPoints} rather than separate spawn implementations.
  */
 public final class PqBotSpawner {
 
@@ -39,10 +47,21 @@ public final class PqBotSpawner {
      */
     private static final int BOTS_PER_PARTY_MULTIPLE = 3;
 
+    private static final List<Integer> FIRST_JOBS = List.of(100, 200, 300, 400, 500);
+    private static final List<Integer> JOB_PATHS =
+            List.of(110, 120, 130, 210, 220, 230, 310, 320, 410, 420, 510, 520);
+
+    static final PqRecruitPoints.Point CARNIVAL = new PqRecruitPoints.Point(
+            "CarnivalPQ", CarnivalPqData.LOBBY_MAP, CarnivalPqData.CPQ1_MIN_LEVEL,
+            CarnivalPqData.CPQ1_MAX_LEVEL, 2, CarnivalPqData.MAX_TEAM_SIZE);
+    static final PqRecruitPoints.Point CARNIVAL_2 = new PqRecruitPoints.Point(
+            "CarnivalPQ2", CarnivalPqData.LOBBY_MAP_CPQ2, CarnivalPqData.CPQ2_MIN_LEVEL,
+            CarnivalPqData.CPQ2_MAX_LEVEL, 2, CarnivalPqData.MAX_TEAM_SIZE);
+
     /**
      * The same scaling the rest of the ambient population goes through, so a server set to run a
-     * lighter population runs lighter quest lobbies too rather than a fixed crowd that ignores
-     * the setting. Delegated rather than reimplemented, so the two cannot drift apart.
+     * lighter population runs lighter quest lobbies too, above the career-coverage floor.
+     * Delegated rather than reimplemented, so the two cannot drift apart.
      */
     private static int scaledAmbient(int base) {
         return soloMapling.Environment.EnvironmentManager.scaledAmbient(base);
@@ -60,33 +79,82 @@ public final class PqBotSpawner {
      */
     public static List<Integer> spawnFor(PqRecruitPoints.Point point,
                                          BotTypeManager.BotType type) {
-        if (point == null || type == null) {
+        return spawnFor(point, type, point == null ? 0 : recruitCount(point));
+    }
+
+    public static List<Integer> spawnFor(PqRecruitPoints.Point point,
+                                         BotTypeManager.BotType type, int count) {
+        if (point == null || type == null || count <= 0) {
             return List.of();
         }
-
-        // Three times what one player would need. A lobby wants a crowd the way Orbis's does,
-        // not exactly enough to start: a handful of bots that matches the party size to the
-        // person reads as a set of placeholders, and a player choosing a party wants spare
-        // bodies to pick from. The multiple is applied to the party-filling count, so each
-        // quest still offers at least one full party's worth.
-        int want = point.botsToOffer(1) * BOTS_PER_PARTY_MULTIPLE;
-        want = scaledAmbient(want);
-        if (want <= 0) {
+        var world = Server.getInstance().getWorld(SoloMaplingConstants.GameConstants.WORLD_SCANIA);
+        if (world == null) {
             return List.of();
         }
-
-        // Placed by the map's own WZ terrain, not a recorded platform pack: only Orbis's lobby
-        // ever shipped one, so the other quests' lobbies had no way to place a bot at all.
-        List<Integer> all = PlatformPlacement.spawnBotsOnMap(want, point.recruitMap());
-        if (all.isEmpty()) {
-            return all;
+        List<Integer> jobs = plannedPaths(point, Math.max(count, recruitPaths(point).size()));
+        List<Integer> all = new ArrayList<>();
+        for (Channel channel : world.getChannels()) {
+            all.addAll(spawnRecruitBatch(point, type, channel, jobs));
         }
-
-        // Level before conversion: the quest's eligibility test reads level at start time, and
-        // a bot converted first would have a tick's worth of running at the wrong level.
-        levelRange(all, point.minLevel(), point.maxLevel());
-        BotTypeManager.setAndStartBots(all, type);
         return all;
+    }
+
+    static List<Integer> recruitPaths(PqRecruitPoints.Point point) {
+        return point.maxLevel() < 30 ? FIRST_JOBS : JOB_PATHS;
+    }
+
+    private static List<Integer> plannedPaths(PqRecruitPoints.Point point, int count) {
+        List<Integer> paths = recruitPaths(point);
+        List<Integer> jobs = new ArrayList<>(count);
+        int level = point.maxLevel() < 30 ? 10 : 30;
+        for (int i = 0; i < count; i++) {
+            jobs.add(count >= paths.size() && i < paths.size() ? paths.get(i)
+                    : BotDecorate.selectJobByLevel(level));
+        }
+        return jobs;
+    }
+
+    static int recruitCount(PqRecruitPoints.Point point) {
+        int base = CarnivalPqData.isHall(point.recruitMap())
+                ? CarnivalPqData.MAX_TEAM_SIZE * HALL_TEAMS
+                : point.botsToOffer(1) * BOTS_PER_PARTY_MULTIPLE;
+        return Math.max(recruitPaths(point).size(), scaledAmbient(base));
+    }
+
+    /**
+     * A path identifies a career, not an advancement: Fighter/Crusader/Hero all count as 110.
+     * Pin level and job at creation so decoration, equipment and name use the same career.
+     */
+    static List<Integer> spawnRecruitBatch(PqRecruitPoints.Point point, BotTypeManager.BotType type,
+                                           Channel channel, List<Integer> paths) {
+        if (paths.isEmpty()) {
+            return List.of();
+        }
+        var map = channel.getMapFactory().getMap(point.recruitMap());
+        if (map == null) {
+            return List.of();
+        }
+        int low = Math.max(point.minLevel(), point.maxLevel() >= 30 ? 30 : 10);
+        int high = point.equals(PqRecruitPoints.ORBIS) ? point.maxLevel()
+                : Math.max(low, Math.min(point.maxLevel(),
+                        point.minLevel() + Math.max(9, (point.maxLevel() - point.minLevel()) / 3)));
+        var portal = map.getPortal(0);
+        Point anchor = portal == null ? new Point() : portal.getPosition();
+        List<Point> spots = BotSpotPicker.pickGroundSpots(map, anchor.x, anchor.y, paths.size());
+        List<Integer> ids = new ArrayList<>(paths.size());
+        int channelId = channel.getId();
+        for (int i = 0; i < paths.size() && !Thread.currentThread().isInterrupted(); i++) {
+            int level = ThreadLocalRandom.current().nextInt(low, high + 1);
+            int job = paths.get(i) + (level >= 120 ? 2 : level >= 70 ? 1 : 0);
+            Point position = i < spots.size() ? spots.get(i) : anchor;
+            int id = BotGeneration.createBotOnChannel(position, map, job / 100, level, level,
+                    job, channelId);
+            if (id > 0) {
+                BotTypeManager.setAndStartBots(List.of(id), type);
+                ids.add(id);
+            }
+        }
+        return ids;
     }
 
     /**
@@ -130,7 +198,7 @@ public final class PqBotSpawner {
         if (!CARNIVAL_HALLS_SEEDED.compareAndSet(false, true)) {
             return;
         }
-        int want = scaledAmbient(CarnivalPqData.MAX_TEAM_SIZE * HALL_TEAMS);
+        int want = recruitCount(CARNIVAL);
         var world = org.gms.net.server.Server.getInstance()
                 .getWorld(soloMapling.server.SoloMaplingConstants.GameConstants.WORLD_SCANIA);
         if (world == null) {
@@ -161,14 +229,25 @@ public final class PqBotSpawner {
         if (want <= 0 || lobbyId <= 0) {
             return List.of();
         }
+        if (CarnivalPqData.isHall(lobbyId)) {
+            var world = Server.getInstance().getWorld(SoloMaplingConstants.GameConstants.WORLD_SCANIA);
+            int target = channel > 0 ? channel
+                    : BotChannelRouter.nextChannel(BotChannelRouter.DEFAULT_CHANNEL);
+            var targetChannel = world == null || target == BotChannelRouter.NONE
+                    ? null : world.getChannel(target);
+            if (targetChannel == null) {
+                return List.of();
+            }
+            var point = cpq2 ? CARNIVAL_2 : CARNIVAL;
+            return spawnRecruitBatch(point, BotTypeManager.BotType.CARNIVAL_PQ_BOT,
+                    targetChannel, plannedPaths(point, want));
+        }
         // Level BEFORE conversion, exactly as spawnFor does: the arena reads the level when it
         // validates the field's parties, and a bot converted first runs a tick at the wrong one.
         int low = cpq2 ? CarnivalPqData.CPQ2_MIN_LEVEL : CarnivalPqData.CPQ1_MIN_LEVEL;
         int high = cpq2 ? CarnivalPqData.CPQ2_MAX_LEVEL : CarnivalPqData.CPQ1_MAX_LEVEL;
-        // A field lobby only ever holds one team (the arena's); a hall holds a crowd.
-        int budget = CarnivalPqData.isHall(lobbyId)
-                ? want
-                : Math.max(1, Math.min(want, CarnivalPqData.MAX_TEAM_SIZE));
+        // A field lobby only ever holds one team (the arena's).
+        int budget = Math.min(want, CarnivalPqData.MAX_TEAM_SIZE);
 
         // Pinned to the channel: the arena drafts bots out of that channel's storage, so one
         // routed elsewhere by the capacity fallback would never be seen.
@@ -226,8 +305,10 @@ public final class PqBotSpawner {
      * about where and who can be recruited - a quest can gain a bot, or lose one, without the
      * eligibility data being touched.
      */
-    private static BotTypeManager.BotType botTypeFor(String questName) {
+    static BotTypeManager.BotType botTypeFor(String questName) {
         return switch (questName) {
+            case "OrbisPQ" -> BotTypeManager.BotType.OPQ_BOT;
+            case "CarnivalPQ", "CarnivalPQ2" -> BotTypeManager.BotType.CARNIVAL_PQ_BOT;
             case "HenesysPQ" -> BotTypeManager.BotType.HENESYS_PQ_BOT;
             case "KerningPQ" -> BotTypeManager.BotType.KERNING_PQ_BOT;
             case "LudiPQ" -> BotTypeManager.BotType.LUDI_PQ_BOT;

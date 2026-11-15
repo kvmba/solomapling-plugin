@@ -368,7 +368,7 @@ public class EnvironmentManager {
 
         BotDecorationQueue.start();
         BotEquipChecker.start();
-        OpqLobbyRotation.start();
+        soloMapling.ArtificialPlayer.PartyQuest.PqLobbyRotation.start();
         // Monster Carnival only opens a match once both sides stand in a field lobby, and its
         // entry point is an NPC dialog, so the waiter is a poll. Started here with the rest of the
         // ambient systems, and idempotent if init runs twice.
@@ -1196,26 +1196,14 @@ public class EnvironmentManager {
     /**
      * One OPQ recruit-bot batch: placed by the lobby map's own WZ terrain (matching the other quest
      * lobbies - the dynamic engine needs no recordings), levelled into OrbisPQ's own 51-70 eligibility
-     * band and started as OPQ bots. Used both by startup's wave 7 and by the lobby rotation.
+     * band and started as OPQ bots, with every career offered on each channel.
      *
      * @return the ids of the bots that were created and started, empty when the map was missing
      */
     public static List<Integer> spawnOPQBatch(int count) {
-        if (count <= 0) {
-            return List.of();
-        }
-        // Falls back to the map's spawn portal when the graph is not baked yet.
-        List<Integer> allBotIds = PlatformPlacement.spawnBotsOnMap(count, OPQ_LOBBY);
-
-        if (!allBotIds.isEmpty()) {
-            // OrbisPQ's own eligibility test (OrbisPQ.js) is level 51-70: a level-50 bot standing
-            // in the lobby is exactly as recruitable as one standing in Henesys, so the floor has
-            // to clear the quest's gate, not sit one below it.
-            setBotsLevelRange(allBotIds, 51, 70);
-            setAndStartBots(allBotIds, BotTypeManager.BotType.OPQ_BOT);
-            debugprint(fmt("OPQ lobby bots spawned and started: {}", allBotIds.size()));
-        }
-        return allBotIds;
+        return PqBotSpawner.spawnFor(
+                soloMapling.ArtificialPlayer.PartyQuest.PqRecruitPoints.ORBIS,
+                BotTypeManager.BotType.OPQ_BOT, count);
     }
 
     public static void setBotsLevelRange(List<Integer> botIds, int minLevel, int maxLevel) {
