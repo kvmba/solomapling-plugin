@@ -27,6 +27,13 @@
 enabled: true
 
 ids:
+  # --- GM-only uniforms and weapons (same ids in English and Chinese WZ) ---
+  - 1002140   # 维泽特帽 / Wizet Invincible Hat
+  - 1002959   # 巡查员帽 / Junior GM Cap
+  - 1042003   # 维泽特西装 / Wizet Plain Suit
+  - 1062007   # 维泽特西裤 / Wizet Plain Suit Pants
+  - 1322013   # 维泽特特殊提包 / Wizet Secret Agent Suitcase
+
   # --- Flag-pole WEAPONS (worst offenders - a bot "fights" holding a flag) ---
   # Maple anniversary flags
   - 1302033   # Maple Flag

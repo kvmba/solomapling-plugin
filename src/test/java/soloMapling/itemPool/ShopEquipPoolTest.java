@@ -2,6 +2,8 @@ package soloMapling.itemPool;
 
 import org.gms.constants.inventory.EquipType;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 
 import java.util.List;
 import java.util.Map;
@@ -130,15 +132,15 @@ public class ShopEquipPoolTest {
                 "reqLevel window still gates even when the job matches");
     }
 
-    @Test
-    public void omittedIdsAreNeverDrawn() {
-        // 1302073 (Singapore Flag) is on EquipOmitList.yaml; any id the central
-        // list blocks must be skipped here regardless of shop stock.
-        int omitted = 1302073;
-        List<EquipMetadataCache.EquipEntry> swords = List.of(
-                entry(omitted, EquipType.SWORD, 2, 0, 0, false));
+    @ParameterizedTest
+    @CsvSource({"1302073,SWORD", "1002140,CAP", "1002959,CAP",
+            "1042003,COAT", "1062007,PANTS", "1322013,MACE"})
+    public void omittedIdsAreNeverDrawn(int omitted, EquipType type) {
+        assertTrue(EquipOmitList.isOmitted(omitted), "flags and GM gear must be omitted");
+        List<EquipMetadataCache.EquipEntry> equips = List.of(
+                entry(omitted, type, 2, 0, 0, false));
 
-        assertNull(ShopEquipPool.draw(swords, 10, 0, 2),
+        assertNull(ShopEquipPool.draw(equips, 10, 0, 2),
                 "omitted ids (flag poles etc.) must be skipped even when shop-sold");
     }
 
