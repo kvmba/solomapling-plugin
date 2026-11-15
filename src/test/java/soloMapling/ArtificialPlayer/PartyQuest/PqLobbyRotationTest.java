@@ -274,17 +274,17 @@ class PqLobbyRotationTest {
             ScheduledFuture<?> timer = mock(ScheduledFuture.class);
             executors.when(ExecutorServiceManager::getScheduledExecutorService).thenReturn(scheduler);
             doReturn(timer).when(scheduler).scheduleWithFixedDelay(
-                    any(Runnable.class), eq(10L), eq(10L), eq(TimeUnit.SECONDS));
+                    any(Runnable.class), eq(30L), eq(30L), eq(TimeUnit.SECONDS));
 
             PqLobbyRotation.start();
             PqLobbyRotation.start();
             verify(scheduler).scheduleWithFixedDelay(
-                    any(Runnable.class), eq(10L), eq(10L), eq(TimeUnit.SECONDS));
+                    any(Runnable.class), eq(30L), eq(30L), eq(TimeUnit.SECONDS));
             PqLobbyRotation.stop();
             verify(timer).cancel(false);
             PqLobbyRotation.start();
             verify(scheduler, times(2)).scheduleWithFixedDelay(
-                    any(Runnable.class), eq(10L), eq(10L), eq(TimeUnit.SECONDS));
+                    any(Runnable.class), eq(30L), eq(30L), eq(TimeUnit.SECONDS));
         }
     }
 
@@ -307,7 +307,7 @@ class PqLobbyRotationTest {
             executors.when(ExecutorServiceManager::getScheduledExecutorService).thenReturn(scheduler);
             executors.when(ExecutorServiceManager::getVirtualThreadExecutorService).thenReturn(workers);
             doReturn(timer).when(scheduler).scheduleWithFixedDelay(
-                    any(Runnable.class), eq(10L), eq(10L), eq(TimeUnit.SECONDS));
+                    any(Runnable.class), eq(30L), eq(30L), eq(TimeUnit.SECONDS));
             Server server = mock(Server.class);
             World world = mock(World.class);
             Channel second = mock(Channel.class);
@@ -328,7 +328,7 @@ class PqLobbyRotationTest {
             PqLobbyRotation.start();
             ArgumentCaptor<Runnable> pulse = ArgumentCaptor.forClass(Runnable.class);
             verify(scheduler).scheduleWithFixedDelay(
-                    pulse.capture(), eq(10L), eq(10L), eq(TimeUnit.SECONDS));
+                    pulse.capture(), eq(30L), eq(30L), eq(TimeUnit.SECONDS));
             pulse.getValue().run();
 
             List<PqRecruitPoints.Point> points = new ArrayList<>(PqRecruitPoints.ALL);

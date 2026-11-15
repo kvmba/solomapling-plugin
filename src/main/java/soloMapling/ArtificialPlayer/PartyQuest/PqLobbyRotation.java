@@ -29,7 +29,7 @@ import java.util.concurrent.TimeUnit;
 /** Maintains recruitable career coverage and rotates each enabled PQ lobby independently. */
 public final class PqLobbyRotation {
     static final long ROTATE_INTERVAL_MS = 150_000L;
-    private static final long COVERAGE_INTERVAL_SECONDS = 10L;
+    private static final long COVERAGE_INTERVAL_SECONDS = 30L;
     private static PqLobbyRotation instance;
 
     private record LobbyKey(int map, int channel) {
