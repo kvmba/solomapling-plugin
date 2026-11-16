@@ -10,6 +10,7 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.concurrent.locks.ReentrantLock;
 
 // Adapted from GreenCatMS - GCMoveSystem movement slice plus the contact-damage fields. Credit: NutNNut.
 /*
@@ -22,11 +23,12 @@ import java.util.concurrent.ThreadLocalRandom;
  * BotFallbackMovementManager) are static and mutate these fields in-place across calls —
  * the fields are the contract.
  *
- * Threading: all fields are tick-thread-only and assume a single stable 50 ms tick per bot
- * (driven by GCMovementDriver); never tick one bot from two threads. A few flags are
- * volatile only because a command thread may flip them between ticks.
+ * Threading: the state lock serializes driver ticks, commands and map/portal operations.
+ * Host map locks can block, so an intrinsic monitor would pin JDK 21 virtual threads.
+ * A few flags remain volatile for snapshots read outside the lock.
  */
 class BotMovementState {
+    final ReentrantLock lock = new ReentrantLock();
     final Character bot;                  // the bot avatar (a real org.gms.client.Character)
     volatile Character owner;             // follow anchor (the followed character), nullable
     volatile boolean following = false;
@@ -194,7 +196,7 @@ class BotMovementState {
     // so it self-expires on landing and never traps a bot (unlike an inAir/swimming pose test, which
     // would silence the long-swimming bots on a swim map). 0 = not arriving.
     // volatile: written on the 50ms physics-driver thread (inside onMapChange, under this state's own
-    // synchronized(entry) monitor), read on the async macro-tick thread (BotFlavor), which holds no
+    // entry.lock), read on the async macro-tick thread (BotFlavor), which holds no
     // lock on this state — a plain long could serve it a stale (or torn) value.
     volatile long portalArrivalGuardUntilMs = 0L;
     // Set by GCMovement.disable() when the bot is still airborne: hand control over LATE, once the

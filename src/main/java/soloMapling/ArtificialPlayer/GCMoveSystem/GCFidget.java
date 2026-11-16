@@ -56,7 +56,8 @@ final class GCFidget {
         }
         BotMovementState st = GCMovement.stateOf(bot);
         if (st == null) return;
-        synchronized (st) {
+        st.lock.lock();
+        try {
             if (st.tickStopped) return;
             cancel(bot);
             Session s = new Session(bot);
@@ -64,14 +65,19 @@ final class GCFidget {
             s.task = POOL.scheduleAtFixedRate(
                     () -> {
                         try {
-                            synchronized (st) {
+                            st.lock.lock();
+                            try {
                                 if (!st.tickStopped && SESSIONS.get(bot.getId()) == s) tick(s);
+                            } finally {
+                                st.lock.unlock();
                             }
                         } catch (Throwable e) {
                             org.slf4j.LoggerFactory.getLogger(GCFidget.class)
                                     .warn("Fidget poll failed for bot {}", bot.getId(), e);
                         }
                     }, POLL_MS, POLL_MS, TimeUnit.MILLISECONDS);
+        } finally {
+            st.lock.unlock();
         }
     }
 
@@ -81,9 +87,12 @@ final class GCFidget {
         }
         BotMovementState st = GCMovement.stateOf(bot);
         if (st == null) return;
-        synchronized (st) {
+        st.lock.lock();
+        try {
             Session s = SESSIONS.remove(bot.getId());
             if (s != null && s.task != null) s.task.cancel(false);
+        } finally {
+            st.lock.unlock();
         }
     }
 

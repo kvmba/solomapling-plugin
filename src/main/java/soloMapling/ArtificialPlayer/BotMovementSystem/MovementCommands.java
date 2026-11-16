@@ -25,6 +25,7 @@ import java.util.Map;
 import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.concurrent.locks.ReentrantLock;
 
 import static java.lang.Math.abs;
 import static org.gms.net.server.channel.handlers.AbstractMovementPacketHandler.updatePositionBot;
@@ -807,12 +808,18 @@ public class MovementCommands {
 
     // ── Movement Lock ──────────────────────────────────────────────────
     private static final class MovementLock {
+        final ReentrantLock stateLock = new ReentrantLock();
         Object owner;
         int holds;
         long attackUntilMs;
     }
 
     private static final ConcurrentHashMap<Integer, MovementLock> movementLocks = new ConcurrentHashMap<>();
+
+    /** Thread-bound state guard for bots without a dynamic session, separate from their movement lease. */
+    public static ReentrantLock movementStateLock(Character bot) {
+        return movementLocks.computeIfAbsent(bot.getId(), k -> new MovementLock()).stateLock;
+    }
 
     public static boolean tryAcquireMovementLock(Character fakechar) {
         return tryAcquireMovementLock(fakechar, Thread.currentThread());

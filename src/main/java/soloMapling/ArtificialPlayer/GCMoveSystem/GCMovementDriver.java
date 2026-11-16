@@ -28,7 +28,7 @@ import java.util.concurrent.atomic.AtomicInteger;
  * self-contained scheduled driver.
  *
  * Threading: a shared scheduled pool; each bot has one self-rescheduling deadline chain.
- * Its state monitor serializes ticks across stop/start races, preserving the per-bot
+ * Its state lock serializes ticks across stop/start races, preserving the per-bot
  * single-thread assumption made by GreenCat's non-volatile physics fields.
  */
 final class GCMovementDriver {
@@ -104,29 +104,38 @@ final class GCMovementDriver {
             });
 
     static void start(BotMovementState entry) {
-        synchronized (entry) {
+        entry.lock.lock();
+        try {
             cancelScheduledTick(entry);
             entry.tickStopped = false;
             long generation = ++entry.tickGeneration;
             scheduleNext(entry, generation, System.nanoTime());
+        } finally {
+            entry.lock.unlock();
         }
     }
 
     static void stop(BotMovementState entry) {
-        synchronized (entry) {
+        entry.lock.lock();
+        try {
             entry.tickStopped = true;
             entry.tickGeneration++;
             cancelScheduledTick(entry);
+        } finally {
+            entry.lock.unlock();
         }
     }
 
     static void wake(BotMovementState entry) {
-        synchronized (entry) {
+        entry.lock.lock();
+        try {
             if (entry.tickStopped || entry.task == null
                     || entry.task.getDelay(TimeUnit.MILLISECONDS) <= BotPhysicsEngine.cfg.TICK_MS) return;
             cancelScheduledTick(entry);
             long generation = ++entry.tickGeneration;
             scheduleNext(entry, generation, System.nanoTime());
+        } finally {
+            entry.lock.unlock();
         }
     }
 
@@ -156,7 +165,8 @@ final class GCMovementDriver {
     }
 
     private static void runScheduledTick(BotMovementState entry, long generation, long deadlineNanos) {
-        synchronized (entry) {
+        entry.lock.lock();
+        try {
             if (entry.tickStopped || entry.tickGeneration != generation) {
                 return;
             }
@@ -175,6 +185,8 @@ final class GCMovementDriver {
             // and diverged from the direct-tick execution sims, which never set a work value.
             entry.lastTickSpanMs = TimeUnit.NANOSECONDS.toMillis(nextDeadlineNanos - deadlineNanos);
             scheduleNext(entry, generation, nextDeadlineNanos);
+        } finally {
+            entry.lock.unlock();
         }
     }
 

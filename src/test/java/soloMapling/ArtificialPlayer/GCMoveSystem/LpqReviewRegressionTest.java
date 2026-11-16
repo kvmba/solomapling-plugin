@@ -388,7 +388,7 @@ class LpqReviewRegressionTest {
         Packet attack = mock(Packet.class);
         clearInvocations(map);
         doAnswer(inv -> {
-            assertTrue(Thread.holdsLock(state), "pose check, stop and attack share the physics lock");
+            assertTrue(state.lock.isHeldByCurrentThread(), "pose check, stop and attack share the physics lock");
             assertEquals(0, state.movementVelX);
             return null;
         }).when(map).broadcastMessage(eq(bot), any(Packet.class), eq(false));
@@ -1767,8 +1767,11 @@ class LpqReviewRegressionTest {
             try {
                 assertTrue(sampled.await(5, TimeUnit.SECONDS));
                 position.set(new Point(0, -443));
-                synchronized (state) {
+                state.lock.lock();
+                try {
                     BotAuraState.updateGuardHide(bot);
+                } finally {
+                    state.lock.unlock();
                 }
                 assertTrue(BotAuraState.isMonsterImmune(bot));
             } finally {

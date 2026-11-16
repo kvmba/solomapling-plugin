@@ -18,6 +18,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.BooleanSupplier;
 
 /*
@@ -55,37 +56,41 @@ public final class GCMovement {
         for (;;) {
             BotMovementState resumed = STATES.get(bot.getId());
             if (resumed != null) {
-                synchronized (resumed) {
+                resumed.lock.lock();
+                try {
                     if (STATES.get(bot.getId()) != resumed) continue;
                     resumed.disableAfterLanding = false;
                     return true;
+                } finally {
+                    resumed.lock.unlock();
                 }
             }
             BotMovementState st = new BotMovementState(bot, null);
             // Acquire BEFORE touching the avatar or starting a driver. The state itself is the
             // session's lease token; a stale teardown cannot release a newer session's lock.
             if (!MovementCommands.tryAcquireMovementLock(bot, st)) return false;
-            synchronized (st) {
-                try {
-                    st.movementProfile = BotMovementProfile.fromCharacter(bot);
-                    if (bot.getMap() != null) {
-                        st.lastMap = bot.getMap();
-                        st.fhIndex = BotMovementManager.buildFhIndex(bot.getMap());
-                        Point cur = bot.getPosition();
-                        Point ground = BotPhysicsEngine.findGroundPoint(bot.getMap(), new Point(cur.x, cur.y - 1));
-                        BotPhysicsEngine.teleportTo(st, bot, settledPoint(cur, ground));
-                        BotMovementManager.resetEntryStateAfterTeleport(st);
-                        BotNavigationGraphProvider.warmGraphAsync(bot.getMap(), st.movementProfile);
-                    }
-                    STATES.put(bot.getId(), st);
-                    GCMovementDriver.start(st);
-                    return true;
-                } catch (RuntimeException | Error e) {
-                    GCMovementDriver.stop(st);
-                    STATES.remove(bot.getId(), st);
-                    MovementCommands.releaseMovementLock(bot, st);
-                    throw e;
+            st.lock.lock();
+            try {
+                st.movementProfile = BotMovementProfile.fromCharacter(bot);
+                if (bot.getMap() != null) {
+                    st.lastMap = bot.getMap();
+                    st.fhIndex = BotMovementManager.buildFhIndex(bot.getMap());
+                    Point cur = bot.getPosition();
+                    Point ground = BotPhysicsEngine.findGroundPoint(bot.getMap(), new Point(cur.x, cur.y - 1));
+                    BotPhysicsEngine.teleportTo(st, bot, settledPoint(cur, ground));
+                    BotMovementManager.resetEntryStateAfterTeleport(st);
+                    BotNavigationGraphProvider.warmGraphAsync(bot.getMap(), st.movementProfile);
                 }
+                STATES.put(bot.getId(), st);
+                GCMovementDriver.start(st);
+                return true;
+            } catch (RuntimeException | Error e) {
+                GCMovementDriver.stop(st);
+                STATES.remove(bot.getId(), st);
+                MovementCommands.releaseMovementLock(bot, st);
+                throw e;
+            } finally {
+                st.lock.unlock();
             }
         }
     }
@@ -97,7 +102,8 @@ public final class GCMovement {
         }
         BotMovementState st = STATES.get(bot.getId());
         if (st != null) {
-            synchronized (st) {
+            st.lock.lock();
+            try {
                 if (STATES.get(bot.getId()) != st) return;
                 GCFollow.cancel(bot);
                 GCTravel.cancel(bot);
@@ -115,6 +121,8 @@ public final class GCMovement {
                     settleGroundedOnDisable(st, bot);
                 }
                 finishDisable(st, bot);
+            } finally {
+                st.lock.unlock();
             }
         }
     }
@@ -143,11 +151,14 @@ public final class GCMovement {
      */
     static void finishDeferredDisable(BotMovementState st) {
         Character bot = st.bot;
-        synchronized (st) {
+        st.lock.lock();
+        try {
             if (STATES.get(bot.getId()) != st || !st.disableAfterLanding || st.inAir) return;
             // A fall can end by grabbing a rope instead of touching down.
             if (!st.climbing) settleGroundedOnDisable(st, bot);
             finishDisable(st, bot);
+        } finally {
+            st.lock.unlock();
         }
     }
 
@@ -213,12 +224,15 @@ public final class GCMovement {
         if (st == null) {
             return;
         }
-        synchronized (st) {
+        st.lock.lock();
+        try {
             if (st.tickStopped) return;
             GCFollow.cancel(bot);
             GCTravel.cancel(bot);
             setMoveTarget(st, x, y, onArrival);
             if (onFailure != null) FAILURE_CALLBACKS.put(bot.getId(), onFailure);
+        } finally {
+            st.lock.unlock();
         }
     }
 
@@ -236,8 +250,11 @@ public final class GCMovement {
     static void moveForTravel(Character bot, int x, int y) {
         BotMovementState st = stateOf(bot);
         if (st == null) return;
-        synchronized (st) {
+        st.lock.lock();
+        try {
             if (!st.tickStopped) setMoveTarget(st, x, y, null);
+        } finally {
+            st.lock.unlock();
         }
     }
 
@@ -245,10 +262,13 @@ public final class GCMovement {
     public static void wanderTo(Character bot, int x, int y) {
         BotMovementState st = stateOf(bot);
         if (st == null) return;
-        synchronized (st) {
+        st.lock.lock();
+        try {
             if (st.tickStopped) return;
             if (GCTravel.isWaitingForTransit(bot)) moveForTravel(bot, x, y);
             else move(bot, x, y);
+        } finally {
+            st.lock.unlock();
         }
     }
 
@@ -259,7 +279,8 @@ public final class GCMovement {
         if (st == null) {
             return;
         }
-        synchronized (st) {
+        st.lock.lock();
+        try {
             if (st.tickStopped) return;
             GCFollow.cancel(bot);
             GCTravel.cancel(bot);
@@ -268,6 +289,8 @@ public final class GCMovement {
                     || Math.abs(current.y - y) >= epsilonPx) {
                 setMoveTarget(st, x, y, null);
             }
+        } finally {
+            st.lock.unlock();
         }
     }
 
@@ -289,7 +312,8 @@ public final class GCMovement {
         if (st == null) {
             return null;
         }
-        synchronized (st) {
+        st.lock.lock();
+        try {
             if (st.tickStopped) return null;
             GCFollow.cancel(bot);
             GCTravel.cancel(bot);
@@ -308,6 +332,8 @@ public final class GCMovement {
             }
             setMoveTarget(st, x, y, null, sameOrder, true);
             return new Point(st.moveTarget);
+        } finally {
+            st.lock.unlock();
         }
     }
 
@@ -326,7 +352,8 @@ public final class GCMovement {
         if (st == null) {
             return false;
         }
-        synchronized (st) {
+        st.lock.lock();
+        try {
             if (st.tickStopped || st.moveTarget == null || st.moveTargetMap != bot.getMap()
                     || Math.abs(st.moveTarget.x - goal.x) > 1
                     || Math.abs(st.moveTarget.y - goal.y) > 1) {
@@ -338,10 +365,12 @@ public final class GCMovement {
             st.following = false;
             st.owner = null;
             return true;
+        } finally {
+            st.lock.unlock();
         }
     }
 
-    // Caller holds the same monitor as the physics tick: never publish half a move or lose a new
+    // Caller holds the same lock as the physics tick: never publish half a move or lose a new
     // target/callback to the previous move's arrival while the combat thread is issuing it.
     private static void setMoveTarget(BotMovementState st, int x, int y, Runnable onArrival) {
         setMoveTarget(st, x, y, onArrival, false, false);
@@ -392,13 +421,16 @@ public final class GCMovement {
         if (st == null) {
             return;
         }
-        synchronized (st) {
+        st.lock.lock();
+        try {
             if (st.tickStopped) return;
             GCFollow.cancel(bot);
             GCTravel.cancel(bot);
             setMoveTarget(st, x, y, null);
             st.farmAnchor = new Point(x, y);
             st.farmAnchorMapId = bot.getMapId();
+        } finally {
+            st.lock.unlock();
         }
     }
 
@@ -422,13 +454,16 @@ public final class GCMovement {
         }
         BotMovementState st = STATES.get(bot.getId());
         if (st != null) {
-            synchronized (st) {
+            st.lock.lock();
+            try {
                 if (st.tickStopped) return;
                 GCFollow.cancel(bot);
                 GCTravel.cancel(bot);
                 clearMoveIntent(bot);
                 st.following = false;
                 st.owner = null;
+            } finally {
+                st.lock.unlock();
             }
         }
     }
@@ -507,7 +542,9 @@ public final class GCMovement {
             return;
         }
         BotMovementState st = STATES.get(bot.getId());
-        synchronized (st != null ? st : bot) {
+        ReentrantLock lock = st != null ? st.lock : MovementCommands.movementStateLock(bot);
+        lock.lock();
+        try {
             if (st != null && st.tickStopped) return;
             MapleMap before = bot.getMap();
             Point positionBefore = bot.getPosition();
@@ -537,6 +574,8 @@ public final class GCMovement {
                     }
                 }
             }
+        } finally {
+            lock.unlock();
         }
     }
 
@@ -544,7 +583,9 @@ public final class GCMovement {
     public static void enterPortal(Character bot, Portal portal) {
         if (bot == null || portal == null || bot.getClient() == null || bot.getMap() == null) return;
         BotMovementState st = STATES.get(bot.getId());
-        synchronized (st != null ? st : bot) {
+        ReentrantLock lock = st != null ? st.lock : MovementCommands.movementStateLock(bot);
+        lock.lock();
+        try {
             if (st != null && st.tickStopped) return;
             MapleMap map = bot.getMap();
             Point before = new Point(bot.getPosition());
@@ -585,6 +626,8 @@ public final class GCMovement {
                 // this map's SPAWN_PLAYER).
                 bot.setStance(stanceBefore);
             }
+        } finally {
+            lock.unlock();
         }
     }
 
@@ -604,7 +647,8 @@ public final class GCMovement {
         if (st == null) {
             return;
         }
-        synchronized (st) {
+        st.lock.lock();
+        try {
             if (st.tickStopped) return;
             Point origin = bot.getPosition();
             Point ground = BotPhysicsEngine.findGroundPoint(bot.getMap(), new Point(x, y));
@@ -619,6 +663,8 @@ public final class GCMovement {
                 }
                 default -> BotMovementManager.broadcastMovement(st);
             }
+        } finally {
+            st.lock.unlock();
         }
     }
 
@@ -632,8 +678,11 @@ public final class GCMovement {
         }
         BotMovementState st = STATES.get(bot.getId());
         if (st != null) {
-            synchronized (st) {
+            st.lock.lock();
+            try {
                 BotContactDamage.markAlerted(st);
+            } finally {
+                st.lock.unlock();
             }
         }
     }
@@ -642,7 +691,9 @@ public final class GCMovement {
     public static boolean broadcastActiveAttack(Character bot, Packet packet, int durationMs) {
         if (bot == null) return false;
         BotMovementState st = STATES.get(bot.getId());
-        synchronized (st != null ? st : bot) {
+        ReentrantLock lock = st != null ? st.lock : MovementCommands.movementStateLock(bot);
+        lock.lock();
+        try {
             if (bot.getMap() == null) return false;
             if (st != null ? st.tickStopped || st.climbing : CharacterStance.isClimbing(bot.getStance())) return false;
             long until = MovementClock.nowMs() + durationMs;
@@ -662,14 +713,19 @@ public final class GCMovement {
             }
             bot.getMap().broadcastMessage(bot, packet, false);
             return true;
+        } finally {
+            lock.unlock();
         }
     }
 
     public static boolean isAttacking(Character bot) {
         BotMovementState st = STATES.get(bot.getId());
         if (st == null) return MovementCommands.isAttacking(bot);
-        synchronized (st) {
+        st.lock.lock();
+        try {
             return MovementClock.nowMs() < st.attackMovementLockUntilMs;
+        } finally {
+            st.lock.unlock();
         }
     }
 
@@ -683,8 +739,11 @@ public final class GCMovement {
         }
         BotMovementState st = STATES.get(bot.getId());
         if (st == null) return false;
-        synchronized (st) {
+        st.lock.lock();
+        try {
             return !st.tickStopped && GCMovementSkills.execTeleport(st, bot, targetX, targetY);
+        } finally {
+            st.lock.unlock();
         }
     }
 
@@ -697,8 +756,11 @@ public final class GCMovement {
         }
         BotMovementState st = STATES.get(bot.getId());
         if (st == null) return false;
-        synchronized (st) {
+        st.lock.lock();
+        try {
             return !st.tickStopped && GCMovementSkills.execFlashJump(st, bot, targetX, scaleCap);
+        } finally {
+            st.lock.unlock();
         }
     }
 
@@ -710,8 +772,11 @@ public final class GCMovement {
         }
         BotMovementState st = STATES.get(bot.getId());
         if (st == null) return false;
-        synchronized (st) {
+        st.lock.lock();
+        try {
             return !st.tickStopped && GCMovementSkills.execFlashJumpForced(st, bot, dir, scale);
+        } finally {
+            st.lock.unlock();
         }
     }
 
@@ -723,8 +788,11 @@ public final class GCMovement {
         }
         BotMovementState st = STATES.get(bot.getId());
         if (st == null) return null;
-        synchronized (st) {
+        st.lock.lock();
+        try {
             return st.facingDir < 0;
+        } finally {
+            st.lock.unlock();
         }
     }
 
@@ -743,7 +811,8 @@ public final class GCMovement {
         if (st == null) {
             return;
         }
-        synchronized (st) {
+        st.lock.lock();
+        try {
             if (st.tickStopped) return;
             st.climbPositionHeld = st.climbing;
             st.moveTarget = null;
@@ -755,6 +824,8 @@ public final class GCMovement {
             BotMovementManager.clearNavigationState(st);
             ARRIVAL_CALLBACKS.remove(bot.getId());
             FAILURE_CALLBACKS.remove(bot.getId());
+        } finally {
+            st.lock.unlock();
         }
     }
 
@@ -764,7 +835,8 @@ public final class GCMovement {
         if (st == null || target == null) {
             return;
         }
-        synchronized (st) {
+        st.lock.lock();
+        try {
             if (st.tickStopped) return;
             st.climbPositionHeld = false;
             st.owner = target;
@@ -777,6 +849,8 @@ public final class GCMovement {
             st.farmAnchorMapId = -1;
             ARRIVAL_CALLBACKS.remove(bot.getId());
             FAILURE_CALLBACKS.remove(bot.getId());
+        } finally {
+            st.lock.unlock();
         }
     }
 
@@ -784,8 +858,11 @@ public final class GCMovement {
     static void pauseFollowForTravel(Character bot) {
         BotMovementState st = bot == null ? null : STATES.get(bot.getId());
         if (st != null) {
-            synchronized (st) {
+            st.lock.lock();
+            try {
                 st.following = false;
+            } finally {
+                st.lock.unlock();
             }
         }
     }
@@ -794,9 +871,12 @@ public final class GCMovement {
     static void endFollowState(Character bot) {
         BotMovementState st = bot == null ? null : STATES.get(bot.getId());
         if (st != null) {
-            synchronized (st) {
+            st.lock.lock();
+            try {
                 st.following = false;
                 st.owner = null;
+            } finally {
+                st.lock.unlock();
             }
         }
     }
@@ -816,10 +896,13 @@ public final class GCMovement {
         }
         BotMovementState st = stateOf(bot);
         if (st == null) return;
-        synchronized (st) {
+        st.lock.lock();
+        try {
             if (st.tickStopped) return;
             GCFollow.cancel(bot);
             GCTravel.travel(bot, destMapId, onDone);
+        } finally {
+            st.lock.unlock();
         }
     }
 
@@ -855,7 +938,7 @@ public final class GCMovement {
      * ambient actions again, and a SocialBot stayed {@code strolling} — which also skipped the
      * {@code GCMovement.disable()} that releases the shared movement lock.
      *
-     * <p>The caller must NOT hold the bot's movement monitor: the callback may take the bot's
+     * <p>The caller must NOT hold the bot's movement lock: the callback may take the bot's
      * macro lock (TrainingBot's moveDone/enterPhase, SocialBot's strollHome).
      */
     public static void cancelTravel(Character bot) {
@@ -914,9 +997,12 @@ public final class GCMovement {
         if (st == null) {
             return false;
         }
-        synchronized (st) {
+        st.lock.lock();
+        try {
             return st.moveTarget != null || st.following || st.inAir || st.climbing
                     || st.navEdge != null || st.portalDropAtMs > 0L;
+        } finally {
+            st.lock.unlock();
         }
     }
 
@@ -930,8 +1016,11 @@ public final class GCMovement {
         if (st == null) {
             return false;
         }
-        synchronized (st) {
+        st.lock.lock();
+        try {
             return st.moveTarget != null;
+        } finally {
+            st.lock.unlock();
         }
     }
 
@@ -961,8 +1050,11 @@ public final class GCMovement {
     public static boolean isClimbing(Character bot) {
         BotMovementState st = bot == null ? null : STATES.get(bot.getId());
         if (st == null) return bot != null && CharacterStance.isClimbing(bot.getStance());
-        synchronized (st) {
+        st.lock.lock();
+        try {
             return st.climbing;
+        } finally {
+            st.lock.unlock();
         }
     }
 
@@ -987,8 +1079,11 @@ public final class GCMovement {
         if (st == null) {
             return false;
         }
-        synchronized (st) {
+        st.lock.lock();
+        try {
             return st.climbing && (st.resting || (st.climbPositionHeld && !st.grinding));
+        } finally {
+            st.lock.unlock();
         }
     }
 
@@ -1057,8 +1152,11 @@ public final class GCMovement {
     public static boolean isGrounded(Character bot) {
         BotMovementState st = bot == null ? null : STATES.get(bot.getId());
         if (st == null) return false;
-        synchronized (st) {
+        st.lock.lock();
+        try {
             return isGrounded(st);
+        } finally {
+            st.lock.unlock();
         }
     }
 
@@ -1081,8 +1179,11 @@ public final class GCMovement {
         if (st == null) {
             return true; // not under GC control: no flight/climb of ours to distrust
         }
-        synchronized (st) {
+        st.lock.lock();
+        try {
             return !st.climbing && (!st.inAir || st.swimming);
+        } finally {
+            st.lock.unlock();
         }
     }
 
@@ -1098,8 +1199,11 @@ public final class GCMovement {
         }
         BotMovementState st = STATES.get(bot.getId());
         if (st != null) {
-            synchronized (st) {
+            st.lock.lock();
+            try {
                 st.grinding = grinding;
+            } finally {
+                st.lock.unlock();
             }
         }
     }
@@ -1118,11 +1222,14 @@ public final class GCMovement {
         }
         BotMovementState st = STATES.get(bot.getId());
         if (st != null) {
-            synchronized (st) {
+            st.lock.lock();
+            try {
                 if (st.resting != resting) {
                     st.resting = resting;
                     GCMovementDriver.wake(st);
                 }
+            } finally {
+                st.lock.unlock();
             }
         }
     }
@@ -1137,8 +1244,11 @@ public final class GCMovement {
     public static void dismountRope(Character bot, int dx) {
         BotMovementState st = bot == null ? null : STATES.get(bot.getId());
         if (st != null) {
-            synchronized (st) {
+            st.lock.lock();
+            try {
                 if (!st.tickStopped && st.climbing) BotMovementManager.jumpOffRope(st, bot, dx);
+            } finally {
+                st.lock.unlock();
             }
         }
     }
@@ -1150,8 +1260,11 @@ public final class GCMovement {
     public static boolean isNavigatingClimb(Character bot) {
         BotMovementState st = bot == null ? null : STATES.get(bot.getId());
         if (st == null) return false;
-        synchronized (st) {
+        st.lock.lock();
+        try {
             return st.climbing && st.navEdge != null;
+        } finally {
+            st.lock.unlock();
         }
     }
 
@@ -1161,11 +1274,14 @@ public final class GCMovement {
     public static void jumpInPlace(Character bot) {
         BotMovementState st = bot == null ? null : STATES.get(bot.getId());
         if (st != null) {
-            synchronized (st) {
+            st.lock.lock();
+            try {
                 if (!st.tickStopped && !st.inAir && !st.climbing
                         && MovementClock.nowMs() >= st.attackMovementLockUntilMs) {
                     BotMovementManager.initiateJump(st, bot, 0);
                 }
+            } finally {
+                st.lock.unlock();
             }
         }
     }
@@ -1177,11 +1293,14 @@ public final class GCMovement {
     public static void jumpToward(Character bot, int dx) {
         BotMovementState st = bot == null ? null : STATES.get(bot.getId());
         if (st != null) {
-            synchronized (st) {
+            st.lock.lock();
+            try {
                 if (!st.tickStopped && !st.inAir && !st.climbing
                         && MovementClock.nowMs() >= st.attackMovementLockUntilMs) {
                     BotMovementManager.initiateJump(st, bot, dx);
                 }
+            } finally {
+                st.lock.unlock();
             }
         }
     }
@@ -1190,9 +1309,12 @@ public final class GCMovement {
     public static void turnAround(Character bot) {
         BotMovementState st = bot == null ? null : STATES.get(bot.getId());
         if (st != null) {
-            synchronized (st) {
+            st.lock.lock();
+            try {
                 if (st.tickStopped) return;
                 st.facingDir = -st.facingDir;
+            } finally {
+                st.lock.unlock();
             }
         }
     }
@@ -1204,10 +1326,13 @@ public final class GCMovement {
     public static void face(Character bot, boolean left) {
         BotMovementState st = bot == null ? null : STATES.get(bot.getId());
         if (st != null) {
-            synchronized (st) {
+            st.lock.lock();
+            try {
                 if (st.tickStopped) return;
                 st.facingDir = left ? -1 : 1;
                 BotMovementManager.broadcastMovement(st);
+            } finally {
+                st.lock.unlock();
             }
         }
     }
@@ -1218,13 +1343,16 @@ public final class GCMovement {
         if (st == null) {
             return "disabled";
         }
-        synchronized (st) {
+        st.lock.lock();
+        try {
             return "pos=" + bot.getPosition() + " move=" + st.moveTarget
                     + " nav=" + st.lastNavDecision + " edge=" + navEdgeSummary(bot)
                     + " block=" + st.lastEdgeBlockReason + " air=" + st.inAir
                     + " climb=" + st.climbing + " vel=" + st.movementVelX + "," + st.movementVelY
                     + " profile=" + st.movementProfile + " warmup=" + st.graphWarmupFallback
                     + " progressAgeMs=" + (MovementClock.nowMs() - st.moveProgressAtMs);
+        } finally {
+            st.lock.unlock();
         }
     }
 
@@ -1232,10 +1360,13 @@ public final class GCMovement {
     public static void duck(Character bot, int durationMs) {
         BotMovementState st = bot == null ? null : STATES.get(bot.getId());
         if (st != null) {
-            synchronized (st) {
+            st.lock.lock();
+            try {
                 if (!st.tickStopped && !st.inAir && !st.climbing) {
                     st.duckUntilMs = MovementClock.nowMs() + Math.max(1, durationMs);
                 }
+            } finally {
+                st.lock.unlock();
             }
         }
     }
@@ -1715,8 +1846,11 @@ public final class GCMovement {
         if (st == null) {
             return null;
         }
-        synchronized (st) {
+        st.lock.lock();
+        try {
             return st.moveTarget == null ? null : new Point(st.moveTarget);
+        } finally {
+            st.lock.unlock();
         }
     }
 

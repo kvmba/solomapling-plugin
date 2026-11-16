@@ -211,7 +211,8 @@ final class GCTravel {
             fire(callback, false);
             return;
         }
-        synchronized (st) {
+        st.lock.lock();
+        try {
             if (st.tickStopped) {
                 fire(callback, false);
                 return;
@@ -228,21 +229,26 @@ final class GCTravel {
             trip.task = POOL.scheduleAtFixedRate(
                     () -> {
                         try {
-                            synchronized (st) {
+                            st.lock.lock();
+                            try {
                                 if (!st.tickStopped && TRIPS.get(bot.getId()) == trip) tick(trip);
+                            } finally {
+                                st.lock.unlock();
                             }
                         } catch (Throwable e) {
                             org.slf4j.LoggerFactory.getLogger(GCTravel.class)
                                     .warn("Travel poll failed for bot {}", bot.getId(), e);
                         }
                     }, 0, POLL_MS, TimeUnit.MILLISECONDS);
+        } finally {
+            st.lock.unlock();
         }
     }
 
     /*
      * Abandon a trip WITHOUT notifying its owner — the internal "a new command supersedes this
-     * trip" path (GCMovement.move/stop/farmHere/disable all hold this bot's movement monitor when
-     * they call here, and running a caller's callback under that monitor is the AB-BA shape
+     * trip" path (GCMovement.move/stop/farmHere/disable all hold this bot's movement lock when
+     * they call here, and running a caller's callback under that lock is the AB-BA shape
      * BotDeath.adoptIfZeroHp dispatches to avoid). External aborts go through GCMovement.cancelTravel.
      */
     static void cancel(Character bot) {
@@ -251,9 +257,12 @@ final class GCTravel {
         }
         BotMovementState st = GCMovement.stateOf(bot);
         if (st == null) return;
-        synchronized (st) {
+        st.lock.lock();
+        try {
             Trip t = TRIPS.remove(bot.getId());
             if (t != null && t.task != null) t.task.cancel(false);
+        } finally {
+            st.lock.unlock();
         }
     }
 
@@ -266,7 +275,7 @@ final class GCTravel {
      * the caller had given up on the trip) and the {@code ok ->} callback never ran, stranding
      * SocialBot.strolling / TownWandererBot.traveling forever.
      *
-     * <p>No trip in flight is a no-op. The caller must NOT hold the bot's movement monitor: the
+     * <p>No trip in flight is a no-op. The caller must NOT hold the bot's movement lock: the
      * callback may take the bot's macro lock (AB-BA).
      */
     static void cancelAndFinish(Character bot) {

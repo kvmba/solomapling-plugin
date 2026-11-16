@@ -198,7 +198,8 @@ class UnobservedBotWorkTest {
         ScheduledFuture<?> idle = mock(ScheduledFuture.class);
         when(idle.getDelay(TimeUnit.MILLISECONDS)).thenReturn(4_000L);
         state.task = idle;
-        synchronized (state) {
+        state.lock.lock();
+        try {
             try {
                 invoke(GCMovement.class, "setMoveTarget",
                         new Class<?>[]{BotMovementState.class, int.class, int.class, Runnable.class},
@@ -214,6 +215,8 @@ class UnobservedBotWorkTest {
             } finally {
                 GCMovementDriver.stop(state);
             }
+        } finally {
+            state.lock.unlock();
         }
     }
 
@@ -251,7 +254,8 @@ class UnobservedBotWorkTest {
         when(idle.getDelay(TimeUnit.MILLISECONDS)).thenReturn(4_000L);
         state.task = idle;
         staticMap(GCMovement.class, "STATES").put(BOT_ID, state);
-        synchronized (state) {
+        state.lock.lock();
+        try {
             try {
                 GCMovement.setRestHold(bot, false);
                 assertFalse(state.resting);
@@ -260,6 +264,8 @@ class UnobservedBotWorkTest {
             } finally {
                 GCMovementDriver.stop(state);
             }
+        } finally {
+            state.lock.unlock();
         }
     }
 

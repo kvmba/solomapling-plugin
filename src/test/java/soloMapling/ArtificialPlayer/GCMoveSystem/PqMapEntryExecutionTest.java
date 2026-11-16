@@ -20,10 +20,14 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Timeout;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.MockedStatic;
 import org.springframework.context.ApplicationContext;
 import org.springframework.context.MessageSource;
 import soloMapling.ArtificialPlayer.BotGeneration;
+import soloMapling.ArtificialPlayer.BotMovementSystem.MovementCommands;
 import soloMapling.ArtificialPlayer.BotCommandsPack.WarpCommands;
 import soloMapling.ArtificialPlayer.BotTypes.Ariant.AriantExpedition;
 import soloMapling.ArtificialPlayer.BotTypes.Carnival.CarnivalArena;
@@ -37,8 +41,12 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.locks.ReentrantReadWriteLock;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
@@ -278,9 +286,58 @@ class PqMapEntryExecutionTest {
         placeManually(avatar, point);
 
         assertTrue(CharacterStance.isJumping(avatar.entryStance));
+        assertTrue(avatar.movementLocked);
         assertEquals(CharacterStance.STAND_LEFT_STANCE, avatar.bot.getStance());
         assertEquals(point, avatar.bot.getPosition());
         assertFalse(GCMovement.isEnabled(avatar.bot));
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    @Timeout(5)
+    void virtualMapEntryDoesNotHoldAnIntrinsicMonitor(boolean dynamic) throws Exception {
+        Avatar avatar = avatar(CharacterStance.STAND_RIGHT_STANCE, dynamic);
+        ReentrantReadWriteLock hostLock = new ReentrantReadWriteLock(true);
+        CompletableFuture<Void> reachedHost = new CompletableFuture<>();
+        doAnswer(call -> {
+            avatar.map.set(call.getArgument(0));
+            return null;
+        }).when(avatar.bot).setMap(any(MapleMap.class));
+        doAnswer(call -> {
+            reachedHost.complete(null);
+            assertTrue(Thread.currentThread().isVirtual());
+            assertFalse(Thread.holdsLock(avatar.bot), "a waiting host map lock must not pin a recorded bot's carrier");
+            assertFalse(Thread.holdsLock(avatar.state), "a waiting host map lock must not pin a dynamic bot's carrier");
+            hostLock.readLock().lock();
+            try {
+                avatar.recordEntry();
+                assertTrue(avatar.movementLocked, "host entry must still be serialized with movement");
+                return null;
+            } finally {
+                hostLock.readLock().unlock();
+            }
+        }).when(lobby).addPlayer(avatar.bot);
+
+        try (var executor = Executors.newVirtualThreadPerTaskExecutor()) {
+            Future<?> placement;
+            hostLock.writeLock().lock();
+            try {
+                placement = executor.submit(() -> {
+                    try (var ignored = mockStatic(BotNavigationGraphProvider.class)) {
+                        GCMovement.placeOnMap(avatar.bot, doors.getFirst().getPosition(), lobby);
+                    }
+                });
+                reachedHost.get();
+                // With a single carrier this probe can run only if the blocked entry unmounts.
+                assertTrue(executor.submit(() -> Thread.currentThread().isVirtual()).get());
+            } finally {
+                hostLock.writeLock().unlock();
+            }
+            placement.get();
+        }
+        assertSame(lobby, avatar.bot.getMap());
+        var lock = dynamic ? avatar.state.lock : MovementCommands.movementStateLock(avatar.bot);
+        assertFalse(lock.isLocked(), "entry must release every reentrant acquisition");
     }
 
     @Test
@@ -370,9 +427,10 @@ class PqMapEntryExecutionTest {
         assertEquals(new Point(100, 0), avatar.state.moveTarget);
     }
 
-    @Test
-    void aFailedWarpRestoresThePoseAndPropagatesTheFailure() {
-        Avatar avatar = avatar(CharacterStance.STAND_RIGHT_STANCE, true);
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void aFailedWarpRestoresThePoseAndPropagatesTheFailure(boolean dynamic) {
+        Avatar avatar = avatar(CharacterStance.STAND_RIGHT_STANCE, dynamic);
         IllegalStateException failure = new IllegalStateException("warp failed");
         doAnswer(call -> {
             avatar.entryStance = avatar.bot.getStance();
@@ -383,6 +441,8 @@ class PqMapEntryExecutionTest {
         assertEquals(CharacterStance.JUMP_RIGHT_STANCE, avatar.entryStance);
         assertEquals(CharacterStance.STAND_RIGHT_STANCE, avatar.bot.getStance());
         assertEquals(0L, avatar.state.portalDropAtMs);
+        var lock = dynamic ? avatar.state.lock : MovementCommands.movementStateLock(avatar.bot);
+        assertFalse(lock.isLocked(), "a failed warp must release its movement state lock");
     }
 
     @Test
@@ -521,7 +581,9 @@ class PqMapEntryExecutionTest {
 
         void recordEntry() {
             entryStance = bot.getStance();
-            movementLocked = Thread.holdsLock(state);
+            movementLocked = GCMovement.isEnabled(bot)
+                    ? state.lock.isHeldByCurrentThread()
+                    : MovementCommands.movementStateLock(bot).isHeldByCurrentThread();
         }
 
         void arrive(Portal portal) {
