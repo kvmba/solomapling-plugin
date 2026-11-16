@@ -7,6 +7,7 @@ import org.gms.net.server.Server;
 import org.gms.net.server.channel.Channel;
 import org.gms.net.server.world.World;
 import org.gms.property.ServiceProperty;
+import org.gms.server.life.NPC;
 import org.gms.server.maps.MapleMap;
 import org.gms.service.ConfigService;
 import org.junit.jupiter.api.AfterEach;
@@ -31,7 +32,7 @@ import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
 class PqLobbySpawnTest {
-    private record Spawn(int family, int low, int high, int job, int channel) {
+    private record Spawn(Point position, int family, int low, int high, int job, int channel) {
     }
 
     private final List<Spawn> created = new ArrayList<>();
@@ -74,12 +75,18 @@ class PqLobbySpawnTest {
         channel = mock(Channel.class, RETURNS_DEEP_STUBS);
         when(channel.getId()).thenReturn(2);
         map = mock(MapleMap.class);
+        NPC tory = mock(NPC.class);
+        when(tory.getPosition()).thenReturn(new Point(1434, 352));
+        when(map.getNPCById(1012112)).thenReturn(tory);
+        NPC lakelis = mock(NPC.class);
+        when(lakelis.getPosition()).thenReturn(new Point(-540, 421));
+        when(map.getNPCById(9020000)).thenReturn(lakelis);
         when(channel.getMapFactory().getMap(anyInt())).thenReturn(map);
         generation = mockStatic(BotGeneration.class);
         generation.when(() -> BotGeneration.createBotOnChannel(
                 any(Point.class), eq(map), anyInt(), anyInt(), anyInt(), anyInt(), anyInt()))
                 .thenAnswer(call -> {
-                    created.add(new Spawn(call.getArgument(2), call.getArgument(3),
+                    created.add(new Spawn(call.getArgument(0), call.getArgument(2), call.getArgument(3),
                             call.getArgument(4), call.getArgument(5), call.getArgument(6)));
                     return 1_000 + created.size();
                 });
@@ -87,6 +94,12 @@ class PqLobbySpawnTest {
         spots = mockStatic(BotSpotPicker.class);
         spots.when(() -> BotSpotPicker.pickGroundSpots(eq(map), anyInt(), anyInt(), anyInt()))
                 .thenReturn(List.of(new Point(12, 34)));
+        spots.when(() -> BotSpotPicker.pickGroundSpotsInRadius(
+                        eq(map), anyInt(), anyInt(), any(Point.class), anyInt(), anyInt()))
+                .thenAnswer(call -> {
+                    Point center = call.getArgument(3);
+                    return List.of(new Point(center.x + 60, center.y));
+                });
     }
 
     @AfterEach
@@ -104,6 +117,7 @@ class PqLobbySpawnTest {
         points.add(PqBotSpawner.CARNIVAL_2);
         for (PqRecruitPoints.Point point : points) {
             created.clear();
+            when(map.getId()).thenReturn(point.recruitMap());
             var paths = PqBotSpawner.recruitPaths(point);
             var type = PqBotSpawner.botTypeFor(point.name());
             assertNotNull(type, point.name());
@@ -123,6 +137,26 @@ class PqLobbySpawnTest {
             }
             assertEquals(new HashSet<>(paths), observedPaths, point.name());
         }
+    }
+
+    @Test
+    void townReplenishmentStaysByTheNpcEvenWhenTheGraphHasNoSpots() {
+        spots.when(() -> BotSpotPicker.pickGroundSpotsInRadius(
+                        eq(map), anyInt(), anyInt(), any(Point.class), anyInt(), anyInt()))
+                .thenReturn(List.of());
+        for (String name : List.of("HenesysPQ", "KerningPQ")) {
+            created.clear();
+            var point = PqRecruitPoints.byName(name);
+            when(map.getId()).thenReturn(point.recruitMap());
+            var area = PqRecruitArea.forMap(map);
+
+            PqBotSpawner.spawnRecruitBatch(point, PqBotSpawner.botTypeFor(name), channel, List.of(230));
+
+            assertEquals(1, created.size());
+            assertEquals(area.center(), created.getFirst().position());
+        }
+        spots.verify(() -> BotSpotPicker.pickGroundSpots(
+                eq(map), anyInt(), anyInt(), anyInt()), never());
     }
 
     @Test

@@ -202,6 +202,30 @@ public final class BotSpotPicker {
         return out;
     }
 
+    // Circle-constrained batch: any reachable platform is allowed, but its actual slope-aware
+    // ground point must be inside the radius. Bounded retries may return fewer than count spots.
+    public static List<Point> pickGroundSpotsInRadius(MapleMap map, int fromX, int fromY,
+                                                     Point center, int radius, int count) {
+        List<Point> out = new ArrayList<>(count);
+        List<Candidate> candidates = eligibleLedges(map, fromX, fromY, center.x - radius, center.x + radius);
+        if (candidates.isEmpty()) {
+            return out;
+        }
+        double radiusSq = (double) radius * radius;
+        Map<Integer, List<Integer>> occupiedByLedge = new HashMap<>();
+        for (int attempt = 0; attempt < count * SPACING_ATTEMPTS && out.size() < count; attempt++) {
+            Candidate c = pickWeightedByWidth(candidates);
+            List<Integer> taken = occupiedByLedge.computeIfAbsent(c.ledge.regionId(), k -> new ArrayList<>());
+            int x = pickSpacedX(c.lo, c.hi, taken);
+            Point ground = GCMovement.groundPointInRegion(map, c.ledge.regionId(), x);
+            if (ground != null && center.distanceSq(ground) <= radiusSq) {
+                taken.add(x);
+                out.add(ground);
+            }
+        }
+        return out;
+    }
+
     // Build the eligible ledge set: walkable ledges that overlap [x1,x2] in X and are reachable from
     // (fromX,fromY). If the anchor sits on no ledge, reachability can't be resolved so we don't filter on
     // it (matches GrindSpotFinder), keeping behavior graceful rather than empty.

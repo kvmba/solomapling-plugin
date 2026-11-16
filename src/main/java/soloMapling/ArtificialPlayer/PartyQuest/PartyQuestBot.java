@@ -105,6 +105,9 @@ public abstract class PartyQuestBot extends BotSM implements GrindTickRegistry.P
      */
     private final BotPotionSim potionSim = new BotPotionSim();
 
+    /** The town's stationary entry NPC is resolved once, not scanned for on every lobby tick. */
+    private PqRecruitArea townRecruitArea;
+
     protected PartyQuestBot(Character character) {
         super(character);
     }
@@ -511,6 +514,9 @@ public abstract class PartyQuestBot extends BotSM implements GrindTickRegistry.P
             return;
         }
 
+        if (townRecruitArea == null) {
+            townRecruitArea = PqRecruitArea.forMap(bot.getMap());
+        }
         long now = System.currentTimeMillis();
         // Both beats are deadline-driven (not "last ran at + interval"): the next due time is
         // rolled once when a beat fires, so the jitter is real jitter instead of a fresh roll
@@ -535,11 +541,16 @@ public abstract class PartyQuestBot extends BotSM implements GrindTickRegistry.P
                 sayRecruitLine(bot);
             }
         }
-        if (now >= nextLobbyStrollAtMs) {
+        if (now >= nextLobbyStrollAtMs
+                || townRecruitArea != null && !townRecruitArea.contains(bot.getPosition())) {
             nextLobbyStrollAtMs = now + LOBBY_STROLL_INTERVAL_MS + jitter(LOBBY_STROLL_JITTER_MS);
             // The dynamic engine owns the walk; a no-op while one is already in progress, so
             // this can be called every tick without thrashing the target.
-            PlatformPlacement.botStrollOnMap(bot);
+            if (townRecruitArea == null) {
+                PlatformPlacement.botStrollOnMap(bot);
+            } else {
+                townRecruitArea.stroll(bot);
+            }
         }
     }
 

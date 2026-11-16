@@ -139,8 +139,11 @@ public final class PqBotSpawner {
                 : Math.max(low, Math.min(point.maxLevel(),
                         point.minLevel() + Math.max(9, (point.maxLevel() - point.minLevel()) / 3)));
         var portal = map.getPortal(0);
-        Point anchor = portal == null ? new Point() : portal.getPosition();
-        List<Point> spots = BotSpotPicker.pickGroundSpots(map, anchor.x, anchor.y, paths.size());
+        PqRecruitArea area = PqRecruitArea.forMap(map);
+        Point anchor = area != null ? area.center() : portal == null ? new Point() : portal.getPosition();
+        List<Point> spots = area == null
+                ? BotSpotPicker.pickGroundSpots(map, anchor.x, anchor.y, paths.size())
+                : area.spots(map, anchor, paths.size());
         List<Integer> ids = new ArrayList<>(paths.size());
         int channelId = channel.getId();
         for (int i = 0; i < paths.size() && !Thread.currentThread().isInterrupted(); i++) {
