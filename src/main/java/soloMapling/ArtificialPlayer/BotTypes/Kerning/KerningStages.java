@@ -1,11 +1,10 @@
 package soloMapling.ArtificialPlayer.BotTypes.Kerning;
 
 import org.gms.client.Character;
+import org.gms.scripting.event.EventInstanceManager;
 import soloMapling.ArtificialPlayer.PartyQuest.PositionCombination;
 import soloMapling.ArtificialPlayer.PartyQuest.PqActions;
 import soloMapling.Environment.BotMessages;
-
-import static soloMapling.ArtificialPlayer.BotHelpers.blockingSleep;
 
 /**
  * What a bot does in each Kerning PQ stage.
@@ -30,69 +29,59 @@ public final class KerningStages {
     // Stage 1 - coupons
     // =========================================================================
 
-    /**
-     * Gather coupons and answer Cloto if the bot is one of the question-holders.
-     *
-     * <p>Stage 1 is the ladder every later stage stands on, and only the members can climb
-     * it: Cloto hands a question to each member who talks to her and gives a pass only to
-     * the member whose coupon count matches it - the leader gets told "tell your party
-     * members to solve the questions", and the leader's own talk can only hand in the
-     * passes. So the bot asks for a question, counts its coupons against the table, and,
-     * on the pass, drops it at the leader's feet - he is the one Cloto counts them for.
-     *
-     * @return true when the leader has the passes he needs, which is the stage's real bar
-     */
-    public static boolean workCoupons(Character bot) {
-        if (PqActions.readEimString(bot, "1stageclear") != null) {
-            return true;
-        }
-        // Already holding a pass: stop talking to Cloto. Every further click is graded against
-        // the coupon count again, and a bot that keeps clicking spends the coupons it needs for
-        // the answer (and, once a pass is in hand, keeps re-opening a conversation that can only
-        // repeat itself). Hand the pass over and wait.
-        if (PqActions.countItem(bot, KerningPqData.PASS) > 0) {
-            PqActions.handItemsToLeader(bot, KerningPqData.PASS);
-            PqActions.say(bot, BotMessages.get("pq.kerning.pass_dropped"));
+    static final int[] COUPON_LOOT_IDS = {KerningPqData.COUPON};
+
+    /** The combat sweep only hunts while this member is short of its assigned coupon count. */
+    static boolean needsCoupons(Character bot) {
+        EventInstanceManager instance = bot.getEventInstance();
+        if (instance == null || instance.getProperty("1stageclear") != null) {
             return false;
         }
-        int coupons = PqActions.countItem(bot, KerningPqData.COUPON);
-        if (coupons > 0) {
-            // Holding a question means spending coupons on the answer; holding none means
-            // the bot is either unanswered or already passed - the conversation tells which.
-            answerCloto(bot);
-            return false;
-        }
-        huntCoupons(bot);
-        return false;
+        int question = instance.gridCheck(bot);
+        return question > 0 && PqActions.countItem(bot, KerningPqData.COUPON) < requiredCoupons(question)
+                && PqActions.countItem(bot, KerningPqData.PASS) == 0 && needsMemberPass(bot, instance);
     }
 
-    /**
-     * Take Cloto's question and answer it, walking the conversation one click at a time.
-     *
-     * <p>Two clicks in one visit are needed: {@code NPCScriptManager.start} runs the script's
-     * own {@code start()}, which itself calls {@code action(1,0,0)} - so the first talk only
-     * reaches status 0, and the question/answer exchange needs one more.
-     *
-     * <p>Only done while the bot actually carries coupons, so an unanswered bot keeps hunting
-     * first - and never once it holds a pass, because every further click is graded against the
-     * coupon count again and would spend the coupons the answer needs.
-     */
-    private static void answerCloto(Character bot) {
-        if (PqActions.talkingTo(bot, KerningPqData.NPC_CLOTO)) {
-            return; // a prompt is already open; let it finish before re-clicking
+    /** Ask Cloto for a question, exchange the exact answer for a pass, and hand it over. */
+    static void workCoupons(Character bot) {
+        EventInstanceManager instance = bot.getEventInstance();
+        if (instance == null || !needsMemberPass(bot, instance)) {
+            return;
         }
-        PqActions.talkTo(bot, KerningPqData.NPC_CLOTO, 0);
-        blockingSleep(1_000);
-        PqActions.talkTo(bot, KerningPqData.NPC_CLOTO, 0);
-        if (PqActions.countItem(bot, KerningPqData.PASS) > 0) {
-            PqActions.handItemsToLeader(bot, KerningPqData.PASS);
+        if (PqActions.countItem(bot, KerningPqData.PASS) == 0) {
+            // Cloto records -1 before asking, a 1-based question index while collecting, and
+            // 0 after awarding a pass. One talk runs the check and closes the conversation.
+            int question = instance.gridCheck(bot);
+            if (question == -1) {
+                PqActions.talkTo(bot, KerningPqData.NPC_CLOTO);
+                return;
+            }
+            if (question == 0) {
+                return;
+            }
+            int excess = PqActions.countItem(bot, KerningPqData.COUPON) - requiredCoupons(question);
+            if (excess < 0) {
+                PqActions.approachRoomLoot(bot, COUPON_LOOT_IDS);
+                return;
+            }
+            if (excess > 0 && !PqActions.dropStack(bot, KerningPqData.COUPON, excess, bot.getPosition())) {
+                return;
+            }
+            PqActions.talkTo(bot, KerningPqData.NPC_CLOTO);
+        }
+        if (PqActions.handItemsToLeader(bot, KerningPqData.PASS) > 0) {
             PqActions.say(bot, BotMessages.get("pq.kerning.pass_dropped"));
         }
     }
 
-    private static void huntCoupons(Character bot) {
-        PqActions.seekAndAttack(bot);
-        PqActions.loot(bot, bot.getPosition(), 2_000, new int[]{KerningPqData.COUPON});
+    private static int requiredCoupons(int question) {
+        return KerningPqData.QUESTION_ANSWERS[question - 1];
+    }
+
+    private static boolean needsMemberPass(Character bot, EventInstanceManager instance) {
+        Character leader = instance.getLeader();
+        return leader != null && leader != bot
+                && PqActions.countItem(leader, KerningPqData.PASS) < instance.getPlayerCount() - 1;
     }
 
     // =========================================================================

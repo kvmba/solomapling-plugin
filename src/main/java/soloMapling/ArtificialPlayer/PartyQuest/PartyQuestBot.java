@@ -255,7 +255,9 @@ public abstract class PartyQuestBot extends BotSM implements GrindTickRegistry.P
         // beat: a kill lands its item at the mob's feet, and waiting for the macro tick to come
         // back for it is the reported "the pass is still lying there" delay. Narrow on purpose -
         // see PqActions.lootSteppedOn.
-        PqActions.lootSteppedOn(bot, steppedOnLootIds());
+        if (PqActions.lootSteppedOn(bot, steppedOnLootIds()) > 0 && !fightsOnSweep()) {
+            return; // the pickup may have met the stage's combat quota
+        }
         if (movementShielded()) {
             PqActions.attack(bot); // the walk owns the steering; the swing still lands
             return;

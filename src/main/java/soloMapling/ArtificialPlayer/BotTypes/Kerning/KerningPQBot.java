@@ -7,6 +7,8 @@ import soloMapling.ArtificialPlayer.PartyQuest.PartyQuestBot;
 import soloMapling.ArtificialPlayer.PartyQuest.PqActions;
 import soloMapling.Environment.BotMessages;
 
+import java.util.concurrent.locks.ReentrantLock;
+
 /**
  * Plays Kerning PQ ("First Time Together") with a real player leading.
  *
@@ -25,7 +27,7 @@ import soloMapling.Environment.BotMessages;
  */
 public class KerningPQBot extends PartyQuestBot {
 
-    private static final long SETTLE_MS = 1_200;
+    private final ReentrantLock couponWork = new ReentrantLock();
 
     /**
      * Which body this bot is, for splitting the wanted spots.
@@ -84,6 +86,32 @@ public class KerningPQBot extends PartyQuestBot {
     }
 
     @Override
+    public void grindTick() {
+        // Cloto's exchange and the combat sweep both change the coupon count. The shared
+        // combat ticker must skip a beat rather than wait for this bot's NPC script.
+        if (!couponWork.tryLock()) {
+            return;
+        }
+        try {
+            super.grindTick();
+        } finally {
+            couponWork.unlock();
+        }
+    }
+
+    @Override
+    protected boolean fightsOnSweep() {
+        Character bot = getChr();
+        return bot.getMapId() != KerningPqData.STAGE_1 || KerningStages.needsCoupons(bot);
+    }
+
+    @Override
+    protected int[] steppedOnLootIds() {
+        return getChr().getMapId() == KerningPqData.STAGE_1
+                ? KerningStages.COUPON_LOOT_IDS : super.steppedOnLootIds();
+    }
+
+    @Override
     protected boolean workStage() {
         int stage = stageOf(getChr().getMapId());
         if (stage < 0) {
@@ -96,7 +124,12 @@ public class KerningPQBot extends PartyQuestBot {
                     sayStageClearOnce(stage);
                     return false; // the portal to stage 2 is open; the leader walks it
                 }
-                KerningStages.workCoupons(getChr());
+                couponWork.lock();
+                try {
+                    KerningStages.workCoupons(getChr());
+                } finally {
+                    couponWork.unlock();
+                }
             }
             case 2, 3, 4 -> {
                 if (KerningStages.stageCleared(getChr(), stage)) {

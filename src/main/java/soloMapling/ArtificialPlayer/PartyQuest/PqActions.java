@@ -784,10 +784,10 @@ public final class PqActions {
      * <p>Item-triggered reactors match {@code item.getQuantity()} against the number in
      * their WZ condition, so the stack size is part of the trigger and cannot be split up.
      * The drop also re-seats itself onto the floor 85px below the throw
-     * (MapleMap#calcDropPos), so {@code at} wants to be a point whose landing is still
-     * inside the target's box.
+     * (MapleMap#calcDropPos), so reactor drops need a point whose landing is still inside
+     * the target's box.
      */
-    private static boolean dropStack(Character bot, int itemId, int qty, Point at) {
+    public static boolean dropStack(Character bot, int itemId, int qty, Point at) {
         MapleMap map = bot.getMap();
         var item = BotLogic.generateCleanItemWithQty(itemId, qty);
         boolean removed = BotClientBinding.withBoundPlayer(bot, () -> {
@@ -1417,6 +1417,11 @@ public final class PqActions {
      */
     public static boolean pickupBeforeChase(Character bot, double radiusPx, int[] itemIds) {
         return pickupBeforeChase(bot, radiusPx, itemIds, PICKUP_REACH_SQ);
+    }
+
+    /** Walk to reachable quest loot beyond the combat sweep's local scan, without picking it up here. */
+    public static void approachRoomLoot(Character bot, int[] itemIds) {
+        pickupBeforeChase(bot, roomReachPx(bot.getMap()), itemIds, STEPPED_ON_REACH_SQ);
     }
 
     private static boolean pickupBeforeChase(Character bot, double radiusPx, int[] itemIds, double pickupReachSq) {
