@@ -8,6 +8,7 @@ import org.gms.manager.ServerManager;
 import org.gms.net.server.world.Party;
 import org.gms.property.ServiceProperty;
 import org.gms.scripting.event.EventInstanceManager;
+import org.gms.server.life.NPC;
 import org.gms.server.maps.MapItem;
 import org.gms.server.maps.MapObject;
 import org.gms.server.maps.MapObjectType;
@@ -36,6 +37,7 @@ import static soloMapling.ArtificialPlayer.BotTypes.Kerning.KerningPqData.*;
 
 class KerningStageOneTest {
     private static final int BOT_ID = 880197;
+    private static final Point CLOTO_POSITION = new Point(-1000, 0);
     private final Character member = mock(Character.class);
     private final Character leader = mock(Character.class);
     private final EventInstanceManager instance = mock(EventInstanceManager.class);
@@ -72,6 +74,9 @@ class KerningStageOneTest {
         when(member.getEventInstance()).thenReturn(instance);
         when(member.getMapId()).thenReturn(STAGE_1);
         when(member.getMap()).thenReturn(mock(MapleMap.class));
+        NPC cloto = mock(NPC.class);
+        when(cloto.getPosition()).thenReturn(CLOTO_POSITION);
+        when(member.getMap().getNPCById(NPC_CLOTO)).thenReturn(cloto);
         when(member.getParty()).thenReturn(mock(Party.class));
         when(member.getItemQuantity(COUPON, false)).thenAnswer(call -> coupons);
         when(member.getItemQuantity(PASS, false)).thenAnswer(call -> passes);
@@ -140,7 +145,8 @@ class KerningStageOneTest {
                 question = 0;
                 return true;
             });
-            actions.when(() -> PqActions.handItemsToLeader(member, PASS)).thenAnswer(call -> {
+            actions.when(() -> PqActions.handItemsToLeaderAfterStage(member, PASS, NPC_CLOTO)).thenAnswer(call -> {
+                if (passes == 0) return 0;
                 assertEquals(1, passes);
                 passes = 0;
                 return 1;
@@ -153,7 +159,9 @@ class KerningStageOneTest {
 
             actions.verify(() -> PqActions.dropStack(member, COUPON, 5, position));
             actions.verify(() -> PqActions.talkTo(member, NPC_CLOTO));
-            actions.verify(() -> PqActions.handItemsToLeader(member, PASS));
+            actions.verify(() -> PqActions.handItemsToLeaderAfterStage(member, PASS, NPC_CLOTO), times(2));
+            actions.verify(() -> PqActions.waitNearStageNpc(member, NPC_CLOTO), times(2));
+            actions.verify(() -> PqActions.handItemsToLeader(member, PASS), never());
             actions.verify(() -> PqActions.lootSteppedOn(member, new int[]{COUPON}), never());
             actions.verify(() -> PqActions.seekAndAttack(member, false, new int[]{COUPON}), never());
         }
@@ -162,15 +170,122 @@ class KerningStageOneTest {
     @Test
     void enoughPassesOnTheLeaderAndStageClearBothStopAStillShortMember() {
         question = 1;
-        when(leader.getItemQuantity(PASS, false)).thenReturn(2, 3, 0);
+        when(leader.getItemQuantity(PASS, false)).thenReturn(2);
         try (var actions = mockActions(); var movement = mockStatic(GCMovement.class)) {
             movement.when(() -> GCMovement.hasGraph(member)).thenReturn(true);
             bot.grindTick(); // exactly enough passes
+            bot.workStage();
+            when(leader.getItemQuantity(PASS, false)).thenReturn(3);
             bot.grindTick(); // surplus passes
+            bot.workStage();
             when(instance.getProperty("1stageclear")).thenReturn("true");
+            when(leader.getItemQuantity(PASS, false)).thenReturn(0);
             bot.grindTick(); // still stopped after the leader submits the passes
+            bot.workStage();
+            actions.verify(() -> PqActions.waitNearStageNpc(member, NPC_CLOTO), times(3));
             actions.verify(() -> PqActions.lootSteppedOn(member, new int[]{COUPON}), never());
             actions.verify(() -> PqActions.seekAndAttack(member, false, new int[]{COUPON}), never());
+        }
+    }
+
+    @Test
+    void walksToClotoBeforeAskingForAQuestion() {
+        when(member.getPosition()).thenReturn(new Point(500, 0));
+        try (var actions = mockActions(); var movement = mockStatic(GCMovement.class)) {
+            movement.when(GCMovement::isVirtualClock).thenReturn(true);
+            actions.when(() -> PqActions.walkTo(member, CLOTO_POSITION)).thenCallRealMethod();
+
+            bot.workStage();
+
+            movement.verify(() -> GCMovement.move(eq(member), eq(-1000), eq(0), any(), any()));
+            actions.verify(() -> PqActions.talkTo(member, NPC_CLOTO), never());
+            when(member.getPosition()).thenReturn(CLOTO_POSITION);
+            bot.workStage();
+            actions.verify(() -> PqActions.talkTo(member, NPC_CLOTO));
+        }
+    }
+
+    @Test
+    void returnsToClotoBeforeDroppingSurplusOrExchangingCoupons() {
+        question = 7;
+        coupons = 13;
+        when(member.getPosition()).thenReturn(new Point(500, 0));
+        try (var actions = mockActions(); var movement = mockStatic(GCMovement.class)) {
+            movement.when(GCMovement::isVirtualClock).thenReturn(true);
+            movement.when(() -> GCMovement.hasGraph(member)).thenReturn(true);
+            actions.when(() -> PqActions.walkTo(member, CLOTO_POSITION)).thenCallRealMethod();
+            actions.when(() -> PqActions.dropStack(member, COUPON, 5, CLOTO_POSITION)).thenAnswer(call -> {
+                coupons -= 5;
+                return true;
+            });
+            actions.when(() -> PqActions.talkTo(member, NPC_CLOTO)).thenAnswer(call -> {
+                assertEquals(CLOTO_POSITION, member.getPosition());
+                assertEquals(8, coupons);
+                coupons = 0;
+                passes = 1;
+                question = 0;
+                return true;
+            });
+
+            bot.workStage();
+            bot.grindTick();
+
+            movement.verify(() -> GCMovement.move(eq(member), eq(-1000), eq(0), any(), any()));
+            actions.verify(() -> PqActions.dropStack(eq(member), eq(COUPON), anyInt(), any()), never());
+            actions.verify(() -> PqActions.talkTo(member, NPC_CLOTO), never());
+            actions.verify(() -> PqActions.seekAndAttack(member, false, new int[]{COUPON}), never());
+            when(member.getPosition()).thenReturn(CLOTO_POSITION);
+            bot.workStage();
+            actions.verify(() -> PqActions.dropStack(member, COUPON, 5, CLOTO_POSITION));
+            actions.verify(() -> PqActions.talkTo(member, NPC_CLOTO));
+        }
+    }
+
+    @Test
+    void deliversPassesOnlyAtClotoEvenWhileTheLeaderIsStillHunting() {
+        question = 0;
+        passes = 1;
+        when(member.getPosition()).thenReturn(new Point(500, 0));
+        when(leader.getMapId()).thenReturn(STAGE_1);
+        when(leader.getPosition()).thenReturn(new Point(600, 0));
+        try (var actions = mockActions(); var movement = mockStatic(GCMovement.class)) {
+            actions.when(() -> PqActions.partyLeader(member)).thenReturn(leader);
+            actions.when(() -> PqActions.handItemsToLeaderAfterStage(member, PASS, NPC_CLOTO))
+                    .thenCallRealMethod();
+            actions.when(() -> PqActions.giveItemAt(member, leader, PASS, 1, CLOTO_POSITION))
+                    .thenAnswer(call -> {
+                        assertEquals(CLOTO_POSITION, member.getPosition());
+                        passes = 0;
+                        return null;
+                    });
+
+            bot.workStage();
+
+            assertEquals(1, passes);
+            actions.verify(() -> PqActions.walkTo(member, CLOTO_POSITION));
+            actions.verify(() -> PqActions.giveItemAt(any(), any(), anyInt(), anyInt(), any()), never());
+            when(member.getPosition()).thenReturn(CLOTO_POSITION);
+            bot.workStage();
+            assertEquals(0, passes);
+            actions.verify(() -> PqActions.giveItemAt(member, leader, PASS, 1, CLOTO_POSITION));
+            actions.verify(() -> PqActions.handItemsToLeader(member, PASS), never());
+        }
+    }
+
+    @Test
+    void aMemberThatAlreadyDeliveredReturnsToWaitAtClotoInsteadOfRemainingAmongMonsters() {
+        question = 0;
+        when(member.getPosition()).thenReturn(new Point(500, 0));
+        try (var actions = mockActions(); var movement = mockStatic(GCMovement.class)) {
+            movement.when(GCMovement::isVirtualClock).thenReturn(true);
+            actions.when(() -> PqActions.walkTo(member, CLOTO_POSITION)).thenCallRealMethod();
+            actions.when(() -> PqActions.waitNearStageNpc(member, NPC_CLOTO)).thenCallRealMethod();
+
+            bot.workStage();
+
+            movement.verify(() -> GCMovement.move(eq(member), eq(-1000), eq(0), any(), any()));
+            actions.verify(() -> PqActions.recoverUngatheredHandoffs(member, PASS));
+            actions.verify(() -> PqActions.talkTo(member, NPC_CLOTO), never());
         }
     }
 
@@ -239,8 +354,10 @@ class KerningStageOneTest {
 
     private static MockedStatic<PqActions> mockActions() {
         return mockStatic(PqActions.class, call -> switch (call.getMethod().getName()) {
-            case "countItem", "readEimString" -> call.callRealMethod();
-            default -> RETURNS_DEFAULTS.answer(call);
+            case "countItem", "readEimString", "walkToNpc", "deliverAndWait" -> call.callRealMethod();
+            case "walkTo" -> true;
+            default -> java.lang.reflect.Modifier.isPrivate(call.getMethod().getModifiers())
+                    ? call.callRealMethod() : RETURNS_DEFAULTS.answer(call);
         });
     }
 }

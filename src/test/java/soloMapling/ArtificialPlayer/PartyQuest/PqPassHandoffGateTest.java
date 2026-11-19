@@ -10,18 +10,18 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /**
  * Pins the post-work delivery contract behind the "bots throw passes as soon as the leader
  * is nearby" report: the mid-fight hand-off is gone from the Ludi stage work, and the only
- * delivery path left ({@code handItemsToLeaderAfterStage}) drops at the stage-NPC post once
+ * shared delivery flow ({@code deliverAndWait}) drops at the stage-NPC post once
  * the stage's work is over - the leader has to come there for the turn-in anyway.
  *
  * <p>The Ludi stage methods must not call the old immediate hand-off any more; the helper
- * itself must refuse to deliver until it has walked the bot to the NPC post and seen the
- * leader in range there.
+ * itself must refuse to deliver until it has walked the bot to the NPC post.
  */
 class PqPassHandoffGateTest {
 
     /** The immediate hand-off: allowed only inside the post-stage helper and handItemsToLeader itself. */
     private static final String[] LUDI_STAGE_SOURCES = {
             "soloMapling/ArtificialPlayer/BotTypes/Ludi/LudiStages.java",
+            "soloMapling/ArtificialPlayer/BotTypes/Ludi/LudiPQBot.java",
     };
 
     @Test
@@ -34,15 +34,15 @@ class PqPassHandoffGateTest {
                             + "PqActions\\.handItemsToLeader.*"),
                     source + " still delivers the moment the leader passes by");
             // The post-work helper is the only delivery path the stage work uses.
-            assertTrue(java.contains("handItemsToLeaderAfterStage"),
-                    source + " must deliver through the post-work helper");
+            assertTrue(java.contains("PqActions.deliverAndWait("),
+                    source + " must deliver through the shared post-work flow");
         }
     }
 
     @Test
-    void helperIsTheOnlyNewDeliveryEntryPoint() throws Exception {
-        Method m = PqActions.class.getDeclaredMethod("handItemsToLeaderAfterStage",
-                org.gms.client.Character.class, int.class);
+    void sharedFlowIsTheDeliveryEntryPoint() throws Exception {
+        Method m = PqActions.class.getDeclaredMethod("deliverAndWait",
+                org.gms.client.Character.class, int.class, int.class);
         assertTrue(java.lang.reflect.Modifier.isStatic(m.getModifiers()),
                 "the post-work delivery is a PqActions action like its siblings");
     }

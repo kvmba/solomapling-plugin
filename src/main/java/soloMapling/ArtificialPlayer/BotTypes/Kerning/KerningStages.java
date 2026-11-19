@@ -30,6 +30,8 @@ public final class KerningStages {
     // =========================================================================
 
     static final int[] COUPON_LOOT_IDS = {KerningPqData.COUPON};
+    static final int[] PASS_LOOT_IDS = {KerningPqData.PASS};
+    static final int BOSS_PASSES_WANTED = 10;
 
     /** The combat sweep only hunts while this member is short of its assigned coupon count. */
     static boolean needsCoupons(Character bot) {
@@ -45,7 +47,11 @@ public final class KerningStages {
     /** Ask Cloto for a question, exchange the exact answer for a pass, and hand it over. */
     static void workCoupons(Character bot) {
         EventInstanceManager instance = bot.getEventInstance();
-        if (instance == null || !needsMemberPass(bot, instance)) {
+        if (instance == null) {
+            return;
+        }
+        if (instance.getProperty("1stageclear") != null || !needsMemberPass(bot, instance)) {
+            PqActions.deliverAndWait(bot, KerningPqData.PASS, KerningPqData.NPC_CLOTO);
             return;
         }
         if (PqActions.countItem(bot, KerningPqData.PASS) == 0) {
@@ -53,23 +59,26 @@ public final class KerningStages {
             // 0 after awarding a pass. One talk runs the check and closes the conversation.
             int question = instance.gridCheck(bot);
             if (question == -1) {
+                if (PqActions.walkToNpc(bot, KerningPqData.NPC_CLOTO)) {
+                    PqActions.talkTo(bot, KerningPqData.NPC_CLOTO);
+                }
+                return;
+            }
+            if (question > 0) {
+                int excess = PqActions.countItem(bot, KerningPqData.COUPON) - requiredCoupons(question);
+                if (excess < 0) {
+                    PqActions.approachRoomLoot(bot, COUPON_LOOT_IDS);
+                    return;
+                }
+                PqActions.stopHunting(bot);
+                if (!PqActions.walkToNpc(bot, KerningPqData.NPC_CLOTO)) return;
+                if (excess > 0 && !PqActions.dropStack(bot, KerningPqData.COUPON, excess, bot.getPosition())) {
+                    return;
+                }
                 PqActions.talkTo(bot, KerningPqData.NPC_CLOTO);
-                return;
             }
-            if (question == 0) {
-                return;
-            }
-            int excess = PqActions.countItem(bot, KerningPqData.COUPON) - requiredCoupons(question);
-            if (excess < 0) {
-                PqActions.approachRoomLoot(bot, COUPON_LOOT_IDS);
-                return;
-            }
-            if (excess > 0 && !PqActions.dropStack(bot, KerningPqData.COUPON, excess, bot.getPosition())) {
-                return;
-            }
-            PqActions.talkTo(bot, KerningPqData.NPC_CLOTO);
         }
-        if (PqActions.handItemsToLeader(bot, KerningPqData.PASS) > 0) {
+        if (PqActions.deliverAndWait(bot, KerningPqData.PASS, KerningPqData.NPC_CLOTO) > 0) {
             PqActions.say(bot, BotMessages.get("pq.kerning.pass_dropped"));
         }
     }
@@ -148,10 +157,9 @@ public final class KerningStages {
     /**
      * Fight the stage-five boss.
      *
-     * <p>Nothing clever here: the stage ends when the mobs are down and the leader has the
-     * passes, so the bot only has to add damage.
+     * <p>Collect the ten passes the turn-in checks, then use the same NPC delivery post as stage 1.
      */
     public static void fightBoss(Character bot) {
-        PqActions.seekAndAttack(bot);
+        PqActions.collectForLeader(bot, PASS_LOOT_IDS, BOSS_PASSES_WANTED, KerningPqData.NPC_CLOTO);
     }
 }

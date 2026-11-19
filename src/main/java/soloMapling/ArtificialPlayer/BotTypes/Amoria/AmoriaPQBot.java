@@ -25,6 +25,8 @@ import soloMapling.ArtificialPlayer.PartyQuest.PqActions;
 public class AmoriaPQBot extends PartyQuestBot {
 
     private static final int[] STATUE_PIECE_LOOT = {AmoriaPqData.STATUE_PIECE};
+    private static final int[] MIRROR_LOOT = {4031595};
+    private static final int[] BOSS_LOOT = {4031594};
 
     public AmoriaPQBot(Character character) {
         super(character);
@@ -58,13 +60,25 @@ public class AmoriaPQBot extends PartyQuestBot {
     @Override
     protected boolean fightsOnSweep() {
         Character bot = getChr();
-        return AmoriaPqData.stageOf(bot.getMapId()) != 4 || (!collectionCleared()
-                && PqActions.needsHuntForLeader(bot, AmoriaPqData.STATUE_PIECE, AmoriaPqData.STATUE_PIECES_WANTED));
+        return switch (AmoriaPqData.stageOf(bot.getMapId())) {
+            case 1 -> PqActions.readEimString(bot, "1stageclear") == null
+                    && PqActions.needsHuntForLeader(bot, MIRROR_LOOT[0], 1);
+            case 4 -> !collectionCleared()
+                    && PqActions.needsHuntForLeader(bot, AmoriaPqData.STATUE_PIECE, AmoriaPqData.STATUE_PIECES_WANTED);
+            case 6 -> PqActions.readEimString(bot, "6stageclear") == null
+                    && PqActions.needsHuntForLeader(bot, BOSS_LOOT[0], 1);
+            default -> true;
+        };
     }
 
     @Override
     protected int[] steppedOnLootIds() {
-        return AmoriaPqData.stageOf(getChr().getMapId()) == 4 ? STATUE_PIECE_LOOT : super.steppedOnLootIds();
+        return switch (AmoriaPqData.stageOf(getChr().getMapId())) {
+            case 1 -> MIRROR_LOOT;
+            case 4 -> STATUE_PIECE_LOOT;
+            case 6 -> BOSS_LOOT;
+            default -> super.steppedOnLootIds();
+        };
     }
 
     @Override
@@ -74,11 +88,16 @@ public class AmoriaPQBot extends PartyQuestBot {
             case 1 -> stageOne();
             case 2, 3 -> ropePuzzle(stage);
             case 4 -> gatherRoom();
-            // 5 is the survival gate and 6 the lever puzzle - both leader-driven reads.
-            // 7/8 are fights (statue room, Papa Pixie) the attack path already covers;
-            // each is added here so the bot is never a bystander in a fight room.
-            case 5, 6 -> fightRoom();
-            case 7, 8 -> fightRoom();
+            case 6 -> {
+                if (PqActions.readEimString(getChr(), "6stageclear") == null) {
+                    PqActions.collectForLeader(getChr(), BOSS_LOOT, 1, 9201045);
+                } else {
+                    PqActions.deliverAndWait(getChr(), BOSS_LOOT[0], 9201045);
+                }
+                yield false;
+            }
+            // Survival and bonus rooms retain their own fight work.
+            case 5, 7, 8 -> fightRoom();
             default -> false; // past the run: nothing to add
         };
     }
@@ -86,7 +105,9 @@ public class AmoriaPQBot extends PartyQuestBot {
     /** Collect only until Amos has been given the pieces or the leader is ready to turn them in. */
     private boolean gatherRoom() {
         if (!collectionCleared()) {
-            PqActions.collectForLeader(getChr(), STATUE_PIECE_LOOT, AmoriaPqData.STATUE_PIECES_WANTED);
+            PqActions.collectForLeader(getChr(), STATUE_PIECE_LOOT, AmoriaPqData.STATUE_PIECES_WANTED, 9201045);
+        } else {
+            PqActions.deliverAndWait(getChr(), AmoriaPqData.STATUE_PIECE, 9201045);
         }
         return false;
     }
@@ -107,6 +128,11 @@ public class AmoriaPQBot extends PartyQuestBot {
      * whoever talks to the NPC.
      */
     private boolean stageOne() {
+        if (PqActions.readEimString(getChr(), "1stageclear") != null
+                || !PqActions.needsHuntForLeader(getChr(), MIRROR_LOOT[0], 1)) {
+            PqActions.deliverAndWait(getChr(), MIRROR_LOOT[0], 9201047);
+            return false;
+        }
         // The mirror on the hall floor: its drop is the pass item itself, and it is the one
         // thing in this stage the bots can reach (the mobs are behind gender doors).
         int mirror = PqActions.findReactorOid(getChr(), AmoriaPqData.MIRROR_REACTOR);
@@ -114,8 +140,7 @@ public class AmoriaPQBot extends PartyQuestBot {
             return false;
         }
         PqActions.seekAndAttack(getChr());
-        PqActions.loot(getChr(), getChr().getPosition(), 2_000, new int[]{4031595});
-        PqActions.handItemsToLeader(getChr(), 4031595);
+        PqActions.loot(getChr(), getChr().getPosition(), 2_000, MIRROR_LOOT);
         return false;
     }
 

@@ -24,6 +24,8 @@ import soloMapling.Environment.BotMessages;
  */
 public class MagatiaPQBot extends PartyQuestBot {
 
+    private static final int[] DOCUMENTS = {4001134, 4001135};
+
     /**
      * The town this bot was recruited from, captured at construction (it is built while standing
      * in its lobby). Returned to when a run ends, so an Alcadno bot goes back to Alcadno and a
@@ -89,9 +91,27 @@ public class MagatiaPQBot extends PartyQuestBot {
             case MagatiaPqData.BEAKER_ROOM_A, MagatiaPqData.BEAKER_ROOM_Z ->
                     PqActions.readEimInt(bot, "statusStg3", 0) == 3;
             case MagatiaPqData.DOCUMENT_ROOM_A, MagatiaPqData.DOCUMENT_ROOM_Z ->
-                    PqActions.readEimInt(bot, "statusStg4", 0) == 1;
+                    PqActions.readEimInt(bot, "statusStg4", 0) == 1 || documentsReady();
             default -> false;
         };
+    }
+
+    private boolean documentsReady() {
+        return !PqActions.needsHuntForLeader(getChr(), DOCUMENTS[0], 1)
+                && !PqActions.needsHuntForLeader(getChr(), DOCUMENTS[1], 1);
+    }
+
+    private void deliverDocuments() {
+        Character bot = getChr();
+        int npc = bot.getMapId() == MagatiaPqData.DOCUMENT_ROOM_A ? 2112005 : 2112006;
+        for (int document : DOCUMENTS) {
+            PqActions.deliverAndWait(bot, document, npc);
+        }
+        if (PqActions.readEimInt(bot, MagatiaPqData.LETTER_DELIVERED, 0) == 0) {
+            int letter = bot.getMapId() == MagatiaPqData.DOCUMENT_ROOM_A
+                    ? MagatiaPqData.ROMEO_LETTER : MagatiaPqData.JULIET_LETTER;
+            PqActions.deliverAndWait(bot, letter, npc);
+        }
     }
 
     @Override
@@ -103,14 +123,13 @@ public class MagatiaPQBot extends PartyQuestBot {
             return false;
         }
         if (collectionRoomCleared()) {
-            int letter = switch (bot.getMapId()) {
-                case MagatiaPqData.DOCUMENT_ROOM_A -> MagatiaPqData.ROMEO_LETTER;
-                case MagatiaPqData.DOCUMENT_ROOM_Z -> MagatiaPqData.JULIET_LETTER;
-                default -> 0;
-            };
-            // Romeo and Juliet still accept the optional letter after the documents unlock the exit.
-            if (letter != 0 && PqActions.readEimInt(bot, MagatiaPqData.LETTER_DELIVERED, 0) == 0) {
-                PqActions.handItemsToLeader(bot, letter);
+            if (bot.getMapId() == MagatiaPqData.DOCUMENT_ROOM_A
+                    || bot.getMapId() == MagatiaPqData.DOCUMENT_ROOM_Z) {
+                deliverDocuments();
+            } else {
+                PqActions.stopHunting(bot);
+                PqActions.waitNearStageNpc(bot,
+                        bot.getMapId() == MagatiaPqData.BEAKER_ROOM_A ? 2112003 : 2112004);
             }
             return false;
         }
@@ -155,6 +174,16 @@ public class MagatiaPQBot extends PartyQuestBot {
 
     /** Kill what is here and break what is breakable, which covers the early stages. */
     private void fightAndBreak() {
+        Character bot = getChr();
+        if ((bot.getMapId() == MagatiaPqData.DOCUMENT_ROOM_A
+                || bot.getMapId() == MagatiaPqData.DOCUMENT_ROOM_Z)
+                && (PqActions.countItem(bot, DOCUMENTS[0]) > 0 || PqActions.countItem(bot, DOCUMENTS[1]) > 0
+                || (PqActions.readEimInt(bot, MagatiaPqData.LETTER_DELIVERED, 0) == 0
+                        && PqActions.countItem(bot, bot.getMapId() == MagatiaPqData.DOCUMENT_ROOM_A
+                                ? MagatiaPqData.ROMEO_LETTER : MagatiaPqData.JULIET_LETTER) > 0))) {
+            deliverDocuments();
+            return;
+        }
         var map = getChr().getMap();
         if (!map.getMonsters().isEmpty()) {
             PqActions.seekAndAttack(getChr());
@@ -162,11 +191,10 @@ public class MagatiaPQBot extends PartyQuestBot {
         // The loot sweep must NAME the quest items: an empty filter matches nothing, and the
         // sweep is what fills the bot's inventory for the hand-off below.
         PqActions.loot(getChr(), getChr().getPosition(), 2_000, MagatiaPqData.QUEST_ITEMS);
-        // Whatever the sweep picked up (the run's exclusive set: letters, genes and their
-        // kin) belongs with the leader - the stage NPCs grade his pockets.
-        for (int itemId : MagatiaPqData.QUEST_ITEMS) {
-            PqActions.handItemsToLeader(getChr(), itemId);
-        }
+        // Reagents feed the beakers, not an NPC. Letters and documents stay pocketed until
+        // the party returns from the side rooms to Romeo/Juliet's delivery post.
+        PqActions.handItemsToLeader(getChr(), 4001132);
+        PqActions.handItemsToLeader(getChr(), 4001133);
     }
 
     /**

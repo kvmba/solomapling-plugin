@@ -20,6 +20,7 @@ import soloMapling.ArtificialPlayer.PartyQuest.PartyQuestBot;
  */
 public class HenesysPQBot extends PartyQuestBot {
 
+    private static final int[] CAKE_LOOT = {HenesysPqData.RICE_CAKE};
     private static final long SETTLE_MS = 1_200;
     private static final int MAX_PLANT_PASSES = 40;
 
@@ -54,6 +55,17 @@ public class HenesysPQBot extends PartyQuestBot {
     @Override
     protected int lobbyMapId() {
         return HenesysPqData.LOBBY_MAP;
+    }
+
+    @Override
+    protected boolean fightsOnSweep() {
+        return !HenesysStages.stageCleared(getChr())
+                && !HenesysStages.deliversCakes(getChr());
+    }
+
+    @Override
+    protected int[] steppedOnLootIds() {
+        return HenesysStages.needsCakes(getChr()) ? CAKE_LOOT : super.steppedOnLootIds();
     }
 
     /**

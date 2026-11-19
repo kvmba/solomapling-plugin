@@ -257,11 +257,13 @@ public abstract class PartyQuestBot extends BotSM implements GrindTickRegistry.P
         int[] lootIds = steppedOnLootIds();
         if (lootIds.length > 0) {
             if (!fightsOnSweep(lootIds)) {
+                PqActions.stopHunting(bot);
                 return;
             }
             PqActions.lootSteppedOn(bot, lootIds);
         }
         if (!fightsOnSweep(lootIds)) {
+            PqActions.stopHunting(bot);
             return; // the leader can meet the quota even when this bot picked up nothing
         }
         if (movementShielded()) {

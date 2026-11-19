@@ -18,6 +18,7 @@ import soloMapling.ArtificialPlayer.PartyQuest.PqActions;
 public class PiratePQBot extends PartyQuestBot {
 
     private static final int MEDALS_PER_ROUND = 20;
+    private static final int STAGE_NPC = 2094002;
     private static final int[][] MEDAL_LOOT_BY_ROUND = {{4001120}, {4001121}, {4001122}};
 
     public PiratePQBot(Character character) {
@@ -78,7 +79,9 @@ public class PiratePQBot extends PartyQuestBot {
         if (map.getId() == PiratePqData.STAGE_1) {
             int[] medals = steppedOnLootIds();
             if (medals.length > 0) {
-                PqActions.collectForLeader(getChr(), medals, MEDALS_PER_ROUND);
+                PqActions.collectForLeader(getChr(), medals, MEDALS_PER_ROUND, STAGE_NPC);
+            } else {
+                PqActions.deliverAndWait(getChr(), MEDAL_LOOT_BY_ROUND[2][0], STAGE_NPC);
             }
             return false;
         }

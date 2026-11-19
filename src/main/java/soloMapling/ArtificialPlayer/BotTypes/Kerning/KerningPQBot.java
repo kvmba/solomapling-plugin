@@ -102,13 +102,21 @@ public class KerningPQBot extends PartyQuestBot {
     @Override
     protected boolean fightsOnSweep() {
         Character bot = getChr();
-        return bot.getMapId() != KerningPqData.STAGE_1 || KerningStages.needsCoupons(bot);
+        return switch (bot.getMapId()) {
+            case KerningPqData.STAGE_1 -> KerningStages.needsCoupons(bot);
+            case KerningPqData.STAGE_5 -> !KerningStages.stageCleared(bot, 5)
+                    && PqActions.needsHuntForLeader(bot, KerningPqData.PASS, KerningStages.BOSS_PASSES_WANTED);
+            default -> true;
+        };
     }
 
     @Override
     protected int[] steppedOnLootIds() {
-        return getChr().getMapId() == KerningPqData.STAGE_1
-                ? KerningStages.COUPON_LOOT_IDS : super.steppedOnLootIds();
+        return switch (getChr().getMapId()) {
+            case KerningPqData.STAGE_1 -> KerningStages.COUPON_LOOT_IDS;
+            case KerningPqData.STAGE_5 -> KerningStages.PASS_LOOT_IDS;
+            default -> super.steppedOnLootIds();
+        };
     }
 
     @Override
@@ -122,7 +130,6 @@ public class KerningPQBot extends PartyQuestBot {
             case 1 -> {
                 if (KerningStages.stageCleared(getChr(), 1)) {
                     sayStageClearOnce(stage);
-                    return false; // the portal to stage 2 is open; the leader walks it
                 }
                 couponWork.lock();
                 try {

@@ -847,37 +847,42 @@ public final class PqActions {
         return bot == null ? 0 : bot.getItemQuantity(itemId, false);
     }
 
-    /** Stop hunting once the leader has enough, or this bot can deliver the rest. */
+    /** Count the team's stock, including addressed piles already posted for the leader. */
     public static boolean needsHuntForLeader(Character bot, int itemId, int quota) {
-        Character leader = eventLeader(bot);
-        return leader != null && countItem(leader, itemId)
-                + (leader == bot ? 0 : countItem(bot, itemId)) < quota;
+        EventInstanceManager instance = instanceOf(bot);
+        Character leader = instance == null ? null : instance.getLeader();
+        if (leader == null) return false;
+        int collected = 0;
+        for (Character member : instance.getPlayers()) {
+            collected += countItem(member, itemId);
+            if (collected >= quota) return false;
+        }
+        double reach = roomReachPx(bot.getMap());
+        for (MapObject object : bot.getMap().getMapObjectsInRange(bot.getPosition(), reach * reach,
+                List.of(org.gms.server.maps.MapObjectType.ITEM))) {
+            MapItem drop = (MapItem) object;
+            drop.lockItem();
+            try {
+                if (!drop.isPickedUp() && drop.isPermanentOwner()
+                        && drop.getOwnerId() == leader.getId() && drop.getItemId() == itemId) {
+                    collected += drop.getItem().getQuantity();
+                    if (collected >= quota) return false;
+                }
+            } finally {
+                drop.unlockItem();
+            }
+        }
+        return true;
     }
 
     /** Work a single-item turn-in. Only the combat beat picks up loot; this beat walks or delivers. */
-    public static void collectForLeader(Character bot, int[] lootIds, int quota) {
-        Character leader = eventLeader(bot);
-        if (leader == null) {
-            return;
-        }
+    public static void collectForLeader(Character bot, int[] lootIds, int quota, int stageNpcId) {
         int itemId = lootIds[0];
-        int missing = quota - countItem(leader, itemId);
-        if (missing <= 0) {
-            return;
-        }
-        int carried = leader == bot ? 0 : countItem(bot, itemId);
-        if (carried == 0) {
+        if (needsHuntForLeader(bot, itemId, quota)) {
             approachRoomLoot(bot, lootIds);
-        } else if (carried >= missing || leaderNear(bot, leader) || !approachRoomLoot(bot, lootIds)) {
-            // Several bots can hold the whole quota between them. Deliver partial stock
-            // when there is no pickup walk left, rather than waiting for more drops.
-            handItemsTo(bot, leader, itemId, true);
+        } else {
+            deliverAndWait(bot, itemId, stageNpcId);
         }
-    }
-
-    private static Character eventLeader(Character bot) {
-        EventInstanceManager instance = instanceOf(bot);
-        return instance == null ? null : instance.getLeader();
     }
 
     /**
@@ -950,10 +955,10 @@ public final class PqActions {
      * @return how many of the item were handed to the leader (0 when there was nothing)
      */
     public static int handItemsToLeader(Character bot, int itemId) {
-        return handItemsTo(bot, partyLeader(bot), itemId, false);
+        return handItemsTo(bot, partyLeader(bot), itemId);
     }
 
-    private static int handItemsTo(Character bot, Character leader, int itemId, boolean protectWalk) {
+    private static int handItemsTo(Character bot, Character leader, int itemId) {
         if (leader == null || leader == bot) {
             return 0;
         }
@@ -973,21 +978,8 @@ public final class PqActions {
             SeekState control = seekStates.computeIfAbsent(botId, ignored -> new SeekState());
             synchronized (control) {
                 if (!movementShielded(botId) && !reactorBeatArmed(bot)) {
-                    if (protectWalk) {
-                        // Partial hand-offs can happen while the combat beat still has work.
-                        Point target = handoffTarget(bot, leader.getPosition());
-                        if (target == null) {
-                            return 0;
-                        }
-                        StageWalkShield shield = armStageWalkShield(bot);
-                        GCMovement.move(bot, target.x, target.y, () -> {
-                            stageWalkShieldUntilByBot.remove(botId, shield);
-                            nudgeStageTick(bot);
-                        }, () -> stageWalkShieldUntilByBot.remove(botId, shield));
-                    } else {
-                        Point target = leader.getPosition();
-                        GCMovement.move(bot, target.x, target.y);
-                    }
+                    Point target = leader.getPosition();
+                    GCMovement.move(bot, target.x, target.y);
                 }
             }
             return 0;
@@ -999,16 +991,6 @@ public final class PqActions {
     /** Inside this range a drop at the leader's feet is his to sweep instantly. */
     private static final int HANDOFF_RANGE_PX = 400;
     private static final double HANDOFF_RANGE_SQ = (double) HANDOFF_RANGE_PX * HANDOFF_RANGE_PX;
-
-    private static Point handoffTarget(Character bot, Point leader) {
-        if (GCMovement.canPathTo(bot, leader.x, leader.y)) {
-            return leader;
-        }
-        // Settling just short of the goal must still leave the bot in delivery range.
-        int reach = HANDOFF_RANGE_PX - 2 * ARRIVAL_EPS_PX;
-        var bounds = new java.awt.Rectangle(leader.x - reach, leader.y - reach, 2 * reach + 1, 2 * reach + 1);
-        return GCMovement.nearestReachableGround(bot, bounds, point -> leader.distanceSq(point) <= reach * reach);
-    }
 
     /**
      * Whether the leader stands within hand-off range right now - the caller's cue to deliver
@@ -1083,6 +1065,15 @@ public final class PqActions {
         // nowhere else.
         giveItemAt(bot, leader, itemId, qty, post);
         return qty;
+    }
+
+    /** The common post-work beat: retire the chase, deliver at the named NPC, then wait nearby. */
+    public static int deliverAndWait(Character bot, int itemId, int stageNpcId) {
+        stopHunting(bot);
+        recoverUngatheredHandoffs(bot, itemId);
+        int delivered = handItemsToLeaderAfterStage(bot, itemId, stageNpcId);
+        waitNearStageNpc(bot, stageNpcId);
+        return delivered;
     }
 
     /**
@@ -1860,6 +1851,17 @@ public final class PqActions {
         }
     }
 
+    /** End only this hunt's steering; a newer pickup, NPC walk or portal order must survive. */
+    public static void stopHunting(Character bot) {
+        SeekState state = seekStates.get(bot.getId());
+        if (state == null) return;
+        synchronized (state) {
+            stopOwnChaseGoal(bot, state);
+            state.targetOid = -1;
+            state.clearGoal();
+        }
+    }
+
     // ── Field trace (the LPQ stage-1 treadmill diagnostics): a GM toggles a per-bot trace with
     // !gcmove trace <botId>; each seek beat then logs one line — the target, its floor probe,
     // the emitted goal, the sticky target and the driver's own nav state. The line is the
@@ -2556,7 +2558,7 @@ public final class PqActions {
             return false;
         }
         NPC npc = bot.getMap().getNPCById(npcId);
-        if (npc == null) {
+        if (npc == null || !walkToNpc(bot, npcId)) {
             return false;
         }
         NPCScriptManager manager = NPCScriptManager.getInstance();
@@ -2568,6 +2570,12 @@ public final class PqActions {
             manager.action(bot.getClient(), (byte) 1, (byte) 0, selection);
         }
         return true;
+    }
+
+    /** NPC scripts have no proximity check of their own: walk there before interacting. */
+    public static boolean walkToNpc(Character bot, int npcId) {
+        Point spot = stageNpcSpot(bot, npcId);
+        return spot != null && walkTo(bot, spot);
     }
 
     /** Whether the conversation with this NPC is still open (a prompt is waiting). */

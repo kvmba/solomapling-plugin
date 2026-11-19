@@ -168,11 +168,10 @@ public class LudiPQBot extends PartyQuestBot {
                 LudiStages.exitTrapRoom(getChr());
                 return false;
             }
-            if (PqActions.handItemsToLeaderAfterStage(getChr(), LudiPqData.PASS,
+            if (PqActions.deliverAndWait(getChr(), LudiPqData.PASS,
                     LudiPqData.stageNpcId(stage)) > 0) {
                 PqActions.say(getChr(), BotMessages.get("pq.passes_dropped"));
             }
-            PqActions.waitNearStageNpc(getChr(), LudiPqData.stageNpcId(stage));
             // Stage 9 does NOT end the run: 2040044.js's turn-in calls eim.clearPQ(), which
             // warps the whole team to the bonus room for a minute of reward boxes. Returning
             // true here sent the bot home the moment the trophy was handed in, so every run

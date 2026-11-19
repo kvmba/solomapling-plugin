@@ -1,6 +1,8 @@
 package soloMapling.ArtificialPlayer.BotTypes.Henesys;
 
 import org.gms.client.Character;
+import soloMapling.ArtificialPlayer.BotMessagingSystem.CharacterStorage;
+import soloMapling.ArtificialPlayer.BotSM;
 import soloMapling.ArtificialPlayer.GCMoveSystem.GCMovement;
 import soloMapling.ArtificialPlayer.PartyQuest.PqActions;
 
@@ -121,15 +123,46 @@ public final class HenesysStages {
      *
      * <p>The quest counts cakes in its own property and stops the run on its own clock.
      * Growlie (NPC 1012114) grades whoever talks to him for 10 cakes - usually the leader -
-     * so a cake in a bot's pocket is a cake the turn-in never sees: the bot loots and then
-     * drops its stock at the leader's feet, the same transfer the other turn-ins need.
+     * so carriers deliver at Growlie one at a time while the remaining bots guard the bunny.
      *
      * <p>Returns true once the run has been cleared for the exit.
      */
     public static boolean guardMoonBunny(Character bot) {
-        PqActions.seekAndAttack(bot);
-        PqActions.loot(bot, bot.getPosition(), 2_000, new int[]{HenesysPqData.RICE_CAKE});
-        PqActions.handItemsToLeader(bot, HenesysPqData.RICE_CAKE);
+        boolean collecting = needsCakes(bot);
+        if (stageCleared(bot) || deliversCakes(bot)) {
+            PqActions.deliverAndWait(bot, HenesysPqData.RICE_CAKE, HenesysPqData.GROWLIE);
+        } else {
+            // Cakes being ready does not end the escort: the bunny can still be killed
+            // before the leader submits them. Only one carrier leaves to deliver at a time.
+            PqActions.seekAndAttack(bot);
+            if (collecting) {
+                PqActions.loot(bot, bot.getPosition(), 2_000, new int[]{HenesysPqData.RICE_CAKE});
+            }
+        }
+        return stageCleared(bot);
+    }
+
+    static boolean needsCakes(Character bot) {
+        return !stageCleared(bot)
+                && PqActions.needsHuntForLeader(bot, HenesysPqData.RICE_CAKE, HenesysPqData.RICE_CAKE_COUNT);
+    }
+
+    static boolean deliversCakes(Character bot) {
+        var instance = bot.getEventInstance();
+        if (instance == null || PqActions.countItem(bot, HenesysPqData.RICE_CAKE) == 0 || needsCakes(bot)) return false;
+        for (Character member : instance.getPlayers()) {
+            if (member.getId() < bot.getId()
+                    && PqActions.countItem(member, HenesysPqData.RICE_CAKE) > 0
+                    && CharacterStorage.getBotById(member.getId()) instanceof HenesysPQBot carrier
+                    && carrier.getRunning() && carrier.getState() != BotSM.BotState.PAUSE
+                    && !carrier.death().isCorpse()) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    static boolean stageCleared(Character bot) {
         return PqActions.readEimString(bot, "1stageclear") != null
                 || PqActions.readEimInt(bot, "stage", 0) > HenesysPqData.FLOWERS_TO_BLOOM;
     }

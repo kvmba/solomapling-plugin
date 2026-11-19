@@ -20,6 +20,8 @@ import soloMapling.ArtificialPlayer.PartyQuest.PqActions;
  */
 public class HorntailPQBot extends PartyQuestBot {
 
+    private static final int[] SIDE_KEYS = {4001092, 4001093};
+
     public HorntailPQBot(Character character) {
         super(character);
         dialoguePath = PARTY_QUEST_DIALOGUE_PATH;
@@ -50,9 +52,35 @@ public class HorntailPQBot extends PartyQuestBot {
     }
 
     @Override
+    protected boolean fightsOnSweep() {
+        int mapId = getChr().getMapId();
+        if (mapId == HorntailPqData.LIGHT_ROOM || mapId == HorntailPqData.DARK_ROOM) {
+            return needsSideKeys();
+        }
+        return true; // the early keys also feed reactors that open the next cave
+    }
+
+    private boolean needsSideKeys() {
+        return PqActions.needsHuntForLeader(getChr(), SIDE_KEYS[0], 1)
+                || PqActions.needsHuntForLeader(getChr(), SIDE_KEYS[1], 6);
+    }
+
+    @Override
     protected boolean workStage() {
         int index = HorntailPqData.roomIndexOf(getChr().getMapId());
         if (index < 0) {
+            int mapId = getChr().getMapId();
+            if (mapId == HorntailPqData.LIGHT_ROOM || mapId == HorntailPqData.DARK_ROOM) {
+                if (needsSideKeys()) {
+                    PqActions.seekAndAttack(getChr(), false, SIDE_KEYS);
+                    PqActions.loot(getChr(), getChr().getPosition(), 1_200, SIDE_KEYS);
+                } else {
+                    for (int key : SIDE_KEYS) {
+                        PqActions.deliverAndWait(getChr(), key, HorntailPqData.AURA);
+                    }
+                }
+                return false;
+            }
             // Past the key rooms: the light/dark choice and the boss are the leader's to make
             // and the attack path's to fight. Keep hitting whatever is here.
             PqActions.seekAndAttack(getChr());
@@ -61,11 +89,9 @@ public class HorntailPQBot extends PartyQuestBot {
 
         int key = HorntailPqData.keyForRoom(index);
         if (PqActions.countItem(getChr(), key) > 0) {
-            // The key is in hand - hand it on: Aura checks the inventory of whoever talks
-            // to him (the leader) and wants all five at once, so a bot holding its room's
-            // key starves the turn-in and the run stalls at the last door.
+            // These keys feed the cave reactors rather than Aura's final turn-in.
             PqActions.handItemsToLeader(getChr(), key);
-            return false; // the leader walks the party on once all five reach him
+            return false; // the cave's reactor still has to open the next door
         }
 
         // Kill this room's monsters, then sweep for the key. The room holds a pair and only

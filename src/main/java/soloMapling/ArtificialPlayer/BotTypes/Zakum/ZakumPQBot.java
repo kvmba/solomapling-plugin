@@ -52,6 +52,10 @@ public class ZakumPQBot extends PartyQuestBot {
 
     @Override
     protected boolean workStage() {
+        if (!PqActions.needsHuntForLeader(getChr(), ZakumPqData.FIRE_ORE, 1)) {
+            PqActions.deliverAndWait(getChr(), ZakumPqData.FIRE_ORE, 2032002);
+            return false;
+        }
         // Break what crates are standing, taking the first of each kind in turn. The mine's
         // crates carry no scripts, so a hit is just a state change and there is nothing to
         // wait for beyond the crate disappearing.
@@ -71,9 +75,10 @@ public class ZakumPQBot extends PartyQuestBot {
         // Whatever fell out is the point of the room.
         PqActions.loot(getChr(), getChr().getPosition(), 2_000,
                 new int[]{ZakumPqData.FIRE_ORE, ZakumPqData.FIRE_ORE_REFINED});
-        // The ore is handed to Aura by the leader, so the bot's copy has to reach him: drop
-        // it at his feet, the same transfer every leader-checked turn-in needs.
-        PqActions.handItemsToLeader(getChr(), ZakumPqData.FIRE_ORE);
+        // Sub-rooms have no turn-in NPC. Keep the ore until the party returns to Adobis.
+        if (!PqActions.needsHuntForLeader(getChr(), ZakumPqData.FIRE_ORE, 1)) {
+            PqActions.deliverAndWait(getChr(), ZakumPqData.FIRE_ORE, 2032002);
+        }
         return false;
     }
 

@@ -41,6 +41,7 @@ class PqCollectionCombatTest {
     private static final int ROOKIE = 4001120;
     private static final int RISING = 4001121;
     private static final int VETERAN = 4001122;
+    private static final Point NPC_POSITION = new Point(-600, 0);
 
     private final Character member = mock(Character.class);
     private final Character leader = mock(Character.class);
@@ -64,6 +65,15 @@ class PqCollectionCombatTest {
         when(member.getMapId()).thenAnswer(call -> map.getId());
         when(member.getPosition()).thenReturn(position);
         when(instance.getLeader()).thenReturn(leader);
+        when(instance.getPlayers()).thenReturn(List.of(leader, member));
+        PartyCharacter partyLeader = mock(PartyCharacter.class);
+        when(member.getParty().getLeader()).thenReturn(partyLeader);
+        when(partyLeader.getPlayer()).thenReturn(leader);
+        for (int npcId : new int[]{2094002, 9201045, 2112003, 2112004, 2112005, 2112006}) {
+            org.gms.server.life.NPC npc = mock(org.gms.server.life.NPC.class);
+            when(npc.getPosition()).thenReturn(NPC_POSITION);
+            when(map.getNPCById(npcId)).thenReturn(npc);
+        }
         when(leader.getMapId()).thenAnswer(call -> map.getId());
         when(leader.getPosition()).thenReturn(new Point(600, 0));
     }
@@ -103,10 +113,9 @@ class PqCollectionCombatTest {
             attack.verify(() -> BotAttackDriver.botAttack(member), never());
 
             // The bot holds the last missing medal. Its next work beat must deliver, not chase.
-            movement.when(() -> GCMovement.canPathTo(member, 600, 0)).thenReturn(true);
             bot.workStage();
             bot.grindTick();
-            movement.verify(() -> GCMovement.move(eq(member), eq(600), eq(0), any(), any()));
+            movement.verify(() -> GCMovement.move(eq(member), eq(-600), eq(0), any(), any()), atLeastOnce());
             attack.verify(() -> BotAttackDriver.botAttack(member), never());
         }
     }
@@ -191,10 +200,13 @@ class PqCollectionCombatTest {
     }
 
     @Test
-    void amoriaDeliversPartialStockAfterLootRunsOutWithoutLettingCombatRetargetTheWalk() {
+    void amoriaDeliversTheTeamsSplitQuotaAtTheNpcWithoutLettingCombatRetargetTheWalk() {
         PartyQuestBot bot = start(670010500, () -> new AmoriaPQBot(member));
         // A second member can supply the other 25. This one must not wait to get all 50 itself.
         when(member.getItemQuantity(STATUE_PIECE, false)).thenReturn(25);
+        Character teammate = mock(Character.class);
+        when(teammate.getItemQuantity(STATUE_PIECE, false)).thenReturn(25);
+        when(instance.getPlayers()).thenReturn(List.of(leader, member, teammate));
         try (var movement = movementWithGraph();
              var inventory = mockStatic(InventoryManipulator.class);
              var drops = mockStatic(DropCommands.class);
@@ -202,14 +214,13 @@ class PqCollectionCombatTest {
                  case "seekAndAttack", "attack" -> RETURNS_DEFAULTS.answer(call);
                  default -> call.callRealMethod();
              })) {
-            movement.when(() -> GCMovement.canPathTo(member, 600, 0)).thenReturn(true);
             bot.workStage();
-            movement.verify(() -> GCMovement.move(eq(member), eq(600), eq(0), any(), any()));
+            movement.verify(() -> GCMovement.move(eq(member), eq(-600), eq(0), any(), any()), atLeastOnce());
             bot.grindTick();
-            actions.verify(() -> PqActions.attack(member));
+            actions.verify(() -> PqActions.attack(member), never());
             actions.verify(() -> PqActions.seekAndAttack(member, false, new int[]{STATUE_PIECE}), never());
 
-            Point at = new Point(600, 0);
+            Point at = NPC_POSITION;
             when(member.getPosition()).thenReturn(at);
             bot.workStage();
             inventory.verify(() -> InventoryManipulator.removeById(
@@ -219,14 +230,15 @@ class PqCollectionCombatTest {
     }
 
     @Test
-    void amoriaWalksIntoHandoffRangeEvenIfTheLeadersExactPositionIsUnreachable() {
+    void amoriaReturnsToTheNpcRatherThanTryingToReachTheLeadersHuntingPosition() {
         PartyQuestBot bot = start(670010500, () -> new AmoriaPQBot(member));
-        when(member.getItemQuantity(STATUE_PIECE, false)).thenReturn(25);
+        when(member.getItemQuantity(STATUE_PIECE, false)).thenReturn(50);
         try (var movement = movementWithGraph()) {
             movement.when(() -> GCMovement.nearestReachableGround(eq(member), any(Rectangle.class), any()))
                     .thenReturn(new Point(300, 0));
             bot.workStage();
-            movement.verify(() -> GCMovement.move(eq(member), eq(300), eq(0), any(), any()));
+            movement.verify(() -> GCMovement.move(eq(member), eq(-600), eq(0), any(), any()), atLeastOnce());
+            movement.verify(() -> GCMovement.nearestReachableGround(eq(member), any(Rectangle.class), any()), never());
         }
     }
 
@@ -269,17 +281,17 @@ class PqCollectionCombatTest {
 
         try (var movement = movementWithGraph(); var attack = mockStatic(BotAttackDriver.class)) {
             bot.workStage();
-            movement.verifyNoInteractions();
+            movement.verify(() -> GCMovement.move(eq(member), eq(-600), eq(0), any(), any()), atLeastOnce());
 
             when(member.getItemQuantity(letter, false)).thenReturn(1);
             bot.workStage();
             bot.grindTick();
-            movement.verify(() -> GCMovement.move(member, 600, 0));
+            movement.verify(() -> GCMovement.move(member, 600, 0), never());
             attack.verifyNoInteractions();
 
             when(instance.getIntProperty("npcShocked")).thenReturn(1);
             bot.workStage();
-            movement.verify(() -> GCMovement.move(member, 600, 0));
+            movement.verify(() -> GCMovement.move(member, 600, 0), never());
         }
     }
 
@@ -295,6 +307,7 @@ class PqCollectionCombatTest {
     private MockedStatic<GCMovement> movementWithGraph() {
         var movement = mockStatic(GCMovement.class);
         movement.when(() -> GCMovement.hasGraph(member)).thenReturn(true);
+        movement.when(GCMovement::isVirtualClock).thenReturn(true);
         return movement;
     }
 
