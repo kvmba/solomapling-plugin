@@ -41,9 +41,11 @@ public final class MagatiaPqData {
     public static final int ENTRY_MAP_Z = 926100000;
     public static final int LAST_MAP_Z  = 926100600;
 
-    /** The room whose monsters carry the stage-1/2 items (Alcadno range). */
-    public static final int MOB_ROOM_1 = 926110100;
-    public static final int MOB_ROOM_2 = 926110200;
+    /** The two collection rooms in each version, whose monsters can respawn after clearing. */
+    public static final int BEAKER_ROOM_A = 926110100;
+    public static final int BEAKER_ROOM_Z = 926100100;
+    public static final int DOCUMENT_ROOM_A = 926110200;
+    public static final int DOCUMENT_ROOM_Z = 926100200;
 
     /** The three sub-rooms that carry the stage-1 pair (Alcadno range). */
     public static final int SUB_ROOM_201 = 926110201;
@@ -79,6 +81,9 @@ public final class MagatiaPqData {
     public static final String YULETE_TIMEOUT = "yuleteTimeout";
     public static final String YULETE_TALKED = "yuleteTalked";
     public static final String YULETE_PASSED = "yuletePassed";
+    public static final String LETTER_DELIVERED = "npcShocked";
+    public static final int ROMEO_LETTER = 4001130;
+    public static final int JULIET_LETTER = 4001131;
 
     /**
      * The run's exclusive items ({@code MagatiaPQ_A/_Z setEventExclusives}) - the quest
@@ -86,7 +91,7 @@ public final class MagatiaPqData {
      * that picks one up drops it at the leader's feet for the same reason every other
      * leader-checked turn-in does.
      */
-    public static final int[] QUEST_ITEMS = {4001130, 4001131, 4001132, 4001133, 4001134, 4001135};
+    public static final int[] QUEST_ITEMS = {ROMEO_LETTER, JULIET_LETTER, 4001132, 4001133, 4001134, 4001135};
 
     /** Whether the party has done what the escort wants; a fail means the run is over. */
     public static final String ESCORT_FAIL = "escortFail";

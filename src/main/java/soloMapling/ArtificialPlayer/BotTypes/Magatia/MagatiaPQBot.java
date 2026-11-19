@@ -79,16 +79,43 @@ public class MagatiaPQBot extends PartyQuestBot {
     }
 
     @Override
-    protected boolean workStage() {
-        int stage = currentStage();
+    protected boolean fightsOnSweep() {
+        return !collectionRoomCleared();
+    }
 
+    private boolean collectionRoomCleared() {
+        Character bot = getChr();
+        return switch (bot.getMapId()) {
+            case MagatiaPqData.BEAKER_ROOM_A, MagatiaPqData.BEAKER_ROOM_Z ->
+                    PqActions.readEimInt(bot, "statusStg3", 0) == 3;
+            case MagatiaPqData.DOCUMENT_ROOM_A, MagatiaPqData.DOCUMENT_ROOM_Z ->
+                    PqActions.readEimInt(bot, "statusStg4", 0) == 1;
+            default -> false;
+        };
+    }
+
+    @Override
+    protected boolean workStage() {
+        Character bot = getChr();
         // The escort's own switch: once Yulete has been dealt with, the run is decided, and
         // there is nothing for a bot to add until the exit.
-        if (PqActions.readEimInt(getChr(), MagatiaPqData.YULETE_PASSED, 0) == 1) {
+        if (PqActions.readEimInt(bot, MagatiaPqData.YULETE_PASSED, 0) == 1) {
+            return false;
+        }
+        if (collectionRoomCleared()) {
+            int letter = switch (bot.getMapId()) {
+                case MagatiaPqData.DOCUMENT_ROOM_A -> MagatiaPqData.ROMEO_LETTER;
+                case MagatiaPqData.DOCUMENT_ROOM_Z -> MagatiaPqData.JULIET_LETTER;
+                default -> 0;
+            };
+            // Romeo and Juliet still accept the optional letter after the documents unlock the exit.
+            if (letter != 0 && PqActions.readEimInt(bot, MagatiaPqData.LETTER_DELIVERED, 0) == 0) {
+                PqActions.handItemsToLeader(bot, letter);
+            }
             return false;
         }
 
-        switch (stage) {
+        switch (currentStage()) {
             case 6 -> readCombination();
             default -> fightAndBreak();
         }

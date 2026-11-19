@@ -24,6 +24,8 @@ import soloMapling.ArtificialPlayer.PartyQuest.PqActions;
  */
 public class AmoriaPQBot extends PartyQuestBot {
 
+    private static final int[] STATUE_PIECE_LOOT = {AmoriaPqData.STATUE_PIECE};
+
     public AmoriaPQBot(Character character) {
         super(character);
         dialoguePath = PARTY_QUEST_DIALOGUE_PATH;
@@ -54,6 +56,18 @@ public class AmoriaPQBot extends PartyQuestBot {
     }
 
     @Override
+    protected boolean fightsOnSweep() {
+        Character bot = getChr();
+        return AmoriaPqData.stageOf(bot.getMapId()) != 4 || (!collectionCleared()
+                && PqActions.needsHuntForLeader(bot, AmoriaPqData.STATUE_PIECE, AmoriaPqData.STATUE_PIECES_WANTED));
+    }
+
+    @Override
+    protected int[] steppedOnLootIds() {
+        return AmoriaPqData.stageOf(getChr().getMapId()) == 4 ? STATUE_PIECE_LOOT : super.steppedOnLootIds();
+    }
+
+    @Override
     protected boolean workStage() {
         int stage = AmoriaPqData.stageOf(getChr().getMapId());
         return switch (stage) {
@@ -69,19 +83,16 @@ public class AmoriaPQBot extends PartyQuestBot {
         };
     }
 
-    /**
-     * Stage 4 (the walkway's 50-room follow-up) and every fight room share one shape:
-     * attack what is here and sweep what falls.
-     *
-     * <p>Stage 4's own bar is 50 statue pieces in the leader's hands (Amos turns them in),
-     * which the bot feeds the same way the collection stages do - kills, loot, and a drop
-     * of its whole stock at the leader's feet.
-     */
+    /** Collect only until Amos has been given the pieces or the leader is ready to turn them in. */
     private boolean gatherRoom() {
-        PqActions.seekAndAttack(getChr());
-        PqActions.loot(getChr(), getChr().getPosition(), 2_000, new int[]{AmoriaPqData.STATUE_PIECE});
-        PqActions.handItemsToLeader(getChr(), AmoriaPqData.STATUE_PIECE);
+        if (!collectionCleared()) {
+            PqActions.collectForLeader(getChr(), STATUE_PIECE_LOOT, AmoriaPqData.STATUE_PIECES_WANTED);
+        }
         return false;
+    }
+
+    private boolean collectionCleared() {
+        return PqActions.readEimString(getChr(), "4stageclear") != null;
     }
 
     /** A fight room the bot can help in without reading anything. */

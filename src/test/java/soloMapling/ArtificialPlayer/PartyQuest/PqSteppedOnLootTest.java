@@ -29,7 +29,8 @@ class PqSteppedOnLootTest {
     @Test
     void theCombatBeatScoopsOnlyTheItemsTheQuestNames() throws Exception {
         String bot = javaSource(PQ_BOT);
-        assertTrue(bot.contains("PqActions.lootSteppedOn(bot, steppedOnLootIds())"),
+        assertTrue(bot.contains("int[] lootIds = steppedOnLootIds()")
+                        && bot.contains("PqActions.lootSteppedOn(bot, lootIds)"),
                 "the combat sweep must scoop the quest's stepped-on items");
         // Empty by default: a quest that does not opt in keeps the old behaviour exactly.
         assertTrue(bot.matches("(?s).*protected int\\[\\] steppedOnLootIds\\(\\) \\{\\s*return EMPTY_LOOT_IDS;\\s*}.*"),

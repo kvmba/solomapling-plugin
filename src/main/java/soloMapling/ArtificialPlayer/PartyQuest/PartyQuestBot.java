@@ -241,7 +241,6 @@ public abstract class PartyQuestBot extends BotSM implements GrindTickRegistry.P
                 || !getRunning()
                 || death().isCorpse() || status().isFrozen()
                 || !inRunGroup(bot)
-                || !fightsOnSweep()
                 || !isInsideQuest(bot.getMapId())) {
             return;
         }
@@ -255,8 +254,15 @@ public abstract class PartyQuestBot extends BotSM implements GrindTickRegistry.P
         // beat: a kill lands its item at the mob's feet, and waiting for the macro tick to come
         // back for it is the reported "the pass is still lying there" delay. Narrow on purpose -
         // see PqActions.lootSteppedOn.
-        if (PqActions.lootSteppedOn(bot, steppedOnLootIds()) > 0 && !fightsOnSweep()) {
-            return; // the pickup may have met the stage's combat quota
+        int[] lootIds = steppedOnLootIds();
+        if (lootIds.length > 0) {
+            if (!fightsOnSweep(lootIds)) {
+                return;
+            }
+            PqActions.lootSteppedOn(bot, lootIds);
+        }
+        if (!fightsOnSweep(lootIds)) {
+            return; // the leader can meet the quota even when this bot picked up nothing
         }
         if (movementShielded()) {
             PqActions.attack(bot); // the walk owns the steering; the swing still lands
@@ -279,11 +285,11 @@ public abstract class PartyQuestBot extends BotSM implements GrindTickRegistry.P
         // arrival callback, so a flag would go stale and, once stale, silently kill this bot's
         // chase for the whole run. "Is one of my quest items sitting at the goal I am walking to"
         // cannot go stale. Swinging still happens - attack() never steers.
-        if (walkingAtALootableDrop(bot)) {
+        if (walkingAtALootableDrop(bot, lootIds)) {
             PqActions.attack(bot);
             return;
         }
-        PqActions.seekAndAttack(bot, false, steppedOnLootIds());
+        PqActions.seekAndAttack(bot, false, lootIds);
     }
 
     /**
@@ -301,8 +307,8 @@ public abstract class PartyQuestBot extends BotSM implements GrindTickRegistry.P
      * the walk is over, and letting it hold the beat at that point would freeze the bot on its
      * own feet.
      */
-    private boolean walkingAtALootableDrop(Character bot) {
-        return PqActions.walkingToLoot(bot, steppedOnLootIds());
+    private static boolean walkingAtALootableDrop(Character bot, int[] lootIds) {
+        return PqActions.walkingToLoot(bot, lootIds);
     }
 
     /** Shared empty opt-in for {@link #steppedOnLootIds()}; never mutated. */
@@ -327,6 +333,11 @@ public abstract class PartyQuestBot extends BotSM implements GrindTickRegistry.P
      */
     protected boolean fightsOnSweep() {
         return true;
+    }
+
+    /** Validate the beat's chosen loot for quests whose turn-in can change in the same room. */
+    protected boolean fightsOnSweep(int[] lootIds) {
+        return fightsOnSweep();
     }
 
     /**

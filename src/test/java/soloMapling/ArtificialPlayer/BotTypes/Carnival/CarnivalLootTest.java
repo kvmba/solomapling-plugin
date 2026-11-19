@@ -87,8 +87,9 @@ class CarnivalLootTest {
         assertTrue(bot.contains(
                         "CarnivalPqData.isArena(getChr().getMap()) ? CarnivalPqData.ARENA_CONSUMABLES : new int[0]"),
                 "the sweep must be arena-only: a reward room's floor is the party's");
-        assertTrue(javaSource(PARTY_QUEST_BOT)
-                        .contains("PqActions.lootSteppedOn(bot, steppedOnLootIds())"),
+        String shared = javaSource(PARTY_QUEST_BOT);
+        assertTrue(shared.contains("int[] lootIds = steppedOnLootIds()")
+                        && shared.contains("PqActions.lootSteppedOn(bot, lootIds)"),
                 "the shared sweep is what carries these ids into the at-feet pickups");
     }
 

@@ -30,10 +30,13 @@ class PqPickupGateWiringTest {
 
     @Test
     void theGateIsDerivedFromTheDriversLiveGoal() throws Exception {
-        String body = methodBody(source(), "private boolean walkingAtALootableDrop(Character bot)");
-        assertTrue(body.contains("steppedOnLootIds"),
+        String java = source();
+        String beat = methodBody(java, "public void grindTick()");
+        assertTrue(beat.contains("int[] lootIds = steppedOnLootIds()")
+                        && beat.contains("walkingAtALootableDrop(bot, lootIds)"),
                 "only a quest's own scoopable items may hold the beat");
-        assertTrue(body.contains("walkingToLoot"),
+        String body = methodBody(java, "private static boolean walkingAtALootableDrop(Character bot, int[] lootIds)");
+        assertTrue(body.contains("walkingToLoot(bot, lootIds)"),
                 "the gate must be a pure query - it must never pick anything up");
         assertFalse(body.contains("GCMovement.move"),
                 "the gate must not steer; the walk it protects was issued by the macro tick");

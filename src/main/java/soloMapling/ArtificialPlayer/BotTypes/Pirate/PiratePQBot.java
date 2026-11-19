@@ -8,17 +8,17 @@ import soloMapling.ArtificialPlayer.PartyQuest.PqActions;
 /**
  * Plays Pirate PQ ("Lord Pirate") with a real player leading.
  *
- * <p>Every room in this quest is the same instruction: break the boxes, deal with whatever
- * comes out, move on when the room is quiet. Rooms 2 to 4 have boxes standing in them, room 1
- * has the monsters on the floor already and room 4 hides its monsters inside the boxes, so
- * the loop is written as "break what is breakable, then fight what is left" and covers all of
- * them without special cases.
+ * <p>The medal room has three separate leader turn-ins. In the other rooms the bot breaks
+ * boxes and fights what is still standing.
  *
  * <p>Which room the party is in is taken from the map, which is also what the quest itself
  * keys on - it bumps its {@code curStage} as the leader walks into each room, so the map is
  * the leading signal rather than a flag that follows it.
  */
 public class PiratePQBot extends PartyQuestBot {
+
+    private static final int MEDALS_PER_ROUND = 20;
+    private static final int[][] MEDAL_LOOT_BY_ROUND = {{4001120}, {4001121}, {4001122}};
 
     public PiratePQBot(Character character) {
         super(character);
@@ -50,8 +50,38 @@ public class PiratePQBot extends PartyQuestBot {
     }
 
     @Override
+    protected boolean fightsOnSweep(int[] lootIds) {
+        Character bot = getChr();
+        if (bot.getMapId() != PiratePqData.STAGE_1) {
+            return lootIds.length == 0;
+        }
+        // Each round has its own cached array. Never use the new round's quota to
+        // authorize a beat that was already aimed at the previous round's medal.
+        return lootIds.length > 0 && lootIds == steppedOnLootIds()
+                && PqActions.needsHuntForLeader(bot, lootIds[0], MEDALS_PER_ROUND);
+    }
+
+    @Override
+    protected int[] steppedOnLootIds() {
+        if (getChr().getMapId() == PiratePqData.STAGE_1) {
+            int round = PqActions.readEimInt(getChr(), "stage2", -1);
+            if (round >= 0 && round < MEDAL_LOOT_BY_ROUND.length) {
+                return MEDAL_LOOT_BY_ROUND[round];
+            }
+        }
+        return super.steppedOnLootIds();
+    }
+
+    @Override
     protected boolean workStage() {
         var map = getChr().getMap();
+        if (map.getId() == PiratePqData.STAGE_1) {
+            int[] medals = steppedOnLootIds();
+            if (medals.length > 0) {
+                PqActions.collectForLeader(getChr(), medals, MEDALS_PER_ROUND);
+            }
+            return false;
+        }
 
         // Boxes first: in room 4 the monsters are inside them, so hitting boxes is also how
         // the fight starts. findReactorOid returns the first one still alive, so this walks
@@ -73,8 +103,7 @@ public class PiratePQBot extends PartyQuestBot {
         if (!map.getMonsters().isEmpty()) {
             PqActions.seekAndAttack(getChr());
         }
-        // The medal stages' turn-in (NPC 2094002) grades the leader's pockets, so anything
-        // the bot picked up - medals and the like from the run's exclusive set - goes to him.
+        // Hand any other quest items the bot picked up to the leader.
         for (int itemId : PiratePqData.QUEST_ITEMS) {
             PqActions.handItemsToLeader(getChr(), itemId);
         }
