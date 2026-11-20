@@ -14,9 +14,27 @@ import org.gms.util.PacketCreator;
 
 import soloMapling.Environment.BotMessages;
 
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.locks.ReentrantLock;
+
 import static soloMapling.DebugUtilities.debugprint;
 
 public class BotPartyCommands {
+
+    // Guarded by the invite queue monitor. Party IDs are local to a world.
+    private static final Set<Integer> JOINING_BOTS = new HashSet<>();
+    private static final Map<PartyKey, PartyJoin> PARTY_JOINS = new HashMap<>();
+
+    private record PartyKey(int world, int partyId) {
+    }
+
+    private static final class PartyJoin {
+        final ReentrantLock lock = new ReentrantLock();
+        int users;
+    }
 
     public static boolean botMakeParty(Character fakechar) {
         if (fakechar.getParty() != null) {
@@ -70,19 +88,26 @@ public class BotPartyCommands {
     }
 
     /**
-     * Accept only the currently queued inviter. The queue lock spans validation,
-     * coordinator answer, and removal so a replacement invite cannot be accepted
-     * between the companion executor's authorization check and this operation.
+     * Validate and consume under the queue lock, but do not hold it while the host
+     * takes map locks or sends packets.
      */
     public static boolean botAcceptPartyInvite(Character fakechar, int expectedInviterId) {
         BotPartyQueue queue = BotPartyQueue.getInstance();
+        int botId = fakechar.getId();
+        Character inviter;
+        int partyId;
+        PartyKey partyKey;
+        PartyJoin join;
         synchronized (queue) {
+            if (JOINING_BOTS.contains(botId)) {
+                return false;
+            }
             BotPartyQueue.PartyInviteEntry entry = queue.getPartyInvite(fakechar);
             if (entry == null) {
                 debugprint("botAcceptPartyInvite: no pending invite for " + fakechar.getName());
                 return false;
             }
-            Character inviter = entry.getInviter();
+            inviter = entry.getInviter();
             if (expectedInviterId > 0
                     && (inviter == null || inviter.getId() != expectedInviterId)) {
                 debugprint("botAcceptPartyInvite: pending inviter does not match expected id="
@@ -90,36 +115,57 @@ public class BotPartyCommands {
                 return false;
             }
 
-            int partyId = entry.getPartyId();
+            partyId = entry.getPartyId();
             InviteResult res = InviteCoordinator.answerInvite(
-                    InviteType.PARTY, fakechar.getId(), partyId, true);
+                    InviteType.PARTY, botId, partyId, true);
             queue.removePartyInvite(fakechar);
-
-            if (res.result == InviteResultType.ACCEPTED) {
-                boolean joined = Party.joinParty(fakechar, partyId, false);
-                if (!joined && inviter != null) {
-                    // joinParty fails silently to the inviter (party disbanded / full /
-                    // bot already partied) - tell them so a clean re-invite is obvious.
-                    inviter.sendPacket(PacketCreator.serverNotice(5,
-                            BotMessages.get("party.join_failed", fakechar.getName())));
-                }
-                debugprint("botAcceptPartyInvite: joined=" + joined + " partyId=" + partyId);
-                return joined;
+            if (res.result != InviteResultType.ACCEPTED) {
+                debugprint("botAcceptPartyInvite: invite expired/invalid, result=" + res.result);
+                return false;
             }
-            debugprint("botAcceptPartyInvite: invite expired/invalid, result=" + res.result);
-            return false;
+            // Serialize bot joins to this party: the host checks capacity before adding the member.
+            partyKey = new PartyKey(fakechar.getWorld(), partyId);
+            join = PARTY_JOINS.computeIfAbsent(partyKey, key -> new PartyJoin());
+            join.users++;
+            JOINING_BOTS.add(botId);
         }
+
+        boolean joined;
+        join.lock.lock();
+        try {
+            joined = Party.joinParty(fakechar, partyId, false);
+        } finally {
+            synchronized (queue) {
+                join.lock.unlock();
+                if (--join.users == 0) {
+                    PARTY_JOINS.remove(partyKey);
+                }
+                JOINING_BOTS.remove(botId);
+            }
+        }
+        if (!joined && inviter != null) {
+            // The host doesn't tell the inviter why the join failed.
+            inviter.sendPacket(PacketCreator.serverNotice(5,
+                    BotMessages.get("party.join_failed", fakechar.getName())));
+        }
+        debugprint("botAcceptPartyInvite: joined=" + joined + " partyId=" + partyId);
+        return joined;
     }
 
     public static boolean botRejectPartyInvite(Character fakechar) {
-        BotPartyQueue.PartyInviteEntry entry = BotPartyQueue.getInstance().getPartyInvite(fakechar);
-        if (entry == null) {
-            debugprint("botRejectPartyInvite: no pending invite, no-op.");
-            return false;
-        }
+        BotPartyQueue queue = BotPartyQueue.getInstance();
+        BotPartyQueue.PartyInviteEntry entry;
+        InviteResult res;
+        synchronized (queue) {
+            entry = queue.getPartyInvite(fakechar);
+            if (entry == null) {
+                debugprint("botRejectPartyInvite: no pending invite, no-op.");
+                return false;
+            }
 
-        InviteResult res = InviteCoordinator.answerInvite(InviteType.PARTY, fakechar.getId(), entry.getPartyId(), false);
-        BotPartyQueue.getInstance().removePartyInvite(fakechar);
+            res = InviteCoordinator.answerInvite(InviteType.PARTY, fakechar.getId(), entry.getPartyId(), false);
+            queue.removePartyInvite(fakechar);
+        }
 
         // Only tell the inviter the bot declined when the coordinator entry actually existed and was
         // denied (DENIED). A NOT_FOUND means the invite was already gone/superseded, so the notice

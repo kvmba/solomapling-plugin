@@ -4,6 +4,9 @@ import org.gms.client.Character;
 import org.gms.config.GameConfig;
 import org.gms.dao.entity.GameConfigDO;
 import org.gms.manager.ServerManager;
+import org.gms.net.server.coordinator.world.InviteCoordinator;
+import org.gms.net.server.coordinator.world.InviteCoordinator.InviteType;
+import org.gms.net.server.world.Party;
 import org.gms.property.ServiceProperty;
 import org.gms.service.ConfigService;
 import org.junit.jupiter.api.BeforeAll;
@@ -15,14 +18,19 @@ import java.util.List;
 import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.RETURNS_DEEP_STUBS;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.mockStatic;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class BotPartyQueueTest {
@@ -107,6 +115,76 @@ class BotPartyQueueTest {
         assertNotNull(entry, "an entry inside the window must still answer");
         assertEquals(500, entry.getPartyId());
         queue.removePartyInvite(bot);
+    }
+
+    @Test
+    void joiningRunsOutsideQueueAndPreservesReplacementInvite() {
+        BotPartyQueue queue = BotPartyQueue.getInstance();
+        Character bot = bot("Joining");
+        Character inviter = bot("Inviter");
+        Character nextInviter = bot("NextInviter");
+        int botId = bot.getId();
+        int partyId = 600;
+        int nextPartyId = 700;
+
+        try (var parties = mockStatic(Party.class)) {
+            assertTrue(InviteCoordinator.createInvite(InviteType.PARTY, inviter, partyId, botId));
+            queue.addPartyInvite(bot, inviter, partyId);
+            parties.when(() -> Party.joinParty(bot, nextPartyId, false)).thenReturn(true);
+            parties.when(() -> Party.joinParty(bot, partyId, false)).thenAnswer(call -> {
+                assertFalse(Thread.holdsLock(queue), "joining must not hold the shared queue lock");
+                assertNull(queue.getPartyInvite(bot), "the invite must be consumed before joining");
+                assertTrue(InviteCoordinator.createInvite(InviteType.PARTY, nextInviter, nextPartyId, botId));
+                queue.addPartyInvite(bot, nextInviter, nextPartyId);
+                assertFalse(BotPartyCommands.botAcceptPartyInvite(bot, nextInviter.getId()),
+                        "the same character cannot accept another invite while joining");
+                return true;
+            });
+
+            assertFalse(BotPartyCommands.botAcceptPartyInvite(bot, nextInviter.getId()),
+                    "the inviter check must not consume an unauthorized invite");
+            assertTrue(BotPartyCommands.botAcceptPartyInvite(bot, inviter.getId()));
+            assertTrue(BotPartyCommands.botAcceptPartyInvite(bot, nextInviter.getId()));
+            assertNull(queue.getPartyInvite(bot));
+        } finally {
+            InviteCoordinator.removeInvite(InviteType.PARTY, botId);
+            queue.forgetBot(botId);
+        }
+    }
+
+    @Test
+    void rejectingConsumesUnderQueueLockAndNotifiesOutsideIt() {
+        BotPartyQueue queue = BotPartyQueue.getInstance();
+        Character bot = bot("Rejecting");
+        Character inviter = bot("Inviter");
+        Character nextInviter = bot("NextInviter");
+        int botId = bot.getId();
+        int partyId = 800;
+        int nextPartyId = 900;
+
+        when(inviter.isLoggedInWorld()).thenAnswer(call -> {
+            assertTrue(Thread.holdsLock(queue), "rejecting must not race with enqueueing a replacement");
+            return true;
+        });
+        doAnswer(call -> {
+            assertFalse(Thread.holdsLock(queue), "sending the decline must not hold the queue lock");
+            assertNull(queue.getPartyInvite(bot));
+            assertTrue(InviteCoordinator.createInvite(InviteType.PARTY, nextInviter, nextPartyId, botId));
+            queue.addPartyInvite(bot, nextInviter, nextPartyId);
+            return null;
+        }).when(inviter).sendPacket(any());
+
+        try {
+            assertTrue(InviteCoordinator.createInvite(InviteType.PARTY, inviter, partyId, botId));
+            queue.addPartyInvite(bot, inviter, partyId);
+
+            assertTrue(BotPartyCommands.botRejectPartyInvite(bot));
+            verify(inviter).sendPacket(any());
+            assertSame(nextInviter, queue.getPartyInvite(bot).getInviter());
+        } finally {
+            InviteCoordinator.removeInvite(InviteType.PARTY, botId);
+            queue.forgetBot(botId);
+        }
     }
 
     private static Character bot(String name) {

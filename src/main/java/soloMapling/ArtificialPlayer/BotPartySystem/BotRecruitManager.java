@@ -134,12 +134,12 @@ public class BotRecruitManager {
         boolean armedMatch = armed != null && inviter != null
                 && inviter.getId() == armed.inviterId();
         if (armedMatch) {
-            boolean joined = BotPartyCommands.botAcceptPartyInvite(botChr);
+            boolean joined = BotPartyCommands.botAcceptPartyInvite(botChr, armed.inviterId());
             if (joined) {
                 ARMED.remove(botChr.getId());
                 return InvitePoll.JOINED;
             }
-            return InvitePoll.NONE; // coordinator-side expiry; queue already cleared by the accept call
+            return InvitePoll.NONE;
         }
         BotPartyCommands.botRejectPartyInvite(botChr);
         return InvitePoll.REJECTED;

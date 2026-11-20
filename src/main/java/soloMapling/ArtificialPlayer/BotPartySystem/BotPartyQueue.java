@@ -62,7 +62,7 @@ public class BotPartyQueue {
     // the coordinator expires an unanswered invite after ~3 min but this queue never did, and
     // a bot answering with the stale entry's old partyId hit NOT_FOUND at the coordinator -
     // leaving the player's live invite wedged ("taking care of another invitation") for 3 min.
-    public synchronized void addPartyInvite(Character fakechar, Character inviter, int partyId) {
+    public void addPartyInvite(Character fakechar, Character inviter, int partyId) {
         addPartyInvite(fakechar, new PartyInviteEntry(inviter, partyId));
     }
 
@@ -71,10 +71,12 @@ public class BotPartyQueue {
      * Production always passes a freshly stamped entry; the explicit form lets a test age one past
      * the TTL without sleeping through the host's own 3-minute invite window.
      */
-    synchronized void addPartyInvite(Character fakechar, PartyInviteEntry entry) {
+    void addPartyInvite(Character fakechar, PartyInviteEntry entry) {
         debugprint("addPartyInvite: bot=" + fakechar.getName() + ", inviter="
                 + entry.getInviter().getName() + ", partyId=" + entry.getPartyId());
-        queues.put(fakechar.getId(), entry);
+        synchronized (this) {
+            queues.put(fakechar.getId(), entry);
+        }
         // Wake the bot's macro brain now so pollInvites drains this on the next ~immediate tick,
         // rather than waiting out its slow scheduled cadence while the armed window ticks away.
         BotRecruitManager.wakeBotForInvite(fakechar);
