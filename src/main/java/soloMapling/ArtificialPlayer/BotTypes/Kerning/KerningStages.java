@@ -223,11 +223,10 @@ public final class KerningStages {
     public static String takeMyPlace(Character bot, int stage, int botIndex) {
         var candidates = KerningPqData.candidatesFor(stage);
         String answerProperty = KerningPqData.answerPropertyFor(stage);
-        PositionCombination.Plan plan = PositionCombination.standOn(bot, botIndex,
-                System.identityHashCode(bot.getMap()),
-                candidates, KerningPqData.areasFor(stage),
-                stage, answerProperty,
-                PositionCombination.indexAnswer(answerProperty, candidates));
+        PositionCombination.Plan plan = PositionCombination.standOn(bot, botIndex, candidates,
+                KerningPqData.areasFor(stage), stage, answerProperty,
+                PositionCombination.indexAnswer(answerProperty, candidates),
+                () -> PqActions.waitNearPuzzleNpc(bot, KerningPqData.NPC_CLOTO));
         return describePlan(plan);
     }
 

@@ -6,17 +6,23 @@ import org.gms.config.GameConfig;
 import org.gms.dao.entity.GameConfigDO;
 import org.gms.manager.ServerManager;
 import org.gms.property.ServiceProperty;
+import org.gms.scripting.event.EventInstanceManager;
 import org.gms.server.maps.MapleMap;
+import org.gms.server.maps.Portal;
 import org.gms.service.ConfigService;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.context.ApplicationContext;
+import soloMapling.ArtificialPlayer.BotTypes.Amoria.AmoriaPqData;
 import soloMapling.ArtificialPlayer.BotTypes.Kerning.KerningPqData;
+import soloMapling.ArtificialPlayer.BotTypes.Kerning.KerningStages;
 import soloMapling.ArtificialPlayer.BotTypes.Ludi.LudiPqData;
+import soloMapling.ArtificialPlayer.PartyQuest.PositionCombination;
 import soloMapling.ArtificialPlayer.PartyQuest.PqActions;
 
 import java.awt.Point;
@@ -28,8 +34,12 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.fail;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.RETURNS_DEEP_STUBS;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.doNothing;
 import static org.mockito.Mockito.doReturn;
@@ -138,13 +148,28 @@ class PqParkDoorExecutionSimTest {
     }
 
     private static Sim sim(int mapId, Point start) {
-        MapleMap map = realRoom(mapId);
+        return sim(realRoom(mapId), start);
+    }
+
+    private static Sim sim(MapleMap map, Point start) {
         // Bake the graph up front (production warms it async; the bake itself is covered
         // elsewhere). The driver tick only peeks this cache.
         BotNavigationGraphProvider.getGraph(map, BotMovementProfile.base());
         AtomicReference<Point> pos = new AtomicReference<>(new Point(start));
         Character bot = new CharacterDouble(BOT_ID, map,
                 () -> new Point(pos.get()), p -> pos.set(new Point(p)));
+        if (map.getPortals().stream().anyMatch(portal -> portal.getTargetMapId() == map.getId())) {
+            // The driver chooses and enters in-map portals; only the host's warp is simulated.
+            bot = spy(bot);
+            EventInstanceManager instance = mock(EventInstanceManager.class);
+            when(instance.getMapInstance(map.getId())).thenReturn(map);
+            doReturn(instance).when(bot).getEventInstance();
+            doAnswer(call -> {
+                Portal portal = call.getArgument(1);
+                pos.set(new Point(portal.getPosition()));
+                return null;
+            }).when(bot).changeMap(eq(map), any(Portal.class));
+        }
         return registerSim(bot, map, start, pos);
     }
 
@@ -176,36 +201,10 @@ class PqParkDoorExecutionSimTest {
         }
     }
 
-    /**
-     * The real 922010100 room: WZ footholds, portals and life entries (the turn-in NPC), so both
-     * the park spot and the chain door come from shipped data.
-     */
+    /** Add the room's NPCs to the navigation loader's real WZ geometry. */
     private static MapleMap realRoom(int mapId) {
-        org.gms.provider.Data mapData = mapData(mapId);
-        MapleMap map = new MapleMap(mapId, 0, 0, 922010000, 0.0f);
-        map.setMapLineBoundings(-4000, 600, -3000, 3000);
-        org.gms.server.maps.FootholdTree tree =
-                new org.gms.server.maps.FootholdTree(new Point(-4000, -4000), new Point(4000, 4000));
-        org.gms.provider.Data footholds = mapData.getChildByPath("foothold");
-        for (org.gms.provider.Data footRoot : footholds) {
-            for (org.gms.provider.Data footCategory : footRoot) {
-                for (org.gms.provider.Data fh : footCategory) {
-                    tree.insert(new org.gms.server.maps.Foothold(
-                            new Point(org.gms.provider.DataTool.getInt(fh.getChildByPath("x1")),
-                                    org.gms.provider.DataTool.getInt(fh.getChildByPath("y1"))),
-                            new Point(org.gms.provider.DataTool.getInt(fh.getChildByPath("x2")),
-                                    org.gms.provider.DataTool.getInt(fh.getChildByPath("y2"))),
-                            Integer.parseInt(fh.getName())));
-                }
-            }
-        }
-        map.setFootholds(tree);
-        org.gms.server.maps.PortalFactory portalFactory = new org.gms.server.maps.PortalFactory();
-        for (org.gms.provider.Data portal : mapData.getChildByPath("portal")) {
-            map.addPortal(portalFactory.makePortal(
-                    org.gms.provider.DataTool.getInt(portal.getChildByPath("pt")), portal));
-        }
-        org.gms.provider.Data life = mapData.getChildByPath("life");
+        MapleMap map = BotNavigationMapLoader.loadMapGeometry(mapId);
+        org.gms.provider.Data life = mapData(mapId).getChildByPath("life");
         if (life != null) {
             for (org.gms.provider.Data entry : life) {
                 if (!"n".equals(org.gms.provider.DataTool.getString("type", entry, ""))) {
@@ -308,6 +307,95 @@ class PqParkDoorExecutionSimTest {
         assertTrue(dist <= 40,
                 "the bot never reached the chain door: ended at " + sim.p() + ", door " + door
                         + " (dist " + String.format("%.1f", dist) + ")");
+    }
+
+    @ParameterizedTest
+    @ValueSource(ints = {2, 3, 4})
+    void kerningExtraMemberWalksFromTheEntranceToCloto(int stage) {
+        int mapId = KerningPqData.STAGE_1 + stage - 1;
+        assumeTrue(wzAvailable(mapId), "Map.wz needed");
+        MapleMap map = realRoom(mapId);
+        Sim sim = sim(map, map.getPortal("sp").getPosition());
+        Character bot = sim.st().bot;
+        try {
+            KerningStages.takeMyPlace(bot, stage, 3); // three puzzle spots; this is the fourth bot
+            assertArrivesNearNpc(sim, KerningPqData.NPC_CLOTO);
+        } finally {
+            PositionCombination.release(System.identityHashCode(map));
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(ints = {2, 3, 4})
+    void kerningClearedPuzzleReplacesTheSpotWalkButNotTheNextDoor(int stage) {
+        int mapId = KerningPqData.STAGE_1 + stage - 1;
+        assumeTrue(wzAvailable(mapId), "Map.wz needed");
+        var puzzleSpots = KerningPqData.spotsFor(stage);
+        Point start = puzzleSpots.getFirst();
+        Sim sim = sim(mapId, start);
+        Character bot = sim.st().bot;
+        if (stage == 2) {
+            var rope = sim.map().getRopes().stream().filter(r -> r.x() == start.x).findFirst().orElseThrow();
+            BotPhysicsEngine.attachToRope(sim.st(), bot, rope, start.y);
+        }
+        PqActions.holdArea(bot, puzzleSpots.getLast(), 1_200);
+        assertEquals(puzzleSpots.getLast(), GCMovement.moveTargetOf(bot));
+
+        PqActions.waitNearPuzzleNpc(bot, KerningPqData.NPC_CLOTO);
+        assertArrivesNearNpc(sim, KerningPqData.NPC_CLOTO);
+
+        var door = sim.map().getPortal("next00");
+        PqActions.walkToPortal(bot, door);
+        Point approach = GCMovement.portalApproachPoint(sim.map(), door);
+        assertEquals(approach, GCMovement.moveTargetOf(bot));
+        PqActions.waitNearPuzzleNpc(bot, KerningPqData.NPC_CLOTO);
+        assertEquals(approach, GCMovement.moveTargetOf(bot), "the leader's door order takes precedence");
+    }
+
+    @ParameterizedTest
+    @CsvSource({
+            "670010300,9201044,540,-1996",
+            "670010301,9201044,-629,-1772",
+            "670010302,9201044,-45,-1861",
+            "670010400,9201044,742,122",
+            "670010400,9201044,2030,201",
+            "670010400,9201044,1952,48",
+            "922010800,2040043,-128,412",
+            "922010800,2040043,-216,-220",
+            "920010500,2013001,84,-80",
+            "920010500,2013001,78,-813"
+    })
+    void otherPlacementPuzzlesAlsoHaveARealRouteToTheGatheringPost(
+            int mapId, int npcId, int x, int y) {
+        assumeTrue(wzAvailable(mapId), "Map.wz needed");
+        Sim sim = sim(mapId, new Point(x, y));
+        if (mapId == 670010400) {
+            Point post = AmoriaPqData.STAGE_3_WAIT_POST;
+            PqActions.waitAtPuzzlePost(sim.st().bot, post);
+            assertArrivesNear(sim, post, () -> PqActions.waitAtPuzzlePost(sim.st().bot, post));
+        } else {
+            PqActions.waitNearPuzzleNpc(sim.st().bot, npcId);
+            assertArrivesNearNpc(sim, npcId);
+        }
+    }
+
+    private static void assertArrivesNearNpc(Sim sim, int npcId) {
+        Point npc = sim.map().getNPCById(npcId).getPosition();
+        assertArrivesNear(sim, npc, () -> PqActions.waitNearPuzzleNpc(sim.st().bot, npcId));
+    }
+
+    private static void assertArrivesNear(Sim sim, Point post, Runnable park) {
+        Character bot = sim.st().bot;
+        Point target = GCMovement.moveTargetOf(bot);
+        assertNotNull(target);
+        assertTrue(Math.abs(target.x - post.x) <= 80 && Math.abs(target.y - post.y) <= 30,
+                () -> "target " + target + " is not by " + post);
+        for (int beat = 0; beat < 10; beat++) {
+            tickN(sim, 2_500 / BotPhysicsEngine.cfg.TICK_MS);
+            if (sim.p().distance(target) <= 16 && GCMovement.isSettled(bot)) return;
+            park.run();
+        }
+        fail(() -> "target " + target + "; " + GCMovement.movementStateReport(bot));
     }
 
     @ParameterizedTest

@@ -170,6 +170,7 @@ public class KerningPQBot extends PartyQuestBot {
             case 2, 3, 4 -> {
                 if (KerningStages.stageCleared(getChr(), stage)) {
                     sayStageClearOnce(stage);
+                    PqActions.waitNearPuzzleNpc(getChr(), KerningPqData.NPC_CLOTO);
                     return false;
                 }
                 String plan = KerningStages.takeMyPlace(getChr(), stage, botIndex());

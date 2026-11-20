@@ -1263,10 +1263,10 @@ public final class LudiStages {
      * chance is 0% on the first round and grows 0.5% per failed one.
      */
     public static PositionCombination.Plan takeCrate(Character bot, int bodyIndex) {
-        return PositionCombination.standOn(bot, bodyIndex, mapInstanceOf(bot),
+        return PositionCombination.standOn(bot, bodyIndex,
                 LudiPqData.crateCandidates(), LudiPqData.crateAreas(bot.getMap().getAreas()),
-                8, LudiPqData.COMBO_PROPERTY,
-                PositionCombination.comboAnswer(LudiPqData.COMBO_PROPERTY));
+                8, LudiPqData.COMBO_PROPERTY, PositionCombination.comboAnswer(LudiPqData.COMBO_PROPERTY),
+                () -> PqActions.waitNearPuzzleNpc(bot, LudiPqData.stageNpcId(8)));
     }
 
     // =========================================================================

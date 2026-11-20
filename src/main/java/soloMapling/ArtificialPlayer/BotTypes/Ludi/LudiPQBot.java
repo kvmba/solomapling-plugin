@@ -172,6 +172,10 @@ public class LudiPQBot extends PartyQuestBot {
                 LudiStages.exitTrapRoom(getChr());
                 return false;
             }
+            if (stage == 8) {
+                PqActions.waitNearPuzzleNpc(getChr(), LudiPqData.stageNpcId(stage));
+                return false;
+            }
             if (PqActions.deliverAndWait(getChr(), LudiPqData.PASS,
                     LudiPqData.stageNpcId(stage)) > 0) {
                 PqActions.say(getChr(), BotMessages.get("pq.passes_dropped"));

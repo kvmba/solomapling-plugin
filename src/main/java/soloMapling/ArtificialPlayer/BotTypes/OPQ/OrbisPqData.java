@@ -150,7 +150,7 @@ public final class OrbisPqData {
             new java.awt.Rectangle(-71, -963, 61, 87),
             new java.awt.Rectangle(40, -850, 76, 74));
 
-    /** The stage number of the sealed room, for its {@code 4stageclear} flag. */
+    /** The stage number of the sealed room. Eak marks it clear via {@code statusStg4}. */
     public static final int STAGE_4 = 4;
 
     public static final int SEALED_PLAYERS = 3;

@@ -177,11 +177,10 @@ public final class PositionCombination {
     }
 
     /**
-     * Stand on this body's share of the candidate being submitted, and report the plan.
+     * Take this body's puzzle spot or wait by the judge if it has none, then report the plan.
      *
      * @param bot        the body taking its share
      * @param bodyIndex  its rank among the bots, for the tail-first split
-     * @param roomKey    one instance's puzzle room
      * @param candidates every pattern the puzzle can ask for, in the order to try them
      * @param areas      the room's area rectangles, in the script's own order
      * @param stage      the stage number, for the {@code <stage>stageclear} flag
@@ -190,14 +189,17 @@ public final class PositionCombination {
      *     real verdict. Its value is never read by this path, so it carries no peek.
      * @param answer     how to read the answer for the round's peek, or {@code null} to
      *     search honestly in every round
+     * @param waitAtPost how to move an unassigned bot out of the counted areas to the NPC's post
      */
-    public static Plan standOn(Character bot, int bodyIndex, int roomKey,
-                               List<Candidate> candidates, List<Rectangle> areas, int stage,
-                               String answerProperty, Answer answer) {
-        Plan plan = decide(bot, roomKey, candidates, areas, stage, answerProperty,
+    public static Plan standOn(Character bot, int bodyIndex, List<Candidate> candidates,
+                               List<Rectangle> areas, int stage, String answerProperty,
+                               Answer answer, Runnable waitAtPost) {
+        Plan plan = decide(bot, System.identityHashCode(bot.getMap()), candidates, areas, stage, answerProperty,
                 seatedBots(bot), answer);
         Point mine = mine(plan.spots(), bodyIndex);
-        if (mine != null) {
+        if (mine == null) {
+            waitAtPost.run();
+        } else {
             PqActions.holdArea(bot, mine, 1_200);
         }
         return plan;

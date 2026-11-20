@@ -2746,16 +2746,43 @@ public final class PqActions {
         // No hold after arrival: the stage still decides whether to fight while parked.
     }
 
+    /** Gather on the judge's ledge when the puzzle has no work for this bot. */
+    public static void waitNearPuzzleNpc(Character bot, int stageNpcId) {
+        Point npc = stageNpcSpot(bot, stageNpcId);
+        if (npc != null) waitAtPuzzlePost(bot, npc);
+    }
+
+    /** Waiting is the puzzle assignment: replace its old spot or chase, but not a portal walk. */
+    public static void waitAtPuzzlePost(Character bot, Point post) {
+        // Keep waiters on the post's tread. In the LPQ crate room the slope beside the Blue
+        // Balloon can send bots from the entrance toward the tower's outer wall instead.
+        Point spot = parkSpot(bot, post, 0);
+        int botId = bot.getId();
+        SeekState control = seekStates.computeIfAbsent(botId, ignored -> new SeekState());
+        synchronized (control) {
+            StageWalkShield shield = stageWalkShieldUntilByBot.get(botId);
+            if (shield != null && shield.portal() && movementShielded(botId)) return;
+            armStageWalkShield(bot); // Do not let the combat sweep pull waiters into the puzzle.
+            if (!withinWalkReach(bot.getPosition(), spot, false) || GCMovement.hasMoveTarget(bot)) {
+                GCMovement.moveIfTargetChanged(bot, spot.x, spot.y, 1);
+            }
+        }
+    }
+
     /**
      * Spread teammates over valid slots near the NPC, even if its ledge only extends one way.
      */
     private static Point parkSpot(Character bot, Point npc) {
+        return parkSpot(bot, npc, NPC_STANDOFF_VERTICAL_PX);
+    }
+
+    private static Point parkSpot(Character bot, Point npc, int verticalTolerance) {
         MapleMap map = bot.getMap();
         int slot = Math.floorMod(bot.getId(), 6);
         Point first = null;
         for (int offset : NPC_STANDOFFS_PX) {
             Point ground = GCMovement.groundPointBelow(map, npc.x + offset, npc.y);
-            if (ground == null || Math.abs(ground.y - npc.y) > NPC_STANDOFF_VERTICAL_PX) {
+            if (ground == null || Math.abs(ground.y - npc.y) > verticalTolerance) {
                 continue;
             }
             if (slot-- == 0) return ground;

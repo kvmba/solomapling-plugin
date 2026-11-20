@@ -137,6 +137,35 @@ class PqDeliveryFlowTest {
         }
     }
 
+    @ParameterizedTest
+    @CsvSource({
+            "kerning,103000801,9020001,2stageclear",
+            "kerning,103000802,9020001,3stageclear",
+            "kerning,103000803,9020001,4stageclear",
+            "amoria,670010300,9201044,2stageclear",
+            "amoria,670010301,9201044,2stageclear",
+            "amoria,670010302,9201044,2stageclear",
+            "amoria,670010400,9201044,3stageclear",
+            "ludi,922010800,2040043,8stageclear"
+    })
+    void clearedPlacementPuzzleReplacesTheOldSpotOrderWithTheNpc(
+            String type, int mapId, int npcId, String clearFlag) {
+        when(map.getId()).thenReturn(mapId);
+        npc(npcId);
+        when(instance.getProperty(clearFlag)).thenReturn("true");
+        Point post = mapId == 670010400 ? new Point(1042, 240) : NPC_POSITION;
+        try (var generation = mockStatic(BotGeneration.class);
+             var movement = mockStatic(GCMovement.class)) {
+            movement.when(GCMovement::isVirtualClock).thenReturn(true);
+            movement.when(() -> GCMovement.hasMoveTarget(member)).thenReturn(true);
+
+            assertFalse(bot(type).workStage(), "clearing the puzzle does not end the run");
+
+            movement.verify(() -> GCMovement.moveIfTargetChanged(member, post.x, post.y, 1));
+            assertTrue(PqActions.movementShielded(BOT_ID));
+        }
+    }
+
     @Test
     void splitInventoryAndPostedCardsCountTowardTheSameQuotaUntilTheLeaderPicksThemUp() {
         Character teammate = mock(Character.class);

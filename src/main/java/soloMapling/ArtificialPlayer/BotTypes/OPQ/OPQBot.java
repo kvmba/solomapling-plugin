@@ -721,6 +721,13 @@ public class OPQBot extends BotSM {
     private void handleMiddleStage() {
         sharedContext_trySetPhase(OPQPhase.STAGE_2);
 
+        if (getChr().getMapId() == OrbisPqData.STAGE_SEALED
+                && readEimInt("statusStg4", -1) == 1
+                && partyLeaderMapId() == OrbisPqData.STAGE_SEALED) {
+            PqActions.waitNearPuzzleNpc(getChr(), OrbisPqData.EAK);
+            return; // Eak has spawned the prize box; wait for the leader to leave the room.
+        }
+
         int stage = currentMiddleStage();
         if (stage < 0) {
             // Nothing outstanding that the bot can see: hand back to the exit logic, which

@@ -163,13 +163,25 @@ public class AmoriaPQBot extends PartyQuestBot {
      * walked the bot out of the instance the moment it reached stage 2.
      */
     private boolean ropePuzzle(int stage) {
+        Character bot = getChr();
+        if (PqActions.readEimString(bot, stage + "stageclear") != null) {
+            waitForAmos(bot, stage);
+            return false;
+        }
         String answerProperty = AmoriaPqData.comboPropertyFor(stage);
-        PositionCombination.standOn(getChr(), botIndex(),
-                System.identityHashCode(getChr().getMap()),
+        PositionCombination.standOn(bot, botIndex(),
                 stage == 2 ? AmoriaPqData.stage2Candidates() : AmoriaPqData.stage3Candidates(),
                 AmoriaPqData.areasFor(stage), stage, answerProperty,
-                PositionCombination.comboAnswer(answerProperty));
+                PositionCombination.comboAnswer(answerProperty), () -> waitForAmos(bot, stage));
         return false;
+    }
+
+    private static void waitForAmos(Character bot, int stage) {
+        if (stage == 3) {
+            PqActions.waitAtPuzzlePost(bot, AmoriaPqData.STAGE_3_WAIT_POST);
+        } else {
+            PqActions.waitNearPuzzleNpc(bot, AmoriaPqData.PUZZLE_NPC);
+        }
     }
 
     /** Which body this bot is, counted from character ids for a stable order. */

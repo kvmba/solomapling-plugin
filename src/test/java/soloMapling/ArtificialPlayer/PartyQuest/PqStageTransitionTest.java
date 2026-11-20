@@ -27,6 +27,7 @@ import soloMapling.ArtificialPlayer.BotTypes.Magatia.MagatiaPQBot;
 import soloMapling.ArtificialPlayer.BotTypes.OPQ.OPQBot;
 import soloMapling.ArtificialPlayer.BotTypes.OPQ.OPQOrchestrator;
 import soloMapling.ArtificialPlayer.BotTypes.OPQ.OPQSharedContext;
+import soloMapling.ArtificialPlayer.BotTypes.OPQ.OrbisPqData;
 import soloMapling.ArtificialPlayer.BotTypes.Pirate.PiratePQBot;
 import soloMapling.ArtificialPlayer.GCMoveSystem.GCMovement;
 import soloMapling.server.BotTickService;
@@ -296,6 +297,33 @@ class PqStageTransitionTest {
             bot.updateState();
             assertEquals(OPQBot.OPQBotState.STAGE_1_TRANSITION, bot.getOPQBotState());
             actions.verify(() -> PqActions.walkThroughPortal(member, exit));
+        }
+    }
+
+    @Test
+    void orbisSealedRoomGathersAtEakUntilTheLeaderReturnsToTheTower() {
+        MapleMap sealed = room(OrbisPqData.STAGE_SEALED);
+        place(member, sealed);
+        place(leader, sealed);
+        Portal exit = door(sealed, "st00", 999999999);
+        OPQOrchestrator run = mock(OPQOrchestrator.class);
+        when(run.getSharedContext()).thenReturn(new OPQSharedContext());
+        try (var generation = mockStatic(BotGeneration.class);
+             var coordinator = mockStatic(OPQOrchestrator.class, call -> run);
+             var actions = mockStatic(PqActions.class)) {
+            actions.when(() -> PqActions.readEimInt(member, "statusStg4", -1)).thenReturn(1);
+            actions.when(() -> PqActions.partyLeader(member)).thenReturn(leader);
+            OPQBot bot = new OPQBot(member);
+            bot.setRunning(true);
+
+            bot.updateState();
+            actions.verify(() -> PqActions.waitNearPuzzleNpc(member, OrbisPqData.EAK));
+            actions.verify(() -> PqActions.walkThroughPortal(member, exit), never());
+
+            place(leader, room(OrbisPqData.TOWER_MAP));
+            bot.updateState();
+            actions.verify(() -> PqActions.walkThroughPortal(member, exit));
+            actions.verify(() -> PqActions.waitNearPuzzleNpc(member, OrbisPqData.EAK));
         }
     }
 

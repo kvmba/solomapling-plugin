@@ -51,7 +51,7 @@ public final class KerningPqData {
     public static final int COUPON = 4001007;
     public static final int PASS = 4001008;
     /**
-     * Cloto, the stage-1 NPC inside 103000800 (her script is 9020001.js; 9020000 is
+     * Cloto, the judge in each stage room (her script is 9020001.js; 9020000 is
      * Lakelis, the entry NPC back in Kerning City who is not present on the stage maps).
      */
     public static final int NPC_CLOTO = 9020001;

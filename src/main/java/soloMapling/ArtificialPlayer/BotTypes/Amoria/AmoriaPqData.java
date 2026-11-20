@@ -71,6 +71,10 @@ public final class AmoriaPqData {
 
     public static final String STAGE_2_COMBO = "stage2combo";
     public static final String STAGE_3_COMBO = "stage3combo";
+    public static final int PUZZLE_NPC = 9201044; // Amos, in stages 2 and 3
+
+    /** Walkway beneath Amos: ordinary jumps cannot reach his ledge from the stage-3 ropes. */
+    public static final Point STAGE_3_WAIT_POST = new Point(1042, 240);
 
     /** Five bodies have to be on the ropes; the quest checks this before accepting a try. */
     public static final int BODIES_ON_ROPES = 5;
