@@ -1,6 +1,7 @@
 package soloMapling.ArtificialPlayer.BotTypes.Kerning;
 
 import org.gms.client.Character;
+import org.gms.scripting.event.EventInstanceManager;
 import soloMapling.ArtificialPlayer.BotGeneration;
 import soloMapling.ArtificialPlayer.BotMessagingSystem.CharacterStorage;
 import soloMapling.ArtificialPlayer.PartyQuest.PartyQuestBot;
@@ -22,12 +23,13 @@ import java.util.concurrent.locks.ReentrantLock;
  * announces the spots that still need someone, because the real player is one of the bodies
  * the quest counts - a bot that quietly claimed a spot would break the count for everybody.
  *
- * <p>Stage 1 is the one this bot only half does: it gathers coupons, but the questions come
- * from Cloto and only the leader may spend the passes, so the turn-in stays with the player.
+ * <p>In stage 1 the bot collects its own coupons and posts the resulting pass at Cloto.
+ * The final turn-in stays with the leader.
  */
 public class KerningPQBot extends PartyQuestBot {
 
     private final ReentrantLock couponWork = new ReentrantLock();
+    private KerningStages.CouponRun couponRun;
 
     /**
      * Which body this bot is, for splitting the wanted spots.
@@ -120,6 +122,24 @@ public class KerningPQBot extends PartyQuestBot {
     }
 
     @Override
+    protected void onStageLootPickedUp(int[] lootIds) {
+        Character bot = getChr();
+        if (lootIds == KerningStages.COUPON_LOOT_IDS && bot.getMapId() == KerningPqData.STAGE_1) {
+            EventInstanceManager instance = bot.getEventInstance();
+            if (instance != null) {
+                couponRun(instance).pickedUp(bot);
+            }
+        }
+    }
+
+    private KerningStages.CouponRun couponRun(EventInstanceManager instance) {
+        if (couponRun == null || couponRun.instance != instance) {
+            couponRun = new KerningStages.CouponRun(instance);
+        }
+        return couponRun;
+    }
+
+    @Override
     protected boolean workStage() {
         int stage = stageOf(getChr().getMapId());
         if (stage < 0) {
@@ -133,7 +153,11 @@ public class KerningPQBot extends PartyQuestBot {
                 }
                 couponWork.lock();
                 try {
-                    KerningStages.workCoupons(getChr());
+                    Character bot = getChr();
+                    EventInstanceManager instance = bot.getEventInstance();
+                    if (instance != null) {
+                        couponRun(instance).work(bot);
+                    }
                 } finally {
                     couponWork.unlock();
                 }
@@ -194,5 +218,11 @@ public class KerningPQBot extends PartyQuestBot {
     protected void releaseRoomState() {
         super.releaseRoomState();
         announcedStage = -1;
+        couponWork.lock();
+        try {
+            couponRun = null;
+        } finally {
+            couponWork.unlock();
+        }
     }
 }

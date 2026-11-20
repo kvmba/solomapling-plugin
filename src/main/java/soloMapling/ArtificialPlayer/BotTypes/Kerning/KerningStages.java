@@ -2,18 +2,23 @@ package soloMapling.ArtificialPlayer.BotTypes.Kerning;
 
 import org.gms.client.Character;
 import org.gms.scripting.event.EventInstanceManager;
+import soloMapling.ArtificialPlayer.BotCommandsPack.SocialCommands;
+import soloMapling.ArtificialPlayer.GCMoveSystem.GCMovement;
 import soloMapling.ArtificialPlayer.PartyQuest.PositionCombination;
 import soloMapling.ArtificialPlayer.PartyQuest.PqActions;
 import soloMapling.Environment.BotMessages;
+
+import java.util.BitSet;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.concurrent.ThreadLocalRandom;
 
 /**
  * What a bot does in each Kerning PQ stage.
  *
  * <p>Stage 1 is the odd one out: each non-leader member is given a question and has to show
- * up carrying exactly the number of coupons it asks for, and only the leader can spend the
- * passes that come back. A bot can do the coupon half, but the pass and the questions both
- * go through Cloto, and the leader is the one who hands them over, so the bot's job is to
- * gather and then step back rather than to push the stage through on its own.
+ * up carrying exactly the number of coupons it asks for. Bots draw different coupon totals,
+ * then use Cloto's own exchange and leave the passes for the leader to turn in.
  *
  * <p>Stages 2 through 4 are the same shape three times over: the quest has picked a row from
  * a fixed table (an instance property says which) and wants a specific number of people on
@@ -32,6 +37,8 @@ public final class KerningStages {
     static final int[] COUPON_LOOT_IDS = {KerningPqData.COUPON};
     static final int[] PASS_LOOT_IDS = {KerningPqData.PASS};
     static final int BOSS_PASSES_WANTED = 10;
+    private static final String COUPON_QUESTIONS = "soloMapling.kerning.couponQuestions";
+    private static final int COLLECTION_CHAT_VARIANTS = 20;
 
     /** The combat sweep only hunts while this member is short of its assigned coupon count. */
     static boolean needsCoupons(Character bot) {
@@ -44,42 +51,128 @@ public final class KerningStages {
                 && PqActions.countItem(bot, KerningPqData.PASS) == 0 && needsMemberPass(bot, instance);
     }
 
-    /** Ask Cloto for a question, exchange the exact answer for a pass, and hand it over. */
-    static void workCoupons(Character bot) {
-        EventInstanceManager instance = bot.getEventInstance();
-        if (instance == null) {
-            return;
+    /** This bot's visit to Cloto and collection announcements for one run. */
+    static final class CouponRun {
+        final EventInstanceManager instance;
+        private long claimAtMs;
+        private boolean completionAnnounced;
+
+        CouponRun(EventInstanceManager instance) {
+            this.instance = instance;
         }
-        if (instance.getProperty("1stageclear") != null || !needsMemberPass(bot, instance)) {
-            PqActions.deliverAndWait(bot, KerningPqData.PASS, KerningPqData.NPC_CLOTO);
-            return;
-        }
-        if (PqActions.countItem(bot, KerningPqData.PASS) == 0) {
-            // Cloto records -1 before asking, a 1-based question index while collecting, and
-            // 0 after awarding a pass. One talk runs the check and closes the conversation.
-            int question = instance.gridCheck(bot);
-            if (question == -1) {
-                if (PqActions.walkToNpc(bot, KerningPqData.NPC_CLOTO)) {
-                    PqActions.talkTo(bot, KerningPqData.NPC_CLOTO);
-                }
+
+        void work(Character bot) {
+            if (instance.getProperty("1stageclear") != null || !needsMemberPass(bot, instance)) {
+                claimAtMs = 0;
+                PqActions.deliverAndWait(bot, KerningPqData.PASS, KerningPqData.NPC_CLOTO);
                 return;
             }
-            if (question > 0) {
-                int excess = PqActions.countItem(bot, KerningPqData.COUPON) - requiredCoupons(question);
-                if (excess < 0) {
-                    PqActions.approachRoomLoot(bot, COUPON_LOOT_IDS);
-                    return;
+            if (PqActions.countItem(bot, KerningPqData.PASS) == 0) {
+                // Cloto uses -1 before the question, a 1-based index during collection,
+                // and 0 once she awards the pass.
+                int question = instance.gridCheck(bot);
+                if (question == -1) {
+                    if (!readyToClaim(bot)) return;
+                    claimAtMs = 0;
+                    question = reserveQuestion(bot, instance);
+                    if (question == -1) return;
+                    completionAnnounced = false;
+                    sayCollection(bot, "start", requiredCoupons(question));
                 }
-                PqActions.stopHunting(bot);
-                if (!PqActions.walkToNpc(bot, KerningPqData.NPC_CLOTO)) return;
-                if (excess > 0 && !PqActions.dropStack(bot, KerningPqData.COUPON, excess, bot.getPosition())) {
-                    return;
+                if (question > 0) {
+                    int excess = PqActions.countItem(bot, KerningPqData.COUPON) - requiredCoupons(question);
+                    if (excess < 0) {
+                        PqActions.approachRoomLoot(bot, COUPON_LOOT_IDS);
+                        return;
+                    }
+                    announceCompletion(bot);
+                    PqActions.stopHunting(bot);
+                    if (!PqActions.walkToNpc(bot, KerningPqData.NPC_CLOTO)) return;
+                    if (excess > 0 && !PqActions.dropStack(bot, KerningPqData.COUPON, excess, bot.getPosition())) {
+                        return;
+                    }
+                    PqActions.talkTo(bot, KerningPqData.NPC_CLOTO);
                 }
-                PqActions.talkTo(bot, KerningPqData.NPC_CLOTO);
+            }
+            if (PqActions.deliverAndWait(bot, KerningPqData.PASS, KerningPqData.NPC_CLOTO) > 0) {
+                PqActions.say(bot, BotMessages.get("pq.kerning.pass_dropped"));
             }
         }
-        if (PqActions.deliverAndWait(bot, KerningPqData.PASS, KerningPqData.NPC_CLOTO) > 0) {
-            PqActions.say(bot, BotMessages.get("pq.kerning.pass_dropped"));
+
+        private boolean readyToClaim(Character bot) {
+            if (!PqActions.walkToNpc(bot, KerningPqData.NPC_CLOTO)) {
+                claimAtMs = 0;
+                return false;
+            }
+            long now = GCMovement.movementNowMs();
+            if (claimAtMs == 0) {
+                GCMovement.stop(bot);
+                claimAtMs = now + ThreadLocalRandom.current().nextLong(2_000, 5_001);
+            }
+            return now >= claimAtMs;
+        }
+
+        void pickedUp(Character bot) {
+            int question = instance.gridCheck(bot);
+            if (question <= 0) return;
+            int remaining = requiredCoupons(question) - PqActions.countItem(bot, KerningPqData.COUPON);
+            if (remaining > 0) {
+                sayCollection(bot, "remaining", remaining);
+            } else {
+                announceCompletion(bot);
+            }
+        }
+
+        private void announceCompletion(Character bot) {
+            if (!completionAnnounced) {
+                completionAnnounced = true;
+                sayCollection(bot, "done");
+            }
+        }
+    }
+
+    /** Draw without replacement by coupon count, not question index: two questions ask for 25. */
+    @SuppressWarnings("unchecked")
+    private static int reserveQuestion(Character bot, EventInstanceManager instance) {
+        synchronized (instance) {
+            if (bot.getEventInstance() != instance || bot.getMapId() != KerningPqData.STAGE_1
+                    || instance.getProperty("1stageclear") != null || !needsMemberPass(bot, instance)) {
+                return -1;
+            }
+            Map<Integer, Integer> questions = (Map<Integer, Integer>) instance.getObjectProperty(COUPON_QUESTIONS);
+            if (questions == null) {
+                questions = new HashMap<>();
+                instance.setObjectProperty(COUPON_QUESTIONS, questions);
+            }
+            // Cloto overwrites the grid after exchange, and unregistering a member clears it.
+            // The same character must not draw a second quota if the host registers it again.
+            int memberId = bot.getId();
+            Integer question = questions.get(memberId);
+            if (question == null) {
+                BitSet used = new BitSet();
+                for (int assigned : questions.values()) {
+                    used.set(requiredCoupons(assigned));
+                }
+                int[] candidates = new int[KerningPqData.QUESTION_ANSWERS.length];
+                int size = 0;
+                for (int candidate = 1; candidate <= candidates.length; candidate++) {
+                    if (!used.get(requiredCoupons(candidate))) {
+                        candidates[size++] = candidate;
+                    }
+                }
+                question = candidates[ThreadLocalRandom.current().nextInt(size)];
+                questions.put(memberId, question);
+            }
+            instance.gridInsert(bot, question); // Cloto's normal script validates this index at exchange.
+            return question;
+        }
+    }
+
+    private static void sayCollection(Character bot, String beat, Object... args) {
+        int variant = ThreadLocalRandom.current().nextInt(1, COLLECTION_CHAT_VARIANTS + 1);
+        String line = BotMessages.getOr("pq.collection." + beat + "." + variant, "", args);
+        if (!line.isBlank()) {
+            SocialCommands.BotFullChat(bot, line);
         }
     }
 

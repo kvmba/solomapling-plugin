@@ -17,6 +17,7 @@ import org.gms.server.movement.LifeMovementFragment;
 import org.gms.util.PacketCreator;
 import soloMapling.ArtificialPlayer.BotClientBinding;
 import soloMapling.ArtificialPlayer.BotCommandsPack.DropCommands;
+import soloMapling.ArtificialPlayer.BotTypes.Kerning.KerningPqData;
 import soloMapling.ArtificialPlayer.GCMoveSystem.GCMovement;
 import soloMapling.ArtificialPlayer.GCMoveSystem.MapleMovement;
 
@@ -1507,8 +1508,9 @@ public final class BotPetFollower {
      * {@link Monster}) — never a player-thrown item — so a looting pet tidies up
      * kills, exactly like a real player's pet.
      */
-    private static void collectLoot(Character chr, MapleMap map, Pet[] pets, BotPetConfig config) {
+    static void collectLoot(Character chr, MapleMap map, Pet[] pets, BotPetConfig config) {
         long now = System.currentTimeMillis();
+        boolean kerningStageOne = map.getId() == KerningPqData.STAGE_1;
         for (int idx = 0; idx < pets.length; idx++) {
             Pet pet = pets[idx];
             if (pet == null) {
@@ -1543,6 +1545,10 @@ public final class BotPetFollower {
                 // Monster drops only: a player-thrown item (dropper is a Character)
                 // is left where it landed.
                 if (!(mapItem.getDropper() instanceof Monster)) {
+                    continue;
+                }
+                // Personal coupons must go through the member's quota and progress checks.
+                if (kerningStageOne && mapItem.getItemId() == KerningPqData.COUPON) {
                     continue;
                 }
                 if (!DropCommands.botCanLoot(chr, mapItem)) {

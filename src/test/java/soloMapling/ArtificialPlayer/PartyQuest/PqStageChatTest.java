@@ -6,6 +6,7 @@ import soloMapling.Environment.BotMessages;
 import soloMapling.Environment.SoloMaplingLanguageConfig;
 
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 
@@ -120,6 +121,25 @@ class PqStageChatTest {
                     key + " has different pool sizes per language");
         }
         assertNotEquals(0, english.size());
+    }
+
+    @Test
+    void personalCollectionPoolsHaveTwentyDistinctLocalizedLinesPerBeat() {
+        for (String language : List.of("en", "zh-CN")) {
+            SoloMaplingLanguageConfig.setLanguageTag(language);
+            BotMessages.invalidate();
+            for (String beat : List.of("start", "remaining", "done")) {
+                String base = "pq.collection." + beat;
+                assertTrue(poolSize(base) >= 20, base);
+                var seen = new HashSet<String>();
+                for (int i = 1; i <= 20; i++) {
+                    String line = BotMessages.get(base + "." + i, 123);
+                    assertEquals(language.equals("zh-CN"), line.matches(".*\\p{IsHan}.*"), line);
+                    assertEquals(!beat.equals("done"), line.contains("123"), line);
+                    assertTrue(seen.add(line), line);
+                }
+            }
+        }
     }
 
     @Test

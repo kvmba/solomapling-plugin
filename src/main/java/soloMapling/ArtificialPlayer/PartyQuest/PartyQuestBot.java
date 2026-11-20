@@ -204,7 +204,7 @@ public abstract class PartyQuestBot extends BotSM implements GrindTickRegistry.P
     /**
      * One beat of the shared combat ticker: fight the room the bot is standing in.
      *
-     * <p>Everything else - invites, following the leader, room transitions, chatter, potion
+     * <p>Everything else - invites, following the leader, room transitions, ambient chatter, potion
      * sips - stays on the macro tick in {@link #tickPartyQuest}; this beat only ever does the
      * one thing the 2-6s macro cadence made the bot look dazed at: swing, and keep closing on
      * whatever it is fighting, at the cadence combat actually runs at. The gates mirror the
@@ -260,7 +260,9 @@ public abstract class PartyQuestBot extends BotSM implements GrindTickRegistry.P
                 PqActions.stopHunting(bot);
                 return;
             }
-            PqActions.lootSteppedOn(bot, lootIds);
+            if (PqActions.lootSteppedOn(bot, lootIds) > 0) {
+                onStageLootPickedUp(lootIds);
+            }
         }
         if (!fightsOnSweep(lootIds)) {
             PqActions.stopHunting(bot);
@@ -327,6 +329,10 @@ public abstract class PartyQuestBot extends BotSM implements GrindTickRegistry.P
      */
     protected int[] steppedOnLootIds() {
         return EMPTY_LOOT_IDS;
+    }
+
+    /** React to an actual inventory gain without blocking the shared combat sweep. */
+    protected void onStageLootPickedUp(int[] lootIds) {
     }
 
     /**

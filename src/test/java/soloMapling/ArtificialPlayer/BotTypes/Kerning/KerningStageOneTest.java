@@ -22,16 +22,22 @@ import org.mockito.MockedStatic;
 import org.springframework.context.ApplicationContext;
 import org.springframework.context.MessageSource;
 import soloMapling.ArtificialPlayer.BotAttackSystem.BotAttackDriver;
+import soloMapling.ArtificialPlayer.BotCommandsPack.SocialCommands;
 import soloMapling.ArtificialPlayer.BotGeneration;
 import soloMapling.ArtificialPlayer.GCMoveSystem.GCMovement;
 import soloMapling.ArtificialPlayer.PartyQuest.PqActions;
+import soloMapling.Environment.BotMessages;
 
 import java.awt.Point;
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.concurrent.FutureTask;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.*;
 import static soloMapling.ArtificialPlayer.BotTypes.Kerning.KerningPqData.*;
 
@@ -81,6 +87,10 @@ class KerningStageOneTest {
         when(member.getItemQuantity(COUPON, false)).thenAnswer(call -> coupons);
         when(member.getItemQuantity(PASS, false)).thenAnswer(call -> passes);
         when(instance.gridCheck(member)).thenAnswer(call -> question);
+        doAnswer(call -> {
+            question = call.getArgument(1);
+            return null;
+        }).when(instance).gridInsert(eq(member), anyInt());
         when(instance.getLeader()).thenReturn(leader);
         when(instance.getPlayerCount()).thenReturn(3);
         try (var generation = mockStatic(BotGeneration.class)) {
@@ -95,34 +105,104 @@ class KerningStageOneTest {
     }
 
     @Test
-    void asksBeforeHuntingAndStopsOnThePickupThatMeetsTheQuota() {
+    void announcesAfterTheNpcPauseAndReportsOnlySuccessfulPickups() {
         int[] loot = {COUPON};
-        try (var actions = mockActions(); var movement = mockStatic(GCMovement.class)) {
+        List<String> lines = new ArrayList<>();
+        try (var actions = mockActions(); var movement = mockStatic(GCMovement.class);
+             var chat = mockStatic(SocialCommands.class)) {
             movement.when(() -> GCMovement.hasGraph(member)).thenReturn(true);
-            actions.when(() -> PqActions.talkTo(member, NPC_CLOTO)).thenAnswer(call -> {
-                assertEquals(-1, question);
-                question = 1;
-                return true;
+            chat.when(() -> SocialCommands.BotFullChat(eq(member), anyString())).thenAnswer(call -> {
+                lines.add(call.getArgument(1));
+                return null;
             });
+
+            movement.when(GCMovement::movementNowMs).thenReturn(100L);
+            bot.workStage(); // reached Cloto; the pause starts here
+            movement.when(GCMovement::movementNowMs).thenReturn(2_099L);
+            bot.workStage();
             bot.grindTick();
+            assertEquals(-1, question);
+            assertTrue(lines.isEmpty());
+            movement.verify(() -> GCMovement.stop(member));
             actions.verify(() -> PqActions.lootSteppedOn(member, loot), never());
             actions.verify(() -> PqActions.seekAndAttack(member, false, loot), never());
+
+            movement.when(GCMovement::movementNowMs).thenReturn(5_100L);
             bot.workStage();
-            coupons = 9;
-            bot.workStage(); // still short; don't try to answer
-            bot.grindTick();
+            int target = QUESTION_ANSWERS[question - 1];
+            assertEquals(1, lines.size());
+            assertInCollectionPool(lines.getFirst(), "start", target);
+
+            coupons = target - 2;
+            bot.workStage(); // inventory isn't a pickup event
+            bot.grindTick(); // no pickup on this beat
+            assertEquals(1, lines.size());
             actions.when(() -> PqActions.lootSteppedOn(member, loot)).thenAnswer(call -> {
                 coupons++;
                 return 1;
             });
             bot.grindTick();
+            assertEquals(2, lines.size());
+            assertInCollectionPool(lines.get(1), "remaining", 1);
+            bot.grindTick();
+            assertEquals(3, lines.size());
+            assertInCollectionPool(lines.get(2), "done");
             bot.grindTick(); // monsters may keep spawning, but neither looting nor fighting resumes
+            bot.workStage(); // returning for the exchange must not repeat the completion line
 
-            assertEquals(10, coupons);
+            assertEquals(target, coupons);
+            assertEquals(3, lines.size());
             actions.verify(() -> PqActions.talkTo(member, NPC_CLOTO));
-            actions.verify(() -> PqActions.lootSteppedOn(member, loot), times(2));
-            actions.verify(() -> PqActions.seekAndAttack(member, false, loot));
+            actions.verify(() -> PqActions.lootSteppedOn(member, loot), times(3));
+            actions.verify(() -> PqActions.seekAndAttack(member, false, loot), times(2));
             actions.verify(() -> PqActions.attack(member), never());
+        }
+    }
+
+    @Test
+    void theInstanceKeepsCountsDistinctAcrossReentryAndExchange() {
+        var grid = new HashMap<Character, Integer>();
+        var reservation = new AtomicReference<>();
+        when(instance.gridCheck(any(Character.class))).thenAnswer(call -> grid.getOrDefault(call.getArgument(0), -1));
+        doAnswer(call -> {
+            grid.put(call.getArgument(0), call.getArgument(1));
+            return null;
+        }).when(instance).gridInsert(any(Character.class), anyInt());
+        when(instance.getObjectProperty(anyString())).thenAnswer(call -> reservation.get());
+        doAnswer(call -> {
+            reservation.set(call.getArgument(1));
+            return null;
+        }).when(instance).setObjectProperty(anyString(), any());
+        when(instance.getPlayerCount()).thenReturn(4);
+
+        var targets = new HashSet<Integer>();
+        MapleMap room = member.getMap();
+        try (var actions = mockActions(); var movement = mockStatic(GCMovement.class);
+             var chat = mockStatic(SocialCommands.class)) {
+            for (int i = 0; i < 3; i++) {
+                Character teammate = mock(Character.class);
+                when(teammate.getId()).thenReturn(BOT_ID + i);
+                when(teammate.getEventInstance()).thenReturn(instance);
+                when(teammate.getMap()).thenReturn(room);
+                when(teammate.getMapId()).thenReturn(STAGE_1);
+                var run = new KerningStages.CouponRun(instance);
+                movement.when(GCMovement::movementNowMs).thenReturn(0L);
+                run.work(teammate);
+                movement.when(GCMovement::movementNowMs).thenReturn(5_000L);
+                run.work(teammate);
+
+                int assigned = grid.get(teammate);
+                assertTrue(targets.add(QUESTION_ANSWERS[assigned - 1]), "duplicate bot quota");
+                if (i == 0) {
+                    grid.remove(teammate); // The host clears the grid entry on unregister.
+                    var reentry = new KerningStages.CouponRun(instance);
+                    reentry.work(teammate);
+                    movement.when(GCMovement::movementNowMs).thenReturn(10_000L);
+                    reentry.work(teammate);
+                    assertEquals(assigned, grid.get(teammate));
+                }
+                instance.gridInsert(teammate, 0); // Cloto no longer stores the question after exchange.
+            }
         }
     }
 
@@ -189,7 +269,7 @@ class KerningStageOneTest {
     }
 
     @Test
-    void walksToClotoBeforeAskingForAQuestion() {
+    void onlyCountsTimeActuallyStandingAtCloto() {
         when(member.getPosition()).thenReturn(new Point(500, 0));
         try (var actions = mockActions(); var movement = mockStatic(GCMovement.class)) {
             movement.when(GCMovement::isVirtualClock).thenReturn(true);
@@ -198,10 +278,42 @@ class KerningStageOneTest {
             bot.workStage();
 
             movement.verify(() -> GCMovement.move(eq(member), eq(-1000), eq(0), any(), any()));
-            actions.verify(() -> PqActions.talkTo(member, NPC_CLOTO), never());
+            verify(instance, never()).gridInsert(eq(member), anyInt());
             when(member.getPosition()).thenReturn(CLOTO_POSITION);
+            movement.when(GCMovement::movementNowMs).thenReturn(20_000L);
             bot.workStage();
-            actions.verify(() -> PqActions.talkTo(member, NPC_CLOTO));
+            verify(instance, never()).gridInsert(eq(member), anyInt());
+            when(member.getPosition()).thenReturn(new Point(500, 0));
+            bot.workStage(); // knocked away, so a fresh wait is needed
+            when(member.getPosition()).thenReturn(CLOTO_POSITION);
+            movement.when(GCMovement::movementNowMs).thenReturn(30_000L);
+            bot.workStage();
+            verify(instance, never()).gridInsert(eq(member), anyInt());
+            movement.when(GCMovement::movementNowMs).thenReturn(35_000L);
+            bot.workStage();
+            verify(instance).gridInsert(eq(member), anyInt());
+            actions.verify(() -> PqActions.talkTo(member, NPC_CLOTO), never());
+        }
+    }
+
+    @Test
+    void aNewInstanceStartsAFreshNpcPause() {
+        EventInstanceManager nextRun = mock(EventInstanceManager.class);
+        when(nextRun.getLeader()).thenReturn(leader);
+        when(nextRun.getPlayerCount()).thenReturn(3);
+        when(nextRun.gridCheck(member)).thenReturn(-1);
+        try (var actions = mockActions(); var movement = mockStatic(GCMovement.class)) {
+            movement.when(GCMovement::movementNowMs).thenReturn(0L);
+            bot.workStage();
+            when(member.getEventInstance()).thenReturn(nextRun);
+            movement.when(GCMovement::movementNowMs).thenReturn(5_000L);
+            bot.workStage();
+            verify(instance, never()).gridInsert(eq(member), anyInt());
+            verify(nextRun, never()).gridInsert(eq(member), anyInt());
+
+            movement.when(GCMovement::movementNowMs).thenReturn(10_000L);
+            bot.workStage();
+            verify(nextRun).gridInsert(eq(member), anyInt());
         }
     }
 
@@ -359,5 +471,14 @@ class KerningStageOneTest {
             default -> java.lang.reflect.Modifier.isPrivate(call.getMethod().getModifiers())
                     ? call.callRealMethod() : RETURNS_DEFAULTS.answer(call);
         });
+    }
+
+    private static void assertInCollectionPool(String actual, String beat, Object... args) {
+        for (int i = 1; i <= 20; i++) {
+            if (actual.equals(BotMessages.get("pq.collection." + beat + "." + i, args))) {
+                return;
+            }
+        }
+        throw new AssertionError("Unexpected " + beat + " line: " + actual);
     }
 }
