@@ -1,6 +1,7 @@
 package soloMapling.ArtificialPlayer.BotTypes.Dojo;
 
 import org.gms.client.Character;
+import org.gms.server.maps.Portal;
 import soloMapling.ArtificialPlayer.BotGeneration;
 import soloMapling.ArtificialPlayer.PartyQuest.PartyQuestBot;
 import soloMapling.ArtificialPlayer.PartyQuest.PqActions;
@@ -43,6 +44,19 @@ public class DojoPQBot extends PartyQuestBot {
     @Override
     protected boolean isInsideQuest(int mapId) {
         return DojoPqData.isPartyDojo(mapId);
+    }
+
+    @Override
+    protected boolean runsOnOwnClock() {
+        return true;
+    }
+
+    @Override
+    protected Portal forwardPortal(int leaderMapId) {
+        var map = getChr().getMap();
+        int here = map.getId();
+        return leaderMapId > here && (leaderMapId - here) % 100 == 0
+                ? map.getPortal("out001") : null;
     }
 
     @Override

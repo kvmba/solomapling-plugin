@@ -1,6 +1,7 @@
 package soloMapling.ArtificialPlayer.BotTypes.Horntail;
 
 import org.gms.client.Character;
+import org.gms.server.maps.Portal;
 import soloMapling.ArtificialPlayer.BotGeneration;
 import soloMapling.ArtificialPlayer.PartyQuest.PartyQuestBot;
 import soloMapling.ArtificialPlayer.PartyQuest.PqActions;
@@ -44,6 +45,17 @@ public class HorntailPQBot extends PartyQuestBot {
     @Override
     protected boolean isInsideQuest(int mapId) {
         return HorntailPqData.isQuestRoom(mapId);
+    }
+
+    @Override
+    protected Portal forwardPortal(int leaderMapId) {
+        var map = getChr().getMap();
+        int here = map.getId();
+        if (here == HorntailPqData.LAST_ROOM ? leaderMapId == HorntailPqData.ENTRY_MAP
+                : here < HorntailPqData.LAST_ROOM && leaderMapId > here && leaderMapId <= HorntailPqData.LAST_ROOM) {
+            return map.getPortal("in00");
+        }
+        return null;
     }
 
     @Override

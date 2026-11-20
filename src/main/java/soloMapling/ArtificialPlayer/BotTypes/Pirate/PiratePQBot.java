@@ -1,6 +1,7 @@
 package soloMapling.ArtificialPlayer.BotTypes.Pirate;
 
 import org.gms.client.Character;
+import org.gms.server.maps.Portal;
 import soloMapling.ArtificialPlayer.BotGeneration;
 import soloMapling.ArtificialPlayer.PartyQuest.PartyQuestBot;
 import soloMapling.ArtificialPlayer.PartyQuest.PqActions;
@@ -43,6 +44,18 @@ public class PiratePQBot extends PartyQuestBot {
     @Override
     protected boolean isInsideQuest(int mapId) {
         return mapId >= PiratePqData.ENTRY_MAP && mapId <= PiratePqData.STAGE_5;
+    }
+
+    @Override
+    protected Portal forwardPortal(int leaderMapId) {
+        var map = getChr().getMap();
+        int room = map.getId();
+        int stage = room - room % 100;
+        if (leaderMapId < stage + 100 || stage >= PiratePqData.STAGE_5) {
+            return null;
+        }
+        // The alternate in01 script resets the side room's monsters; don't trail a leader into it.
+        return map.getPortal(room == stage ? "next00" : "out00");
     }
 
     @Override

@@ -105,7 +105,7 @@ public class KerningPQBot extends PartyQuestBot {
     protected boolean fightsOnSweep() {
         Character bot = getChr();
         return switch (bot.getMapId()) {
-            case KerningPqData.STAGE_1 -> KerningStages.needsCoupons(bot);
+            case KerningPqData.STAGE_1 -> KerningStages.needsCoupons(bot, couponRun);
             case KerningPqData.STAGE_5 -> !KerningStages.stageCleared(bot, 5)
                     && PqActions.needsHuntForLeader(bot, KerningPqData.PASS, KerningStages.BOSS_PASSES_WANTED);
             default -> true;
@@ -156,7 +156,7 @@ public class KerningPQBot extends PartyQuestBot {
                     Character bot = getChr();
                     EventInstanceManager instance = bot.getEventInstance();
                     if (instance != null) {
-                        couponRun(instance).work(bot);
+                        couponRun(instance).work(bot, this::requestTickWithin);
                     }
                 } finally {
                     couponWork.unlock();

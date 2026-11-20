@@ -31,7 +31,6 @@ import static soloMapling.ArtificialPlayer.BotCommandsPack.WarpCommands.botWarpM
 import static soloMapling.ArtificialPlayer.BotCommandsPack.WarpCommands.mapForBot;
 import static soloMapling.ArtificialPlayer.BotGeneration.warpBotToLocation;
 import static soloMapling.ArtificialPlayer.BotHelpers.blockingSleep;
-import static soloMapling.ArtificialPlayer.BotTypes.OPQ.OPQConstants.STAGE_1_COMPLETE_TP;
 import static soloMapling.ArtificialPlayer.BotTypes.OPQ.OPQConstants.STAGE_1_ENTRY_TP;
 import static soloMapling.BotLogger.log;
 import static soloMapling.DebugUtilities.debugprint;
@@ -165,7 +164,6 @@ public class OPQBot extends BotSM {
         STAGE_1_DROP_ITEMS,
         STAGE_1_WAIT,
         STAGE_1_TRANSITION,
-        STAGE_1_TRANSITION_PT_2,
         MIDDLE_STAGE,
         STAGE_2_NAVIGATE,
         STAGE_2_HIT_BOX,
@@ -193,6 +191,13 @@ public class OPQBot extends BotSM {
     // =========================================================================
 
     @Override
+    protected long lowPriorityDelayMs() {
+        MapleMap map = getChr().getMap();
+        return map != null && OrbisPqData.isOrbisRoom(map.getId()) && map.getEventInstance() != null
+                ? PqActions.inRunDelayMs() : super.lowPriorityDelayMs();
+    }
+
+    @Override
     public void updateState() {
         super.updateState();
         if (checkIfNotRunningOrPaused()) {
@@ -214,6 +219,26 @@ public class OPQBot extends BotSM {
         if (mapDerived != null && mapDerived != opqBotState && !inSameStageFamily(mapDerived, opqBotState)) {
             transitionTo(mapDerived,
                     "map-derived rehome (mapId=" + getChr().getMapId() + ")");
+        }
+
+        // Eak can finish either collection room while this bot is still gathering or returning.
+        int mapId = getChr().getMapId();
+        if (mapId == OPQConstants.OPQ_STAGE_1 || mapId == OPQConstants.OPQ_STAGE_2) {
+            int leaderMap = partyLeaderMapId();
+            if (leaderMap == OPQConstants.OPQ_EXIT_LOBBY || leaderMap == OPQConstants.OPQ_LOBBY) {
+                followLeaderOut();
+                return;
+            }
+            if (mapId == OPQConstants.OPQ_STAGE_1 && readEimInt("statusStg0", -1) == 1) {
+                transitionTo(OPQBotState.STAGE_1_TRANSITION, "Eak opened the tower route");
+                handleStage1Transition();
+                return;
+            }
+            if (mapId == OPQConstants.OPQ_STAGE_2 && leaderMap != mapId
+                    && OrbisPqData.isOrbisRoom(leaderMap) && readEimInt("statusStg3", -1) >= 1) {
+                walkOutOfCurrentRoom();
+                return;
+            }
         }
 
         switch (opqBotState) {
@@ -247,9 +272,6 @@ public class OPQBot extends BotSM {
                 break;
             case STAGE_1_TRANSITION:
                 handleStage1Transition();
-                break;
-            case STAGE_1_TRANSITION_PT_2:
-                handleStage1TransitionPart2();
                 break;
             case MIDDLE_STAGE:
                 handleMiddleStage();
@@ -594,9 +616,14 @@ public class OPQBot extends BotSM {
         if (throwing) {
             SocialCommands.BotSpeak(getChr(), BotMessages.get("opq.dropping_clouds",
                     OPQConstants.CLOUD_REQUIRED, BotMessages.get("opq.cloud_plural")));
-            BotTiming.after(400, () ->
-                    DropCommands.botThrowItemQty(getChr(), OPQConstants.CLOUD_PIECE,
-                            OPQConstants.CLOUD_REQUIRED, OPQConstants.STAGE_1_DROP_POS));
+            Character bot = getChr();
+            MapleMap clouds = bot.getMap();
+            BotTiming.after(400, () -> {
+                if (bot.getMap() == clouds && PqActions.readEimInt(bot, "statusStg0", -1) != 1) {
+                    DropCommands.botThrowItemQty(bot, OPQConstants.CLOUD_PIECE,
+                            OPQConstants.CLOUD_REQUIRED, OPQConstants.STAGE_1_DROP_POS);
+                }
+            });
             waitFor(800); // hold WAIT until the throw lands
         }
 
@@ -648,34 +675,7 @@ public class OPQBot extends BotSM {
     }
 
     private void handleStage1Wait() {
-        if (sharedContext.isStage1Complete() && orchestrator.isChamberlainSpawned(getChr())) {
-            orchestrator.followLeaderWarp(getChr(), STAGE_1_COMPLETE_TP);
-            // Walk to the portal on the top platform, then step through it.
-            PqActions.walkToPortal(getChr(), 4);
-            transitionTo(OPQBotState.STAGE_1_TRANSITION, "stage1Complete flag flipped by orchestrator");
-            return;
-        }
-
-        // Same recovery the stage-2 wait has, for the same reason: the altar only fires if a
-        // stack of exactly 20 lands in its box, so a run where that never happened (the
-        // thrower died, the stack was looted inside the engine's five-second window, the drop
-        // landed outside the box) must be able to give up rather than sit here forever. The
-        // leader leaving is the other end of the same rope - he may have exited the PQ or
-        // walked back to the lobby, and the run is over either way.
-        int leaderMap = partyLeaderMapId();
-        if (leaderMap == OPQConstants.OPQ_EXIT_LOBBY) {
-            blockingSleep(1000); // deliberate: blocking follow-warp below
-            orchestrator.followLeaderWarp(getChr(), new Point(-161, 323));
-            transitionTo(OPQBotState.EXIT_LOBBY, "leader left stage 1 — following to exit lobby");
-            return;
-        }
-        if (leaderMap == OPQConstants.OPQ_LOBBY) {
-            blockingSleep(1000); // deliberate: blocking follow-warp below
-            orchestrator.followLeaderWarp(getChr(), new Point(-233, 174));
-            transitionTo(OPQBotState.LOOP_CHECK, "leader already in OPQ lobby");
-            return;
-        }
-
+        // An altar that never fires (the offering was looted, missed its box, etc.) may time out.
         if (waitTimedOut()) {
             transitionTo(OPQBotState.LOOP_CHECK,
                     "stage-1 wait timed out after "
@@ -684,28 +684,19 @@ public class OPQBot extends BotSM {
     }
 
     private void handleStage1Transition() {
-        debugLogf("handleStage1Transition: mapId=" + getChr().getMapId()
-                + " awaiting teleport to central tower (" + OPQConstants.OPQ_TOWER + ")");
-
-        // I'm not sure how to have the bots enter the proper portal which is to get them to the map of OPQ_TOWER
-        // Because technically its a PQ instance, so it's gotta be the correct MapleMap, not just generic map.
-        if (partyLeaderMapId() == OPQConstants.OPQ_TOWER) {
-            // deliberate synchronous warp sequence (blocking arrival choreography)
-            blockingSleep(1000);
-            orchestrator.followLeaderWarp(getChr(), new Point(-260,-32)); // Spawn point for OPQ tower [x=-260,y=-32]
-            blockingSleep(1000);
-            PqActions.walkTo(getChr(), new Point(159, -32)); // Walk to Portal [x=159,y=-32]
-            transitionTo(OPQBotState.STAGE_1_TRANSITION_PT_2, "Waiting for leader to enter stage 2");
+        Character bot = getChr();
+        Character leader = PqActions.partyLeader(bot);
+        MapleMap here = bot.getMap();
+        MapleMap target = leader == null ? null : leader.getMap();
+        if (target == null || here == target || here.getEventInstance() != target.getEventInstance()
+                || !OrbisPqData.isOrbisRoom(target.getId()) || target.getId() == OPQConstants.OPQ_STAGE_1) {
+            return;
         }
-    }
-
-    private void handleStage1TransitionPart2() {
-        // The tower is the hub; the quest's middle stages are all reached from here, so hand
-        // over to the generic middle-stage driver instead of jumping straight at the music
-        // box and skipping five rooms. If the party has already worked its way to the music
-        // box room, that driver routes there on its own.
-        if (getChr().getMapId() == OPQConstants.OPQ_TOWER) {
-            transitionTo(OPQBotState.MIDDLE_STAGE, "tower reached, working the middle stages");
+        // Eak moves the team to the top platform; the tower is reached via in00 even when
+        // the leader has already left it for another room.
+        var door = here.getPortal("in00");
+        if (door != null) {
+            PqActions.walkThroughPortal(bot, door);
         }
     }
 
@@ -819,7 +810,7 @@ public class OPQBot extends BotSM {
         if (door == null) {
             return;
         }
-        if (PqActions.walkTo(getChr(), door.getPosition())) PqActions.enterPortal(getChr(), door);
+        PqActions.walkThroughPortal(getChr(), door);
         waitFor(OPQConstants.NAVIGATE_SETTLE_MS);
     }
 
@@ -898,7 +889,7 @@ public class OPQBot extends BotSM {
             waitFor(OPQConstants.NAVIGATE_SETTLE_MS);
             return;
         }
-        if (PqActions.walkTo(getChr(), exit.getPosition())) PqActions.enterPortal(getChr(), exit);
+        PqActions.walkThroughPortal(getChr(), exit);
         waitFor(OPQConstants.NAVIGATE_SETTLE_MS);
     }
 
@@ -916,10 +907,8 @@ public class OPQBot extends BotSM {
     /**
      * Walk onto the room's tower portal and step through it.
      *
-     * <p>The tower portals ({@code in00..in06}) are script portals: walking onto one only moves
-     * the bot, and the script that actually warps to the room only runs on entering. The tower
-     * spot a room declares is that portal's position, so this walks there and then enters the
-     * portal the bot is now standing on.
+     * <p>The tower portals ({@code in00..in06}) are script portals: the script that warps to the
+     * room only runs on entering the named door.
      */
     private void walkToRoom(OrbisStages.StageRoom room) {
         if (getChr().getMapId() != OPQConstants.OPQ_TOWER) {
@@ -927,13 +916,9 @@ public class OPQBot extends BotSM {
             walkToTower();
             return;
         }
-        Point spot = room.towerSpot();
-        if (spot == null) {
-            return;
-        }
-        var portal = getChr().getMap().findClosestPortal(spot);
-        if (portal != null && PqActions.walkTo(getChr(), portal.getPosition())) {
-            PqActions.enterPortal(getChr(), portal);
+        var portal = getChr().getMap().getPortal(OrbisPqData.towerPortalName(room.portalInTower()));
+        if (portal != null) {
+            PqActions.walkThroughPortal(getChr(), portal);
         }
         waitFor(OPQConstants.NAVIGATE_SETTLE_MS);
     }

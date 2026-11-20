@@ -12,6 +12,7 @@ import java.util.BitSet;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.function.LongConsumer;
 
 /**
  * What a bot does in each Kerning PQ stage.
@@ -41,9 +42,10 @@ public final class KerningStages {
     private static final int COLLECTION_CHAT_VARIANTS = 20;
 
     /** The combat sweep only hunts while this member is short of its assigned coupon count. */
-    static boolean needsCoupons(Character bot) {
+    static boolean needsCoupons(Character bot, CouponRun run) {
         EventInstanceManager instance = bot.getEventInstance();
-        if (instance == null || instance.getProperty("1stageclear") != null) {
+        if (instance == null || (run != null && run.instance == instance && !run.canCollect())
+                || instance.getProperty("1stageclear") != null) {
             return false;
         }
         int question = instance.gridCheck(bot);
@@ -55,15 +57,21 @@ public final class KerningStages {
     static final class CouponRun {
         final EventInstanceManager instance;
         private long claimAtMs;
+        private long collectAtMs;
         private boolean completionAnnounced;
 
         CouponRun(EventInstanceManager instance) {
             this.instance = instance;
         }
 
-        void work(Character bot) {
+        boolean canCollect() {
+            return collectAtMs == 0 || GCMovement.movementNowMs() >= collectAtMs;
+        }
+
+        void work(Character bot, LongConsumer wake) {
             if (instance.getProperty("1stageclear") != null || !needsMemberPass(bot, instance)) {
                 claimAtMs = 0;
+                collectAtMs = 0;
                 PqActions.deliverAndWait(bot, KerningPqData.PASS, KerningPqData.NPC_CLOTO);
                 return;
             }
@@ -72,14 +80,22 @@ public final class KerningStages {
                 // and 0 once she awards the pass.
                 int question = instance.gridCheck(bot);
                 if (question == -1) {
-                    if (!readyToClaim(bot)) return;
+                    if (!readyToClaim(bot, wake)) return;
                     claimAtMs = 0;
                     question = reserveQuestion(bot, instance);
                     if (question == -1) return;
                     completionAnnounced = false;
+                    collectAtMs = GCMovement.movementNowMs() + ThreadLocalRandom.current().nextLong(600, 3_001);
                     sayCollection(bot, "start", requiredCoupons(question));
                 }
                 if (question > 0) {
+                    long now = GCMovement.movementNowMs();
+                    if (now < collectAtMs) {
+                        // Claim and departure are different actions. Wake on this member's own
+                        // deadline; the party's macro/combat beats must not round them all together.
+                        wake.accept(collectAtMs - now);
+                        return;
+                    }
                     int excess = PqActions.countItem(bot, KerningPqData.COUPON) - requiredCoupons(question);
                     if (excess < 0) {
                         PqActions.approachRoomLoot(bot, COUPON_LOOT_IDS);
@@ -99,17 +115,20 @@ public final class KerningStages {
             }
         }
 
-        private boolean readyToClaim(Character bot) {
+        private boolean readyToClaim(Character bot, LongConsumer wake) {
             if (!PqActions.walkToNpc(bot, KerningPqData.NPC_CLOTO)) {
                 claimAtMs = 0;
                 return false;
             }
             long now = GCMovement.movementNowMs();
             if (claimAtMs == 0) {
-                GCMovement.stop(bot);
                 claimAtMs = now + ThreadLocalRandom.current().nextLong(2_000, 5_001);
             }
-            return now >= claimAtMs;
+            if (now < claimAtMs) {
+                wake.accept(claimAtMs - now);
+                return false;
+            }
+            return true;
         }
 
         void pickedUp(Character bot) {

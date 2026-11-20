@@ -163,6 +163,22 @@ final class MovementPlan {
         return inMap(map.getId(), edges);
     }
 
+    /** A* connects regions; a precise move must also reach its point on the final region. */
+    MovementPlan finishOnSurface(MapleMap map, Point target, double walkPxPerSecond) {
+        Point landing = edges.getLast().endPoint;
+        if (GCMovement.withinArrivalBox(landing, target)) {
+            return this;
+        }
+        MovementPlan lastWalk = surfaceWalk(map, landing, target, walkPxPerSecond);
+        if (lastWalk == null) {
+            return this; // not a continuous surface; leave the final approach to the next move
+        }
+        var fullRoute = new java.util.ArrayList<BotNavigationGraph.Edge>(edges.size() + lastWalk.edges.size());
+        fullRoute.addAll(edges);
+        fullRoute.addAll(lastWalk.edges);
+        return inMap(mapId, fullRoute);
+    }
+
     boolean isComplete(long elapsedMs) {
         return elapsedMs >= totalTimeMs;
     }

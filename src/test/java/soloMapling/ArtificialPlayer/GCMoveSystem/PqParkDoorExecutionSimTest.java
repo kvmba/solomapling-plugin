@@ -1,6 +1,7 @@
 package soloMapling.ArtificialPlayer.GCMoveSystem;
 
 import org.gms.client.Character;
+import org.gms.client.Client;
 import org.gms.config.GameConfig;
 import org.gms.dao.entity.GameConfigDO;
 import org.gms.manager.ServerManager;
@@ -8,9 +9,13 @@ import org.gms.property.ServiceProperty;
 import org.gms.server.maps.MapleMap;
 import org.gms.service.ConfigService;
 import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.context.ApplicationContext;
+import soloMapling.ArtificialPlayer.BotTypes.Kerning.KerningPqData;
 import soloMapling.ArtificialPlayer.BotTypes.Ludi.LudiPqData;
 import soloMapling.ArtificialPlayer.PartyQuest.PqActions;
 
@@ -20,11 +25,17 @@ import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 import static org.mockito.Mockito.RETURNS_DEEP_STUBS;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.doNothing;
+import static org.mockito.Mockito.doReturn;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.spy;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
@@ -89,6 +100,14 @@ class PqParkDoorExecutionSimTest {
         MovementClock.reset();
     }
 
+    @AfterEach
+    void clearMove() throws ReflectiveOperationException {
+        var field = GCMovement.class.getDeclaredField("STATES");
+        field.setAccessible(true);
+        ((java.util.Map<?, ?>) field.get(null)).remove(BOT_ID);
+        PqActions.clearSeekState(BOT_ID);
+    }
+
     private static GameConfigDO config(String type, String key, String value) {
         GameConfigDO d = new GameConfigDO();
         d.setConfigType(type);
@@ -99,10 +118,14 @@ class PqParkDoorExecutionSimTest {
         return d;
     }
 
-    private static boolean wzAvailable() {
+    private static org.gms.provider.Data mapData(int id) {
+        return org.gms.provider.DataProviderFactory.getDataProvider(org.gms.provider.wz.WZFiles.MAP)
+                .getData("Map/Map" + id / 100_000_000 + "/" + id + ".img");
+    }
+
+    private static boolean wzAvailable(int id) {
         try {
-            return org.gms.provider.DataProviderFactory.getDataProvider(org.gms.provider.wz.WZFiles.MAP)
-                    .getData("Map/Map9/922010100.img") != null;
+            return mapData(id) != null;
         } catch (Throwable t) {
             return false;
         }
@@ -114,14 +137,18 @@ class PqParkDoorExecutionSimTest {
         }
     }
 
-    private static Sim sim(Point start) {
-        MapleMap map = realRoom();
+    private static Sim sim(int mapId, Point start) {
+        MapleMap map = realRoom(mapId);
         // Bake the graph up front (production warms it async; the bake itself is covered
         // elsewhere). The driver tick only peeks this cache.
         BotNavigationGraphProvider.getGraph(map, BotMovementProfile.base());
         AtomicReference<Point> pos = new AtomicReference<>(new Point(start));
         Character bot = new CharacterDouble(BOT_ID, map,
                 () -> new Point(pos.get()), p -> pos.set(new Point(p)));
+        return registerSim(bot, map, start, pos);
+    }
+
+    private static Sim registerSim(Character bot, MapleMap map, Point start, AtomicReference<Point> pos) {
         BotMovementState st = new BotMovementState(bot, null);
         st.movementProfile = BotMovementProfile.base();
         st.lastProfileRefreshMs = Long.MAX_VALUE / 4;
@@ -153,11 +180,9 @@ class PqParkDoorExecutionSimTest {
      * The real 922010100 room: WZ footholds, portals and life entries (the turn-in NPC), so both
      * the park spot and the chain door come from shipped data.
      */
-    private static MapleMap realRoom() {
-        org.gms.provider.Data mapData =
-                org.gms.provider.DataProviderFactory.getDataProvider(org.gms.provider.wz.WZFiles.MAP)
-                        .getData("Map/Map9/922010100.img");
-        MapleMap map = new MapleMap(MAP_ID, 0, 0, 922010000, 0.0f);
+    private static MapleMap realRoom(int mapId) {
+        org.gms.provider.Data mapData = mapData(mapId);
+        MapleMap map = new MapleMap(mapId, 0, 0, 922010000, 0.0f);
         map.setMapLineBoundings(-4000, 600, -3000, 3000);
         org.gms.server.maps.FootholdTree tree =
                 new org.gms.server.maps.FootholdTree(new Point(-4000, -4000), new Point(4000, 4000));
@@ -223,8 +248,12 @@ class PqParkDoorExecutionSimTest {
     }
 
     private static void tickN(Sim sim, int ticks) {
+        tickN(sim, ticks, true);
+    }
+
+    private static void tickN(Sim sim, int ticks, boolean observed) {
         for (int i = 0; i < ticks; i++) {
-            if (i % 30 == 0) {
+            if (observed && i % 30 == 0) {
                 ObserverTracker.markObservedNow(sim.st().bot.getMap());
             }
             try {
@@ -242,8 +271,8 @@ class PqParkDoorExecutionSimTest {
      */
     @Test
     void oneMacroTickOfFollowThenParkStillReachesTheDoor() {
-        assumeTrue(wzAvailable(), "Map.wz needed");
-        Sim sim = sim(new Point(0, 130));
+        assumeTrue(wzAvailable(MAP_ID), "Map.wz needed");
+        Sim sim = sim(MAP_ID, new Point(0, 130));
         Point door = sim.map().getPortal("next00").getPosition();
         Character bot = sim.st().bot;
 
@@ -279,5 +308,43 @@ class PqParkDoorExecutionSimTest {
         assertTrue(dist <= 40,
                 "the bot never reached the chain door: ended at " + sim.p() + ", door " + door
                         + " (dist " + String.format("%.1f", dist) + ")");
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    void kerningFirstDoorRunsItsScriptFromTheActualLandingSurface(boolean observed) {
+        int mapId = 103000800;
+        assumeTrue(wzAvailable(mapId), "Map.wz needed");
+        Point start = new Point(592, 106);
+        MapleMap map = realRoom(mapId);
+        BotNavigationGraphProvider.getGraph(map, BotMovementProfile.base());
+        var pos = new AtomicReference<>(start);
+        Character bot = spy(new CharacterDouble(BOT_ID, map,
+                () -> new Point(pos.get()), p -> pos.set(new Point(p))));
+        Client client = mock(Client.class);
+        doReturn(client).when(bot).getClient();
+        Sim sim = registerSim(bot, map, start, pos);
+        org.gms.server.maps.Portal door = spy(sim.map().getPortal("next00"));
+        doNothing().when(door).enterPortal(client);
+        sim.map().addPortal(door);
+        Point art = door.getPosition();
+        assertEquals(new Point(716, 106), art);
+        assertEquals(new Point(716, 115), GCMovement.portalApproachPoint(sim.map(), door));
+
+        assertFalse(PqActions.walkToNpc(bot, KerningPqData.NPC_CLOTO), "standing on Cloto is not the stand-off");
+        tickN(sim, 40, observed);
+        assertTrue(Math.abs(sim.p().x - start.x) >= 24);
+        assertTrue(PqActions.walkToNpc(bot, KerningPqData.NPC_CLOTO));
+
+        PqActions.walkThroughPortal(bot, door);
+        verify(door, never()).enterPortal(client);
+        tickN(sim, 80, observed);
+        assertTrue(GCMovement.withinArrivalBox(sim.p(), GCMovement.portalApproachPoint(sim.map(), door)),
+                () -> "bot ended at " + sim.p() + ", move target=" + sim.st().moveTarget
+                        + ", coarse=" + sim.st().coarseActive);
+        assertTrue(PqActions.movementShielded(BOT_ID), "door owns steering until the script runs");
+        PqActions.walkThroughPortal(bot, door);
+        verify(door).enterPortal(client);
+        assertFalse(PqActions.movementShielded(BOT_ID), "a refused portal returns steering to the stage");
     }
 }

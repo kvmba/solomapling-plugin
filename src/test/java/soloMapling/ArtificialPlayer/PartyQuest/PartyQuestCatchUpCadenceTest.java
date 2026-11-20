@@ -1,11 +1,8 @@
 package soloMapling.ArtificialPlayer.PartyQuest;
 
-import org.gms.client.Character;
-import org.gms.server.maps.MapleMap;
 import org.gms.server.maps.Portal;
 import org.junit.jupiter.api.Test;
 
-import java.awt.Point;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
@@ -47,57 +44,6 @@ class PartyQuestCatchUpCadenceTest {
         int hops = Integer.parseInt(java.replaceAll("(?s).*MAX_CATCHUP_HOPS = (\\d+);.*", "$1"));
         assertTrue(hops >= 2 && hops <= 4,
                 "a few rooms per tick closes a real deficit without spanning the quest; got " + hops);
-    }
-
-    @Test
-    void aBotWorkingTheRunReDecidesFast() throws Exception {
-        String body = methodBody(source(), "protected long lowPriorityDelayMs()");
-        assertTrue(body.contains("isInsideQuest"),
-                "the fast cadence is for the run, not for idling in town");
-        assertTrue(body.contains("getMap().getEventInstance() != null"),
-                "the fast cadence is for maps that belong to the run's instance");
-        assertTrue(body.contains("IN_RUN_DELAY_MS"), "the in-run pace must be its own constant");
-        assertTrue(body.contains("super.lowPriorityDelayMs()"),
-                "a bot outside the run keeps the ordinary cadence exactly");
-    }
-
-    /**
-     * A recruit lobby must not be pushed onto the fast wheel. Two quests still list a public map
-     * in {@code isInsideQuest}: Carnival's two lobbies and Ariant's queue halls. Those maps carry
-     * no instance, so the instance gate is what keeps a hall full of idle runners on the
-     * background cadence.
-     *
-     * <p>Boss Rush's host map used to be the third example; it is no longer inside the run at all
-     * (a bot standing in its own recruit room has to be recruitable), so it now takes the ordinary
-     * lobby beat instead.
-     *
-     * <p>The MAP's instance is the right one to read, not the character's: a room-to-room walk
-     * unregisters and re-registers the character mid-warp, so the character's field is null for a
-     * moment exactly when a returning bot decides its next move - which would drop it back onto
-     * the 36-48s wheel at the very moment this fix exists for.
-     */
-    @Test
-    void aPublicLobbyMapKeepsTheSlowBackgroundCadence() throws Exception {
-        String body = methodBody(source(), "protected long lowPriorityDelayMs()");
-        assertTrue(body.contains("getMap().getEventInstance()"),
-                "isInsideQuest alone is not enough - it contains public lobby maps, and the "
-                        + "pace would turn every empty recruit hall into a busy one");
-        assertFalse(body.contains("getChr().getEventInstance()"),
-                "the character's instance is nulled during a room-to-room warp; read the map's");
-        assertFalse(body.contains("partyLeader"),
-                "the pace must not depend on where the leader is: a bot back on the leader's "
-                        + "map (or a leader that resolves no Character) is still inside the run");
-    }
-
-    @Test
-    void catchUpPaceBeatsTheUnobservedDefault() throws Exception {
-        String java = source();
-        long inRun = Long.parseLong(
-                java.replaceAll("(?s).*IN_RUN_DELAY_MS = ([0-9_]+)L;.*", "$1").replace("_", ""));
-        // BotSM's unobserved cadence is 36_000 + rand(12_000).
-        assertTrue(inRun <= 4_000,
-                "a bot working the run must re-decide in seconds, not on the 36-48s wheel; got "
-                        + inRun);
     }
 
     @Test

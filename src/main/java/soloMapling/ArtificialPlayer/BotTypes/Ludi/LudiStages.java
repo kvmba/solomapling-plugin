@@ -301,7 +301,7 @@ public final class LudiStages {
         if (standsDownForLiveMove(bot)) {
             return; // a walk owns the driver; see standsDownForLiveMove
         }
-        if (PqActions.walkTo(bot, exit.getPosition())) PqActions.enterPortal(bot, exit);
+        PqActions.walkThroughPortal(bot, exit);
     }
 
     /**
@@ -601,15 +601,14 @@ public final class LudiStages {
         //
         // Unreachable means "the graph says there is no edge chain to this door for THIS bot's
         // profile", which is exactly the reason to hand the room to someone else.
-        if (!GCMovement.canPathTo(bot, door.getPosition().x, door.getPosition().y)) {
+        Point approach = GCMovement.portalApproachPoint(bot.getMap(), door);
+        if (!GCMovement.canPathTo(bot, approach.x, approach.y)) {
             releaseDoorRoom(bot);
             return false;
         }
-        if (PqActions.walkTo(bot, door.getPosition())) {
-            PqActions.enterPortal(bot, door);
-            if (bot.getMapId() == room) {
-                return true;
-            }
+        PqActions.walkThroughPortal(bot, door);
+        if (bot.getMapId() == room) {
+            return true;
         }
         // Only give the claim up when the walk is genuinely OVER: walkTo's false means "not
         // arrived inside its 1.2s window", and a long walk to a far door is still in flight
@@ -648,7 +647,7 @@ public final class LudiStages {
         if (standsDownForLiveMove(bot)) {
             return; // a walk owns the driver; see standsDownForLiveMove
         }
-        if (PqActions.walkTo(bot, exit.getPosition())) PqActions.enterPortal(bot, exit);
+        PqActions.walkThroughPortal(bot, exit);
     }
 
     /**
@@ -1003,14 +1002,15 @@ public final class LudiStages {
             if (!"out00".equals(name) && !"out01".equals(name)) {
                 continue;
             }
-            if (p.getPosition() == null) {
+            if (p.getPosition() == null || !p.getPortalStatus()) {
                 continue;
             }
-            double dsq = bot.getPosition().distanceSq(p.getPosition());
+            Point approach = GCMovement.portalApproachPoint(map, p);
+            double dsq = bot.getPosition().distanceSq(approach);
             if (dsq >= bestSq) {
                 continue;
             }
-            if (!GCMovement.canPathTo(bot, p.getPosition().x, p.getPosition().y)) {
+            if (!GCMovement.canPathTo(bot, approach.x, approach.y)) {
                 continue; // on the far side of a one-way ledge; the other exit is the way out
             }
             best = p;
@@ -1203,10 +1203,7 @@ public final class LudiStages {
             rung = bot.getMap().getPortal("next00");
             if (rung == null) return stageCleared(bot, 6) || previousY > hereY;
         }
-        if (!PqActions.walkTo(bot, rung.getPosition())) {
-            return false;
-        }
-        PqActions.enterPortal(bot, rung);
+        PqActions.walkThroughPortal(bot, rung);
         // A working rung leaves the bot higher than it was (the tower's y decreases as it goes
         // up); a decoy puts it back at the bottom.
         return bot.getPosition().y < hereY;

@@ -243,12 +243,14 @@ class PqRearguardTest {
         Portal exit = mock(Portal.class);
         when(exit.getTargetMapId()).thenReturn(922010200);
         when(exit.getPosition()).thenReturn(new Point(100, 0));
+        when(exit.getPortalStatus()).thenReturn(true);
         when(room.getPortals()).thenReturn(List.of(exit));
 
         try (var actions = mockStatic(PqActions.class);
              var movement = mockStatic(GCMovement.class)) {
-            assertFalse(follower.bot().followLeaderIntoNextRoom());
-            actions.verify(() -> PqActions.walkTo(follower.character(), exit.getPosition()));
+            movement.when(() -> GCMovement.hasMoveTarget(follower.character())).thenReturn(true);
+            follower.bot().tickPartyQuest();
+            actions.verify(() -> PqActions.walkToPortal(follower.character(), exit));
             speech.verifyNoInteractions();
         }
     }

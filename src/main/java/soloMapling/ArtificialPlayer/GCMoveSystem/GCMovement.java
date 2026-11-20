@@ -579,6 +579,22 @@ public final class GCMovement {
         }
     }
 
+    /**
+     * Use the nearby standing surface, not the artwork origin, as the walk goal. Kerning's first
+     * exit is drawn 9px above the floor. Keep the original goal for genuinely aerial portals.
+     */
+    public static Point portalApproachPoint(MapleMap map, Portal portal) {
+        Point entrance = portal.getPosition();
+        Point ground = BotPhysicsEngine.findGroundPoint(map, entrance);
+        return ground != null && Math.abs(ground.y - entrance.y) <= 32 ? ground : entrance;
+    }
+
+    /** Match the coarse driver's 12px arrival box as well as precise walking. */
+    public static boolean withinArrivalBox(Point position, Point approach) {
+        return Math.abs(position.x - approach.x) <= GCMovementDriver.COARSE_ARRIVE_PX
+                && Math.abs(position.y - approach.y) <= GCMovementDriver.COARSE_ARRIVE_PX;
+    }
+
     /** Enter a scripted quest portal without racing the physics tick, including same-map warps. */
     public static void enterPortal(Character bot, Portal portal) {
         if (bot == null || portal == null || bot.getClient() == null || bot.getMap() == null) return;
@@ -589,9 +605,9 @@ public final class GCMovement {
             if (st != null && st.tickStopped) return;
             MapleMap map = bot.getMap();
             Point before = new Point(bot.getPosition());
-            Point entrance = portal.getPosition();
-            if (map.getPortal(portal.getId()) != portal
-                    || Math.abs(before.x - entrance.x) > 8 || Math.abs(before.y - entrance.y) > 8) return;
+            if (map.getPortal(portal.getId()) != portal || !portal.getPortalStatus()
+                    || !(withinArrivalBox(before, portal.getPosition())
+                    || withinArrivalBox(before, portalApproachPoint(map, portal)))) return;
             // Arm the jump pose before the warp so the host's SPAWN_PLAYER omits the foothold and the
             // client cannot snap the bot back down (see ENTRY_RAISE_PX). Only a bot under dynamic
             // control: its next driver tick re-derives the real pose through resolveStance, whereas a

@@ -761,6 +761,11 @@ public abstract class BotSM implements EventSubscriber {
         BotTickService.nudge(getChr().getId(), initialDelayMs, period);
     }
 
+    /** Check an action deadline on the normal FSM thread without changing its steady cadence. */
+    public final void requestTickWithin(long delayMs) {
+        BotTickService.requestEarlierTick(getChr().getId(), tickRunnable, delayMs);
+    }
+
     // Cadence tier tracking: reschedule the observed cadence only on a tier flip, but
     // re-assert the low cadence every unobserved tick - a reschedule is two field
     // writes on the tick wheel now, and re-asserting lets a phase-dependent low delay

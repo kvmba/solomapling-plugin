@@ -1,6 +1,7 @@
 package soloMapling.ArtificialPlayer.BotTypes.BossRush;
 
 import org.gms.client.Character;
+import org.gms.server.maps.Portal;
 import soloMapling.ArtificialPlayer.BotGeneration;
 import soloMapling.ArtificialPlayer.PartyQuest.PartyQuestBot;
 import soloMapling.ArtificialPlayer.PartyQuest.PqActions;
@@ -47,6 +48,16 @@ public class BossRushPQBot extends PartyQuestBot {
         // and the answer to a player's "anyone want to party?" - the crowd was there and
         // unreachable except by right-click invite.
         return BossRushPqData.isFightRoom(mapId) || BossRushPqData.isRestSpot(mapId);
+    }
+
+    @Override
+    protected Portal forwardPortal(int leaderMapId) {
+        var map = getChr().getMap();
+        int here = map.getId();
+        // raid_stage sends every fifth room to a lower-numbered reward map.
+        int rest = BossRushPqData.FIRST_STAGE + (here - 970030100) / 500;
+        return leaderMapId == rest || (leaderMapId > here && (leaderMapId - here) % 100 == 0)
+                ? map.getPortal("clear") : null;
     }
 
     @Override

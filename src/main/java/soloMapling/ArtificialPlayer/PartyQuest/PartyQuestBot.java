@@ -4,19 +4,21 @@ import org.gms.client.Character;
 import org.gms.scripting.event.EventInstanceManager;
 import org.gms.server.maps.MapleMap;
 import org.gms.server.maps.Portal;
+import soloMapling.ArtificialPlayer.BotAttackSystem.BotAuraState;
 import soloMapling.ArtificialPlayer.BotCommandsPack.SocialCommands;
 import soloMapling.ArtificialPlayer.BotCommandsPack.WarpCommands;
 import soloMapling.ArtificialPlayer.BotDialogueHandler;
+import soloMapling.ArtificialPlayer.BotGrindSystem.GrindTickRegistry;
+import soloMapling.ArtificialPlayer.BotHealthSystem.BotPotionSim;
+import soloMapling.ArtificialPlayer.BotMessagingSystem.CharacterStorage;
+import soloMapling.ArtificialPlayer.BotMessagingSystem.ChatMessage;
 import soloMapling.ArtificialPlayer.BotPartySystem.BotPartyCommands;
 import soloMapling.ArtificialPlayer.BotPartySystem.BotPartyLogic;
 import soloMapling.ArtificialPlayer.BotPartySystem.BotPartyQueue;
 import soloMapling.ArtificialPlayer.BotPartySystem.BotRecruitManager;
 import soloMapling.ArtificialPlayer.BotSM;
-import soloMapling.ArtificialPlayer.BotAttackSystem.BotAuraState;
-import soloMapling.ArtificialPlayer.BotHealthSystem.BotPotionSim;
-import soloMapling.ArtificialPlayer.BotMessagingSystem.CharacterStorage;
-import soloMapling.ArtificialPlayer.BotMessagingSystem.ChatMessage;
-import soloMapling.ArtificialPlayer.BotGrindSystem.GrindTickRegistry;
+import soloMapling.ArtificialPlayer.BotTypes.OPQ.OPQBot;
+import soloMapling.ArtificialPlayer.BotTypes.OPQ.OrbisPqData;
 import soloMapling.ArtificialPlayer.GCMoveSystem.GCMovement;
 import soloMapling.BotLogger;
 import soloMapling.Environment.BotMessages;
@@ -115,35 +117,12 @@ public abstract class PartyQuestBot extends BotSM implements GrindTickRegistry.P
     /** How many rooms one catch-up tick may chain through (each hop is a bounded walk+portal). */
     private static final int MAX_CATCHUP_HOPS = 3;
 
-    /**
-     * How fast a bot working the run re-decides, in ms.
-     *
-     * <p>A quest room is by definition a map no real player is watching, so the default
-     * unobserved cadence ({@link BotSM#lowPriorityDelayMs}, 36-48s) is what every stage decision
-     * in one used to run at. Catch-up was already paced at this value, but only while the leader
-     * stood on a different map - so the two cases that matter most fell straight through to
-     * 36-48s: a bot that had finished its own sub-room and was back on the leader's map (it
-     * claims the next room on its next tick), and a run whose leader does not resolve a Character
-     * at all ({@link #partyLeader} answers null for an offline leader, and a bot-led party may
-     * answer the bot itself). Both showed up as "enters a sub-room alone, comes back to the main
-     * map and just stands there for a long while".
-     *
-     * <p>The gate is "this MAP belongs to a run instance", not "inside the quest's map set": a
-     * recruit lobby or another public map that a quest happens to list in
-     * {@link #isInsideQuest(int)} carries no instance, so a bot standing there keeps the slow
-     * background cadence - a hall of idle runners must not turn into a busy one. The map's own
-     * instance is read rather than the bot's: a room-to-room walk unregisters and re-registers
-     * the character on the way through ({@code Character.changeMap}), so the character's field is
-     * momentarily null exactly when the returning bot is deciding what to do next.
-     */
-    private static final long IN_RUN_DELAY_MS = 2_500L;
-
+    /** Read the room's instance: the character's membership can be transient during a warp. */
     @Override
     protected long lowPriorityDelayMs() {
-        Character bot = getChr();
-        if (bot != null && bot.getMap() != null && isInsideQuest(bot.getMapId())
-                && (bot.getMap().getEventInstance() != null || runsOnOwnClock())) {
-            return IN_RUN_DELAY_MS;
+        MapleMap map = getChr().getMap();
+        if (map != null && isInsideQuest(map.getId()) && (map.getEventInstance() != null || runsOnOwnClock())) {
+            return PqActions.inRunDelayMs();
         }
         return super.lowPriorityDelayMs();
     }
@@ -152,11 +131,8 @@ public abstract class PartyQuestBot extends BotSM implements GrindTickRegistry.P
      * Whether this run lives in a map that carries no {@code EventInstance}, yet still needs the
      * fast in-run cadence.
      *
-     * <p>The cadence gate above reads the map's event instance, which is what every scripted
-     * party quest registers. Monster Carnival is the exception: its arena is created with
-     * {@code MapManager.getDisposableMap}, so the map has no instance at all - and a bot left on
-     * the default 36-48s background cadence would summon roughly twice in a ten-minute match and
-     * read as a team that never played. Default false; the arena overrides it.
+     * <p>Public lobbies stay slow; quests such as Monster Carnival or Dojo opt in for their
+     * active rooms even though the host does not attach an event instance.
      */
     protected boolean runsOnOwnClock() {
         return false;
@@ -463,23 +439,14 @@ public abstract class PartyQuestBot extends BotSM implements GrindTickRegistry.P
         // tick wheel logs it - it must never fall through to the heuristic.
         GCMovement.ensureGraph(bot);
 
-        // Stay with the party. Most of these quests move between rooms by the players walking
-        // through a portal, not by a script warping the team, so a bot that only ever works on
-        // whatever room it happens to be standing in gets left behind at the first stage
-        // transition - registered in the instance but standing in an empty room, where it
-        // contributes nothing and, worse, is still counted by getPlayerCount for the puzzles
-        // that care how many people are present.
-        //
-        // The loop is what makes catch-up CATCH UP. One hop per tick meant a bot that fell one
-        // room behind needed one macro tick per room to close the gap - and the tick that matters
-        // here is the UNOBSERVED one (36-48s, because a lagging bot is by definition on a map no
-        // player is watching). Against a party advancing one room per stage, the deficit never
-        // closes. Hopping while the door chain is open closes several rooms inside ONE tick, and
-        // each hop is still an ordinary walk+portal (its script re-checks the stage gate, so a
-        // bot can never skip ahead of the leader).
+        // Once a door has the steering, do not run an old-room park or loot pass over it.
         boolean moved = false;
         for (int hop = 0; hop < MAX_CATCHUP_HOPS; hop++) {
-            if (!followLeaderIntoNextRoom()) {
+            FollowResult result = followLeaderIntoNextRoom();
+            if (result == FollowResult.WALKING) {
+                return;
+            }
+            if (result == FollowResult.NONE) {
                 break;
             }
             moved = true;
@@ -497,6 +464,40 @@ public abstract class PartyQuestBot extends BotSM implements GrindTickRegistry.P
             maybeQuestChat(Beat.CLEAR);
             returnToLobby("stage work reports the run is over");
             return;
+        }
+    }
+
+    /** The map-entry event only sees the new room; also wake this party's bots still behind. */
+    public static void wakeForLeaderEntry(Character leader, MapleMap destination) {
+        var party = leader.getParty();
+        if (party == null || party.getLeaderId() != leader.getId() || leader.getMap() != destination) {
+            return;
+        }
+        EventInstanceManager instance = destination.getEventInstance();
+        int destinationId = destination.getId();
+        for (var member : party.getMembers()) {
+            BotSM bot = CharacterStorage.getBotById(member.getId());
+            if (!(bot instanceof PartyQuestBot || bot instanceof OPQBot) || !bot.getRunning()) {
+                continue;
+            }
+            BotState state = bot.getState();
+            if (state == BotState.PAUSE || state == BotState.TRADING || state == BotState.FINISHED
+                    || bot.death().isCorpse()) {
+                continue;
+            }
+            Character teammate = bot.getChr();
+            var team = teammate.getParty();
+            MapleMap from = teammate.getMap();
+            if (team == null || team.getId() != party.getId() || from == null || from == destination
+                    || from.getEventInstance() != instance) {
+                continue;
+            }
+            if ((bot instanceof PartyQuestBot pq
+                    && pq.isInsideQuest(from.getId()) && pq.isInsideQuest(destinationId))
+                    || (bot instanceof OPQBot && OrbisPqData.isOrbisRoom(from.getId())
+                    && OrbisPqData.isOrbisRoom(destinationId))) {
+                bot.requestTickWithin(ThreadLocalRandom.current().nextLong(150, 701));
+            }
         }
     }
 
@@ -831,95 +832,57 @@ public abstract class PartyQuestBot extends BotSM implements GrindTickRegistry.P
         }
     }
 
+    private enum FollowResult { NONE, WALKING, MOVED }
+
     /**
-     * Walk through the portal the leader took, when the party has moved on without this bot.
-     *
-     * <p>Quests advance in one of two ways: the event script warps the whole team, or the
-     * players walk a portal whose script checks that the stage is clear. The second kind is
-     * invisible to a bot that does not walk it, and the result is not a stalled bot but a
-     * misleading one - it stays registered, so a stage that counts the party's numbers still
-     * counts it, while its position is in the room the party already left.
-     *
-     * <p>The portal is chosen by <em>destination</em>, not by proximity. A quest room's nearest
-     * portal is usually its spawn point ({@code sp}, target {@code 999999999}) or a return
-     * portal - walking onto either is at best a no-op and at worst a warp to a map that does not
-     * exist. The one that matters is the one whose target is the room the leader is standing in,
-     * and its own script (e.g. Kerning's {@code kpq0}) re-checks the stage gate, so a bot that
-     * arrives early is simply refused instead of skipping ahead.
-     *
-     * <p>Only follows within the quest: a leader who has gone back to town is not a stage
-     * transition, and following him out would abandon the run.
-     *
-     * @return true when this bot changed rooms
+     * A walk that outlives its blocking window still owns the tick. If the portal refuses entry,
+     * hand control back to this room's work so it can satisfy the gate.
      */
-    protected final boolean followLeaderIntoNextRoom() {
-        if (!isFollowingLeader()) {
-            return false; // this bot is on its own errand right now - the stage work decides
-        }
+    private FollowResult followLeaderIntoNextRoom() {
+        Character bot = getChr();
+        MapleMap here = bot.getMap();
         Character leader = partyLeader();
-        if (leader == null || leader == getChr()) {
-            return false;
+        MapleMap target = leader == null ? null : leader.getMap();
+        if (here == null || target == null || target == here || !isInsideQuest(target.getId())
+                || !isInsideQuest(here.getId()) || here.getEventInstance() != target.getEventInstance()
+                || !isFollowingLeader()) {
+            return FollowResult.NONE;
         }
-        int leaderMap = leader.getMapId();
-        int here = getChr().getMapId();
-        if (leaderMap == here || !isInsideQuest(leaderMap)) {
-            return false;
-        }
-        Portal exit = portalTo(leaderMap);
+        Portal exit = portalTo(here.getPortals(), target.getId());
         if (exit == null) {
-            // No door from here to there. Two very different situations hide behind that null,
-            // and telling them apart is what the catch-up walk below is for:
-            //
-            //  - the rooms are not directly connected because the party is MORE THAN ONE ROOM
-            //    ahead (a bot that had its own work in this stage - LPQ's trap room or a door
-            //    room - always leaves one stage late). The quest still has a forward door out of
-            //    this room (LPQ's next00 chain), and walking it is exactly what caught-up play
-            //    does. Without this the bot sat at the finished stage's NPC for the rest of the
-            //    run: the reported "one bot never comes back, so every later stage is a body
-            //    short". Its script re-checks the stage gate, so a bot that is refused simply
-            //    stands at the door and retries - it can never skip ahead of the leader.
-            //  - there is no forward door at all (the leader was warped by a script, or this is
-            //    the run's last room): leave it to the quest's own team warp next tick.
-            exit = forwardPortal();
+            exit = forwardPortal(target.getId());
         }
-        if (exit == null) {
-            return false;
+        if (exit == null || !exit.getPortalStatus()) {
+            return FollowResult.NONE;
         }
-        BotLogger.log("PQ bot " + getChr().getName() + " following the leader from "
-                + here + " to " + leaderMap + " through portal " + exit.getName());
+        if (!PqActions.walkToPortal(bot, exit)) {
+            if (bot.getMap() != here) {
+                return FollowResult.MOVED;
+            }
+            return GCMovement.hasMoveTarget(bot) ? FollowResult.WALKING : FollowResult.NONE;
+        }
         sayDoorLine();
-        if (PqActions.walkTo(getChr(), exit.getPosition())) {
-            PqActions.enterPortal(getChr(), exit);
+        PqActions.enterPortal(bot, exit);
+        if (bot.getMap() == here) {
+            return FollowResult.NONE;
         }
-        return getChr().getMapId() != here;
+        BotLogger.log("PQ bot " + bot.getName() + " followed the leader from "
+                + here.getId() + " through portal " + exit.getName());
+        return FollowResult.MOVED;
     }
 
     /**
-     * The room's forward door - the portal a party walks to advance one stage.
-     *
-     * <p>Default is {@code next00}, which is the convention every quest chain in this server
-     * shares ({@code linkToNextStage} renames that same portal's script on each stage turn-in, so
-     * it is the door the quest itself opens). A quest whose chain uses another name overrides
-     * this. Deliberately NOT "the nearest portal": a room's nearest portal is its spawn point,
-     * whose target is the engine's no-map sentinel - walking onto it moves nobody (the same
-     * failure {@link #portalTo} exists to prevent).
+     * A known door towards the leader when there is no direct WZ link. Linear quests have a
+     * {@code next00} chain; a quest with script-only links knows which one leads forward.
      */
-    protected Portal forwardPortal() {
-        var map = getChr().getMap();
-        return map == null ? null : forwardPortalOf(map.getPortals());
+    protected Portal forwardPortal(int leaderMapId) {
+        Portal door = forwardPortalOf(getChr().getMap().getPortals());
+        return door != null && door.getTargetMapId() <= leaderMapId ? door : null;
     }
 
     /**
-     * The pure form of {@link #forwardPortal()}: the {@code next00} door in a map's portal list
-     * that actually leads somewhere, or null when the room has none. Kept collection-taking so the
-     * rule is unit-testable against the engine's own portal type (a real {@code MapleMap} cannot
-     * be constructed in a test).
-     *
-     * <p>A portal named {@code next00} with target {@code 999999999} is NOT a stage door: that is
-     * the engine's "no map" sentinel, and the portal is a script-only gate whose effect depends on
-     * whatever script the room happens to carry (Davy Jones' {@code davy_next*} and the ghost-ship
-     * gates are named the same way but do not lead to a next map). Walking one of those to catch
-     * up would be a guess, so it reports null and the caller waits for the party instead.
+     * The {@code next00} door with a declared target. A script-only gate cannot be inferred
+     * from its name alone, so the quest that owns it supplies the route.
      */
     static Portal forwardPortalOf(java.util.Collection<Portal> portals) {
         if (portals == null) {
@@ -977,13 +940,6 @@ public abstract class PartyQuestBot extends BotSM implements GrindTickRegistry.P
      */
     protected boolean followLeaderByWarp() {
         return false;
-    }
-
-    /**
-     * The portal on this bot's map that leads to {@code targetMapId}, or null when there is none. */
-    private Portal portalTo(int targetMapId) {
-        var map = getChr().getMap();
-        return map == null ? null : portalTo(map.getPortals(), targetMapId);
     }
 
     /**

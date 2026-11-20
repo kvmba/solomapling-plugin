@@ -47,7 +47,7 @@ final class GCMovementDriver {
     // New move orders, rest changes and observation promotion wake the pending deadline.
     private static final int UNOBSERVED_IDLE_TICK_MS = 4000;
     // Coarse "arrived" box: within this of the goal, hold (and fire arrival) instead of replanning.
-    private static final int COARSE_ARRIVE_PX = 12;
+    static final int COARSE_ARRIVE_PX = 12;
     private static final boolean ENABLE_UNSTUCK = true;
     private static final int AIR_STUCK_RECOVER_TICKS = 30;
     // Ours: goal-proximity radius (px, per axis) inside which the stuck tally treats "closer to
@@ -620,6 +620,10 @@ final class GCMovementDriver {
                     // already-reached goal).
                     return false;
                 }
+            } else if (entry.moveTargetPrecise) {
+                // The last nav edge only lands on the destination platform. Finish the walk
+                // to the NPC/portal before reporting arrival (Kerning: x697 is not x716).
+                plan = plan.finishOnSurface(bot.getMap(), target, entry.movementProfile.walkVelocityPxs());
             }
             entry.coarsePlan = plan;
             entry.coarsePlanStartMs = now;

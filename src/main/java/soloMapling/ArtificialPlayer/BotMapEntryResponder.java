@@ -7,6 +7,7 @@ import soloMapling.ArtificialPlayer.BotAttackSystem.BotAuraState;
 import soloMapling.ArtificialPlayer.BotAttackSystem.BotBuffEffects;
 import soloMapling.ArtificialPlayer.BotMessagingSystem.CharacterStorage;
 import soloMapling.ArtificialPlayer.GCMoveSystem.GCMovement;
+import soloMapling.ArtificialPlayer.PartyQuest.PartyQuestBot;
 import soloMapling.server.BotTiming;
 import soloMapling.server.ExecutorServiceManager;
 import soloMapling.server.EventMessageSystem.EventBus;
@@ -155,6 +156,9 @@ public final class BotMapEntryResponder implements EventSubscriber {
                 if (chr != null && isBot(chr)) {
                     nudge(chr);
                 }
+            }
+            if (entering != null) {
+                PartyQuestBot.wakeForLeaderEntry(entering, map);
             }
             pushPartyHpSoon(map, entering);
             replayAurasSoon(map, entering);

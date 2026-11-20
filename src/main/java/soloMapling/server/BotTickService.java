@@ -4,6 +4,7 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLongFieldUpdater;
 
 // Fable Phase 2: the central macro-brain tick wheel. Replaces the per-bot
 // Executors.newScheduledThreadPool(1) in BotSM (one dedicated OS thread per bot)
@@ -27,13 +28,15 @@ public final class BotTickService {
     // 100ms keeps nudge latency well under the 150-700ms map-entry stagger.
     private static final long DRIVER_PERIOD_MS = 100;
 
-    private static final class Entry {
+    static final class Entry {
         final Runnable tick;
         volatile long periodMs;
         volatile long nextDueMs;
         // A fire-at time requested while a tick was in flight (nudge/reschedule);
         // consumed by that tick's completion so wakeups are never lost. 0 = none.
         volatile long pendingDueMs;
+        // A one-shot action deadline survives changes to the steady cadence.
+        volatile long actionDueMs = Long.MAX_VALUE;
         // High-priority foreground bots (FollowerBot) opt out of governor stretching -
         // their cadence IS the feature; degrading it breaks the bot, not just its polish.
         volatile boolean noThrottle;
@@ -44,9 +47,41 @@ public final class BotTickService {
             this.periodMs = periodMs;
             this.nextDueMs = nextDueMs;
         }
+
+        void requestActionAt(long at) {
+            ACTION_DUE.accumulateAndGet(this, at, Math::min);
+        }
+
+        long tryStart(long now) {
+            long due = Math.min(nextDueMs, actionDueMs);
+            if (now < due || !ticking.compareAndSet(false, true)) {
+                return Long.MAX_VALUE;
+            }
+            nextDueMs = Long.MAX_VALUE; // parked while ticking
+            if (now >= actionDueMs) {
+                ACTION_DUE.getAndSet(this, Long.MAX_VALUE); // satisfies every earlier request
+            }
+            if (pendingDueMs > 0 && now >= pendingDueMs) {
+                pendingDueMs = 0;
+            }
+            return due;
+        }
+
+        void finish(long now) {
+            long due = now + (noThrottle ? periodMs : (long) (periodMs * throttleFactor));
+            long pending = pendingDueMs;
+            if (pending > 0) {
+                pendingDueMs = 0;
+                due = Math.min(due, Math.max(pending, now));
+            }
+            nextDueMs = due;
+            ticking.set(false);
+        }
     }
 
     private static final Map<Integer, Entry> ENTRIES = new ConcurrentHashMap<>();
+    private static final AtomicLongFieldUpdater<Entry> ACTION_DUE =
+            AtomicLongFieldUpdater.newUpdater(Entry.class, "actionDueMs");
     private static final AtomicBoolean DRIVER_STARTED = new AtomicBoolean(false);
 
     // ── Governor v1 (Fable Phase 5): self-regulating degrade ────────────────
@@ -143,10 +178,17 @@ public final class BotTickService {
         requestFireAt(e, System.currentTimeMillis() + initialDelayMs);
     }
 
+    /** Wake for an action deadline without delaying a tick already due earlier. */
+    public static void requestEarlierTick(int botId, Runnable tick, long delayMs) {
+        Entry e = ENTRIES.get(botId);
+        if (e == null || e.tick != tick) return;
+        e.requestActionAt(System.currentTimeMillis() + delayMs);
+    }
+
     // Ask for a fire at 'at'. pendingDueMs is set first so an in-flight tick's
     // completion always sees the request - a wakeup can never be lost to the race
     // between this write and the driver parking nextDueMs for a dispatch.
-    private static void requestFireAt(Entry e, long at) {
+    static void requestFireAt(Entry e, long at) {
         e.pendingDueMs = at;
         if (e.nextDueMs != Long.MAX_VALUE) { // not mid-tick: move the wheel entry directly
             e.nextDueMs = at;
@@ -174,17 +216,9 @@ public final class BotTickService {
         long lagSum = 0;
         int dispatched = 0;
         for (Entry e : ENTRIES.values()) {
-            if (now < e.nextDueMs) {
-                continue;
-            }
-            if (!e.ticking.compareAndSet(false, true)) {
-                continue; // still running; its completion computes the next due time
-            }
-            long lag = now - e.nextDueMs;
-            e.nextDueMs = Long.MAX_VALUE; // parked while ticking
-            if (e.pendingDueMs > 0 && now >= e.pendingDueMs) {
-                e.pendingDueMs = 0; // this dispatch satisfies the pending request
-            }
+            long due = e.tryStart(now);
+            if (due == Long.MAX_VALUE) continue;
+            long lag = now - due;
             BotPerfStats.recordWheelDispatch(lag);
             lagSum += Math.max(0, lag);
             dispatched++;
@@ -224,16 +258,7 @@ public final class BotTickService {
         } catch (Throwable t) {
             // one bot's tick error must never kill its schedule (tickRunnable also guards)
         } finally {
-            long now = System.currentTimeMillis();
-            long due = now + (e.noThrottle ? e.periodMs
-                    : (long) (e.periodMs * throttleFactor)); // governor stretches steady cadence only
-            long pending = e.pendingDueMs;
-            if (pending > 0) {
-                e.pendingDueMs = 0;
-                due = Math.min(due, Math.max(pending, now));
-            }
-            e.nextDueMs = due;       // write the due time BEFORE releasing the guard
-            e.ticking.set(false);
+            e.finish(System.currentTimeMillis());
         }
     }
 }

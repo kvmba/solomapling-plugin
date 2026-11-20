@@ -1,6 +1,7 @@
 package soloMapling.ArtificialPlayer.BotTypes.Ellin;
 
 import org.gms.client.Character;
+import org.gms.server.maps.Portal;
 import soloMapling.ArtificialPlayer.BotGeneration;
 import soloMapling.ArtificialPlayer.PartyQuest.PartyQuestBot;
 import soloMapling.ArtificialPlayer.PartyQuest.PqActions;
@@ -47,6 +48,13 @@ public class EllinPQBot extends PartyQuestBot {
     @Override
     protected boolean isInsideQuest(int mapId) {
         return EllinPqData.isQuestRoom(mapId);
+    }
+
+    @Override
+    protected Portal forwardPortal(int leaderMapId) {
+        var map = getChr().getMap();
+        return map.getId() < EllinPqData.MAZE_MAP && leaderMapId >= map.getId() + 100
+                ? map.getPortal("east00") : null;
     }
 
     @Override
@@ -119,8 +127,9 @@ public class EllinPQBot extends PartyQuestBot {
         if (mazeExitAsked == getChr().getMapId() && PqActions.inInstance(getChr())) {
             return; // already asked on this visit; the warp either happened or is pending
         }
-        mazeExitAsked = getChr().getMapId();
-        PqActions.talkTo(getChr(), MAZE_NPC, 0);
+        if (PqActions.talkTo(getChr(), MAZE_NPC, 0)) {
+            mazeExitAsked = EllinPqData.MAZE_MAP;
+        }
     }
 
     /**

@@ -164,6 +164,10 @@ public class LudiPQBot extends PartyQuestBot {
             // the delivery post: the stock of passes in this bot's pockets is dropped at
             // the stage NPC's feet the moment the leader comes there for the turn-in.
             sayStageClearOnce(getChr().getMapId());
+            if (stage == 6) {
+                climb(); // the leader reaching the top doesn't finish this bot's remaining rungs
+                return false;
+            }
             if (getChr().getMapId() == LudiPqData.TRAP_ROOM) {
                 LudiStages.exitTrapRoom(getChr());
                 return false;
@@ -202,17 +206,15 @@ public class LudiPQBot extends PartyQuestBot {
     }
 
     /**
-     * The door-room loops drive this bot room by room on their own claims; the follow beat
-     * must not pull it back to the leader's map mid-exploration (the leader stays on the
-     * main map while the bots clear the rooms behind the doors). The stage-2 trap room never
-     * follows out either: its own work and its own gated exit own the room. For the door
-     * stages, two gates end the errand and restore normal following: the stage turned in
-     * ("4stageclear"/"5stageclear" set), or every room personally cleared / held by a live
-     * teammate - the bot parks at the NPC, delivers, and moves with the party again.
+     * Sub-rooms own their exits, and the climb owns its rungs. In the main door rooms, advance
+     * with the party only after the stage is turned in or the bot has no door work left.
      */
     @Override
     protected boolean isFollowingLeader() {
         int mapId = getChr().getMapId();
+        if (mapId == LudiPqData.STAGE_6) {
+            return false; // the climb owns the successive same-map rungs before next00
+        }
         if (mapId == LudiPqData.TRAP_ROOM) {
             // The trap room is a self-contained errand: the bot works its four pass boxes and
             // takes its own gated exit (exitTrapRoom) back to the tower. The follow beat must
@@ -221,39 +223,29 @@ public class LudiPQBot extends PartyQuestBot {
             // still uncollected, which the stage needs to clear.
             return false;
         }
+        if (mapId == LudiPqData.STAGE_2) {
+            Character leader = partyLeader();
+            return leader == null || leader.getMapId() != LudiPqData.TRAP_ROOM;
+        }
         int roomStage = LudiPqData.roomStage(mapId);
+        if (roomStage >= 0) {
+            return false; // some sub-rooms have two exits to the same map, but only one is reachable
+        }
         int stage = stageOf(mapId);
-        if (roomStage != 4 && roomStage != 5 && stage != 4 && stage != 5) {
+        if (stage != 4 && stage != 5) {
             return true; // not a door-room stage: follow as usual
         }
-        if (stage >= 0 && LudiStages.stageCleared(getChr(), stage)) {
-            return true; // the stage is turned in - move with the party
+        Character leader = partyLeader();
+        if (leader != null && LudiPqData.roomStage(leader.getMapId()) >= 0) {
+            // The leader exploring a side room is not the party moving to a new stage.
+            return false;
         }
-        // Stage 5: the posting table decides whether THIS bot may be where the party is
-        // moving. A body with no hide must not be carried into the guard room (922010506)
-        // - one PAD-999 touch kills it - and the leaders' door scripts admit any party
-        // member, so the bot must not follow there; the quest's own next00 warp carries it
-        // along instead. The leader's CURRENT room is the room the party is in.
-        if (roomStage == 5 || (stage == 5 && roomStage < 0)) {
-            Character leader = partyLeader();
-            int leaderStage = (leader != null) ? stageOf(leader.getMapId()) : -1;
-            if (leaderStage == 5 && !LudiStages.stage5AdmitsTo(getChr(), leader.getMapId())) {
-                return false;
-            }
-        }
-        int roomFirst = roomStage == 5 ? LudiPqData.STAGE5_ROOM_FIRST : LudiPqData.STAGE4_ROOM_FIRST;
-        int roomLast = roomStage == 5 ? LudiPqData.STAGE5_ROOM_LAST : LudiPqData.STAGE4_ROOM_LAST;
-        if (!LudiStages.doorRoomsOutstanding(getChr(), roomFirst, roomLast)) {
-            // This bot's door errand is done. The leader stepping into a sub-room is HIS
-            // exploring, not a party move - trailing him there re-walks a cleared door and
-            // then walks right back out. The NPC post is this bot's place.
-            Character leader = partyLeader();
-            if (leader != null && LudiPqData.roomStage(leader.getMapId()) >= 0) {
-                return false;
-            }
+        if (LudiStages.stageCleared(getChr(), stage)) {
             return true;
         }
-        return false;
+        int first = stage == 5 ? LudiPqData.STAGE5_ROOM_FIRST : LudiPqData.STAGE4_ROOM_FIRST;
+        int last = stage == 5 ? LudiPqData.STAGE5_ROOM_LAST : LudiPqData.STAGE4_ROOM_LAST;
+        return !LudiStages.doorRoomsOutstanding(getChr(), first, last);
     }
 
     /**

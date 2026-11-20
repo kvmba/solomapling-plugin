@@ -135,7 +135,8 @@ public class CarnivalPQBot extends PartyQuestBot {
     @Override
     protected boolean isInsideQuest(int mapId) {
         MapleMap map = getChr().getMap();
-        return CarnivalPqData.isArena(map) || CarnivalPqData.isRewardMap(map);
+        return map != null && map.getId() == mapId
+                && (CarnivalPqData.isArena(map) || CarnivalPqData.isRewardMap(map));
     }
 
     /**

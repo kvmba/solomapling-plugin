@@ -59,6 +59,11 @@ public final class PqActions {
     private PqActions() {
     }
 
+    /** Keep even unobserved quest members responsive without moving the whole party in lockstep. */
+    public static long inRunDelayMs() {
+        return ThreadLocalRandom.current().nextLong(2_000, 3_501);
+    }
+
     // =========================================================================
     // N1 - instance state
     // =========================================================================
@@ -191,39 +196,35 @@ public final class PqActions {
      * reaching the wait deadline is NOT arrival.
      */
     public static boolean walkTo(Character bot, Point target) {
+        return walkTo(bot, target, false);
+    }
+
+    private static boolean walkTo(Character bot, Point target, boolean portal) {
         if (bot == null || target == null || bot.getMap() == null) {
             return false;
         }
         MapleMap map = bot.getMap();
         SeekState control = seekStates.computeIfAbsent(bot.getId(), ignored -> new SeekState());
-        java.util.concurrent.CountDownLatch arrived = new java.util.concurrent.CountDownLatch(1);
+        java.util.concurrent.CountDownLatch arrived;
         StageWalkShield shield;
         synchronized (control) {
             Point here = bot.getPosition();
-            if (Math.abs(here.x - target.x) <= ARRIVAL_EPS_PX
-                    && Math.abs(here.y - target.y) <= ARRIVAL_EPS_PX) {
-                // "I am already here" stands down THIS walk only, never someone else's.
-                //
-                // stopIfTarget, not stop: a quest tick issues more than one walk. The macro tick
-                // runs the follow beat first and the stage work second, and both can ask for a
-                // walk in the same tick (the follow beat to the chain door, the cleared stage's
-                // park beat to the NPC post). When the park target is where the bot already
-                // stands, this shortcut used to stop the driver outright - and the driver has ONE
-                // goal slot, so that stop discarded the follow order issued moments earlier. The
-                // next tick re-issued it and this shortcut cancelled it again: a pair that can
-                // repeat for as long as the stage stays cleared.
-                //
-                // The guard that normally keeps the two apart (yieldsToLiveWalk, in the park
-                // helpers) only fires when the bot is OFF its park spot, so this shortcut is the
-                // one seam left where a park can reach a live follow order and cancel it.
+            if (withinWalkReach(here, target, portal)) {
+                if (portal) {
+                    stopOwnChaseGoal(bot, control);
+                    clearReactorBeat(bot.getId());
+                    armStageWalkShield(bot, true);
+                }
+                // Reaching this point must not cancel an unrelated, newer move.
                 GCMovement.stopIfTarget(bot, target);
                 return true;
             }
+            arrived = new java.util.concurrent.CountDownLatch(1);
             clearReactorBeat(bot.getId()); // stage walking supersedes box work
-            stageWalkShieldUntilByBot.remove(bot.getId());
-            shield = armStageWalkShield(bot);
+            shield = armStageWalkShield(bot, portal);
             GCMovement.move(bot, target.x, target.y, () -> {
-                stageWalkShieldUntilByBot.remove(bot.getId(), shield);
+                // A door walk still owns the bot after landing, until the macro tick enters it.
+                if (!portal) stageWalkShieldUntilByBot.remove(bot.getId(), shield);
                 arrived.countDown();
                 nudgeStageTick(bot); // arrival is the event the FSM waits on - wake it (debounced)
             }, () -> stageWalkShieldUntilByBot.remove(bot.getId(), shield));
@@ -257,12 +258,17 @@ public final class PqActions {
         }
         // A live stage walk owns steering beyond the short blocking window. The driver's
         // actual no-progress abandonment, not the caller's wait deadline, ends that ownership.
-        if (walkShieldReleases(arrivedFlag, GCMovement.isMoving(bot))) {
+        Point pos = bot.getPosition();
+        boolean atTarget = bot.getMap() == map && pos != null && withinWalkReach(pos, target, portal);
+        if ((!portal || !atTarget) && walkShieldReleases(arrivedFlag, GCMovement.isMoving(bot))) {
             stageWalkShieldUntilByBot.remove(bot.getId(), shield);
         }
-        Point pos = bot.getPosition();
-        return bot.getMap() == map && pos != null
-                && Math.abs(pos.x - target.x) <= ARRIVAL_EPS_PX
+        return atTarget;
+    }
+
+    private static boolean withinWalkReach(Point pos, Point target, boolean portal) {
+        return portal ? GCMovement.withinArrivalBox(pos, target)
+                : Math.abs(pos.x - target.x) <= ARRIVAL_EPS_PX
                 && Math.abs(pos.y - target.y) <= ARRIVAL_EPS_PX;
     }
 
@@ -310,13 +316,10 @@ public final class PqActions {
     // Stage-walk shield: the macro tick's walks (portal following, puzzle holds) must not be
     // re-targeted by the 250ms combat beat, which would yank the walk at a mob and oscillate
     // the bot between its goal and the fight. walkTo/holdArea arm a shield that outlives the
-    // blocking window. A live goal stays protected until arrival/abandonment; a puzzle hold
-    // with no walking goal expires on its own. The combat beat skips only chase steering
-    // (the swing half still runs). Deliberately NOT armed by the
-    // wait spots (waitNearStageNpc/spreadNearStageNpc): a park renewed every macro tick was a
-    // permanent combat blackout, the reported "发呆".
+    // blocking window. Door walks also hold the landing until the script runs or the shield
+    // expires; the combat beat skips only chase steering, not swings.
     private static final long STAGE_WALK_SHIELD_MS = 8_000;
-    private record StageWalkShield(Character bot, MapleMap map, long until) {}
+    private record StageWalkShield(Character bot, MapleMap map, long until, boolean portal) {}
     private static final Map<Integer, StageWalkShield> stageWalkShieldUntilByBot = new java.util.concurrent.ConcurrentHashMap<>();
 
     /** Whether the combat beat must leave this bot's movement alone right now. */
@@ -334,7 +337,11 @@ public final class PqActions {
     }
 
     private static StageWalkShield armStageWalkShield(Character bot) {
-        StageWalkShield shield = new StageWalkShield(bot, bot.getMap(), movementNowMs() + STAGE_WALK_SHIELD_MS);
+        return armStageWalkShield(bot, false);
+    }
+
+    private static StageWalkShield armStageWalkShield(Character bot, boolean portal) {
+        StageWalkShield shield = new StageWalkShield(bot, bot.getMap(), movementNowMs() + STAGE_WALK_SHIELD_MS, portal);
         stageWalkShieldUntilByBot.put(bot.getId(), shield);
         return shield;
     }
@@ -491,16 +498,16 @@ public final class PqActions {
                 && groundUnderTarget.y > botPos.y + APPROACH_Y;
     }
 
-    /** Walk to the position of a portal on the bot's current map. No-op if the portal is unknown. */
-    public static boolean walkToPortal(Character bot, int portalId) {
-        if (bot == null || bot.getMap() == null) {
-            return false;
+    /** Walking and script entry agree on where the bot can actually stand at the door. */
+    public static boolean walkToPortal(Character bot, Portal portal) {
+        return portal.getPortalStatus()
+                && walkTo(bot, GCMovement.portalApproachPoint(bot.getMap(), portal), true);
+    }
+
+    public static void walkThroughPortal(Character bot, Portal portal) {
+        if (walkToPortal(bot, portal)) {
+            enterPortal(bot, portal);
         }
-        Portal portal = bot.getMap().getPortal(portalId);
-        if (portal != null) {
-            return walkTo(bot, portal.getPosition());
-        }
-        return false;
     }
 
     // =========================================================================
@@ -1042,14 +1049,15 @@ public final class PqActions {
         // Reach the post FIRST: the rule is piles AT the stage NPC. A bot still walking
         // there has not delivered this tick (the arrival nudge re-runs it promptly).
         if (bot.getPosition().distanceSq(post) > PICKUP_REACH_SQ) {
+            Point stand = parkSpot(bot, post);
             // The delivery re-arms every tick while the stock is held, so it must stand down
             // for a live move like every other recurring origin (yieldsToLiveWalk) - a pickup/
             // reclaim walk armed earlier this tick would otherwise be overwritten and its
             // drop left orphaned. The next tick (or the walk's arrival nudge) re-arms this.
-            if (yieldsToLiveWalk(bot, post)) {
+            if (yieldsToLiveWalk(bot, stand)) {
                 return 0;
             }
-            walkTo(bot, post);
+            walkTo(bot, stand);
             return 0;
         }
         Character leader = partyLeader(bot);
@@ -2572,10 +2580,15 @@ public final class PqActions {
         return true;
     }
 
-    /** NPC scripts have no proximity check of their own: walk there before interacting. */
+    /** NPC scripts have no proximity check of their own: approach without stepping onto the NPC. */
     public static boolean walkToNpc(Character bot, int npcId) {
-        Point spot = stageNpcSpot(bot, npcId);
-        return spot != null && walkTo(bot, spot);
+        MapleMap map = bot.getMap();
+        Point npc = stageNpcSpot(bot, npcId);
+        if (npc == null) return false;
+        Point stand = parkSpot(bot, npc);
+        if (walkTo(bot, stand)) return true;
+        Point pos = bot.getPosition();
+        return bot.getMap() == map && pos != null && GCMovement.withinArrivalBox(pos, stand);
     }
 
     /** Whether the conversation with this NPC is still open (a prompt is waiting). */
@@ -2602,22 +2615,8 @@ public final class PqActions {
     /** How far (px) below the NPC a floor may sit and still count as the NPC's wait ring. */
     private static final int RING_FLOOR_TOLERANCE_PX = 30;
 
-    /**
-     * How far along the NPC's ledge a waiter may drift from the NPC pixel. Each bot derives its
-     * own offset from its id, so a party stands in different places instead of all walking to
-     * the same pixel (which rendered as one body on the turn-in NPC). Derived rather than
-     * rolled on purpose: a fresh random step every macro tick would walk the bot back and forth
-     * for as long as the wait lasts. Two waiters drifting to the same spot is fine - touching
-     * bodies still read as a pair of people waiting.
-     */
-    private static final int PARK_DRIFT_PX = 60;
-
-    /**
-     * How far off the NPC's row a drifted landing may sit and still count as "beside the NPC".
-     * Big enough for a neighbouring board one step up or down (LPQ stacks ledges 13-22px apart),
-     * small enough that the far storeys (measured 300+px away on the tower maps) are rejected.
-     */
-    private static final int PARK_VERTICAL_TOLERANCE_PX = 60;
+    private static final int[] NPC_STANDOFFS_PX = {-24, 24, -34, 34, -44, 44, -56, 56, -68, 68, -80, 80};
+    private static final int NPC_STANDOFF_VERTICAL_PX = 60;
 
     /** map instance -> the wait spots already claimed (the NPC pixel is the first). */
     private static final Map<Integer, java.util.Set<Point>> WAIT_SPOT_CLAIMS = new java.util.concurrent.ConcurrentHashMap<>();
@@ -2653,35 +2652,25 @@ public final class PqActions {
             return;
         }
         walkTo(bot, spot);
-        // No shield here: parked-by-the-NPC is a wait, not a staged walk. The combat beat
-        // may steer at whatever spawns nearby and - critically - the 250ms beat keeps the
-        // bot's swings alive while it stands (a shield renewed every macro tick read as a
-        // 100% combat blackout for the whole wait).
+        // No hold after arrival: the stage still decides whether to fight while parked.
     }
 
     /**
-     * A few steps off the NPC, chosen by the bot's own id so a party stands in different spots.
-     *
-     * <p>Any legal foothold will do - a neighbouring ledge or a board one step up or down is fine,
-     * since the point of the wait is that six bodies do not share one pixel. Two bounds keep the
-     * step a STEP and not a walk-away:
-     * <ul>
-     *   <li>no ground under the drifted column (a gap) keeps the NPC pixel rather than walking
-     *       into the air;</li>
-     *   <li>a landing more than {@link #PARK_VERTICAL_TOLERANCE_PX} off the NPC's row is a
-     *       different storey - measured, those answers came 300+px away on the tower maps - so
-     *       the bot keeps the NPC pixel instead of teleporting the wait downstairs.</li>
-     * </ul>
-     * The drift is bounded by {@link #PARK_DRIFT_PX} and therefore inside the pickup reach, so a
-     * bot holding passes still delivers from where it stands instead of walking back and forth.
+     * Spread teammates over valid slots near the NPC, even if its ledge only extends one way.
      */
     private static Point parkSpot(Character bot, Point npc) {
-        int drift = Math.floorMod(bot.getId() * 37, 2 * PARK_DRIFT_PX + 1) - PARK_DRIFT_PX;
-        Point ground = GCMovement.groundPointBelow(bot.getMap(), npc.x + drift, npc.y);
-        if (ground == null || Math.abs(ground.y - npc.y) > PARK_VERTICAL_TOLERANCE_PX) {
-            return new Point(npc);
+        MapleMap map = bot.getMap();
+        int slot = Math.floorMod(bot.getId(), 6);
+        Point first = null;
+        for (int offset : NPC_STANDOFFS_PX) {
+            Point ground = GCMovement.groundPointBelow(map, npc.x + offset, npc.y);
+            if (ground == null || Math.abs(ground.y - npc.y) > NPC_STANDOFF_VERTICAL_PX) {
+                continue;
+            }
+            if (slot-- == 0) return ground;
+            if (first == null) first = ground;
         }
-        return ground;
+        return first != null ? first : npc;
     }
 
     /**
@@ -2996,6 +2985,12 @@ public final class PqActions {
      * stage is clear.
      */
     public static void enterPortal(Character bot, Portal portal) {
-        GCMovement.enterPortal(bot, portal);
+        int id = bot.getId();
+        StageWalkShield shield = stageWalkShieldUntilByBot.get(id);
+        try {
+            GCMovement.enterPortal(bot, portal);
+        } finally {
+            if (shield != null && shield.portal()) stageWalkShieldUntilByBot.remove(id, shield);
+        }
     }
 }

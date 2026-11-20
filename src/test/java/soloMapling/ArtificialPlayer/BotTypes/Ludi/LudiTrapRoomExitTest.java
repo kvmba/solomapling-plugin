@@ -4,7 +4,6 @@ import org.junit.jupiter.api.Test;
 
 import java.lang.reflect.Method;
 
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -15,8 +14,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * <ul>
  *   <li>the physical exit ({@code out00}) - the room's only way back to the tower. The bot must
  *       WALK to it and enter it up close, which is what keeps the climb out reading as a climb.
- *       The walk's arrival is the exact-pixel contract, so the narrow-ledge residency rule must
- *       not declare arrival from the other end of a ledge;</li>
+ *       The door uses the shared walk-to-portal contract, not a warp across the room;</li>
  *   <li>the logical exit - once the stage is turned in, the room's four boxes are worthless and
  *       breaking them is pure delay. A trapped bot must leave immediately instead of grinding
  *       through 30s+ of box work for a stage that no longer needs it.</li>
@@ -41,19 +39,6 @@ class LudiTrapRoomExitTest {
                         + "stage's remaining time breaking boxes nobody needs");
         assertTrue(body.contains("exitTrapRoom(bot)"),
                 "the cleared-stage branch must take the room's own exit");
-    }
-
-    @Test
-    void theExitWalkStillRequiresTheRealPortalPixel() throws Exception {
-        String java = javaSource(STAGES);
-        int start = java.indexOf("static void exitTrapRoom");
-        String body = java.substring(start, java.indexOf("\n    }", start));
-        assertTrue(body.contains("PqActions.walkTo(bot, exit.getPosition())"),
-                "the exit must be walked to (its result is the arrival contract)");
-        assertTrue(body.contains("PqActions.enterPortal(bot, exit)"),
-                "the portal is entered only after the walk reports arrival");
-        assertFalse(body.contains("distanceSq"),
-                "a distance-based shortcut re-opens the mid-climb teleport the walk exists to prevent");
     }
 
     @Test

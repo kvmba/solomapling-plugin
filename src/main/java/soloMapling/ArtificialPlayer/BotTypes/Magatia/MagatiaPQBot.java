@@ -1,6 +1,7 @@
 package soloMapling.ArtificialPlayer.BotTypes.Magatia;
 
 import org.gms.client.Character;
+import org.gms.server.maps.Portal;
 import soloMapling.ArtificialPlayer.BotGeneration;
 import soloMapling.ArtificialPlayer.PartyQuest.PartyQuestBot;
 import soloMapling.ArtificialPlayer.PartyQuest.PqActions;
@@ -61,6 +62,28 @@ public class MagatiaPQBot extends PartyQuestBot {
     @Override
     protected boolean isInsideQuest(int mapId) {
         return MagatiaPqData.isQuestRoom(mapId);
+    }
+
+    @Override
+    protected Portal forwardPortal(int leaderMapId) {
+        var map = getChr().getMap();
+        int here = map.getId();
+        if (here / 10_000 != leaderMapId / 10_000) {
+            return null; // the Alcadno and Zenumist maps are separate runs
+        }
+        int room = here % 10_000;
+        int leaderRoom = leaderMapId % 10_000;
+        // The four puzzle entrances are exclusive slots. Let the room scripts assign them;
+        // following the leader's slot would try a door that's already taken.
+        String door = switch (room) {
+            case 0, 1, 100, 400 -> leaderRoom > room ? "pt00" : null;
+            case 200 -> leaderRoom >= 203 ? "pt00" : null;
+            case 201, 202 -> leaderRoom == 200 || leaderRoom >= 203 ? "out00" : null;
+            case 203 -> leaderRoom >= 300 ? "out00" : null;
+            case 301, 302, 303, 304 -> leaderRoom >= 400 ? "out00" : null;
+            default -> null;
+        };
+        return door == null ? null : map.getPortal(door);
     }
 
     /**
