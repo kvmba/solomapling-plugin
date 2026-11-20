@@ -17,6 +17,7 @@ import soloMapling.ArtificialPlayer.BotBuffRequestSystem.BotBuffRequestHandler;
 import soloMapling.ArtificialPlayer.BotMessagingSystem.CharacterStorage;
 import soloMapling.ArtificialPlayer.BotPartySystem.BotRecruitManager;
 import soloMapling.ArtificialPlayer.GCMoveSystem.GCMovement;
+import soloMapling.ArtificialPlayer.PartyQuest.PqActions;
 import soloMapling.companion.CompanionRoster;
 import soloMapling.server.BotChannelRouter;
 import soloMapling.server.SoloMaplingConstants;
@@ -566,6 +567,8 @@ public class BotGeneration {
         if (removalMustStopFsm(CharacterStorage.getBotById(fakechar.getId()))) {
             BotTypeManager.manuallyStopBot(fakechar);
         }
+        // Removing the avatar from a map does not fire the event's change-map callback.
+        PqActions.leaveEventInstance(fakechar);
         // Detach pets first: they must be shown leaving while the bot is still on
         // its map. Ambient bots keep pets in memory only, so nothing is left
         // behind; companions are skipped here (their saved pets persist).

@@ -217,12 +217,17 @@ public class OPQBot extends BotSM {
 
         MapleMap map = getChr().getMap();
         if (map == null) return;
-        if (map.getId() == OPQConstants.OPQ_LOBBY
-                && (isInsidePQ() || opqBotState == OPQBotState.LOOP_CHECK)) {
-            handleLoopCheck();
-            return;
-        }
         var instance = map.getEventInstance();
+        if (map.getId() == OPQConstants.OPQ_LOBBY) {
+            if (instance != null) {
+                returnToLobby();
+                return;
+            }
+            if (isInsidePQ() || opqBotState == OPQBotState.LOOP_CHECK) {
+                handleLoopCheck();
+                return;
+            }
+        }
         if (OrbisPqData.isOrbisRoom(map.getId()) && instance != null && instance.isEventCleared()) {
             transitionTo(OPQBotState.EXIT_DETECT, "settling the cleared run");
             workSettlement(map);
@@ -1219,9 +1224,7 @@ public class OPQBot extends BotSM {
             return;
         }
         if (leaderMap == OPQConstants.OPQ_LOBBY) {
-            blockingSleep(1000); // deliberate: blocking follow-warp below
-            orchestrator.followLeaderWarp(getChr(), new Point(-233, 174));
-            transitionTo(OPQBotState.LOOP_CHECK, "leader already in OPQ lobby");
+            returnToLobby();
             return;
         }
 
@@ -1248,7 +1251,7 @@ public class OPQBot extends BotSM {
         MapleMap target = PqActions.findHumanPartyRoom(bot,
                 room -> room.getEventInstance() == instance && OrbisPqData.isOrbisRoom(room.getId()));
         if (target == null) {
-            finishSettlement();
+            returnToLobby();
             return;
         }
         int mapId = here.getId();
@@ -1312,14 +1315,13 @@ public class OPQBot extends BotSM {
         }
     }
 
-    private void finishSettlement() {
+    private void returnToLobby() {
         Character bot = getChr();
-        PositionCombination.release(System.identityHashCode(bot.getMap()));
-        releaseEventInstance();
+        PqActions.leaveEventInstance(bot);
         var lobby = mapForBot(bot, OPQConstants.OPQ_LOBBY);
         if (lobby != null) {
             GCMovement.changeMap(bot, lobby, lobby.getPortal(0));
-            handleLoopCheck();
+            if (bot.getMap() == lobby) handleLoopCheck();
         }
     }
 
@@ -1340,9 +1342,7 @@ public class OPQBot extends BotSM {
             orchestrator.followLeaderWarp(getChr(), new Point(-161, 323));
             transitionTo(OPQBotState.EXIT_LOBBY, "followed leader to exit lobby");
         } else if (leaderMap == OPQConstants.OPQ_LOBBY) {
-            blockingSleep(1000); // deliberate: blocking follow-warp below
-            orchestrator.followLeaderWarp(getChr(), new Point(-233, 174));
-            transitionTo(OPQBotState.LOOP_CHECK, "followed leader to OPQ lobby");
+            returnToLobby();
         }
     }
 
@@ -1356,36 +1356,12 @@ public class OPQBot extends BotSM {
             return;
         }
 
-        // If leader has already moved to recruitment lobby, follow them
-        // (deliberate synchronous warps: arrival choreography blocks and must not overlap)
-        int leaderMap = partyLeaderMapId();
-        if (leaderMap == OPQConstants.OPQ_LOBBY) {
-            blockingSleep(300);
-            MapleMap lobbyMap = mapForBot(getChr(), OPQConstants.OPQ_LOBBY);
-            warpBotToLocation(getChr(), new Point(-233, 174), lobbyMap);
-            transitionTo(OPQBotState.LOOP_CHECK, "followed leader to recruitment lobby");
-            return;
-        }
-
-        // Otherwise warp ourselves to lobby after a short wait
-        blockingSleep(500);
-        MapleMap lobbyMap = mapForBot(getChr(), OPQConstants.OPQ_LOBBY);
-        warpBotToLocation(getChr(), new Point(-233, 174), lobbyMap);
-        blockingSleep(2000);
-        PlatformPlacement.botStrollOnMap(getChr());
-
-        transitionTo(OPQBotState.LOOP_CHECK, "exit-lobby complete, warped to recruitment lobby");
+        returnToLobby();
     }
 
     private void handleLoopCheck() {
         debugLogf("handleLoopCheck: inParty=" + isInParty()
                 + " mapId=" + getChr().getMapId());
-        // Back in the lobby after a run (or a failed run). Release the event instance, if we still
-        // hold one: the host now registers this bot like any party member, and a bot that walks
-        // out of the run without unregistering stays in the instance's player list - counted by
-        // getPlayerCount() for the puzzles, and keeping the instance alive long after the party
-        // that started it has finished.
-        releaseEventInstance();
         // Clear ALL per-run scratch so next run starts completely clean.
         sharedContext.clearTaskComplete(getChr().getId());
         sharedContext.putCloudAssignment(getChr().getId(), null);
@@ -1431,8 +1407,7 @@ public class OPQBot extends BotSM {
         warpBotToLocation(getChr(), new Point(-161, 323), exitMap);
         blockingSleep(1500);
 
-        MapleMap lobbyMap = mapForBot(getChr(), OPQConstants.OPQ_LOBBY);
-        warpBotToLocation(getChr(), new Point(-233, 174), lobbyMap);
+        returnToLobby();
 
         resetOPQBotState();
         transitionTo(OPQBotState.RECRUITMENT, "party lost — PQ abandoned, returned to lobby");
@@ -1489,21 +1464,6 @@ public class OPQBot extends BotSM {
         return getChr().getParty() != null;
     }
 
-    /**
-     * Leave the event instance this bot is still registered in, if any.
-     *
-     * <p>The quests' own scripts unregister on the way out ({@code playerExit}), but a bot that
-     * reaches the lobby by its own warps never passes through that path. Unregistering here is
-     * what keeps {@code getPlayerCount()} honest for the next run and lets a finished instance
-     * dispose instead of waiting on a participant that has already walked off.
-     */
-    private void releaseEventInstance() {
-        var eim = getChr().getEventInstance();
-        if (eim != null) {
-            eim.unregisterPlayer(getChr());
-        }
-    }
-
     private int partyLeaderMapId() {
         Character leader = PqActions.partyLeader(getChr());
         return leader == null ? -1 : leader.getMapId();
@@ -1521,8 +1481,7 @@ public class OPQBot extends BotSM {
             orchestrator.followLeaderWarp(getChr(), new Point(-161, 323));
             transitionTo(OPQBotState.EXIT_LOBBY, "leader already left stage 2 — following to exit lobby");
         } else if (leaderMap == OPQConstants.OPQ_LOBBY) {
-            orchestrator.followLeaderWarp(getChr(), new Point(-233, 174));
-            transitionTo(OPQBotState.LOOP_CHECK, "leader already in OPQ lobby — skipping exit");
+            returnToLobby();
         }
     }
 

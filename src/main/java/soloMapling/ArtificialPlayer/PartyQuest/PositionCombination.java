@@ -1,17 +1,19 @@
 package soloMapling.ArtificialPlayer.PartyQuest;
 
 import org.gms.client.Character;
+import org.gms.server.maps.MapleMap;
 import soloMapling.ArtificialPlayer.BotMessagingSystem.CharacterStorage;
 import soloMapling.ArtificialPlayer.BotSM;
 
 import java.awt.Point;
 import java.awt.Rectangle;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.concurrent.ConcurrentHashMap;
+import java.util.WeakHashMap;
 import java.util.concurrent.ThreadLocalRandom;
 
 /**
@@ -89,7 +91,8 @@ public final class PositionCombination {
         private boolean sampled;
     }
 
-    private static final Map<Integer, Ledger> LEDGERS = new ConcurrentHashMap<>();
+    // The map owns the lifetime of the puzzle. One bot leaving must not erase the team's search.
+    private static final Map<MapleMap, Ledger> LEDGERS = Collections.synchronizedMap(new WeakHashMap<>());
 
     /** One candidate: the packed pattern, and where each body stands. */
     public record Candidate(long pattern, List<Point> spots) {
@@ -173,11 +176,6 @@ public final class PositionCombination {
         };
     }
 
-    /** Drop one room's search (the party left the stage, or the run ended). */
-    public static void release(int roomKey) {
-        LEDGERS.remove(roomKey);
-    }
-
     /**
      * Take this body's puzzle spot or wait by the judge if it has none, then report the plan.
      *
@@ -196,8 +194,7 @@ public final class PositionCombination {
     public static Plan standOn(Character bot, int bodyIndex, List<Candidate> candidates,
                                List<Rectangle> areas, int stage, String answerProperty,
                                Answer answer, Runnable waitAtPost) {
-        Plan plan = decide(bot, System.identityHashCode(bot.getMap()), candidates, areas, stage, answerProperty,
-                seatedBots(bot), answer);
+        Plan plan = decide(bot, candidates, areas, stage, answerProperty, seatedBots(bot), answer);
         Point mine = mine(plan.spots(), bodyIndex);
         if (mine == null) {
             waitAtPost.run();
@@ -216,14 +213,18 @@ public final class PositionCombination {
      * the plan reports - {@code tried.size() + 1} - so round 1 is a hard 0% and every verdict that
      * retires a pattern moves the chance one step of 0.5%.
      */
-    public static Plan decide(Character bot, int roomKey, List<Candidate> candidates,
-                              List<Rectangle> areas, int stage, String answerProperty,
-                              int seated, Answer answer) {
-        Ledger ledger = LEDGERS.computeIfAbsent(roomKey, ignored -> new Ledger());
+    static Plan decide(Character bot, List<Candidate> candidates, List<Rectangle> areas,
+                       int stage, String answerProperty, int seated, Answer answer) {
+        MapleMap room = bot.getMap();
+        Ledger ledger = ledgerFor(room);
         synchronized (ledger) {
-            observeJudgement(bot, ledger, areas, stage, answerProperty);
+            observeJudgement(bot, room, ledger, areas, stage, answerProperty);
             return plan(ledger, candidates, seated, bot, answer);
         }
+    }
+
+    static Ledger ledgerFor(MapleMap room) {
+        return LEDGERS.computeIfAbsent(room, ignored -> new Ledger());
     }
 
     /**
@@ -339,10 +340,10 @@ public final class PositionCombination {
      * property NAME is supplied by the quest, but its VALUE is never read - only whether the
      * stage has answered, which is the precondition for any judgement, not the answer itself.
      */
-    private static void observeJudgement(Character bot, Ledger ledger, List<Rectangle> areas,
+    private static void observeJudgement(Character bot, MapleMap room, Ledger ledger, List<Rectangle> areas,
                                          int stage, String answerProperty) {
         Character leader = PqActions.partyLeader(bot);
-        if (leader == null || leader.getMapId() != bot.getMapId()) {
+        if (leader == null || leader.getMap() != room) {
             return; // only a talk in this room, by the body the scripts listen to, can judge
         }
         PqActions.Pattern standing = PqActions.observedPattern(bot, areas);

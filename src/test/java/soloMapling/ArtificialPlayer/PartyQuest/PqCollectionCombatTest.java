@@ -74,6 +74,7 @@ class PqCollectionCombatTest {
             when(npc.getPosition()).thenReturn(NPC_POSITION);
             when(map.getNPCById(npcId)).thenReturn(npc);
         }
+        when(leader.getMap()).thenReturn(map);
         when(leader.getMapId()).thenAnswer(call -> map.getId());
         when(leader.getPosition()).thenReturn(new Point(600, 0));
     }

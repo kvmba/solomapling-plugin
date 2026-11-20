@@ -921,7 +921,7 @@ public final class PqActions {
         if (bot == null || receiver == null || qty <= 0) {
             return;
         }
-        if (bot.getMapId() != receiver.getMapId()) {
+        if (bot.getMap() != receiver.getMap()) {
             return; // nowhere to drop it; the hand-off waits for a shared map
         }
         int carried = countItem(bot, itemId);
@@ -979,7 +979,7 @@ public final class PqActions {
         // nobody but him can pick it, and the host despawns drops nobody picked up - an
         // unreachable pile is a timed wipe of the bot's whole stock. Walk to him first; the
         // move is fire-and-forget, so the hand-off just waits for a tick where he is close.
-        if (leader.getMapId() != bot.getMapId()) {
+        if (leader.getMap() != bot.getMap()) {
             return 0; // nothing to do here; the party's own movement brings them together
         }
         if (!leaderNear(bot, leader)) {
@@ -1007,8 +1007,9 @@ public final class PqActions {
      * the delivery happens when the room quiets or the paths cross).
      */
     public static boolean leaderNear(Character bot, Character leader) {
-        return bot != null && leader != null && leader != bot
-                && leader.getMapId() == bot.getMapId()
+        if (bot == null || leader == null || leader == bot) return false;
+        MapleMap room = bot.getMap();
+        return room != null && leader.getMap() == room
                 && bot.getPosition() != null && leader.getPosition() != null
                 && bot.getPosition().distanceSq(leader.getPosition()) <= HANDOFF_RANGE_SQ;
     }
@@ -1063,7 +1064,7 @@ public final class PqActions {
             return 0;
         }
         Character leader = partyLeader(bot);
-        if (leader == null || leader == bot || leader.getMapId() != bot.getMapId()) {
+        if (leader == null || leader == bot || leader.getMap() != bot.getMap()) {
             return 0;
         }
         int qty = countItem(bot, itemId);
@@ -1167,6 +1168,20 @@ public final class PqActions {
         var party = bot == null ? null : bot.getParty();
         var leader = party == null ? null : party.getLeader();
         return leader == null ? null : leader.getPlayer();
+    }
+
+    /** Detach before the lobby warp so it cannot resolve back into the instance. */
+    public static void leaveEventInstance(Character bot) {
+        EventInstanceManager instance = bot.getEventInstance();
+        if (instance == null) return;
+        instance.unregisterPlayer(bot);
+        // With no changedMap callback after detaching, the last bot owns disposal.
+        // Registration also takes this monitor: don't close a run as another member joins it.
+        synchronized (instance) {
+            if (!instance.isEventDisposed() && instance.getPlayerCount() == 0) {
+                instance.dispose(false);
+            }
+        }
     }
 
     /** Prefer the real leader's room, or another teammate's if the leader already left. */

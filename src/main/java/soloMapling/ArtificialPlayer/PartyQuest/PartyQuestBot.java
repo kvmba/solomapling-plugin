@@ -407,7 +407,7 @@ public abstract class PartyQuestBot extends BotSM implements GrindTickRegistry.P
         if (!isInsideQuest(bot.getMapId())) {
             // A script can send everyone straight home. tickLobby only cleans up when it has
             // to move the bot itself, so close that run here even if we're already in town.
-            if (wasInsideQuest && bot.getMapId() == lobbyMapId()) {
+            if (wasInsideQuest && bot.getMapId() == lobbyMapId() && bot.getMap().getEventInstance() == null) {
                 releaseRoomState();
             }
             // A party that moved by a warp rather than by a door is out of this bot's walking
@@ -503,22 +503,12 @@ public abstract class PartyQuestBot extends BotSM implements GrindTickRegistry.P
         }
     }
 
-    /**
-     * Drop whatever room-scoped state this bot holds (stage-NPC wait spots, box claims).
-     *
-     * <p>The placement-puzzle ledgers are released here for every quest, not just the ones that
-     * override: a search belongs to one run of one room, and carrying a stale "this pattern was
-     * already judged wrong" into the next run would silently skip a candidate that was never
-     * tried. Subclasses that keep their own state must call {@code super.releaseRoomState()}.
-     */
+    /** Drop per-bot state, not the puzzle progress the other members of the room still use. */
     protected void releaseRoomState() {
         wasInsideQuest = false;
         celebratedClearKey = Integer.MIN_VALUE;
         nextQuestChatAtMs = 0;
-        Character bot = getChr();
-        if (bot != null && bot.getMap() != null) {
-            PositionCombination.release(System.identityHashCode(bot.getMap()));
-        }
+        PqActions.releaseWaitClaims(getChr().getId());
     }
 
     /**
@@ -536,8 +526,8 @@ public abstract class PartyQuestBot extends BotSM implements GrindTickRegistry.P
      * not be moved by a quest at all.
      */
     protected void tickLobby(Character bot) {
-        if (bot.getMapId() != lobbyMapId()) {
-            returnToLobby("outside the quest and outside the lobby");
+        if (bot.getMapId() != lobbyMapId() || bot.getMap().getEventInstance() != null) {
+            returnToLobby("outside the public lobby");
             return;
         }
 
@@ -1014,9 +1004,11 @@ public abstract class PartyQuestBot extends BotSM implements GrindTickRegistry.P
         if (bot == null) {
             return;
         }
+        int lobbyId = lobbyMapId();
+        MapleMap here = bot.getMap();
         releaseRoomState(); // the run is over - give up the room's wait spots and claims
-        if (bot.getMapId() == lobbyMapId()) {
-            leaveInstance();
+        if (here.getId() == lobbyId && here.getEventInstance() == null) {
+            PqActions.leaveEventInstance(bot);
             return;
         }
         BotLogger.log("PQ bot " + bot.getName() + " leaving the run: " + reason);
@@ -1027,8 +1019,8 @@ public abstract class PartyQuestBot extends BotSM implements GrindTickRegistry.P
         BotAuraState.cancelHidesForAction(bot);
         // Drop the instance before warping: changeMap would otherwise resolve the lobby through
         // the instance's own map cache and put the bot in an empty copy of the town.
-        leaveInstance();
-        var lobby = WarpCommands.mapForBot(bot, lobbyMapId());
+        PqActions.leaveEventInstance(bot);
+        var lobby = WarpCommands.mapForBot(bot, lobbyId);
         if (lobby == null) {
             return; // a lobby id that does not resolve is a data error, not a reason to wander
         }
@@ -1047,21 +1039,6 @@ public abstract class PartyQuestBot extends BotSM implements GrindTickRegistry.P
      */
     protected Portal lobbyArrivalPortal(Character bot, MapleMap lobby) {
         return lobby.getPortal(0);
-    }
-
-    /**
-     * Take this bot out of its event instance, if it is in one.
-     *
-     * <p>Written as the quests' own {@code playerExit} does it: unregister first (which clears
-     * {@code Character.eventInstance}), then leave the map. Without this the bot stays counted by
-     * {@code getPlayerCount()} for the rest of the instance's life - a puzzle that wants an exact
-     * number of bodies in a rectangle would still see a bot that has gone home.
-     */
-    private void leaveInstance() {
-        var eim = getChr().getEventInstance();
-        if (eim != null) {
-            eim.unregisterPlayer(getChr());
-        }
     }
 
     // =========================================================================

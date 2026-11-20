@@ -4,6 +4,7 @@ import org.gms.config.GameConfig;
 import org.gms.dao.entity.GameConfigDO;
 import org.gms.manager.ServerManager;
 import org.gms.property.ServiceProperty;
+import org.gms.server.maps.MapleMap;
 import org.gms.service.ConfigService;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
@@ -26,6 +27,8 @@ import static org.mockito.Mockito.when;
  * quiet. leaderNear is that gate; the same/different-map and null edges decide the rest.
  */
 class LeaderNearGateTest {
+
+    private final MapleMap room = mock(MapleMap.class);
 
     @BeforeAll
     static void stubHostEnvironment() throws Exception {
@@ -50,39 +53,39 @@ class LeaderNearGateTest {
         return d;
     }
 
-    private static org.gms.client.Character chrAt(Point p, int mapId) {
+    private static org.gms.client.Character chrAt(Point p, MapleMap map) {
         org.gms.client.Character c = mock(org.gms.client.Character.class, RETURNS_DEEP_STUBS);
-        when(c.getMapId()).thenReturn(mapId);
+        when(c.getMap()).thenReturn(map);
         when(c.getPosition()).thenReturn(p);
         return c;
     }
 
     @Test
     void leaderWithin400pxIsNear() {
-        org.gms.client.Character bot = chrAt(new Point(88, -450), 922010100);
-        org.gms.client.Character leader = chrAt(new Point(95, -450), 922010100);
+        org.gms.client.Character bot = chrAt(new Point(88, -450), room);
+        org.gms.client.Character leader = chrAt(new Point(95, -450), room);
         assertTrue(PqActions.leaderNear(bot, leader));
     }
 
     @Test
     void leader600pxBelowOnTheTowerIsNotNear() {
         // The live geometry: leader on the ground floor (y=130), bot on the -450 fight row.
-        org.gms.client.Character bot = chrAt(new Point(88, -450), 922010100);
-        org.gms.client.Character leader = chrAt(new Point(0, 130), 922010100);
+        org.gms.client.Character bot = chrAt(new Point(88, -450), room);
+        org.gms.client.Character leader = chrAt(new Point(0, 130), room);
         assertFalse(PqActions.leaderNear(bot, leader),
                 "a ground-floor leader is out of hand-off range from the mid-tower fight");
     }
 
     @Test
     void leaderOnAnotherMapIsNeverNear() {
-        org.gms.client.Character bot = chrAt(new Point(88, -450), 922010100);
-        org.gms.client.Character leader = chrAt(new Point(88, -450), 922010200);
+        org.gms.client.Character bot = chrAt(new Point(88, -450), room);
+        org.gms.client.Character leader = chrAt(new Point(88, -450), mock(MapleMap.class));
         assertFalse(PqActions.leaderNear(bot, leader));
     }
 
     @Test
     void nullsAndSelfAreNotNear() {
-        org.gms.client.Character bot = chrAt(new Point(0, 0), 922010100);
+        org.gms.client.Character bot = chrAt(new Point(0, 0), room);
         assertFalse(PqActions.leaderNear(null, bot));
         assertFalse(PqActions.leaderNear(bot, null));
         assertFalse(PqActions.leaderNear(bot, bot), "the bot is not its own delivery target");

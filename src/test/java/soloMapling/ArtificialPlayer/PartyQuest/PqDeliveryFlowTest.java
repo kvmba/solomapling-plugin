@@ -71,6 +71,7 @@ class PqDeliveryFlowTest {
         when(instance.getLeader()).thenReturn(leader);
         when(instance.getPlayers()).thenReturn(List.of(leader, member));
         when(leader.getId()).thenReturn(LEADER_ID);
+        when(leader.getMap()).thenReturn(map);
         when(leader.getMapId()).thenAnswer(call -> map.getId());
         when(leader.getPosition()).thenReturn(new Point(600, 0));
         Party party = mock(Party.class);
@@ -134,6 +135,27 @@ class PqDeliveryFlowTest {
                     member, itemId, quota, leader, NPC_POSITION));
             drops.verify(() -> DropCommands.botThrowToOwnerItemQtyAt(
                     member, itemId, quota, leader, leader.getPosition()), never());
+        }
+    }
+
+    @Test
+    void neverHandsOffStockToALeaderInADifferentInstanceOfTheSameRoom() {
+        when(map.getId()).thenReturn(925100100);
+        MapleMap otherRoom = mock(MapleMap.class);
+        when(otherRoom.getId()).thenReturn(925100100);
+        when(leader.getMap()).thenReturn(otherRoom);
+        npc(NPC_ID);
+        position.set(NPC_POSITION);
+        when(leader.getPosition()).thenReturn(NPC_POSITION);
+        when(member.getItemQuantity(ITEM, false)).thenReturn(20);
+        try (var inventory = mockStatic(InventoryManipulator.class);
+             var drops = mockStatic(DropCommands.class)) {
+            assertFalse(PqActions.leaderNear(member, leader));
+            assertEquals(0, PqActions.handItemsToLeader(member, ITEM));
+            assertEquals(0, PqActions.handItemsToLeaderAfterStage(member, ITEM, NPC_ID));
+            PqActions.giveItemAt(member, leader, ITEM, 20, NPC_POSITION);
+            inventory.verifyNoInteractions();
+            drops.verifyNoInteractions();
         }
     }
 

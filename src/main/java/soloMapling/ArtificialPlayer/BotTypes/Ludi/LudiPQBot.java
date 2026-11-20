@@ -88,7 +88,7 @@ public class LudiPQBot extends PartyQuestBot {
 
     @Override
     protected void releaseRoomState() {
-        super.releaseRoomState(); // drops the room's crate search
+        super.releaseRoomState();
         LudiStages.releaseRoomState(getChr().getId());
         // The announcements reset with the search, so the next run's first attempt is spoken.
         climbFloorY = Integer.MIN_VALUE;

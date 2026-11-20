@@ -22,7 +22,6 @@ import soloMapling.ArtificialPlayer.BotTypes.Amoria.AmoriaPqData;
 import soloMapling.ArtificialPlayer.BotTypes.Kerning.KerningPqData;
 import soloMapling.ArtificialPlayer.BotTypes.Kerning.KerningStages;
 import soloMapling.ArtificialPlayer.BotTypes.Ludi.LudiPqData;
-import soloMapling.ArtificialPlayer.PartyQuest.PositionCombination;
 import soloMapling.ArtificialPlayer.PartyQuest.PqActions;
 
 import java.awt.Point;
@@ -317,12 +316,8 @@ class PqParkDoorExecutionSimTest {
         MapleMap map = realRoom(mapId);
         Sim sim = sim(map, map.getPortal("sp").getPosition());
         Character bot = sim.st().bot;
-        try {
-            KerningStages.takeMyPlace(bot, stage, 3); // three puzzle spots; this is the fourth bot
-            assertArrivesNearNpc(sim, KerningPqData.NPC_CLOTO);
-        } finally {
-            PositionCombination.release(System.identityHashCode(map));
-        }
+        KerningStages.takeMyPlace(bot, stage, 3); // three puzzle spots; this is the fourth bot
+        assertArrivesNearNpc(sim, KerningPqData.NPC_CLOTO);
     }
 
     @ParameterizedTest

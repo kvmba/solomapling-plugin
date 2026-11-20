@@ -24,9 +24,6 @@ import static soloMapling.ArtificialPlayer.BotHelpers.isBot;
  *       the party leaves by talking to the tombstone NPC - so the leader's presence is the one
  *       thing that says whether the run is still on.</li>
  * </ul>
- *
- * <p>Leaving on the leader's cue has one consequence the other quest bots never had to face;
- * see {@link #releaseRoomState()}.
  */
 public class PapulatusPQBot extends PartyQuestBot {
 
@@ -131,41 +128,15 @@ public class PapulatusPQBot extends PartyQuestBot {
         return eim != null && eim.isEventCleared();
     }
 
-    /**
-     * Hand the instance back when the party has emptied out of the room.
-     *
-     * <p>Why this bot needs it when the others do not: the script ends a run from
-     * {@code changedMap}, and that test is {@code isExpeditionTeamLackingNow}, i.e.
-     * {@code getPlayerCount() <= 1} evaluated <em>before</em> the leaver is unregistered. A
-     * player walking out of a room where bots are still standing therefore reads as "one player
-     * left, the team is fine" and nothing ends - which was invisible before because those bots
-     * never left. This bot leaves on the leader's cue, so the party does empty out, and someone
-     * has to close the room.
-     *
-     * <p>The order matters: detach first, then look. Several bots of one party walk out on the
-     * same cue, so a plain "is the room empty?" test would see the others still registered and
-     * leave nobody to dispose; each one removes itself first, and the last one sees zero. The
-     * detach is the same call the base class makes moments later and is harmless twice.
-     *
-     * <p>What it must NOT do: dispose while another member is still in the room. The count
-     * guard is the whole protection - a run the player abandons with bots still fighting keeps
-     * its instance, which is the pre-existing behaviour for every other quest.
-     *
-     * <p>Called from the base class's stop path as well as its exit path, so it has to stay safe
-     * for a bot that is merely being retyped: with no instance there is nothing to do.
-     */
     @Override
     protected void releaseRoomState() {
-        super.releaseRoomState(); // drops the room's placement-puzzle ledger
+        super.releaseRoomState();
         seenInsideRoom = false;
-        Character bot = getChr();
-        var eim = bot == null ? null : bot.getEventInstance();
-        if (eim == null) {
-            return; // not in a run (a lobby bot, or one already detached)
-        }
-        eim.unregisterPlayer(bot);
-        if (eim.getPlayerCount() == 0) {
-            eim.dispose();
-        }
+    }
+
+    @Override
+    public synchronized void stopScheduledTask() {
+        super.stopScheduledTask();
+        PqActions.leaveEventInstance(getChr());
     }
 }

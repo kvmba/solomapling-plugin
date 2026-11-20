@@ -43,9 +43,12 @@ import soloMapling.server.BotTickService;
 
 import java.awt.Point;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotSame;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.*;
@@ -628,6 +631,111 @@ class PqStageTransitionTest {
             new soloMapling.ArtificialPlayer.BotTypes.Amoria.AmoriaPQBot(member).tickPartyQuest();
             actions.verify(() -> PqActions.approachReactor(member, 33, false, true));
             actions.verify(() -> PqActions.collectForLeader(eq(member), any(int[].class), anyInt(), anyInt()), never());
+        }
+    }
+
+    @Test
+    void theLastBotClosesTheInstanceButEarlierExitsDoNot() {
+        Character anotherBot = mock(Character.class);
+        when(member.getEventInstance()).thenReturn(instance);
+        when(anotherBot.getEventInstance()).thenReturn(instance);
+        AtomicInteger remaining = new AtomicInteger(2);
+        when(instance.getPlayerCount()).thenAnswer(call -> remaining.get());
+        doAnswer(call -> {
+            Character leaving = call.getArgument(0);
+            when(leaving.getEventInstance()).thenReturn(null);
+            remaining.decrementAndGet();
+            return null;
+        }).when(instance).unregisterPlayer(any());
+
+        PqActions.leaveEventInstance(member);
+        verify(instance, never()).dispose(false);
+
+        PqActions.leaveEventInstance(anotherBot);
+        PqActions.leaveEventInstance(anotherBot);
+        var order = inOrder(instance);
+        order.verify(instance).unregisterPlayer(member);
+        order.verify(instance).unregisterPlayer(anotherBot);
+        order.verify(instance).dispose(false);
+        verify(instance, times(1)).dispose(false);
+    }
+
+    @Test
+    void aBotInAnInstancedCopyOfItsLobbyMovesToThePublicMap() {
+        MapleMap copied = room(KerningPqData.RECRUIT_MAP);
+        MapleMap lobby = mock(MapleMap.class);
+        when(lobby.getId()).thenReturn(KerningPqData.RECRUIT_MAP);
+        place(member, copied);
+        when(member.getEventInstance()).thenReturn(instance);
+        doAnswer(call -> {
+            when(member.getEventInstance()).thenReturn(null);
+            return null;
+        }).when(instance).unregisterPlayer(member);
+        try (var generation = mockStatic(BotGeneration.class);
+             var movement = mockStatic(GCMovement.class);
+             var warps = mockStatic(WarpCommands.class)) {
+            warps.when(() -> WarpCommands.mapForBot(member, KerningPqData.RECRUIT_MAP)).thenReturn(lobby);
+            movement.when(() -> GCMovement.changeMap(member, lobby, null)).thenAnswer(call -> {
+                assertNull(member.getEventInstance(), "detach before the actual warp resolves its destination");
+                place(member, lobby);
+                return null;
+            });
+
+            new KerningPQBot(member).tickPartyQuest();
+
+            assertSame(lobby, member.getMap());
+            verify(instance).dispose(false);
+        }
+    }
+
+    @Test
+    void orbisDoesNotUnregisterTheNextRunWhileWaitingForItsEntryWarp() {
+        MapleMap lobby = mock(MapleMap.class);
+        when(lobby.getId()).thenReturn(OrbisPqData.LOBBY_MAP);
+        place(member, lobby);
+        when(member.getEventInstance()).thenReturn(instance);
+        var orchestrator = mock(OPQOrchestrator.class);
+        when(orchestrator.getSharedContext()).thenReturn(new OPQSharedContext());
+        try (var generation = mockStatic(BotGeneration.class);
+             var coordinator = mockStatic(OPQOrchestrator.class, call -> orchestrator)) {
+            OPQBot bot = new OPQBot(member);
+            bot.setRunning(true);
+            bot.setStateForDebug(OPQBot.OPQBotState.EXIT_DETECT);
+
+            bot.updateState();
+
+            assertEquals(OPQBot.OPQBotState.IN_PARTY_IDLE, bot.getOPQBotState());
+            verify(instance, never()).unregisterPlayer(member);
+        }
+    }
+
+    @Test
+    void aBotLeavingDoesNotEraseTheRoomsPuzzleLedger() {
+        MapleMap puzzle = room(KERNING_1 + 1);
+        MapleMap otherCopy = room(puzzle.getId());
+        place(member, puzzle);
+        var ledger = PositionCombination.ledgerFor(puzzle);
+        ledger.tried.add(1L);
+
+        shell().releaseRoomState();
+
+        assertSame(ledger, PositionCombination.ledgerFor(puzzle));
+        assertTrue(ledger.tried.contains(1L));
+        assertNotSame(ledger, PositionCombination.ledgerFor(otherCopy));
+        assertTrue(PositionCombination.ledgerFor(otherCopy).tried.isEmpty());
+    }
+
+    @Test
+    void aLeaderInAnotherCopyCannotJudgeThisRoomsPuzzle() {
+        MapleMap puzzle = room(KERNING_1 + 1);
+        place(member, puzzle);
+        place(leader, room(puzzle.getId()));
+        var rooms = List.of(new java.awt.Rectangle(0, 0, 10, 10));
+        var candidates = List.of(new PositionCombination.Candidate(1L, List.of(new Point(2, 2))));
+        try (var actions = mockStatic(PqActions.class)) {
+            actions.when(() -> PqActions.partyLeader(member)).thenReturn(leader);
+            PositionCombination.decide(member, candidates, rooms, 2, "stg2Property", 1, null);
+            actions.verify(() -> PqActions.observedPattern(member, rooms), never());
         }
     }
 

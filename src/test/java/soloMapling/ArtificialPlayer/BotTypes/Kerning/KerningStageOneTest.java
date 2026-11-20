@@ -409,7 +409,8 @@ class KerningStageOneTest {
         question = 0;
         passes = 1;
         when(member.getPosition()).thenReturn(new Point(500, 0));
-        when(leader.getMapId()).thenReturn(STAGE_1);
+        MapleMap room = member.getMap();
+        when(leader.getMap()).thenReturn(room);
         when(leader.getPosition()).thenReturn(new Point(600, 0));
         try (var actions = mockActions(); var movement = mockStatic(GCMovement.class)) {
             actions.when(() -> PqActions.partyLeader(member)).thenReturn(leader);

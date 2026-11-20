@@ -57,7 +57,7 @@ class PartyQuestRunStateResetTest {
             }
             if (!release.contains("super.releaseRoomState()")) {
                 offenders.add(entry[0] + ".releaseRoomState() must call super - the base class "
-                        + "releases the room's placement ledger there");
+                        + "resets its run state and releases the bot's wait spot there");
             }
             if (!release.contains(field + " =")) {
                 offenders.add(entry[0] + ".releaseRoomState() does not reset " + field);
