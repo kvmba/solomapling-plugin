@@ -1240,7 +1240,7 @@ public class ArtificialPlayerCommand extends Command {
     private static void reportAttack(Character fakechar, BotAttackDriver.AttackResult res, String verb, Character player) {
         if (res.hit()) {
             player.yellowMessage(verb + " " + fakechar.getName() + " lv" + fakechar.getLevel()
-                    + " -> hit '" + res.monsterName() + "' for " + res.damage()
+                    + (res.pending() ? " -> pending hit on '" : " -> hit '") + res.monsterName() + "' for " + res.damage()
                     + (res.killed() ? " (KILLED)" : ""));
         } else {
             player.yellowMessage(verb + " " + fakechar.getName() + " -> no hit: " + res.reason());

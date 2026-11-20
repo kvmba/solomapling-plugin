@@ -8,7 +8,13 @@ import org.gms.client.status.MonsterStatus;
 import org.gms.client.status.MonsterStatusEffect;
 import org.gms.config.GameConfig;
 import org.gms.constants.inventory.ItemConstants;
+import org.gms.constants.skills.Bishop;
+import org.gms.constants.skills.Cleric;
+import org.gms.constants.skills.FPWizard;
+import org.gms.constants.skills.Magician;
 import org.gms.constants.skills.Marauder;
+import org.gms.constants.skills.Ranger;
+import org.gms.constants.skills.Sniper;
 import org.gms.net.packet.Packet;
 import org.gms.net.server.world.World;
 import org.gms.server.ItemInformationProvider;
@@ -21,6 +27,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import soloMapling.ArtificialPlayer.GCMoveSystem.GCMovement;
 import soloMapling.companion.CompanionRoster;
+import soloMapling.server.BotTiming;
 import soloMapling.server.MethodScheduler;
 import org.gms.util.PacketCreator;
 import org.gms.util.Randomizer;
@@ -32,10 +39,11 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Consumer;
 
 /*
  * Lands a real bot hit (melee / ranged / magic): broadcast the attack packet with the
- * damage line(s) so players see it, then apply the summed damage directly - skipping the
+ * damage line(s) so players see it, then apply the summed damage at impact - skipping the
  * vanilla applyAttack path, which is keyed off stats a bot lacks. The bot is always passed
  * explicitly (never the shared client).
  *
@@ -57,20 +65,23 @@ public final class BotAttackEffects {
      * Do NOT pass the attack hitDelay here. killMonster 4th arg is the animation byte written
      * straight into the KILL_MONSTER packet (PacketCreator writes it with writeByte, so 300ms
      * truncates to 44 - an animation the client has no death sequence for, and the mob pops out
-     * of existence instead of playing die1). The hit delay schedules a surviving mob's hit pose,
-     * not its death animation.
+     * of existence instead of playing die1).
      */
     private static final int DEATH_ANIMATION_FADE_OUT = 1;
 
+    // Approximate client flight speed. Configured shots are shallow, so horizontal distance is enough.
+    private static final int PROJECTILE_SPEED_PX_PER_SECOND = 1_200;
+
     private BotAttackEffects() {}
 
-    public enum StrikeResult { REJECTED, HIT, KILLED }
+    public enum StrikeResult { REJECTED, HIT, KILLED, PENDING }
+
+    private enum ImpactTiming { IMMEDIATE, FIXED, PROJECTILE }
 
     /*
      * Credits to NutNNut for Packet IDs
      * Land a melee hit on one or more mobs: broadcast the swing carrying each mob's damage
-     * line(s), apply the summed damage per mob, and drop loot for any it kills. Returns
-     * true if at least one mob died. skillId 0 = a no-skill basic swing.
+     * line(s), then apply the summed damage per mob at contact. skillId 0 = a no-skill basic swing.
      *
      * @param bot          the attacking bot (passed explicitly - shared-client-safe)
      * @param hits         each target mob -> its rolled damage line(s); all same line count
@@ -78,28 +89,46 @@ public final class BotAttackEffects {
      * @param bodyActionId the per-weapon swing animation id (from BotAttackData)
      * @param facingMask   the stance/facing byte (0x00 right / 0x80 left)
      * @param speed        the attack-speed byte (2..9)
-     * @param hitDelay     ms until a surviving mob's hit pose; loot timing comes from die1
+     * @param hitDelay     ms from the swing to estimated contact; loot timing comes from die1
      */
     public static StrikeResult meleeStrike(Character bot, Map<Monster, List<Integer>> hits, int skillId,
                                       int skillLevel, int bodyActionId, int facingMask, int speed, short hitDelay) {
+        return meleeStrike(bot, hits, skillId, skillLevel, bodyActionId, facingMask, speed, hitDelay, null);
+    }
+
+    public static StrikeResult meleeStrike(Character bot, Map<Monster, List<Integer>> hits, int skillId,
+                                           int skillLevel, int bodyActionId, int facingMask, int speed, short hitDelay,
+                                           Consumer<Map<Monster, List<Integer>>> onLanded) {
         if (notReady(bot, hits)) {
             return StrikeResult.REJECTED;
         }
         Packet packet = PacketCreator.closeRangeAttack(bot, skillId, skillLevel, facingMask,
                 numAttackedAndDamage(hits), toTargets(hits), speed, bodyActionId, 0);
-        return broadcastAndApply(bot, packet, hits, skillId, hitDelay, bodyActionId);
+        return broadcastAndApply(bot, packet, hits, skillId, hitDelay, bodyActionId, ImpactTiming.FIXED, onLanded);
     }
 
     /* Ranged version (bow/crossbow/gun/claw): like melee, plus the flying projectile. */
     public static StrikeResult rangedStrike(Character bot, Map<Monster, List<Integer>> hits, int skillId,
                                        int skillLevel, int projectile, int bodyActionId, int facingMask,
                                        int speed, short hitDelay) {
+        return rangedStrike(bot, hits, skillId, skillLevel, projectile, bodyActionId, facingMask, speed, hitDelay, null);
+    }
+
+    public static StrikeResult rangedStrike(Character bot, Map<Monster, List<Integer>> hits, int skillId,
+                                            int skillLevel, int projectile, int bodyActionId, int facingMask,
+                                            int speed, short hitDelay, Consumer<Map<Monster, List<Integer>>> onLanded) {
         if (notReady(bot, hits)) {
             return StrikeResult.REJECTED;
         }
         Packet packet = PacketCreator.rangedAttack(bot, skillId, skillLevel, facingMask,
                 numAttackedAndDamage(hits), projectile, toTargets(hits), speed, bodyActionId, 0);
-        return broadcastAndApply(bot, packet, hits, skillId, hitDelay, bodyActionId);
+        ImpactTiming timing = switch (skillId) {
+            // Arrows appear at the target, not along a shot from the archer.
+            case Ranger.ARROW_RAIN, Sniper.ARROW_ERUPTION -> ImpactTiming.FIXED;
+            default -> ItemConstants.isArrow(projectile) || ItemConstants.isThrowingStar(projectile)
+                    ? ImpactTiming.PROJECTILE : ImpactTiming.IMMEDIATE;
+        };
+        return broadcastAndApply(bot, packet, hits, skillId, hitDelay, bodyActionId, timing, onLanded);
     }
 
     /*
@@ -115,7 +144,13 @@ public final class BotAttackEffects {
         Packet packet = PacketCreator.magicAttack(bot, skillId, skillLevel, facingMask,
                 numAttackedAndDamage(hits), toTargets(hits),
                 BotAttackData.magicChargeFor(skillId), speed, bodyActionId, 0);
-        return broadcastAndApply(bot, packet, hits, skillId, hitDelay, bodyActionId);
+        // Single-target v83 spells with a flying bolt (Skill.wz ball frames), not beams or hit-only casts.
+        ImpactTiming timing = switch (skillId) {
+            case Magician.ENERGY_BOLT, FPWizard.FIRE_ARROW, Cleric.HOLY_ARROW, Bishop.ANGEL_RAY ->
+                    ImpactTiming.PROJECTILE;
+            default -> ImpactTiming.IMMEDIATE;
+        };
+        return broadcastAndApply(bot, packet, hits, skillId, hitDelay, bodyActionId, timing, null);
     }
 
     private static boolean notReady(Character bot, Map<Monster, List<Integer>> hits) {
@@ -137,12 +172,53 @@ public final class BotAttackEffects {
         return targets;
     }
 
-    /* Rejection is distinct from a landed attack that did not kill a mob. */
-    private static StrikeResult broadcastAndApply(Character bot, Packet packet,
-                                             Map<Monster, List<Integer>> hits, int skillId, short hitDelay, int bodyActionId) {
+    private static StrikeResult broadcastAndApply(Character bot, Packet packet, Map<Monster, List<Integer>> hits,
+                                                 int skillId, short hitDelay, int bodyActionId, ImpactTiming timing,
+                                                 Consumer<Map<Monster, List<Integer>>> onLanded) {
+        MapleMap map = bot.getMap();
         if (!GCMovement.broadcastActiveAttack(bot, packet, BotAttackData.animationDurationMs(bodyActionId))) {
             return StrikeResult.REJECTED;
         }
+        if (timing == ImpactTiming.IMMEDIATE) {
+            // Unchanged routes still apply HP now and request the host's delayed hit pose.
+            return applyHits(bot, map, hits, skillId, hitDelay, onLanded);
+        }
+        if (timing == ImpactTiming.FIXED) {
+            BotTiming.after(hitDelay, () -> landDelayed(bot, map, hits, skillId, onLanded));
+        } else {
+            int originX = bot.getPosition().x;
+            boolean singleTarget = hits.size() == 1;
+            hits.forEach((mob, lines) -> {
+                int distance = Math.abs(mob.getPosition().x - originX);
+                int flightMs = Math.ceilDiv(distance * 1_000, PROJECTILE_SPEED_PX_PER_SECOND);
+                Map<Monster, List<Integer>> target = singleTarget ? hits : Map.of(mob, lines);
+                BotTiming.after(hitDelay + flightMs, () -> landDelayed(bot, map, target, skillId, onLanded));
+            });
+        }
+        return StrikeResult.PENDING;
+    }
+
+    private static void landDelayed(Character bot, MapleMap map, Map<Monster, List<Integer>> hits, int skillId,
+                                    Consumer<Map<Monster, List<Integer>>> onLanded) {
+        // A defeated bot stays on the field, and a despawn can leave getMap() pointing at it.
+        if (!bot.isAlive() || bot.getMap() != map || map.getMapObject(bot.getObjectId()) != bot) {
+            return;
+        }
+        Map<Monster, List<Integer>> liveHits = hits;
+        for (Monster mob : hits.keySet()) {
+            if (!mob.isAlive() || map.getMapObject(mob.getObjectId()) != mob) {
+                if (hits.size() == 1) return;
+                if (liveHits == hits) liveHits = new LinkedHashMap<>(hits);
+                liveHits.remove(mob);
+            }
+        }
+        if (!liveHits.isEmpty()) {
+            applyHits(bot, map, liveHits, skillId, (short) 0, onLanded);
+        }
+    }
+
+    private static StrikeResult applyHits(Character bot, MapleMap map, Map<Monster, List<Integer>> hits, int skillId,
+                                          short hitDelay, Consumer<Map<Monster, List<Integer>>> onLanded) {
         boolean anyKilled = false;
         for (Map.Entry<Monster, List<Integer>> hit : hits.entrySet()) {
             int total = 0;
@@ -152,7 +228,7 @@ public final class BotAttackEffects {
                 total += damage;
                 hitDamage = Math.max(hitDamage, damage);
             }
-            if (applyDamageAndLoot(bot, hit.getKey(), total, hitDamage, hitDelay)) {
+            if (applyDamageAndLoot(bot, map, hit.getKey(), total, hitDamage, hitDelay)) {
                 anyKilled = true;
             }
         }
@@ -166,6 +242,7 @@ public final class BotAttackEffects {
         // The 独行客 pair: with Pickpocket rolled, scatter the meso bags the host's own damage
         // handler would drop for these lines (BotMesoBomb also owns their later detonation).
         BotMesoBomb.onAttackLanded(bot, skillId, hits);
+        if (onLanded != null) onLanded.accept(hits);
         return anyKilled ? StrikeResult.KILLED : StrikeResult.HIT;
     }
 
@@ -203,7 +280,7 @@ public final class BotAttackEffects {
                 skill, skillLevel, facingMask,
                 /* numAttackedAndDamage */ (1 << 4) | 1,
                 targets, BotAttackData.DEFAULT_ATTACK_SPEED, bodyActionId, /* display */ 0), false);
-        return applyDamageAndLoot(bot, mob, damage, damage, (short) 0);
+        return applyDamageAndLoot(bot, bot.getMap(), mob, damage, damage, (short) 0);
     }
 
     /*
@@ -215,12 +292,12 @@ public final class BotAttackEffects {
         if (bot == null || bot.getMap() == null || target == null || !target.isAlive() || damage <= 0) {
             return false;
         }
-        return applyDamageAndLoot(bot, target, damage, damage, (short) 0);
+        return applyDamageAndLoot(bot, bot.getMap(), target, damage, damage, (short) 0);
     }
 
     /* Apply HP damage; on death, credit EXP + the death broadcast (no vanilla drops) and spawn our own loot. */
-    private static boolean applyDamageAndLoot(Character bot, Monster target, int damage, int hitDamage, short hitDelay) {
-        MapleMap map = bot.getMap();
+    private static boolean applyDamageAndLoot(Character bot, MapleMap map, Monster target, int damage, int hitDamage,
+                                              short hitDelay) {
         Map<Integer, Integer> expBefore = companionPartyExp(bot);
 
         // Snapshot BEFORE killMonster: its finally block runs dispatchMonsterKilled ->
@@ -252,16 +329,13 @@ public final class BotAttackEffects {
             }
             // Captured at kill time: by the time a delayed task fires the mob is already
             // removed from the map, so the roll must not re-read live state off it.
-            // Monster.map is never nulled, so a getMap() == null test would be dead code -
-            // compare the bot's current map against the kill map instead.
-            final int killMapId = map.getId();
             final Point deathPos = new Point(target.getPosition());
             final Runnable lootTask = () -> {
                 // Use the captured Character directly rather than re-looking it up by id: a
                 // lookup is another chance to miss (the bot may already be despawned), and
                 // this reference stays valid regardless — Channel.removePlayer only drops the
                 // map entry, it does not invalidate the object.
-                if (bot.getMap() == null || bot.getMapId() != killMapId) {
+                if (bot.getMap() != map) {
                     return; // bot warped away or left - no loot at the corpse
                 }
                 dropMobLootAt(bot, target, killChRate, killDropType, killNoDrops, deathPos);

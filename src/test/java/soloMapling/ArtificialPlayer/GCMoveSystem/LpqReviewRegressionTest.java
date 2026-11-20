@@ -5,6 +5,7 @@ import org.gms.client.Job;
 import org.gms.client.inventory.Item;
 import org.gms.client.inventory.WeaponType;
 import org.gms.constants.game.CharacterStance;
+import org.gms.constants.skills.Fighter;
 import org.gms.config.GameConfig;
 import org.gms.dao.entity.GameConfigDO;
 import org.gms.manager.ServerManager;
@@ -33,11 +34,13 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
+import org.mockito.ArgumentCaptor;
 import org.springframework.context.ApplicationContext;
 import soloMapling.ArtificialPlayer.BotAttackSystem.BotAttackDriver;
 import soloMapling.ArtificialPlayer.BotAttackSystem.BotAttackData;
 import soloMapling.ArtificialPlayer.BotAttackSystem.BotDemonRider;
 import soloMapling.ArtificialPlayer.BotAttackSystem.BotAttackEffects;
+import soloMapling.ArtificialPlayer.BotAttackSystem.BotAttackProfile.Route;
 import soloMapling.ArtificialPlayer.BotAttackSystem.BotAuraState;
 import soloMapling.ArtificialPlayer.BotAttackSystem.BotBuffEffects;
 import soloMapling.ArtificialPlayer.BotAttackSystem.BotEnergyCharge;
@@ -57,6 +60,7 @@ import soloMapling.ArtificialPlayer.BotTypes.Ludi.LudiPqData;
 import soloMapling.ArtificialPlayer.BotTypes.Ludi.LudiStages;
 import soloMapling.ArtificialPlayer.PartyQuest.PqActions;
 import soloMapling.MapVFX.CustomReactor;
+import soloMapling.server.BotTiming;
 
 import java.awt.Point;
 import java.lang.reflect.Field;
@@ -156,26 +160,50 @@ class LpqReviewRegressionTest {
     }
 
     @ParameterizedTest
-    @ValueSource(ints = {0, 1, 2})
-    void everyActiveAttackRouteRelaysTheLargestDecodedLineForTheMobHit(int route) throws Exception {
+    @CsvSource({
+            "CLOSE, 0, 0, 300",
+            "RANGED, 3001005, 2060000, 325", // Double Shot
+            "RANGED, 4001344, 2070000, 325", // Lucky Seven
+            "RANGED, 3111004, 2060000, 300", // Arrow Rain: no horizontal flight
+            "MAGIC, 2001004, 0, 325",       // Energy Bolt
+            "MAGIC, 2101004, 0, 325",       // Fire Arrow
+            "MAGIC, 2301005, 0, 325",       // Holy Arrow
+            "MAGIC, 2321007, 0, 325",       // Angel Ray
+            "MAGIC, 2001005, 0, 0",         // Magic Claw
+            "MAGIC, 2201005, 0, 0"          // Thunderbolt
+    })
+    void everyActiveAttackRouteRelaysTheLargestDecodedLineAtImpact(Route route, int skill, int projectile,
+                                                                  long impactDelay) throws Exception {
         MapleMap map = attackMap();
         createBot(map, new Point(0, 0), Job.BEGINNER);
         state.alertResetScheduled = true;
         Monster mob = monster(9300005, 99170, new Point(30, 0));
+        inject(map, bot);
+        inject(map, mob);
         when(mob.getStati(any())).thenReturn(null);
         int criticalLine = BotAttackData.encodeCritLine(150);
         int criticalDamage = BotAttackData.decodeDamageLine(criticalLine);
-        Map<Monster, List<Integer>> hits = Map.of(mob,
-                List.of(0, criticalLine, 50));
-
-        var result = switch (route) {
-            case 0 -> BotAttackEffects.meleeStrike(bot, hits, 0, 0, 5, 0, 4, (short) 300);
-            case 1 -> BotAttackEffects.rangedStrike(bot, hits, 3001004, 1, 0, 22, 0, 4, (short) 300);
-            default -> BotAttackEffects.magicStrike(bot, hits, 2001004, 1, 28, 0, 4, (short) 300);
-        };
-        assertEquals(HIT, result);
+        Map<Monster, List<Integer>> hits = Map.of(mob, List.of(0, criticalLine, 50));
+        try (var timer = mockStatic(BotTiming.class)) {
+            var result = switch (route) {
+                case CLOSE -> BotAttackEffects.meleeStrike(bot, hits, skill, 0, 5, 0, 4, (short) 300);
+                case RANGED -> BotAttackEffects.rangedStrike(bot, hits, skill, 1, projectile, 22, 0, 4, (short) 300);
+                case MAGIC -> BotAttackEffects.magicStrike(bot, hits, skill, 1, 28, 0, 4, (short) 300);
+            };
+            if (impactDelay == 0) {
+                assertEquals(HIT, result);
+                timer.verifyNoInteractions();
+            } else {
+                assertEquals(PENDING, result);
+                verify(mob, never()).damage(any(), anyInt(), anyBoolean());
+                verify(mob, never()).showHitReaction(any(), anyInt(), anyInt());
+                var impact = ArgumentCaptor.forClass(Runnable.class);
+                timer.verify(() -> BotTiming.after(eq(impactDelay), impact.capture()));
+                impact.getValue().run();
+            }
+        }
         verify(mob).damage(bot, criticalDamage + 50, false);
-        verify(mob).showHitReaction(bot, criticalDamage, 300);
+        verify(mob).showHitReaction(bot, criticalDamage, impactDelay == 0 ? 300 : 0);
     }
 
     @Test
@@ -184,11 +212,112 @@ class LpqReviewRegressionTest {
         createBot(map, new Point(0, 0), Job.BEGINNER);
         state.alertResetScheduled = true;
         Monster mob = monster(9300005, 99171, new Point(30, 0));
+        inject(map, bot);
+        inject(map, mob);
         when(mob.getStati(any())).thenReturn(null);
-        assertEquals(HIT, BotAttackEffects.meleeStrike(bot, Map.of(mob, List.of(0, 0)),
-                0, 0, 5, 0, 4, (short) 300));
+        try (var timer = mockStatic(BotTiming.class)) {
+            assertEquals(PENDING, BotAttackEffects.meleeStrike(bot, Map.of(mob, List.of(0, 0)),
+                    0, 0, 5, 0, 4, (short) 300));
+            var impact = ArgumentCaptor.forClass(Runnable.class);
+            timer.verify(() -> BotTiming.after(eq(300L), impact.capture()));
+            impact.getValue().run();
+        }
         verify(mob).damage(bot, 0, false);
         verify(mob, never()).showHitReaction(any(), anyInt(), anyInt());
+    }
+
+    @Test
+    void nearerProjectilesLandFirstAndTheFarMobCannotDieEarly() throws Exception {
+        MapleMap map = attackMap();
+        createBot(map, new Point(0, 0), Job.BEGINNER);
+        state.alertResetScheduled = true;
+        Monster near = monster(9300005, 99174, new Point(120, 0));
+        Monster far = monster(9300005, 99175, new Point(360, 0));
+        inject(map, bot);
+        inject(map, near);
+        inject(map, far);
+        when(near.getStati(any())).thenReturn(null);
+        when(far.getStati(any())).thenReturn(null);
+        when(far.dropsDisabled()).thenReturn(true);
+        when(far.damage(bot, 150, false)).thenReturn(true);
+        doNothing().when(map).killMonster(far, bot, false, 1);
+        try (var timer = mockStatic(BotTiming.class); var config = mockStatic(GameConfig.class)) {
+            assertEquals(PENDING, BotAttackEffects.rangedStrike(bot, Map.of(near, List.of(100), far, List.of(150)),
+                    3201005, 1, 2061000, 23, 0, 4, (short) 340));
+            var impact = ArgumentCaptor.forClass(Runnable.class);
+            timer.verify(() -> BotTiming.after(eq(440L), impact.capture()));
+            verify(near, never()).damage(any(), anyInt(), anyBoolean());
+            impact.getValue().run();
+            verify(near).damage(bot, 100, false);
+            verify(near).showHitReaction(bot, 100, 0);
+            verify(far, never()).damage(any(), anyInt(), anyBoolean());
+            verify(map, never()).killMonster(eq(far), any(), anyBoolean(), anyInt());
+
+            timer.verify(() -> BotTiming.after(eq(640L), impact.capture()));
+            impact.getValue().run();
+            verify(far).damage(bot, 150, false);
+            verify(map).killMonster(far, bot, false, 1);
+            verify(far, never()).showHitReaction(any(), anyInt(), anyInt());
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"dead", "replaced", "defeated", "despawned", "warped"})
+    void pendingHitsRequireALivingAttackerAndTheOriginalTarget(String change) throws Exception {
+        MapleMap map = attackMap();
+        createBot(map, new Point(0, 0), Job.BEGINNER);
+        state.alertResetScheduled = true;
+        Monster mob = monster(9300005, 99176, new Point(30, 0));
+        inject(map, bot);
+        inject(map, mob);
+        try (var timer = mockStatic(BotTiming.class)) {
+            assertEquals(PENDING, BotAttackEffects.meleeStrike(bot, Map.of(mob, List.of(100)),
+                    0, 0, 5, 0, 4, (short) 300));
+            switch (change) {
+                case "dead" -> when(mob.isAlive()).thenReturn(false);
+                case "replaced" -> inject(map, monster(9300005, mob.getObjectId(), mob.getPosition()));
+                case "defeated" -> when(bot.isAlive()).thenReturn(false);
+                case "despawned" -> map.removeMapObject(bot.getObjectId());
+                case "warped" -> {
+                    MapleMap anotherInstance = map(map.getId());
+                    when(bot.getMap()).thenReturn(anotherInstance);
+                }
+            }
+            var impact = ArgumentCaptor.forClass(Runnable.class);
+            timer.verify(() -> BotTiming.after(eq(300L), impact.capture()));
+            impact.getValue().run();
+        }
+        verify(mob, never()).damage(any(), anyInt(), anyBoolean());
+    }
+
+    @ParameterizedTest
+    @CsvSource({"30, true", "-80, false", "240, false"})
+    void followUpWaitsForTheMainSwingAndRechecksReach(int impactX, boolean inReach) throws Exception {
+        MapleMap map = attackMap();
+        createBot(map, new Point(0, 0), Job.WARRIOR);
+        state.alertResetScheduled = true;
+        Monster mob = monster(9300005, 99177, new Point(30, 0));
+        inject(map, bot);
+        inject(map, mob);
+        when(mob.getStati(any())).thenReturn(null);
+        try (var timer = mockStatic(BotTiming.class);
+             var finalAttack = mockStatic(BotFinalAttack.class, invocation -> invocation.getMethod().getName()
+                     .equals("maybeTrigger") ? null : invocation.callRealMethod());
+             var attack = mockStatic(BotAttack.class)) {
+            attack.when(() -> BotAttack.resolveEquippedWeaponType(bot)).thenReturn(WeaponType.SWORD1H);
+            var result = BotAttackDriver.forceSingle(bot);
+            assertTrue(result.hit());
+            assertTrue(result.pending());
+            assertFalse(result.killed());
+            finalAttack.verify(() -> BotFinalAttack.maybeTrigger(any(), anyInt(), anyInt(), anyInt(), any()), never());
+            var impact = ArgumentCaptor.forClass(Runnable.class);
+            timer.verify(() -> BotTiming.after(eq(300L), impact.capture()));
+            when(mob.getPosition()).thenReturn(new Point(impactX, 0));
+            impact.getValue().run();
+            verify(mob).damage(eq(bot), anyInt(), eq(false));
+            finalAttack.verify(() -> BotFinalAttack.maybeTrigger(eq(bot), eq(Fighter.FINAL_ATTACK_SWORD),
+                    anyInt(), anyInt(), eq(mob)), times(inReach ? 1 : 0));
+        }
     }
 
     @ParameterizedTest
@@ -303,7 +432,7 @@ class LpqReviewRegressionTest {
         assertEquals(REJECTED, BotAttackEffects.magicStrike(bot, hits, 2001004, 1, 28, 0, 4, (short) 300));
         when(bot.getLevel()).thenReturn(120);
         when(bot.getJob()).thenReturn(Job.FIGHTER);
-        BotFinalAttack.maybeTrigger(bot, WeaponType.SWORD1H, 5, 0, hits);
+        BotFinalAttack.maybeTrigger(bot, Fighter.FINAL_ATTACK_SWORD, 5, 0, mob);
         when(bot.getJob()).thenReturn(Job.CHIEFBANDIT);
         assertNull(BotMesoBomb.tryDetonate(bot, false));
         when(bot.getJob()).thenReturn(Job.HERMIT);
@@ -712,7 +841,7 @@ class LpqReviewRegressionTest {
             assertTrue(BotAttackDriver.forceSingle(bot).hit(), "face and hit the same-floor target");
             effects.verify(() -> BotAttackEffects.meleeStrike(eq(bot),
                     argThat(hits -> hits.containsKey(reachable) && !hits.containsKey(blocked)),
-                    anyInt(), anyInt(), anyInt(), anyInt(), anyInt(), anyShort()));
+                    anyInt(), anyInt(), anyInt(), anyInt(), anyInt(), anyShort(), any()));
         }
     }
 
@@ -731,7 +860,7 @@ class LpqReviewRegressionTest {
             assertTrue(BotAttackDriver.botAttack(bot).hit());
             effects.verify(() -> BotAttackEffects.rangedStrike(eq(bot),
                     argThat(hits -> hits.containsKey(target) && !hits.containsKey(blocked)),
-                    anyInt(), anyInt(), anyInt(), anyInt(), anyInt(), anyInt(), anyShort()));
+                    anyInt(), anyInt(), anyInt(), anyInt(), anyInt(), anyInt(), anyShort(), any()));
             for (int beat = 0; beat < 80; beat++) {
                 PqActions.seekAndAttack(bot, true);
                 tick();
@@ -758,7 +887,7 @@ class LpqReviewRegressionTest {
             assertTrue(BotAttackDriver.botAttack(bot).hit());
             effects.verify(() -> BotAttackEffects.meleeStrike(eq(bot),
                     argThat(hits -> hits.containsKey(first) && hits.containsKey(second)),
-                    anyInt(), anyInt(), anyInt(), anyInt(), anyInt(), anyShort()));
+                    anyInt(), anyInt(), anyInt(), anyInt(), anyInt(), anyShort(), any()));
         }
     }
 
@@ -776,7 +905,7 @@ class LpqReviewRegressionTest {
             assertTrue(BotAttackDriver.botAttack(bot).hit());
             effects.verify(() -> BotAttackEffects.meleeStrike(eq(bot),
                     argThat(hits -> hits.containsKey(first) && !hits.containsKey(second)),
-                    anyInt(), anyInt(), anyInt(), anyInt(), anyInt(), anyShort()));
+                    anyInt(), anyInt(), anyInt(), anyInt(), anyInt(), anyShort(), any()));
         }
     }
 
@@ -1066,7 +1195,7 @@ class LpqReviewRegressionTest {
         MapItem drop = pass(99204, new Point(350, 0));
         try (var effects = mockStatic(BotAttackEffects.class)) {
             effects.when(() -> BotAttackEffects.rangedStrike(eq(bot), anyMap(), anyInt(), anyInt(),
-                    anyInt(), anyInt(), anyInt(), anyInt(), anyShort())).thenAnswer(inv -> {
+                    anyInt(), anyInt(), anyInt(), anyInt(), anyShort(), any())).thenAnswer(inv -> {
                 when(first.isAlive()).thenReturn(false);
                 inject(map, drop);
                 return KILLED;
@@ -1551,7 +1680,7 @@ class LpqReviewRegressionTest {
         };
         try (var effects = mockStatic(BotAttackEffects.class)) {
             effects.when(() -> BotAttackEffects.rangedStrike(eq(bot), anyMap(), anyInt(), anyInt(), anyInt(),
-                    anyInt(), anyInt(), anyInt(), anyShort())).thenAnswer(landHits);
+                    anyInt(), anyInt(), anyInt(), anyShort(), any())).thenAnswer(landHits);
             effects.when(() -> BotAttackEffects.magicStrike(eq(bot), anyMap(), anyInt(), anyInt(),
                     anyInt(), anyInt(), anyInt(), anyShort())).thenAnswer(landHits);
             for (int t = 0; t < 1200 && kills.get() < mobs.length; t++) {
@@ -1964,6 +2093,7 @@ class LpqReviewRegressionTest {
         when(bot.getId()).thenReturn(BOT_ID); when(bot.getMap()).thenReturn(map);
         when(bot.getMapId()).thenReturn(mapId); when(bot.getJob()).thenReturn(job);
         when(bot.getLevel()).thenReturn(40); when(bot.getHp()).thenReturn(5000);
+        when(bot.isAlive()).thenReturn(true);
         when(bot.getTotalMoveSpeedStat()).thenReturn(100); when(bot.getTotalJumpStat()).thenReturn(100);
         when(bot.getPosition()).thenAnswer(inv -> position.get());
         when(bot.getParty()).thenReturn(null); when(bot.getEventInstance()).thenReturn(null);

@@ -9,13 +9,10 @@ import org.gms.constants.skills.Fighter;
 import org.gms.constants.skills.Hunter;
 import org.gms.constants.skills.Page;
 import org.gms.constants.skills.Spearman;
+import org.gms.server.life.Monster;
 import soloMapling.ArtificialPlayer.BotStatusSystem.BotDebuffState;
 import soloMapling.ArtificialPlayer.GCMoveSystem.GCMovement;
-import org.gms.server.life.Monster;
-import org.gms.server.maps.MapleMap;
-import org.gms.util.PacketCreator;
 
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -30,12 +27,11 @@ import java.util.concurrent.ThreadLocalRandom;
  * id; the server only re-renders it (AbstractDealDamageHandler) and its per-attack damage override
  * never applies to it (DawnWarrior.FINAL_ATTACK is the known host exception). A bot has no client to
  * roll anything, so the passive never fires on its own - this class rolls the chance server-side
- * and renders the same thing: an immediate second swing under the final-attack skill id, one line
+ * and renders the same thing: a second swing under the final-attack skill id, one line
  * per swing, no skill damage override (the host applies none to triggered final attacks either).
  *
- * Kept deliberately minimal (bots are decorative): no separate reach re-scan, no extra crit roll -
- * the follow-up re-strikes the swing's nearest target with one line off the same damage band, which
- * is exactly what the visual reads as.
+ * The follow-up re-strikes a target still in reach from the main swing, with one line off the same
+ * damage band and no extra crit roll.
  */
 public final class BotFinalAttack {
 
@@ -43,6 +39,7 @@ public final class BotFinalAttack {
     // rides the same cadence as a real client's re-swing (~1s); without it a maxed prop would chain
     // visually on top of every fast grinder swing. Released on despawn.
     private static final long TRIGGER_COOLDOWN_MS = 1_000L;
+    private static final short FOLLOW_UP_HIT_DELAY_MS = 300;
     private static final Map<Integer, Long> nextTriggerByBot = new ConcurrentHashMap<>();
 
     /** The WZ prop at max level, x/100 as the host's StatEffect.loadFromData reads it:
@@ -57,16 +54,10 @@ public final class BotFinalAttack {
     /*
      * Roll the passive right after a landed swing. On a hit, broadcasts the final-attack swing (the
      * caller's own body action - the client plays the follow-up on the same attack animation) under
-     * the weapon's final-attack skill id, one damage line on the swing's nearest still-living target,
-     * and lands the real damage through the ordinary bot kill/EXP/loot path.
-     *
-     * {@code hits} is the swing's damage map (mob -> lines) as the attack layer built it, nearest
-     * mob first; the follow-up takes the first entry it can still hit.
+     * the weapon's final-attack skill id and lands one more line on the revalidated target.
      */
-    public static void maybeTrigger(Character bot, WeaponType weapon, int bodyActionId, int facingMask,
-                                    Map<Monster, List<Integer>> hits) {
-        if (bot == null || bot.getMap() == null || weapon == null || hits == null || hits.isEmpty()
-                || GCMovement.isClimbing(bot)) {
+    public static void maybeTrigger(Character bot, int skillId, int bodyActionId, int facingMask, Monster target) {
+        if (bot.getMap() == null || !bot.isAlive() || !target.isAlive() || GCMovement.isClimbing(bot)) {
             return;
         }
         // A mob debuff that disarms the bot (STUN/SEDUCE/SEAL) also disarms the follow-up: it is a
@@ -77,58 +68,34 @@ public final class BotFinalAttack {
         if (status != null && status.blocksAttack()) {
             return;
         }
-        Skill skill = skillFor(bot, weapon);
-        if (skill == null) {
-            return; // not a final-attack weapon (sword<->axe variants resolve below; blunt falls through)
-        }
-        int jobId = bot.getJob() == null ? 0 : bot.getJob().getId();
-        if (jobId / 100 != 1 && jobId / 100 != 3) {
-            return; // warrior (1xx) and bowman (3xx) branches only
-        }
-        long now = System.currentTimeMillis();
-        if (now < nextTriggerByBot.getOrDefault(bot.getId(), 0L)) {
+        Skill skill = SkillFactory.getSkill(skillId);
+        if (skill == null || skill.getMaxLevel() == 0) {
             return;
         }
-        nextTriggerByBot.put(bot.getId(), now + TRIGGER_COOLDOWN_MS);
 
-        double prop = weapon == WeaponType.BOW || weapon == WeaponType.CROSSBOW ? PROP_BOW_MAX : PROP_MAX;
+        // Projectiles can resolve individual targets concurrently. Claim the roll only once.
+        int botId = bot.getId();
+        long now = System.currentTimeMillis();
+        Long next = nextTriggerByBot.get(botId);
+        long until = now + TRIGGER_COOLDOWN_MS;
+        if (next == null ? nextTriggerByBot.putIfAbsent(botId, until) != null
+                : now < next || !nextTriggerByBot.replace(botId, next, until)) {
+            return;
+        }
+        double prop = (skillId == Hunter.FINAL_ATTACK || skillId == Crossbowman.FINAL_ATTACK) ? PROP_BOW_MAX : PROP_MAX;
         if (ThreadLocalRandom.current().nextDouble() >= prop) {
             return;
         }
 
-        // The main swing's hitDelay may not have landed its damage yet, so the first listed mob can
-        // still be alive here; the first ALIVE one is the honest follow-up target.
-        Monster target = null;
-        for (Monster mob : hits.keySet()) {
-            if (mob.isAlive()) {
-                target = mob;
-                break;
-            }
-        }
-        if (target == null) {
-            return;
-        }
-
-        int skillId = skill.getId();
         int skillLevel = resolveSkillLevel(bot, skill);
         // The final-attack passive row carries no attack percentage; the follow-up blow is a
         // plain swing (its frequency, not its size, is what the passive buys).
         int damage = BotDamageModel.rollLine(bot.getJob().getJobTier(), bot.getLevel(),
                 BotDamageModel.PLAIN_SWING_PERCENT);
 
-        // The follow-up swing renders immediately (a real client's final attack needs no travel time
-        // for melee and the projectile is cosmetic for bowmen), one line on one mob.
-        Map<Integer, List<Integer>> targets = new HashMap<>();
-        targets.put(target.getObjectId(), List.of(damage));
-        if (!GCMovement.broadcastActiveAttack(bot, PacketCreator.closeRangeAttack(bot, skillId, skillLevel,
-                facingMask, (1 << 4) | 1, targets, BotAttackData.DEFAULT_ATTACK_SPEED, bodyActionId, 0),
-                BotAttackData.animationDurationMs(bodyActionId))) return;
-        BotAttackEffects.applyExternalHit(bot, target, damage);
-
-        // The host's orb-gain branch runs on the final-attack packet too (its own
-        // numAttacked > 0, only Shout is excluded) - a comboed Hero's follow-up gains an orb
-        // exactly like every other swing.
-        BotComboOrb.onAttackLanded(bot, skillId);
+        // The follow-up uses the close-range packet even for bowmen; it carries no ammo projectile.
+        BotAttackEffects.meleeStrike(bot, Map.of(target, List.of(damage)), skillId, skillLevel,
+                bodyActionId, facingMask, BotAttackData.DEFAULT_ATTACK_SPEED, FOLLOW_UP_HIT_DELAY_MS);
     }
 
     /** Release a despawned bot's trigger cooldown (mirrors the other per-bot clearBot hooks). */
@@ -191,17 +158,6 @@ public final class BotFinalAttack {
      * weapon ids. */
     private static boolean isFighterLine(int jobId) {
         return jobId / 100 == 1 && (jobId % 100) / 10 == 1;
-    }
-
-    /** Resolve the pure id to a Skill, or null when it is unresolvable for this server. */
-    private static Skill skillFor(Character bot, WeaponType weapon) {
-        int jobId = bot.getJob() == null ? 0 : bot.getJob().getId();
-        int skillId = skillIdFor(jobId, weapon);
-        if (skillId == 0) {
-            return null;
-        }
-        Skill skill = SkillFactory.getSkill(skillId);
-        return skill != null && skill.getMaxLevel() > 0 ? skill : null;
     }
 
     /** Max level - bots do not learn passives, so the follow-up renders at the skill's ceiling. */

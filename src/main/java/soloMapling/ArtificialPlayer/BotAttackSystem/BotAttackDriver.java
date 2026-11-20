@@ -27,6 +27,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.Consumer;
 
 /*
  * Targeting and route-dispatch model adapted from GreenCatMS bot combat. Credit: NutNNut.
@@ -110,13 +111,17 @@ public final class BotAttackDriver {
 
     private BotAttackDriver() {}
 
-    /* Outcome of an attack attempt, for the GM command to report. */
-    public record AttackResult(boolean hit, String monsterName, int damage, boolean killed, String reason) {
+    /* hit means the swing was accepted; a pending swing has not applied its rolled damage yet. */
+    public record AttackResult(boolean hit, String monsterName, int damage, boolean killed, String reason,
+                               boolean pending) {
         static AttackResult hit(String name, int dmg, boolean killed) {
-            return new AttackResult(true, name, dmg, killed, null);
+            return new AttackResult(true, name, dmg, killed, null, false);
+        }
+        static AttackResult pending(String name, int dmg) {
+            return new AttackResult(true, name, dmg, false, null, true);
         }
         static AttackResult miss(String reason) {
-            return new AttackResult(false, null, 0, false, reason);
+            return new AttackResult(false, null, 0, false, reason, false);
         }
     }
 
@@ -437,12 +442,19 @@ public final class BotAttackDriver {
             hits.put(mob, lines);
         }
 
+        // A follow-up may only roll against targets whose main hit has already arrived.
+        int jobId = bot.getJob().getId();
+        int jobFamily = jobId / 100;
+        int followUpSkill = !whiff && weapon != null && (jobFamily == 1 || jobFamily == 3)
+                ? BotFinalAttack.skillIdFor(jobId, weapon) : 0;
+        Consumer<Map<Monster, List<Integer>>> onLanded = followUpSkill == 0 ? null
+                : landed -> tryFinalAttack(bot, profile, weapon, followUpSkill, bodyActionId, facingMask, landed.keySet());
         BotAttackEffects.StrikeResult result = switch (profile.route) {
             case CLOSE  -> BotAttackEffects.meleeStrike(bot, hits, skillId, profile.skillLevel,
-                    bodyActionId, facingMask, profile.speed, profile.hitDelayMs);
+                    bodyActionId, facingMask, profile.speed, profile.hitDelayMs, onLanded);
             case RANGED -> BotAttackEffects.rangedStrike(bot, hits, skillId, profile.skillLevel,
                     BotAttackData.projectileFor(weapon, bot), bodyActionId, facingMask,
-                    BotAttackData.speedFor(weapon, profile.speed), profile.hitDelayMs);
+                    BotAttackData.speedFor(weapon, profile.speed), profile.hitDelayMs, onLanded);
             case MAGIC  -> BotAttackEffects.magicStrike(bot, hits, skillId, profile.skillLevel,
                     bodyActionId, facingMask, profile.speed, profile.hitDelayMs);
         };
@@ -459,13 +471,6 @@ public final class BotAttackDriver {
             BotDemonRider.apply(bot, skillId, hits);
         }
 
-        // The 终极攻击 passive: an occasional extra blow right after the swing. A real client rolls
-        // the chance and renders the follow-up itself; the bot's roll happens here instead. A whiffed
-        // swing (every line a MISS) never triggers it.
-        if (!whiff) {
-            BotFinalAttack.maybeTrigger(bot, weapon, bodyActionId, facingMask, hits);
-        }
-
         nextAttackByBot.put(bot.getId(), now + profile.cooldownMs);
         if (selection.ultimate()) { // firing the throttled full-map nuke starts its long cooldown
             nextUltimateByBot.put(bot.getId(), now + FULL_MAP_ULTIMATE_COOLDOWN_MS);
@@ -473,7 +478,25 @@ public final class BotAttackDriver {
         String label = targets.size() > 1
                 ? targets.size() + " mobs (nearest '" + targets.get(0).getName() + "')"
                 : targets.get(0).getName();
-        return AttackResult.hit(label, reported, result == BotAttackEffects.StrikeResult.KILLED);
+        return result == BotAttackEffects.StrikeResult.PENDING ? AttackResult.pending(label, reported)
+                : AttackResult.hit(label, reported, result == BotAttackEffects.StrikeResult.KILLED);
+    }
+
+    private static void tryFinalAttack(Character bot, BotAttackProfile profile, WeaponType weapon, int skillId,
+                                       int bodyActionId, int facingMask, Iterable<Monster> landed) {
+        MapleMap map = bot.getMap();
+        if (map == null || !bot.isAlive()) return;
+
+        // This attack has not been broadcast yet. The target may have left reach during the main hit.
+        Point position = bot.getPosition();
+        Rectangle box = reachBox(position, profile, weapon, facingMask == BotAttackData.FACING_LEFT_MASK);
+        for (Monster mob : landed) {
+            if (inReach(bot, position, box, profile, mob) && map.getMapObject(mob.getObjectId()) == mob
+                    && PqActions.huntFilterAdmits(bot, mob)) {
+                BotFinalAttack.maybeTrigger(bot, skillId, bodyActionId, facingMask, mob);
+                return;
+            }
+        }
     }
 
     private record AttackSelection(BotAttackProfile profile, List<Monster> targets,

@@ -63,7 +63,7 @@ class AttackLedgeRuleTest {
     @Test
     void theRouteIsThreadedFromTheSwingDecision() throws Exception {
         String body = methodBody(source(), "private static boolean inReach(Character bot, Point botPos,");
-        assertTrue(body.contains("onAttackableSurface(bot.getMap(), botPos, m, route)"),
+        assertTrue(body.contains("onAttackableSurface(bot.getMap(), botPos, m, profile.route)"),
                 "inReach must pass its own route in, or the exemption can never apply");
     }
 
