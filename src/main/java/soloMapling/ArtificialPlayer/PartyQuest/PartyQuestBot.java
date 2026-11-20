@@ -226,6 +226,11 @@ public abstract class PartyQuestBot extends BotSM implements GrindTickRegistry.P
         if (!GCMovement.hasGraph(bot)) {
             return;
         }
+        combatSweep(bot);
+    }
+
+    /** The room's combat work once the shared run and navigation checks have passed. */
+    protected void combatSweep(Character bot) {
         // Sweep the drops the bot is standing on, whatever the stage's steering is doing this
         // beat: a kill lands its item at the mob's feet, and waiting for the macro tick to come
         // back for it is the reported "the pass is still lying there" delay. Narrow on purpose -
@@ -236,9 +241,7 @@ public abstract class PartyQuestBot extends BotSM implements GrindTickRegistry.P
                 PqActions.stopHunting(bot);
                 return;
             }
-            if (PqActions.lootSteppedOn(bot, lootIds) > 0) {
-                onStageLootPickedUp(lootIds);
-            }
+            PqActions.lootSteppedOn(bot, lootIds);
         }
         if (!fightsOnSweep(lootIds)) {
             PqActions.stopHunting(bot);
@@ -305,10 +308,6 @@ public abstract class PartyQuestBot extends BotSM implements GrindTickRegistry.P
      */
     protected int[] steppedOnLootIds() {
         return EMPTY_LOOT_IDS;
-    }
-
-    /** React to an actual inventory gain without blocking the shared combat sweep. */
-    protected void onStageLootPickedUp(int[] lootIds) {
     }
 
     /**

@@ -1200,6 +1200,7 @@ public final class PqActions {
 
     /** Inline-pickup cap for a loot sweep (see {@link #loot}): what one tick may pay for. */
     private static final int LOOT_INLINE_MAX = 5;
+    private static final long FLOOR_DROP_SETTLE_MS = 400L;
 
     // =========================================================================
     // N6 - hunting
@@ -1482,6 +1483,68 @@ public final class PqActions {
         return pickupBeforeChase(bot, roomReachPx(bot.getMap()), itemIds, STEPPED_ON_REACH_SQ);
     }
 
+    public enum LootBeat { NONE, COLLECTING, PICKED_UP }
+
+    /** A loot-only beat for a collection stage: walk, wait for pickup, or pick up one item. */
+    public static LootBeat collectPartyMonsterLoot(Character bot, int[] itemIds) {
+        int botId = bot.getId();
+        SeekState state = seekStates.computeIfAbsent(botId, ignored -> new SeekState());
+        synchronized (state) {
+            if (seekStates.get(botId) != state || movementShielded(botId) || reactorBeatArmed(bot)) {
+                return LootBeat.COLLECTING;
+            }
+            MapleMap map = bot.getMap();
+            Point position = bot.getPosition();
+            List<MapObject> found = BotLogic.checkForItemsOnFloor(bot, position, roomReachPx(map), itemIds);
+            if (found.isEmpty()) return bot.getMap() == map ? LootBeat.NONE : LootBeat.COLLECTING;
+            Point goal = GCMovement.moveTargetOf(bot);
+            if (goal != null && goal.equals(state.lastChaseGoal)) goal = null;
+            long settledBefore = System.currentTimeMillis() - FLOOR_DROP_SETTLE_MS;
+            MapItem nearest = null;
+            double bestSq = STEPPED_ON_REACH_SQ;
+            boolean hasNearbyDrop = false;
+            boolean keepWalk = false;
+            // Don't run pathfinding while a pickup is already in reach or the driver is on its way.
+            for (MapObject object : found) {
+                if (!(object instanceof MapItem drop)) continue;
+                Point at = drop.getPosition();
+                if (at == null) continue;
+                double distanceSq = position.distanceSq(at);
+                boolean nearer = distanceSq <= bestSq;
+                if (!(nearer || (!keepWalk && at.equals(goal))) || !canCollectFloorDrop(bot, drop, true)) continue;
+                if (nearer) {
+                    hasNearbyDrop = true;
+                    if (drop.getDropTime() <= settledBefore) {
+                        nearest = drop;
+                        bestSq = distanceSq;
+                    }
+                } else {
+                    keepWalk = true;
+                }
+            }
+            if (bot.getMap() != map) return LootBeat.COLLECTING;
+            if (hasNearbyDrop) {
+                stopHunting(bot);
+                if (nearest == null) return LootBeat.COLLECTING; // let new drops land before trying
+                long now = movementNowMs();
+                Long next = nextSteppedOnPickupAtByBot.get(botId);
+                if ((next != null && now < next)
+                        || bot.getPosition().distanceSq(nearest.getPosition()) > STEPPED_ON_REACH_SQ) {
+                    return LootBeat.COLLECTING;
+                }
+                return collectSteppedOn(bot, itemIds, nearest, now, true) > 0
+                        ? LootBeat.PICKED_UP : LootBeat.COLLECTING;
+            }
+            if (keepWalk) return LootBeat.COLLECTING;
+            MapItem target = nearestPathableLoot(bot, position, found, STEPPED_ON_REACH_SQ, true);
+            if (bot.getMap() != map) return LootBeat.COLLECTING;
+            if (target == null) return LootBeat.NONE;
+            stopHunting(bot);
+            walkForPickup(bot, target);
+            return LootBeat.COLLECTING;
+        }
+    }
+
     private static boolean pickupBeforeChase(Character bot, double radiusPx, int[] itemIds, double pickupReachSq) {
         if (bot == null || bot.getMap() == null || itemIds == null || itemIds.length == 0
                 || bot.getPosition() == null) {
@@ -1493,28 +1556,9 @@ public final class PqActions {
                 return false; // a staged walk / box beat already owns this beat
             }
             if (walkingToLoot(bot, itemIds)) return true;
-            List<MapObject> found = BotLogic.checkForItemsOnFloor(bot, bot.getPosition(), radiusPx, itemIds);
             Point botPos = bot.getPosition();
-            MapItem nearest = null;
-            double bestSq = Double.MAX_VALUE;
-            for (MapObject o : found) {
-                if (!(o instanceof MapItem drop) || !canCollectFloorDrop(bot, drop)) {
-                    continue;
-                }
-                Point ip = drop.getPosition();
-                if (ip == null) {
-                    continue;
-                }
-                double dsq = botPos.distanceSq(ip);
-                if (dsq <= pickupReachSq) {
-                    continue; // the caller's paced pickup handles it without a walk
-                }
-                if (dsq < bestSq && !soloMapling.ArtificialPlayer.BotTypes.Ludi.LudiStages.refusesFloor(bot, ip)
-                        && GCMovement.canPathTo(bot, ip.x, ip.y)) {
-                    bestSq = dsq;
-                    nearest = drop;
-                }
-            }
+            List<MapObject> found = BotLogic.checkForItemsOnFloor(bot, botPos, radiusPx, itemIds);
+            MapItem nearest = nearestPathableLoot(bot, botPos, found, pickupReachSq, false);
             if (nearest == null) {
                 return false;
             }
@@ -1526,8 +1570,33 @@ public final class PqActions {
         }
     }
 
+    private static MapItem nearestPathableLoot(Character bot, Point position, List<MapObject> found,
+                                                double pickupReachSq, boolean allowPartyMonsterLoot) {
+        MapItem nearest = null;
+        double bestSq = Double.MAX_VALUE;
+        for (MapObject object : found) {
+            if (!(object instanceof MapItem drop)) continue;
+            Point at = drop.getPosition();
+            if (at == null) continue;
+            double distanceSq = position.distanceSq(at);
+            if (distanceSq > pickupReachSq && distanceSq < bestSq
+                    && canCollectFloorDrop(bot, drop, allowPartyMonsterLoot)
+                    && !soloMapling.ArtificialPlayer.BotTypes.Ludi.LudiStages.refusesFloor(bot, at)
+                    && GCMovement.canPathTo(bot, at.x, at.y)) {
+                nearest = drop;
+                bestSq = distanceSq;
+            }
+        }
+        return nearest;
+    }
+
     private static boolean canCollectFloorDrop(Character bot, MapItem drop) {
-        if (!isFloorLoot(drop) || !DropCommands.botCanLoot(bot, drop)) return false;
+        return canCollectFloorDrop(bot, drop, false);
+    }
+
+    private static boolean canCollectFloorDrop(Character bot, MapItem drop, boolean allowPartyMonsterLoot) {
+        if (!isFloorLoot(drop) || !(DropCommands.botCanLoot(bot, drop)
+                || (allowPartyMonsterLoot && isPartyMonsterDrop(bot, drop)))) return false;
         // A Chief Bandit's Pickpocket bags are bomb fuel, not loot: botCanLoot passes them (they
         // are the bot's own drops) and they register the instant they land, so without this gate
         // the sweep eats them long before BAG_MIN_AGE_MS makes them detonable. The grind layer's
@@ -1545,12 +1614,29 @@ public final class PqActions {
         }
     }
 
+    /** The host lets party members pick up monster loot during its owner-protection window. */
+    private static boolean isPartyMonsterDrop(Character bot, MapItem drop) {
+        if (!(drop.getDropper() instanceof Monster) || drop.isPickedUp()) return false;
+        int partyId = bot.getPartyId();
+        if (partyId == -1) return false;
+        drop.lockItem();
+        try {
+            return partyId == drop.getPartyOwnerIdLocked();
+        } finally {
+            drop.unlockItem();
+        }
+    }
+
     private static void collectFloorDrop(Character bot, MapItem drop) {
+        collectFloorDrop(bot, drop, false);
+    }
+
+    private static void collectFloorDrop(Character bot, MapItem drop, boolean allowPartyMonsterLoot) {
         // The host refuses drops younger than 400ms; that is settling, not a failed pickup.
-        if (System.currentTimeMillis() - drop.getDropTime() < 400) return;
+        if (System.currentTimeMillis() - drop.getDropTime() < FLOOR_DROP_SETTLE_MS) return;
         SeekState control = seekStates.computeIfAbsent(bot.getId(), ignored -> new SeekState());
         synchronized (control) {
-            if (!canCollectFloorDrop(bot, drop)) return;
+            if (!canCollectFloorDrop(bot, drop, allowPartyMonsterLoot)) return;
             DropCommands.botLootSingleDrop(bot, drop);
             if (!drop.isPickedUp()) control.failedPickups.add(drop);
         }
@@ -2381,11 +2467,16 @@ public final class PqActions {
         if (nearest == null) {
             return 0;
         }
+        return collectSteppedOn(bot, itemIds, nearest, now, false);
+    }
+
+    private static int collectSteppedOn(Character bot, int[] itemIds, MapItem drop, long now,
+                                       boolean allowPartyMonsterLoot) {
         int before = 0;
         for (int id : itemIds) {
             before += countItem(bot, id);
         }
-        collectFloorDrop(bot, nearest);
+        collectFloorDrop(bot, drop, allowPartyMonsterLoot);
         nextSteppedOnPickupAtByBot.put(bot.getId(), now + STEPPED_ON_PICKUP_GAP_MIN_MS
                 + ThreadLocalRandom.current().nextLong(STEPPED_ON_PICKUP_GAP_MAX_MS
                 - STEPPED_ON_PICKUP_GAP_MIN_MS + 1));

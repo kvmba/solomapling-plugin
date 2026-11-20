@@ -102,34 +102,39 @@ public class KerningPQBot extends PartyQuestBot {
     }
 
     @Override
+    protected void combatSweep(Character bot) {
+        if (bot.getMapId() != KerningPqData.STAGE_1) {
+            super.combatSweep(bot);
+            return;
+        }
+        if (!KerningStages.needsCoupons(bot, couponRun)) {
+            PqActions.stopHunting(bot);
+            return;
+        }
+        switch (PqActions.collectPartyMonsterLoot(bot, KerningStages.COUPON_LOOT_IDS)) {
+            case NONE -> PqActions.seekAndAttack(bot);
+            case COLLECTING -> { }
+            case PICKED_UP -> {
+                EventInstanceManager instance = bot.getEventInstance();
+                if (instance != null && bot.getMapId() == KerningPqData.STAGE_1) {
+                    couponRun(instance).pickedUp(bot);
+                }
+            }
+        }
+    }
+
+    @Override
     protected boolean fightsOnSweep() {
         Character bot = getChr();
-        return switch (bot.getMapId()) {
-            case KerningPqData.STAGE_1 -> KerningStages.needsCoupons(bot, couponRun);
-            case KerningPqData.STAGE_5 -> !KerningStages.stageCleared(bot, 5)
-                    && PqActions.needsHuntForLeader(bot, KerningPqData.PASS, KerningStages.BOSS_PASSES_WANTED);
-            default -> true;
-        };
+        if (bot.getMapId() != KerningPqData.STAGE_5) return true;
+        return !KerningStages.stageCleared(bot, 5)
+                && PqActions.needsHuntForLeader(bot, KerningPqData.PASS, KerningStages.BOSS_PASSES_WANTED);
     }
 
     @Override
     protected int[] steppedOnLootIds() {
-        return switch (getChr().getMapId()) {
-            case KerningPqData.STAGE_1 -> KerningStages.COUPON_LOOT_IDS;
-            case KerningPqData.STAGE_5 -> KerningStages.PASS_LOOT_IDS;
-            default -> super.steppedOnLootIds();
-        };
-    }
-
-    @Override
-    protected void onStageLootPickedUp(int[] lootIds) {
-        Character bot = getChr();
-        if (lootIds == KerningStages.COUPON_LOOT_IDS && bot.getMapId() == KerningPqData.STAGE_1) {
-            EventInstanceManager instance = bot.getEventInstance();
-            if (instance != null) {
-                couponRun(instance).pickedUp(bot);
-            }
-        }
+        return getChr().getMapId() == KerningPqData.STAGE_5
+                ? KerningStages.PASS_LOOT_IDS : super.steppedOnLootIds();
     }
 
     private KerningStages.CouponRun couponRun(EventInstanceManager instance) {

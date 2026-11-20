@@ -98,8 +98,7 @@ public final class KerningStages {
                     }
                     int excess = PqActions.countItem(bot, KerningPqData.COUPON) - requiredCoupons(question);
                     if (excess < 0) {
-                        PqActions.approachRoomLoot(bot, COUPON_LOOT_IDS);
-                        return;
+                        return; // the combat sweep owns both pickup and hunting until the quota is met
                     }
                     announceCompletion(bot);
                     PqActions.stopHunting(bot);

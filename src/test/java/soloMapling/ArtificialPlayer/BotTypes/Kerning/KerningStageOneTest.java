@@ -8,6 +8,7 @@ import org.gms.manager.ServerManager;
 import org.gms.net.server.world.Party;
 import org.gms.property.ServiceProperty;
 import org.gms.scripting.event.EventInstanceManager;
+import org.gms.server.life.Monster;
 import org.gms.server.life.NPC;
 import org.gms.server.maps.MapItem;
 import org.gms.server.maps.MapObject;
@@ -42,6 +43,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.*;
 import static soloMapling.ArtificialPlayer.BotTypes.Kerning.KerningPqData.*;
+import static soloMapling.ArtificialPlayer.PartyQuest.PqActions.LootBeat.*;
 
 class KerningStageOneTest {
     private static final int BOT_ID = 880197;
@@ -126,8 +128,8 @@ class KerningStageOneTest {
             bot.grindTick();
             assertEquals(-1, question);
             assertTrue(lines.isEmpty());
-            actions.verify(() -> PqActions.lootSteppedOn(member, loot), never());
-            actions.verify(() -> PqActions.seekAndAttack(member, false, loot), never());
+            actions.verify(() -> PqActions.collectPartyMonsterLoot(member, loot), never());
+            actions.verify(() -> PqActions.seekAndAttack(member), never());
 
             ticks.clearInvocations();
             movement.when(GCMovement::movementNowMs).thenReturn(5_100L);
@@ -137,19 +139,20 @@ class KerningStageOneTest {
             assertInCollectionPool(lines.getFirst(), "start", target);
 
             bot.grindTick(); // knowing the answer does not let the combat sweep leave yet
-            actions.verify(() -> PqActions.seekAndAttack(member, false, loot), never());
-            actions.verify(() -> PqActions.approachRoomLoot(member, loot), never());
+            actions.verify(() -> PqActions.collectPartyMonsterLoot(member, loot), never());
+            actions.verify(() -> PqActions.seekAndAttack(member), never());
             ticks.verify(() -> BotTickService.requestEarlierTick(eq(BOT_ID), any(Runnable.class),
                     longThat(delay -> delay >= 600 && delay <= 3_000)));
 
             movement.when(GCMovement::movementNowMs).thenReturn(8_100L);
             coupons = target - 2;
             bot.workStage(); // inventory isn't a pickup event
+            actions.when(() -> PqActions.collectPartyMonsterLoot(member, loot)).thenReturn(NONE);
             bot.grindTick(); // no pickup on this beat
             assertEquals(1, lines.size());
-            actions.when(() -> PqActions.lootSteppedOn(member, loot)).thenAnswer(call -> {
+            actions.when(() -> PqActions.collectPartyMonsterLoot(member, loot)).thenAnswer(call -> {
                 coupons++;
-                return 1;
+                return PICKED_UP;
             });
             bot.grindTick();
             assertEquals(2, lines.size());
@@ -163,8 +166,8 @@ class KerningStageOneTest {
             assertEquals(target, coupons);
             assertEquals(3, lines.size());
             actions.verify(() -> PqActions.talkTo(member, NPC_CLOTO));
-            actions.verify(() -> PqActions.lootSteppedOn(member, loot), times(3));
-            actions.verify(() -> PqActions.seekAndAttack(member, false, loot), times(2));
+            actions.verify(() -> PqActions.collectPartyMonsterLoot(member, loot), times(3));
+            actions.verify(() -> PqActions.seekAndAttack(member));
             actions.verify(() -> PqActions.attack(member), never());
         }
     }
@@ -288,8 +291,8 @@ class KerningStageOneTest {
             actions.verify(() -> PqActions.handItemsToLeaderAfterStage(member, PASS, NPC_CLOTO), times(2));
             actions.verify(() -> PqActions.waitNearStageNpc(member, NPC_CLOTO), times(2));
             actions.verify(() -> PqActions.handItemsToLeader(member, PASS), never());
-            actions.verify(() -> PqActions.lootSteppedOn(member, new int[]{COUPON}), never());
-            actions.verify(() -> PqActions.seekAndAttack(member, false, new int[]{COUPON}), never());
+            actions.verify(() -> PqActions.collectPartyMonsterLoot(member, new int[]{COUPON}), never());
+            actions.verify(() -> PqActions.seekAndAttack(member), never());
         }
     }
 
@@ -309,8 +312,8 @@ class KerningStageOneTest {
             bot.grindTick(); // still stopped after the leader submits the passes
             bot.workStage();
             actions.verify(() -> PqActions.waitNearStageNpc(member, NPC_CLOTO), times(3));
-            actions.verify(() -> PqActions.lootSteppedOn(member, new int[]{COUPON}), never());
-            actions.verify(() -> PqActions.seekAndAttack(member, false, new int[]{COUPON}), never());
+            actions.verify(() -> PqActions.collectPartyMonsterLoot(member, new int[]{COUPON}), never());
+            actions.verify(() -> PqActions.seekAndAttack(member), never());
         }
     }
 
@@ -393,7 +396,7 @@ class KerningStageOneTest {
             movement.verify(() -> GCMovement.move(eq(member), eq(-1000), eq(0), any(), any()));
             actions.verify(() -> PqActions.dropStack(eq(member), eq(COUPON), anyInt(), any()), never());
             actions.verify(() -> PqActions.talkTo(member, NPC_CLOTO), never());
-            actions.verify(() -> PqActions.seekAndAttack(member, false, new int[]{COUPON}), never());
+            actions.verify(() -> PqActions.seekAndAttack(member), never());
             when(member.getPosition()).thenReturn(CLOTO_POSITION);
             bot.workStage();
             actions.verify(() -> PqActions.dropStack(member, COUPON, 5, CLOTO_POSITION));
@@ -450,37 +453,99 @@ class KerningStageOneTest {
     }
 
     @Test
-    void walksToReachableCouponsOutsideTheCombatScanWithoutPickingThemUpRemotely() {
+    void walksToThePartysReachableCouponBeforeAttackingAndPicksItUpOnlyInReach() {
         question = 1;
-        Point at = new Point(0, 0);
-        when(member.getPosition()).thenReturn(at);
-        MapItem drop = mock(MapItem.class);
-        Item item = mock(Item.class);
-        when(item.getQuantity()).thenReturn((short) 1);
-        when(drop.getItem()).thenReturn(item);
-        when(drop.getItemId()).thenReturn(COUPON);
-        when(drop.getOwnerId()).thenReturn(BOT_ID);
-        when(drop.getPosition()).thenReturn(new Point(500, 0));
-        MapleMap map = member.getMap();
-        when(map.getMapObjectsInRange(eq(at), anyDouble(), eq(List.of(MapObjectType.ITEM))))
-                .thenAnswer(call -> {
-                    var items = new ArrayList<MapObject>();
-                    if (call.<Double>getArgument(1) >= at.distanceSq(drop.getPosition())) {
-                        items.add(drop);
-                    }
-                    return items;
-                });
-        try (var attack = mockStatic(BotAttackDriver.class); var movement = mockStatic(GCMovement.class)) {
+        when(member.getPosition()).thenReturn(new Point());
+        when(member.getPartyId()).thenReturn(37);
+        when(leader.getId()).thenReturn(BOT_ID + 1);
+        when(leader.getPartyId()).thenReturn(37);
+        Character outsider = mock(Character.class);
+        when(outsider.getId()).thenReturn(BOT_ID + 2);
+        when(outsider.getPartyId()).thenReturn(38);
+        Point destination = new Point(500, 0);
+        MapItem partyDrop = couponDrop(leader, destination);
+        MapItem foreignDrop = couponDrop(outsider, new Point(10, 0));
+        MapItem unreachableDrop = couponDrop(member, new Point(90, -80));
+        MapItem addressedDrop = couponDrop(leader, new Point(20, 0));
+        addressedDrop.lockItem();
+        try {
+            addressedDrop.setPermanentOwnerLocked(true);
+        } finally {
+            addressedDrop.unlockItem();
+        }
+        stubFloorCoupons(foreignDrop, unreachableDrop, addressedDrop, partyDrop);
+
+        try (var attack = mockStatic(BotAttackDriver.class); var movement = mockStatic(GCMovement.class);
+             var chat = mockStatic(SocialCommands.class)) {
             attack.when(() -> BotAttackDriver.attackReachX(member)).thenReturn(150);
             attack.when(() -> BotAttackDriver.attackReachY(member)).thenReturn(100);
             movement.when(() -> GCMovement.hasGraph(member)).thenReturn(true);
             movement.when(() -> GCMovement.canPathTo(member, 500, 0)).thenReturn(true);
+            long dropTime = System.currentTimeMillis() - 1_000;
+            partyDrop.setDropTime(dropTime);
+            foreignDrop.setDropTime(dropTime);
 
             bot.grindTick();
-            bot.workStage();
+            movement.when(() -> GCMovement.moveTargetOf(member)).thenReturn(destination);
+            bot.grindTick(); // the live pickup walk must not restart or let combat in
 
             movement.verify(() -> GCMovement.move(eq(member), eq(500), eq(0), any(), any()));
-            verify(member, never()).pickupItem(drop);
+            verify(member, never()).pickupItem(any());
+            attack.verify(() -> BotAttackDriver.botAttack(member), never());
+
+            when(member.getPosition()).thenReturn(destination);
+            bot.grindTick();
+            verify(member).pickupItem(partyDrop);
+            attack.verify(() -> BotAttackDriver.botAttack(member), never());
+
+            bot.grindTick(); // only unavailable coupons remain, even with the old goal still live
+            attack.verify(() -> BotAttackDriver.botAttack(member));
+            assertEquals(1, coupons);
+        }
+    }
+
+    @Test
+    void picksUpTheSettledCouponBeforeTheCloserNewDropAndWaitsThroughCooldown() {
+        question = 1;
+        when(member.getPosition()).thenReturn(new Point());
+        MapItem settled = couponDrop(member, new Point(20, 0));
+        MapItem newDrop = couponDrop(member, new Point());
+        newDrop.setDropTime(Long.MAX_VALUE);
+        stubFloorCoupons(settled, newDrop);
+
+        try (var attack = mockStatic(BotAttackDriver.class); var movement = mockStatic(GCMovement.class);
+             var chat = mockStatic(SocialCommands.class)) {
+            movement.when(() -> GCMovement.hasGraph(member)).thenReturn(true);
+            bot.grindTick();
+            verify(member).pickupItem(settled);
+            bot.grindTick(); // wait for the drop to settle instead of attacking
+            newDrop.setDropTime(0);
+            bot.grindTick(); // the drop settled, but virtual pickup time has not advanced
+            verify(member, never()).pickupItem(newDrop);
+
+            movement.when(GCMovement::movementNowMs).thenReturn(250L);
+            bot.grindTick();
+            verify(member).pickupItem(newDrop);
+            attack.verifyNoInteractions();
+        }
+    }
+
+    @Test
+    void doesNotPickUpACouponFromTheRoomTheMemberJustLeft() {
+        question = 1;
+        when(member.getPosition()).thenReturn(new Point());
+        MapItem drop = couponDrop(member, new Point());
+        MapleMap nextRoom = mock(MapleMap.class);
+        when(member.getMap().getMapObjectsInRange(any(Point.class), anyDouble(), eq(List.of(MapObjectType.ITEM))))
+                .thenAnswer(call -> {
+                    when(member.getMap()).thenReturn(nextRoom);
+                    return new ArrayList<>(List.of(drop));
+                });
+        try (var attack = mockStatic(BotAttackDriver.class); var movement = mockStatic(GCMovement.class)) {
+            movement.when(() -> GCMovement.hasGraph(member)).thenReturn(true);
+            bot.grindTick();
+            verify(member, never()).pickupItem(any());
+            attack.verifyNoInteractions();
         }
     }
 
@@ -495,8 +560,8 @@ class KerningStageOneTest {
                     try (var combat = mockActions(); var movement = mockStatic(GCMovement.class)) {
                         movement.when(() -> GCMovement.hasGraph(member)).thenReturn(true);
                         bot.grindTick();
-                        combat.verify(() -> PqActions.lootSteppedOn(member, new int[]{COUPON}), never());
-                        combat.verify(() -> PqActions.seekAndAttack(member, false, new int[]{COUPON}), never());
+                        combat.verify(() -> PqActions.collectPartyMonsterLoot(member, new int[]{COUPON}), never());
+                        combat.verify(() -> PqActions.seekAndAttack(member), never());
                     }
                     return null;
                 });
@@ -510,6 +575,30 @@ class KerningStageOneTest {
             bot.workStage();
             assertEquals(0, question);
         }
+    }
+
+    private static MapItem couponDrop(Character owner, Point at) {
+        return new MapItem(new Item(COUPON, (short) 0, (short) 1), at,
+                mock(Monster.class), owner, owner.getClient(), (byte) 1, false);
+    }
+
+    private void stubFloorCoupons(MapItem... drops) {
+        when(member.getMap().getMapObjectsInRange(any(Point.class), anyDouble(), eq(List.of(MapObjectType.ITEM))))
+                .thenAnswer(call -> {
+                    Point center = call.getArgument(0);
+                    double radiusSq = call.getArgument(1);
+                    var items = new ArrayList<MapObject>();
+                    for (MapItem drop : drops) {
+                        if (!drop.isPickedUp() && center.distanceSq(drop.getPosition()) <= radiusSq) items.add(drop);
+                    }
+                    return items;
+                });
+        doAnswer(call -> {
+            MapItem drop = call.getArgument(0);
+            drop.setPickedUp(true);
+            coupons++;
+            return null;
+        }).when(member).pickupItem(any(MapItem.class));
     }
 
     private static MockedStatic<PqActions> mockActions() {
