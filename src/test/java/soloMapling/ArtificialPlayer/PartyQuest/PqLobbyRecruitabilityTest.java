@@ -43,9 +43,11 @@ class PqLobbyRecruitabilityTest {
     /** The rooms the run really plays in stay inside the quest. */
     @Test
     void theBossRushFightRoomsStayInsideTheRun() {
-        assertTrue(BossRushPqData.isFightRoom(BossRushPqData.FIRST_STAGE));
-        assertTrue(BossRushPqData.isFightRoom(BossRushPqData.LAST_STAGE));
-        assertTrue(BossRushPqData.isRestSpot(970032700));
+        assertTrue(BossRushPqData.isFightRoom(970030100));
+        assertTrue(BossRushPqData.isFightRoom(970032700));
+        assertTrue(BossRushPqData.isRestSpot(BossRushPqData.FIRST_STAGE));
+        assertTrue(BossRushPqData.isRestSpot(BossRushPqData.LAST_STAGE));
+        assertFalse(BossRushPqData.isRestSpot(970032700));
     }
 
     /**

@@ -1,11 +1,12 @@
 package soloMapling.ArtificialPlayer.BotTypes.Amoria;
 
 import org.gms.client.Character;
+import org.gms.server.maps.Portal;
 import soloMapling.ArtificialPlayer.BotGeneration;
-import soloMapling.ArtificialPlayer.BotMessagingSystem.CharacterStorage;
 import soloMapling.ArtificialPlayer.PartyQuest.PartyQuestBot;
 import soloMapling.ArtificialPlayer.PartyQuest.PositionCombination;
 import soloMapling.ArtificialPlayer.PartyQuest.PqActions;
+import soloMapling.ArtificialPlayer.PartyQuest.PqStageChat;
 
 /**
  * Plays Amoria PQ ("Amorian Challenge") with a real player leading.
@@ -19,14 +20,15 @@ import soloMapling.ArtificialPlayer.PartyQuest.PqActions;
  * also counts. Stage 2 indexes the three areas of its sub-room; stage 3 the nine ropes on
  * {@code 670010400}.
  *
- * <p>Stage 1 (the mirror fight) and the stages past the ropes are fights, which the attack path
- * already covers, so this bot only adds its damage there.
+ * <p>Collection rooms deliver at Amos; the bonus stages keep the same bot in the run to work boxes.
  */
 public class AmoriaPQBot extends PartyQuestBot {
 
     private static final int[] STATUE_PIECE_LOOT = {AmoriaPqData.STATUE_PIECE};
     private static final int[] MIRROR_LOOT = {4031595};
     private static final int[] BOSS_LOOT = {4031594};
+    private static final int MARRIED_BONUS_MAP = 670010750;
+    private static final int EXIT_MAP = 670011000;
 
     public AmoriaPQBot(Character character) {
         super(character);
@@ -49,7 +51,7 @@ public class AmoriaPQBot extends PartyQuestBot {
 
     @Override
     protected boolean isInsideQuest(int mapId) {
-        return mapId >= AmoriaPqData.ENTRY_MAP && mapId <= AmoriaPqData.CLEAR_MAP;
+        return mapId >= AmoriaPqData.ENTRY_MAP && mapId <= AmoriaPqData.CLEAR_MAP || mapId == EXIT_MAP;
     }
 
     @Override
@@ -60,6 +62,7 @@ public class AmoriaPQBot extends PartyQuestBot {
     @Override
     protected boolean fightsOnSweep() {
         Character bot = getChr();
+        if (bot.getMapId() == MARRIED_BONUS_MAP) return true;
         return switch (AmoriaPqData.stageOf(bot.getMapId())) {
             case 1 -> PqActions.readEimString(bot, "1stageclear") == null
                     && PqActions.needsHuntForLeader(bot, MIRROR_LOOT[0], 1);
@@ -67,12 +70,14 @@ public class AmoriaPQBot extends PartyQuestBot {
                     && PqActions.needsHuntForLeader(bot, AmoriaPqData.STATUE_PIECE, AmoriaPqData.STATUE_PIECES_WANTED);
             case 6 -> PqActions.readEimString(bot, "6stageclear") == null
                     && PqActions.needsHuntForLeader(bot, BOSS_LOOT[0], 1);
+            case 9 -> false;
             default -> true;
         };
     }
 
     @Override
     protected int[] steppedOnLootIds() {
+        if (getChr().getMapId() == MARRIED_BONUS_MAP) return super.steppedOnLootIds();
         return switch (AmoriaPqData.stageOf(getChr().getMapId())) {
             case 1 -> MIRROR_LOOT;
             case 4 -> STATUE_PIECE_LOOT;
@@ -83,7 +88,20 @@ public class AmoriaPQBot extends PartyQuestBot {
 
     @Override
     protected boolean workStage() {
-        int stage = AmoriaPqData.stageOf(getChr().getMapId());
+        int mapId = getChr().getMapId();
+        if (mapId == EXIT_MAP) {
+            settleRewardRoom(9201047);
+            return false;
+        }
+        if (mapId == MARRIED_BONUS_MAP) {
+            breakBonusBoxes(6701000, 6701002);
+            return fightRoom();
+        }
+        if (mapId == AmoriaPqData.CLEAR_MAP) {
+            breakBonusBoxes(6702003, 6702012);
+            return false;
+        }
+        int stage = AmoriaPqData.stageOf(mapId);
         return switch (stage) {
             case 1 -> stageOne();
             case 2, 3 -> ropePuzzle(stage);
@@ -96,10 +114,31 @@ public class AmoriaPQBot extends PartyQuestBot {
                 }
                 yield false;
             }
-            // Survival and bonus rooms retain their own fight work.
-            case 5, 7, 8 -> fightRoom();
+            case 5 -> fightRoom();
             default -> false; // past the run: nothing to add
         };
+    }
+
+    private void breakBonusBoxes(int first, int last) {
+        Character bot = getChr();
+        for (var box : bot.getMap().getAllReactors()) {
+            if (box.getId() >= first && box.getId() <= last && box.isActive()
+                    && PqActions.approachReactor(bot, box.getObjectId(), false, true) != PqActions.Approach.STUCK) {
+                return;
+            }
+        }
+    }
+
+    @Override
+    protected Portal forwardPortal(int leaderMapId) {
+        if (getChr().getMapId() != MARRIED_BONUS_MAP || leaderMapId != AmoriaPqData.CLEAR_MAP) {
+            return super.forwardPortal(leaderMapId);
+        }
+        return getChr().getMap().getPortals().stream()
+                .filter(portal -> "stageBogo".equals(portal.getScriptName()))
+                .min(java.util.Comparator.comparingDouble(portal ->
+                        portal.getPosition().distanceSq(getChr().getPosition())))
+                .orElse(null);
     }
 
     /** Collect only until Amos has been given the pieces or the leader is ready to turn them in. */
@@ -165,14 +204,17 @@ public class AmoriaPQBot extends PartyQuestBot {
     private boolean ropePuzzle(int stage) {
         Character bot = getChr();
         if (PqActions.readEimString(bot, stage + "stageclear") != null) {
+            sayStageClearOnce(stage);
             waitForAmos(bot, stage);
             return false;
         }
         String answerProperty = AmoriaPqData.comboPropertyFor(stage);
-        PositionCombination.standOn(bot, botIndex(),
+        var areas = AmoriaPqData.areasFor(stage);
+        var plan = PositionCombination.standOn(bot, PositionCombination.botIndex(bot),
                 stage == 2 ? AmoriaPqData.stage2Candidates() : AmoriaPqData.stage3Candidates(),
-                AmoriaPqData.areasFor(stage), stage, answerProperty,
+                areas, stage, answerProperty,
                 PositionCombination.comboAnswer(answerProperty), () -> waitForAmos(bot, stage));
+        PqStageChat.announcePositionPlan(this, stage, plan, areas);
         return false;
     }
 
@@ -182,22 +224,5 @@ public class AmoriaPQBot extends PartyQuestBot {
         } else {
             PqActions.waitNearPuzzleNpc(bot, AmoriaPqData.PUZZLE_NPC);
         }
-    }
-
-    /** Which body this bot is, counted from character ids for a stable order. */
-    private int botIndex() {
-        var party = getChr().getParty();
-        if (party == null) {
-            return 0;
-        }
-        int mine = getChr().getId();
-        int ahead = 0;
-        for (var member : party.getMembers()) {
-            int id = member.getId();
-            if (id != mine && id < mine && CharacterStorage.getBotById(id) != null) {
-                ahead++;
-            }
-        }
-        return ahead;
     }
 }

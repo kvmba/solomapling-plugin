@@ -2,10 +2,13 @@ package soloMapling.ArtificialPlayer.BotTypes.Ariant;
 
 import org.gms.client.Character;
 import org.gms.client.inventory.manipulator.InventoryManipulator;
+import org.gms.constants.id.MapId;
 import org.gms.server.life.Monster;
 import soloMapling.ArtificialPlayer.BotGeneration;
 import soloMapling.ArtificialPlayer.PartyQuest.PartyQuestBot;
 import soloMapling.ArtificialPlayer.PartyQuest.PqActions;
+
+import static soloMapling.ArtificialPlayer.BotHelpers.isBot;
 
 /**
  * Plays Ariant Coliseum with a real player leading.
@@ -65,7 +68,8 @@ public class AriantPQBot extends PartyQuestBot {
      */
     @Override
     protected boolean isInsideQuest(int mapId) {
-        return AriantPqData.isArena(mapId) || AriantPqData.isQueueLobby(mapId);
+        return AriantPqData.isArena(mapId) || AriantPqData.isQueueLobby(mapId)
+                || mapId == MapId.ARPQ_KINGS_ROOM;
     }
 
     /**
@@ -91,6 +95,9 @@ public class AriantPQBot extends PartyQuestBot {
      */
     @Override
     protected boolean inRunGroup(Character bot) {
+        if (bot.getMapId() == MapId.ARPQ_KINGS_ROOM) {
+            return bot.getAriantColiseum() != null;
+        }
         return AriantExpedition.enrolled(bot);
     }
 
@@ -138,17 +145,23 @@ public class AriantPQBot extends PartyQuestBot {
      */
     @Override
     protected boolean workStage() {
-        int mapId = getChr().getMapId();
-        if (!AriantPqData.isArena(mapId)) {
-            if (AriantExpedition.enrolled(getChr())) {
-                return false; // queue hall: wait with the expedition for the player's NPC
+        Character bot = getChr();
+        int mapId = bot.getMapId();
+        if (mapId == MapId.ARPQ_KINGS_ROOM) {
+            // All matches use this public map. The arena pointer, rather than the map or
+            // channel expedition registry (already removed), identifies our competitors.
+            var arena = bot.getAriantColiseum();
+            for (Character player : bot.getMap().getAllPlayers()) {
+                if (player != bot && player.getAriantColiseum() == arena && !isBot(player)) {
+                    PqActions.waitNearStageNpc(bot, 2101016);
+                    return false;
+                }
             }
-            // The expedition is gone (the match disposed it, or the player abandoned the
-            // registration). Give up the seat for good - a stale roster entry would keep a slot
-            // in a match this bot will never join - and report the run over so the base class
-            // walks it home and says its clear line through the one path every quest uses.
-            AriantExpedition.leave(getChr());
-            return true;
+            returnToLobby("the competitors left the result room");
+            return false;
+        }
+        if (!AriantPqData.isArena(mapId)) {
+            return false; // queue hall: wait with the expedition for the player's NPC
         }
         grantArenaKitIfDue();
         if (!hasElementRock()) {

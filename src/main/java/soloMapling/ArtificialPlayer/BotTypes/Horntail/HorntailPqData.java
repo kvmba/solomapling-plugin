@@ -34,6 +34,8 @@ public final class HorntailPqData {
     /** The light and dark sides the last room can lead to. */
     public static final int LIGHT_ROOM = 240050300;
     public static final int DARK_ROOM  = 240050310;
+    public static final int REWARD_MAP = 240050400;
+    public static final int REWARD_NPC = 2083002;
 
     public static final int MIN_PLAYERS = 6;
     public static final int MAX_PLAYERS = 6;

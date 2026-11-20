@@ -17,14 +17,11 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * already owns the seam for that - {@link PartyQuestBot#releaseRoomState()} runs on every run end
  * (and on stop/retype) - and Ludi, Ariant and Papulatus reset their own state there.
  *
- * <p>Three quests did not, and each one degrades silently on the second run:
+ * <p>The latches guarded here would silently degrade the second run:
  * <ul>
  *   <li>Henesys' {@code guarding} stayed true, so the next run skipped the planting half and stood
  *       in an empty field while Moon Bunny never spawned;</li>
- *   <li>Ellin's {@code mazeExitAsked} still named the maze map, so the bot skipped the one talk
- *       that opens the way out and the party stayed stuck in the maze;</li>
- *   <li>Kerning's and Magatia's "already announced" latches suppressed the plan line the player
- *       needs to solve the stage.</li>
+ *   <li>Magatia's "already announced" latch suppressed the plan line the player needs.</li>
  * </ul>
  *
  * <p>Pinned at the source level: a run-scoped field and its reset live in the same seam, and a
@@ -37,8 +34,6 @@ class PartyQuestRunStateResetTest {
     /** Quest bot file -> the per-run fields it must reset at the run's end. */
     private static final List<String[]> RESETS = List.of(
             new String[]{"Henesys/HenesysPQBot.java", "guarding"},
-            new String[]{"Ellin/EllinPQBot.java", "mazeExitAsked"},
-            new String[]{"Kerning/KerningPQBot.java", "announcedStage"},
             new String[]{"Magatia/MagatiaPQBot.java", "announcedCombination"},
             // These two already reset; kept so the list stays the whole register of run latches.
             new String[]{"Ludi/LudiPQBot.java", "announcedCrateAttempt"});

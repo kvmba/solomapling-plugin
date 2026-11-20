@@ -19,7 +19,7 @@ class PqPickupGateWiringTest {
 
     @Test
     void theBeatConsultsThePickupGateBeforeTheChase() throws Exception {
-        String body = methodBody(source(), "public void grindTick()");
+        String body = methodBody(source(), "protected void combatSweep(Character bot)");
         int gate = body.indexOf("walkingAtALootableDrop");
         int chase = body.lastIndexOf("seekAndAttack");
         assertTrue(gate > 0, "the combat beat must consult the pickup gate");
@@ -31,7 +31,7 @@ class PqPickupGateWiringTest {
     @Test
     void theGateIsDerivedFromTheDriversLiveGoal() throws Exception {
         String java = source();
-        String beat = methodBody(java, "public void grindTick()");
+        String beat = methodBody(java, "protected void combatSweep(Character bot)");
         assertTrue(beat.contains("int[] lootIds = steppedOnLootIds()")
                         && beat.contains("walkingAtALootableDrop(bot, lootIds)"),
                 "only a quest's own scoopable items may hold the beat");

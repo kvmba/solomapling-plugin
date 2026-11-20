@@ -16,7 +16,9 @@ import soloMapling.ArtificialPlayer.BotPartySystem.BotPartyLogic;
 import soloMapling.ArtificialPlayer.BotPartySystem.BotRecruitManager;
 import soloMapling.ArtificialPlayer.BotSM;
 import soloMapling.ArtificialPlayer.GCMoveSystem.GCMovement;
+import soloMapling.ArtificialPlayer.PartyQuest.PositionCombination;
 import soloMapling.ArtificialPlayer.PartyQuest.PqActions;
+import soloMapling.ArtificialPlayer.PartyQuest.PqStageChat;
 import soloMapling.ArtificialPlayer.BotTypes.OPQ.OPQSharedContext.OPQPhase;
 import soloMapling.Environment.BotMessages;
 import soloMapling.Environment.EnvironmentManager;
@@ -210,6 +212,20 @@ public class OPQBot extends BotSM {
 
         if (isInsidePQ() && !isInParty()) {
             handlePQAbandoned();
+            return;
+        }
+
+        MapleMap map = getChr().getMap();
+        if (map == null) return;
+        if (map.getId() == OPQConstants.OPQ_LOBBY
+                && (isInsidePQ() || opqBotState == OPQBotState.LOOP_CHECK)) {
+            handleLoopCheck();
+            return;
+        }
+        var instance = map.getEventInstance();
+        if (OrbisPqData.isOrbisRoom(map.getId()) && instance != null && instance.isEventCleared()) {
+            transitionTo(OPQBotState.EXIT_DETECT, "settling the cleared run");
+            workSettlement(map);
             return;
         }
 
@@ -940,9 +956,8 @@ public class OPQBot extends BotSM {
                 return;
             }
             case 4 -> {
-                if (!OrbisStages.standOnSealedPlatform(getChr(), sharedContext.mySealedSlot(getChr().getId()))) {
-                    debugLogf("sealed room: no published layout yet");
-                }
+                var plan = OrbisStages.standOnSealedPlatform(getChr(), PositionCombination.botIndex(getChr()));
+                PqStageChat.announcePositionPlan(this, OrbisPqData.STAGE_4, plan, OrbisPqData.SEALED_AREA_RECTS);
             }
             case 5 -> { /* handled by workLounge, which rotates the sub-rooms */ }
             case 6 -> OrbisStages.pullCorrectLevers(getChr());
@@ -1227,6 +1242,87 @@ public class OPQBot extends BotSM {
     // Phase: Exit
     // =========================================================================
 
+    private void workSettlement(MapleMap here) {
+        Character bot = getChr();
+        var instance = here.getEventInstance();
+        MapleMap target = PqActions.findHumanPartyRoom(bot,
+                room -> room.getEventInstance() == instance && OrbisPqData.isOrbisRoom(room.getId()));
+        if (target == null) {
+            finishSettlement();
+            return;
+        }
+        int mapId = here.getId();
+        int to = target.getId();
+        if (mapId == OrbisPqData.REWARD_MAP) {
+            PqActions.waitNearStageNpc(bot, OrbisPqData.MINERVA);
+        } else if (to != mapId && (to == OrbisPqData.REWARD_MAP || to == OrbisPqData.TREASURE_MAP)) {
+            // Minerva can be entered from either branch; Eak's hidden-room dialogue is
+            // leader-only. Follow only into a settlement room already opened for the party.
+            GCMovement.changeMap(bot, target, target.getPortal(0));
+        } else if (mapId == OrbisPqData.TREASURE_MAP) {
+            int box = PqActions.findReactorOid(bot, OrbisPqData.TREASURE_BOX);
+            if (box >= 0) PqActions.hitReactor(bot, box);
+            else PqActions.waitNearStageNpc(bot, OrbisPqData.MINERVA);
+        } else if (mapId == OrbisPqData.STAGE_PRIZE && to == mapId) {
+            if (here.getMonsters().isEmpty()) PqActions.waitNearStageNpc(bot, OrbisPqData.EAK);
+            else PqActions.seekAndAttack(bot);
+        } else {
+            followSettlementDoor(here, to);
+        }
+    }
+
+    private void followSettlementDoor(MapleMap here, int to) {
+        int mapId = here.getId();
+        var door = switch (mapId) {
+            case OrbisPqData.TOWER_MAP -> OrbisPqData.isJailRoom(to) ? here.getPortal("hiden00")
+                    : to == OrbisPqData.STAGE_PRIZE ? here.getPortal("in06") : null;
+            case OrbisPqData.STAGE_JAIL -> OrbisPqData.isJailRoom(to) && to != mapId
+                    ? here.getPortal("in0" + (to - mapId) / 10) : null;
+            default -> null;
+        };
+        if (door != null) {
+            PqActions.walkThroughPortal(getChr(), door);
+        } else if (mapId == OrbisPqData.TOWER_MAP) {
+            PqActions.waitNearStageNpc(getChr(), OrbisPqData.MINERVA);
+        } else if (mapId == OrbisPqData.STAGE_JAIL && to == OrbisPqData.TOWER_MAP) {
+            PqActions.walkThroughPortal(getChr(), here.getPortal("out00"));
+        } else if (OrbisPqData.isJailRoom(mapId) && mapId != OrbisPqData.STAGE_JAIL) {
+            if (mapId % 10 == 2) {
+                for (int boxId = 2002017; boxId <= 2002018; boxId++) {
+                    int box = PqActions.findReactorOid(getChr(), boxId);
+                    if (box >= 0) {
+                        PqActions.hitReactor(getChr(), box);
+                        break;
+                    }
+                }
+            } else if (to == mapId || to == mapId + 2) {
+                var lever = here.getAllReactors().stream()
+                        .filter(reactor -> reactor.getId() == 2008007 && reactor.getState() == 0)
+                        .findFirst().orElse(null);
+                if (lever != null) PqActions.hitReactor(getChr(), lever.getObjectId());
+            }
+            var gate = here.getPortal("in00");
+            if (to == mapId + 2 && gate != null) PqActions.walkThroughPortal(getChr(), gate);
+            if (to == OrbisPqData.TOWER_MAP || to == OrbisPqData.STAGE_JAIL
+                    || OrbisPqData.isJailRoom(to) && to / 10 != mapId / 10) {
+                PqActions.walkThroughPortal(getChr(), here.getPortal("out00"));
+            }
+        } else if (mapId != to) {
+            walkOutOfCurrentRoom();
+        }
+    }
+
+    private void finishSettlement() {
+        Character bot = getChr();
+        PositionCombination.release(System.identityHashCode(bot.getMap()));
+        releaseEventInstance();
+        var lobby = mapForBot(bot, OPQConstants.OPQ_LOBBY);
+        if (lobby != null) {
+            GCMovement.changeMap(bot, lobby, lobby.getPortal(0));
+            handleLoopCheck();
+        }
+    }
+
     private void handleExitDetect() {
         debugLogf("handleExitDetect: mapId=" + getChr().getMapId()
                 + " leaderMap=" + partyLeaderMapId());
@@ -1253,6 +1349,12 @@ public class OPQBot extends BotSM {
     private void handleExitLobby() {
         debugLogf("handleExitLobby: mapId=" + getChr().getMapId()
                 + " leaderMap=" + partyLeaderMapId());
+
+        MapleMap here = getChr().getMap();
+        if (PqActions.findHumanPartyRoom(getChr(), room -> room == here) != null) {
+            PqActions.waitNearStageNpc(getChr(), OrbisPqData.EAK);
+            return;
+        }
 
         // If leader has already moved to recruitment lobby, follow them
         // (deliberate synchronous warps: arrival choreography blocks and must not overlap)

@@ -41,7 +41,16 @@ public class PyramidPQBot extends PartyQuestBot {
 
     @Override
     protected boolean isInsideQuest(int mapId) {
-        return PyramidPqData.isPyramidMap(mapId);
+        return PyramidPqData.isPyramidMap(mapId) || isResultRoom(mapId);
+    }
+
+    @Override
+    protected boolean runsOnOwnClock() {
+        return true;
+    }
+
+    private static boolean isResultRoom(int mapId) {
+        return mapId == PyramidPqData.RUN_MAP || mapId == 926020001;
     }
 
     @Override
@@ -54,6 +63,10 @@ public class PyramidPQBot extends PartyQuestBot {
 
     @Override
     protected boolean workStage() {
+        if (isResultRoom(getChr().getMapId())) {
+            settleRewardRoom(2103013);
+            return false;
+        }
         // Attack only if there is something here that is safe to attack. The attack driver
         // picks its own target from what is in reach, so the room is checked first rather
         // than trusting it to avoid the marked monsters.
@@ -86,6 +99,6 @@ public class PyramidPQBot extends PartyQuestBot {
     /** The combat sweep reads the same conservative gate as the stage work. */
     @Override
     protected boolean fightsOnSweep() {
-        return hasOnlyKillableMonsters();
+        return !isResultRoom(getChr().getMapId()) && hasOnlyKillableMonsters();
     }
 }

@@ -44,7 +44,7 @@ public class HorntailPQBot extends PartyQuestBot {
 
     @Override
     protected boolean isInsideQuest(int mapId) {
-        return HorntailPqData.isQuestRoom(mapId);
+        return HorntailPqData.isQuestRoom(mapId) || mapId == HorntailPqData.REWARD_MAP;
     }
 
     @Override
@@ -66,6 +66,7 @@ public class HorntailPQBot extends PartyQuestBot {
     @Override
     protected boolean fightsOnSweep() {
         int mapId = getChr().getMapId();
+        if (mapId == HorntailPqData.REWARD_MAP) return false;
         if (mapId == HorntailPqData.LIGHT_ROOM || mapId == HorntailPqData.DARK_ROOM) {
             return needsSideKeys();
         }
@@ -79,6 +80,10 @@ public class HorntailPQBot extends PartyQuestBot {
 
     @Override
     protected boolean workStage() {
+        if (getChr().getMapId() == HorntailPqData.REWARD_MAP) {
+            settleRewardRoom(HorntailPqData.REWARD_NPC);
+            return false;
+        }
         int index = HorntailPqData.roomIndexOf(getChr().getMapId());
         if (index < 0) {
             int mapId = getChr().getMapId();

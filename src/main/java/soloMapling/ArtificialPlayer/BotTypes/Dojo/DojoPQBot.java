@@ -1,6 +1,7 @@
 package soloMapling.ArtificialPlayer.BotTypes.Dojo;
 
 import org.gms.client.Character;
+import org.gms.constants.id.MapId;
 import org.gms.server.maps.Portal;
 import soloMapling.ArtificialPlayer.BotGeneration;
 import soloMapling.ArtificialPlayer.PartyQuest.PartyQuestBot;
@@ -21,6 +22,8 @@ import soloMapling.ArtificialPlayer.PartyQuest.PqActions;
  * whoever is assembling the party, not for a bot to take on its own.
  */
 public class DojoPQBot extends PartyQuestBot {
+
+    private static final int CLEAR_MAP = 925020003;
 
     public DojoPQBot(Character character) {
         super(character);
@@ -43,7 +46,7 @@ public class DojoPQBot extends PartyQuestBot {
 
     @Override
     protected boolean isInsideQuest(int mapId) {
-        return DojoPqData.isPartyDojo(mapId);
+        return DojoPqData.isPartyDojo(mapId) || mapId == MapId.DOJO_EXIT || mapId == CLEAR_MAP;
     }
 
     @Override
@@ -55,7 +58,8 @@ public class DojoPQBot extends PartyQuestBot {
     protected Portal forwardPortal(int leaderMapId) {
         var map = getChr().getMap();
         int here = map.getId();
-        return leaderMapId > here && (leaderMapId - here) % 100 == 0
+        return (leaderMapId > here && (leaderMapId - here) % 100 == 0
+                || leaderMapId == CLEAR_MAP && here / 100 % 100 == 38)
                 ? map.getPortal("out001") : null;
     }
 
@@ -67,6 +71,17 @@ public class DojoPQBot extends PartyQuestBot {
     @Override
     protected boolean workStage() {
         var map = getChr().getMap();
+        if (map.getId() == MapId.DOJO_EXIT || map.getId() == CLEAR_MAP) {
+            var exit = map.getPortal("out00");
+            if (exit != null) {
+                if (hasPlayerInRun()) {
+                    PqActions.waitAtPuzzlePost(getChr(), exit.getPosition());
+                } else {
+                    PqActions.walkThroughPortal(getChr(), exit);
+                }
+            }
+            return false;
+        }
         // The dojo's rooms are one boss each and the door opens when it is down, so there is
         // nothing to read - just fight while anything is standing.
         if (!map.getMonsters().isEmpty()) {

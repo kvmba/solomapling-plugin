@@ -379,18 +379,33 @@ class PqParkDoorExecutionSimTest {
         }
     }
 
+    @Test
+    void kerningCanClimbFromKingSlimeBackToTheRewardNpc() {
+        int mapId = KerningPqData.STAGE_5;
+        assumeTrue(wzAvailable(mapId), "Map.wz needed");
+        Sim sim = sim(mapId, new Point(162, -451));
+        Character bot = sim.st().bot;
+        Runnable park = () -> PqActions.waitNearStageNpc(bot, KerningPqData.NPC_CLOTO);
+        park.run();
+        assertArrivesNear(sim, sim.map().getNPCById(KerningPqData.NPC_CLOTO).getPosition(), park, 14);
+    }
+
     private static void assertArrivesNearNpc(Sim sim, int npcId) {
         Point npc = sim.map().getNPCById(npcId).getPosition();
         assertArrivesNear(sim, npc, () -> PqActions.waitNearPuzzleNpc(sim.st().bot, npcId));
     }
 
     private static void assertArrivesNear(Sim sim, Point post, Runnable park) {
+        assertArrivesNear(sim, post, park, 10);
+    }
+
+    private static void assertArrivesNear(Sim sim, Point post, Runnable park, int travelBeats) {
         Character bot = sim.st().bot;
         Point target = GCMovement.moveTargetOf(bot);
         assertNotNull(target);
         assertTrue(Math.abs(target.x - post.x) <= 80 && Math.abs(target.y - post.y) <= 30,
                 () -> "target " + target + " is not by " + post);
-        for (int beat = 0; beat < 10; beat++) {
+        for (int beat = 0; beat < travelBeats; beat++) {
             tickN(sim, 2_500 / BotPhysicsEngine.cfg.TICK_MS);
             if (sim.p().distance(target) <= 16 && GCMovement.isSettled(bot)) return;
             park.run();

@@ -3,11 +3,12 @@ package soloMapling.ArtificialPlayer.BotTypes.Henesys;
 import org.gms.client.Character;
 import soloMapling.ArtificialPlayer.BotGeneration;
 import soloMapling.ArtificialPlayer.PartyQuest.PartyQuestBot;
+import soloMapling.ArtificialPlayer.PartyQuest.PqActions;
 
 /**
  * Plays Henesys PQ ("Primrose Hill") with a real player leading.
  *
- * <p>The quest is one map and two halves, so this bot is correspondingly small: plant
+ * <p>The main room has two halves: plant
  * primroses until the moon dial is full, then guard Moon Bunny while the rice cakes come
  * out. Which half it is in is decided by the quest's own {@code stage} counter rather than
  * by a timer, because the second half starts exactly when the sixth flower takes.
@@ -49,7 +50,11 @@ public class HenesysPQBot extends PartyQuestBot {
 
     @Override
     protected boolean isInsideQuest(int mapId) {
-        return mapId == HenesysPqData.ENTRY_MAP;
+        return switch (mapId) {
+            case HenesysPqData.ENTRY_MAP, HenesysPqData.REWARD_MAP,
+                    HenesysPqData.BONUS_MAP, HenesysPqData.FAILED_MAP, HenesysPqData.BONUS_EXIT_MAP -> true;
+            default -> false;
+        };
     }
 
     @Override
@@ -59,13 +64,18 @@ public class HenesysPQBot extends PartyQuestBot {
 
     @Override
     protected boolean fightsOnSweep() {
-        return !HenesysStages.stageCleared(getChr())
-                && !HenesysStages.deliversCakes(getChr());
+        return switch (getChr().getMapId()) {
+            case HenesysPqData.ENTRY_MAP -> !HenesysStages.stageCleared(getChr())
+                    && !HenesysStages.deliversCakes(getChr());
+            case HenesysPqData.BONUS_MAP -> true;
+            default -> false;
+        };
     }
 
     @Override
     protected int[] steppedOnLootIds() {
-        return HenesysStages.needsCakes(getChr()) ? CAKE_LOOT : super.steppedOnLootIds();
+        return getChr().getMapId() == HenesysPqData.ENTRY_MAP && HenesysStages.needsCakes(getChr())
+                ? CAKE_LOOT : super.steppedOnLootIds();
     }
 
     /**
@@ -86,6 +96,26 @@ public class HenesysPQBot extends PartyQuestBot {
 
     @Override
     protected boolean workStage() {
+        switch (getChr().getMapId()) {
+            case HenesysPqData.REWARD_MAP, HenesysPqData.BONUS_EXIT_MAP -> {
+                settleRewardRoom(HenesysPqData.TORY);
+                return false;
+            }
+            case HenesysPqData.FAILED_MAP -> {
+                settleRewardRoom(HenesysPqData.TOMMY);
+                return false;
+            }
+            case HenesysPqData.BONUS_MAP -> {
+                if (!hasPlayerInRunRoom(HenesysPqData.BONUS_MAP)) {
+                    PqActions.stopHunting(getChr());
+                    PqActions.talkTo(getChr(), HenesysPqData.TOMMY, 0);
+                } else {
+                    PqActions.seekAndAttack(getChr());
+                }
+                return false;
+            }
+            default -> { }
+        }
         if (!guarding && HenesysStages.flowersBloomed(getChr()) < HenesysPqData.FLOWERS_TO_BLOOM) {
             plantUntilBloomed();
             // The moon message the sixth flower raises is what flips the quest to its second
@@ -98,7 +128,8 @@ public class HenesysPQBot extends PartyQuestBot {
             return false;
         }
         guarding = true;
-        return HenesysStages.guardMoonBunny(getChr());
+        HenesysStages.guardMoonBunny(getChr());
+        return false;
     }
 
     /**

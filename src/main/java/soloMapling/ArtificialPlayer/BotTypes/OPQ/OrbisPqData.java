@@ -47,7 +47,11 @@ public final class OrbisPqData {
     public static final int STAGE_PAPA        = 920010800; // statusStg7 - scar1..6
     public static final int STAGE_JAIL        = 920010900;
     public static final int STAGE_PRIZE       = 920011000;
+    public static final int TREASURE_MAP      = 920011100;
     public static final int EXIT_LOBBY        = 920011200;
+    public static final int REWARD_MAP        = 920011300;
+
+    public static final int TREASURE_BOX     = 2002014;
 
     /** The four sub-rooms 920010600 opens onto; 604 holds the ten 4001052 reactors. */
     public static final List<Integer> LOUNGE_ROOMS =
@@ -70,6 +74,7 @@ public final class OrbisPqData {
 
     /** Chamberlain Eak at 2013001: spawns from the altar, clears every stage. */
     public static final int EAK = 2013001;
+    public static final int MINERVA = 2013002;
 
     // =========================================================================
     // Items
@@ -337,8 +342,14 @@ public final class OrbisPqData {
         return mapId == STAGE_CLOUDS || mapId == TOWER_MAP || mapId == STAGE_WALKWAY
                 || mapId == STAGE_STORAGE || mapId == STAGE_MUSIC || mapId == STAGE_SEALED
                 || mapId == STAGE_LOUNGE || mapId == STAGE_UP || mapId == STAGE_PAPA
-                || mapId == STAGE_JAIL || mapId == STAGE_PRIZE
+                || isJailRoom(mapId) || mapId == STAGE_PRIZE || mapId == TREASURE_MAP
+                || mapId == REWARD_MAP
                 || LOUNGE_ROOMS.contains(mapId);
+    }
+
+    static boolean isJailRoom(int mapId) {
+        return mapId == STAGE_JAIL || mapId >= STAGE_JAIL + 10 && mapId <= STAGE_JAIL + 32
+                && (mapId % 10 == 0 || mapId % 10 == 2);
     }
 
     /**

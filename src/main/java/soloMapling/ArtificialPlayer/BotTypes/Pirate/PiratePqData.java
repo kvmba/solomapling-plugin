@@ -37,6 +37,9 @@ public final class PiratePqData {
     public static final int STAGE_3     = 925100300; // two rows of boxes
     public static final int STAGE_4     = 925100400; // boxes with monsters inside
     public static final int STAGE_5     = 925100500; // Lord Pirate
+    public static final int REWARD_MAP  = 925100600;
+    public static final int EXIT_MAP    = 925100700;
+    public static final int WU_YANG     = 2094001;
 
     public static final int MIN_PLAYERS = 3;
     public static final int MAX_PLAYERS = 6;
@@ -54,6 +57,8 @@ public final class PiratePqData {
      * <p>Room 925100100 has no reactors of its own - its monsters are spawned by the event
      * script into the room directly - so it is fought, not broken.
      */
+    private static final int[] ENTRY_BOXES = {2511000, 2512000};
+    static final int[] NO_BOXES = {};
     public static final int[] STAGE_2_BOXES = {2518000, 2511001, 2512000};
     public static final int[] STAGE_3_BOXES = {2518000, 2511001, 2512000};
     public static final int[] STAGE_4_BOXES = {2519000, 2519001, 2519002, 2519003};
@@ -67,10 +72,11 @@ public final class PiratePqData {
     /** Which boxes stand in a room, or an empty array when the room is a fight. */
     public static int[] boxesIn(int mapId) {
         return switch (mapId) {
+            case ENTRY_MAP -> ENTRY_BOXES;
             case STAGE_2 -> STAGE_2_BOXES;
             case STAGE_3 -> STAGE_3_BOXES;
             case STAGE_4 -> STAGE_4_BOXES;
-            default -> new int[0];
+            default -> NO_BOXES;
         };
     }
 

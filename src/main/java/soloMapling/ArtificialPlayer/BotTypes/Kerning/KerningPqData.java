@@ -37,6 +37,8 @@ public final class KerningPqData {
     public static final int STAGE_3 = 103000802;
     public static final int STAGE_4 = 103000803;
     public static final int STAGE_5 = 103000804;
+    public static final int BONUS_MAP = 103000805;
+    public static final int EXIT_MAP = 103000890;
 
     /** The quest's own limits: 3 to 4 players, levels 21 to 30. */
     public static final int MIN_PLAYERS = 3;
@@ -55,6 +57,7 @@ public final class KerningPqData {
      * Lakelis, the entry NPC back in Kerning City who is not present on the stage maps).
      */
     public static final int NPC_CLOTO = 9020001;
+    public static final int NPC_NELLA = 9020002;
 
     /**
      * Coupon counts the seven questions ask for, in question order. A member is handed one

@@ -1413,8 +1413,10 @@ transit.onboard_plane.99: "系好安全带"
 # --- PQ 阶段台词（组队任务bot家族）---
 pq.passes_dropped: "通行证丢在交任务NPC脚边了！"
 pq.stage_plan: "第{0}阶段：{1}"
-pq.kerning.spot: "第{0}处"
-pq.kerning.spot_separator: "、"
+pq.position_plan.spot: "第{0}处站{1}人"
+pq.position_plan.separator: "、"
+pq.position_plan.fill: "第{0}阶段，第{1}组：请补站{2}，到位后请队长对话判定。"
+pq.position_plan.ready: "第{0}阶段，第{1}组：站位都由我们负责，到齐后请队长对话判定。"
 pq.kerning.pass_dropped: "通行证丢npc这了，队长记得捡"
 
 # Personal collection quotas: claim, non-final pickup, and ready to exchange.

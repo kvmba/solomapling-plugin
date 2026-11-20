@@ -68,15 +68,13 @@ public class BossRushPQBot extends PartyQuestBot {
     @Override
     protected boolean workStage() {
         var map = getChr().getMap();
-        if (map.getMonsters().isEmpty()) {
-            // The room is clear. Whether to move on is the leader's call - he is the one the
-            // host asks, and the portal he walks is the one everyone follows - so the bot only
-            // has to be standing somewhere it can follow from.
+        if (BossRushPqData.isRestSpot(map.getId())) {
+            settleRewardRoom(9000037);
             return false;
         }
-        // Fight what is here. The attack driver picks its own target, so a boss room is the
-        // same to this bot as any other room full of monsters.
-        if (!map.getMonsters().isEmpty()) {
+        if (map.getMonsters().isEmpty()) {
+            PqActions.waitNearStageNpc(getChr(), 9000037);
+        } else {
             PqActions.seekAndAttack(getChr());
         }
         return false;

@@ -2,12 +2,11 @@ package soloMapling.ArtificialPlayer.BotTypes.Ludi;
 
 import org.gms.client.Character;
 import soloMapling.ArtificialPlayer.BotGeneration;
-import soloMapling.ArtificialPlayer.BotSM;
 import soloMapling.Environment.BotMessages;
-import soloMapling.ArtificialPlayer.BotMessagingSystem.CharacterStorage;
 import soloMapling.ArtificialPlayer.PartyQuest.PartyQuestBot;
 import soloMapling.ArtificialPlayer.PartyQuest.PositionCombination;
 import soloMapling.ArtificialPlayer.PartyQuest.PqActions;
+import soloMapling.ArtificialPlayer.PartyQuest.PqStageChat;
 
 /**
  * Plays Ludi PQ ("Dimensional Schism") with a real player leading.
@@ -92,6 +91,7 @@ public class LudiPQBot extends PartyQuestBot {
         super.releaseRoomState(); // drops the room's crate search
         LudiStages.releaseRoomState(getChr().getId());
         // The announcements reset with the search, so the next run's first attempt is spoken.
+        climbFloorY = Integer.MIN_VALUE;
         announcedStage = -1;
         announcedCrateAttempt = -1;
     }
@@ -118,7 +118,7 @@ public class LudiPQBot extends PartyQuestBot {
         // reclaim it either. Its exit is the NPC beat: walk up, let the conversation "read",
         // then go home.
         if (mapId == LudiPqData.BONUS_TAIL_MAP) {
-            if (LudiStages.takeBonusReward(getChr())) {
+            if (LudiStages.takeBonusReward(getChr()) && !hasPlayerInRun()) {
                 returnToLobby("bonus stage finished");
             }
             return false;
@@ -262,7 +262,7 @@ public class LudiPQBot extends PartyQuestBot {
     @Override
     protected boolean fightsOnSweep() {
         int mapId = getChr().getMapId();
-        if (LudiPqData.roomStage(mapId) == LudiPqData.STAGE5_ROOM_LAST) {
+        if (mapId == LudiPqData.STAGE5_ROOM_LAST) {
             return false; // the guard room: hide is the mechanic
         }
         return !(stageOf(mapId) == 5 && LudiStages.nearbyGuardCount(getChr()) > 0);
@@ -353,7 +353,7 @@ public class LudiPQBot extends PartyQuestBot {
      * to talk, or that the previous five were already ruled out.
      */
     private void standOnCrates() {
-        announceCratePlan(LudiStages.takeCrate(getChr(), botIndex()));
+        announceCratePlan(LudiStages.takeCrate(getChr(), PositionCombination.botIndex(getChr())));
     }
 
     /**
@@ -369,83 +369,16 @@ public class LudiPQBot extends PartyQuestBot {
      * @return whether a line was spoken (the caller's contract is otherwise a no-op)
      */
     boolean announceCratePlan(PositionCombination.Plan plan) {
-        if (!canSpeakCratePlan() || stage8Speaker() != getChr()) {
+        if (announcedCrateAttempt == plan.attempt() || !PqStageChat.isRoomSpeaker(this)) {
             return false;
-        }
-        if (announcedCrateAttempt == plan.attempt()) {
-            return false; // same pattern, same line - do not spam the room
         }
         announcedCrateAttempt = plan.attempt();
         announcedStage = 8;
+        if (!PqStageChat.claimRoomLine(getChr(), "crate", Integer.toString(plan.attempt()))) return false;
         PqActions.say(getChr(),
                 plan.free() == 0
                         ? BotMessages.get("pq.ludi.stage8_full", plan.attempt())
                         : BotMessages.get("pq.ludi.stage8", plan.attempt(), plan.free()));
         return true;
-    }
-
-    /**
-     * Whether this bot can be the room's stage-8 voice.
-     *
-     * <p>Deliberately the same test for self and for peers: every bot has to agree on the same
-     * candidate set, or the losers would each compute a different winner and the room double-shouts
-     * (or falls silent). The states mirror the macro tick's own gates - a paused bot does not tick
-     * the stage work at all, while a trading bot still does, so only PAUSE is excluded.
-     */
-    private boolean canSpeakCratePlan() {
-        return getRunning() && getState() != BotSM.BotState.PAUSE && !death().isCorpse();
-    }
-
-    /**
-     * The bot in this room that announces the crate plan: the highest level among the party's
-     * crate bots that can speak and stand on the same map instance, ties to the lowest character
-     * id. This bot when no peer outranks it.
-     */
-    private Character stage8Speaker() {
-        Character me = getChr();
-        var party = me.getParty();
-        if (party == null) {
-            return me;
-        }
-        Character best = me;
-        for (var member : party.getMembers()) {
-            // Only a peer that can actually speak for this stage: a companion or another quest's
-            // bot must never win the voice and leave the room silent.
-            if (!(CharacterStorage.getBotById(member.getId()) instanceof LudiPQBot speaker)
-                    || !speaker.canSpeakCratePlan()) {
-                continue;
-            }
-            Character chr = speaker.getChr();
-            if (chr == null || chr.getMap() == null || chr.getMap() != me.getMap()) {
-                continue; // another room's bot: it must not silence this one
-            }
-            if (chr.getLevel() > best.getLevel()
-                    || (chr.getLevel() == best.getLevel() && chr.getId() < best.getId())) {
-                best = chr;
-            }
-        }
-        return best;
-    }
-
-    /**
-     * Which body this bot is among the bots in its party.
-     *
-     * <p>Counted from character ids, which is a stable order needing no setup and no
-     * knowledge of the other bots. It keeps two Ludi bots off the same crate.
-     */
-    private int botIndex() {
-        var party = getChr().getParty();
-        if (party == null) {
-            return 0;
-        }
-        int mine = getChr().getId();
-        int ahead = 0;
-        for (var member : party.getMembers()) {
-            int id = member.getId();
-            if (id != mine && id < mine && CharacterStorage.getBotById(id) != null) {
-                ahead++;
-            }
-        }
-        return ahead;
     }
 }

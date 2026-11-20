@@ -39,7 +39,7 @@ public final class BossRushPqData {
      * lobbies sit inside it - so the same test is the honest one to use.
      */
     public static boolean isFightRoom(int mapId) {
-        return mapId >= FIRST_STAGE && mapId <= 970042711;
+        return mapId >= 970030100 && mapId <= 970042711;
     }
 
     /** How many rooms stand between one resting spot and the next. */
@@ -47,6 +47,6 @@ public final class BossRushPqData {
 
     /** Whether a map is a resting spot, where the party is between stretches. */
     public static boolean isRestSpot(int mapId) {
-        return mapId >= 970032700 && mapId < 970032800;
+        return mapId >= FIRST_STAGE && mapId <= LAST_STAGE;
     }
 }

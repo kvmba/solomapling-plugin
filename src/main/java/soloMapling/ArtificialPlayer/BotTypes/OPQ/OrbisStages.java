@@ -153,14 +153,13 @@ public final class OrbisStages {
      *
      * <p>{@code index} is this bot's slot among the bots taking part.
      *
-     * @return true when a candidate has been chosen and this bot is standing on its share
+     * @return the candidate to announce to the players who still need to take a spot
      */
-    public static boolean standOnSealedPlatform(Character bot, int index) {
-        PositionCombination.Plan plan = PositionCombination.standOn(bot, index, sealedCandidates(),
+    public static PositionCombination.Plan standOnSealedPlatform(Character bot, int index) {
+        return PositionCombination.standOn(bot, index, sealedCandidates(),
                 OrbisPqData.SEALED_AREA_RECTS, OrbisPqData.STAGE_4, "stage4_0",
                 PositionCombination.countsAnswer("stage4_0", "stage4_1", "stage4_2"),
                 () -> PqActions.waitNearPuzzleNpc(bot, OrbisPqData.EAK));
-        return !plan.spots().isEmpty();
     }
 
     /**

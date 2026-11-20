@@ -1,6 +1,8 @@
 package soloMapling.ArtificialPlayer.PartyQuest;
 
 import org.gms.client.Character;
+import soloMapling.ArtificialPlayer.BotMessagingSystem.CharacterStorage;
+import soloMapling.ArtificialPlayer.BotSM;
 
 import java.awt.Point;
 import java.awt.Rectangle;
@@ -546,14 +548,33 @@ public final class PositionCombination {
         if (party == null) {
             return 1;
         }
-        int bots = 0;
+        BotSM self = CharacterStorage.getBotById(bot.getId());
+        int bots = 1;
         for (var member : party.getMembers()) {
-            if (soloMapling.ArtificialPlayer.BotMessagingSystem.CharacterStorage
-                    .getBotById(member.getId()) != null) {
+            int id = member.getId();
+            if (id != bot.getId() && eligiblePeer(bot, self, id)) {
                 bots++;
             }
         }
         return bots;
+    }
+
+    /** Seat indices and the free count both use the bots actually available in this room. */
+    public static int botIndex(Character bot) {
+        var party = bot.getParty();
+        if (party == null) return 0;
+        BotSM self = CharacterStorage.getBotById(bot.getId());
+        int ahead = 0;
+        for (var member : party.getMembers()) {
+            if (member.getId() < bot.getId() && eligiblePeer(bot, self, member.getId())) ahead++;
+        }
+        return ahead;
+    }
+
+    private static boolean eligiblePeer(Character bot, BotSM self, int id) {
+        BotSM peer = CharacterStorage.getBotById(id);
+        return peer != null && (self == null || peer.getClass() == self.getClass())
+                && peer.getChr().getMap() == bot.getMap() && PqStageChat.isAvailable(peer);
     }
 
     /**

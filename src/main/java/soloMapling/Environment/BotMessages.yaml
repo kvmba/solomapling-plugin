@@ -1394,8 +1394,10 @@ transit.onboard_plane.99: "till next time"
 # --- PQ stage chatter (PartyQuestBot family) ---
 pq.passes_dropped: "Passes are at the turn-in NPC's feet!"
 pq.stage_plan: "Stage {0}: {1}"
-pq.kerning.spot: "spot {0}"
-pq.kerning.spot_separator: ", "
+pq.position_plan.spot: "spot {0}: {1}"
+pq.position_plan.separator: ", "
+pq.position_plan.fill: "Stage {0}, try {1}: players, fill these spots ({2}), then have the leader check."
+pq.position_plan.ready: "Stage {0}, try {1}: the bots are taking every spot. Leader, check once everyone is in place."
 pq.kerning.pass_dropped: "Dropped my pass by the npc, lead come grab it"
 
 # Personal collection quotas: claim, non-final pickup, and ready to exchange.

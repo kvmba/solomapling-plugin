@@ -1,11 +1,18 @@
 package soloMapling.ArtificialPlayer.PartyQuest;
 
+import org.gms.client.Character;
+import soloMapling.ArtificialPlayer.BotMessagingSystem.CharacterStorage;
+import soloMapling.ArtificialPlayer.BotSM;
+import soloMapling.ArtificialPlayer.GCMoveSystem.GCMovement;
 import soloMapling.ArtificialPlayer.PartyQuest.PartyQuestBot.Beat;
 import soloMapling.Environment.BotMessages;
 
+import java.awt.Rectangle;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.StringJoiner;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.function.Predicate;
 
 /**
  * Line pool for the moments inside a run that a {@link PartyQuestBot} may talk through:
@@ -32,6 +39,68 @@ import java.util.concurrent.ThreadLocalRandom;
 public final class PqStageChat {
 
     private PqStageChat() {
+    }
+
+    public static boolean isRoomSpeaker(BotSM bot) {
+        Character character = bot.getChr();
+        return character.getMap() != null && isAvailable(bot)
+                && roomSpeaker(character, character, bot.getClass()::isInstance) == character;
+    }
+
+    /** One voice per party and map object: highest level, then lowest character id. */
+    static Character roomSpeaker(Character anchor, Character best, Predicate<BotSM> applies) {
+        var party = anchor.getParty();
+        if (party == null) return best;
+        var room = anchor.getMap();
+        for (var member : party.getMembers()) {
+            BotSM bot = CharacterStorage.getBotById(member.getId());
+            if (!applies.test(bot)) continue;
+            Character candidate = bot.getChr();
+            if (candidate.getMap() != room || !isAvailable(bot)) continue;
+            if (best == null || candidate.getLevel() > best.getLevel()
+                    || candidate.getLevel() == best.getLevel() && candidate.getId() < best.getId()) {
+                best = candidate;
+            }
+        }
+        return best;
+    }
+
+    static boolean isAvailable(BotSM bot) {
+        BotSM.BotState state = bot.getState();
+        return bot.getRunning() && state != BotSM.BotState.PAUSE
+                && state != BotSM.BotState.FINISHED && !bot.death().isCorpse();
+    }
+
+    /** Announce the actual spots still needed from players, independently of ambient chatter. */
+    public static void announcePositionPlan(BotSM bot, int stage, PositionCombination.Plan plan,
+                                            List<Rectangle> areas) {
+        Character character = bot.getChr();
+        if (plan.spots().isEmpty() || !GCMovement.isMapObserved(character.getMap()) || !isRoomSpeaker(bot)) return;
+        String stamp = plan.attempt() + ":" + plan.free() + ":" + plan.spots().hashCode();
+        if (!claimRoomLine(character, "plan." + stage, stamp)) return;
+        if (plan.free() == 0) {
+            PqActions.say(character, BotMessages.get("pq.position_plan.ready", stage, plan.attempt()));
+            return;
+        }
+        // Bots take spots from the end of the list; all earlier ones are the players' share.
+        var needed = new StringJoiner(BotMessages.get("pq.position_plan.separator"));
+        for (int area = 0; area < areas.size(); area++) {
+            int count = 0;
+            for (int spot = 0; spot < plan.free(); spot++) {
+                if (areas.get(area).contains(plan.spots().get(spot))) count++;
+            }
+            if (count > 0) needed.add(BotMessages.get("pq.position_plan.spot", area + 1, count));
+        }
+        PqActions.say(character, BotMessages.get("pq.position_plan.fill", stage, plan.attempt(), needed));
+    }
+
+    /** Remember the last line in the event room, not on the speaker that may leave it. */
+    public static boolean claimRoomLine(Character bot, String kind, String stamp) {
+        var instance = bot.getEventInstance();
+        if (instance == null) return true;
+        String key = "solomapling." + kind + "." + bot.getMapId();
+        return !stamp.equals(instance.getProperty(key))
+                && !stamp.equals(instance.setProperty(key, stamp, true));
     }
 
     /**

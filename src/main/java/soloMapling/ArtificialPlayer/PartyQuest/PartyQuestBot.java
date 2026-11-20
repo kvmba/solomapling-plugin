@@ -405,11 +405,11 @@ public abstract class PartyQuestBot extends BotSM implements GrindTickRegistry.P
         }
 
         if (!isInsideQuest(bot.getMapId())) {
-            // Outside the quest the run's edge flags reset, so a bot that leaves and comes
-            // back gets its run-start line again - and its stage-clear milestones - on the
-            // next run.
-            wasInsideQuest = false;
-            celebratedClearKey = Integer.MIN_VALUE;
+            // A script can send everyone straight home. tickLobby only cleans up when it has
+            // to move the bot itself, so close that run here even if we're already in town.
+            if (wasInsideQuest && bot.getMapId() == lobbyMapId()) {
+                releaseRoomState();
+            }
             // A party that moved by a warp rather than by a door is out of this bot's walking
             // reach. Checked before the lobby beat: Monster Carnival's hall -> field chain has no
             // portal between them at all, so a teammate recruited in the hall would otherwise
@@ -420,13 +420,13 @@ public abstract class PartyQuestBot extends BotSM implements GrindTickRegistry.P
             tickLobby(bot);
             return;
         }
-        if (!wasInsideQuest) {
-            wasInsideQuest = true;
-            noteEnteredQuest();
-        }
         if (!inRunGroup(bot)) {
             returnToLobby("no longer in a party");
             return;
+        }
+        if (!wasInsideQuest) {
+            wasInsideQuest = true;
+            noteEnteredQuest();
         }
 
         // Quest work runs with the real graph, or not at all. The warmup heuristic has no A*, so
@@ -457,7 +457,10 @@ public abstract class PartyQuestBot extends BotSM implements GrindTickRegistry.P
         // Survive the fight: sip back whatever the room's mobs took off (no-op while full).
         potionSim.tick(bot);
 
-        maybeQuestChat(Beat.WORKING);
+        EventInstanceManager instance = bot.getMap().getEventInstance();
+        if (instance == null || !instance.isEventCleared()) {
+            maybeQuestChat(Beat.WORKING);
+        }
 
         if (workStage()) {
             maybeQuestChat(Beat.CLEAR);
@@ -509,6 +512,9 @@ public abstract class PartyQuestBot extends BotSM implements GrindTickRegistry.P
      * tried. Subclasses that keep their own state must call {@code super.releaseRoomState()}.
      */
     protected void releaseRoomState() {
+        wasInsideQuest = false;
+        celebratedClearKey = Integer.MIN_VALUE;
+        nextQuestChatAtMs = 0;
         Character bot = getChr();
         if (bot != null && bot.getMap() != null) {
             PositionCombination.release(System.identityHashCode(bot.getMap()));
@@ -713,26 +719,13 @@ public abstract class PartyQuestBot extends BotSM implements GrindTickRegistry.P
     /** Speak once on the actual clear event, while the leader can still hear the room. */
     public static void sayRearguardLine(EventInstanceManager instance, MapleMap map) {
         Character leader = instance.getLeader();
-        if (leader == null || leader.getMap() != map || leader.getParty() == null) {
+        if (leader == null || leader.getMap() != map) {
             return;
         }
         int mapId = map.getId();
-        Character speaker = null;
-        for (var member : leader.getParty().getMembers()) {
-            if (!(CharacterStorage.getBotById(member.getId()) instanceof PartyQuestBot pq)
-                    || !pq.getRunning() || pq.getState() == BotState.PAUSE
-                    || pq.death().isCorpse() || !pq.isInsideQuest(mapId)) {
-                continue;
-            }
-            Character bot = pq.getChr();
-            if (bot.getMap() != map) {
-                continue;
-            }
-            if (speaker == null || bot.getLevel() > speaker.getLevel()
-                    || (bot.getLevel() == speaker.getLevel() && bot.getId() < speaker.getId())) {
-                speaker = bot;
-            }
-        }
+        Character speaker = PqStageChat.roomSpeaker(leader, null,
+                bot -> bot instanceof PartyQuestBot pq && pq.isInsideQuest(mapId)
+                        || bot instanceof OPQBot && OrbisPqData.isOrbisRoom(mapId));
         // The instance owns the claim: repeated effects and concurrent callbacks share it,
         // while a new run gets a fresh claim even when it reuses the same map id.
         if (speaker != null
@@ -968,6 +961,30 @@ public abstract class PartyQuestBot extends BotSM implements GrindTickRegistry.P
             return null; // the leader's character is null while he is offline
         }
         return party.getLeader().getPlayer();
+    }
+
+    /** Wait for players in this run, even if the leader has already left the prize room. */
+    protected final boolean hasPlayerInRun() {
+        return hasPlayerInRunRoom(0);
+    }
+
+    protected final boolean hasPlayerInRunRoom(int mapId) {
+        Character bot = getChr();
+        MapleMap here = bot.getMap();
+        EventInstanceManager instance = here.getEventInstance();
+        return PqActions.findHumanPartyRoom(bot, room -> (mapId == 0 || room.getId() == mapId)
+                && (room == here || instance != null && room.getEventInstance() == instance
+                        && isInsideQuest(room.getId()))) != null;
+    }
+
+    /** Walk to the same reward post as the players; never claim their prizes on the bot's behalf. */
+    protected final void settleRewardRoom(int npcId) {
+        if (!hasPlayerInRun()) {
+            returnToLobby("the players left the reward room");
+            return;
+        }
+        PqActions.stopHunting(getChr());
+        PqActions.waitNearStageNpc(getChr(), npcId);
     }
 
     /**

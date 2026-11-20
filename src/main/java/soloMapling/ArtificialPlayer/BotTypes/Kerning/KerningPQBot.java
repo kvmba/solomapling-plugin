@@ -3,10 +3,10 @@ package soloMapling.ArtificialPlayer.BotTypes.Kerning;
 import org.gms.client.Character;
 import org.gms.scripting.event.EventInstanceManager;
 import soloMapling.ArtificialPlayer.BotGeneration;
-import soloMapling.ArtificialPlayer.BotMessagingSystem.CharacterStorage;
 import soloMapling.ArtificialPlayer.PartyQuest.PartyQuestBot;
+import soloMapling.ArtificialPlayer.PartyQuest.PositionCombination;
 import soloMapling.ArtificialPlayer.PartyQuest.PqActions;
-import soloMapling.Environment.BotMessages;
+import soloMapling.ArtificialPlayer.PartyQuest.PqStageChat;
 
 import java.util.concurrent.locks.ReentrantLock;
 
@@ -31,33 +31,6 @@ public class KerningPQBot extends PartyQuestBot {
     private final ReentrantLock couponWork = new ReentrantLock();
     private KerningStages.CouponRun couponRun;
 
-    /**
-     * Which body this bot is, for splitting the wanted spots.
-     *
-     * <p>Counted from character ids among the bots in the same party: a stable order that
-     * needs no setup and no knowledge of the other bots, so two Kerning bots on one stage
-     * always take different spots while a lone bot always takes the same one.
-     */
-    private int botIndex() {
-        var party = getChr().getParty();
-        if (party == null) {
-            return 0;
-        }
-        int mine = getChr().getId();
-        int ahead = 0;
-        for (var member : party.getMembers()) {
-            int id = member.getId();
-            if (id != mine && id < mine
-                    && CharacterStorage.getBotById(id) != null) {
-                ahead++;
-            }
-        }
-        return ahead;
-    }
-
-    /** The stage whose plan was last announced, so the party is not spammed with it. */
-    private int announcedStage = -1;
-
     public KerningPQBot(Character character) {
         super(character);
         dialoguePath = PARTY_QUEST_DIALOGUE_PATH;
@@ -79,7 +52,8 @@ public class KerningPQBot extends PartyQuestBot {
 
     @Override
     protected boolean isInsideQuest(int mapId) {
-        return mapId >= KerningPqData.STAGE_1 && mapId <= KerningPqData.STAGE_5;
+        return mapId >= KerningPqData.STAGE_1 && mapId <= KerningPqData.BONUS_MAP
+                || mapId == KerningPqData.EXIT_MAP;
     }
 
     @Override
@@ -126,9 +100,12 @@ public class KerningPQBot extends PartyQuestBot {
     @Override
     protected boolean fightsOnSweep() {
         Character bot = getChr();
-        if (bot.getMapId() != KerningPqData.STAGE_5) return true;
-        return !KerningStages.stageCleared(bot, 5)
-                && PqActions.needsHuntForLeader(bot, KerningPqData.PASS, KerningStages.BOSS_PASSES_WANTED);
+        return switch (bot.getMapId()) {
+            case KerningPqData.STAGE_5 -> !KerningStages.stageCleared(bot, 5)
+                    && PqActions.needsHuntForLeader(bot, KerningPqData.PASS, KerningStages.BOSS_PASSES_WANTED);
+            case KerningPqData.EXIT_MAP -> false;
+            default -> true;
+        };
     }
 
     @Override
@@ -146,7 +123,25 @@ public class KerningPQBot extends PartyQuestBot {
 
     @Override
     protected boolean workStage() {
-        int stage = stageOf(getChr().getMapId());
+        int mapId = getChr().getMapId();
+        if (mapId == KerningPqData.BONUS_MAP) {
+            if (!hasPlayerInRun()) {
+                PqActions.stopHunting(getChr());
+                PqActions.talkTo(getChr(), KerningPqData.NPC_NELLA, 0);
+            } else {
+                PqActions.seekAndAttack(getChr());
+            }
+            return false;
+        }
+        if (mapId == KerningPqData.EXIT_MAP) {
+            if (hasPlayerInRun()) {
+                PqActions.waitNearStageNpc(getChr(), KerningPqData.NPC_NELLA);
+            } else {
+                PqActions.talkTo(getChr(), KerningPqData.NPC_NELLA, 0);
+            }
+            return false;
+        }
+        int stage = stageOf(mapId);
         if (stage < 0) {
             return false;
         }
@@ -173,12 +168,22 @@ public class KerningPQBot extends PartyQuestBot {
                     PqActions.waitNearPuzzleNpc(getChr(), KerningPqData.NPC_CLOTO);
                     return false;
                 }
-                String plan = KerningStages.takeMyPlace(getChr(), stage, botIndex());
-                announcePlanOnce(stage, plan);
+                var plan = KerningStages.takeMyPlace(getChr(), stage, PositionCombination.botIndex(getChr()));
+                PqStageChat.announcePositionPlan(this, stage, plan, KerningPqData.areasFor(stage));
             }
             case 5 -> {
                 if (KerningStages.stageCleared(getChr(), 5)) {
-                    return true; // all five done: the quest is over
+                    // No WZ link to the bonus. Cloto rewards each member separately and
+                    // sends that member to the bonus on the confirmation click.
+                    PqActions.stopHunting(getChr());
+                    if (hasPlayerInRunRoom(KerningPqData.BONUS_MAP)) {
+                        PqActions.talkTo(getChr(), KerningPqData.NPC_CLOTO, 0);
+                    } else if (hasPlayerInRun()) {
+                        PqActions.waitNearStageNpc(getChr(), KerningPqData.NPC_CLOTO);
+                    } else {
+                        PqActions.talkTo(getChr(), KerningPqData.NPC_NELLA, 0);
+                    }
+                    return false;
                 }
                 KerningStages.fightBoss(getChr());
             }
@@ -197,33 +202,9 @@ public class KerningPQBot extends PartyQuestBot {
         return mapId - KerningPqData.STAGE_1 + 1;
     }
 
-    /**
-     * Tell the party the spots that still need a body, once per stage.
-     *
-     * <p>The quest counts everyone in the instance, the player included, so the spots this bot
-     * did not take are the player's to fill. Saying so once is help; saying it every tick is
-     * noise.
-     */
-    private void announcePlanOnce(int stage, String plan) {
-        if (plan == null || announcedStage == stage) {
-            return;
-        }
-        announcedStage = stage;
-        PqActions.say(getChr(), BotMessages.get("pq.stage_plan", stage, plan));
-    }
-
-    /**
-     * Forget the last announced stage when the run ends.
-     *
-     * <p>{@code announcedStage} is compared against the stage number only, and stage 2 of the next
-     * run is the same number as stage 2 of this one - so without the reset the bot stays silent
-     * about the new run's rope plan, which is exactly the line the player needs to solve it. The
-     * same seam Ludi resets its two announcement flags at.
-     */
     @Override
     protected void releaseRoomState() {
         super.releaseRoomState();
-        announcedStage = -1;
         couponWork.lock();
         try {
             couponRun = null;

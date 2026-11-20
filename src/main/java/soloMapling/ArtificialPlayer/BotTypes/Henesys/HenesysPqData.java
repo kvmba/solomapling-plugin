@@ -37,7 +37,12 @@ public final class HenesysPqData {
     // =========================================================================
 
     public static final int LOBBY_MAP = 100000200; // Henesys, where Tory recruits
-    public static final int ENTRY_MAP = 910010000; // the one map the whole quest plays in
+    public static final int ENTRY_MAP = 910010000;
+    public static final int REWARD_MAP = 910010100;
+    public static final int BONUS_MAP = 910010200;
+    public static final int FAILED_MAP = 910010300;
+    public static final int BONUS_EXIT_MAP = 910010400;
+    public static final int TOMMY = 1012113;
     public static final int EXIT_MAP  = 100000200;
 
     /** The quest's own floor for a party: {@code minPlayers = 3}, levels 10 and up. */

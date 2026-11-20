@@ -29,29 +29,15 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  */
 class PartyQuestWorkStageContractTest {
 
-    /** Quest bots allowed to return true, and only from a branch that ends the run. */
-    private static final List<String> MAY_END_THE_RUN = List.of(
-            // The last stage's turn-in (all five stages cleared).
-            "KerningPQBot.java",
-            // The cleared exit after the boss falls.
-            "PapulatusPQBot.java",
-            // The expedition dissolved while the bot still stood in the queue hall.
-            "AriantPQBot.java",
-            // The last room's clear flag, read once the leader has left.
-            "HenesysPQBot.java");
-
     @Test
-    void onlyTheTerminalQuestsEverReportTheRunOver() throws Exception {
+    void noStageClearShortCircuitsTheSettlement() throws Exception {
         List<String> offenders = new ArrayList<>();
         for (Path file : questBots()) {
             String body = methodBody(Files.readString(file), "protected boolean workStage()");
             if (body == null || !body.contains("return true")) {
                 continue;
             }
-            if (!MAY_END_THE_RUN.contains(file.getFileName().toString())) {
-                offenders.add(file.getFileName() + " returns true from workStage() but is not one "
-                        + "of the terminal quests - a true here warps the bot out of the run");
-            }
+            offenders.add(file.getFileName() + " returns true from workStage(), skipping settlement");
         }
         assertTrue(offenders.isEmpty(), String.join("\n", offenders));
     }

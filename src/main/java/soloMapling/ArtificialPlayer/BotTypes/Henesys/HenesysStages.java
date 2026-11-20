@@ -124,10 +124,8 @@ public final class HenesysStages {
      * <p>The quest counts cakes in its own property and stops the run on its own clock.
      * Growlie (NPC 1012114) grades whoever talks to him for 10 cakes - usually the leader -
      * so carriers deliver at Growlie one at a time while the remaining bots guard the bunny.
-     *
-     * <p>Returns true once the run has been cleared for the exit.
      */
-    public static boolean guardMoonBunny(Character bot) {
+    public static void guardMoonBunny(Character bot) {
         boolean collecting = needsCakes(bot);
         if (stageCleared(bot) || deliversCakes(bot)) {
             PqActions.deliverAndWait(bot, HenesysPqData.RICE_CAKE, HenesysPqData.GROWLIE);
@@ -139,7 +137,6 @@ public final class HenesysStages {
                 PqActions.loot(bot, bot.getPosition(), 2_000, new int[]{HenesysPqData.RICE_CAKE});
             }
         }
-        return stageCleared(bot);
     }
 
     static boolean needsCakes(Character bot) {

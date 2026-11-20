@@ -37,8 +37,10 @@ import java.awt.Point;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.function.Predicate;
 
 import static soloMapling.ArtificialPlayer.BotHelpers.blockingSleep;
+import static soloMapling.ArtificialPlayer.BotHelpers.isBot;
 
 /**
  * The things a party-quest bot has to be able to do, in one place: read the instance's
@@ -1165,6 +1167,28 @@ public final class PqActions {
         var party = bot == null ? null : bot.getParty();
         var leader = party == null ? null : party.getLeader();
         return leader == null ? null : leader.getPlayer();
+    }
+
+    /** Prefer the real leader's room, or another teammate's if the leader already left. */
+    public static MapleMap findHumanPartyRoom(Character bot, Predicate<MapleMap> inRun) {
+        var party = bot.getParty();
+        if (party == null) return null;
+        int botId = bot.getId();
+        int leaderId = party.getLeaderId();
+        MapleMap fallback = null;
+        for (var member : party.getMembers()) {
+            int id = member.getId();
+            if (id == botId) continue;
+            Character player = member.getPlayer();
+            if (player != null && !isBot(player)) {
+                MapleMap room = player.getMap();
+                if (room != null && inRun.test(room)) {
+                    if (id == leaderId) return room;
+                    if (fallback == null) fallback = room;
+                }
+            }
+        }
+        return fallback;
     }
 
     // =========================================================================

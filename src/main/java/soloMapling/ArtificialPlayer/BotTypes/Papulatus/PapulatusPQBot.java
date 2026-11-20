@@ -77,12 +77,11 @@ public class PapulatusPQBot extends PartyQuestBot {
 
     @Override
     protected boolean workStage() {
+        if (isRunCleared()) {
+            settleRewardRoom(2041025);
+            return false;
+        }
         if (leaderIsGone()) {
-            if (isRunCleared()) {
-                return true; // base class owns the cleared exit (and the clear beat)
-            }
-            // Abandoned: leave here, because the base class would announce a clear that never
-            // happened.
             returnToLobby("the leader left the run");
             return false;
         }
@@ -96,6 +95,11 @@ public class PapulatusPQBot extends PartyQuestBot {
         // or one whose clock just fell over. Both are "stay with them": the party is standing
         // right here, and the room has no exit portal for anyone to have walked through.
         return false;
+    }
+
+    @Override
+    protected boolean fightsOnSweep() {
+        return !isRunCleared();
     }
 
     /**

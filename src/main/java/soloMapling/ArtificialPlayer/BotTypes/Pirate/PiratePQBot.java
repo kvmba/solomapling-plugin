@@ -43,7 +43,8 @@ public class PiratePQBot extends PartyQuestBot {
 
     @Override
     protected boolean isInsideQuest(int mapId) {
-        return mapId >= PiratePqData.ENTRY_MAP && mapId <= PiratePqData.STAGE_5;
+        return mapId >= PiratePqData.ENTRY_MAP && mapId <= PiratePqData.REWARD_MAP
+                || mapId == PiratePqData.EXIT_MAP;
     }
 
     @Override
@@ -66,7 +67,11 @@ public class PiratePQBot extends PartyQuestBot {
     @Override
     protected boolean fightsOnSweep(int[] lootIds) {
         Character bot = getChr();
-        if (bot.getMapId() != PiratePqData.STAGE_1) {
+        int mapId = bot.getMapId();
+        if (mapId == PiratePqData.REWARD_MAP || mapId == PiratePqData.EXIT_MAP || waitingForWuYang(bot)) {
+            return false;
+        }
+        if (mapId != PiratePqData.STAGE_1) {
             return lootIds.length == 0;
         }
         // Each round has its own cached array. Never use the new round's quota to
@@ -88,7 +93,21 @@ public class PiratePQBot extends PartyQuestBot {
 
     @Override
     protected boolean workStage() {
-        var map = getChr().getMap();
+        Character bot = getChr();
+        var map = bot.getMap();
+        if (map.getId() == PiratePqData.REWARD_MAP) {
+            settleRewardRoom(PiratePqData.WU_YANG);
+            return false;
+        }
+        if (map.getId() == PiratePqData.EXIT_MAP) {
+            settleRewardRoom(STAGE_NPC);
+            return false;
+        }
+        if (waitingForWuYang(bot)) {
+            PqActions.stopHunting(bot);
+            PqActions.waitNearStageNpc(bot, PiratePqData.WU_YANG);
+            return false;
+        }
         if (map.getId() == PiratePqData.STAGE_1) {
             int[] medals = steppedOnLootIds();
             if (medals.length > 0) {
@@ -102,7 +121,9 @@ public class PiratePQBot extends PartyQuestBot {
         // Boxes first: in room 4 the monsters are inside them, so hitting boxes is also how
         // the fight starts. findReactorOid returns the first one still alive, so this walks
         // the room's boxes one at a time until none are left.
-        for (int boxId : PiratePqData.boxesIn(map.getId())) {
+        int[] boxes = map.getId() == PiratePqData.ENTRY_MAP && PqActions.readEimInt(bot, "grindMode", 0) == 0
+                ? PiratePqData.NO_BOXES : PiratePqData.boxesIn(map.getId());
+        for (int boxId : boxes) {
             for (int guard = 0; guard < BOXES_PER_ROOM_LIMIT; guard++) {
                 int oid = PqActions.findReactorOid(getChr(), boxId);
                 if (oid < 0) {
@@ -124,6 +145,11 @@ public class PiratePQBot extends PartyQuestBot {
             PqActions.handItemsToLeader(getChr(), itemId);
         }
         return false;
+    }
+
+    private static boolean waitingForWuYang(Character bot) {
+        return bot.getMapId() == PiratePqData.STAGE_5
+                && bot.getMap().getNPCById(PiratePqData.WU_YANG) != null;
     }
 
     /** How many of one box kind to keep hitting before giving the tick back. */

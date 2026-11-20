@@ -218,46 +218,20 @@ public final class KerningStages {
      * current row wrong, with each round allowed to peek at the property - 0% on the first and
      * 0.5% more after every failed one.
      *
-     * <p>Returns a description of the plan so the caller can pass it on.
+     * <p>Returns the plan so the room's speaker can report the unfilled spots.
      */
-    public static String takeMyPlace(Character bot, int stage, int botIndex) {
+    public static PositionCombination.Plan takeMyPlace(Character bot, int stage, int botIndex) {
         var candidates = KerningPqData.candidatesFor(stage);
         String answerProperty = KerningPqData.answerPropertyFor(stage);
-        PositionCombination.Plan plan = PositionCombination.standOn(bot, botIndex, candidates,
+        return PositionCombination.standOn(bot, botIndex, candidates,
                 KerningPqData.areasFor(stage), stage, answerProperty,
                 PositionCombination.indexAnswer(answerProperty, candidates),
                 () -> PqActions.waitNearPuzzleNpc(bot, KerningPqData.NPC_CLOTO));
-        return describePlan(plan);
     }
 
     /** Whether the stage has been cleared, by the quest's own per-stage flags. */
     public static boolean stageCleared(Character bot, int stage) {
         return PqActions.readEimString(bot, stage + "stageclear") != null;
-    }
-
-    /**
-     * The plan in words, for the party chat.
-     *
-     * <p>Worth saying out loud: the quest counts every player in the instance including the
-     * real one, so the player has to take the spots the bots left untouched. A bot that stayed
-     * quiet would leave him guessing exactly as he would have without any help.
-     *
-     * <p>Spots are named by their position in the room's own layout ("第 2 处"), not by their
-     * map coordinates: the coordinates this used to print were both untranslated and unreadable
-     * in-game - a player cannot turn {@code (-721,-340)} into "the second rope from the left".
-     * The number matches the order the room lists its ropes/platforms/barrels, which is the same
-     * order {@code spotsFor} hands them to the search.
-     */
-    private static String describePlan(PositionCombination.Plan plan) {
-        StringBuilder out = new StringBuilder();
-        int total = plan.spots().size();
-        for (int i = 0; i < total; i++) {
-            if (i > 0) {
-                out.append(BotMessages.get("pq.kerning.spot_separator"));
-            }
-            out.append(BotMessages.get("pq.kerning.spot", i + 1));
-        }
-        return total > 0 ? out.toString() : null;
     }
 
     // =========================================================================

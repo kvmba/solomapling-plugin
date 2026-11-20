@@ -27,11 +27,14 @@ import soloMapling.ArtificialPlayer.BotHealthSystem.BotDeath;
 import soloMapling.ArtificialPlayer.BotMessagingSystem.CharacterStorage;
 import soloMapling.ArtificialPlayer.BotSM;
 import soloMapling.ArtificialPlayer.BotTypes.Ludi.LudiPQBot;
+import soloMapling.ArtificialPlayer.BotTypes.OPQ.OPQBot;
+import soloMapling.ArtificialPlayer.BotTypes.OPQ.OrbisPqData;
 import soloMapling.ArtificialPlayer.GCMoveSystem.GCMovement;
 import soloMapling.Environment.BotMessages;
 import soloMapling.plugin.HostGameplayEventBridge;
 
 import java.awt.Point;
+import java.awt.Rectangle;
 import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.List;
@@ -237,6 +240,46 @@ class PqRearguardTest {
     }
 
     @Test
+    void orbisUsesTheSameClearEventAsTheOtherQuests() {
+        room = room(OrbisPqData.STAGE_SEALED);
+        when(leader.getMap()).thenReturn(room);
+        Character character = character(50, 70, room);
+        OPQBot bot = mock(OPQBot.class);
+        when(bot.getChr()).thenReturn(character);
+        when(bot.getRunning()).thenReturn(true);
+        when(bot.death()).thenReturn(mock(BotDeath.class));
+        register(50, bot);
+
+        clear();
+        clear();
+        speech.verify(() -> SocialCommands.BotSpeak(character, line));
+        speech.verifyNoMoreInteractions();
+    }
+
+    @Test
+    void thePuzzleLineNamesTheActualMissingSpotAndSurvivesSpeakerHandover() {
+        Bot high = addBot(55, 70, room);
+        Bot low = addBot(50, 50, room);
+        when(high.character().getEventInstance()).thenReturn(instance);
+        when(low.character().getEventInstance()).thenReturn(instance);
+        var areas = List.of(new Rectangle(5, 0, 10, 10),
+                new Rectangle(20, 0, 10, 10), new Rectangle(40, 0, 10, 10));
+        var plan = new PositionCombination.Plan(List.of(new Point(25, 5), new Point(45, 5)), 1, 2);
+        String expected = BotMessages.get("pq.position_plan.fill", 4, 2,
+                BotMessages.get("pq.position_plan.spot", 2, 1));
+        try (var movement = mockStatic(GCMovement.class); var actions = mockStatic(PqActions.class)) {
+            movement.when(() -> GCMovement.isMapObserved(room)).thenReturn(true);
+            PqStageChat.announcePositionPlan(low.bot(), 4, plan, areas);
+            PqStageChat.announcePositionPlan(high.bot(), 4, plan, areas);
+            when(high.death().isCorpse()).thenReturn(true);
+            PqStageChat.announcePositionPlan(low.bot(), 4, plan, areas);
+
+            actions.verify(() -> PqActions.say(high.character(), expected));
+            actions.verifyNoMoreInteractions();
+        }
+    }
+
+    @Test
     void catchingUpAfterTheLeaderLeavesDoesNotRepeatTheRearguardLine() {
         Bot follower = addBot(40, 50, room);
         doReturn(room(922010200)).when(leader).getMap();
@@ -263,6 +306,8 @@ class PqRearguardTest {
         EventInstanceManager result = mock(EventInstanceManager.class);
         when(result.getLeader()).thenReturn(leader);
         Properties properties = new Properties();
+        when(result.getProperty(anyString())).thenAnswer(invocation ->
+                properties.getProperty(invocation.getArgument(0)));
         when(result.setProperty(anyString(), anyString(), eq(true)))
                 .thenAnswer(invocation -> properties.setProperty(
                         invocation.getArgument(0), invocation.getArgument(1)));
