@@ -68,6 +68,7 @@ public class OPQBot extends BotSM {
 
     /** Stage 5: which of the lounge's four sub-rooms to enter next (advances on each visit). */
     private int loungeVisit;
+    private MapleMap leavingLoungeRoom;
 
     private volatile int lootedRecordItemId = -1;
 
@@ -186,6 +187,7 @@ public class OPQBot extends BotSM {
         reactorHitsThisTarget = 0;
         lootedRecordItemId = -1;
         loungeVisit = 0;
+        leavingLoungeRoom = null;
     }
 
     // =========================================================================
@@ -494,7 +496,11 @@ public class OPQBot extends BotSM {
             return;
         }
 
-        if (PqActions.approachReactor(getChr(), reactorOid, false, false) == PqActions.Approach.IN_POSITION) {
+        var approach = PqActions.approachReactor(getChr(), reactorOid, false, false);
+        if (approach == PqActions.Approach.STUCK) {
+            PqActions.deferReactorApproach(getChr(), reactorOid);
+            sharedContext.putCloudAssignment(getChr().getId(), null);
+        } else if (approach == PqActions.Approach.IN_POSITION) {
             reactorHitsThisTarget = 0;
             transitionTo(OPQBotState.STAGE_1_HIT_REACTOR,
                     "arrived beside reactor oid=" + reactorOid);
@@ -696,6 +702,10 @@ public class OPQBot extends BotSM {
     }
 
     private void handleStage1Wait() {
+        if (orchestrator.hasUnclaimedLiveCloudReactor(getChr().getMap(), getChr().getId())) {
+            transitionTo(OPQBotState.STAGE_1_NAVIGATE, "a cloud reactor is available again");
+            return;
+        }
         // An altar that never fires (the offering was looted, missed its box, etc.) may time out.
         if (waitTimedOut()) {
             transitionTo(OPQBotState.LOOP_CHECK,
@@ -819,27 +829,42 @@ public class OPQBot extends BotSM {
      * same item).
      */
     private void workLounge() {
-        int here = getChr().getMapId();
+        Character bot = getChr();
+        MapleMap room = bot.getMap();
+        int here = room.getId();
         if (OrbisPqData.LOUNGE_ROOMS.contains(here)) {
-            if (!OrbisStages.gatherLounge(getChr())) {
+            if (leavingLoungeRoom != room && needsLoungePieces() && !OrbisStages.gatherLounge(bot)) {
                 waitFor(OPQConstants.NAVIGATE_SETTLE_MS);
                 return;
             }
-            // Step back to the lounge so the next entry takes the following sub-room.
+            // A portal walk can span ticks; finish it without starting another loot pass.
+            leavingLoungeRoom = room;
             walkOutOfCurrentRoom();
-            if (getChr().getMapId() != here) loungeVisit++;
+            if (bot.getMap() != room) {
+                leavingLoungeRoom = null;
+                loungeVisit++;
+            }
             return;
         }
+        leavingLoungeRoom = null;
         if (here != OrbisPqData.STAGE_LOUNGE) {
             walkToRoom(OrbisStages.roomFor(5));
             return;
         }
-        var door = getChr().getMap().getPortal(OrbisPqData.loungeEntryPortal(loungeVisit));
+        if (!needsLoungePieces()) {
+            PqActions.deliverAndWait(bot, OrbisPqData.STATUE_PIECE_5, OrbisPqData.EAK);
+            return;
+        }
+        var door = room.getPortal(OrbisPqData.loungeEntryPortal(loungeVisit));
         if (door == null) {
             return;
         }
         PqActions.walkThroughPortal(getChr(), door);
         waitFor(OPQConstants.NAVIGATE_SETTLE_MS);
+    }
+
+    private boolean needsLoungePieces() {
+        return PqActions.needsHuntForLeader(getChr(), OrbisPqData.STATUE_PIECE_5, OrbisPqData.LOUNGE_COUNT);
     }
 
     /**
@@ -1030,7 +1055,11 @@ public class OPQBot extends BotSM {
         String ordinal = orchestrator.getBoxOrdinal(reactorOid);
         SocialCommands.BotSpeak(getChr(), BotMessages.get("opq.taking_box", localizeOrdinal(ordinal)));
 
-        if (PqActions.approachReactor(getChr(), reactorOid, false, false) == PqActions.Approach.IN_POSITION) {
+        var approach = PqActions.approachReactor(getChr(), reactorOid, false, false);
+        if (approach == PqActions.Approach.STUCK) {
+            PqActions.deferReactorApproach(getChr(), reactorOid);
+            sharedContext.putBoxAssignment(getChr().getId(), null);
+        } else if (approach == PqActions.Approach.IN_POSITION) {
             reactorHitsThisTarget = 0;
             transitionTo(OPQBotState.STAGE_2_HIT_BOX,
                     "arrived at " + ordinal + " box (oid=" + reactorOid + ")");
@@ -1234,6 +1263,10 @@ public class OPQBot extends BotSM {
             return;
         }
 
+        if (orchestrator.hasUnclaimedLiveBoxReactor(getChr().getMap(), getChr().getId())) {
+            transitionTo(OPQBotState.STAGE_2_NAVIGATE, "a record box is available again");
+            return;
+        }
         if (waitTimedOut()) {
             transitionTo(OPQBotState.LOOP_CHECK,
                     "stage-2 wait timed out after "
@@ -1371,6 +1404,7 @@ public class OPQBot extends BotSM {
         stageWaitStartTime = 0;
         lootedRecordItemId = -1;
         loungeVisit = 0;
+        leavingLoungeRoom = null;
 
         if (isInParty()) {
             transitionTo(OPQBotState.IN_PARTY_IDLE,

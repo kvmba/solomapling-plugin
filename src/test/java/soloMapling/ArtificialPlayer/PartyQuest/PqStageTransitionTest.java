@@ -3,9 +3,11 @@ package soloMapling.ArtificialPlayer.PartyQuest;
 import org.gms.client.Character;
 import org.gms.client.inventory.Inventory;
 import org.gms.client.inventory.InventoryType;
+import org.gms.client.inventory.Item;
 import org.gms.net.server.world.Party;
 import org.gms.net.server.world.PartyCharacter;
 import org.gms.scripting.event.EventInstanceManager;
+import org.gms.server.maps.MapItem;
 import org.gms.server.maps.MapleMap;
 import org.gms.server.maps.Portal;
 import org.gms.server.maps.Reactor;
@@ -17,6 +19,7 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.EnumSource;
 import soloMapling.ArtificialPlayer.BotGeneration;
+import soloMapling.ArtificialPlayer.BotCommandsPack.SocialCommands;
 import soloMapling.ArtificialPlayer.BotCommandsPack.WarpCommands;
 import soloMapling.ArtificialPlayer.BotMessagingSystem.CharacterStorage;
 import soloMapling.ArtificialPlayer.BotTypes.Amoria.AmoriaPQBot;
@@ -32,10 +35,12 @@ import soloMapling.ArtificialPlayer.BotTypes.Ludi.LudiPQBot;
 import soloMapling.ArtificialPlayer.BotTypes.Ludi.LudiPqData;
 import soloMapling.ArtificialPlayer.BotTypes.Ludi.LudiStages;
 import soloMapling.ArtificialPlayer.BotTypes.Magatia.MagatiaPQBot;
+import soloMapling.ArtificialPlayer.BotTypes.Magatia.MagatiaPqData;
 import soloMapling.ArtificialPlayer.BotTypes.OPQ.OPQBot;
 import soloMapling.ArtificialPlayer.BotTypes.OPQ.OPQOrchestrator;
 import soloMapling.ArtificialPlayer.BotTypes.OPQ.OPQSharedContext;
 import soloMapling.ArtificialPlayer.BotTypes.OPQ.OrbisPqData;
+import soloMapling.ArtificialPlayer.BotTypes.OPQ.OrbisStages;
 import soloMapling.ArtificialPlayer.BotTypes.Papulatus.PapulatusPQBot;
 import soloMapling.ArtificialPlayer.BotTypes.Pirate.PiratePQBot;
 import soloMapling.ArtificialPlayer.BotTypes.Pyramid.PyramidPQBot;
@@ -44,6 +49,7 @@ import soloMapling.ArtificialPlayer.GCMoveSystem.GCMovement;
 import soloMapling.server.BotTickService;
 
 import java.awt.Point;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -128,6 +134,157 @@ class PqStageTransitionTest {
             assertSame(third, member.getMap());
             assertEquals(0, stageTicks);
         }
+    }
+
+    @ParameterizedTest
+    @CsvSource({"6,true", "7,false"})
+    void magatiaSubmitsTheLastDoseButDoesNotFeedAnAlreadyCompletedBeaker(byte state, boolean needsDose) {
+        MapleMap beakers = room(MagatiaPqData.BEAKER_ROOM_A);
+        place(member, beakers);
+        when(member.getEventInstance()).thenReturn(instance);
+        Reactor beaker = mock(Reactor.class);
+        when(beaker.getId()).thenReturn(2618000);
+        when(beaker.getObjectId()).thenReturn(101);
+        when(beaker.isAlive()).thenReturn(true);
+        when(beaker.getState()).thenReturn(state);
+        when(beakers.getAllReactors()).thenReturn(List.of(beaker));
+        try (var generation = mockStatic(BotGeneration.class); var actions = mockStatic(PqActions.class)) {
+            actions.when(() -> PqActions.feedReactor(member, 101, 4001132)).thenReturn(true);
+            PartyQuestBot bot = new MagatiaPQBot(member);
+            bot.workStage();
+            actions.verify(() -> PqActions.feedReactor(member, 101, 4001132), times(needsDose ? 1 : 0));
+        }
+    }
+
+    @Test
+    void orbisLoungePicksUpTheLastFragmentBeforeReportingThatTheRoomIsDone() {
+        MapleMap boxes = room(920010604);
+        place(member, boxes);
+        Point besideFragment = new Point(40, 0);
+        int piece = OrbisPqData.STATUE_PIECE_5;
+        when(member.getPosition()).thenReturn(new Point());
+        MapItem fragment = mock(MapItem.class);
+        when(fragment.getItem()).thenReturn(new Item(piece, (short) 0, (short) 1));
+        when(fragment.getItemId()).thenReturn(piece);
+        when(fragment.getPosition()).thenReturn(besideFragment);
+        when(fragment.getOwnerId()).thenReturn(BOT_ID);
+        when(boxes.getMapObjectsInRange(any(), anyDouble(), anyList()))
+                .thenAnswer(call -> new ArrayList<>(List.of(fragment)));
+        doAnswer(call -> {
+            when(fragment.isPickedUp()).thenReturn(true);
+            when(member.getItemQuantity(piece, false)).thenReturn(1);
+            return null;
+        }).when(member).pickupItem(fragment);
+
+        try (var movement = mockStatic(GCMovement.class)) {
+            assertFalse(OrbisStages.gatherLounge(member));
+            verify(member).pickupItem(fragment);
+            assertTrue(OrbisStages.gatherLounge(member));
+        } finally {
+            PqActions.clearSeekState(BOT_ID);
+        }
+    }
+
+    @Test
+    void orbisKeepsTheLoungeExitWalkAndDeliversTheCollectedQuotaInTheHall() {
+        MapleMap boxes = room(920010604);
+        MapleMap lounge = room(OrbisPqData.STAGE_LOUNGE);
+        Portal exit = door(boxes, "out00", OrbisPqData.STAGE_LOUNGE);
+        place(member, boxes);
+        place(leader, lounge);
+        when(member.getEventInstance()).thenReturn(instance);
+        when(member.getPosition()).thenReturn(new Point());
+        OPQOrchestrator run = mock(OPQOrchestrator.class);
+        when(run.getSharedContext()).thenReturn(new OPQSharedContext());
+        int piece = OrbisPqData.STATUE_PIECE_5;
+        try (var generation = mockStatic(BotGeneration.class);
+             var coordinator = mockStatic(OPQOrchestrator.class, call -> run);
+             var actions = mockStatic(PqActions.class)) {
+            for (String key : List.of("statusStg1", "statusStg2", "statusStg3", "statusStg4")) {
+                actions.when(() -> PqActions.readEimInt(member, key, -1)).thenReturn(1);
+            }
+            actions.when(() -> PqActions.needsHuntForLeader(member, piece, OrbisPqData.LOUNGE_COUNT))
+                    .thenReturn(true, true, false);
+            actions.when(() -> PqActions.collectPartyQuestLoot(member, new int[]{piece}))
+                    .thenReturn(PqActions.LootBeat.COLLECTING, PqActions.LootBeat.NONE);
+            actions.when(() -> PqActions.walkThroughPortal(member, exit)).thenAnswer(call -> null)
+                    .thenAnswer(call -> { place(member, lounge); return null; });
+
+            OPQBot bot = new OPQBot(member);
+            bot.setRunning(true);
+            bot.setStateForDebug(OPQBot.OPQBotState.MIDDLE_STAGE);
+            bot.updateState();
+            actions.verify(() -> PqActions.walkThroughPortal(member, exit), never());
+            bot.updateState();
+            assertSame(boxes, member.getMap());
+            bot.updateState();
+            assertSame(lounge, member.getMap());
+            actions.verify(() -> PqActions.collectPartyQuestLoot(member, new int[]{piece}), times(2));
+            bot.updateState();
+            actions.verify(() -> PqActions.deliverAndWait(member, piece, OrbisPqData.EAK));
+        }
+    }
+
+    @ParameterizedTest
+    @CsvSource({"920010000,STAGE_1_NAVIGATE,STAGE_1_WAIT", "920010400,STAGE_2_NAVIGATE,STAGE_2_WAIT"})
+    void orbisSharesAStalledReactorWithAnotherBotInsteadOfImmediatelyTakingItBack(
+            int mapId, OPQBot.OPQBotState navigate, OPQBot.OPQBotState waiting) throws Exception {
+        MapleMap map = room(mapId);
+        place(member, map);
+        place(leader, map);
+        when(member.getPosition()).thenReturn(new Point());
+        when(leader.getPosition()).thenReturn(new Point());
+        when(member.getEventInstance()).thenReturn(instance);
+        boolean cloud = mapId == 920010000;
+        Reactor selected = orbisReactor(map, cloud ? 2002001 : 2002004, 101, 50);
+        Reactor alternate = orbisReactor(map, cloud ? 2002001 : 2002005, 102, 300);
+        when(map.getAllReactors()).thenReturn(List.of(selected, alternate));
+        if (!cloud) when(selected.getState()).thenReturn((byte) 1);
+
+        // Keep the production assignment logic without starting the orchestrator's timer.
+        var constructor = OPQOrchestrator.class.getDeclaredConstructors()[0];
+        constructor.setAccessible(true);
+        OPQOrchestrator run = spy((OPQOrchestrator) constructor.newInstance((Object) null));
+        doNothing().when(run).mirrorPhase(any(), any());
+        OPQSharedContext assignments = run.getSharedContext();
+        try (var generation = mockStatic(BotGeneration.class);
+             var coordinator = mockStatic(OPQOrchestrator.class, call ->
+                     "bind".equals(call.getMethod().getName()) ? run : call.callRealMethod());
+             var actions = mockStatic(PqActions.class, call -> {
+                 if ("approachReactor".equals(call.getMethod().getName())) {
+                     return ((int) call.getArgument(1)) == 101 ? PqActions.Approach.STUCK : PqActions.Approach.TRAVELLING;
+                 }
+                 return call.callRealMethod();
+             }); var chat = mockStatic(SocialCommands.class); var movement = mockStatic(GCMovement.class)) {
+            OPQBot bot = new OPQBot(member);
+            bot.setRunning(true);
+            bot.setStateForDebug(navigate);
+            bot.updateState();
+            actions.verify(() -> PqActions.deferReactorApproach(member, 101));
+            assertNull(cloud ? assignments.getMyCloudAssignment(BOT_ID) : assignments.getMyBoxAssignment(BOT_ID));
+
+            bot.setStateForDebug(waiting);
+            bot.updateState();
+            assertEquals(navigate, bot.getOPQBotState());
+            bot.updateState();
+            assertEquals(102, cloud ? assignments.getMyCloudAssignment(BOT_ID) : assignments.getMyBoxAssignment(BOT_ID));
+
+            OPQBot other = mock(OPQBot.class);
+            when(other.getChr()).thenReturn(leader);
+            assertEquals(101, cloud ? run.assignCloudReactor(other) : run.assignBoxReactor(other));
+        } finally {
+            PqActions.clearSeekState(BOT_ID);
+        }
+    }
+
+    private static Reactor orbisReactor(MapleMap map, int dataId, int oid, int x) {
+        Reactor reactor = mock(Reactor.class);
+        when(reactor.getId()).thenReturn(dataId);
+        when(reactor.getObjectId()).thenReturn(oid);
+        when(reactor.isAlive()).thenReturn(true);
+        when(reactor.getPosition()).thenReturn(new Point(x, 0));
+        when(map.getReactorByOid(oid)).thenReturn(reactor);
+        return reactor;
     }
 
     @ParameterizedTest

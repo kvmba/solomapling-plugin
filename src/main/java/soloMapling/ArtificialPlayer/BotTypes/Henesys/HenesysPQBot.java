@@ -3,7 +3,6 @@ package soloMapling.ArtificialPlayer.BotTypes.Henesys;
 import org.gms.client.Character;
 import soloMapling.ArtificialPlayer.BotGeneration;
 import soloMapling.ArtificialPlayer.PartyQuest.PartyQuestBot;
-import soloMapling.ArtificialPlayer.PartyQuest.PqActions;
 
 /**
  * Plays Henesys PQ ("Primrose Hill") with a real player leading.
@@ -22,11 +21,6 @@ import soloMapling.ArtificialPlayer.PartyQuest.PqActions;
 public class HenesysPQBot extends PartyQuestBot {
 
     private static final int[] CAKE_LOOT = {HenesysPqData.RICE_CAKE};
-    private static final long SETTLE_MS = 1_200;
-    private static final int MAX_PLANT_PASSES = 40;
-
-    /** Whether the planting half is done and the cakes are being made. */
-    private boolean guarding;
 
     public HenesysPQBot(Character character) {
         super(character);
@@ -65,7 +59,7 @@ public class HenesysPQBot extends PartyQuestBot {
     @Override
     protected boolean fightsOnSweep() {
         return switch (getChr().getMapId()) {
-            case HenesysPqData.ENTRY_MAP -> !HenesysStages.stageCleared(getChr())
+            case HenesysPqData.ENTRY_MAP -> plantingDone() && !HenesysStages.stageCleared(getChr())
                     && !HenesysStages.deliversCakes(getChr());
             case HenesysPqData.BONUS_MAP -> hasPlayerInRunRoom(HenesysPqData.BONUS_MAP);
             default -> false;
@@ -74,24 +68,19 @@ public class HenesysPQBot extends PartyQuestBot {
 
     @Override
     protected int[] steppedOnLootIds() {
-        return getChr().getMapId() == HenesysPqData.ENTRY_MAP && HenesysStages.needsCakes(getChr())
+        return getChr().getMapId() == HenesysPqData.ENTRY_MAP
+                && plantingDone() && HenesysStages.needsCakes(getChr())
                 ? CAKE_LOOT : super.steppedOnLootIds();
     }
 
-    /**
-     * Forget which half of the quest the last visit was in.
-     *
-     * <p>{@code guarding} is a per-run latch, and the bot object outlives the run: the same
-     * instance is recruited for the next party, so without this reset the second visit starts
-     * already believing the flowers are planted and skips straight to guarding Moon Bunny - which
-     * never spawns until six seeds are planted, leaving the bot standing in an empty field for the
-     * whole run. The base class calls this on every run end (and on stop/retype), which is the
-     * same seam Ludi's announcement flags reset at.
-     */
+    private boolean plantingDone() {
+        return HenesysStages.flowersBloomed(getChr()) >= HenesysPqData.FLOWERS_TO_BLOOM;
+    }
+
     @Override
     protected void releaseRoomState() {
         super.releaseRoomState();
-        guarding = false;
+        HenesysStages.releaseFlowerClaim(getChr());
     }
 
     @Override
@@ -110,46 +99,12 @@ public class HenesysPQBot extends PartyQuestBot {
             }
             default -> { }
         }
-        if (!guarding && HenesysStages.flowersBloomed(getChr()) < HenesysPqData.FLOWERS_TO_BLOOM) {
-            plantUntilBloomed();
-            // The moon message the sixth flower raises is what flips the quest to its second
-            // half; read it rather than assuming, in case a drop was refused.
-            guarding = HenesysStages.flowersBloomed(getChr()) >= HenesysPqData.FLOWERS_TO_BLOOM;
-            if (guarding) {
-                // The planting half is done: the moon is full and Moon Bunny is cooking.
-                sayStageClearOnce(HenesysPqData.ENTRY_MAP);
-            }
-            return false;
+        if (!plantingDone()) {
+            HenesysStages.plantOneFlower(getChr());
+        } else {
+            sayStageClearOnce(HenesysPqData.ENTRY_MAP);
+            HenesysStages.guardMoonBunny(getChr());
         }
-        guarding = true;
-        HenesysStages.guardMoonBunny(getChr());
         return false;
-    }
-
-    /**
-     * Keep planting until the dial is full, within a pass budget.
-     *
-     * <p>A pass that plants nothing leaves the bot where it can try again next tick, which
-     * matters when the leaves have not regrown yet - the quest's own pacing, not a failure.
-     */
-    private void plantUntilBloomed() {
-        for (int pass = 0; pass < MAX_PLANT_PASSES; pass++) {
-            if (HenesysStages.flowersBloomed(getChr()) >= HenesysPqData.FLOWERS_TO_BLOOM) {
-                return;
-            }
-            if (!HenesysStages.plantOneFlower(getChr())) {
-                // Nothing to plant this pass; give the map a moment and try the next leaf.
-                sleep(SETTLE_MS);
-                return;
-            }
-        }
-    }
-
-    private void sleep(long millis) {
-        try {
-            Thread.sleep(millis);
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-        }
     }
 }

@@ -30,6 +30,8 @@ public class MagatiaPQBot extends PartyQuestBot {
 
     private static final int[] DOCUMENTS = {4001134, 4001135};
     private static final int[] BEAKER_LOOT = {4001132};
+    // The host runs the completion hook on the hit from state 6 to 7.
+    private static final int LAST_BEAKER_FILL_STATE = 6;
     private static final int[] DOOR_LOOT = {4001133};
     private static final int REWARD_NPC = 2112018;
     private static final int BOSS_TURN_IN_NPC = 2112005;
@@ -237,7 +239,7 @@ public class MagatiaPQBot extends PartyQuestBot {
     private static void fillBeakers(Character bot) {
         Reactor beaker = null;
         for (Reactor reactor : bot.getMap().getAllReactors()) {
-            if (reactor.getId() == 2618000 && reactor.isAlive() && reactor.getState() < 6
+            if (reactor.getId() == 2618000 && reactor.isAlive() && reactor.getState() <= LAST_BEAKER_FILL_STATE
                     && (beaker == null || reactor.getState() > beaker.getState())) {
                 beaker = reactor;
             }

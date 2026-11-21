@@ -188,24 +188,16 @@ public final class OrbisStages {
     // Stage 5 - lounge: kill 9300041..9300043 for 40 of 4001052, plus the room-604 reactors
     // =========================================================================
 
-    /**
-     * Gather the lounge's statue pieces.
-     *
-     * <p>Three of the four side rooms hold mobs that drop {@code 4001052}; the fourth holds
-     * ten reactors ({@code 2002002}) whose scripts drop the same item, so a bot should work
-     * whichever room it is standing in rather than assuming the mobs are the only source.
-     */
+    private static final int[] LOUNGE_LOOT = {OrbisPqData.STATUE_PIECE_5};
+
+    /** Work this visit's drops before breaking another reactor or walking out. */
     public static boolean gatherLounge(Character bot) {
+        if (PqActions.collectPartyQuestLoot(bot, LOUNGE_LOOT) != PqActions.LootBeat.NONE) return false;
         if (mobsPresent(bot, OrbisPqData.LOUNGE_MOB_FIRST, OrbisPqData.LOUNGE_MOB_LAST)) {
-            huntMobs(bot, OrbisPqData.LOUNGE_MOB_FIRST, OrbisPqData.LOUNGE_MOB_LAST);
+            PqActions.seekAndAttack(bot);
             return false;
         }
-        int reactor = PqActions.findReactorOid(bot, OrbisPqData.LOUNGE_REACTOR);
-        if (reactor >= 0) {
-            PqActions.hitReactor(bot, reactor);
-            return false;
-        }
-        return true;
+        return !PqActions.workActiveReactors(bot, OrbisPqData.LOUNGE_REACTOR);
     }
 
     // =========================================================================

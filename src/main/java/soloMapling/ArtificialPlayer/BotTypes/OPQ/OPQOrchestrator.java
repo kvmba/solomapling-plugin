@@ -5,6 +5,7 @@ import org.gms.server.maps.MapleMap;
 import org.gms.server.maps.Reactor;
 import org.gms.scripting.event.EventInstanceManager;
 import soloMapling.ArtificialPlayer.BotTypes.OPQ.OPQSharedContext.OPQPhase;
+import soloMapling.ArtificialPlayer.PartyQuest.PqActions;
 import soloMapling.server.ExecutorServiceManager;
 
 import java.awt.Point;
@@ -142,8 +143,9 @@ public class OPQOrchestrator {
      * Returns null if there are no free live reactors.
      */
     public synchronized Integer assignCloudReactor(OPQBot bot) {
-        int id = bot.getChr().getId();
-        MapleMap map = bot.getChr().getMap();
+        Character chr = bot.getChr();
+        int id = chr.getId();
+        MapleMap map = chr.getMap();
         if (map == null) return null;
 
         // Re-validate any existing assignment first — if dead, drop it and re-pick.
@@ -153,18 +155,19 @@ public class OPQOrchestrator {
             if (r != null && r.isAlive() && r.getState() < 4) {
                 return existing;
             }
-            opqLog("Dropping stale cloud assignment oid=" + existing + " for " + bot.getChr().getName());
+            opqLog("Dropping stale cloud assignment oid=" + existing + " for " + chr.getName());
             context.putCloudAssignment(id, null);
         }
 
         Collection<Integer> taken = context.getCloudAssignmentsView().values();
         Reactor best = null;
         double bestDist = Double.MAX_VALUE;
-        Point botPos = bot.getChr().getPosition();
+        Point botPos = chr.getPosition();
         for (Reactor r : map.getAllReactors()) {
             if (!isCloudReactor(r)) continue;
             if (!r.isAlive() || r.getState() >= 4) continue;
-            if (taken.contains(r.getObjectId())) continue;
+            int oid = r.getObjectId();
+            if (taken.contains(oid) || PqActions.reactorApproachDeferred(chr, oid)) continue;
             double d = botPos.distance(r.getPosition());
             if (d < bestDist) {
                 bestDist = d;
@@ -172,14 +175,14 @@ public class OPQOrchestrator {
             }
         }
         if (best == null) {
-            opqLog("No free live cloud reactor for " + bot.getChr().getName()
+            opqLog("No free live cloud reactor for " + chr.getName()
                     + " (alive on map=" + map.getAllReactors().size() + ", taken=" + taken.size() + ")");
             return null;
         }
         int pickedOid = best.getObjectId();
         context.putCloudAssignment(id, pickedOid);
         opqLog("Assigned cloud reactor oid=" + pickedOid + " (id=" + best.getId()
-                + " pos=" + best.getPosition() + ") -> " + bot.getChr().getName());
+                + " pos=" + best.getPosition() + ") -> " + chr.getName());
         return pickedOid;
     }
 
@@ -213,13 +216,12 @@ public class OPQOrchestrator {
 
     /**
      * Reserve a unique box reactor for this bot and return its oid.
-     * Picks the closest live box reactor (state == 0, not claimed by another bot).
-     * Skips reactors with state > 0 (may be hit by a real player).
-     * Returns null if no free untouched box reactors remain.
+     * Picks the closest live box reactor not claimed by another bot, including abandoned partial boxes.
      */
     public synchronized Integer assignBoxReactor(OPQBot bot) {
-        int id = bot.getChr().getId();
-        MapleMap map = bot.getChr().getMap();
+        Character chr = bot.getChr();
+        int id = chr.getId();
+        MapleMap map = chr.getMap();
         if (map == null) return null;
 
         buildBoxSortedIndex(map);
@@ -230,20 +232,19 @@ public class OPQOrchestrator {
             if (r != null && r.isAlive() && r.getState() < 4) {
                 return existing;
             }
-            opqLog("Dropping stale box assignment oid=" + existing + " for " + bot.getChr().getName());
+            opqLog("Dropping stale box assignment oid=" + existing + " for " + chr.getName());
             context.putBoxAssignment(id, null);
         }
 
         Collection<Integer> taken = context.getBoxAssignmentsView().values();
         Reactor best = null;
         double bestDist = Double.MAX_VALUE;
-        Point botPos = bot.getChr().getPosition();
+        Point botPos = chr.getPosition();
         for (Reactor r : map.getAllReactors()) {
             if (!isBoxReactor(r)) continue;
             if (!r.isAlive() || r.getState() >= 4) continue;
-            // Skip reactors partially hit by someone else (real player)
-            if (r.getState() > 0 && !taken.contains(r.getObjectId())) continue;
-            if (taken.contains(r.getObjectId())) continue;
+            int oid = r.getObjectId();
+            if (taken.contains(oid) || PqActions.reactorApproachDeferred(chr, oid)) continue;
             double d = botPos.distance(r.getPosition());
             if (d < bestDist) {
                 bestDist = d;
@@ -251,7 +252,7 @@ public class OPQOrchestrator {
             }
         }
         if (best == null) {
-            opqLog("No free box reactor for " + bot.getChr().getName()
+            opqLog("No free box reactor for " + chr.getName()
                     + " (alive on map=" + map.getAllReactors().size() + ", taken=" + taken.size() + ")");
             return null;
         }
@@ -260,13 +261,13 @@ public class OPQOrchestrator {
         String ordinal = getBoxOrdinal(best.getId());
 //        opqLog("Assigned box reactor oid=" + pickedOid + " (" + ordinal
 //                + " box, id=" + best.getId() + " pos=" + best.getPosition()
-//                + ") -> " + bot.getChr().getName());
+//                + ") -> " + chr.getName());
         return pickedOid;
     }
 
     /**
      * Whether the given map still has at least one box reactor that is alive,
-     * untouched (state == 0), and not claimed by another bot.
+     * and not claimed by another bot.
      *
      * <p>Synchronized, matching {@link #assignBoxReactor}: same compound-read-over-a-concurrent-map
      * shape, same mid-write observation hazard. mySealedSlot was already fixed this way; these two
@@ -278,7 +279,6 @@ public class OPQOrchestrator {
         for (Reactor r : map.getAllReactors()) {
             if (!isBoxReactor(r)) continue;
             if (!r.isAlive() || r.getState() >= 4) continue;
-            if (r.getState() > 0 && !taken.contains(r.getObjectId())) continue;
             int oid = r.getObjectId();
             if (taken.contains(oid)) continue;
             return true;

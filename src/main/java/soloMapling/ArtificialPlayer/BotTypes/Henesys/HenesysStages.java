@@ -1,12 +1,15 @@
 package soloMapling.ArtificialPlayer.BotTypes.Henesys;
 
 import org.gms.client.Character;
+import org.gms.server.maps.MapleMap;
+import org.gms.server.maps.Reactor;
 import soloMapling.ArtificialPlayer.BotMessagingSystem.CharacterStorage;
 import soloMapling.ArtificialPlayer.BotSM;
-import soloMapling.ArtificialPlayer.GCMoveSystem.GCMovement;
 import soloMapling.ArtificialPlayer.PartyQuest.PqActions;
 
-import java.util.List;
+import java.util.Collections;
+import java.util.Map;
+import java.util.WeakHashMap;
 
 /**
  * What a bot does in each half of Henesys PQ.
@@ -29,89 +32,84 @@ public final class HenesysStages {
     // First half - plant the six primroses
     // =========================================================================
 
-    /**
-     * Take the next seed the bot is missing and plant it.
-     *
-     * <p>One seed per pass, because carrying all six would need the bot to know which flower
-     * is still empty - and it can find that out more cheaply by reading the flowers. The
-     * quest's own reaction is the confirmation: a flower only bumps {@code stage} if it was
-     * the right seed at the right footing.
-     *
-     * @return true once all six are up, which is the quest's own condition
-     */
-    public static boolean plantOneFlower(Character bot) {
-        if (flowersBloomed(bot) >= HenesysPqData.FLOWERS_TO_BLOOM) {
-            return true;
-        }
+    // One claimant per seed color, scoped to the actual room rather than its shared map id.
+    private static final Map<MapleMap, int[]> FLOWER_CLAIMS = Collections.synchronizedMap(new WeakHashMap<>());
 
-        int wanted = firstEmptyFlower(bot);
-        if (wanted < 0) {
-            return false;
-        }
-        int seed = HenesysPqData.seedForFlower(wanted);
+    /** Work on the claimed flower until its seed is accepted by the quest script. */
+    static void plantOneFlower(Character bot) {
+        Reactor flower = claimFlower(bot);
+        if (flower == null) return;
+        int index = flower.getId() - HenesysPqData.FLOWER_FIRST;
+        int seed = HenesysPqData.seedForFlower(index);
+        int oid = flower.getObjectId();
 
-        // Check the pending drop before looking for another seed: its inventory copy was
-        // consumed, but the flower has not advanced until the delayed trigger fires.
-        if (plantSeedAt(bot, wanted, seed)) {
-            return flowersBloomed(bot) >= HenesysPqData.FLOWERS_TO_BLOOM;
+        // An already planted seed lies on the ground until the delayed trigger runs.
+        if (feedOrRelease(bot, oid, seed) || PqActions.countItem(bot, seed) > 0) return;
+        switch (PqActions.collectPartyQuestLoot(bot, new int[]{seed})) {
+            case PICKED_UP -> feedOrRelease(bot, oid, seed);
+            case COLLECTING -> { }
+            case NONE -> PqActions.workActiveReactors(bot, HenesysPqData.LEAF_FIRST + index);
         }
-
-        if (PqActions.countItem(bot, seed) == 0) {
-            takeSeed(bot, seed);
-            if (PqActions.countItem(bot, seed) == 0) {
-                return false; // none on the ground yet; the caller will come back
-            }
-        }
-
-        plantSeedAt(bot, wanted, seed);
-        return flowersBloomed(bot) >= HenesysPqData.FLOWERS_TO_BLOOM;
     }
 
-    private static boolean plantSeedAt(Character bot, int flowerIndex, int seed) {
-        int oid = PqActions.findReactorOid(bot, HenesysPqData.FLOWER_FIRST + flowerIndex);
-        return oid >= 0 && PqActions.feedReactor(bot, oid, seed);
+    private static boolean feedOrRelease(Character bot, int oid, int seed) {
+        var result = PqActions.feedReactorStep(bot, oid, seed);
+        if (result == PqActions.FeedResult.STUCK) {
+            PqActions.deferReactorApproach(bot, oid);
+            releaseFlowerClaim(bot);
+        }
+        return result != PqActions.FeedResult.NO_ACTION;
     }
 
-    /** Break leaves until one drops the seed this bot is after. */
-    private static void takeSeed(Character bot, int seed) {
-        PqActions.loot(bot, bot.getPosition(), 4_000, new int[]{seed});
-        if (PqActions.countItem(bot, seed) > 0 || GCMovement.hasMoveTarget(bot)) return;
-        for (int leafId = HenesysPqData.LEAF_FIRST; leafId <= HenesysPqData.LEAF_LAST; leafId++) {
-            int oid = PqActions.findReactorOid(bot, leafId);
-            if (oid < 0) {
-                continue;
+    private static Reactor claimFlower(Character bot) {
+        MapleMap map = bot.getMap();
+        var flowers = map.getReactorsByIdRange(HenesysPqData.FLOWER_FIRST, HenesysPqData.FLOWER_LAST);
+        int[] claims = FLOWER_CLAIMS.computeIfAbsent(map, room -> new int[HenesysPqData.SEED_TYPES]);
+        int botId = bot.getId();
+        synchronized (claims) {
+            Reactor free = null;
+            for (Reactor flower : flowers) {
+                int index = flower.getId() - HenesysPqData.FLOWER_FIRST;
+                if (!flower.isActive() || flower.getState() != 0) {
+                    claims[index] = 0;
+                    continue;
+                }
+                int owner = claims[index];
+                if (owner == botId) return flower;
+                if ((free == null || flower.getId() < free.getId())
+                        && (owner == 0 || !isPlantingInRoom(owner, map))
+                        && !PqActions.reactorApproachDeferred(bot, flower.getObjectId())) {
+                    free = flower;
+                }
             }
-            if (!PqActions.hitReactor(bot, oid)) return;
-            PqActions.loot(bot, bot.getPosition(), 4_000, new int[]{seed});
-            return; // let this leaf's drop settle before selecting another target
+            if (free != null) claims[free.getId() - HenesysPqData.FLOWER_FIRST] = botId;
+            return free;
+        }
+    }
+
+    private static boolean isPlantingInRoom(int botId, MapleMap room) {
+        return CharacterStorage.getBotById(botId) instanceof HenesysPQBot planter
+                && planter.getChr().getMap() == room && planter.getRunning()
+                && planter.getState() != BotSM.BotState.PAUSE && !planter.death().isCorpse();
+    }
+
+    static void releaseFlowerClaim(Character bot) {
+        int[] claims = FLOWER_CLAIMS.get(bot.getMap());
+        if (claims == null) return;
+        int botId = bot.getId();
+        synchronized (claims) {
+            for (int i = 0; i < claims.length; i++) {
+                if (claims[i] == botId) {
+                    claims[i] = 0;
+                    return;
+                }
+            }
         }
     }
 
     /** How many flowers have taken a seed, from the quest's own {@code stage} counter. */
     public static int flowersBloomed(Character bot) {
         return PqActions.readEimInt(bot, "stage", 0);
-    }
-
-    /**
-     * The first flower still waiting for its seed, by reading the flowers themselves
-     * ({@code state > 0} means it has taken one). This is also what makes the loop
-     * self-correcting: a flower that rejected its seed keeps state 0 and gets tried again.
-     */
-    private static int firstEmptyFlower(Character bot) {
-        List<org.gms.server.maps.Reactor> flowers = bot.getMap().getAllReactors().stream()
-                .filter(r -> r.getId() >= HenesysPqData.FLOWER_FIRST
-                        && r.getId() <= HenesysPqData.FLOWER_LAST)
-                .toList();
-        for (int index = 0; index < HenesysPqData.SEED_TYPES; index++) {
-            int dataId = HenesysPqData.FLOWER_FIRST + index;
-            boolean hasTaken = flowers.stream()
-                    .filter(r -> r.getId() == dataId)
-                    .anyMatch(r -> r.getState() > 0);
-            if (!hasTaken) {
-                return index;
-            }
-        }
-        return -1;
     }
 
     // =========================================================================

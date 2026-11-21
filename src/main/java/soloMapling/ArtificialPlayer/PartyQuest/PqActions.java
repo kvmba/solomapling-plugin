@@ -584,6 +584,85 @@ public final class PqActions {
                 .findFirst().orElse(-1);
     }
 
+    private static final long REACTOR_RETRY_MS = 20_000;
+
+    private static final class ReactorWork {
+        final MapleMap map;
+        final Map<Integer, Long> retryAt = new java.util.HashMap<>();
+        int target = -1;
+
+        ReactorWork(MapleMap map) {
+            this.map = map;
+        }
+
+        boolean deferred(int oid) {
+            Long until = retryAt.get(oid);
+            if (until == null) return false;
+            if (movementNowMs() < until) return true;
+            retryAt.remove(oid);
+            return false;
+        }
+    }
+
+    /** Let another bot try this reactor while this bot tries a different route or target. */
+    public static void deferReactorApproach(Character bot, int oid) {
+        SeekState control = seekStates.computeIfAbsent(bot.getId(), ignored -> new SeekState());
+        synchronized (control) {
+            ReactorWork work = reactorWork(control, bot.getMap());
+            work.retryAt.put(oid, movementNowMs() + REACTOR_RETRY_MS);
+            control.approach = null;
+        }
+    }
+
+    public static boolean reactorApproachDeferred(Character bot, int oid) {
+        SeekState control = seekStates.get(bot.getId());
+        if (control == null) return false;
+        synchronized (control) {
+            ReactorWork work = control.reactorWork;
+            return work != null && work.map == bot.getMap() && work.deferred(oid);
+        }
+    }
+
+    private static ReactorWork reactorWork(SeekState control, MapleMap map) {
+        if (control.reactorWork == null || control.reactorWork.map != map) {
+            control.reactorWork = new ReactorWork(map);
+        }
+        return control.reactorWork;
+    }
+
+    /** Keep working the chosen copy until it breaks or the driver gives up on reaching it. */
+    public static boolean workActiveReactors(Character bot, int dataId) {
+        MapleMap map = bot.getMap();
+        SeekState control = seekStates.computeIfAbsent(bot.getId(), ignored -> new SeekState());
+        synchronized (control) {
+            ReactorWork work = reactorWork(control, map);
+            Reactor current = work.target < 0 ? null : map.getReactorByOid(work.target);
+            if (current != null && current.getId() == dataId && current.isActive()
+                    && workReactor(bot, work, current.getObjectId())) return true;
+
+            work.target = -1;
+            boolean active = false;
+            for (Reactor reactor : map.getReactorsByIdRange(dataId, dataId)) {
+                if (!reactor.isActive()) continue;
+                active = true;
+                if (workReactor(bot, work, reactor.getObjectId())) return true;
+            }
+            return active; // only unreachable copies remain for now
+        }
+    }
+
+    private static boolean workReactor(Character bot, ReactorWork work, int oid) {
+        if (work.deferred(oid)) return false;
+        Approach approach = approachReactor(bot, oid, true, false);
+        if (approach == Approach.STUCK) {
+            deferReactorApproach(bot, oid);
+            return false;
+        }
+        work.target = oid;
+        if (approach == Approach.IN_POSITION) hitReactor(bot, oid);
+        return true;
+    }
+
     // ===== Beat-driven reactor work: approach + strike on the 250ms combat sweep =====
     //
     // The stage helpers above only RUN on the macro tick (2-6s observed, 36-48s not), so a
@@ -815,23 +894,23 @@ public final class PqActions {
         return removed;
     }
 
+    public enum FeedResult { NO_ACTION, WORKING, STUCK }
+
     /** True while approaching, feeding or awaiting an armed item reactor's delayed trigger. */
     public static boolean feedReactor(Character bot, int reactorOid, int itemId) {
+        return feedReactorStep(bot, reactorOid, itemId) == FeedResult.WORKING;
+    }
+
+    /** Distinguish an abandoned approach from a reactor that still needs its item. */
+    public static FeedResult feedReactorStep(Character bot, int reactorOid, int itemId) {
         MapleMap map = bot.getMap();
         Reactor reactor = map.getReactorByOid(reactorOid);
-        if (reactor == null) return false;
+        if (reactor == null) return FeedResult.NO_ACTION;
         // Bots share this monitor for the check-and-drop; the host's trigger owns its own locks.
         synchronized (reactor) {
-            if (!reactor.isAlive() || reactor.getReactorType() != 100) return false;
+            if (!reactor.isAlive() || reactor.getReactorType() != 100) return FeedResult.NO_ACTION;
             var required = reactor.getReactItem(reactor.getEventState());
-            // getReactorType() reports the CURRENT state's type while getReactItem() indexes the
-            // EVENT state, so the two are not guaranteed to agree - and the host's
-            // ReactorStats.getReactItem dereferences stateInfo.get(state).get(index) with no
-            // guard, returning null (or throwing) when that chain is empty. Today's five OPQ
-            // reactors all have a single state-0 event so it cannot happen, but the moment any
-            // script calls setEventState(>0) on one it would. required.getRight() is dereferenced
-            // three times below, so the guard goes here rather than at each use.
-            if (required == null || required.getLeft() != itemId) return false;
+            if (required == null || required.getLeft() != itemId) return FeedResult.NO_ACTION;
             for (MapObject object : map.getMapObjectsInRect(reactor.getArea(),
                     List.of(org.gms.server.maps.MapObjectType.ITEM))) {
                 MapItem drop = (MapItem) object;
@@ -839,15 +918,18 @@ public final class PqActions {
                 try {
                     var item = drop.getItem();
                     if (!drop.isPickedUp() && item != null && item.getItemId() == itemId
-                            && item.getQuantity() == required.getRight()) return true;
+                            && item.getQuantity() == required.getRight()) return FeedResult.WORKING;
                 } finally {
                     drop.unlockItem();
                 }
             }
-            if (countItem(bot, itemId) < required.getRight()) return false;
-            Approach approach = approachUnder(bot, reactor.getPosition());
-            if (approach != Approach.IN_POSITION) return approach == Approach.TRAVELLING;
-            return dropStack(bot, itemId, required.getRight(), reactor.getPosition());
+            if (countItem(bot, itemId) < required.getRight()) return FeedResult.NO_ACTION;
+            return switch (approachUnder(bot, reactor.getPosition())) {
+                case TRAVELLING -> FeedResult.WORKING;
+                case STUCK -> FeedResult.STUCK;
+                case IN_POSITION -> dropStack(bot, itemId, required.getRight(), reactor.getPosition())
+                        ? FeedResult.WORKING : FeedResult.NO_ACTION;
+            };
         }
     }
 
@@ -1323,6 +1405,7 @@ public final class PqActions {
     private static final class SeekState {
         MapleMap map;
         ApproachAttempt approach;
+        ReactorWork reactorWork;
         int targetOid = -1;
         Point anchorFloor;
         int drift;
@@ -1524,8 +1607,19 @@ public final class PqActions {
 
     public enum LootBeat { NONE, COLLECTING, PICKED_UP }
 
-    /** A loot-only beat for a collection stage: walk, wait for pickup, or pick up one item. */
+    private enum PartyDrops { NONE, MONSTERS, MONSTERS_AND_REACTORS }
+
+    /** A loot-only beat for the named monster drops, including the party's protected drops. */
     public static LootBeat collectPartyMonsterLoot(Character bot, int[] itemIds) {
+        return collectRoomLoot(bot, itemIds, PartyDrops.MONSTERS);
+    }
+
+    /** Also accept party drops produced by a reactor, but not a player's offerings or hand-offs. */
+    public static LootBeat collectPartyQuestLoot(Character bot, int[] itemIds) {
+        return collectRoomLoot(bot, itemIds, PartyDrops.MONSTERS_AND_REACTORS);
+    }
+
+    private static LootBeat collectRoomLoot(Character bot, int[] itemIds, PartyDrops partyDrops) {
         int botId = bot.getId();
         SeekState state = seekStates.computeIfAbsent(botId, ignored -> new SeekState());
         synchronized (state) {
@@ -1550,7 +1644,8 @@ public final class PqActions {
                 if (at == null) continue;
                 double distanceSq = position.distanceSq(at);
                 boolean nearer = distanceSq <= bestSq;
-                if (!(nearer || (!keepWalk && at.equals(goal))) || !canCollectFloorDrop(bot, drop, true)) continue;
+                if (!(nearer || (!keepWalk && at.equals(goal)))
+                        || !canCollectFloorDrop(bot, drop, partyDrops)) continue;
                 if (nearer) {
                     hasNearbyDrop = true;
                     if (drop.getDropTime() <= settledBefore) {
@@ -1571,11 +1666,11 @@ public final class PqActions {
                         || bot.getPosition().distanceSq(nearest.getPosition()) > STEPPED_ON_REACH_SQ) {
                     return LootBeat.COLLECTING;
                 }
-                return collectSteppedOn(bot, itemIds, nearest, now, true) > 0
+                return collectSteppedOn(bot, itemIds, nearest, now, partyDrops) > 0
                         ? LootBeat.PICKED_UP : LootBeat.COLLECTING;
             }
             if (keepWalk) return LootBeat.COLLECTING;
-            MapItem target = nearestPathableLoot(bot, position, found, STEPPED_ON_REACH_SQ, true);
+            MapItem target = nearestPathableLoot(bot, position, found, STEPPED_ON_REACH_SQ, partyDrops);
             if (bot.getMap() != map) return LootBeat.COLLECTING;
             if (target == null) return LootBeat.NONE;
             stopHunting(bot);
@@ -1597,7 +1692,7 @@ public final class PqActions {
             if (walkingToLoot(bot, itemIds)) return true;
             Point botPos = bot.getPosition();
             List<MapObject> found = BotLogic.checkForItemsOnFloor(bot, botPos, radiusPx, itemIds);
-            MapItem nearest = nearestPathableLoot(bot, botPos, found, pickupReachSq, false);
+            MapItem nearest = nearestPathableLoot(bot, botPos, found, pickupReachSq, PartyDrops.NONE);
             if (nearest == null) {
                 return false;
             }
@@ -1610,7 +1705,7 @@ public final class PqActions {
     }
 
     private static MapItem nearestPathableLoot(Character bot, Point position, List<MapObject> found,
-                                                double pickupReachSq, boolean allowPartyMonsterLoot) {
+                                                double pickupReachSq, PartyDrops partyDrops) {
         MapItem nearest = null;
         double bestSq = Double.MAX_VALUE;
         for (MapObject object : found) {
@@ -1619,7 +1714,7 @@ public final class PqActions {
             if (at == null) continue;
             double distanceSq = position.distanceSq(at);
             if (distanceSq > pickupReachSq && distanceSq < bestSq
-                    && canCollectFloorDrop(bot, drop, allowPartyMonsterLoot)
+                    && canCollectFloorDrop(bot, drop, partyDrops)
                     && !soloMapling.ArtificialPlayer.BotTypes.Ludi.LudiStages.refusesFloor(bot, at)
                     && GCMovement.canPathTo(bot, at.x, at.y)) {
                 nearest = drop;
@@ -1630,12 +1725,12 @@ public final class PqActions {
     }
 
     private static boolean canCollectFloorDrop(Character bot, MapItem drop) {
-        return canCollectFloorDrop(bot, drop, false);
+        return canCollectFloorDrop(bot, drop, PartyDrops.NONE);
     }
 
-    private static boolean canCollectFloorDrop(Character bot, MapItem drop, boolean allowPartyMonsterLoot) {
+    private static boolean canCollectFloorDrop(Character bot, MapItem drop, PartyDrops partyDrops) {
         if (!isFloorLoot(drop) || !(DropCommands.botCanLoot(bot, drop)
-                || (allowPartyMonsterLoot && isPartyMonsterDrop(bot, drop)))) return false;
+                || (partyDrops != PartyDrops.NONE && isPartySourceDrop(bot, drop, partyDrops)))) return false;
         // A Chief Bandit's Pickpocket bags are bomb fuel, not loot: botCanLoot passes them (they
         // are the bot's own drops) and they register the instant they land, so without this gate
         // the sweep eats them long before BAG_MIN_AGE_MS makes them detonable. The grind layer's
@@ -1653,9 +1748,10 @@ public final class PqActions {
         }
     }
 
-    /** The host lets party members pick up monster loot during its owner-protection window. */
-    private static boolean isPartyMonsterDrop(Character bot, MapItem drop) {
-        if (!(drop.getDropper() instanceof Monster) || drop.isPickedUp()) return false;
+    private static boolean isPartySourceDrop(Character bot, MapItem drop, PartyDrops partyDrops) {
+        MapObject source = drop.getDropper();
+        if (drop.isPickedUp() || !(source instanceof Monster
+                || (partyDrops == PartyDrops.MONSTERS_AND_REACTORS && source instanceof Reactor))) return false;
         int partyId = bot.getPartyId();
         if (partyId == -1) return false;
         drop.lockItem();
@@ -1667,15 +1763,15 @@ public final class PqActions {
     }
 
     private static void collectFloorDrop(Character bot, MapItem drop) {
-        collectFloorDrop(bot, drop, false);
+        collectFloorDrop(bot, drop, PartyDrops.NONE);
     }
 
-    private static void collectFloorDrop(Character bot, MapItem drop, boolean allowPartyMonsterLoot) {
+    private static void collectFloorDrop(Character bot, MapItem drop, PartyDrops partyDrops) {
         // The host refuses drops younger than 400ms; that is settling, not a failed pickup.
         if (System.currentTimeMillis() - drop.getDropTime() < FLOOR_DROP_SETTLE_MS) return;
         SeekState control = seekStates.computeIfAbsent(bot.getId(), ignored -> new SeekState());
         synchronized (control) {
-            if (!canCollectFloorDrop(bot, drop, allowPartyMonsterLoot)) return;
+            if (!canCollectFloorDrop(bot, drop, partyDrops)) return;
             DropCommands.botLootSingleDrop(bot, drop);
             if (!drop.isPickedUp()) control.failedPickups.add(drop);
         }
@@ -2506,16 +2602,16 @@ public final class PqActions {
         if (nearest == null) {
             return 0;
         }
-        return collectSteppedOn(bot, itemIds, nearest, now, false);
+        return collectSteppedOn(bot, itemIds, nearest, now, PartyDrops.NONE);
     }
 
     private static int collectSteppedOn(Character bot, int[] itemIds, MapItem drop, long now,
-                                       boolean allowPartyMonsterLoot) {
+                                       PartyDrops partyDrops) {
         int before = 0;
         for (int id : itemIds) {
             before += countItem(bot, id);
         }
-        collectFloorDrop(bot, drop, allowPartyMonsterLoot);
+        collectFloorDrop(bot, drop, partyDrops);
         nextSteppedOnPickupAtByBot.put(bot.getId(), now + STEPPED_ON_PICKUP_GAP_MIN_MS
                 + ThreadLocalRandom.current().nextLong(STEPPED_ON_PICKUP_GAP_MAX_MS
                 - STEPPED_ON_PICKUP_GAP_MIN_MS + 1));
