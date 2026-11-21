@@ -79,6 +79,8 @@ public abstract class PartyQuestBot extends BotSM implements GrindTickRegistry.P
     /** Whether the previous tick saw this bot inside the quest - the run-start edge. */
     private boolean wasInsideQuest;
 
+    private MapleMap lastCheckedBonusRoom;
+
     /** The stage or room whose clear already celebrated this run, so one milestone speaks once. */
     private int celebratedClearKey = Integer.MIN_VALUE;
 
@@ -213,17 +215,22 @@ public abstract class PartyQuestBot extends BotSM implements GrindTickRegistry.P
     @Override
     public void grindTick() {
         Character bot = getChr();
-        if (bot == null || bot.getMap() == null
+        MapleMap room = bot == null ? null : bot.getMap();
+        if (room == null
                 || !getRunning()
                 || death().isCorpse() || status().isFrozen()
                 || !inRunGroup(bot)
-                || !isInsideQuest(bot.getMapId())) {
+                || !isInsideQuest(room.getId())) {
             return;
         }
         // No graph yet: this sweep must not steer on the warmup heuristic, and must not build one
         // on this thread either (the shared 250ms sweep is one thread for every bot). The macro
         // tick does the building (GCMovement.ensureGraph) and will run the fight on its next beat.
         if (!GCMovement.hasGraph(bot)) {
+            return;
+        }
+        if (clearedRunWithoutPlayers(room.getEventInstance())) {
+            PqActions.stopHunting(bot);
             return;
         }
         combatSweep(bot);
@@ -424,6 +431,11 @@ public abstract class PartyQuestBot extends BotSM implements GrindTickRegistry.P
             returnToLobby("no longer in a party");
             return;
         }
+        EventInstanceManager instance = bot.getMap().getEventInstance();
+        if (clearedRunWithoutPlayers(instance)) {
+            returnToLobby("the players left the cleared run");
+            return;
+        }
         if (!wasInsideQuest) {
             wasInsideQuest = true;
             noteEnteredQuest();
@@ -457,7 +469,6 @@ public abstract class PartyQuestBot extends BotSM implements GrindTickRegistry.P
         // Survive the fight: sip back whatever the room's mobs took off (no-op while full).
         potionSim.tick(bot);
 
-        EventInstanceManager instance = bot.getMap().getEventInstance();
         if (instance == null || !instance.isEventCleared()) {
             maybeQuestChat(Beat.WORKING);
         }
@@ -508,6 +519,7 @@ public abstract class PartyQuestBot extends BotSM implements GrindTickRegistry.P
         wasInsideQuest = false;
         celebratedClearKey = Integer.MIN_VALUE;
         nextQuestChatAtMs = 0;
+        lastCheckedBonusRoom = null;
         PqActions.releaseWaitClaims(getChr().getId());
     }
 
@@ -953,6 +965,11 @@ public abstract class PartyQuestBot extends BotSM implements GrindTickRegistry.P
         return party.getLeader().getPlayer();
     }
 
+    /** Some scripts stop their only timer on clear and count bots as remaining members. */
+    private boolean clearedRunWithoutPlayers(EventInstanceManager instance) {
+        return instance != null && instance.isEventCleared() && !hasPlayerInRun();
+    }
+
     /** Wait for players in this run, even if the leader has already left the prize room. */
     protected final boolean hasPlayerInRun() {
         return hasPlayerInRunRoom(0);
@@ -965,6 +982,25 @@ public abstract class PartyQuestBot extends BotSM implements GrindTickRegistry.P
         return PqActions.findHumanPartyRoom(bot, room -> (mapId == 0 || room.getId() == mapId)
                 && (room == here || instance != null && room.getEventInstance() == instance
                         && isInsideQuest(room.getId()))) != null;
+    }
+
+    /** Team warps move members one by one; allow the first arrival tick for players to catch up. */
+    protected final boolean shouldLeaveBonusRoom(boolean teammateHere) {
+        MapleMap here = getChr().getMap();
+        boolean abandoned = lastCheckedBonusRoom == here && !teammateHere;
+        lastCheckedBonusRoom = here;
+        return abandoned;
+    }
+
+    /** Wait by the exit while teammates are here; leaving never requires the portal to work. */
+    protected final void settleExitPortal(String portalName) {
+        Character bot = getChr();
+        if (!hasPlayerInRunRoom(bot.getMapId())) {
+            returnToLobby("the players left the exit room");
+            return;
+        }
+        Portal exit = bot.getMap().getPortal(portalName);
+        if (exit != null) PqActions.waitAtPuzzlePost(bot, exit.getPosition());
     }
 
     /** Walk to the same reward post as the players; never claim their prizes on the bot's behalf. */
@@ -1006,6 +1042,8 @@ public abstract class PartyQuestBot extends BotSM implements GrindTickRegistry.P
         }
         int lobbyId = lobbyMapId();
         MapleMap here = bot.getMap();
+        PqActions.stopHunting(bot);
+        PqActions.clearReactorBeat(bot.getId());
         releaseRoomState(); // the run is over - give up the room's wait spots and claims
         if (here.getId() == lobbyId && here.getEventInstance() == null) {
             PqActions.leaveEventInstance(bot);

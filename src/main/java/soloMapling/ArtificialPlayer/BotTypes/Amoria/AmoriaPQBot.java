@@ -62,8 +62,11 @@ public class AmoriaPQBot extends PartyQuestBot {
     @Override
     protected boolean fightsOnSweep() {
         Character bot = getChr();
-        if (bot.getMapId() == MARRIED_BONUS_MAP) return true;
-        return switch (AmoriaPqData.stageOf(bot.getMapId())) {
+        int mapId = bot.getMapId();
+        if (mapId == MARRIED_BONUS_MAP || mapId == AmoriaPqData.CLEAR_MAP) {
+            return hasPlayerInRunRoom(mapId);
+        }
+        return switch (AmoriaPqData.stageOf(mapId)) {
             case 1 -> PqActions.readEimString(bot, "1stageclear") == null
                     && PqActions.needsHuntForLeader(bot, MIRROR_LOOT[0], 1);
             case 4 -> !collectionCleared()
@@ -93,13 +96,16 @@ public class AmoriaPQBot extends PartyQuestBot {
             settleRewardRoom(9201047);
             return false;
         }
-        if (mapId == MARRIED_BONUS_MAP) {
-            breakBonusBoxes(6701000, 6701002);
-            return fightRoom();
-        }
-        if (mapId == AmoriaPqData.CLEAR_MAP) {
-            breakBonusBoxes(6702003, 6702012);
-            return false;
+        if (mapId == MARRIED_BONUS_MAP || mapId == AmoriaPqData.CLEAR_MAP) {
+            boolean teammateHere = hasPlayerInRunRoom(mapId);
+            if (teammateHere) {
+                if (mapId == MARRIED_BONUS_MAP) {
+                    breakBonusBoxes(6701000, 6701002);
+                } else {
+                    breakBonusBoxes(6702003, 6702012);
+                }
+            }
+            return shouldLeaveBonusRoom(teammateHere);
         }
         int stage = AmoriaPqData.stageOf(mapId);
         return switch (stage) {

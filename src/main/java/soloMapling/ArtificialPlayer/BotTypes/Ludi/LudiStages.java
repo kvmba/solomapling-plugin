@@ -899,7 +899,6 @@ public final class LudiStages {
         releaseTowerBox(botId);
         DOOR_ROOM_CLAIMS.remove(botId);
         CLEARED_DOOR_ROOMS.remove(botId);
-        releaseBonusReward(botId);
         PqActions.releaseWaitClaims(botId);
     }
 
@@ -1325,78 +1324,6 @@ public final class LudiStages {
             // plain strike sequence is all it needs.
             hitReactorRotate(bot, box, LudiPqData.BONUS_BOX);
         }
-    }
-
-    /**
-     * Work the bonus stage's TAIL room (922011100) and take its exit.
-     *
-     * <p>{@code clearPQ} armed a one-minute timer and {@code scheduledTimeout} warped the team
-     * from the box room to this one. The room holds no boxes at all - its only contents are the
-     * two NPCs (2040035 Arturo at (190,-1136), 9000033 at (24,-582)) and three ropes - so the box
-     * loop used above has nothing to do here and the bot stood still forever: 922011100 is inside
-     * {@link LudiPqData}'s quest range, so {@code tickLobby} does not reclaim it either.
-     *
-     * <p>The exit is what a player does there: walk up to 2040035, spend a moment on it, and be
-     * warped home. The bot deliberately does NOT run that conversation. {@code 2040035.js} hands
-     * out {@code eim.giveEventReward(player)} and then warps, so driving it from a bot would grant
-     * the bot an event reward and - when its inventory happens to be full - leave the script's
-     * dialog open with nothing able to click it closed. What the bot reproduces is the observable
-     * part only: the walk to the NPC, the pause a person spends reading, and the hop back to the
-     * party lobby.
-     *
-     * @return true once the dialogue beat is over and this bot should leave the run
-     */
-    public static boolean takeBonusReward(Character bot) {
-        Point post = bonusTailNpcSpot(bot);
-        if (post == null) {
-            return false; // no standable spot under the NPC: this room is broken, not the bot
-        }
-        if (!PqActions.withinPickupReach(bot, post)) {
-            // Nothing else in this room owns the driver (no mobs, no boxes), so the walk does not
-            // have to yield to anyone; walkTo's own "already standing on the spot" test is what
-            // keeps a re-arm from restarting a finished walk.
-            PqActions.walkTo(bot, post);
-            bonusTalkUntil.remove(bot.getId());
-            return false;
-        }
-        // The shared movement clock, not System.currentTimeMillis(): this beat runs on the driver
-        // tick, and an execution sim advances MovementClock instead of the wall clock. A wall-clock
-        // read here left the only way to test the pause as a real multi-second sleep.
-        long now = GCMovement.movementNowMs();
-        Long until = bonusTalkUntil.get(bot.getId());
-        if (until == null) {
-            // Arrived: stand and read. Jittered per bot so a cohort does not warp in lockstep.
-            bonusTalkUntil.put(bot.getId(),
-                    now + BONUS_TALK_MIN_MS
-                            + ThreadLocalRandom.current().nextLong(BONUS_TALK_JITTER_MS));
-            return false;
-        }
-        return now >= until;
-    }
-
-    /**
-     * The standable spot at the reward NPC, from the room's own WZ geometry: 2040035 is declared
-     * at (190,-1136) and the ledge beneath it sits at y=-1133.
-     */
-    private static Point bonusTailNpcSpot(Character bot) {
-        Point at = LudiPqData.BONUS_TAIL_NPC_SPOT;
-        Point ground = GCMovement.groundPointBelow(bot.getMap(), at.x, at.y);
-        return ground != null ? ground : at;
-    }
-
-    /**
-     * The pause a player spends on 2040035's two confirmations. Long enough that the walk up to
-     * the NPC and the departure read as separate beats; short enough that the room costs seconds.
-     */
-    private static final long BONUS_TALK_MIN_MS = 2_000L;
-    private static final long BONUS_TALK_JITTER_MS = 1_200L;
-
-    /** botId -> the epoch-ms at which this bot's simulated turn-in conversation ends. */
-    private static final Map<Integer, Long> bonusTalkUntil = new java.util.concurrent.ConcurrentHashMap<>();
-
-    /** Drop the tail room's dialogue clock with the rest of this bot's room state. */
-    static void releaseBonusReward(int botId) {
-        bonusTalkUntil.remove(botId);
     }
 
     // =========================================================================

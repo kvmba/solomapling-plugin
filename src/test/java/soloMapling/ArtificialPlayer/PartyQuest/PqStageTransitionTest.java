@@ -19,6 +19,7 @@ import org.junit.jupiter.params.provider.EnumSource;
 import soloMapling.ArtificialPlayer.BotGeneration;
 import soloMapling.ArtificialPlayer.BotCommandsPack.WarpCommands;
 import soloMapling.ArtificialPlayer.BotMessagingSystem.CharacterStorage;
+import soloMapling.ArtificialPlayer.BotTypes.Amoria.AmoriaPQBot;
 import soloMapling.ArtificialPlayer.BotTypes.Ariant.AriantPQBot;
 import soloMapling.ArtificialPlayer.BotTypes.BossRush.BossRushPQBot;
 import soloMapling.ArtificialPlayer.BotTypes.Dojo.DojoPQBot;
@@ -38,6 +39,7 @@ import soloMapling.ArtificialPlayer.BotTypes.OPQ.OrbisPqData;
 import soloMapling.ArtificialPlayer.BotTypes.Papulatus.PapulatusPQBot;
 import soloMapling.ArtificialPlayer.BotTypes.Pirate.PiratePQBot;
 import soloMapling.ArtificialPlayer.BotTypes.Pyramid.PyramidPQBot;
+import soloMapling.ArtificialPlayer.BotTypes.Zakum.ZakumPQBot;
 import soloMapling.ArtificialPlayer.GCMoveSystem.GCMovement;
 import soloMapling.server.BotTickService;
 
@@ -343,11 +345,9 @@ class PqStageTransitionTest {
     }
 
     @Test
-    void kerningWaitsForClotoThenTakesTheBonusAndTheExit() {
+    void kerningWaitsForClotoUntilAPlayerReachesTheBonus() {
         MapleMap boss = room(KerningPqData.STAGE_5);
         MapleMap bonus = room(KerningPqData.BONUS_MAP);
-        MapleMap exit = room(KerningPqData.EXIT_MAP);
-        MapleMap town = room(KerningPqData.RECRUIT_MAP);
         place(member, boss);
         place(leader, boss);
         when(instance.isEventCleared()).thenReturn(true);
@@ -360,11 +360,6 @@ class PqStageTransitionTest {
                 place(member, bonus);
                 return true;
             });
-            actions.when(() -> PqActions.talkTo(member, KerningPqData.NPC_NELLA, 0))
-                    .thenAnswer(call -> {
-                        place(member, member.getMap() == bonus ? exit : town);
-                        return true;
-                    });
             PartyQuestBot bot = new KerningPQBot(member);
 
             bot.tickPartyQuest();
@@ -375,25 +370,80 @@ class PqStageTransitionTest {
             place(leader, bonus);
             bot.tickPartyQuest();
             assertSame(bonus, member.getMap());
-            bot.tickPartyQuest();
-            actions.verify(() -> PqActions.seekAndAttack(member));
+        }
+    }
 
-            place(leader, exit);
-            when(exit.getEventInstance()).thenReturn(null); // Nella removed the player from the EIM
-            bot.tickPartyQuest();
-            assertSame(exit, member.getMap());
-            bot.tickPartyQuest();
-            actions.verify(() -> PqActions.waitNearStageNpc(member, KerningPqData.NPC_NELLA));
-            assertSame(exit, member.getMap());
+    @Test
+    void kerningBonusBotsStopAndReturnWhenTheLastHumanLeavesTheRoom() {
+        MapleMap bonus = room(KerningPqData.BONUS_MAP);
+        MapleMap exit = room(KerningPqData.EXIT_MAP);
+        MapleMap town = room(KerningPqData.RECRUIT_MAP);
+        when(exit.getEventInstance()).thenReturn(null);
+        when(town.getEventInstance()).thenReturn(null);
+        place(leader, exit);
 
-            place(leader, town);
-            bot.tickPartyQuest();
+        Character teammate = mock(Character.class);
+        when(teammate.getId()).thenReturn(124);
+        place(teammate, bonus);
+        Character anotherBot = mock(Character.class);
+        when(anotherBot.getId()).thenReturn(BOT_ID + 1);
+        when(anotherBot.getParty()).thenReturn(party);
+        when(anotherBot.getInventory(InventoryType.EQUIPPED)).thenReturn(mock(Inventory.class));
+        when(anotherBot.getHp()).thenReturn(100);
+        var captain = party.getLeader();
+        var members = List.of(captain, partyEntry(teammate), partyEntry(member), partyEntry(anotherBot));
+        when(party.getMembers()).thenReturn(members);
+        when(instance.isEventCleared()).thenReturn(true);
+        when(instance.getPlayerCount()).thenReturn(2, 1);
+
+        try (var generation = mockStatic(BotGeneration.class);
+             var movement = mockStatic(GCMovement.class);
+             var warps = mockStatic(WarpCommands.class);
+             var actions = mockStatic(PqActions.class)) {
+            actions.when(() -> PqActions.findHumanPartyRoom(any(), any())).thenCallRealMethod();
+            actions.when(() -> PqActions.leaveEventInstance(any())).thenCallRealMethod();
+            movement.when(() -> GCMovement.hasGraph(any())).thenReturn(true);
+            warps.when(() -> WarpCommands.mapForBot(any(), eq(KerningPqData.RECRUIT_MAP))).thenReturn(town);
+            movement.when(() -> GCMovement.changeMap(any(), same(town), isNull())).thenAnswer(call -> {
+                place(call.getArgument(0), town);
+                return null;
+            });
+            var bots = List.of(new KerningPQBot(member), new KerningPQBot(anotherBot));
+            for (PartyQuestBot bot : bots) {
+                Character character = bot.getChr();
+                place(character, bonus);
+                when(character.getEventInstance()).thenReturn(instance);
+                bot.setRunning(true);
+                bot.tickPartyQuest();
+                bot.grindTick();
+                assertSame(bonus, character.getMap());
+                actions.verify(() -> PqActions.seekAndAttack(eq(character), eq(false), any(int[].class)));
+            }
+
+            // A teammate elsewhere in this run must not keep the bonus room active.
+            place(teammate, room(KerningPqData.STAGE_5));
+            actions.clearInvocations();
+            bots.forEach(PartyQuestBot::grindTick);
+            actions.verify(() -> PqActions.seekAndAttack(any(), anyBoolean(), any(int[].class)), never());
+            actions.verify(() -> PqActions.stopHunting(member));
+            actions.verify(() -> PqActions.stopHunting(anotherBot));
+
+            bots.forEach(PartyQuestBot::tickPartyQuest);
             assertSame(town, member.getMap());
+            assertSame(town, anotherBot.getMap());
+            actions.verify(() -> PqActions.seekAndAttack(any()), never());
+            actions.verify(() -> PqActions.talkTo(any(), eq(KerningPqData.NPC_NELLA), eq(0)), never());
+            verify(instance).unregisterPlayer(member);
+            verify(instance).unregisterPlayer(anotherBot);
+            verify(instance, never()).dispose(false);
         }
     }
 
     @ParameterizedTest
     @CsvSource({
+            "kerning,103000804,9020001,103000000",
+            "kerning,103000890,9020002,103000000",
+            "ludi,922011100,2040035,221024500",
             "henesys,910010100,1012112,100000200",
             "henesys,910010400,1012112,100000200",
             "pirate,925100600,2094001,251010404",
@@ -427,6 +477,9 @@ class PqStageTransitionTest {
              var warps = mockStatic(WarpCommands.class);
              var actions = mockStatic(PqActions.class)) {
             actions.when(() -> PqActions.findHumanPartyRoom(eq(member), any())).thenCallRealMethod();
+            if (rewardMap == KerningPqData.STAGE_5) {
+                actions.when(() -> PqActions.readEimString(member, "5stageclear")).thenReturn("true");
+            }
             warps.when(() -> WarpCommands.mapForBot(member, lobbyMap)).thenReturn(lobby);
             PartyQuestBot bot = bot(type);
             place(member, reward);
@@ -440,6 +493,121 @@ class PqStageTransitionTest {
             place(teammate, otherInstance);
             bot.tickPartyQuest();
             movement.verify(() -> GCMovement.changeMap(eq(member), same(lobby), any()));
+        }
+    }
+
+    @ParameterizedTest
+    @CsvSource({
+            "amoria,670010700",
+            "bossrush,970032700",
+            "zakum,280010000",
+            "ludi,922011100"
+    })
+    void aClearedRunWithNoPlayersReturnsBotsBeforeRoomWork(String type, int mapId) {
+        MapleMap here = room(mapId);
+        MapleMap otherRun = room(mapId);
+        when(otherRun.getEventInstance()).thenReturn(mock(EventInstanceManager.class));
+        when(instance.isEventCleared()).thenReturn(true);
+        place(member, here);
+        place(leader, otherRun);
+        MapleMap lobby = mock(MapleMap.class);
+        try (var generation = mockStatic(BotGeneration.class);
+             var movement = mockStatic(GCMovement.class);
+             var warps = mockStatic(WarpCommands.class);
+             var actions = mockStatic(PqActions.class)) {
+            actions.when(() -> PqActions.findHumanPartyRoom(eq(member), any())).thenCallRealMethod();
+            PartyQuestBot bot = bot(type);
+            int lobbyId = bot.lobbyMapId();
+            warps.when(() -> WarpCommands.mapForBot(member, lobbyId)).thenReturn(lobby);
+            movement.when(() -> GCMovement.hasGraph(member)).thenReturn(true);
+            bot.setRunning(true);
+
+            bot.grindTick();
+            actions.verify(() -> PqActions.stopHunting(member));
+            actions.verify(() -> PqActions.seekAndAttack(eq(member), anyBoolean(), any(int[].class)), never());
+            bot.tickPartyQuest();
+
+            movement.verify(() -> GCMovement.ensureGraph(member), never());
+            actions.verify(() -> PqActions.leaveEventInstance(member));
+            movement.verify(() -> GCMovement.changeMap(member, lobby, null));
+        }
+    }
+
+    @ParameterizedTest
+    @CsvSource({
+            "henesys,910010200,910010100",
+            "ludi,922011000,922011100",
+            "amoria,670010750,670010700",
+            "amoria,670010800,670010700"
+    })
+    void bonusWorkNeedsAHumanTeammateInTheSameRoom(String type, int mapId, int nextMapId) {
+        MapleMap bonus = room(mapId);
+        place(member, bonus);
+        MapleMap nextRoom = room(nextMapId);
+        place(leader, nextRoom); // The host has not finished warping the team yet.
+        when(instance.isEventCleared()).thenReturn(true);
+        MapleMap lobby = mock(MapleMap.class);
+        try (var generation = mockStatic(BotGeneration.class);
+             var movement = mockStatic(GCMovement.class);
+             var warps = mockStatic(WarpCommands.class);
+             var actions = mockStatic(PqActions.class)) {
+            actions.when(() -> PqActions.findHumanPartyRoom(eq(member), any())).thenCallRealMethod();
+            PartyQuestBot bot = bot(type);
+            int lobbyId = bot.lobbyMapId();
+            warps.when(() -> WarpCommands.mapForBot(member, lobbyId)).thenReturn(lobby);
+
+            assertFalse(bot.fightsOnSweep());
+            bot.tickPartyQuest();
+            movement.verify(() -> GCMovement.changeMap(member, lobby, null), never());
+
+            place(leader, bonus);
+            assertTrue(bot.fightsOnSweep());
+            bot.tickPartyQuest();
+            movement.verify(() -> GCMovement.changeMap(member, lobby, null), never());
+
+            place(leader, nextRoom);
+            assertFalse(bot.fightsOnSweep());
+            bot.tickPartyQuest();
+            movement.verify(() -> GCMovement.changeMap(member, lobby, null));
+        }
+    }
+
+    @ParameterizedTest
+    @CsvSource({
+            "ellin,930000800,east00",
+            "magatia,926110700,out00",
+            "magatia,926100700,out00",
+            "dojang,925020002,out00",
+            "dojang,925020003,out00"
+    })
+    void botsInAPublicResultRoomDoNotDependOnTheExitPortal(String type, int mapId, String portalName) {
+        MapleMap exit = room(mapId);
+        when(exit.getEventInstance()).thenReturn(null); // Even a public exit cannot hold the bot.
+        place(member, room(mapId == 926100700 ? 261000011 : 261000021));
+        place(leader, exit);
+        Portal portal = door(exit, portalName, 999999999);
+        Point post = new Point(50, 0);
+        when(portal.getPosition()).thenReturn(post);
+        MapleMap lobby = mock(MapleMap.class);
+        try (var generation = mockStatic(BotGeneration.class);
+             var movement = mockStatic(GCMovement.class);
+             var warps = mockStatic(WarpCommands.class);
+             var actions = mockStatic(PqActions.class)) {
+            actions.when(() -> PqActions.findHumanPartyRoom(eq(member), any())).thenCallRealMethod();
+            PartyQuestBot bot = bot(type);
+            place(member, exit);
+            int lobbyId = bot.lobbyMapId();
+            warps.when(() -> WarpCommands.mapForBot(member, lobbyId)).thenReturn(lobby);
+
+            bot.tickPartyQuest();
+            actions.verify(() -> PqActions.waitAtPuzzlePost(member, post));
+            movement.verify(() -> GCMovement.changeMap(member, lobby, null), never());
+
+            place(leader, lobby);
+            bot.tickPartyQuest();
+            movement.verify(() -> GCMovement.changeMap(member, lobby, null));
+            actions.verify(() -> PqActions.walkThroughPortal(member, portal), never());
+            actions.verify(() -> PqActions.talkTo(any(), anyInt(), any(int[].class)), never());
         }
     }
 
@@ -628,7 +796,8 @@ class PqStageTransitionTest {
         try (var generation = mockStatic(BotGeneration.class);
              var movement = mockStatic(GCMovement.class);
              var actions = mockStatic(PqActions.class)) {
-            new soloMapling.ArtificialPlayer.BotTypes.Amoria.AmoriaPQBot(member).tickPartyQuest();
+            actions.when(() -> PqActions.findHumanPartyRoom(eq(member), any())).thenCallRealMethod();
+            new AmoriaPQBot(member).tickPartyQuest();
             actions.verify(() -> PqActions.approachReactor(member, 33, false, true));
             actions.verify(() -> PqActions.collectForLeader(eq(member), any(int[].class), anyInt(), anyInt()), never());
         }
@@ -741,7 +910,10 @@ class PqStageTransitionTest {
 
     private PartyQuestBot bot(String type) {
         return switch (type) {
+            case "kerning" -> new KerningPQBot(member);
+            case "amoria" -> new AmoriaPQBot(member);
             case "henesys" -> new HenesysPQBot(member);
+            case "ludi" -> new LudiPQBot(member);
             case "pirate" -> new PiratePQBot(member);
             case "ellin" -> new EllinPQBot(member);
             case "magatia" -> new MagatiaPQBot(member);
@@ -750,6 +922,7 @@ class PqStageTransitionTest {
             case "bossrush" -> new BossRushPQBot(member);
             case "papulatus" -> new PapulatusPQBot(member);
             case "pyramid" -> new PyramidPQBot(member);
+            case "zakum" -> new ZakumPQBot(member);
             default -> throw new AssertionError(type);
         };
     }
@@ -785,6 +958,14 @@ class PqStageTransitionTest {
         int id = map.getId();
         when(character.getMap()).thenReturn(map);
         when(character.getMapId()).thenReturn(id);
+    }
+
+    private static PartyCharacter partyEntry(Character player) {
+        int id = player.getId();
+        PartyCharacter entry = mock(PartyCharacter.class);
+        when(entry.getId()).thenReturn(id);
+        when(entry.getPlayer()).thenReturn(player);
+        return entry;
     }
 
     private static Portal door(MapleMap map, String name, int target) {

@@ -164,19 +164,11 @@ public class MagatiaPQBot extends PartyQuestBot {
             return false;
         }
         if (room == 700) {
-            var exit = bot.getMap().getPortal("out00");
-            if (exit != null) {
-                if (hasPlayerInRun()) PqActions.waitAtPuzzlePost(bot, exit.getPosition());
-                else PqActions.walkThroughPortal(bot, exit);
-            }
+            settleExitPortal("out00");
             return false;
         }
         var instance = bot.getEventInstance();
         if (instance != null && instance.isEventCleared()) {
-            if (!hasPlayerInRun()) {
-                returnToLobby("the players left the cleared run");
-                return false;
-            }
             if (room == 500) {
                 int npc = bot.getMapId() == 926110500 ? 2112011 : 2112001;
                 if (hasPlayerInRunRoom(bot.getMapId() + 100)) {

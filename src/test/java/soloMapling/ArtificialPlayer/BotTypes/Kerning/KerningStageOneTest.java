@@ -84,7 +84,9 @@ class KerningStageOneTest {
         when(member.getInventory(InventoryType.EQUIPPED)).thenReturn(mock(Inventory.class));
         when(member.getEventInstance()).thenReturn(instance);
         when(member.getMapId()).thenReturn(STAGE_1);
-        when(member.getMap()).thenReturn(mock(MapleMap.class));
+        MapleMap stage = mock(MapleMap.class);
+        when(stage.getId()).thenReturn(STAGE_1);
+        when(member.getMap()).thenReturn(stage);
         NPC cloto = mock(NPC.class);
         when(cloto.getPosition()).thenReturn(CLOTO_POSITION);
         when(member.getMap().getNPCById(NPC_CLOTO)).thenReturn(cloto);

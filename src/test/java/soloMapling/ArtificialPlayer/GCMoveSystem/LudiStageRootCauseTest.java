@@ -259,50 +259,25 @@ class LudiStageRootCauseTest {
     // Bonus tail room - the exit is the reward NPC
     // =========================================================================
 
-    /**
-     * 922011100 holds no boxes at all: only 2040035 and 9000033. Sending it through the box loop
-     * made the bot stand still forever, and the room is inside the quest's map range so the lobby
-     * beat does not reclaim it either.
-     *
-     * <p>What the bot owes the room is the OBSERVABLE exit: walk to the NPC, spend a beat there,
-     * then leave. It must never run the NPC's script - that grants the bot an event reward and,
-     * on a full inventory, leaves the dialog open with nothing able to close it.
-     */
     @Test
-    void bonusTailRoomWalksToTheNpcThenLeavesWithoutTalking() throws Exception {
-        MapleMap map = realMap(922011100);
+    void bonusTailRoomWaitPostIsReachableFromTheRealArrivalPortal() throws Exception {
+        MapleMap map = realMap(LudiPqData.BONUS_TAIL_MAP);
         assumeTrue(map != null, "GMS083 Map.wz required");
-        Point st00 = map.getPortal("st00").getPosition();
-        createBot(map, st00, Job.HUNTER);
+        createBot(map, map.getPortal("st00").getPosition(), Job.HUNTER);
+        Point npc = new Point(190, -1136);
+        var judge = new org.gms.server.life.NPC(LudiPqData.BONUS_TAIL_NPC, null);
+        judge.setPosition(npc);
+        map.addMapObject(judge);
 
-        assertFalse(LudiStages.takeBonusReward(bot), "the beat starts with the walk, not with a warp");
-        assertNotNull(state.moveTarget, "the tail room's exit is a walk to 2040035, not idling");
-        Point npc = LudiPqData.BONUS_TAIL_NPC_SPOT;
-        assertTrue(Math.abs(state.moveTarget.x - npc.x) <= 16
-                        && Math.abs(state.moveTarget.y - npc.y) <= 16,
-                "the goal must be the reward NPC; got " + state.moveTarget + " for npc " + npc);
-
-        // Walk there for real, then confirm the beat completes on its own after the pause.
-        for (int beat = 0; beat < 600 && !arrived(npc); beat++) {
-            LudiStages.takeBonusReward(bot);
+        PqActions.waitNearStageNpc(bot, LudiPqData.BONUS_TAIL_NPC);
+        Point post = state.moveTarget;
+        assertNotNull(post, "the bot must walk to 2040035 rather than idle");
+        assertTrue(post.distanceSq(npc) <= 100 * 100);
+        for (int beat = 0; beat < 600 && !arrived(post); beat++) {
+            PqActions.waitNearStageNpc(bot, LudiPqData.BONUS_TAIL_NPC);
             tick();
         }
-        assertTrue(arrived(npc), "the NPC must be reachable by walking; ended at " + bot.getPosition());
-        // The approach arms the pause as soon as the bot is within PICKUP reach (150px), while
-        // "arrived" is 24px, so a slow final leg can outlast the whole pause. Drop the clock so the
-        // pause below is measured from the arrival - which is what this case is about.
-        LudiStages.releaseRoomState(BOT_ID);
-        assertFalse(LudiStages.takeBonusReward(bot), "the conversation beat is not instant");
-
-        // The pause is measured on the shared movement clock, so advance THAT (a real sleep would
-        // make this test cost the 2-3.2s the conversation lasts, and it would be testing the wall
-        // clock rather than the beat's own timing). BONUS_TALK is 2s + up to 1.2s of per-bot jitter.
-        boolean done = false;
-        for (int tick = 0; tick < 100 && !done; tick++) {
-            MovementClock.advance(50);
-            done = LudiStages.takeBonusReward(bot);
-        }
-        assertTrue(done, "the beat must end on its own so the bot can leave the run");
+        assertTrue(arrived(post), "the wait post must be reachable by walking; ended at " + bot.getPosition());
     }
 
     private boolean arrived(Point npc) {

@@ -67,7 +67,7 @@ public class HenesysPQBot extends PartyQuestBot {
         return switch (getChr().getMapId()) {
             case HenesysPqData.ENTRY_MAP -> !HenesysStages.stageCleared(getChr())
                     && !HenesysStages.deliversCakes(getChr());
-            case HenesysPqData.BONUS_MAP -> true;
+            case HenesysPqData.BONUS_MAP -> hasPlayerInRunRoom(HenesysPqData.BONUS_MAP);
             default -> false;
         };
     }
@@ -106,13 +106,7 @@ public class HenesysPQBot extends PartyQuestBot {
                 return false;
             }
             case HenesysPqData.BONUS_MAP -> {
-                if (!hasPlayerInRunRoom(HenesysPqData.BONUS_MAP)) {
-                    PqActions.stopHunting(getChr());
-                    PqActions.talkTo(getChr(), HenesysPqData.TOMMY, 0);
-                } else {
-                    PqActions.seekAndAttack(getChr());
-                }
-                return false;
+                return shouldLeaveBonusRoom(hasPlayerInRunRoom(HenesysPqData.BONUS_MAP));
             }
             default -> { }
         }

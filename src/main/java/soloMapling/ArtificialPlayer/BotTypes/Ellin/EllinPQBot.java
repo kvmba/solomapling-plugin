@@ -76,7 +76,8 @@ public class EllinPQBot extends PartyQuestBot {
     protected boolean workStage() {
         Character bot = getChr();
         switch (bot.getMapId()) {
-            case EllinPqData.ENTRY_MAP, 930000700 -> PqActions.waitNearStageNpc(bot, MAZE_NPC);
+            case EllinPqData.ENTRY_MAP -> PqActions.waitNearStageNpc(bot, MAZE_NPC);
+            case 930000700 -> settleRewardRoom(MAZE_NPC);
             case FOREST_MAP -> workForest(bot);
             case EllinPqData.MAZE_MAP -> workMaze(bot);
             case EllinPqData.FROG_ROOM -> {
@@ -95,16 +96,7 @@ public class EllinPQBot extends PartyQuestBot {
                     PqActions.seekAndAttack(bot);
                 }
             }
-            case EllinPqData.LAST_ROOM -> {
-                Portal exit = bot.getMap().getPortal("east00");
-                if (exit != null) {
-                    if (hasPlayerInRunRoom(EllinPqData.LAST_ROOM)) {
-                        PqActions.waitAtPuzzlePost(bot, exit.getPosition());
-                    } else {
-                        PqActions.walkThroughPortal(bot, exit);
-                    }
-                }
-            }
+            case EllinPqData.LAST_ROOM -> settleExitPortal("east00");
             default -> {
                 if (bot.getMap().getMonsters().isEmpty()) {
                     PqActions.waitNearStageNpc(bot, MAZE_NPC);
@@ -232,6 +224,9 @@ public class EllinPQBot extends PartyQuestBot {
      */
     @Override
     protected boolean fightsOnSweep() {
-        return getChr().getMapId() != EllinPqData.FROG_ROOM;
+        return switch (getChr().getMapId()) {
+            case EllinPqData.FROG_ROOM, 930000700, EllinPqData.LAST_ROOM -> false;
+            default -> true;
+        };
     }
 }

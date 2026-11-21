@@ -74,9 +74,14 @@ public class BossRushPQBot extends PartyQuestBot {
         }
         if (map.getMonsters().isEmpty()) {
             PqActions.waitNearStageNpc(getChr(), 9000037);
-        } else {
-            PqActions.seekAndAttack(getChr());
         }
         return false;
+    }
+
+    @Override
+    protected boolean fightsOnSweep() {
+        var map = getChr().getMap();
+        var instance = map.getEventInstance();
+        return BossRushPqData.isFightRoom(map.getId()) && (instance == null || !instance.isEventCleared());
     }
 }

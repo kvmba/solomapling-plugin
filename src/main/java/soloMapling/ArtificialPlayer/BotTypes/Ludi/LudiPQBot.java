@@ -109,18 +109,12 @@ public class LudiPQBot extends PartyQuestBot {
         // other stage path would route them to "stage cleared, wait by an NPC" and burn the
         // minute standing still.
         if (mapId == LudiPqData.BONUS_MAP) {
-            LudiStages.breakBonusBoxes(getChr());
-            return false;
+            boolean teammateHere = hasPlayerInRunRoom(mapId);
+            if (teammateHere) LudiStages.breakBonusBoxes(getChr());
+            return shouldLeaveBonusRoom(teammateHere);
         }
-        // The tail room has NO boxes at all: it holds the reward NPC (2040035) and nothing
-        // else. Sending it through the box loop left the bot standing there for the rest of
-        // the run - and the room is inside this quest's map range, so tickLobby does not
-        // reclaim it either. Its exit is the NPC beat: walk up, let the conversation "read",
-        // then go home.
         if (mapId == LudiPqData.BONUS_TAIL_MAP) {
-            if (LudiStages.takeBonusReward(getChr()) && !hasPlayerInRun()) {
-                returnToLobby("bonus stage finished");
-            }
+            settleRewardRoom(LudiPqData.BONUS_TAIL_NPC);
             return false;
         }
         // The door rooms (stages 4 and 5) sit just past their stage's main map, which the
@@ -262,8 +256,11 @@ public class LudiPQBot extends PartyQuestBot {
     @Override
     protected boolean fightsOnSweep() {
         int mapId = getChr().getMapId();
-        if (mapId == LudiPqData.STAGE5_ROOM_LAST) {
-            return false; // the guard room: hide is the mechanic
+        if (mapId == LudiPqData.BONUS_MAP) {
+            return hasPlayerInRunRoom(mapId);
+        }
+        if (mapId == LudiPqData.STAGE5_ROOM_LAST || mapId == LudiPqData.BONUS_TAIL_MAP) {
+            return false;
         }
         return !(stageOf(mapId) == 5 && LudiStages.nearbyGuardCount(getChr()) > 0);
     }

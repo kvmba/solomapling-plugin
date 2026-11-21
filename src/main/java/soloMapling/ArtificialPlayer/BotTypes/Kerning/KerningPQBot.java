@@ -103,6 +103,7 @@ public class KerningPQBot extends PartyQuestBot {
         return switch (bot.getMapId()) {
             case KerningPqData.STAGE_5 -> !KerningStages.stageCleared(bot, 5)
                     && PqActions.needsHuntForLeader(bot, KerningPqData.PASS, KerningStages.BOSS_PASSES_WANTED);
+            case KerningPqData.BONUS_MAP -> hasPlayerInRunRoom(KerningPqData.BONUS_MAP);
             case KerningPqData.EXIT_MAP -> false;
             default -> true;
         };
@@ -125,20 +126,10 @@ public class KerningPQBot extends PartyQuestBot {
     protected boolean workStage() {
         int mapId = getChr().getMapId();
         if (mapId == KerningPqData.BONUS_MAP) {
-            if (!hasPlayerInRun()) {
-                PqActions.stopHunting(getChr());
-                PqActions.talkTo(getChr(), KerningPqData.NPC_NELLA, 0);
-            } else {
-                PqActions.seekAndAttack(getChr());
-            }
-            return false;
+            return !hasPlayerInRunRoom(mapId); // Only the combat sweep works this room.
         }
         if (mapId == KerningPqData.EXIT_MAP) {
-            if (hasPlayerInRun()) {
-                PqActions.waitNearStageNpc(getChr(), KerningPqData.NPC_NELLA);
-            } else {
-                PqActions.talkTo(getChr(), KerningPqData.NPC_NELLA, 0);
-            }
+            settleRewardRoom(KerningPqData.NPC_NELLA);
             return false;
         }
         int stage = stageOf(mapId);
@@ -178,10 +169,8 @@ public class KerningPQBot extends PartyQuestBot {
                     PqActions.stopHunting(getChr());
                     if (hasPlayerInRunRoom(KerningPqData.BONUS_MAP)) {
                         PqActions.talkTo(getChr(), KerningPqData.NPC_CLOTO, 0);
-                    } else if (hasPlayerInRun()) {
-                        PqActions.waitNearStageNpc(getChr(), KerningPqData.NPC_CLOTO);
                     } else {
-                        PqActions.talkTo(getChr(), KerningPqData.NPC_NELLA, 0);
+                        PqActions.waitNearStageNpc(getChr(), KerningPqData.NPC_CLOTO);
                     }
                     return false;
                 }

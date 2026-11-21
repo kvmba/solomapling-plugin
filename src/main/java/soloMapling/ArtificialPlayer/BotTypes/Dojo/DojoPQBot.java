@@ -72,14 +72,7 @@ public class DojoPQBot extends PartyQuestBot {
     protected boolean workStage() {
         var map = getChr().getMap();
         if (map.getId() == MapId.DOJO_EXIT || map.getId() == CLEAR_MAP) {
-            var exit = map.getPortal("out00");
-            if (exit != null) {
-                if (hasPlayerInRun()) {
-                    PqActions.waitAtPuzzlePost(getChr(), exit.getPosition());
-                } else {
-                    PqActions.walkThroughPortal(getChr(), exit);
-                }
-            }
+            settleExitPortal("out00");
             return false;
         }
         // The dojo's rooms are one boss each and the door opens when it is down, so there is
