@@ -47,6 +47,7 @@ class BotMovementState {
     double physX = 0.0;
     double physY = 0.0;
     double groundPhysicsCarryMs = 0.0;
+    Foothold groundContact; // Last foothold the integrator actually stood on.
     double fallPeakPhysY = Double.POSITIVE_INFINITY;
     boolean inAir = false;
     int jumpCooldownMs = 0;
@@ -184,6 +185,7 @@ class BotMovementState {
     long coarsePlanStartMs = 0L;
     Point coarsePlanTarget = null;
     int coarsePlanMapId = -1;
+    int coarseRegionId = -1;
     boolean coarseActive = false;
     // Organic map-entry drop: epoch-ms at which the bot, after appearing at the spawn portal,
     // releases its natural fall to the floor. 0 = no pending drop. (Mirrors the recorded engine's
@@ -250,6 +252,7 @@ class BotMovementState {
     BotNavigationGraph navGraph = null;
     BotNavigationGraph.Edge navEdge = null;
     BotNavigationGraph.Edge navJumpLaunchEdge = null;
+    BotNavigationManager.DirectJumpApproach navDirectJumpApproach;
     int navJumpLaunchX = Integer.MIN_VALUE;
     int navJumpLaunchDelaySteps = Integer.MIN_VALUE;
     int navTargetRegionId = -1;

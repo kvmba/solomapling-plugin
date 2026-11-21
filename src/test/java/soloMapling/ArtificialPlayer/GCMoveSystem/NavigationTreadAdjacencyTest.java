@@ -50,17 +50,15 @@ class NavigationTreadAdjacencyTest {
     }
 
     @Test
-    void nextTreadTowardReturnsTheFirstStepOffTheFeet() {
-        BotNavigationGraph.Segment lower = seg(2, 41, 131, 106, 131);
-        BotNavigationGraph.Segment ramp = seg(3, 26, 118, 41, 131);
-        BotNavigationGraph.Segment upper = seg(1, 26, 118, 49, 118);
-        BotNavigationGraph.Segment left = seg(4, -181, 118, 26, 118);
-        BotNavigationGraph.Region r = region(lower, ramp, upper, left);
+    void aFoldedWalkAimsAtTheTurnRatherThanTheNearestSeam() {
+        BotNavigationGraph.Region r = region(
+                seg(4, -181, 118, 26, 118),
+                seg(1, 26, 118, 49, 118),
+                seg(3, 26, 118, 41, 131),
+                seg(2, 41, 131, 106, 131));
 
-        BotNavigationGraph.Segment first = r.nextTreadToward(lower, upper);
-        assertNotNull(first);
-        assertEquals(3, first.footholdId, "the ramp is the first step off the lower tread");
-        assertNull(r.nextTreadToward(lower, lower), "same tread has no next step");
+        assertEquals(new Point(26, 118), r.jumpApproach(new Point(60, 131), 45));
+        assertEquals(new Point(45, 118), r.jumpApproach(new Point(26, 118), 45));
     }
 
     @Test
@@ -72,10 +70,8 @@ class NavigationTreadAdjacencyTest {
     }
 
     @Test
-    void disconnectedTreadsAnswerNullAndDoNotLoop() {
-        BotNavigationGraph.Segment a = seg(1, 0, 0, 10, 0);
-        BotNavigationGraph.Segment b = seg(2, 500, 0, 510, 0);
-        BotNavigationGraph.Region r = region(a, b);
-        assertNull(r.nextTreadToward(a, b), "no chain between them");
+    void disconnectedOverlappingTreadsDoNotInventAJoin() {
+        BotNavigationGraph.Region r = region(seg(1, 0, 0, 10, 0), seg(2, 0, 20, 10, 20));
+        assertEquals(new Point(8, 0), r.jumpApproach(new Point(2, 20), 8));
     }
 }

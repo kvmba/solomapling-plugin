@@ -211,6 +211,7 @@ class BotMovementManager {
         // attach/teleport as well; either end may end the flight.
         entry.navFlightEdge = null;
         entry.navJumpLaunchEdge = null;
+        entry.navDirectJumpApproach = null;
         entry.navJumpLaunchX = Integer.MIN_VALUE;
         entry.navJumpLaunchDelaySteps = Integer.MIN_VALUE;
         entry.navTargetRegionId = -1;
@@ -862,6 +863,7 @@ class BotMovementManager {
 
     private static MoveAction planGroundAction(BotMovementState entry, Foothold currentFh, Point botPos, Point targetPos) {
         boolean directionalDrop = isDirectionalDropEdge(entry.navEdge);
+        boolean approachingJump = entry.navEdge != null && entry.navEdge.type == BotNavigationGraph.EdgeType.JUMP;
         int stopDist = directionalDrop ? 0 : entry.navPreciseTarget ? preciseNavStopDist(entry.navEdge) : cfg.STOP_DIST;
         // No hysteresis when navigating to an edge — always move toward the waypoint
         int followDist = directionalDrop ? 0
@@ -870,24 +872,24 @@ class BotMovementManager {
         if (stepX == 0) {
             return MoveAction.idle();
         }
+        if (directionalDrop && Integer.signum(stepX) == Integer.signum(entry.navEdge.launchStepX)) {
+            // The walk-off simulator already used the ground integrator, not a nominal full-step
+            // wall probe. Keep that input; the real step still collides and checks its landing.
+            return MoveAction.walk(stepX);
+        }
         // Ours (LPQ stage-1 shelf loop): a COLLAPSED JUMP launch window (one stamped pixel) whose
         // approach would overfly it. The intent step clamps to the remaining distance, but the
         // ground physics integrates the real hspeed — a full stride that starts outside the
         // window's far edge lands PAST it (and past the platform lip, a fall). Counter-strafe
         // instead: the reverse input bleeds the momentum off over a few ticks, and the small
         // steps that follow land INSIDE the window, where the fire gate accepts the jump.
-        if (entry.navEdge != null
-                && entry.navEdge.type == BotNavigationGraph.EdgeType.JUMP
-                && entry.navEdge.launchMinX == entry.navEdge.launchMaxX) {
+        if (approachingJump && entry.navEdge.launchMinX == entry.navEdge.launchMaxX) {
             int dir = Integer.signum(stepX);
             int near = dir > 0 ? entry.navEdge.launchMinX : entry.navEdge.launchMaxX;
             int far = dir > 0 ? entry.navEdge.launchMaxX : entry.navEdge.launchMinX;
             boolean insideNow = botPos.x >= near && botPos.x <= far;
             if (!insideNow) {
-                BotPhysicsEngine.GroundStepResult held = BotPhysicsEngine.simulateGroundMotion(
-                        entry.bot.getMap(), botPos, currentFh, dir,
-                        new BotPhysicsEngine.GroundTravelState(entry.physX, entry.hspeed, entry.groundPhysicsCarryMs),
-                        entry.movementProfile);
+                var held = BotPhysicsEngine.simulateLiveGroundMotion(entry, botPos, currentFh, dir);
                 int landingX = held.lostGround()
                         ? botPos.x + dir * BotPhysicsEngine.walkStep(entry.bot.getMap(), entry.movementProfile)
                         : held.point().x;
@@ -899,12 +901,16 @@ class BotMovementManager {
                 }
             }
         }
-        boolean canWalkStep = BotPhysicsEngine.canWalkGroundStep(entry.bot.getMap(), botPos, stepX);
+        boolean canWalkStep = BotPhysicsEngine.canWalkGroundStep(entry.bot.getMap(), botPos, currentFh, stepX);
         if (!canWalkStep) {
+            if (approachingJump) {
+                // The requested X offset is not this tick's stride. On an overlapping tread, a
+                // short step from rest can stay on solid ground even when a full step misses it.
+                var held = BotPhysicsEngine.simulateLiveGroundMotion(entry, botPos, currentFh, Integer.signum(stepX));
+                if (!held.lostGround() && held.state().hspeed() != 0.0) return MoveAction.walk(stepX);
+            }
             boolean blockedByWall = BotPhysicsEngine.isGroundStepBlockedByWall(entry.bot.getMap(), botPos, stepX);
-            if (!blockedByWall
-                    && ((directionalDrop && Integer.signum(stepX) == Integer.signum(entry.navEdge.launchStepX))
-                    || BotFallbackMovementManager.shouldWalkOffLedge(entry, botPos, targetPos, stepX))) {
+            if (!blockedByWall && BotFallbackMovementManager.shouldWalkOffLedge(entry, botPos, targetPos, stepX)) {
                 // Walk-off drops should keep walking in the authored direction until physics
                 // detects lost ground and transitions into a fall with preserved momentum.
                 return MoveAction.walk(stepX);
@@ -917,8 +923,7 @@ class BotMovementManager {
             // the bot regains stride control, and the sub-step walk-ins land INSIDE the collapsed
             // launch window instead of past it. (A collapsed window can be as narrow as one pixel;
             // full strides can never reliably land in it.)
-            if (!blockedByWall && entry.navEdge != null
-                    && entry.navEdge.type == BotNavigationGraph.EdgeType.JUMP) {
+            if (!blockedByWall && approachingJump) {
                 return MoveAction.walk(-Integer.signum(stepX));
             }
             // Wall-blocked nav edges are stale or invalid. Clear them so the next AI tick can
@@ -956,7 +961,7 @@ class BotMovementManager {
         // updateStepX (X only, shared with GroundSwayTest's harness) must not guess at.
         if (stopDist > 0
                 && (entry.navEdge == null || entry.navEdge.type == BotNavigationGraph.EdgeType.WALK)) {
-            Foothold standing = BotPhysicsEngine.findGroundFoothold(entry.bot.getMap(), botPos);
+            Foothold standing = BotPhysicsEngine.standingFoothold(entry, botPos);
             if (settledNarrowLedge(standing, botPos.x, targetPos.x, targetPos.y, botPos.y,
                     BotPhysicsEngine.walkStep(entry.bot.getMap(), entry.movementProfile))) {
                 entry.wasMovingX = false;
@@ -1152,7 +1157,7 @@ class BotMovementManager {
             // runtime, which hand-integrates the client step math) falls back to the analytic
             // estimates — the pre-sway-fix behaviour the flat-floor sweep already pins.
             if (map != null && absDx <= BotPhysicsEngine.walkStep(map, entry.movementProfile) * 4) {
-                Foothold standing = BotPhysicsEngine.findGroundFoothold(map, new Point(botX, botY));
+                Foothold standing = BotPhysicsEngine.standingFoothold(entry, new Point(botX, botY));
                 Point botPos = new Point(botX, botY);
                 Point glideOut = (standing != null) ? simulatedGlideOutStop(map, entry, botPos, standing) : null;
                 int glide = (glideOut != null) ? Math.abs(glideOut.x - botX) : 0;
@@ -1252,7 +1257,7 @@ class BotMovementManager {
         broadcastMovement(entry);
     }
 
-    private static void initiateFixedArcJump(BotMovementState entry, Character bot, int dx) {
+    static void initiateFixedArcJump(BotMovementState entry, Character bot, int dx) {
         initiateJump(entry, bot, dx);
         entry.fixedAirArc = true;
     }
@@ -1293,7 +1298,7 @@ class BotMovementManager {
         if (pos == null || bot.getMap() == null || bot.getMap().getFootholds() == null) {
             return false;
         }
-        Foothold standing = BotPhysicsEngine.findGroundFoothold(bot.getMap(), pos);
+        Foothold standing = BotPhysicsEngine.standingFoothold(entry, pos);
         if (standing == null || sameSurface(bot.getMap(), standing, entry.moveTarget)) {
             return false; // the goal is this very surface: the bot is where it means to be
         }
@@ -1350,54 +1355,31 @@ class BotMovementManager {
      */
     static void tickUnstuck(BotMovementState entry) {
         Character bot = entry.bot;
-        int walkStep = BotPhysicsEngine.walkStep(bot.getMap(), entry.movementProfile);
-        // A random-direction hop is a recovery on solid ground, but at a lip whose outward column has
-        // no ground below it is a fall out of the map. Prefer a direction with a real landing; if
-        // neither has one, stay put rather than launch off the edge.
-        int dir = ThreadLocalRandom.current().nextBoolean() ? -1 : 1;
-        // Ours (small-platform sway): with a precise goal, direction matters as much as the landing.
-        // The classic wedge is a sway ON the platform the goal sits on — both directions land fine,
-        // but both land back on the SAME platform, so the hop resets the loop instead of breaking it.
-        // Prefer the direction whose landing foothold is not the one under the bot (a genuine hop
-        // out); fall back to the raw landing check when the bot has no goal (a plain wedge) or no
-        // direction clears the surface.
-        Foothold standing = BotPhysicsEngine.findGroundFoothold(bot.getMap(), bot.getPosition());
-        if (standing != null && entry.moveTarget != null && entry.moveTargetPrecise) {
-            int away = hopDirOffSurface(entry, bot, walkStep, standing);
-            if (away != 0) {
-                dir = away;
-            }
-        }
-        if (!hasJumpLandingAhead(bot, walkStep * dir)) {
-            dir = -dir;
-            if (!hasJumpLandingAhead(bot, walkStep * dir)) {
-                clearNavigationState(entry);
-                entry.unstuckCooldownMs = delayAfterCurrentTick(5000);
-                return;
-            }
-        }
-        // Dead-pit guard: a landing EXISTING is not enough - the LPQ stage-3 pit floor is a
-        // perfectly valid landing for the sim yet a one-way trap. Refuse any hop whose arc
-        // lands on an unescapable surface; the hop is a recovery, not a relocation into a
-        // basin the bot can never leave.
-        Point hopPos = bot.getPosition();
-        JumpLanding hopLanding = simulateJumpLanding(bot.getMap(), hopPos, walkStep * dir, entry.movementProfile);
-        if (hopLanding != null
-                && !DeadPitGuard.isLivableLanding(bot.getMap(), hopLanding.point(), entry.movementProfile,
-                        BotMovementCapabilities.of(entry.bot))) {
-            dir = -dir;
-            hopLanding = simulateJumpLanding(bot.getMap(), hopPos, walkStep * dir, entry.movementProfile);
-            if (hopLanding == null
-                    || !DeadPitGuard.isLivableLanding(bot.getMap(), hopLanding.point(), entry.movementProfile,
-                            BotMovementCapabilities.of(entry.bot))) {
-                clearNavigationState(entry);
-                entry.unstuckCooldownMs = delayAfterCurrentTick(5000);
-                return;
-            }
-        }
-        BotPhysicsEngine.beginGroundJump(entry, bot, walkStep * dir);
+        MapleMap map = bot.getMap();
+        Point from = bot.getPosition();
+        BotMovementProfile profile = entry.movementProfile;
+        int walkStep = BotPhysicsEngine.walkStep(map, profile);
+        BotMovementCapabilities capabilities = BotMovementCapabilities.of(bot);
+        var left = BotPhysicsEngine.simulateJumpLanding(map, from, -walkStep, profile);
+        var right = BotPhysicsEngine.simulateJumpLanding(map, from, walkStep, profile);
+        boolean safeLeft = left != null && DeadPitGuard.isLivableSurface(map, left.foothold(), profile, capabilities);
+        boolean safeRight = right != null && DeadPitGuard.isLivableSurface(map, right.foothold(), profile, capabilities);
         clearNavigationState(entry);
         entry.unstuckCooldownMs = delayAfterCurrentTick(5000);
+        if (!safeLeft && !safeRight) return;
+
+        int dir;
+        if (safeLeft && safeRight) {
+            Foothold standing = BotPhysicsEngine.standingFoothold(entry, from);
+            boolean preferExit = standing != null && entry.moveTarget != null && entry.moveTargetPrecise;
+            boolean leftExits = preferExit && left.foothold() != standing;
+            boolean rightExits = preferExit && right.foothold() != standing;
+            dir = leftExits != rightExits ? (leftExits ? -1 : 1) : ThreadLocalRandom.current().nextBoolean() ? -1 : 1;
+        } else {
+            dir = safeLeft ? -1 : 1;
+        }
+        BotPhysicsEngine.beginGroundJump(entry, bot, walkStep * dir);
+        entry.fixedAirArc = !map.isSwim(); // honor the profile and arc that passed the safety check
         broadcastMovement(entry);
     }
 
@@ -1464,27 +1446,6 @@ class BotMovementManager {
             }
         }
         return best;
-    }
-
-    /**
-     * Which hop direction lands OFF the foothold the bot stands on (its own sim-verified landing,
-     * not the raw walkStep probe), +1 / -1 / 0 = neither. A random tiebreak keeps behaviour
-     * humanlike when both directions escape.
-     */
-    private static int hopDirOffSurface(BotMovementState entry, Character bot, int walkStep, Foothold standing) {
-        BotMovementProfile profile = entry.movementProfile;
-        JumpLanding left = simulateJumpLanding(bot.getMap(), bot.getPosition(), -walkStep, profile);
-        JumpLanding right = simulateJumpLanding(bot.getMap(), bot.getPosition(), walkStep, profile);
-        boolean leftEscapes = left != null && left.foothold() != standing;
-        boolean rightEscapes = right != null && right.foothold() != standing;
-        if (leftEscapes && rightEscapes) {
-            return ThreadLocalRandom.current().nextBoolean() ? -1 : 1;
-        }
-        return leftEscapes ? -1 : rightEscapes ? 1 : 0;
-    }
-
-    private static boolean hasJumpLandingAhead(Character bot, int stepX) {
-        return simulateJumpLanding(bot.getMap(), bot.getPosition(), stepX) != null;
     }
 
     static void initiateRopeJump(BotMovementState entry, Character bot, int dx) {
@@ -1628,7 +1589,7 @@ class BotMovementManager {
         // Only a land pose pays for the ground lookup; every other pose resolves to 0/rope below.
         Foothold fh = (entry.climbing || airborne || entry.swimming)
                 ? null
-                : BotPhysicsEngine.findGroundFoothold(bot.getMap(), bot.getPosition());
+                : BotPhysicsEngine.standingFoothold(entry, bot.getPosition());
         int groundFhId = fh != null ? fh.getId() : 0;
         return resolveWireFh(entry.climbing, airborne, entry.swimming, ropeWireFh, groundFhId);
     }

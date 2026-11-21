@@ -57,8 +57,8 @@ final class GCMovementDriver {
     // Ours: live fall-off-map catch. The airborne integrator has no VR-bottom clamp, so a bot that slips
     // through a foothold gap (or off the side) free-falls forever — the frozen-air watchdog only fires once
     // the position STOPS changing, which a live plummet never does. Trigger a snap-back once the bot is this
-    // far outside the map's VR bounds (footholds live inside the VR, so a legit deep drop never reaches here).
-    private static final int FALL_RECOVER_SLACK_PX = 400;
+    // far outside the map's bounds. The lower bound also accounts for authored floors below the VR.
+    static final int FALL_RECOVER_SLACK_PX = 400;
     // Organic map-entry: appear standing at the spawn portal, wait a "client load" beat, then drop.
     // Mirrors WarpCommands.botEnterPortalDropDown (the recorded engine's ~1.5s lag before the drop).
     private static final long PORTAL_DROP_DELAY_MS = 1500;
@@ -292,6 +292,11 @@ final class GCMovementDriver {
             return;
         }
 
+        boolean active = ObserverTracker.isActiveMap(bot.getMap());
+        if (entry.coarseActive && (active || entry.inAir || entry.climbing)) {
+            reconstructPhysicsFromCoarse(entry, bot);
+        }
+
         // Mob debuffs run on the movement tick: advance the clock (expiry + the poison tick) and
         // publish the SLOW scale the ground physics reads this tick. Separate from the freeze hold
         // below so the clock keeps running while frozen — otherwise a stun would never expire.
@@ -478,15 +483,6 @@ final class GCMovementDriver {
             return;
         }
 
-        boolean active = ObserverTracker.isActiveMap(bot.getMap());
-
-        // LOD promotion (M2): the bot was moving analytically (coarse) and a player just arrived —
-        // rebuild the physics shadow at its current interpolated position so physics resumes cleanly
-        // instead of snapping from stale shadow coords. Minimal reconstruction; full hysteresis is M3.
-        if (active && entry.coarseActive) {
-            reconstructPhysicsFromCoarse(entry, bot);
-        }
-
         boolean runAiTick = consumeAiTick(entry);
 
         // Player reaction (ported pathAware): on an observed map, occasionally emote/chat at or stop-and-
@@ -566,6 +562,7 @@ final class GCMovementDriver {
         if (!active && tryCoarseAdvance(entry, bot, target)) {
             return;
         }
+        if (entry.coarseActive) reconstructPhysicsFromCoarse(entry, bot); // analytic fallback after a retarget
         stepMovementCore(entry, target != null ? target : bot.getPosition(), runAiTick);
     }
 
@@ -579,14 +576,9 @@ final class GCMovementDriver {
         if (target == null || entry.inAir || entry.climbing) {
             return false;
         }
-        // Already at the goal: arrive (fires the callback, holds an anchor) without replanning each tick.
-        if (entry.coarsePlan == null
-                && Math.abs(bot.getPosition().x - target.x) <= COARSE_ARRIVE_PX
-                && Math.abs(bot.getPosition().y - target.y) <= COARSE_ARRIVE_PX) {
-            arriveCoarse(entry, bot, target);
-            return true;
-        }
-        BotNavigationGraph graph = BotNavigationGraphProvider.peekBestGraph(bot.getMap(), entry.movementProfile);
+        MapleMap map = bot.getMap();
+        Point position = bot.getPosition();
+        BotNavigationGraph graph = BotNavigationGraphProvider.peekBestGraph(map, entry.movementProfile);
         if (graph == null) {
             return false; // no cached graph -> let the M1 throttle cover it (don't trigger a bake)
         }
@@ -595,36 +587,25 @@ final class GCMovementDriver {
                 || entry.coarsePlanMapId != bot.getMapId()
                 || !target.equals(entry.coarsePlanTarget);
         if (needPlan) {
-            MovementPlan plan = MovementPlan.inMap(graph, bot.getMap(), bot.getPosition(), target,
-                    BotMovementCapabilities.of(bot).teleport());
-            if (plan == null) {
-                // A null plan means EITHER "same region — walk straight there" OR "no path / no
-                // region", and the two need different answers. Teleporting to the goal on the
-                // latter was a silent cross-map warp the macro brain read as a real arrival (the
-                // goal could sit on a floor two regions up). The former is not an arrival either:
-                // it is an ordinary walk across one platform, and treating it as one snapped the
-                // body onto the goal's pixel — the reported "the whole bot team is yanked to the
-                // NPC the instant it lands in the reward room", and the same silent jump on any
-                // unobserved map whose goal sits on the bot's own ledge. Model it as the walk it
-                // is; the analytic clock then carries it at the body's own pace.
-                int goalRegion = graph.findRegionId(bot.getMap(), target);
-                int botRegion = graph.findRegionId(bot.getMap(), bot.getPosition());
-                if (goalRegion < 0 || goalRegion != botRegion) {
-                    return false; // no path / no region: the throttled physics owns it
-                }
-                plan = MovementPlan.surfaceWalk(bot.getMap(), bot.getPosition(), target,
-                        entry.movementProfile.walkVelocityPxs());
-                if (plan == null) {
-                    // Same pixels, or no floor under the route: nothing the analytic path can
-                    // carry on its own. Physics walks the rest (it simply does not move for an
-                    // already-reached goal).
-                    return false;
-                }
-            } else if (entry.moveTargetPrecise) {
-                // The last nav edge only lands on the destination platform. Finish the walk
-                // to the NPC/portal before reporting arrival (Kerning: x697 is not x716).
-                plan = plan.finishOnSurface(bot.getMap(), target, entry.movementProfile.walkVelocityPxs());
+            int from = entry.coarseActive && entry.coarseRegionId > 0 ? entry.coarseRegionId
+                    : BotNavigationManager.resolveCurrentRegionId(graph, entry, map, position);
+            int to = graph.findRegionId(map, target);
+            if (from < 0 || to < 0) return false;
+            // A close goal on a different floor is not arrival. Leave the body where it stands.
+            if (from == to && GCMovement.withinArrivalBox(position, target)) {
+                arriveCoarse(entry);
+                return true;
             }
+            MovementPlan plan = MovementPlan.inMap(graph, map, position, from, target, to,
+                    BotMovementCapabilities.of(bot));
+            if (plan == null && from == to) {
+                // The graph has no edge for an ordinary walk along the same platform.
+                plan = MovementPlan.surfaceWalk(map, position, target,
+                        entry.movementProfile.walkVelocityPxs(), graph.getRegion(from));
+            } else if (plan != null && entry.moveTargetPrecise) {
+                plan = plan.finishOnSurface(graph, map, target, entry.movementProfile.walkVelocityPxs());
+            }
+            if (plan == null) return false;
             entry.coarsePlan = plan;
             entry.coarsePlanStartMs = now;
             entry.coarsePlanTarget = new Point(target);
@@ -632,28 +613,14 @@ final class GCMovementDriver {
         }
         entry.coarseActive = true;
         CoarseExecutor.Step step = CoarseExecutor.advance(entry.coarsePlan, entry.coarsePlanStartMs, now);
-        if (step.position() != null) {
-            bot.setPosition(step.position());
-        }
-        if (step.complete()) {
-            arriveCoarse(entry, bot, entry.coarsePlanTarget);
-        }
+        entry.coarseRegionId = step.regionId();
+        bot.setPosition(step.position());
+        if (step.complete()) arriveCoarse(entry);
         return true;
     }
 
-    /* Finish a coarse trip: settle on the plan's own last waypoint, clear the plan + move target,
-     * fire the arrival callback. The waypoint, not the raw order: a plan walks the FLOOR, and the
-     * order can name a pixel in the air (a mob's sprite anchor, an NPC above its ledge) - snapping
-     * onto that would put the unobserved bot back off the surface, which is the same silent jump
-     * this path exists to stop. */
-    private static void arriveCoarse(BotMovementState entry, Character bot, Point target) {
-        MovementPlan plan = entry.coarsePlan;
-        Point arrival = (plan != null && !plan.edges.isEmpty())
-                ? plan.edges.get(plan.edges.size() - 1).endPoint
-                : target;
-        if (arrival != null) {
-            bot.setPosition(new Point(arrival));
-        }
+    /* The last analytic frame is already at the landing; drop the order and fire arrival. */
+    private static void arriveCoarse(BotMovementState entry) {
         entry.coarsePlan = null;
         entry.coarsePlanTarget = null;
         entry.moveTarget = null;
@@ -665,22 +632,32 @@ final class GCMovementDriver {
         GCMovement.fireArrival(entry);
     }
 
-    /*
-     * Promotion (COARSE -> FULL/HALO): resume physics from the bot's current analytic position.
-     *
-     * The room's new player was just spawned at this exact point (MapleMap broadcasts the bot at its
-     * live position), so the physics shadow must continue from there — snapping to a re-probed ground
-     * instead would move the bot a second time in the player's first frames, reading as a teleport.
-     * MovementPlan already keeps the coarse position on real standing/rope points (only WALK edges are
-     * interpolated), so re-seating the shadow at it is both correct and continuous. Minimal — full
-     * hysteresis/safe-node reconstruction is M3.
-     */
+    /* Restore from the last published coarse frame, before contact or any other live physics. */
     private static void reconstructPhysicsFromCoarse(BotMovementState entry, Character bot) {
+        int regionId = entry.coarseRegionId;
         entry.coarseActive = false;
         entry.coarsePlan = null;
         entry.coarsePlanTarget = null;
-        BotPhysicsEngine.teleportTo(entry, bot, bot.getPosition());
+        entry.coarseRegionId = -1;
+        entry.moveProgressAtMs = MovementClock.nowMs();
+        entry.moveBestDist = Integer.MAX_VALUE;
+        if (entry.inAir || entry.climbing) return; // a live action already owns the body
+
+        Point position = bot.getPosition();
+        BotPhysicsEngine.teleportTo(entry, bot, position);
         BotMovementManager.resetEntryStateAfterTeleport(entry);
+        MapleMap map = bot.getMap();
+        var graph = BotNavigationGraphProvider.peekBestGraph(map, entry.movementProfile);
+        var region = graph == null ? null : graph.getRegion(regionId);
+        if (region == null) return;
+        if (region.isRopeRegion) {
+            var rope = BotNavigationGraphProvider.findRopeFromRegion(map, region);
+            if (rope != null) BotPhysicsEngine.attachToRope(entry, bot, rope, position.y);
+        } else {
+            // At a shared X/Y seam the pixel alone doesn't say which floor carried the walk.
+            var segment = region.segmentAt(position.x, position.y);
+            if (segment != null) entry.groundContact = BotPhysicsEngine.footholdById(map, segment.footholdId);
+        }
     }
 
     /*
@@ -697,8 +674,9 @@ final class GCMovementDriver {
      * straight down".
      */
     private static boolean giveUpStalledMove(BotMovementState entry) {
-        if (entry.moveTarget == null) {
-            return false;
+        if (entry.moveTarget == null
+                || entry.coarseActive && entry.coarsePlan != null && entry.moveTarget.equals(entry.coarsePlanTarget)) {
+            return false; // a live analytic plan progresses by time, not distance to the final goal
         }
         // The no-progress clock must apply to an AIRBORNE bot too. The inAir/climbing guard that used
         // to sit above this was meant to spare a hop from being cut off mid-flight, but it also spared
@@ -977,7 +955,7 @@ final class GCMovementDriver {
         if (entry.moveTargetPrecise
                 && (entry.navEdge == null || entry.navEdge.type == BotNavigationGraph.EdgeType.WALK)
                 && !entry.climbing && !entry.inAir) {
-            Foothold standing = BotPhysicsEngine.findGroundFoothold(entry.bot.getMap(), botPos);
+            Foothold standing = BotPhysicsEngine.standingFoothold(entry, botPos);
             if (BotMovementManager.settledNarrowLedge(standing, botPos.x, entry.moveTarget.x,
                     entry.moveTarget.y, botPos.y,
                     BotPhysicsEngine.walkStep(entry.bot.getMap(), entry.movementProfile))) {
@@ -1121,6 +1099,7 @@ final class GCMovementDriver {
         // Drop any coarse plan from the previous map; onMapChange re-seeds the physics shadow below.
         entry.coarsePlan = null;
         entry.coarsePlanTarget = null;
+        entry.coarseRegionId = -1;
         entry.coarseActive = false;
         // If a real player is already on this map, mark it observed NOW so the visible spawn (float →
         // drop, jump stance) and FULL combat start this tick instead of waiting up to one observer poll.
@@ -1338,7 +1317,7 @@ final class GCMovementDriver {
     // below the floor or off the side), snap it back to solid ground under its own position. Mirrors the
     // frozen-air watchdog's recovery, but keys off "outside the map" instead of "frozen in the air", so it
     // catches an active free-fall. Ours (Fable fluid-combat pass).
-    private static void tickFallOffMapRecovery(BotMovementState entry) {
+    static void tickFallOffMapRecovery(BotMovementState entry) {
         Character bot = entry.bot;
         MapleMap map = (bot != null) ? bot.getMap() : null;
         if (map == null) {
@@ -1361,7 +1340,10 @@ final class GCMovementDriver {
         Point standable = BotPhysicsEngine.standableXBounds(map);
         int leftBound = standable != null ? standable.x : vr.x;
         int rightBound = standable != null ? standable.y : vr.x + vr.width;
-        boolean belowFloor = pos.y > vr.y + vr.height + FALL_RECOVER_SLACK_PX;
+        // The VR is a camera bound, not the lowest playable floor. In the mirror rooms
+        // (222020111/211) the exit corridor continues below the VR margin.
+        boolean belowFloor = pos.y > vr.y + vr.height + FALL_RECOVER_SLACK_PX
+                && pos.y > BotPhysicsEngine.lowestStandableY(map);
         boolean offSides = pos.x < leftBound - FALL_RECOVER_SLACK_PX
                 || pos.x > rightBound + FALL_RECOVER_SLACK_PX;
         if (!belowFloor && !offSides) {

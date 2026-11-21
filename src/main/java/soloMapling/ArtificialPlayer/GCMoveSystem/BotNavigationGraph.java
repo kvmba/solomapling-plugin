@@ -241,39 +241,66 @@ final class BotNavigationGraph implements Serializable {
                     && Math.abs(other.pointAt(x).y - y) <= BotPhysicsEngine.GROUND_LINE_SLACK_PX;
         }
 
-        /**
-         * The next tread on the walk chain from {@code from} toward {@code to}, or null when they
-         * are not connected through this region.
-         *
-         * <p>Breadth-first over the region's own adjacency, so the answer is the literal next step
-         * a walking body takes. That is what lets a fold-back be expressed to an X-only steer.
-         */
-        Segment nextTreadToward(Segment from, Segment to) {
-            if (from == null || to == null || isRopeRegion || from.footholdId == to.footholdId) {
-                return null;
+        // A reversal on a connected walk path requires two treads with overlapping X interiors.
+        // Most regions have none. Cache this derived fact without changing the graph file format.
+        private transient volatile Boolean overlappingTreads;
+
+        private boolean hasOverlappingTreads() {
+            Boolean cached = overlappingTreads;
+            if (cached != null) return cached;
+            int right = Integer.MIN_VALUE;
+            for (Segment segment : segments) {
+                if (segment.minX < right) {
+                    overlappingTreads = true;
+                    return true;
+                }
+                right = segment.maxX;
             }
-            java.util.Map<Integer, java.util.List<Segment>> pathTo = new java.util.HashMap<>();
-            java.util.ArrayDeque<Segment> queue = new java.util.ArrayDeque<>();
-            pathTo.put(from.footholdId, java.util.List.of(from));
-            queue.add(from);
-            while (!queue.isEmpty()) {
-                Segment current = queue.poll();
-                java.util.List<Segment> path = pathTo.get(current.footholdId);
-                for (Segment next : segments) {
-                    if (pathTo.containsKey(next.footholdId) || !adjacent(current, next)) {
-                        continue;
+            overlappingTreads = false;
+            return false;
+        }
+
+        /** Follow the walk joins to the actual launch tread, steering as far as the first turn. */
+        Point jumpApproach(Point feet, int launchX) {
+            Segment destination = findBestSegment(launchX);
+            Point launch = destination.pointAt(launchX);
+            if (!hasOverlappingTreads()) return launch;
+            Segment standing = segmentAt(feet.x, feet.y);
+            if (standing == null || standing == destination) return launch;
+
+            // Search backwards so every visited tread points at its next tread toward the launch.
+            int source = segments.indexOf(standing);
+            int target = segments.indexOf(destination);
+            int[] next = new int[segments.size()];
+            java.util.Arrays.fill(next, -1);
+            int[] queue = new int[next.length];
+            next[target] = target;
+            queue[0] = target;
+            for (int head = 0, tail = 1; head < tail && next[source] < 0; head++) {
+                int current = queue[head];
+                Segment tread = segments.get(current);
+                for (int i = 0; i < next.length; i++) {
+                    if (next[i] < 0 && adjacent(tread, segments.get(i))) {
+                        next[i] = current;
+                        queue[tail++] = i;
                     }
-                    java.util.List<Segment> extended = new java.util.ArrayList<>(path.size() + 1);
-                    extended.addAll(path);
-                    extended.add(next);
-                    if (next.footholdId == to.footholdId) {
-                        return extended.size() >= 2 ? extended.get(1) : null;
-                    }
-                    pathTo.put(next.footholdId, extended);
-                    queue.add(next);
                 }
             }
-            return null;
+            if (next[source] < 0) return launch;
+
+            int x = feet.x;
+            int direction = 0;
+            for (int i = source; i != target; i = next[i]) {
+                Segment tread = segments.get(i);
+                int joinX = sharedColumnX(tread, segments.get(next[i]));
+                int step = Integer.compare(joinX, x);
+                if (step != 0) {
+                    if (step == -direction) return tread.pointAt(x);
+                    direction = step;
+                }
+                x = joinX;
+            }
+            return direction != 0 && Integer.compare(launch.x, x) == -direction ? destination.pointAt(x) : launch;
         }
 
         /**

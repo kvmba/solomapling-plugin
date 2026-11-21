@@ -658,10 +658,11 @@ final class BotNavigationManager {
         }
         entry.lastEdgeBlockReason = null;
         setEdgeExecutionTarget(entry, edge);
-        BotMovementManager.initiateJump(entry, bot, edge.launchStepX);
+        BotMovementManager.initiateFixedArcJump(entry, bot, edge.launchStepX);
         // One-shot launch point: a missed arc re-rolls a fresh spot (and a fresh deepen count)
         // on the next approach instead of repeating the identical failure forever.
         entry.navJumpLaunchEdge = null;
+        entry.navDirectJumpApproach = null;
         entry.navJumpLaunchX = Integer.MIN_VALUE;
         entry.navJumpLaunchDelaySteps = Integer.MIN_VALUE;
         return new NavigationDirective(rawTargetPos, true);
@@ -747,7 +748,8 @@ final class BotNavigationManager {
         // below (mirrors the JUMP edge's arcLaunchesFrom re-check). Execution-time simulation
         // uses the same integrator as the flight itself, so a fire that passes this guard is
         // the fire that lands on the target.
-        BotPhysicsEngine.JumpLanding liveLanding = BotPhysicsEngine.simulateDownJumpLanding(bot.getMap(), botPos);
+        BotPhysicsEngine.JumpLanding liveLanding = BotPhysicsEngine.simulateDownJumpLanding(bot.getMap(), botPos,
+                BotPhysicsEngine.standingFoothold(entry, botPos));
         if (liveLanding == null) {
             entry.lastEdgeBlockReason = "drop-void";
             return null;
@@ -1021,71 +1023,72 @@ final class BotNavigationManager {
         return selectJumpWaypoint(graph, null, botPos, edge);
     }
 
-    private static Point selectJumpWaypoint(BotNavigationGraph graph,
-                                            BotMovementState entry,
-                                            Point botPos,
-                                            BotNavigationGraph.Edge edge) {
+    static Point selectJumpWaypoint(BotNavigationGraph graph,
+                                    BotMovementState entry,
+                                    Point botPos,
+                                    BotNavigationGraph.Edge edge) {
         BotNavigationGraph.Region fromRegion = graph.getRegion(edge.fromRegionId);
         if (fromRegion == null || fromRegion.isRopeRegion) {
             return new Point(edge.startPoint);
         }
-        int targetX = entry == null
-                ? edge.containsLaunchX(botPos.x) ? botPos.x : botPos.x < edge.launchMinX ? edge.launchMinX : edge.launchMaxX
+        int targetX = entry == null ? Math.clamp(botPos.x, edge.launchMinX, edge.launchMaxX)
                 : selectedJumpLaunchX(entry, graph, edge);
-        // Ours (shelf-step sway): when the launch window sits on a DIFFERENT ROW of this region and
-        // the walk to it is a fold-back, hand the steer the first leg of that fold-back instead of
-        // a pixel it can never reach.
-        //
-        // 922010800's r27 unions the y=118 row (fh169/fh192/fh227) with the y=131 row (fh233)
-        // through the fh226 ramp. From (45,131) the window at x 42..49 is only reachable by walking
-        // LEFT to the ramp foot at 41, UP to (26,118) and BACK RIGHT - a sequence no single X goal
-        // expresses: aimed at x=45 the steer sees zero error and parks, and around it every pixel
-        // re-targets the opposite way, so the bot paces until the 500 ms rescue hop (the reported
-        // "货架式台阶跳大平台时原地左右摆动N次, 持续N秒后才跳走").
-        //
-        // STRICTLY GATED: only a window on another ROW triggers this. Re-aiming ordinary ramp
-        // walking broke 108 shelf climbs when this ran unguarded.
-        Point rowChange = approachAcrossRows(fromRegion, botPos, edge);
-        if (rowChange != null) {
-            return rowChange;
+        int dir = Integer.compare(targetX, botPos.x);
+        var cached = entry == null ? null : entry.navDirectJumpApproach;
+        boolean sameApproach = cached != null && cached.edge == edge && cached.launchX == targetX && cached.dir == dir;
+        if (sameApproach && cached.direct && (botPos.x - cached.fromX) * dir >= 0) {
+            // The probe already reached the launch. Keep the straight approach through its joins.
+            return fromRegion.pointAt(targetX);
         }
-        return fromRegion.pointAt(targetX);
+        Point waypoint = fromRegion.jumpApproach(botPos, targetX);
+        if (entry == null || entry.bot == null || dir == 0 || Integer.compare(waypoint.x, botPos.x) == dir) {
+            return waypoint;
+        }
+        // A geometric join can require going back even when live ground motion can cross to
+        // the launch tread directly (overlapping slopes or a shallow step at a tread's end).
+        // Taking that unnecessary turn can re-enter the same tread and start the turn again.
+        MapleMap map = entry.bot.getMap();
+        var standing = BotPhysicsEngine.standingFoothold(entry, botPos);
+        if (standing == null) return waypoint;
+        int walkStep = BotPhysicsEngine.walkStep(map, entry.movementProfile);
+        if (sameApproach && !cached.direct && cached.fromFoothold == standing.getId()
+                && Math.abs(botPos.x - cached.fromX) <= walkStep) return waypoint;
+        Point launch = fromRegion.pointAt(targetX);
+        int launchFoothold = fromRegion.segmentAt(launch.x, launch.y).footholdId;
+        boolean direct = canWalkStraightToLaunch(map, graph, edge, botPos, standing, targetX, launchFoothold,
+                entry.movementProfile);
+        entry.navDirectJumpApproach = new DirectJumpApproach(edge, targetX, dir, standing.getId(), botPos.x, direct);
+        return direct ? launch : waypoint;
     }
 
-    /**
-     * When this edge's launch window sits on a different row than the feet, the first leg of the
-     * walk that changes rows - or null when the bot is already on the window's row.
-     *
-     * <p>Returns a fixed hand-off pixel (the join between the next tread and the one after), so the
-     * goal does not drift as the bot crosses a tread, which is what made an earlier version
-     * alternate between the two ends of the ramp.
-     */
-    private static Point approachAcrossRows(BotNavigationGraph.Region region,
-                                            Point botPos,
-                                            BotNavigationGraph.Edge edge) {
-        BotNavigationGraph.Segment own = region.segmentAt(botPos.x, botPos.y);
-        BotNavigationGraph.Segment window = region.segmentAt(edge.launchMinX, edge.startPoint.y);
-        if (own == null || window == null || own.footholdId == window.footholdId) {
-            return null; // already on the window's own tread
+    record DirectJumpApproach(BotNavigationGraph.Edge edge, int launchX, int dir, int fromFoothold,
+                              int fromX, boolean direct) {}
+
+    static boolean canWalkStraightToLaunch(MapleMap map, BotNavigationGraph graph, BotNavigationGraph.Edge edge,
+                                            Point feet, Foothold standing, int launchX, int launchFoothold,
+                                            BotMovementProfile profile) {
+        int dir = Integer.compare(launchX, feet.x);
+        int tolerance = BotPhysicsEngine.walkStep(map, profile);
+        boolean slippery = BotPhysicsEngine.slipperyGround(map) && !profile.snowShoes();
+        var travel = BotPhysicsEngine.initialGroundTravelState(feet);
+        for (int stationary = 0; dir != 0 && Integer.compare(launchX, feet.x) == dir;) {
+            var step = BotPhysicsEngine.simulateGroundMotion(map, feet, standing, dir, travel, profile);
+            if (step.lostGround()) return false;
+            int advance = Integer.compare(step.point().x, feet.x);
+            if (advance == -dir) return false;
+            stationary = advance == 0 ? stationary + 1 : 0;
+            if (stationary == 8) return false;
+            feet = step.point();
+            standing = step.foothold();
+            if (standing == null || graph.regionIdByFootholdId.getOrDefault(standing.getId(), -1) != edge.fromRegionId) {
+                return false;
+            }
+            if (Math.abs(feet.x - launchX) <= tolerance && standing.getId() == launchFoothold
+                    && canExecuteJumpFromCurrentPosition(graph, map, feet, edge)) return true;
+            travel = slippery ? step.state()
+                    : new BotPhysicsEngine.GroundTravelState(feet.x, step.state().hspeed(), step.state().carryMs());
         }
-        int windowY = window.pointAt(edge.launchMinX).y;
-        if (windowY == botPos.y) {
-            return null; // exactly level: the ordinary waypoint is correct
-        }
-        BotNavigationGraph.Segment hop = region.nextTreadToward(own, window);
-        if (hop == null) {
-            return null; // not connected through this region: leave the ordinary waypoint alone
-        }
-        // Leave a ramp through the join toward the launch row, uphill OR downhill. Always
-        // choosing its top reverses a descent; clamping X to an overlapping row can stop mid-ramp.
-        if (own.y1 != own.y2) {
-            return own.pointAt(BotNavigationGraph.Region.sharedColumnX(own, hop));
-        }
-        BotNavigationGraph.Segment after = region.nextTreadToward(hop, window);
-        int handOffX = after == null
-                ? Math.clamp(botPos.x, hop.minX, hop.maxX)
-                : BotNavigationGraph.Region.sharedColumnX(hop, after);
-        return hop.pointAt(handOffX);
+        return false;
     }
 
     static Point selectClimbWaypoint(BotMovementState entry, Point botPos, BotNavigationGraph.Edge edge) {
@@ -1152,14 +1155,14 @@ final class BotNavigationManager {
             return fromRegion.pointAt(targetX);
         }
 
-        if (hasReachedDirectionalDropRunway(botPos, edge)) {
-            return new Point(edge.endPoint);
-        }
-
         BotNavigationGraph.Region fromRegion = graph.getRegion(edge.fromRegionId);
-        if (fromRegion == null || fromRegion.isRopeRegion) {
-            return new Point(edge.endPoint);
-        }
+        if (fromRegion == null || fromRegion.isRopeRegion) return new Point(edge.endPoint);
+        // Aim beyond the lip, even when a wall puts the landing back behind it. Use a fixed
+        // waypoint so the progress watchdog sees the approach, instead of resetting every tick.
+        int walkOffX = edge.launchStepX > 0 ? Math.max(edge.endPoint.x, fromRegion.maxX + edge.launchStepX)
+                : Math.min(edge.endPoint.x, fromRegion.minX + edge.launchStepX);
+        Point walkOff = new Point(walkOffX, edge.endPoint.y);
+        if (hasReachedDirectionalDropRunway(botPos, edge)) return walkOff;
 
         BotPhysicsEngine.WalkOffLanding liveOutcome = BotPhysicsEngine.simulateWalkOffLanding(
                 entry.bot.getMap(), botPos, Integer.signum(edge.launchStepX),
@@ -1169,9 +1172,9 @@ final class BotNavigationManager {
             // Like rope top step-offs, once the continuous-control exit is naturally executable
             // we stop targeting an intermediate anchor and just keep feeding the authored
             // direction until physics performs the dismount.
-            return new Point(edge.endPoint);
+            return walkOff;
         }
-        return new Point(edge.startPoint);
+        return fromRegion.jumpApproach(botPos, edge.startPoint.x);
     }
 
     private static boolean hasReachedDirectionalDropRunway(Point botPos, BotNavigationGraph.Edge edge) {
@@ -1226,7 +1229,7 @@ final class BotNavigationManager {
         // it cannot cast instead of planning them and having the executor refuse each one.
         return runSearch(graph, bot.getMap(), bot.getPosition(), startRegionId, targetRegionId,
                 targetPos, null, useAdmissibleHeuristic, true, routeSeed(bot),
-                BotMovementCapabilities.of(bot).teleport()).path();
+                BotMovementCapabilities.of(bot)).path();
     }
 
     static List<BotNavigationGraph.Edge> findPath(BotNavigationGraph graph,
@@ -1235,7 +1238,7 @@ final class BotNavigationManager {
                                                   int startRegionId,
                                                   int targetRegionId,
                                                   Point targetPos) {
-        return findPath(graph, map, startPos, startRegionId, targetRegionId, targetPos, null);
+        return findPath(graph, map, startPos, startRegionId, targetRegionId, targetPos, BotMovementCapabilities.TELEPORT_ONLY);
     }
 
     /** As above for a body whose move set is known: {@code canBlink=false} excludes blinks. */
@@ -1246,8 +1249,15 @@ final class BotNavigationManager {
                                                   int targetRegionId,
                                                   Point targetPos,
                                                   boolean canBlink) {
+        return findPath(graph, map, startPos, startRegionId, targetRegionId, targetPos,
+                canBlink ? BotMovementCapabilities.TELEPORT_ONLY : BotMovementCapabilities.NONE);
+    }
+
+    static List<BotNavigationGraph.Edge> findPath(BotNavigationGraph graph, MapleMap map, Point startPos,
+                                                 int startRegionId, int targetRegionId, Point targetPos,
+                                                 BotMovementCapabilities capabilities) {
         return runSearch(graph, map, startPos, startRegionId, targetRegionId, targetPos,
-                null, useAdmissibleHeuristic, true, 0L, canBlink).path();
+                null, useAdmissibleHeuristic, true, 0L, capabilities).path();
     }
 
     static List<BotNavigationGraph.Edge> findPathForTargetScore(BotNavigationGraph graph,
@@ -1328,6 +1338,15 @@ final class BotNavigationManager {
                                    boolean instrument,
                                    long routeSeed,
                                    boolean canBlink) {
+        return runSearch(graph, map, startPos, startRegionId, targetRegionId, targetPos, pathfindCaller,
+                zeroHeuristic, instrument, routeSeed,
+                canBlink ? BotMovementCapabilities.TELEPORT_ONLY : BotMovementCapabilities.NONE);
+    }
+
+    private static SearchOutcome runSearch(BotNavigationGraph graph, MapleMap map, Point startPos,
+                                           int startRegionId, int targetRegionId, Point targetPos,
+                                           String pathfindCaller, boolean zeroHeuristic, boolean instrument,
+                                           long routeSeed, BotMovementCapabilities capabilities) {
         long startedAt = System.nanoTime();
         PathfindProfile profile = null;
         // routeSeed != 0 (per-bot) diversifies routes so 100 bots don't stack on one optimal
@@ -1374,12 +1393,7 @@ final class BotNavigationManager {
 
                 for (BotNavigationGraph.Edge edge : graph.getOutgoing(current.state.regionId)) {
                     edgeChecks++;
-                    if (!isEdgeUsable(graph, map, edge)) {
-                        continue;
-                    }
-                    if (!canBlink && edge.type == BotNavigationGraph.EdgeType.TELEPORT) {
-                        continue; // no 快速移动: this blink is not a move for this body
-                    }
+                    if (!isEdgeUsable(graph, map, edge, capabilities)) continue;
                     usableEdges++;
 
                     boolean isPortal = edge.type == BotNavigationGraph.EdgeType.PORTAL;
@@ -1627,7 +1641,7 @@ final class BotNavigationManager {
     }
 
     private static boolean isEdgeUsable(BotNavigationGraph graph, Character bot, BotNavigationGraph.Edge edge) {
-        return isEdgeUsable(graph, bot.getMap(), edge);
+        return isEdgeUsable(graph, bot.getMap(), edge, BotMovementCapabilities.of(bot));
     }
 
     private static boolean sameEdge(BotNavigationGraph.Edge left, BotNavigationGraph.Edge right) {
@@ -1664,14 +1678,27 @@ final class BotNavigationManager {
                 && replacement.type != BotNavigationGraph.EdgeType.WALK;
     }
 
-    private static boolean isEdgeUsable(BotNavigationGraph graph, MapleMap map, BotNavigationGraph.Edge edge) {
+    static boolean isEdgeUsable(BotNavigationGraph graph, MapleMap map, BotNavigationGraph.Edge edge,
+                                BotMovementCapabilities capabilities) {
         return switch (edge.type) {
-            case WALK, JUMP, DROP, CLIMB, TELEPORT -> true;
+            case WALK, CLIMB -> true;
+            case TELEPORT -> capabilities.teleport();
+            case JUMP, DROP -> landingRegionIsLivable(graph, map, edge, capabilities);
             case PORTAL -> {
                 Portal portal = map.getPortal(edge.portalId);
                 yield portal != null && portal.getPortalStatus();
             }
         };
+    }
+
+    private static boolean landingRegionIsLivable(BotNavigationGraph graph, MapleMap map,
+                                                         BotNavigationGraph.Edge edge, BotMovementCapabilities capabilities) {
+        // The graph is shared across classes. A landing that only a mage can exit is not a
+        // landing for everyone else. The escape verdict is shared by the whole region.
+        var destination = graph.getRegion(edge.toRegionId);
+        if (destination == null || destination.isRopeRegion) return false;
+        Foothold member = BotPhysicsEngine.footholdById(map, destination.segments.getFirst().footholdId);
+        return DeadPitGuard.isLivableSurface(map, member, graph.movementProfile, capabilities);
     }
 
     private static boolean usePortal(Character bot, int portalId) {
@@ -2119,7 +2146,9 @@ final class BotNavigationManager {
             // edge even though the authored graph and ballistic landing simulation still agree.
             return -1;
         }
-        return graph.findRegionId(map, botPos);
+        Foothold contact = BotPhysicsEngine.standingFoothold(entry, botPos);
+        int ground = contact == null ? -1 : graph.regionIdByFootholdId.getOrDefault(contact.getId(), -1);
+        return ground >= 0 ? ground : graph.findRopeRegionId(botPos);
     }
 
     static int resolveTargetRegionId(BotNavigationGraph graph,

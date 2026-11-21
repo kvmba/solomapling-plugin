@@ -16,20 +16,19 @@ class RampJumpWaypointTest {
 
     @ParameterizedTest
     @CsvSource({
-            "17, -1244, -44, -1234, 6, -1234",
-            "12, -1239, -44, -1234, 6, -1234",
-            "10, -1237, 45, -1247, 21, -1247",
-            "17, -1244, 45, -1247, 21, -1247"
+            "17, -1244, -44, -1234",
+            "12, -1239, -44, -1234",
+            "10, -1237, 45, -1247",
+            "17, -1244, 45, -1247"
     })
-    void aRampLeadsToTheExitTowardTheLaunchRow(int x, int y, int launchX, int launchY,
-                                             int exitX, int exitY) {
+    void aContinuousRampCanAimStraightAtTheLaunch(int x, int y, int launchX, int launchY) {
         BotNavigationGraph.Region region = new BotNavigationGraph.Region(1, List.of(
                 segment(264, -59, -1234, 6, -1234),
                 segment(265, 6, -1234, 21, -1247),
                 segment(266, 21, -1247, 79, -1247)));
 
-        assertEquals(new Point(exitX, exitY), waypoint(region, new Point(x, y),
-                new Point(launchX, launchY)));
+        Point launch = new Point(launchX, launchY);
+        assertEquals(launch, waypoint(region, new Point(x, y), launch));
     }
 
     @Test

@@ -15,6 +15,7 @@ import org.gms.client.Job;
 record BotMovementCapabilities(boolean teleport, float flashJumpScale) {
 
     static final BotMovementCapabilities NONE = new BotMovementCapabilities(false, 0f);
+    static final BotMovementCapabilities TELEPORT_ONLY = new BotMovementCapabilities(true, 0f);
 
     // Hermit / Night Lord ids and the dash tiers (see FlashJumpTiers).
     private static final int HERMIT = 411;
@@ -27,7 +28,9 @@ record BotMovementCapabilities(boolean teleport, float flashJumpScale) {
             return NONE;
         }
         int jobId = bot.getJob().getId();
-        return new BotMovementCapabilities(isTeleportMage(jobId), flashJumpScale(jobId, bot.getLevel()));
+        if (isTeleportMage(jobId)) return TELEPORT_ONLY;
+        float dash = flashJumpScale(jobId, bot.getLevel());
+        return dash == 0f ? NONE : new BotMovementCapabilities(false, dash);
     }
 
     /**

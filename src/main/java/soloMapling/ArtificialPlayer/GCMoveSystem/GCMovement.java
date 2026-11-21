@@ -1613,7 +1613,9 @@ public final class GCMovement {
         while (!queue.isEmpty()) {
             int rid = queue.poll();
             for (BotNavigationGraph.Edge e : g.getOutgoing(rid)) {
-                if (e.toRegionId != rid && seen.add(e.toRegionId)) {
+                if (!seen.contains(e.toRegionId)
+                        && BotNavigationManager.isEdgeUsable(g, map, e, BotMovementCapabilities.TELEPORT_ONLY)) {
+                    seen.add(e.toRegionId);
                     queue.add(e.toRegionId);
                 }
             }
@@ -1670,7 +1672,7 @@ public final class GCMovement {
      * prize mobs parked on ledges no edge climbs to, and aim for the floor under them instead.
      * (The graph provider and MovementPlan are package-private; this is their public seam.) */
     public static boolean canPathTo(Character bot, int x, int y) {
-        return canReach(bot, x, y, BotMovementCapabilities.of(bot).teleport());
+        return canReach(bot, x, y, BotMovementCapabilities.of(bot));
     }
 
     /**
@@ -1686,10 +1688,10 @@ public final class GCMovement {
      * without the skill.
      */
     public static boolean canReachOnFoot(Character bot, int x, int y) {
-        return canReach(bot, x, y, false);
+        return canReach(bot, x, y, BotMovementCapabilities.NONE);
     }
 
-    private static boolean canReach(Character bot, int x, int y, boolean canBlink) {
+    private static boolean canReach(Character bot, int x, int y, BotMovementCapabilities capabilities) {
         var map = bot == null ? null : bot.getMap();
         if (map == null || bot.getPosition() == null) {
             return true;
@@ -1714,7 +1716,7 @@ public final class GCMovement {
         // question, and the per-bot route jitter would make the answer depend on which of two
         // equally-priced routes that bot happens to prefer.
         return BotNavigationManager.findPath(graph, map, bot.getPosition(), from, to,
-                new Point(x, y), canBlink) != null;
+                new Point(x, y), capabilities) != null;
     }
 
     /**
@@ -1778,6 +1780,7 @@ public final class GCMovement {
         if (graph == null) return null;
         int start = graph.findRegionId(map, from);
         if (start < 0) return null;
+        BotMovementCapabilities capabilities = BotMovementCapabilities.of(bot);
         java.util.Set<Integer> seen = new java.util.HashSet<>();
         java.util.ArrayDeque<Integer> queue = new java.util.ArrayDeque<>();
         seen.add(start);
@@ -1814,11 +1817,10 @@ public final class GCMovement {
                 }
             }
             for (BotNavigationGraph.Edge edge : graph.getOutgoing(id)) {
-                if (edge.type == BotNavigationGraph.EdgeType.PORTAL) {
-                    Portal portal = map.getPortal(edge.portalId);
-                    if (portal == null || !portal.getPortalStatus()) continue;
+                if (!seen.contains(edge.toRegionId) && BotNavigationManager.isEdgeUsable(graph, map, edge, capabilities)) {
+                    seen.add(edge.toRegionId);
+                    queue.addLast(edge.toRegionId);
                 }
-                if (seen.add(edge.toRegionId)) queue.addLast(edge.toRegionId);
             }
         }
         return best;

@@ -408,6 +408,38 @@ class PqParkDoorExecutionSimTest {
         fail(() -> "target " + target + "; " + GCMovement.movementStateReport(bot));
     }
 
+    @Test
+    void kerningStageOneShelfDoesNotTurnAwayFromTheSelectedLaunch() {
+        assumeTrue(wzAvailable(KerningPqData.STAGE_1), "Map.wz needed");
+        MapleMap map = realRoom(KerningPqData.STAGE_1);
+        Sim sim = sim(map, new Point(-293, 102)); // FH49, just before the rounded line rises 1px
+        BotMovementState st = sim.st();
+        var graph = BotNavigationGraphProvider.getGraph(map);
+        int shelf = graph.regionIdByFootholdId.get(49);
+        int floor = graph.regionIdByFootholdId.get(38);
+        var jumpRight = graph.getOutgoing(shelf).stream()
+                .filter(e -> e.type == BotNavigationGraph.EdgeType.JUMP && e.toRegionId == floor
+                        && e.launchStepX > 0 && e.containsLaunchX(-280))
+                .findFirst().orElseThrow();
+        Point goal = GCMovement.portalApproachPoint(map, map.getPortal("next00"));
+        GCMovement.move(st.bot, goal.x, goal.y);
+        st.navGraph = graph;
+        st.navEdge = jumpRight;
+        st.navTargetRegionId = floor;
+        st.navPathTargetPos = goal;
+        st.navJumpLaunchEdge = jumpRight;
+        st.navJumpLaunchX = -280; // Pin the launch after the normal in-window variation.
+        st.navJumpLaunchDelaySteps = 0;
+
+        for (int i = 0; i < 20 && !st.inAir; i++) {
+            tickN(sim, 1);
+            assertTrue(st.moveDir >= 0, () -> "turned away from the launch at " + sim.p());
+        }
+        assertTrue(st.inAir && "exec".equals(st.lastNavDecision), "must execute the chosen jump, not a rescue");
+        tickN(sim, 250);
+        assertTrue(GCMovement.withinArrivalBox(sim.p(), goal), () -> "did not reach the door: " + sim.p());
+    }
+
     @ParameterizedTest
     @ValueSource(booleans = {true, false})
     void kerningFirstDoorRunsItsScriptFromTheActualLandingSurface(boolean observed) {

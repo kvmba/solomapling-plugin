@@ -17,8 +17,8 @@ final class CoarseExecutor {
     private CoarseExecutor() {
     }
 
-    /* One advance step: the bot's interpolated position and whether the plan has completed. */
-    record Step(Point position, boolean complete) {
+    /* The committed position and surface/rope to restore if this analytic frame becomes visible. */
+    record Step(Point position, boolean complete, int regionId) {
     }
 
     /*
@@ -28,6 +28,12 @@ final class CoarseExecutor {
      */
     static Step advance(MovementPlan plan, long planStartedAtMs, long nowMs) {
         long elapsed = Math.max(0L, nowMs - planStartedAtMs);
-        return new Step(plan.positionAt(elapsed), plan.isComplete(elapsed));
+        if (plan.isComplete(elapsed)) {
+            var edge = plan.edges.getLast();
+            return new Step(new Point(edge.endPoint), true, edge.toRegionId);
+        }
+        int index = elapsed == 0 ? 0 : plan.edgeIndexAt(elapsed);
+        var edge = plan.edges.get(index);
+        return new Step(plan.positionOnEdgeAt(index, elapsed), false, edge.fromRegionId);
     }
 }

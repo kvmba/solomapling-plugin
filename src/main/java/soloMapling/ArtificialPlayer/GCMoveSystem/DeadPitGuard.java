@@ -232,7 +232,7 @@ final class DeadPitGuard {
         int hiX = Math.max(foothold.getX1(), foothold.getX2());
         int apex = (int) Math.ceil(BotPhysicsEngine.calculateMaxJumpHeight(key.profile()));
 
-        if (portalNear(map, foothold, loX, hiX)) {
+        if (portalNear(map, foothold, loX, hiX, roots, componentRoot)) {
             return true;
         }
         if (ropeAbove(map, foothold, floorY, loX, hiX, apex, key.profile(), roots)) {
@@ -383,13 +383,27 @@ final class DeadPitGuard {
         return topmost;
     }
 
-    private static boolean portalNear(MapleMap map, Foothold surface, int loX, int hiX) {
+    private static boolean portalNear(MapleMap map, Foothold surface, int loX, int hiX,
+                                      Map<Integer, Integer> roots, int componentRoot) {
         for (Portal portal : map.getPortals()) {
             if (portal == null || portal.getPosition() == null) {
                 continue;
             }
             Point p = portal.getPosition();
             if (p.x < loX - PORTAL_X_SLACK_PX || p.x > hiX + PORTAL_X_SLACK_PX) {
+                continue;
+            }
+            // In-map retry portals may be drawn high above the floor. Use the same floor
+            // the planner attaches the portal edge to, not a separate height cutoff.
+            Portal exit = BotNavigationGraphProvider.localPortalTarget(map, portal);
+            if (exit != null) {
+                if (p.x >= loX && p.x <= hiX) {
+                    Foothold start = BotNavigationGraphProvider.portalFoothold(map, portal);
+                    if (start != null && rootOf(roots, start) == componentRoot) {
+                        Foothold end = BotNavigationGraphProvider.portalFoothold(map, exit);
+                        if (end != null && rootOf(roots, end) != componentRoot) return true;
+                    }
+                }
                 continue;
             }
             // Judge the portal against the surface's REAL y at the portal's column (slope-aware),

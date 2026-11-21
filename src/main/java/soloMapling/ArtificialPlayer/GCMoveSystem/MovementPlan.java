@@ -1,8 +1,10 @@
 package soloMapling.ArtificialPlayer.GCMoveSystem;
 
+import org.gms.server.maps.Foothold;
 import org.gms.server.maps.MapleMap;
 
 import java.awt.Point;
+import java.util.ArrayList;
 import java.util.List;
 
 /*
@@ -13,8 +15,7 @@ import java.util.List;
  * (computed once at bake time by running the physics sim), so an unobserved bot's position becomes a
  * pure function of elapsed wall-clock time — no runtime physics integration. This is the
  * linchpin of cheap background movement: the CoarseExecutor "renders the
- * plan with a clock" while the physics path "renders it with a sim", and because they share the same
- * plan they can never disagree about where the bot is or how long the trip takes.
+ * plan with a clock", using the same navigation graph as the full physics driver.
  *
  * Pure data + pure math — no mutable cursor, no side effects — so it is trivially unit-testable
  * with a fake clock.
@@ -77,15 +78,28 @@ final class MovementPlan {
      * Returns null when there is nothing to walk (the caller treats that as an arrival).
      */
     static MovementPlan surfaceWalk(MapleMap map, Point from, Point to, double walkPxPerSecond) {
+        return surfaceWalk(map, from, to, walkPxPerSecond, null);
+    }
+
+    static MovementPlan surfaceWalk(MapleMap map, Point from, Point to, double walkPxPerSecond,
+                                    BotNavigationGraph.Region region) {
         if (map == null || from == null || to == null || from.equals(to)) {
             return null;
         }
+        Foothold anchor = null;
+        if (region != null) {
+            var segment = region.segmentAt(from.x, from.y);
+            if (segment == null) return null;
+            anchor = BotPhysicsEngine.footholdById(map, segment.footholdId);
+            if (anchor == null) return null;
+        }
+        int regionId = region == null ? 0 : region.id;
         int dx = to.x - from.x;
         int steps = Math.max(1, (int) Math.ceil(Math.abs(dx) / (double) SURFACE_SAMPLE_PX));
-        List<Point> waypoints = new java.util.ArrayList<>(steps + 1);
-        // The start is snapped too: the plan's first frame is what a joining player is shown, so it
-        // must already be a floor point even if the caller passed a mid-slope pixel.
-        Point cursor = BotPhysicsEngine.findGroundPoint(map, from);
+        List<Point> waypoints = new ArrayList<>(steps + 1);
+        // A resolved tread already supports this pixel (including the 1px slope roundoff).
+        // Preserve it at the hand-off rather than re-rounding the body's first frame.
+        Point cursor = anchor == null ? BotPhysicsEngine.findGroundPoint(map, from) : from;
         if (cursor == null) {
             return null;
         }
@@ -94,12 +108,13 @@ final class MovementPlan {
         // in-band step at a time instead of being judged against the start row's absolute height.
         for (int i = 1; i <= steps; i++) {
             if (i == steps) {
-                Point end = BotPhysicsEngine.findGroundPoint(map, to);
-                waypoints.add(end != null ? end : new Point(to));
+                Point end = walkPoint(map, to, anchor);
+                if (end == null) return null;
+                waypoints.add(end);
                 break;
             }
             int x = from.x + (int) Math.round(dx * (double) i / steps);
-            Point ground = BotPhysicsEngine.findGroundPoint(map, new Point(x, cursor.y));
+            Point ground = walkPoint(map, new Point(x, cursor.y), anchor);
             if (ground == null) {
                 return null; // no floor under the route: not a walk the analytic path can carry
             }
@@ -107,7 +122,7 @@ final class MovementPlan {
             cursor = ground;
         }
         double pace = Math.max(1.0, walkPxPerSecond);
-        List<BotNavigationGraph.Edge> edges = new java.util.ArrayList<>(waypoints.size() - 1);
+        List<BotNavigationGraph.Edge> edges = new ArrayList<>(waypoints.size() - 1);
         for (int i = 1; i < waypoints.size(); i++) {
             Point a = waypoints.get(i - 1);
             Point b = waypoints.get(i);
@@ -120,9 +135,14 @@ final class MovementPlan {
             }
             int cost = (int) Math.max(1L, Math.round(a.distance(b) / pace * 1000.0));
             edges.add(new BotNavigationGraph.Edge(
-                    0, 0, BotNavigationGraph.EdgeType.WALK, a, b, 0, 0, 0, 0, 0, 0, 0, cost));
+                    regionId, regionId, BotNavigationGraph.EdgeType.WALK, a, b, 0, 0, 0, 0, 0, 0, 0, cost));
         }
         return inMap(map.getId(), edges);
+    }
+
+    private static Point walkPoint(MapleMap map, Point position, Foothold anchor) {
+        return anchor == null ? BotPhysicsEngine.findGroundPoint(map, position)
+                : BotPhysicsEngine.findWalkRegionGroundPoint(map, anchor, position.x, position.y);
     }
 
     /** Ground-sampling stride for {@link #surfaceWalk}: short enough that a step-up is a real step. */
@@ -140,40 +160,68 @@ final class MovementPlan {
      * A* result itself, not this plan.
      */
     static MovementPlan inMap(BotNavigationGraph graph, MapleMap map, Point startPos, Point targetPos) {
-        return inMap(graph, map, startPos, targetPos, true);
+        return inMap(graph, map, startPos, targetPos, BotMovementCapabilities.TELEPORT_ONLY);
     }
 
     /*
-     * As above for a specific body: {@code canBlink=false} keeps blinks out of the plan. The graph
+     * As above for a specific body, including its escape abilities. The graph
      * is class-neutral (one map = one bake), so an unobserved bot's analytic route must apply the
      * same class filter the physics path does, or the two plans disagree about where it can go.
      */
     static MovementPlan inMap(BotNavigationGraph graph, MapleMap map, Point startPos, Point targetPos,
-                              boolean canBlink) {
+                              BotMovementCapabilities capabilities) {
         if (graph == null || map == null || startPos == null || targetPos == null) {
             return null;
         }
-        int startRegion = graph.findRegionId(map, startPos);
-        int targetRegion = graph.findRegionId(map, targetPos);
+        return inMap(graph, map, startPos, graph.findRegionId(map, startPos), targetPos,
+                graph.findRegionId(map, targetPos), capabilities);
+    }
+
+    static MovementPlan inMap(BotNavigationGraph graph, MapleMap map, Point startPos, int startRegion,
+                              Point targetPos, int targetRegion, BotMovementCapabilities capabilities) {
         if (startRegion < 0 || targetRegion < 0) {
             return null;
         }
         List<BotNavigationGraph.Edge> edges =
-                BotNavigationManager.findPath(graph, map, startPos, startRegion, targetRegion, targetPos, canBlink);
-        return inMap(map.getId(), edges);
+                BotNavigationManager.findPath(graph, map, startPos, startRegion, targetRegion, targetPos, capabilities);
+        if (edges == null || edges.isEmpty()) return null;
+
+        // A* prices travel to each launch/entry anchor separately from the baked edge. The
+        // analytic executor needs those approaches as real legs, not jumps between endpoints.
+        var route = new ArrayList<BotNavigationGraph.Edge>(edges.size());
+        Point cursor = startPos;
+        for (var edge : edges) {
+            if (!cursor.equals(edge.startPoint)) {
+                var source = graph.getRegion(edge.fromRegionId);
+                if (source.isRopeRegion) {
+                    if (cursor.x != source.minX || edge.startPoint.x != source.minX) return null;
+                    int cost = (int) Math.max(1L, Math.round(Math.abs(cursor.y - edge.startPoint.y) * 1000.0
+                            / BotMovementManager.cfg.CLIMB_SPEED_PXS));
+                    route.add(new BotNavigationGraph.Edge(source.id, source.id, BotNavigationGraph.EdgeType.CLIMB,
+                            cursor, edge.startPoint, 0, 0, source.minX, source.minY, source.maxY, cost));
+                } else {
+                    MovementPlan approach = surfaceWalk(map, cursor, edge.startPoint,
+                            graph.movementProfile.walkVelocityPxs(), source);
+                    if (approach == null) return null;
+                    route.addAll(approach.edges);
+                }
+            }
+            route.add(edge);
+            cursor = edge.endPoint;
+        }
+        return inMap(map.getId(), route);
     }
 
     /** A* connects regions; a precise move must also reach its point on the final region. */
-    MovementPlan finishOnSurface(MapleMap map, Point target, double walkPxPerSecond) {
-        Point landing = edges.getLast().endPoint;
+    MovementPlan finishOnSurface(BotNavigationGraph graph, MapleMap map, Point target, double walkPxPerSecond) {
+        var finalEdge = edges.getLast();
+        Point landing = finalEdge.endPoint;
         if (GCMovement.withinArrivalBox(landing, target)) {
             return this;
         }
-        MovementPlan lastWalk = surfaceWalk(map, landing, target, walkPxPerSecond);
-        if (lastWalk == null) {
-            return this; // not a continuous surface; leave the final approach to the next move
-        }
-        var fullRoute = new java.util.ArrayList<BotNavigationGraph.Edge>(edges.size() + lastWalk.edges.size());
+        MovementPlan lastWalk = surfaceWalk(map, landing, target, walkPxPerSecond, graph.getRegion(finalEdge.toRegionId));
+        if (lastWalk == null) return null; // Let physics handle a precise goal off the straight walk.
+        var fullRoute = new ArrayList<BotNavigationGraph.Edge>(edges.size() + lastWalk.edges.size());
         fullRoute.addAll(edges);
         fullRoute.addAll(lastWalk.edges);
         return inMap(mapId, fullRoute);
@@ -198,7 +246,10 @@ final class MovementPlan {
         if (elapsedMs >= totalTimeMs) {
             return new Point(edges.get(edges.size() - 1).endPoint);
         }
-        int i = edgeIndexAt(elapsedMs);
+        return positionOnEdgeAt(edgeIndexAt(elapsedMs), elapsedMs);
+    }
+
+    Point positionOnEdgeAt(int i, long elapsedMs) {
         BotNavigationGraph.Edge e = edges.get(i);
         long into = elapsedMs - cumStartMs[i];
         long dur = Math.max(1, e.cost);
@@ -211,14 +262,12 @@ final class MovementPlan {
      * a real player arrives — MapleMap spawns the bot at the current coarse position and the promoted
      * physics then continues from it — so the point must be one a player can believe.
      *
-     * A WALK edge is the only edge that lies along one walkable surface, so it is interpolated. Every
-     * other edge (JUMP / DROP / CLIMB / PORTAL) crosses empty space — between two ledges, or onto a
-     * rope — so a straight lerp would float the bot in mid-air, which the player's spawn then shows
-     * and the promoted physics snaps away; those quantise to a real standing point (the launch point,
-     * then the landing point at the end) instead.
+     * Interpolate only continuous walks and same-rope climbs. Edges between surfaces cross empty
+     * space, so they hold the launch anchor until landing rather than showing an unsupported pose.
      */
     private static Point pointOnEdge(BotNavigationGraph.Edge e, double t) {
-        if (e.type != BotNavigationGraph.EdgeType.WALK) {
+        boolean climbingAlongRope = e.type == BotNavigationGraph.EdgeType.CLIMB && e.fromRegionId == e.toRegionId;
+        if (e.type != BotNavigationGraph.EdgeType.WALK && !climbingAlongRope) {
             return new Point(t < 1.0 ? e.startPoint : e.endPoint);
         }
         int x = (int) Math.round(e.startPoint.x + (e.endPoint.x - e.startPoint.x) * t);

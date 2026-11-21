@@ -421,41 +421,40 @@ final class BotContactDamage {
         if (dmg <= 0 || !shouldApplyMobKnockback(entry, bot)) {
             return; // miss flash, climbing, or a warrior who braced - no recoil
         }
-        clearActionState(entry); // cancel current walk/nav so the recoil reads cleanly
-        float dampen = isWarrior(bot) ? WARRIOR_KB_DAMPEN : 1.0f; // a warrior that does get knocked barely budges
+        applyKnockbackMotion(entry, knockbackAirVelX);
+    }
+
+    static void applyKnockbackMotion(BotMovementState entry, int knockbackAirVelX) {
+        Character bot = entry.bot;
+        MapleMap map = bot.getMap();
+        Point from = bot.getPosition();
+        float dampen = isWarrior(bot) ? WARRIOR_KB_DAMPEN : 1.0f;
         int hVel = Math.round(knockbackAirVelX * dampen);
-        // Dead-pit guard: a recoil whose ballistic column lands on an unescapable surface (a
-        // one-way basin) is refused its horizontal component - the hit reads as braced rather
-        // than relocating the bot into a trap. This keeps the arc out of the dead column in the
-        // first place; if a bot still ends up wedged, tickUnstuck's dead-pit self-heal is the
-        // backstop. Swim maps fall into water (floor-clamped), and any probe failure falls back
-        // to the honest recoil.
-        if (hVel != 0 && knockbackLandsOnDeadSurface(entry, bot, botPos, hVel)) {
-            hVel = 0;
+        float vVel = entry.inAir ? entry.velY : -scaledOpenStoryStep(KNOCKBACK_VFORCE) * dampen;
+        boolean validate = !map.isSwim() && map.getFootholds() != null;
+        if (validate) {
+            var capabilities = BotMovementCapabilities.of(bot);
+            if (!safeKnockbackLanding(entry, map, from, vVel, hVel, capabilities)) {
+                if (hVel == 0 || !safeKnockbackLanding(entry, map, from, vVel, 0, capabilities)) return;
+                hVel = 0;
+            }
         }
-        if (entry.inAir) {
-            BotPhysicsEngine.applyAirKnockback(entry, bot, hVel);
-        } else {
-            BotPhysicsEngine.beginKnockback(entry, bot, botPos,
-                    -scaledOpenStoryStep(KNOCKBACK_VFORCE) * dampen, hVel);
+        clearActionState(entry);
+        if (entry.inAir) BotPhysicsEngine.applyAirKnockback(entry, bot, hVel);
+        else BotPhysicsEngine.beginKnockback(entry, bot, from, vVel, hVel);
+        if (validate) {
+            // Preserve the checked recoil instead of allowing a pending dash or an old goal to
+            // steer the bot somewhere that wasn't part of the landing check.
+            entry.fixedAirArc = true;
+            entry.pendingFlashJump = false;
         }
         BotMovementManager.broadcastMovement(entry);
     }
 
-    /** Whether the knockback {@code hVel} from {@code botPos} would land on a dead surface. */
-    private static boolean knockbackLandsOnDeadSurface(BotMovementState entry, Character bot,
-                                                       Point botPos, int hVel) {
-        MapleMap map = bot.getMap();
-        if (map == null || map.getFootholds() == null || map.isSwim()) {
-            return false;
-        }
-        // The knockback launcher supplies a vertical kick too, so probe with a full jump arc,
-        // not a bare fall: closer to the real trajectory the recoil produces.
-        BotPhysicsEngine.JumpLanding landing = BotPhysicsEngine.simulateJumpLanding(
-                map, botPos, hVel, entry.movementProfile);
-        return landing != null
-                && !DeadPitGuard.isLivableLanding(map, landing.point(), entry.movementProfile,
-                BotMovementCapabilities.of(entry.bot));
+    private static boolean safeKnockbackLanding(BotMovementState entry, MapleMap map, Point from, float vVel,
+                                                int hVel, BotMovementCapabilities capabilities) {
+        var landing = BotPhysicsEngine.simulateLanding(map, from, vVel, hVel, entry.downJumpGracePeriodMS);
+        return landing != null && DeadPitGuard.isLivableSurface(map, landing.foothold(), entry.movementProfile, capabilities);
     }
 
     // Knockback applies on any real (non-zero) hit unless the bot is climbing. The donor also rolled
