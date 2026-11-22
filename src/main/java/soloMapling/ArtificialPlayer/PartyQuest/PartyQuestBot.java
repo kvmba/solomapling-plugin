@@ -317,6 +317,14 @@ public abstract class PartyQuestBot extends BotSM implements GrindTickRegistry.P
         return EMPTY_LOOT_IDS;
     }
 
+    /** Does this bot's current work include this floor item? Used only to rank teammates. */
+    protected boolean wantsQuestLoot(int itemId) {
+        for (int id : steppedOnLootIds()) {
+            if (id == itemId) return true;
+        }
+        return false;
+    }
+
     /**
      * Whether the shared combat beat may fight in the room the bot is standing in. Stages
      * whose puzzles forbid swinging override this; the common case is to fight.
@@ -680,6 +688,13 @@ public abstract class PartyQuestBot extends BotSM implements GrindTickRegistry.P
     /** The quest-specific pool for the current stage; null keeps only the shared lines. */
     protected String questChatPool(Beat beat) {
         return questName;
+    }
+
+    protected final boolean hasLiveQuestMonster() {
+        for (var monster : getChr().getMap().getAllMonsters()) {
+            if (monster.isAlive()) return true;
+        }
+        return false;
     }
 
     /**

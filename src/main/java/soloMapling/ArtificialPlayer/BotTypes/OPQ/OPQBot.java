@@ -1,16 +1,13 @@
 package soloMapling.ArtificialPlayer.BotTypes.OPQ;
 
 import org.gms.client.Character;
-import org.gms.server.maps.MapItem;
 import org.gms.server.maps.MapleMap;
-import org.gms.server.maps.MapObject;
 import org.gms.server.maps.Reactor;
 import soloMapling.ArtificialPlayer.BotCommandsPack.DropCommands;
 import soloMapling.ArtificialPlayer.BotCommandsPack.SocialCommands;
 import soloMapling.ArtificialPlayer.BotDialogueHandler;
 import soloMapling.ArtificialPlayer.BotGeneration;
 import soloMapling.ArtificialPlayer.BotGrindSystem.GrindTickRegistry;
-import soloMapling.ArtificialPlayer.BotLogic;
 import soloMapling.ArtificialPlayer.BotMessagingSystem.ChatMessage;
 import soloMapling.ArtificialPlayer.BotMessagingSystem.MessageQueue;
 import soloMapling.ArtificialPlayer.BotPartySystem.BotPartyLogic;
@@ -55,6 +52,8 @@ import static soloMapling.DebugUtilities.debugprint;
  * so a stuck bot eventually falls back to LOOP_CHECK instead of hanging.
  */
 public class OPQBot extends BotSM implements GrindTickRegistry.Participant {
+
+    private static final int[] CLOUD_LOOT = {OPQConstants.CLOUD_PIECE};
 
     // volatile: the swing chains run off-tick and read/write these
     private volatile OPQBotState opqBotState = OPQBotState.RESET;
@@ -152,6 +151,22 @@ public class OPQBot extends BotSM implements GrindTickRegistry.Participant {
      */
     public OPQBotState getOPQBotState() {
         return opqBotState;
+    }
+
+    public boolean wantsQuestLoot(int itemId) {
+        Character bot = getChr();
+        int room = bot.getMapId();
+        return switch (room) {
+            case OPQConstants.OPQ_STAGE_1 -> opqBotState == OPQBotState.STAGE_1_LOOT
+                    && itemId == OPQConstants.CLOUD_PIECE;
+            case OPQConstants.OPQ_STAGE_2 -> opqBotState == OPQBotState.STAGE_2_LOOT
+                    && itemId == wantedRecord(bot.getMap()) && PqActions.countItem(bot, itemId) == 0;
+            case OrbisPqData.STAGE_STORAGE -> itemId == OrbisPqData.PAPA_TRAP_ITEM;
+            case OrbisPqData.STAGE_PAPA -> (itemId == OrbisPqData.PAPA_MEDAL || itemId == OrbisPqData.PAPA_TRAP_ITEM
+                    || itemId == OrbisPqData.PAPA_SEED) && PqActions.readEimInt(bot, "statusStg7", -1) == -1;
+            default -> itemId == OrbisPqData.STATUE_PIECE_5 && OrbisPqData.LOUNGE_ROOMS.contains(room)
+                    && leavingLoungeRoom != bot.getMap();
+        };
     }
 
     /**
@@ -584,47 +599,14 @@ public class OPQBot extends BotSM implements GrindTickRegistry.Participant {
     }
 
     private void handleStage1Loot() {
-        Point botPos = getChr().getPosition();
-        Integer reactorOid = sharedContext.getMyCloudAssignment(getChr().getId());
-        Reactor reactor = (reactorOid != null) ? getChr().getMap().getReactorByOid(reactorOid) : null;
-        Point reactorPos = (reactor != null) ? reactor.getPosition() : null;
-        int[] cloudFilter = {OPQConstants.CLOUD_PIECE};
-
-        // 1) Primary scan: at the bot's feet (where the just-broken reactor stood).
-        List<MapObject> found = BotLogic.checkForItemsOnFloor(
-                getChr(), botPos, OPQConstants.STAGE_1_LOOT_SCAN_RANGE_PX, cloudFilter);
-        debugLogf("handleStage1Loot: primary @" + botPos + " hits=" + found.size());
-
-        // 2) Fallback: cloud may have fallen through one or more footholds
-        //    below the reactor anchor. Step straight down from the reactor's
-        //    x in fixed increments and stop on the first hit.
-        if (found.isEmpty() && reactorPos != null) {
-            for (int step = 1; step <= OPQConstants.STAGE_1_LOOT_FALLBACK_STEPS; step++) {
-                Point probe = new Point(
-                        reactorPos.x,
-                        reactorPos.y + step * OPQConstants.STAGE_1_LOOT_FALLBACK_STEP_PX);
-                List<MapObject> hits = BotLogic.checkForItemsOnFloor(
-                        getChr(), probe, OPQConstants.STAGE_1_LOOT_SCAN_RANGE_PX, cloudFilter);
-                debugLogf("handleStage1Loot: fallback step " + step
-                        + " @" + probe + " hits=" + hits.size());
-                if (!hits.isEmpty()) {
-                    found = hits;
-                    break;
-                }
+        switch (PqActions.collectReactorLoot(getChr(), CLOUD_LOOT)) {
+            case COLLECTING -> { return; }
+            case PICKED_UP -> {
+                SocialCommands.BotChatbubble(getChr(), BotMessages.get("opq.cloud_pieces", cloudPiecesCount()));
+                return; // There may be another uncollected cloud on this floor.
             }
+            case NONE -> { }
         }
-
-        List<MapObject> loot = dropLoneItemsOnly(found);
-        if (!loot.isEmpty()) {
-            DropCommands.lootItemListOnFloor(getChr(), loot);
-            SocialCommands.BotChatbubble(getChr(),
-                    BotMessages.get("opq.cloud_pieces", cloudPiecesCount()));
-        }
-        waitFor(800); // loot beat before NAVIGATE ticks
-
-        debugLogf("handleStage1Loot: scannedHits=" + found.size()
-                + " held=" + cloudPiecesCount());
-
         transitionTo(OPQBotState.STAGE_1_NAVIGATE,
                 "loot pass complete, searching for next cloud reactor");
     }
@@ -658,12 +640,12 @@ public class OPQBot extends BotSM implements GrindTickRegistry.Participant {
                 + " pos=" + getChr().getPosition());
 
         if (throwing) {
-            SocialCommands.BotSpeak(getChr(), BotMessages.get("opq.dropping_clouds",
-                    OPQConstants.CLOUD_REQUIRED, BotMessages.get("opq.cloud_plural")));
             Character bot = getChr();
             MapleMap clouds = bot.getMap();
             BotTiming.after(400, () -> {
                 if (bot.getMap() == clouds && PqActions.readEimInt(bot, "statusStg0", -1) != 1) {
+                    SocialCommands.BotSpeak(bot, BotMessages.get("opq.dropping_clouds",
+                            OPQConstants.CLOUD_REQUIRED, BotMessages.get("opq.cloud_plural")));
                     DropCommands.botThrowItemQty(bot, OPQConstants.CLOUD_PIECE,
                             OPQConstants.CLOUD_REQUIRED, OPQConstants.STAGE_1_DROP_POS);
                 }
@@ -685,22 +667,6 @@ public class OPQBot extends BotSM implements GrindTickRegistry.Participant {
      */
     private int cloudPiecesCount() {
         return getChr().getItemQuantity(OPQConstants.CLOUD_PIECE, false);
-    }
-
-    /**
-     * Drop multi-piece stacks from a loot list, keeping only the lone items a broken reactor
-     * leaves behind.
-     *
-     * <p>A reactor drops one piece at a time, so a stack bigger than that can only be
-     * something a party member laid down as an offering - and both of this PQ's item
-     * triggers read their stack by identity five seconds after the drop, so picking one up
-     * cancels the trigger silently. The loot scan reaches several thousand pixels, which is
-     * most of either stage map, so this cannot be left to "the bot is probably not adjacent".
-     */
-    private static List<MapObject> dropLoneItemsOnly(List<MapObject> found) {
-        return found.stream()
-                .filter(obj -> !(obj instanceof MapItem drop) || drop.getItem().getQuantity() <= 1)
-                .toList();
     }
 
     /**
@@ -1032,6 +998,11 @@ public class OPQBot extends BotSM implements GrindTickRegistry.Participant {
             followLeaderOut();
             return;
         }
+        if (musicPlaying()) {
+            sharedContext.putBoxAssignment(getChr().getId(), null);
+            transitionTo(OPQBotState.STAGE_2_WAIT, "the music box has accepted its record");
+            return;
+        }
 
         // Debug: dump all reactors on the map on first entry
         debugLogf("handleStage2Navigate: dumping all reactors on map " + getChr().getMapId());
@@ -1077,13 +1048,12 @@ public class OPQBot extends BotSM implements GrindTickRegistry.Participant {
 
         // Chat which box we're going for (ordinal based on sorted position right-to-left)
         String ordinal = orchestrator.getBoxOrdinal(reactorOid);
-        SocialCommands.BotSpeak(getChr(), BotMessages.get("opq.taking_box", localizeOrdinal(ordinal)));
-
         var approach = PqActions.approachReactor(getChr(), reactorOid, false, false);
         if (approach == PqActions.Approach.STUCK) {
             PqActions.deferReactorApproach(getChr(), reactorOid);
             sharedContext.putBoxAssignment(getChr().getId(), null);
         } else if (approach == PqActions.Approach.IN_POSITION) {
+            SocialCommands.BotSpeak(getChr(), BotMessages.get("opq.taking_box", localizeOrdinal(ordinal)));
             reactorHitsThisTarget = 0;
             transitionTo(OPQBotState.STAGE_2_HIT_BOX,
                     "arrived at " + ordinal + " box (oid=" + reactorOid + ")");
@@ -1156,34 +1126,25 @@ public class OPQBot extends BotSM implements GrindTickRegistry.Participant {
     }
 
     private void handleStage2Loot() {
-        Point botPos = getChr().getPosition();
-        Integer reactorOid = sharedContext.getMyBoxAssignment(getChr().getId());
-        Reactor reactor = (reactorOid != null) ? getChr().getMap().getReactorByOid(reactorOid) : null;
-        Point scanCenter = (reactor != null) ? reactor.getPosition() : botPos;
-
-        // Seven boxes drop seven different records and the music box accepts only today's
-        // (OrbisPQ.js sets its event state to the weekday), so pick up that one and leave the
-        // rest - a player does the same, and hoarding the other six would only clutter the
-        // inventory and make the bot carry records it has no use for.
-        int today = OPQOrchestrator.getTodayRecordItemId();
-        List<MapObject> found = BotLogic.checkForItemsOnFloor(
-                getChr(), scanCenter, OPQConstants.STAGE_1_LOOT_SCAN_RANGE_PX,
-                new int[]{today});
-        // Same guard as stage 1: records drop as single items, so a stack is somebody's
-        // offering already sitting on the music box, and taking it cancels their trigger.
-        List<MapObject> loot = dropLoneItemsOnly(found);
-        if (!loot.isEmpty()) {
-            DropCommands.lootItemListOnFloor(getChr(), loot);
+        if (musicPlaying()) {
+            PqActions.stopPartyLoot(getChr());
+            sharedContext.putBoxAssignment(getChr().getId(), null);
+            transitionTo(OPQBotState.STAGE_2_WAIT, "the music box has accepted its record");
+            return;
+        }
+        int wanted = wantedRecord(getChr().getMap());
+        if (wanted > 0 && PqActions.countItem(getChr(), wanted) == 0
+                && PqActions.collectReactorLoot(getChr(), new int[]{wanted}) == PqActions.LootBeat.COLLECTING) {
+            return;
         }
 
         // Which record the bot ended up holding is read back off the inventory rather than
         // predicted from the box: the engine's own reactordrops decides what each box yields.
-        boolean carryingToday = getChr().getItemQuantity(today, false) > 0;
-        lootedRecordItemId = carryingToday ? today : -1;
+        boolean carryingRecord = wanted > 0 && PqActions.countItem(getChr(), wanted) > 0;
+        lootedRecordItemId = carryingRecord ? wanted : -1;
 
-        debugLogf("handleStage2Loot: holdingToday=" + carryingToday
-                + " today=" + today + " floorHits=" + found.size());
-        if (carryingToday) {
+        debugLogf("handleStage2Loot: carryingRecord=" + carryingRecord + " wanted=" + wanted);
+        if (carryingRecord) {
             SocialCommands.BotChatbubble(getChr(), BotMessages.get("opq.got_record"));
         }
         waitFor(800); // loot beat before RETURN ticks
@@ -1191,7 +1152,7 @@ public class OPQBot extends BotSM implements GrindTickRegistry.Participant {
         // Clear box assignment so we can pick a new one
         sharedContext.putBoxAssignment(getChr().getId(), null);
 
-        if (carryingToday) {
+        if (carryingRecord) {
             // Nothing more to hunt for - take it to the music box now instead of breaking
             // boxes the leader may still want.
             transitionTo(OPQBotState.STAGE_2_RETURN, "holding today's record, returning to music box");
@@ -1199,6 +1160,18 @@ public class OPQBot extends BotSM implements GrindTickRegistry.Participant {
             transitionTo(OPQBotState.STAGE_2_NAVIGATE,
                     "this box did not hold today's record, trying another");
         }
+    }
+
+    /** Read the run's own music-box requirement, fixed when this instance opened. */
+    static int wantedRecord(MapleMap room) {
+        Reactor music = room.getReactorByName("music");
+        if (music == null || !music.isAlive() || music.getReactorType() != 100) return -1;
+        var requirement = music.getReactItem(music.getEventState());
+        return requirement == null ? -1 : requirement.getLeft();
+    }
+
+    private boolean musicPlaying() {
+        return PqActions.readEimInt(getChr(), "statusStg3", -1) >= 0;
     }
 
     /**
@@ -1229,13 +1202,16 @@ public class OPQBot extends BotSM implements GrindTickRegistry.Participant {
 
     private void handleStage2DropItems() {
         if (lootedRecordItemId > 0) {
-            SocialCommands.BotSpeak(getChr(), BotMessages.get("opq.dropping_record"));
             int recordId = lootedRecordItemId;
-            // Throw at the box's cell, not at the bot's feet: the landing cell caps how far
-            // this can travel, and the bot is only near the target here, not on it.
-            BotTiming.after(400, () ->
-                    DropCommands.botThrowItem(getChr(), recordId, OPQConstants.STAGE_2_DROP_POS));
-            debugLogf("handleStage2DropItems: dropping itemId=" + recordId);
+            Character bot = getChr();
+            MapleMap musicRoom = bot.getMap();
+            BotTiming.after(400, () -> {
+                if (bot.getMap() == musicRoom && wantedRecord(musicRoom) == recordId
+                        && !musicPlaying()) {
+                    SocialCommands.BotSpeak(bot, BotMessages.get("opq.dropping_record"));
+                    DropCommands.botThrowItem(bot, recordId, OPQConstants.STAGE_2_DROP_POS);
+                }
+            });
             lootedRecordItemId = -1;
         } else {
             debugLogf("handleStage2DropItems: no record to drop (lootedId=" + lootedRecordItemId + ")");
@@ -1287,6 +1263,10 @@ public class OPQBot extends BotSM implements GrindTickRegistry.Participant {
             return;
         }
 
+        if (musicPlaying()) {
+            waitFor(OPQConstants.NAVIGATE_SETTLE_MS);
+            return; // leave the remaining boxes alone while Eak validates the stage
+        }
         if (orchestrator.hasUnclaimedLiveBoxReactor(getChr().getMap(), getChr().getId())) {
             transitionTo(OPQBotState.STAGE_2_NAVIGATE, "a record box is available again");
             return;

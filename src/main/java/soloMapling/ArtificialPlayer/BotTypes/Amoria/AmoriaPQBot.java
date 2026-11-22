@@ -60,6 +60,24 @@ public class AmoriaPQBot extends PartyQuestBot {
     }
 
     @Override
+    protected String questChatPool(Beat beat) {
+        Character bot = getChr();
+        int mapId = bot.getMapId();
+        if (beat == Beat.START && mapId != AmoriaPqData.ENTRY_MAP) return null;
+        if (beat != Beat.WORKING) return questName;
+        if (mapId == MARRIED_BONUS_MAP || mapId == AmoriaPqData.CLEAR_MAP || mapId == EXIT_MAP) return null;
+        int stage = AmoriaPqData.stageOf(mapId);
+        if (PqActions.readEimString(bot, stage + "stageclear") != null) return null;
+        return switch (stage) {
+            case 1 -> PqActions.needsHuntForLeader(bot, MIRROR_LOOT[0], 1) ? questName : null;
+            case 2, 3 -> questName + ".ropes";
+            case 4 -> PqActions.needsHuntForLeader(bot, AmoriaPqData.STATUE_PIECE, AmoriaPqData.STATUE_PIECES_WANTED)
+                    ? questName + ".pieces" : null;
+            default -> null;
+        };
+    }
+
+    @Override
     protected boolean fightsOnSweep() {
         Character bot = getChr();
         int mapId = bot.getMapId();

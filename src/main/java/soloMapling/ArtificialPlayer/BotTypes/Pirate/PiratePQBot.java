@@ -66,6 +66,20 @@ public class PiratePQBot extends PartyQuestBot {
     }
 
     @Override
+    protected String questChatPool(Beat beat) {
+        Character bot = getChr();
+        int room = bot.getMapId();
+        if (beat == Beat.START && room != PiratePqData.ENTRY_MAP) return null;
+        if (beat != Beat.WORKING) return questName;
+        return switch (room) {
+            case PiratePqData.STAGE_1 -> steppedOnLootIds().length == 0 ? null : questName;
+            case PiratePqData.STAGE_4 -> questName + ".keys";
+            case PiratePqData.STAGE_5 -> !waitingForWuYang(bot) && hasLiveQuestMonster() ? questName + ".boss" : null;
+            default -> null;
+        };
+    }
+
+    @Override
     protected boolean fightsOnSweep(int[] lootIds) {
         Character bot = getChr();
         int mapId = bot.getMapId();

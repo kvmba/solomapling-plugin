@@ -128,6 +128,13 @@ public class AriantPQBot extends PartyQuestBot {
         return AriantPqData.LOBBY_MAP;
     }
 
+    @Override
+    protected String questChatPool(Beat beat) {
+        if (!AriantPqData.isArena(getChr().getMapId()) || beat == Beat.CLEAR
+                || beat == Beat.WORKING && (!hasElementRock() || !hasLiveQuestMonster())) return null;
+        return questName;
+    }
+
     /**
      * A queue hall is part of the run but has no work of its own: the match is started by the
      * player talking to Cesar. Standing with the team is the whole contribution.

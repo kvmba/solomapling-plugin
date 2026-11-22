@@ -73,6 +73,29 @@ public class EllinPQBot extends PartyQuestBot {
     }
 
     @Override
+    protected String questChatPool(Beat beat) {
+        int mapId = getChr().getMapId();
+        if (beat == Beat.START && mapId != EllinPqData.ENTRY_MAP) return null;
+        if (beat != Beat.WORKING) return questName;
+        return switch (mapId) {
+            case EllinPqData.MAZE_MAP -> questName + ".maze";
+            case EllinPqData.FROG_ROOM -> hasLiveQuestMonster() ? questName : null;
+            case FOREST_MAP -> PqActions.findReactorOid(getChr(), EllinPqData.SPINE_REACTOR) >= 0
+                    ? questName + ".forest" : null;
+            default -> null;
+        };
+    }
+
+    @Override
+    protected boolean wantsQuestLoot(int itemId) {
+        return switch (getChr().getMapId()) {
+            case FOREST_MAP -> itemId == RAW_POISON || itemId == DILUTED_POISON;
+            case STONE_MAP -> itemId == MAGIC_STONE;
+            default -> false;
+        };
+    }
+
+    @Override
     protected boolean workStage() {
         Character bot = getChr();
         switch (bot.getMapId()) {

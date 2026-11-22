@@ -64,6 +64,14 @@ public class HorntailPQBot extends PartyQuestBot {
     }
 
     @Override
+    protected String questChatPool(Beat beat) {
+        int room = getChr().getMapId();
+        if (beat == Beat.START && room != HorntailPqData.ENTRY_MAP) return null;
+        if (beat == Beat.WORKING && (!HorntailPqData.isKeyRoom(room) || !hasLiveQuestMonster())) return null;
+        return questName;
+    }
+
+    @Override
     protected boolean fightsOnSweep() {
         int mapId = getChr().getMapId();
         if (mapId == HorntailPqData.REWARD_MAP) return false;
@@ -76,6 +84,17 @@ public class HorntailPQBot extends PartyQuestBot {
     private boolean needsSideKeys() {
         return PqActions.needsHuntForLeader(getChr(), SIDE_KEYS[0], 1)
                 || PqActions.needsHuntForLeader(getChr(), SIDE_KEYS[1], 6);
+    }
+
+    @Override
+    protected boolean wantsQuestLoot(int itemId) {
+        Character bot = getChr();
+        int room = bot.getMapId();
+        if (room == HorntailPqData.LIGHT_ROOM || room == HorntailPqData.DARK_ROOM) {
+            return itemId == SIDE_KEYS[0] || itemId == SIDE_KEYS[1];
+        }
+        int index = HorntailPqData.roomIndexOf(room);
+        return index >= 0 && itemId == HorntailPqData.keyForRoom(index) && PqActions.countItem(bot, itemId) == 0;
     }
 
     @Override

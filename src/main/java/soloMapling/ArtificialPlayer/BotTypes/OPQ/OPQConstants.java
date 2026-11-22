@@ -33,12 +33,6 @@ public final class OPQConstants {
     // ---- Item IDs -----------------------------------------------------------
     public static final int CLOUD_PIECE    = 4001063; // Stage 1 Cloud Pieces - GOOD
 
-    // Stage 2 records. Seven boxes drop seven different ones, in data-id order:
-    // 2002004 -> 4001056 ... 2002010 -> 4001062 (reactordrops). The music box accepts only
-    // the one matching today's weekday, which OrbisPQ.js picks by setting the reactor's
-    // event state to d.getDay() - see OPQOrchestrator.getTodayRecordItemId().
-    public static final int RECORD_LP_FIRST = 4001056;
-
     // ---- Stage 1 reactor data ids -------------------------------------------
     // Reactor data (template) ids on map 920010000, sourced from
     // wz/Map.wz/Map/Map9/920010000.img.xml:
@@ -77,26 +71,6 @@ public final class OPQConstants {
     public static final int STAGE_1_TOP_PLATFORM_Y        = -1270;
     public static final int STAGE_1_TOP_PLATFORM_TOL_X_PX =   300;
     public static final int STAGE_1_TOP_PLATFORM_TOL_Y_PX =   150;
-
-    // ---- Stage 1 loot scan tuning -------------------------------------------
-    // After breaking a cloud reactor, the dropped piece can land at the
-    // reactor's anchor or fall through several footholds below it. The bot
-    // first probes its own feet (where the just-broken reactor was) and, if
-    // nothing's there, walks straight down the reactor's x in fixed steps.
-    //
-    // Units: the scan range is in PIXELS (BotLogic.checkForItemsOnFloor squares
-    // it once at the engine boundary). 150px matches the branch's proximity-
-    // honest pickup reach - the engine's pickupItem has no distance check, so a
-    // wider scan would read as a vacuum grab. The old raw 8000 read as a squared
-    // bound, so the scan really covered sqrt(8000) ~= 89px.
-    //
-    // The fallback step must be <= the scan radius or the probes leave blind
-    // gaps a fallen piece can sit in; the old 2500px step against that <100px
-    // scan was mostly holes. 20 x 150px covers 3000px of column, past the
-    // tower's full 2706px height.
-    public static final double STAGE_1_LOOT_SCAN_RANGE_PX    = 150;
-    public static final int    STAGE_1_LOOT_FALLBACK_STEPS   =  20;
-    public static final int    STAGE_1_LOOT_FALLBACK_STEP_PX = 150;
 
     // ---- Stage 1 drop / return zone -----------------------------------------
     // The altar reactor ("eak") at (377,66) is what spawns Chamberlain Eak, and it fires

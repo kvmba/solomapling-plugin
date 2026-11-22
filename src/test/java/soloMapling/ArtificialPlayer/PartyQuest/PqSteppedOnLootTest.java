@@ -24,7 +24,6 @@ class PqSteppedOnLootTest {
 
     private static final String PQ_ACTIONS = "soloMapling/ArtificialPlayer/PartyQuest/PqActions.java";
     private static final String PQ_BOT = "soloMapling/ArtificialPlayer/PartyQuest/PartyQuestBot.java";
-    private static final String LUDI_BOT = "soloMapling/ArtificialPlayer/BotTypes/Ludi/LudiPQBot.java";
 
     @Test
     void theCombatBeatScoopsOnlyTheItemsTheQuestNames() throws Exception {
@@ -38,22 +37,6 @@ class PqSteppedOnLootTest {
     }
 
     @Test
-    void ludiOptsInWithItsPassAndNothingElse() throws Exception {
-        String ludi = javaSource(LUDI_BOT);
-        // The pass is the quest's only scoopable item - and NOT in the bonus room, where the
-        // boxes spray rewards that belong to the party's human members.
-        assertTrue(ludi.contains("new int[]{LudiPqData.PASS}"),
-                "Ludi must scoop exactly its pass");
-        assertTrue(ludi.matches("(?s).*protected int\\[\\] steppedOnLootIds\\(\\) \\{\\s*"
-                        + "int mapId = getChr\\(\\)\\.getMapId\\(\\);\\s*"
-                        + "if \\(mapId == LudiPqData\\.BONUS_MAP \\|\\| mapId == LudiPqData\\.BONUS_TAIL_MAP\\) \\{\\s*"
-                        + "return new int\\[0\\];.*"),
-                "the bonus rooms must opt OUT: their spray is the party's");
-        assertFalse(ludi.contains("PAPA_SEED") || ludi.contains("flowerSeed"),
-                "Ludi must not sweep any other mechanic's ground item");
-    }
-
-    @Test
     void theSweepIsAtFeetOnlyAndKeepsTheEntitlementRules() throws Exception {
         String java = javaSource(PQ_ACTIONS);
         int start = java.indexOf("public static int lootSteppedOn");
@@ -61,7 +44,7 @@ class PqSteppedOnLootTest {
         String body = java.substring(start, java.indexOf("\n    }", start));
 
         assertTrue(body.contains("STEPPED_ON_REACH_SQ"), "the reach is the stepped-on box");
-        assertTrue(body.contains("canCollectFloorDrop"), "use the shared entitlement and failed-pickup gate");
+        assertTrue(body.contains("lootAdmission"), "use the same entitlement and claim gate as macro loot");
         assertTrue(body.contains("nextSteppedOnPickupAtByBot"), "pickups are paced, not vacuumed");
         assertFalse(body.contains("walkForPickup") || body.contains("GCMovement.move"),
                 "a combat beat must never steer the driver");

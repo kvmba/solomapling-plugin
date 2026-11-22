@@ -55,6 +55,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotSame;
@@ -292,6 +293,7 @@ class PqStageTransitionTest {
         when(leader.getPosition()).thenReturn(new Point());
         when(member.getEventInstance()).thenReturn(instance);
         boolean cloud = mapId == 920010000;
+        if (!cloud) when(instance.getIntProperty("statusStg3")).thenReturn(-1);
         Reactor selected = orbisReactor(map, cloud ? 2002001 : 2002004, 101, 50);
         Reactor alternate = orbisReactor(map, cloud ? 2002001 : 2002005, 102, 300);
         when(map.getAllReactors()).thenReturn(List.of(selected, alternate));
@@ -328,6 +330,34 @@ class PqStageTransitionTest {
             OPQBot other = mock(OPQBot.class);
             when(other.getChr()).thenReturn(leader);
             assertEquals(101, cloud ? run.assignCloudReactor(other) : run.assignBoxReactor(other));
+        } finally {
+            PqActions.clearSeekState(BOT_ID);
+        }
+    }
+
+    @ParameterizedTest
+    @EnumSource(value = OPQBot.OPQBotState.class, names = {"STAGE_2_NAVIGATE", "STAGE_2_LOOT", "STAGE_2_WAIT"})
+    void orbisStopsHuntingForRecordsOnceTheMusicIsPlaying(OPQBot.OPQBotState start) {
+        MapleMap music = room(920010400);
+        place(member, music);
+        place(leader, music);
+        when(member.getPosition()).thenReturn(new Point());
+        when(member.getEventInstance()).thenReturn(instance);
+        when(instance.getIntProperty("statusStg3")).thenReturn(0);
+        OPQOrchestrator run = mock(OPQOrchestrator.class);
+        when(run.getSharedContext()).thenReturn(new OPQSharedContext());
+        try (var generation = mockStatic(BotGeneration.class);
+             var coordinator = mockStatic(OPQOrchestrator.class, call -> run);
+             var chat = mockStatic(SocialCommands.class); var movement = mockStatic(GCMovement.class)) {
+            OPQBot bot = new OPQBot(member);
+            bot.setRunning(true);
+            bot.setStateForDebug(start);
+            bot.updateState();
+
+            assertEquals(OPQBot.OPQBotState.STAGE_2_WAIT, bot.getOPQBotState());
+            verify(run, never()).assignBoxReactor(any());
+            verify(run, never()).hasUnclaimedLiveBoxReactor(any(), anyInt());
+            chat.verifyNoInteractions();
         } finally {
             PqActions.clearSeekState(BOT_ID);
         }
@@ -576,6 +606,67 @@ class PqStageTransitionTest {
             assertEquals("HenesysPQ", bot.questChatPool(PartyQuestBot.Beat.CLEAR));
 
             place(member, room(HenesysPqData.BONUS_MAP));
+            assertNull(bot.questChatPool(PartyQuestBot.Beat.WORKING));
+        }
+    }
+
+    @ParameterizedTest
+    @CsvSource(value = {
+            "kerning,103000800,KerningPQ", "kerning,103000802,KerningPQ.puzzle", "kerning,103000804,KerningPQ.boss",
+            "ludi,922010600,generic", "ludi,922010800,generic",
+            "amoria,670010400,AmoriaPQ.ropes", "ellin,930000300,EllinPQ.maze",
+            "magatia,926110100,MagatiaPQ.beakers", "magatia,926100303,MagatiaPQ.lanes",
+            "pirate,925100100,PiratePQ", "pirate,925100400,PiratePQ.keys", "pirate,925100600,generic",
+            "horntail,240050300,generic", "bossrush,970030001,generic", "papulatus,220080001,generic"
+    }, nullValues = "generic")
+    void ambientWorkChatUsesTheCurrentRoomInsteadOfAnEarlierObjective(String type, int mapId, String pool) {
+        place(member, room(mapId));
+        when(member.getEventInstance()).thenReturn(instance);
+        try (var generation = mockStatic(BotGeneration.class)) {
+            PartyQuestBot bot = bot(type);
+            assertEquals(pool, bot.questChatPool(PartyQuestBot.Beat.WORKING));
+        }
+    }
+
+    @Test
+    void aClearedAmoriaPuzzleStopsUsingItsPositioningInstructions() {
+        place(member, room(670010400));
+        when(member.getEventInstance()).thenReturn(instance);
+        try (var generation = mockStatic(BotGeneration.class)) {
+            PartyQuestBot bot = new AmoriaPQBot(member);
+            assertEquals("AmoriaPQ.ropes", bot.questChatPool(PartyQuestBot.Beat.WORKING));
+            when(instance.getProperty("3stageclear")).thenReturn("true");
+            assertNull(bot.questChatPool(PartyQuestBot.Beat.WORKING));
+        }
+    }
+
+    @Test
+    void ludiCollectsOnlyPassesAndDoesNotOptInDuringPuzzlesOrRewards() {
+        place(member, room(LudiPqData.ENTRY_MAP));
+        try (var generation = mockStatic(BotGeneration.class)) {
+            PartyQuestBot bot = new LudiPQBot(member);
+            assertArrayEquals(new int[]{LudiPqData.PASS}, bot.steppedOnLootIds());
+            for (int id : new int[]{LudiPqData.STAGE_6, LudiPqData.STAGE_8, LudiPqData.STAGE_9,
+                    LudiPqData.BONUS_MAP, LudiPqData.BONUS_TAIL_MAP}) {
+                place(member, room(id));
+                assertEquals(0, bot.steppedOnLootIds().length, "room " + id);
+            }
+        }
+    }
+
+    @Test
+    void ludiFightingChatterDoesNotFollowTheBotIntoTheGuardRoom() {
+        MapleMap entrance = room(LudiPqData.ENTRY_MAP);
+        MapleMap stealth = room(LudiPqData.STAGE_5);
+        var mob = mock(org.gms.server.life.Monster.class);
+        when(mob.isAlive()).thenReturn(true);
+        when(entrance.getAllMonsters()).thenReturn(List.of(mob));
+        when(stealth.getAllMonsters()).thenReturn(List.of(mob));
+        place(member, entrance);
+        try (var generation = mockStatic(BotGeneration.class)) {
+            PartyQuestBot bot = new LudiPQBot(member);
+            assertEquals("LudiPQ", bot.questChatPool(PartyQuestBot.Beat.WORKING));
+            place(member, stealth);
             assertNull(bot.questChatPool(PartyQuestBot.Beat.WORKING));
         }
     }

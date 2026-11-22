@@ -122,10 +122,38 @@ public class MagatiaPQBot extends PartyQuestBot {
     }
 
     @Override
+    protected String questChatPool(Beat beat) {
+        Character bot = getChr();
+        int room = bot.getMapId() % 10_000;
+        if (beat == Beat.START && room > 1) return null;
+        if (beat != Beat.WORKING) return questName;
+        return switch (room) {
+            case 100 -> collectionRoomCleared() ? null : questName + ".beakers";
+            case 200 -> collectionRoomCleared() ? null : questName;
+            case 300, 301, 302, 303, 304 -> questName + ".lanes";
+            default -> null;
+        };
+    }
+
+    @Override
     protected boolean fightsOnSweep() {
         var instance = getChr().getEventInstance();
         return getChr().getMapId() % 10_000 < 600 && (instance == null || !instance.isEventCleared())
                 && !collectionRoomCleared();
+    }
+
+    @Override
+    protected boolean wantsQuestLoot(int itemId) {
+        Character bot = getChr();
+        int room = bot.getMapId() % 10_000;
+        if (room == 100) return itemId == BEAKER_LOOT[0] && !collectionRoomCleared();
+        if (room == 200 && (PqActions.readEimInt(bot, "statusStg4", 0) == 1
+                || PqActions.countItem(bot, DOCUMENTS[0]) > 0 || PqActions.countItem(bot, DOCUMENTS[1]) > 0)) return false;
+        if (room != 1 && (room < 200 || room > 203)) return false;
+        for (int id : MagatiaPqData.QUEST_ITEMS) {
+            if (id == itemId) return true;
+        }
+        return false;
     }
 
     private boolean collectionRoomCleared() {

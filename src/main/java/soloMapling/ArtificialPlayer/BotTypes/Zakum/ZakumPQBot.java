@@ -49,6 +49,18 @@ public class ZakumPQBot extends PartyQuestBot {
     }
 
     @Override
+    protected String questChatPool(Beat beat) {
+        if (beat == Beat.START && getChr().getMapId() != ZakumPqData.ENTRY_MAP) return null;
+        if (beat == Beat.WORKING && !PqActions.needsHuntForLeader(getChr(), ZakumPqData.FIRE_ORE, 1)) return null;
+        return questName;
+    }
+
+    @Override
+    protected boolean wantsQuestLoot(int itemId) {
+        return itemId == ZakumPqData.FIRE_ORE;
+    }
+
+    @Override
     protected boolean workStage() {
         Character bot = getChr();
         PqActions.armReactorBeat(bot, -1);

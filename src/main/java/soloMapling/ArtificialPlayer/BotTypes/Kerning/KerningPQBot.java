@@ -63,6 +63,20 @@ public class KerningPQBot extends PartyQuestBot {
     }
 
     @Override
+    protected String questChatPool(Beat beat) {
+        int stage = stageOf(getChr().getMapId());
+        if (beat == Beat.START && stage != 1) return null;
+        if (beat != Beat.WORKING) return questName;
+        if (stage < 0 || KerningStages.stageCleared(getChr(), stage)) return null;
+        return switch (stage) {
+            case 1 -> questName;
+            case 2, 3, 4 -> questName + ".puzzle";
+            case 5 -> questName + ".boss";
+            default -> null;
+        };
+    }
+
+    @Override
     public void grindTick() {
         // Cloto's exchange and the combat sweep both change the coupon count. The shared
         // combat ticker must skip a beat rather than wait for this bot's NPC script.

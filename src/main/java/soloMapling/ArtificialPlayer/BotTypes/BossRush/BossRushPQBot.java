@@ -66,6 +66,13 @@ public class BossRushPQBot extends PartyQuestBot {
     }
 
     @Override
+    protected String questChatPool(Beat beat) {
+        if (BossRushPqData.isRestSpot(getChr().getMapId())
+                || beat == Beat.WORKING && !hasLiveQuestMonster()) return null;
+        return questName;
+    }
+
+    @Override
     protected boolean workStage() {
         var map = getChr().getMap();
         if (BossRushPqData.isRestSpot(map.getId())) {

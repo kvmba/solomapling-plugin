@@ -42,7 +42,9 @@ class PqStageChatTest {
     private static Map<String, Integer> poolSizes() {
         java.util.Map<String, Integer> sizes = new java.util.HashMap<>();
         List<String> scopes = spawnedQuestNames();
-        scopes.add("HenesysPQ.guard");
+        scopes.addAll(List.of("HenesysPQ.guard", "AmoriaPQ.ropes", "AmoriaPQ.pieces", "EllinPQ.maze", "EllinPQ.forest",
+                "KerningPQ.puzzle", "KerningPQ.boss", "MagatiaPQ.beakers", "MagatiaPQ.lanes",
+                "PiratePQ.keys", "PiratePQ.boss"));
         for (String quest : scopes) {
             for (PartyQuestBot.Beat beat : PartyQuestBot.Beat.values()) {
                 int n = poolSize("pq.chat." + quest + "." + beat.name().toLowerCase());
@@ -121,6 +123,12 @@ class PqStageChatTest {
         for (String key : english.keySet()) {
             assertEquals(english.get(key), chinese.get(key),
                     key + " has different pool sizes per language");
+            if (key.split("\\.").length > 4) {
+                for (int i = 1; i <= english.get(key); i++) {
+                    String line = BotMessages.get(key + "." + i);
+                    assertTrue(line.matches(".*\\p{IsHan}.*"), key + " is missing Chinese text: " + line);
+                }
+            }
         }
         assertNotEquals(0, english.size());
     }

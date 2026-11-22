@@ -69,6 +69,13 @@ public class DojoPQBot extends PartyQuestBot {
     }
 
     @Override
+    protected String questChatPool(Beat beat) {
+        int room = getChr().getMapId();
+        if (room == CLEAR_MAP || room == MapId.DOJO_EXIT || beat == Beat.WORKING && !hasLiveQuestMonster()) return null;
+        return questName;
+    }
+
+    @Override
     protected boolean workStage() {
         var map = getChr().getMap();
         if (map.getId() == MapId.DOJO_EXIT || map.getId() == CLEAR_MAP) {

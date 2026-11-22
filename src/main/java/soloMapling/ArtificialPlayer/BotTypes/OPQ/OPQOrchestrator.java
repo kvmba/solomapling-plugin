@@ -12,7 +12,6 @@ import java.awt.Point;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Collection;
-import java.util.Calendar;
 import java.util.Comparator;
 import java.util.Deque;
 import java.util.HashMap;
@@ -575,25 +574,6 @@ public class OPQOrchestrator {
             return OPQConstants.STAGE_2_BOX_ORDINALS[idx];
         }
         return "?";
-    }
-
-    /**
-     * The record the music box accepts today, which is the only one worth carrying there.
-     * OrbisPQ.js does {@code getReactorByName("music").setEventState(d.getDay())} (JS:
-     * 0=Sunday..6=Saturday), and that number indexes the WZ event blocks in order - block[0]
-     * wants 4001056, block[6] wants 4001062.
-     */
-    public static int getTodayRecordItemId() {
-        return recordForDayOfWeek(Calendar.getInstance().get(Calendar.DAY_OF_WEEK));
-    }
-
-    /**
-     * {@link Calendar}'s day-of-week to the record that day's event block asks for. The two
-     * number days differently - Calendar starts at Sunday = 1, the JS side at Sunday = 0 -
-     * so this is the one place the offset is applied (and the reason to keep it in one place).
-     */
-    static int recordForDayOfWeek(int calendarDayOfWeek) {
-        return OPQConstants.RECORD_LP_FIRST + (calendarDayOfWeek - Calendar.SUNDAY);
     }
 
     /**

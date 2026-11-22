@@ -29,6 +29,8 @@ import soloMapling.ArtificialPlayer.BotGrindSystem.MovementStylePolicy;
 import soloMapling.ArtificialPlayer.BotLogic;
 import soloMapling.ArtificialPlayer.BotMessagingSystem.CharacterStorage;
 import soloMapling.ArtificialPlayer.BotTypes.Ariant.AriantPqData;
+import soloMapling.ArtificialPlayer.BotTypes.Ludi.LudiStages;
+import soloMapling.ArtificialPlayer.BotTypes.OPQ.OPQBot;
 import soloMapling.ArtificialPlayer.GCMoveSystem.GCMovement;
 import soloMapling.MapVFX.CustomReactor;
 import soloMapling.server.ExecutorServiceManager;
@@ -37,6 +39,7 @@ import static soloMapling.ArtificialPlayer.GCMoveSystem.GCMovement.movementNowMs
 
 import java.awt.Point;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.WeakHashMap;
@@ -299,6 +302,26 @@ public final class PqActions {
                 Point at = drop.getPosition();
                 GCMovement.move(bot, at.x, at.y, () -> nudgeStageTick(bot),
                         () -> control.failedPickups.add(drop));
+            }
+        }
+    }
+
+    /** Claim before issuing a floor-loot walk. Owner-addressed reclaim uses walkForPickup directly. */
+    private static boolean walkForFloorDrop(Character bot, MapleMap room, MapItem drop, double reachSq) {
+        SeekState state = seekStates.computeIfAbsent(bot.getId(), ignored -> new SeekState());
+        synchronized (state) {
+            if (bot.getMap() != room || movementShielded(bot.getId()) || reactorBeatArmed(bot)) return false;
+            MapItem target = liveLootTarget(bot, bot.getPosition(), state);
+            if (target != null) return target == drop;
+            releaseLootWalk(state);
+            LootClaim claim = claimFloorDrop(bot, room, drop);
+            if (claim == null) return false;
+            state.lootWalk = new LootWalk(room, drop, reachSq, claim);
+            try {
+                walkForPickup(bot, drop);
+                return true;
+            } finally {
+                claim.dispatching = false;
             }
         }
     }
@@ -1445,7 +1468,7 @@ public final class PqActions {
         Point retreatGoal;
         final CombatSpacing spacing = new CombatSpacing();
         volatile MapleMap pickupMap;
-        MapItem partyLootTarget; // Only the shared combat sweep assigns monster drops.
+        volatile LootWalk lootWalk;
         // Movement failure callbacks run under the driver lock: never take SeekState's lock there.
         final java.util.Set<MapItem> failedPickups = java.util.concurrent.ConcurrentHashMap.newKeySet();
         /** When set, the chase never falls back to an unreachable mob (see seekAndAttack). */
@@ -1596,7 +1619,8 @@ public final class PqActions {
         Point pos = bot.getPosition();
         if (Math.abs(pos.x - goal.x) <= 8 && Math.abs(pos.y - goal.y) <= 8) return false;
         for (MapObject object : itemsOnFloorAt(bot, goal, itemIds)) {
-            if (object instanceof MapItem drop && canCollectFloorDrop(bot, drop)) return true;
+            if (object instanceof MapItem drop && canCollectFloorDrop(bot, drop, PartyDrops.MONSTERS_AND_REACTORS)
+                    && !claimedByOther(bot, bot.getMap(), drop, PARTY_LOOT_CLAIMS.get(drop))) return true;
         }
         return false;
     }
@@ -1630,12 +1654,23 @@ public final class PqActions {
 
     public enum LootBeat { NONE, COLLECTING, PICKED_UP }
 
-    private enum PartyDrops { NONE, MONSTERS, MONSTERS_AND_REACTORS }
+    private enum PartyDrops { MONSTERS, MONSTERS_AND_REACTORS, REACTORS }
 
-    // One claim per actual drop, confined to the shared combat sweep. A removed drop needs no cleanup.
-    private static final Map<MapItem, Integer> PARTY_LOOT_CLAIMS = new WeakHashMap<>();
+    // The macro and combat loops share actual drop identities, not reused map or object ids.
+    private static final Map<MapItem, LootClaim> PARTY_LOOT_CLAIMS = Collections.synchronizedMap(new WeakHashMap<>());
 
-    /** Only the shared combat sweep may assign or collect these drops. */
+    private static final class LootClaim {
+        final int botId;
+        volatile boolean dispatching = true;
+
+        LootClaim(int botId) {
+            this.botId = botId;
+        }
+    }
+
+    private record LootWalk(MapleMap room, MapItem drop, double reachSq, LootClaim claim) {}
+
+    /** Collect the specified monster items, including party-protected drops. */
     public static LootBeat collectPartyMonsterLoot(Character bot, int[] itemIds, Predicate<BotSM> eligiblePeer) {
         return collectRoomLoot(bot, itemIds, PartyDrops.MONSTERS, eligiblePeer);
     }
@@ -1645,6 +1680,11 @@ public final class PqActions {
         return collectRoomLoot(bot, itemIds, PartyDrops.MONSTERS_AND_REACTORS, null);
     }
 
+    /** A live mechanism's offering is not a reactor drop, even if it is a single item. */
+    public static LootBeat collectReactorLoot(Character bot, int[] itemIds) {
+        return collectRoomLoot(bot, itemIds, PartyDrops.REACTORS, null);
+    }
+
     private static LootBeat collectRoomLoot(Character bot, int[] itemIds, PartyDrops partyDrops,
                                             Predicate<BotSM> eligiblePeer) {
         int botId = bot.getId();
@@ -1652,28 +1692,23 @@ public final class PqActions {
         synchronized (state) {
             if (seekStates.get(botId) != state) return LootBeat.COLLECTING;
             if (movementShielded(botId) || reactorBeatArmed(bot)) {
-                if (eligiblePeer != null) stopPartyLoot(bot, state);
+                stopPartyLoot(bot, state);
                 return LootBeat.COLLECTING;
             }
-            Party party = eligiblePeer == null ? null : bot.getParty();
-            if (eligiblePeer != null && party == null) return LootBeat.COLLECTING;
             MapleMap map = bot.getMap();
             Point position = bot.getPosition();
             List<MapObject> found = BotLogic.checkForItemsOnFloor(bot, position, roomReachPx(map), itemIds);
             if (bot.getMap() != map) return LootBeat.COLLECTING;
-            MapItem claim = eligiblePeer == null ? null : livePartyLoot(bot, position, state);
-            if (claim != null && found.contains(claim)) {
+            MapItem claim = liveLootTarget(bot, position, state);
+            if (claim != null && found.contains(claim) && canCollectFloorDrop(bot, claim, partyDrops)) {
                 found = List.of(claim);
-            } else if (eligiblePeer != null) {
+            } else {
                 stopPartyLoot(bot, state);
                 claim = null;
             }
             if (found.isEmpty()) return LootBeat.NONE;
-            List<PartyCollector> peers = party == null || claim != null
-                    ? List.of() : partyCollectors(bot, map, party, eligiblePeer);
-            Predicate<MapItem> admits = drop -> canCollectFloorDrop(bot, drop, partyDrops)
-                    && !peerHasLootPriority(bot, position, drop, peers);
-            Point goal = eligiblePeer == null || claim != null ? GCMovement.moveTargetOf(bot) : null;
+            Predicate<MapItem> admits = lootAdmission(bot, map, position, STEPPED_ON_REACH_SQ, partyDrops, eligiblePeer);
+            Point goal = claim != null ? GCMovement.moveTargetOf(bot) : null;
             if (goal != null && goal.equals(state.lastChaseGoal)) goal = null;
             long settledBefore = System.currentTimeMillis() - FLOOR_DROP_SETTLE_MS;
             MapItem nearest = null;
@@ -1702,15 +1737,13 @@ public final class PqActions {
             if (hasNearbyDrop) {
                 stopHunting(bot);
                 if (nearest == null) return LootBeat.COLLECTING; // let new drops land before trying
-                if (eligiblePeer != null && claim == null) claimPartyLoot(state, botId, nearest);
                 long now = movementNowMs();
                 Long next = nextSteppedOnPickupAtByBot.get(botId);
                 if ((next != null && now < next)
                         || bot.getPosition().distanceSq(nearest.getPosition()) > STEPPED_ON_REACH_SQ) {
                     return LootBeat.COLLECTING;
                 }
-                int pickedUp = collectSteppedOn(bot, itemIds, nearest, now, partyDrops);
-                if (eligiblePeer != null) stopPartyLoot(bot, state);
+                int pickedUp = collectSteppedOn(bot, map, itemIds, nearest, now, partyDrops);
                 return pickedUp > 0 ? LootBeat.PICKED_UP : LootBeat.COLLECTING;
             }
             if (keepWalk) return LootBeat.COLLECTING;
@@ -1718,18 +1751,22 @@ public final class PqActions {
             if (bot.getMap() != map) return LootBeat.COLLECTING;
             if (target == null) return LootBeat.NONE;
             stopHunting(bot);
-            if (eligiblePeer != null) claimPartyLoot(state, botId, target);
-            walkForPickup(bot, target);
-            return LootBeat.COLLECTING;
+            return walkForFloorDrop(bot, map, target, STEPPED_ON_REACH_SQ) ? LootBeat.COLLECTING : LootBeat.NONE;
         }
     }
 
-    private static void claimPartyLoot(SeekState state, int botId, MapItem drop) {
-        PARTY_LOOT_CLAIMS.put(drop, botId);
-        state.partyLootTarget = drop;
+    private static LootClaim claimFloorDrop(Character bot, MapleMap room, MapItem drop) {
+        LootClaim previous = PARTY_LOOT_CLAIMS.get(drop);
+        if (drop.isPickedUp() || claimedByOther(bot, room, drop, previous)) return null;
+        var claim = new LootClaim(bot.getId());
+        synchronized (PARTY_LOOT_CLAIMS) {
+            if (PARTY_LOOT_CLAIMS.get(drop) != previous) return null;
+            PARTY_LOOT_CLAIMS.put(drop, claim);
+        }
+        return claim;
     }
 
-    /** Release this bot's claim on the combat sweep, without retracting a stage walk. */
+    /** Release only the pickup walk, never a replacement stage walk. */
     public static void stopPartyLoot(Character bot) {
         SeekState state = seekStates.get(bot.getId());
         if (state == null) return;
@@ -1739,63 +1776,108 @@ public final class PqActions {
     }
 
     private static void stopPartyLoot(Character bot, SeekState state) {
-        MapItem target = state.partyLootTarget;
-        if (target == null) return;
-        state.partyLootTarget = null;
-        PARTY_LOOT_CLAIMS.remove(target, bot.getId());
-        if (state.pickupMap == bot.getMap() && !movementShielded(bot.getId()) && !reactorBeatArmed(bot)) {
-            GCMovement.stopIfTarget(bot, target.getPosition());
+        LootWalk walk = releaseLootWalk(state);
+        if (walk != null && walk.room() == bot.getMap() && !movementShielded(bot.getId()) && !reactorBeatArmed(bot)) {
+            GCMovement.stopIfTarget(bot, walk.drop().getPosition());
         }
     }
 
-    private static MapItem livePartyLoot(Character bot, Point position, SeekState state) {
-        if (state == null || state.pickupMap != bot.getMap()) return null;
-        MapItem target = state.partyLootTarget;
-        if (target == null || state.failedPickups.contains(target)
-                || PARTY_LOOT_CLAIMS.getOrDefault(target, 0) != bot.getId()
-                || !canAccessFloorDrop(bot, target, PartyDrops.MONSTERS)) return null;
-        Point at = target.getPosition();
-        return position.distanceSq(at) <= STEPPED_ON_REACH_SQ || at.equals(GCMovement.moveTargetOf(bot))
-                ? target : null;
+    private static LootWalk releaseLootWalk(SeekState state) {
+        LootWalk walk = state.lootWalk;
+        if (walk != null) {
+            state.lootWalk = null;
+            PARTY_LOOT_CLAIMS.remove(walk.drop(), walk.claim());
+        }
+        return walk;
     }
 
-    private record PartyCollector(Character bot, Point position, SeekState state, MapItem claim) {}
+    private static MapItem liveLootTarget(Character bot, Point position, SeekState state) {
+        LootWalk walk = state == null ? null : state.lootWalk;
+        if (walk == null || walk.room() != bot.getMap()) return null;
+        MapItem drop = walk.drop();
+        if (failedPickup(bot, drop, state) || PARTY_LOOT_CLAIMS.get(drop) != walk.claim()
+                || !canAccessFloorDrop(bot, drop, PartyDrops.MONSTERS_AND_REACTORS) || isLiveOffering(walk.room(), drop)) {
+            return null;
+        }
+        Point at = drop.getPosition();
+        return walk.claim().dispatching || position.distanceSq(at) <= walk.reachSq()
+                || at.equals(GCMovement.moveTargetOf(bot)) ? drop : null;
+    }
 
-    private static List<PartyCollector> partyCollectors(Character bot, MapleMap room, Party party,
-                                                         Predicate<BotSM> eligible) {
+    private static boolean claimedByOther(Character bot, MapleMap room, MapItem drop, LootClaim claim) {
+        if (claim == null || claim.botId == bot.getId()) return false;
+        if (claim.dispatching) return true;
+        BotSM owner = CharacterStorage.getBotById(claim.botId);
+        if (!availableCollector(owner, room)) return false;
+        Character chr = owner.getChr();
+        return !movementShielded(claim.botId) && !reactorBeatArmed(chr)
+                && liveLootTarget(chr, chr.getPosition(), seekStates.get(claim.botId)) == drop;
+    }
+
+    private static boolean availableCollector(BotSM peer, MapleMap room) {
+        return peer != null && peer.getChr().getMap() == room && peer.getChr().getParty() != null
+                && PqStageChat.isAvailable(peer) && !peer.status().isFrozen();
+    }
+
+    private record PartyCollector(BotSM peer, Point position, SeekState state, MapItem target) {}
+
+    private static List<PartyCollector> partyCollectors(Character bot, MapleMap room, Predicate<BotSM> eligible) {
+        Party party = bot.getParty();
+        if (party == null) return List.of();
         var peers = new ArrayList<PartyCollector>();
         for (var member : party.getMembers()) {
             int id = member.getId();
             if (id == bot.getId()) continue;
             BotSM peer = CharacterStorage.getBotById(id);
-            if (peer == null) continue;
+            if (!availableCollector(peer, room) || peer.getChr().getParty() != party
+                    || (eligible != null && !eligible.test(peer))
+                    || movementShielded(id) || reactorBeatArmed(peer.getChr())) continue;
             Character candidate = peer.getChr();
-            if (candidate.getMap() != room || candidate.getParty() != party
-                    || movementShielded(id) || reactorBeatArmed(candidate) || !eligible.test(peer)) continue;
             Point position = candidate.getPosition();
             SeekState state = seekStates.get(id);
-            peers.add(new PartyCollector(candidate, position, state, livePartyLoot(candidate, position, state)));
+            peers.add(new PartyCollector(peer, position, state, liveLootTarget(candidate, position, state)));
         }
         return peers;
     }
 
-    /** Keep live claims exclusive; otherwise the closest free, reachable bot wins, not the first tick. */
-    private static boolean peerHasLootPriority(Character bot, Point position, MapItem drop, List<PartyCollector> peers) {
+    private static Predicate<MapItem> lootAdmission(Character bot, MapleMap room, Point position, double reachSq,
+                                                     PartyDrops partyDrops, Predicate<BotSM> eligible) {
+        List<PartyCollector> peers = partyCollectors(bot, room, eligible);
+        MapItem target = liveLootTarget(bot, position, seekStates.get(bot.getId()));
+        return drop -> canCollectFloorDrop(bot, drop, partyDrops) && !claimedByOther(bot, room, drop,
+                PARTY_LOOT_CLAIMS.get(drop)) && (target == drop
+                || !peerHasLootPriority(bot, position, drop, peers, reachSq, partyDrops, eligible));
+    }
+
+    /** Only an available bot that actually works this item may win by distance. */
+    private static boolean peerHasLootPriority(Character bot, Point position, MapItem drop, List<PartyCollector> peers,
+                                                double reachSq, PartyDrops drops, Predicate<BotSM> eligible) {
         if (peers.isEmpty()) return false;
         Point at = drop.getPosition();
         double distanceSq = position.distanceSq(at);
         for (PartyCollector peer : peers) {
-            if (peer.claim() == drop) return true;
-            if (peer.claim() != null) continue;
-            Character candidate = peer.bot();
+            if (peer.target() != null) continue;
+            Character candidate = peer.peer().getChr();
             double peerSq = peer.position().distanceSq(at);
             if (peerSq > distanceSq || (peerSq == distanceSq && candidate.getId() > bot.getId())) continue;
-            SeekState state = peer.state();
-            if (state != null && state.pickupMap == candidate.getMap() && state.failedPickups.contains(drop)) continue;
-            if (canAccessFloorDrop(candidate, drop, PartyDrops.MONSTERS)
-                    && (peerSq <= STEPPED_ON_REACH_SQ || GCMovement.canPathTo(candidate, at.x, at.y))) return true;
+            if (failedPickup(candidate, drop, peer.state()) || !canAccessFloorDrop(candidate, drop, drops)
+                    || (eligible == null && !wantsQuestDrop(peer.peer(), drop))) continue;
+            if (peerSq <= reachSq || canWalkToDrop(candidate, at)) return true;
         }
         return false;
+    }
+
+    private static boolean wantsQuestDrop(BotSM peer, MapItem drop) {
+        return peer instanceof PartyQuestBot pq && pq.wantsQuestLoot(drop.getItemId())
+                || peer instanceof OPQBot orbis && orbis.wantsQuestLoot(drop.getItemId());
+    }
+
+    private static boolean failedPickup(Character bot, MapItem drop, SeekState state) {
+        return state != null && state.pickupMap == bot.getMap() && state.failedPickups.contains(drop);
+    }
+
+    private static boolean canWalkToDrop(Character bot, Point at) {
+        return !LudiStages.refusesFloor(bot, at) && GCMovement.canPathTo(bot, at.x, at.y);
     }
 
     private static boolean pickupBeforeChase(Character bot, double radiusPx, int[] itemIds, double pickupReachSq) {
@@ -1809,17 +1891,19 @@ public final class PqActions {
                 return false; // a staged walk / box beat already owns this beat
             }
             if (walkingToLoot(bot, itemIds)) return true;
+            MapleMap room = bot.getMap();
             Point botPos = bot.getPosition();
             List<MapObject> found = BotLogic.checkForItemsOnFloor(bot, botPos, radiusPx, itemIds);
-            MapItem nearest = nearestPathableLoot(bot, botPos, found, pickupReachSq, drop -> canCollectFloorDrop(bot, drop));
+            if (found.isEmpty() || bot.getMap() != room) return false;
+            MapItem nearest = nearestPathableLoot(bot, botPos, found, pickupReachSq,
+                    lootAdmission(bot, room, botPos, pickupReachSq, PartyDrops.MONSTERS_AND_REACTORS, null));
             if (nearest == null) {
                 return false;
             }
             // Retract only the chase order this episode issued, then hand the driver the drop.
             stopOwnChaseGoal(bot, control);
             control.clearGoal();
-            walkForPickup(bot, nearest);
-            return true;
+            return walkForFloorDrop(bot, room, nearest, pickupReachSq);
         }
     }
 
@@ -1832,10 +1916,7 @@ public final class PqActions {
             Point at = drop.getPosition();
             if (at == null) continue;
             double distanceSq = position.distanceSq(at);
-            if (distanceSq > pickupReachSq && distanceSq < bestSq
-                    && admits.test(drop)
-                    && !soloMapling.ArtificialPlayer.BotTypes.Ludi.LudiStages.refusesFloor(bot, at)
-                    && GCMovement.canPathTo(bot, at.x, at.y)) {
+            if (distanceSq > pickupReachSq && distanceSq < bestSq && admits.test(drop) && canWalkToDrop(bot, at)) {
                 nearest = drop;
                 bestSq = distanceSq;
             }
@@ -1843,12 +1924,8 @@ public final class PqActions {
         return nearest;
     }
 
-    private static boolean canCollectFloorDrop(Character bot, MapItem drop) {
-        return canCollectFloorDrop(bot, drop, PartyDrops.NONE);
-    }
-
     private static boolean canCollectFloorDrop(Character bot, MapItem drop, PartyDrops partyDrops) {
-        if (!canAccessFloorDrop(bot, drop, partyDrops)) return false;
+        if (!canAccessFloorDrop(bot, drop, partyDrops) || isLiveOffering(bot.getMap(), drop)) return false;
         SeekState control = seekStates.get(bot.getId());
         if (control == null) return true;
         synchronized (control) {
@@ -1861,9 +1938,9 @@ public final class PqActions {
     }
 
     private static boolean canAccessFloorDrop(Character bot, MapItem drop, PartyDrops partyDrops) {
+        if (partyDrops == PartyDrops.REACTORS && !(drop.getDropper() instanceof Reactor)) return false;
         if (!isFloorLoot(drop) || !(DropCommands.botCanLoot(bot, drop)
-                || (partyDrops != PartyDrops.NONE && !BotLogic.reservedQuestDrop(bot, drop)
-                        && isPartySourceDrop(bot, drop, partyDrops)))) return false;
+                || (!BotLogic.reservedQuestDrop(bot, drop) && isPartySourceDrop(bot, drop, partyDrops)))) return false;
         // A Chief Bandit's Pickpocket bags are bomb fuel, not loot: botCanLoot passes them (they
         // are the bot's own drops) and they register the instant they land, so without this gate
         // the sweep eats them long before BAG_MIN_AGE_MS makes them detonable. The grind layer's
@@ -1872,10 +1949,25 @@ public final class PqActions {
         return !BotMesoBomb.isDetonationBag(bot.getId(), drop);
     }
 
+    private static boolean isLiveOffering(MapleMap room, MapItem drop) {
+        if (!(drop.getDropper() instanceof Character)) return false;
+        Item item = drop.getItem();
+        if (item == null) return false;
+        Point at = drop.getPosition();
+        for (Reactor reactor : room.getAllReactors()) {
+            if (!reactor.isAlive() || reactor.getReactorType() != 100 || !reactor.getArea().contains(at)) continue;
+            var required = reactor.getReactItem(reactor.getEventState());
+            if (required != null && required.getLeft() == item.getItemId() && required.getRight() == item.getQuantity()) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     private static boolean isPartySourceDrop(Character bot, MapItem drop, PartyDrops partyDrops) {
         MapObject source = drop.getDropper();
-        if (drop.isPickedUp() || !(source instanceof Monster
-                || (partyDrops == PartyDrops.MONSTERS_AND_REACTORS && source instanceof Reactor))) return false;
+        if (drop.isPickedUp() || !(partyDrops != PartyDrops.REACTORS && source instanceof Monster
+                || partyDrops != PartyDrops.MONSTERS && source instanceof Reactor)) return false;
         int partyId = bot.getPartyId();
         if (partyId == -1) return false;
         drop.lockItem();
@@ -1886,18 +1978,23 @@ public final class PqActions {
         }
     }
 
-    private static void collectFloorDrop(Character bot, MapItem drop) {
-        collectFloorDrop(bot, drop, PartyDrops.NONE);
-    }
-
-    private static void collectFloorDrop(Character bot, MapItem drop, PartyDrops partyDrops) {
+    private static void collectFloorDrop(Character bot, MapleMap room, MapItem drop, double reachSq, PartyDrops partyDrops) {
         // The host refuses drops younger than 400ms; that is settling, not a failed pickup.
         if (System.currentTimeMillis() - drop.getDropTime() < FLOOR_DROP_SETTLE_MS) return;
         SeekState control = seekStates.computeIfAbsent(bot.getId(), ignored -> new SeekState());
         synchronized (control) {
-            if (!canCollectFloorDrop(bot, drop, partyDrops)) return;
-            DropCommands.botLootSingleDrop(bot, drop);
-            if (!drop.isPickedUp()) control.failedPickups.add(drop);
+            if (bot.getMap() != room || !canCollectFloorDrop(bot, drop, partyDrops)
+                    || bot.getPosition().distanceSq(drop.getPosition()) > reachSq) return;
+            LootClaim claim = claimFloorDrop(bot, room, drop);
+            if (claim == null) return;
+            try {
+                DropCommands.botLootSingleDrop(bot, drop);
+                if (!drop.isPickedUp()) control.failedPickups.add(drop);
+            } finally {
+                PARTY_LOOT_CLAIMS.remove(drop, claim);
+                LootWalk walk = control.lootWalk;
+                if (walk != null && walk.drop() == drop) stopPartyLoot(bot, control);
+            }
         }
     }
 
@@ -2444,6 +2541,7 @@ public final class PqActions {
         if (state != null) {
             synchronized (state) {
                 seekStates.remove(botId, state);
+                releaseLootWalk(state);
             }
         }
         orphanProbeAtByBot.remove(botId);
@@ -2530,13 +2628,15 @@ public final class PqActions {
 
     /** Pick up matching drops near a point. Returns how many items were gathered. */
     public static int loot(Character bot, Point at, double radiusPx, int[] itemIds) {
-        if (bot == null || at == null) {
+        if (bot == null || at == null || bot.getMap() == null) {
             return 0;
         }
         // The radius is px; BotLogic.checkForItemsOnFloor squares it once at the engine boundary
         // (the old call here passed px through unsquared, so "2_000" scanned a ~45px circle
         // around the bot's feet - the "bots do not pick up the passes" report).
+        MapleMap room = bot.getMap();
         List<MapObject> found = BotLogic.checkForItemsOnFloor(bot, at, radiusPx, itemIds);
+        if (bot.getMap() != room) return 0;
         if (found.isEmpty()) {
             // The caller's radius is a kill's neighbourhood, so a drop that landed outside it
             // (a ranged kill's shot, a knockback slide) is invisible here - the deleted 2000px
@@ -2545,7 +2645,7 @@ public final class PqActions {
             // half at a paced cadence: it may start a walk to the drop; the pickup itself
             // still happens up close on a later scan (the engine's pickupItem has no distance
             // check, so a grab from here would teleport the item).
-            sweepOrphanDropOutside(bot, radiusPx, itemIds);
+            sweepOrphanDropOutside(bot, room, radiusPx, itemIds);
             return 0;
         }
         // Never take a multi-piece stack: the item-triggered reactors read their stack five
@@ -2556,13 +2656,6 @@ public final class PqActions {
         // ping-pongs between the bots. At most LOOT_INLINE_MAX pickups run inline (each
         // carries a 100ms stagger): an overflow pile waits for the next macro tick, far below
         // the drops' own despawn - a wide sweep can no longer freeze a busy stage tick.
-        List<MapObject> lone = found.stream()
-                .filter(o -> o instanceof MapItem drop && canCollectFloorDrop(bot, drop))
-                .limit(LOOT_INLINE_MAX)
-                .toList();
-        if (lone.isEmpty()) {
-            return 0;
-        }
         // Pickup must be proximity-honest: the engine's pickupItem has no distance check (a
         // real client walks to the item first), so an item outside the bot's pickup reach
         // teleports to it if grabbed from here - the reported vacuum pickup. Anything in
@@ -2570,20 +2663,21 @@ public final class PqActions {
         // one and the sweep finishes up close on a later tick. This is what keeps a ranged
         // kill's drop reachable without a whole-room grab.
         Point botPos = bot.getPosition();
-        List<MapObject> reachable = new java.util.ArrayList<>();
+        var drops = PartyDrops.MONSTERS_AND_REACTORS;
+        Predicate<MapItem> admits = lootAdmission(bot, room, botPos, PICKUP_REACH_SQ, drops, null);
+        List<MapItem> reachable = new ArrayList<>();
         MapItem nearestOutOfReach = null;
         double walkSq = Double.MAX_VALUE;
-        for (MapObject o : lone) {
-            Point ip = o.getPosition();
-            if (ip == null) {
-                continue;
-            }
+        for (MapObject o : found) {
+            if (!(o instanceof MapItem drop) || !admits.test(drop)) continue;
+            Point ip = drop.getPosition();
             double dsq = botPos.distanceSq(ip);
             if (dsq <= PICKUP_REACH_SQ) {
-                reachable.add(o);
-            } else if (dsq < walkSq) {
+                reachable.add(drop);
+                if (reachable.size() == LOOT_INLINE_MAX) break;
+            } else if (dsq < walkSq && !LudiStages.refusesFloor(bot, ip)) {
                 walkSq = dsq;
-                nearestOutOfReach = (MapItem) o;
+                nearestOutOfReach = drop;
             }
         }
         if (reachable.isEmpty()) {
@@ -2591,7 +2685,7 @@ public final class PqActions {
             // is in flight (a loot walk issued over it would yank the bot off its chase).
             // The re-issue replans from the CURRENT pixel once the driver is idle.
             if (nearestOutOfReach != null && !GCMovement.isMoving(bot)) {
-                walkForPickup(bot, nearestOutOfReach);
+                walkForFloorDrop(bot, room, nearestOutOfReach, PICKUP_REACH_SQ);
             }
             return 0;
         }
@@ -2599,8 +2693,8 @@ public final class PqActions {
         for (int id : itemIds) {
             before += countItem(bot, id);
         }
-        for (MapObject object : reachable) {
-            collectFloorDrop(bot, (MapItem) object);
+        for (MapItem drop : reachable) {
+            collectFloorDrop(bot, room, drop, PICKUP_REACH_SQ, drops);
             blockingSleep(100);
         }
         int after = 0;
@@ -2700,15 +2794,18 @@ public final class PqActions {
         if (botPos == null) {
             return 0;
         }
+        MapleMap room = bot.getMap();
         List<MapObject> found = BotLogic.checkForItemsOnFloor(bot, botPos,
                 STEPPED_ON_REACH_PX, itemIds);
-        if (found.isEmpty()) {
+        if (found.isEmpty() || bot.getMap() != room) {
             return 0;
         }
+        var drops = PartyDrops.MONSTERS_AND_REACTORS;
+        Predicate<MapItem> admits = lootAdmission(bot, room, botPos, STEPPED_ON_REACH_SQ, drops, null);
         MapItem nearest = null;
         double bestSq = STEPPED_ON_REACH_SQ;
         for (MapObject o : found) {
-            if (!(o instanceof MapItem drop) || !canCollectFloorDrop(bot, drop)) {
+            if (!(o instanceof MapItem drop) || !admits.test(drop)) {
                 continue;
             }
             Point ip = drop.getPosition();
@@ -2724,16 +2821,16 @@ public final class PqActions {
         if (nearest == null) {
             return 0;
         }
-        return collectSteppedOn(bot, itemIds, nearest, now, PartyDrops.NONE);
+        return collectSteppedOn(bot, room, itemIds, nearest, now, drops);
     }
 
-    private static int collectSteppedOn(Character bot, int[] itemIds, MapItem drop, long now,
+    private static int collectSteppedOn(Character bot, MapleMap room, int[] itemIds, MapItem drop, long now,
                                        PartyDrops partyDrops) {
         int before = 0;
         for (int id : itemIds) {
             before += countItem(bot, id);
         }
-        collectFloorDrop(bot, drop, partyDrops);
+        collectFloorDrop(bot, room, drop, STEPPED_ON_REACH_SQ, partyDrops);
         nextSteppedOnPickupAtByBot.put(bot.getId(), now + STEPPED_ON_PICKUP_GAP_MIN_MS
                 + ThreadLocalRandom.current().nextLong(STEPPED_ON_PICKUP_GAP_MAX_MS
                 - STEPPED_ON_PICKUP_GAP_MIN_MS + 1));
@@ -2768,13 +2865,12 @@ public final class PqActions {
      * bot's 260px loot radius, and 3 minutes later it despawns). Two rules keep it from
      * re-opening the defects the sweep's removal fixed: it NEVER picks up (no vacuum grab -
      * the walk is proximity-honest like every pickup in this class) and it NEVER takes an
-     * addressed pile or another bot's still-protected drop (the same entitlement
-     * {@link DropCommands#botCanLoot} enforces for the sweep paths, which is what stopped the
-     * pass ping-pong). The walk is only armed when the driver is idle - seekAndAttack and
+     * addressed pile or a drop protected for another party. The walk is only armed when the
+     * driver is idle - seekAndAttack and
      * approachUnder own a live move, and a loot walk issued over it would yank the bot off
      * its chase (the 317bfbc guard).
      */
-    private static void sweepOrphanDropOutside(Character bot, double radiusPx, int[] itemIds) {
+    private static void sweepOrphanDropOutside(Character bot, MapleMap room, double radiusPx, int[] itemIds) {
         if (GCMovement.isMoving(bot)) {
             return; // a live chase/approach walk owns the bot; never re-target it mid-flight
         }
@@ -2788,18 +2884,16 @@ public final class PqActions {
         // well past the old 3_000px (Ludi's towers are ~730px wide but 4575+ tall, and Orbis's
         // stage-1 cloud map is 2446px across), so a fixed radius silently blind-spots the far end of
         // a tall room - exactly the completeness this probe exists to restore.
-        List<MapObject> anywhere = BotLogic.checkForItemsOnFloor(bot, bot.getPosition(),
-                roomReachPx(bot.getMap()), itemIds);
         Point botPos = bot.getPosition();
+        List<MapObject> anywhere = BotLogic.checkForItemsOnFloor(bot, botPos, roomReachPx(room), itemIds);
+        if (anywhere.isEmpty() || bot.getMap() != room) return;
+        Predicate<MapItem> admits = lootAdmission(bot, room, botPos, PICKUP_REACH_SQ,
+                PartyDrops.MONSTERS_AND_REACTORS, null);
         double callerReachSq = radiusPx * radiusPx;
         MapItem nearest = null;
         double bestSq = Double.MAX_VALUE;
         for (MapObject o : anywhere) {
-            // botCanLoot already refuses picked-up drops, addressed hand-off piles,
-            // still-protected drops AND position-less drops; isFloorLoot additionally
-            // refuses multi-piece stacks (item-triggered reactors match their stack by
-            // identity).
-            if (!(o instanceof MapItem drop) || !canCollectFloorDrop(bot, drop)) {
+            if (!(o instanceof MapItem drop) || !admits.test(drop)) {
                 continue;
             }
             Point ip = drop.getPosition();
@@ -2807,13 +2901,13 @@ public final class PqActions {
             if (dsq <= callerReachSq) {
                 continue; // inside the caller's own radius would have matched already
             }
-            if (dsq < bestSq) {
+            if (dsq < bestSq && !LudiStages.refusesFloor(bot, ip)) {
                 bestSq = dsq;
                 nearest = drop;
             }
         }
         if (nearest != null) {
-            walkForPickup(bot, nearest);
+            walkForFloorDrop(bot, room, nearest, PICKUP_REACH_SQ);
         }
     }
 

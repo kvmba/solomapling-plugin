@@ -102,6 +102,16 @@ public class LudiPQBot extends PartyQuestBot {
     }
 
     @Override
+    protected String questChatPool(Beat beat) {
+        int mapId = getChr().getMapId();
+        if (beat == Beat.START && mapId != LudiPqData.ENTRY_MAP) return null;
+        if (beat != Beat.WORKING) return questName;
+        int stage = stageOf(mapId);
+        boolean fightRoom = stage == 1 || stage == 3 || LudiPqData.roomStage(mapId) == 4 || stage == 7 || stage == 9;
+        return fightRoom && !LudiStages.stageCleared(getChr(), stage) && hasLiveQuestMonster() ? questName : null;
+    }
+
+    @Override
     protected boolean workStage() {
         int mapId = getChr().getMapId();
         // The bonus rooms come FIRST: they are not a numbered stage (stageOf reads them as
@@ -266,22 +276,19 @@ public class LudiPQBot extends PartyQuestBot {
         return !(stageOf(mapId) == 5 && LudiStages.nearbyGuardCount(getChr()) > 0);
     }
 
-    /**
-     * The pass is the item the whole quest is about, and every LPQ collection stage earns it by
-     * killing at close range - so the combat beat scoops a pass the bot is standing on instead of
-     * leaving it for the next macro tick. Stages whose passes come out of a box (2, 4, 5) get the
-     * same treatment: those drops land at the box the bot is working, not across the room.
-     *
-     * <p>Stage 7 is omitted on purpose: its Rombard is summoned at a fixed spawn point and the
-     * stage's own beat already walks to that drop; a stepped-on sweep there adds nothing.
-     */
+    private static final int[] PASS_LOOT = {LudiPqData.PASS};
+
+    /** The climb, crate puzzle, altar and bonus rooms must never steer toward a stray pass. */
     @Override
     protected int[] steppedOnLootIds() {
-        int mapId = getChr().getMapId();
-        if (mapId == LudiPqData.STAGE_9 || mapId == LudiPqData.BONUS_MAP || mapId == LudiPqData.BONUS_TAIL_MAP) {
-            return super.steppedOnLootIds(); // altar offerings and bonus drops stay on the floor
-        }
-        return new int[]{LudiPqData.PASS};
+        return wantsQuestLoot(LudiPqData.PASS) ? PASS_LOOT : super.steppedOnLootIds();
+    }
+
+    @Override
+    protected boolean wantsQuestLoot(int itemId) {
+        int stage = stageOf(getChr().getMapId());
+        return itemId == LudiPqData.PASS && stage > 0 && stage < 8 && stage != 6
+                && !LudiStages.stageCleared(getChr(), stage);
     }
 
     /**

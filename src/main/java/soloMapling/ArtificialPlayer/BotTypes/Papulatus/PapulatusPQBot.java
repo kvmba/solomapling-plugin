@@ -73,6 +73,15 @@ public class PapulatusPQBot extends PartyQuestBot {
     }
 
     @Override
+    protected String questChatPool(Beat beat) {
+        return switch (beat) {
+            case START -> !isRunCleared() && !hasLiveQuestMonster() ? questName : null;
+            case WORKING -> !isRunCleared() && hasLiveQuestMonster() ? questName : null;
+            default -> questName;
+        };
+    }
+
+    @Override
     protected boolean workStage() {
         if (isRunCleared()) {
             settleRewardRoom(2041025);

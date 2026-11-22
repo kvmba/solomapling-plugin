@@ -62,6 +62,12 @@ public class PyramidPQBot extends PartyQuestBot {
     }
 
     @Override
+    protected String questChatPool(Beat beat) {
+        if (isResultRoom(getChr().getMapId()) || beat == Beat.WORKING && !hasLiveQuestMonster()) return null;
+        return questName;
+    }
+
+    @Override
     protected boolean workStage() {
         if (isResultRoom(getChr().getMapId())) {
             settleRewardRoom(2103013);
