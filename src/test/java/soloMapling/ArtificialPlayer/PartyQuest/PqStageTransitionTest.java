@@ -28,6 +28,7 @@ import soloMapling.ArtificialPlayer.BotTypes.BossRush.BossRushPQBot;
 import soloMapling.ArtificialPlayer.BotTypes.Dojo.DojoPQBot;
 import soloMapling.ArtificialPlayer.BotTypes.Ellin.EllinPQBot;
 import soloMapling.ArtificialPlayer.BotTypes.Henesys.HenesysPQBot;
+import soloMapling.ArtificialPlayer.BotTypes.Henesys.HenesysPqData;
 import soloMapling.ArtificialPlayer.BotTypes.Horntail.HorntailPQBot;
 import soloMapling.ArtificialPlayer.BotTypes.Kerning.KerningPQBot;
 import soloMapling.ArtificialPlayer.BotTypes.Kerning.KerningPqData;
@@ -553,6 +554,29 @@ class PqStageTransitionTest {
             bot.updateState();
             actions.verify(() -> PqActions.walkThroughPortal(member, exit));
             actions.verify(() -> PqActions.waitNearPuzzleNpc(member, OrbisPqData.EAK));
+        }
+    }
+
+    @Test
+    void henesysChatSwitchesFromPlantingToGuardingInTheSameRoom() {
+        place(member, room(HenesysPqData.ENTRY_MAP));
+        when(member.getEventInstance()).thenReturn(instance);
+        try (var generation = mockStatic(BotGeneration.class)) {
+            PartyQuestBot bot = new HenesysPQBot(member);
+            when(instance.getIntProperty("stage")).thenReturn(HenesysPqData.FLOWERS_TO_BLOOM - 1);
+            assertEquals("HenesysPQ", bot.questChatPool(PartyQuestBot.Beat.WORKING));
+
+            when(instance.getIntProperty("stage")).thenReturn(HenesysPqData.FLOWERS_TO_BLOOM);
+            assertEquals("HenesysPQ.guard", bot.questChatPool(PartyQuestBot.Beat.START));
+            assertEquals("HenesysPQ.guard", bot.questChatPool(PartyQuestBot.Beat.WORKING));
+            assertEquals("HenesysPQ.guard", bot.questChatPool(PartyQuestBot.Beat.CLEAR));
+
+            when(instance.getProperty("1stageclear")).thenReturn("true");
+            assertNull(bot.questChatPool(PartyQuestBot.Beat.WORKING));
+            assertEquals("HenesysPQ", bot.questChatPool(PartyQuestBot.Beat.CLEAR));
+
+            place(member, room(HenesysPqData.BONUS_MAP));
+            assertNull(bot.questChatPool(PartyQuestBot.Beat.WORKING));
         }
     }
 

@@ -1510,7 +1510,7 @@ public final class BotPetFollower {
      */
     static void collectLoot(Character chr, MapleMap map, Pet[] pets, BotPetConfig config) {
         long now = System.currentTimeMillis();
-        boolean kerningStageOne = map.getId() == KerningPqData.STAGE_1;
+        int mapId = map.getId();
         for (int idx = 0; idx < pets.length; idx++) {
             Pet pet = pets[idx];
             if (pet == null) {
@@ -1547,8 +1547,9 @@ public final class BotPetFollower {
                 if (!(mapItem.getDropper() instanceof Monster)) {
                     continue;
                 }
-                // Personal coupons must go through the member's quota and progress checks.
-                if (kerningStageOne && mapItem.getItemId() == KerningPqData.COUPON) {
+                // The party quest assigns a collector for these drops.
+                if ((mapId == KerningPqData.STAGE_1 && mapItem.getItemId() == KerningPqData.COUPON)
+                        || (mapId == KerningPqData.STAGE_5 && mapItem.getItemId() == KerningPqData.PASS)) {
                     continue;
                 }
                 if (!DropCommands.botCanLoot(chr, mapItem)) {

@@ -101,10 +101,10 @@ class BotSkillLevelGateTest {
     void aPinnedThirdJobAtLobbyLevelHitsInTheSecondJobBand() {
         assertEquals(2, BotSkillLevelGate.tierForLevel(38), "level 38 is a 2nd-job level");
         // Raw tier 3 (the job the bot actually holds) must still be capped to the 2nd-job band:
-        // 171..443 with the level ramp (1 + 38/250) is 197..510 per line.
+        // 171..443 with the level ramp (1 + 38/250), then halved, is 98..255 per line.
         for (int i = 0; i < 200; i++) {
             int line = BotDamageModel.rollLine(3, 38, BotDamageModel.PLAIN_SWING_PERCENT);
-            assertTrue(line >= 196 && line <= 511,
+            assertTrue(line >= 98 && line <= 255,
                     "a level-38 3rd-job swing must roll in the 2nd-job band, got " + line);
         }
     }
@@ -112,11 +112,18 @@ class BotSkillLevelGateTest {
     /** A genuine 4th-job bot (level 130) keeps its own band - the cap must not flatten everyone. */
     @Test
     void aRealFourthJobberKeepsItsOwnBand() {
-        // 1098..2549 with the level ramp (1 + 130/250) is 1669..3874.
+        // 1098..2549 with the level ramp (1 + 130/250), then halved, is 834..1937 per line.
         for (int i = 0; i < 200; i++) {
             int line = BotDamageModel.rollLine(4, 130, BotDamageModel.PLAIN_SWING_PERCENT);
-            assertTrue(line >= 1668 && line <= 3875,
+            assertTrue(line >= 834 && line <= 1937,
                     "level-130 4th-job swing stays in the 4th-job band, got " + line);
         }
+    }
+
+    @Test
+    void halvesDamageWithoutTurningAHitIntoAMiss() {
+        assertEquals(100, BotDamageModel.scaleDamage(200));
+        assertEquals(100, BotDamageModel.scaleDamage(201));
+        assertEquals(1, BotDamageModel.scaleDamage(1));
     }
 }

@@ -124,8 +124,8 @@ public final class BotShadowMeso {
         // Mirror all three - a broke bot still throws, the wallet just stops draining.
         int money = moneyCon + ThreadLocalRandom.current().nextInt(Math.max(1, moneyCon / 2));
         int charge = Math.min(money, bot.getMeso());
-        // The host's SHADOW_MESO line price, keyed on the level-table moneyCon.
-        int perLine = (int) Math.floor(moneyCon * 10 * 1.5);
+        // The host's SHADOW_MESO formula, with the same damage reduction as the other bot hits.
+        int perLine = BotDamageModel.scaleDamage(moneyCon * 15);
 
         Map<Integer, List<Integer>> mobDamage = new LinkedHashMap<>();
         for (Monster mob : targets) {

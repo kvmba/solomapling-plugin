@@ -18,8 +18,8 @@ import java.util.concurrent.ThreadLocalRandom;
  *
  * <p>{@link #TIER_BAND} is that formula's value for a 100%-damage single-line swing minus the level
  * ramp, i.e. the bot's raw attack power at its advancement. The skill's own WZ percentage is applied
- * on top, so Power Strike (260%) and Thunderbolt (60%) land where a real player's would instead of
- * both receiving one flat band.
+ * on top, so Power Strike (260%) and Thunderbolt (60%) keep their relative strength. The final
+ * roll is halved so bots support rather than outdamage players.
  *
  * <p>Two things this replaces, both measured against the formula above:
  * <ul>
@@ -86,7 +86,11 @@ public final class BotDamageModel {
         if (percent != PLAIN_SWING_PERCENT) {
             base = (int) Math.round(base * (percent / 100.0));
         }
-        return Math.max(1, base);
+        return scaleDamage(base);
+    }
+
+    static int scaleDamage(int damage) {
+        return Math.max(1, damage / 2);
     }
 
     /**

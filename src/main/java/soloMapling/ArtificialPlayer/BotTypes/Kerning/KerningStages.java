@@ -57,7 +57,7 @@ public final class KerningStages {
     static final class CouponRun {
         final EventInstanceManager instance;
         private long claimAtMs;
-        private long collectAtMs;
+        private volatile long collectAtMs;
         private boolean completionAnnounced;
 
         CouponRun(EventInstanceManager instance) {
@@ -65,7 +65,8 @@ public final class KerningStages {
         }
 
         boolean canCollect() {
-            return collectAtMs == 0 || GCMovement.movementNowMs() >= collectAtMs;
+            long deadline = collectAtMs;
+            return deadline == 0 || GCMovement.movementNowMs() >= deadline;
         }
 
         void work(Character bot, LongConsumer wake) {
@@ -238,12 +239,7 @@ public final class KerningStages {
     // Stage 5 - the boss
     // =========================================================================
 
-    /**
-     * Fight the stage-five boss.
-     *
-     * <p>Collect the ten passes the turn-in checks, then use the same NPC delivery post as stage 1.
-     */
-    public static void fightBoss(Character bot) {
-        PqActions.collectForLeader(bot, PASS_LOOT_IDS, BOSS_PASSES_WANTED, KerningPqData.NPC_CLOTO);
+    static boolean needsBossPasses(Character bot) {
+        return PqActions.needsHuntForLeader(bot, KerningPqData.PASS, BOSS_PASSES_WANTED);
     }
 }

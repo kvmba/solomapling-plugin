@@ -3,6 +3,7 @@ package soloMapling.ArtificialPlayer.BotTypes.Kerning;
 import org.gms.client.Character;
 import org.gms.scripting.event.EventInstanceManager;
 import soloMapling.ArtificialPlayer.BotGeneration;
+import soloMapling.ArtificialPlayer.BotSM;
 import soloMapling.ArtificialPlayer.PartyQuest.PartyQuestBot;
 import soloMapling.ArtificialPlayer.PartyQuest.PositionCombination;
 import soloMapling.ArtificialPlayer.PartyQuest.PqActions;
@@ -29,7 +30,7 @@ import java.util.concurrent.locks.ReentrantLock;
 public class KerningPQBot extends PartyQuestBot {
 
     private final ReentrantLock couponWork = new ReentrantLock();
-    private KerningStages.CouponRun couponRun;
+    private volatile KerningStages.CouponRun couponRun;
 
     public KerningPQBot(Character character) {
         super(character);
@@ -77,42 +78,47 @@ public class KerningPQBot extends PartyQuestBot {
 
     @Override
     protected void combatSweep(Character bot) {
-        if (bot.getMapId() != KerningPqData.STAGE_1) {
+        int mapId = bot.getMapId();
+        boolean coupons = mapId == KerningPqData.STAGE_1;
+        if (!coupons && mapId != KerningPqData.STAGE_5) {
             super.combatSweep(bot);
             return;
         }
-        if (!KerningStages.needsCoupons(bot, couponRun)) {
+        if (getState() == BotState.PAUSE || !(coupons ? KerningStages.needsCoupons(bot, couponRun)
+                : !KerningStages.stageCleared(bot, 5) && KerningStages.needsBossPasses(bot))) {
+            PqActions.stopPartyLoot(bot);
             PqActions.stopHunting(bot);
             return;
         }
-        switch (PqActions.collectPartyMonsterLoot(bot, KerningStages.COUPON_LOOT_IDS)) {
+        int[] lootIds = coupons ? KerningStages.COUPON_LOOT_IDS : KerningStages.PASS_LOOT_IDS;
+        switch (PqActions.collectPartyMonsterLoot(bot, lootIds, KerningPQBot::eligibleLootPeer)) {
             case NONE -> PqActions.seekAndAttack(bot);
-            case COLLECTING -> { }
+            case COLLECTING -> {
+                if (!coupons) PqActions.attack(bot);
+            }
             case PICKED_UP -> {
-                EventInstanceManager instance = bot.getEventInstance();
-                if (instance != null && bot.getMapId() == KerningPqData.STAGE_1) {
-                    couponRun(instance).pickedUp(bot);
+                if (coupons) {
+                    EventInstanceManager instance = bot.getEventInstance();
+                    if (instance != null && bot.getMapId() == mapId) couponRun(instance).pickedUp(bot);
                 }
             }
         }
     }
 
+    private static boolean eligibleLootPeer(BotSM other) {
+        if (!(other instanceof KerningPQBot peer) || !peer.getRunning() || peer.getState() == BotState.PAUSE
+                || peer.death().isCorpse() || peer.status().isFrozen()) return false;
+        Character bot = peer.getChr();
+        return bot.getMapId() != KerningPqData.STAGE_1 || KerningStages.needsCoupons(bot, peer.couponRun);
+    }
+
     @Override
     protected boolean fightsOnSweep() {
-        Character bot = getChr();
-        return switch (bot.getMapId()) {
-            case KerningPqData.STAGE_5 -> !KerningStages.stageCleared(bot, 5)
-                    && PqActions.needsHuntForLeader(bot, KerningPqData.PASS, KerningStages.BOSS_PASSES_WANTED);
+        return switch (getChr().getMapId()) {
             case KerningPqData.BONUS_MAP -> hasPlayerInRunRoom(KerningPqData.BONUS_MAP);
             case KerningPqData.EXIT_MAP -> false;
             default -> true;
         };
-    }
-
-    @Override
-    protected int[] steppedOnLootIds() {
-        return getChr().getMapId() == KerningPqData.STAGE_5
-                ? KerningStages.PASS_LOOT_IDS : super.steppedOnLootIds();
     }
 
     private KerningStages.CouponRun couponRun(EventInstanceManager instance) {
@@ -174,7 +180,9 @@ public class KerningPQBot extends PartyQuestBot {
                     }
                     return false;
                 }
-                KerningStages.fightBoss(getChr());
+                if (!KerningStages.needsBossPasses(getChr())) {
+                    PqActions.deliverAndWait(getChr(), KerningPqData.PASS, KerningPqData.NPC_CLOTO);
+                }
             }
             default -> {
                 return false;

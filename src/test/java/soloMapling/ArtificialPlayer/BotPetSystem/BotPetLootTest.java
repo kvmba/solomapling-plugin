@@ -13,6 +13,8 @@ import org.gms.service.ConfigService;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
+import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.springframework.context.ApplicationContext;
 import org.springframework.context.MessageSource;
@@ -93,32 +95,33 @@ class BotPetLootTest {
         assertTrue(DropCommands.botCanLoot(bot, new MapItem(key, at, mock(Monster.class), bot, null, (byte) 2, false)));
     }
 
-    @Test
-    void aPetLeavesKerningCouponsForTheMemberButStillCollectsOtherDrops() {
+    @ParameterizedTest
+    @ValueSource(ints = {KerningPqData.STAGE_1, KerningPqData.STAGE_5})
+    void aPetLeavesKerningTicketsForTheMemberButStillCollectsOtherDrops(int mapId) {
         Character bot = mock(Character.class);
         MapleMap map = mock(MapleMap.class);
         Pet pet = mock(Pet.class);
         Monster monster = mock(Monster.class);
-        MapItem coupon = mock(MapItem.class);
+        MapItem ticket = mock(MapItem.class);
         MapItem ordinaryDrop = mock(MapItem.class);
         Point pos = new Point();
         int petId = 987_641;
 
-        when(map.getId()).thenReturn(KerningPqData.STAGE_1);
+        when(map.getId()).thenReturn(mapId);
         when(bot.isEquippedItemPouch((byte) 0)).thenReturn(true);
         when(pet.getUniqueId()).thenReturn(petId);
         when(pet.getPos()).thenReturn(pos);
-        when(coupon.getItemId()).thenReturn(KerningPqData.COUPON);
-        when(coupon.getDropper()).thenReturn(monster);
+        when(ticket.getItemId()).thenReturn(mapId == KerningPqData.STAGE_1 ? KerningPqData.COUPON : KerningPqData.PASS);
+        when(ticket.getDropper()).thenReturn(monster);
         when(ordinaryDrop.getItemId()).thenReturn(2000000);
         when(ordinaryDrop.getDropper()).thenReturn(monster);
         when(map.getMapObjectsInRange(eq(pos), anyDouble(), eq(List.of(MapObjectType.ITEM))))
-                .thenReturn(List.of(coupon, ordinaryDrop));
+                .thenReturn(List.of(ticket, ordinaryDrop));
 
         try (var drops = mockStatic(DropCommands.class)) {
             drops.when(() -> DropCommands.botCanLoot(eq(bot), any(MapItem.class))).thenReturn(true);
             BotPetFollower.collectLoot(bot, map, new Pet[]{pet}, BotPetConfig.defaults());
-            verify(bot, never()).pickupItem(coupon, 0);
+            verify(bot, never()).pickupItem(ticket, 0);
             verify(bot).pickupItem(ordinaryDrop, 0);
         } finally {
             BotPetFollower.forgetPet(petId);

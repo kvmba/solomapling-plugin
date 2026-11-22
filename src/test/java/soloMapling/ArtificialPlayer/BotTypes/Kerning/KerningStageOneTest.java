@@ -6,6 +6,7 @@ import org.gms.client.inventory.InventoryType;
 import org.gms.client.inventory.Item;
 import org.gms.manager.ServerManager;
 import org.gms.net.server.world.Party;
+import org.gms.net.server.world.PartyCharacter;
 import org.gms.property.ServiceProperty;
 import org.gms.scripting.event.EventInstanceManager;
 import org.gms.server.life.Monster;
@@ -19,12 +20,15 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.MockedStatic;
 import org.springframework.context.ApplicationContext;
 import org.springframework.context.MessageSource;
 import soloMapling.ArtificialPlayer.BotAttackSystem.BotAttackDriver;
 import soloMapling.ArtificialPlayer.BotCommandsPack.SocialCommands;
 import soloMapling.ArtificialPlayer.BotGeneration;
+import soloMapling.ArtificialPlayer.BotMessagingSystem.CharacterStorage;
 import soloMapling.ArtificialPlayer.GCMoveSystem.GCMovement;
 import soloMapling.ArtificialPlayer.PartyQuest.PqActions;
 import soloMapling.Environment.BotMessages;
@@ -109,6 +113,7 @@ class KerningStageOneTest {
     @AfterEach
     void clearSeekState() {
         PqActions.clearSeekState(BOT_ID);
+        PqActions.clearSeekState(BOT_ID + 1);
     }
 
     @Test
@@ -130,7 +135,7 @@ class KerningStageOneTest {
             bot.grindTick();
             assertEquals(-1, question);
             assertTrue(lines.isEmpty());
-            actions.verify(() -> PqActions.collectPartyMonsterLoot(member, loot), never());
+            actions.verify(() -> PqActions.collectPartyMonsterLoot(eq(member), eq(loot), any()), never());
             actions.verify(() -> PqActions.seekAndAttack(member), never());
 
             ticks.clearInvocations();
@@ -141,7 +146,7 @@ class KerningStageOneTest {
             assertInCollectionPool(lines.getFirst(), "start", target);
 
             bot.grindTick(); // knowing the answer does not let the combat sweep leave yet
-            actions.verify(() -> PqActions.collectPartyMonsterLoot(member, loot), never());
+            actions.verify(() -> PqActions.collectPartyMonsterLoot(eq(member), eq(loot), any()), never());
             actions.verify(() -> PqActions.seekAndAttack(member), never());
             ticks.verify(() -> BotTickService.requestEarlierTick(eq(BOT_ID), any(Runnable.class),
                     longThat(delay -> delay >= 600 && delay <= 3_000)));
@@ -149,10 +154,10 @@ class KerningStageOneTest {
             movement.when(GCMovement::movementNowMs).thenReturn(8_100L);
             coupons = target - 2;
             bot.workStage(); // inventory isn't a pickup event
-            actions.when(() -> PqActions.collectPartyMonsterLoot(member, loot)).thenReturn(NONE);
+            actions.when(() -> PqActions.collectPartyMonsterLoot(eq(member), eq(loot), any())).thenReturn(NONE);
             bot.grindTick(); // no pickup on this beat
             assertEquals(1, lines.size());
-            actions.when(() -> PqActions.collectPartyMonsterLoot(member, loot)).thenAnswer(call -> {
+            actions.when(() -> PqActions.collectPartyMonsterLoot(eq(member), eq(loot), any())).thenAnswer(call -> {
                 coupons++;
                 return PICKED_UP;
             });
@@ -168,7 +173,7 @@ class KerningStageOneTest {
             assertEquals(target, coupons);
             assertEquals(3, lines.size());
             actions.verify(() -> PqActions.talkTo(member, NPC_CLOTO));
-            actions.verify(() -> PqActions.collectPartyMonsterLoot(member, loot), times(3));
+            actions.verify(() -> PqActions.collectPartyMonsterLoot(eq(member), eq(loot), any()), times(3));
             actions.verify(() -> PqActions.seekAndAttack(member));
             actions.verify(() -> PqActions.attack(member), never());
         }
@@ -293,7 +298,7 @@ class KerningStageOneTest {
             actions.verify(() -> PqActions.handItemsToLeaderAfterStage(member, PASS, NPC_CLOTO), times(2));
             actions.verify(() -> PqActions.waitNearStageNpc(member, NPC_CLOTO), times(2));
             actions.verify(() -> PqActions.handItemsToLeader(member, PASS), never());
-            actions.verify(() -> PqActions.collectPartyMonsterLoot(member, new int[]{COUPON}), never());
+            actions.verify(() -> PqActions.collectPartyMonsterLoot(eq(member), eq(new int[]{COUPON}), any()), never());
             actions.verify(() -> PqActions.seekAndAttack(member), never());
         }
     }
@@ -314,7 +319,7 @@ class KerningStageOneTest {
             bot.grindTick(); // still stopped after the leader submits the passes
             bot.workStage();
             actions.verify(() -> PqActions.waitNearStageNpc(member, NPC_CLOTO), times(3));
-            actions.verify(() -> PqActions.collectPartyMonsterLoot(member, new int[]{COUPON}), never());
+            actions.verify(() -> PqActions.collectPartyMonsterLoot(eq(member), eq(new int[]{COUPON}), any()), never());
             actions.verify(() -> PqActions.seekAndAttack(member), never());
         }
     }
@@ -533,6 +538,82 @@ class KerningStageOneTest {
         }
     }
 
+    @ParameterizedTest
+    @ValueSource(ints = {STAGE_1, STAGE_5})
+    void onlyTheCloserBotClaimsTheDropUntilItsWalkFails(int mapId) {
+        MapleMap room = member.getMap();
+        when(room.getId()).thenReturn(mapId);
+        when(member.getMapId()).thenReturn(mapId);
+        when(member.getPosition()).thenReturn(new Point());
+        question = 1;
+        KerningPQBot closer = addTeammate(100);
+        Character near = closer.getChr();
+        Point destination = new Point(300, 0);
+        int itemId = mapId == STAGE_1 ? COUPON : PASS;
+        MapItem drop = new MapItem(new Item(itemId, (short) 0, (short) 1), destination,
+                mock(Monster.class), member, null, (byte) 1, false);
+        stubFloorCoupons(drop);
+        var failure = new AtomicReference<Runnable>();
+        try (var attacks = mockStatic(BotAttackDriver.class); var movement = mockStatic(GCMovement.class);
+             var bots = mockStatic(CharacterStorage.class); var chat = mockStatic(SocialCommands.class)) {
+            bots.when(() -> CharacterStorage.getBotById(BOT_ID)).thenReturn(bot);
+            bots.when(() -> CharacterStorage.getBotById(BOT_ID + 1)).thenReturn(closer);
+            movement.when(() -> GCMovement.hasGraph(any())).thenReturn(true);
+            movement.when(() -> GCMovement.canPathTo(any(), eq(destination.x), eq(destination.y))).thenReturn(true);
+            movement.when(() -> GCMovement.move(same(near), eq(destination.x), eq(destination.y), any(), any()))
+                    .thenAnswer(call -> {
+                        failure.set(call.getArgument(4));
+                        return null;
+                    });
+
+            if (mapId == STAGE_5) {
+                bot.workStage();
+                closer.workStage();
+                movement.verify(() -> GCMovement.move(any(), anyInt(), anyInt(), any(), any()), never());
+            }
+
+            bot.grindTick(); // the farther bot's tick runs first
+            closer.grindTick();
+            movement.verify(() -> GCMovement.move(eq(member), anyInt(), anyInt(), any(), any()), never());
+            movement.verify(() -> GCMovement.move(eq(near), eq(destination.x), eq(destination.y), any(), any()));
+            attacks.verify(() -> BotAttackDriver.botAttack(member));
+
+            movement.when(() -> GCMovement.moveTargetOf(near)).thenReturn(destination);
+            when(member.getPosition()).thenReturn(destination);
+            bot.grindTick(); // walking past the drop does not steal the existing claim
+            verify(member, never()).pickupItem(drop);
+
+            failure.get().run();
+            bot.grindTick();
+            verify(member).pickupItem(drop);
+        }
+    }
+
+    @Test
+    void equalDistancesUseCharacterIdAndAnUnreachableWinnerDoesNotBlockTheDrop() {
+        question = 1;
+        when(member.getPosition()).thenReturn(new Point());
+        KerningPQBot teammate = addTeammate(400);
+        Character other = teammate.getChr();
+        Point destination = new Point(200, 0);
+        stubFloorCoupons(couponDrop(member, destination));
+
+        try (var attacks = mockStatic(BotAttackDriver.class); var movement = mockStatic(GCMovement.class);
+             var bots = mockStatic(CharacterStorage.class)) {
+            bots.when(() -> CharacterStorage.getBotById(BOT_ID)).thenReturn(bot);
+            bots.when(() -> CharacterStorage.getBotById(BOT_ID + 1)).thenReturn(teammate);
+            movement.when(() -> GCMovement.hasGraph(any())).thenReturn(true);
+            movement.when(() -> GCMovement.canPathTo(any(), eq(destination.x), eq(destination.y))).thenReturn(true);
+
+            teammate.grindTick();
+            movement.verify(() -> GCMovement.move(eq(other), anyInt(), anyInt(), any(), any()), never());
+
+            movement.when(() -> GCMovement.canPathTo(member, destination.x, destination.y)).thenReturn(false);
+            teammate.grindTick();
+            movement.verify(() -> GCMovement.move(eq(other), eq(destination.x), eq(destination.y), any(), any()));
+        }
+    }
+
     @Test
     void doesNotPickUpACouponFromTheRoomTheMemberJustLeft() {
         question = 1;
@@ -563,7 +644,8 @@ class KerningStageOneTest {
                     try (var combat = mockActions(); var movement = mockStatic(GCMovement.class)) {
                         movement.when(() -> GCMovement.hasGraph(member)).thenReturn(true);
                         bot.grindTick();
-                        combat.verify(() -> PqActions.collectPartyMonsterLoot(member, new int[]{COUPON}), never());
+                        combat.verify(() -> PqActions.collectPartyMonsterLoot(
+                                eq(member), eq(new int[]{COUPON}), any()), never());
                         combat.verify(() -> PqActions.seekAndAttack(member), never());
                     }
                     return null;
@@ -585,6 +667,33 @@ class KerningStageOneTest {
                 mock(Monster.class), owner, owner.getClient(), (byte) 1, false);
     }
 
+    private KerningPQBot addTeammate(int x) {
+        MapleMap room = member.getMap();
+        int mapId = member.getMapId();
+        Party party = member.getParty();
+        Character teammate = mock(Character.class);
+        when(teammate.getId()).thenReturn(BOT_ID + 1);
+        when(teammate.getHp()).thenReturn(100);
+        when(teammate.getInventory(InventoryType.EQUIPPED)).thenReturn(mock(Inventory.class));
+        when(teammate.getMap()).thenReturn(room);
+        when(teammate.getMapId()).thenReturn(mapId);
+        when(teammate.getPosition()).thenReturn(new Point(x, 0));
+        when(teammate.getEventInstance()).thenReturn(instance);
+        when(teammate.getParty()).thenReturn(party);
+        when(instance.gridCheck(teammate)).thenReturn(1);
+
+        PartyCharacter first = mock(PartyCharacter.class);
+        PartyCharacter second = mock(PartyCharacter.class);
+        when(first.getId()).thenReturn(BOT_ID);
+        when(second.getId()).thenReturn(BOT_ID + 1);
+        when(party.getMembers()).thenReturn(List.of(first, second));
+        try (var generation = mockStatic(BotGeneration.class)) {
+            KerningPQBot teammateBot = new KerningPQBot(teammate);
+            teammateBot.setRunning(true);
+            return teammateBot;
+        }
+    }
+
     private void stubFloorCoupons(MapItem... drops) {
         when(member.getMap().getMapObjectsInRange(any(Point.class), anyDouble(), eq(List.of(MapObjectType.ITEM))))
                 .thenAnswer(call -> {
@@ -599,7 +708,11 @@ class KerningStageOneTest {
         doAnswer(call -> {
             MapItem drop = call.getArgument(0);
             drop.setPickedUp(true);
-            coupons++;
+            if (drop.getItemId() == COUPON) {
+                coupons++;
+            } else {
+                passes++;
+            }
             return null;
         }).when(member).pickupItem(any(MapItem.class));
     }

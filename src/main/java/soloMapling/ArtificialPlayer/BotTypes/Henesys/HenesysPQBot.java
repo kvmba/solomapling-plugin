@@ -56,6 +56,15 @@ public class HenesysPQBot extends PartyQuestBot {
     }
 
     @Override
+    protected String questChatPool(Beat beat) {
+        if (beat == Beat.DOOR) return questName;
+        Character bot = getChr();
+        if (bot.getMapId() != HenesysPqData.ENTRY_MAP) return null;
+        if (HenesysStages.stageCleared(bot)) return beat == Beat.CLEAR ? questName : null;
+        return plantingDone() ? questName + ".guard" : questName;
+    }
+
+    @Override
     protected void combatSweep(Character bot) {
         if (PqActions.reactorBeatArmed(bot)) {
             if (bot.getMapId() == HenesysPqData.ENTRY_MAP && !plantingDone()) {

@@ -41,7 +41,9 @@ class PqStageChatTest {
     /** Keys the pack actually defines under {@code pq.chat.<scope>.<beat>[...]}: key -> count. */
     private static Map<String, Integer> poolSizes() {
         java.util.Map<String, Integer> sizes = new java.util.HashMap<>();
-        for (String quest : spawnedQuestNames()) {
+        List<String> scopes = spawnedQuestNames();
+        scopes.add("HenesysPQ.guard");
+        for (String quest : scopes) {
             for (PartyQuestBot.Beat beat : PartyQuestBot.Beat.values()) {
                 int n = poolSize("pq.chat." + quest + "." + beat.name().toLowerCase());
                 if (n > 0) {
@@ -137,6 +139,24 @@ class PqStageChatTest {
                     assertEquals(language.equals("zh-CN"), line.matches(".*\\p{IsHan}.*"), line);
                     assertEquals(!beat.equals("done"), line.contains("123"), line);
                     assertTrue(seen.add(line), line);
+                }
+            }
+        }
+    }
+
+    @Test
+    void moonBunnyGuardPoolsAreLocalizedWithoutPlantingInstructions() {
+        for (String language : List.of("en", "zh-CN")) {
+            SoloMaplingLanguageConfig.setLanguageTag(language);
+            BotMessages.invalidate();
+            for (String beat : List.of("start", "working", "clear")) {
+                String base = "pq.chat.HenesysPQ.guard." + beat;
+                int size = poolSize(base);
+                assertTrue(size > 0, base);
+                for (int i = 1; i <= size; i++) {
+                    String line = BotMessages.get(base + "." + i);
+                    assertEquals(language.equals("zh-CN"), line.matches(".*\\p{IsHan}.*"), line);
+                    assertFalse(line.matches("(?i).*(seed|plant|种子|种花).*"), line);
                 }
             }
         }

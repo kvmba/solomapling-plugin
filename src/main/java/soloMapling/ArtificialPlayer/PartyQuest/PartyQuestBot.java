@@ -621,7 +621,7 @@ public abstract class PartyQuestBot extends BotSM implements GrindTickRegistry.P
      * walking through an opened door only sometimes), and one shared quiet-until (see
      * {@link #maybeQuestChat}) so no two beats ever land back to back.
      */
-    enum Beat {
+    protected enum Beat {
         /** First tick inside the quest - the run is starting. */
         START(0.60),
         /** Mid-stage, while the work is actually going on. */
@@ -671,10 +671,15 @@ public abstract class PartyQuestBot extends BotSM implements GrindTickRegistry.P
         if (!GCMovement.isMapObserved(bot.getMap())) {
             return;
         }
-        String line = PqStageChat.line(questName, beat);
+        String line = PqStageChat.line(questChatPool(beat), beat);
         if (line != null) {
             SocialCommands.BotSpeak(bot, line);
         }
+    }
+
+    /** The quest-specific pool for the current stage; null keeps only the shared lines. */
+    protected String questChatPool(Beat beat) {
+        return questName;
     }
 
     /**
