@@ -50,7 +50,7 @@ class PqRecruitAreaTest {
                     var area = PqRecruitArea.forMap(map);
 
                     assertEquals(center, area.center());
-                    assertEquals(henesys ? 15 : 12, PqBotSpawner.recruitCount(point));
+                    assertEquals(henesys ? 15 : 9, PqBotSpawner.recruitCount(point));
                     assertEquals(henesys ? 350 : 300, area.radius());
                     environment.when(() -> EnvironmentManager.scaledAmbient(anyInt()))
                             .thenAnswer(call -> (int) call.getArgument(0) * 2);
@@ -152,7 +152,7 @@ class PqRecruitAreaTest {
         load.setAccessible(true);
         for (int[] town : new int[][]{
                 {100000200, 1434, 352, 350, 15},
-                {103000000, -540, 421, 300, 12}}) {
+                {103000000, -540, 421, 300, 9}}) {
             MapleMap map = (MapleMap) load.invoke(null, town[0]);
             var area = new PqRecruitArea(new Point(town[1], town[2]), town[3]);
             for (Point from : List.of(area.center(), map.getPortal(0).getPosition())) {

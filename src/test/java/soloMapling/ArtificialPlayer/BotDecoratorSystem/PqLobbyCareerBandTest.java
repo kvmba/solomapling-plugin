@@ -70,26 +70,6 @@ class PqLobbyCareerBandTest {
         }
     }
 
-    /**
-     * The bounds {@code PqBotSpawner.levelRange} draws from: the band's low end plus at most a third
-     * of it (min 9 levels), clamped to the quest's own maximum. A lobby must never seat a level its
-     * own eligibility test would reject.
-     */
-    @Test
-    void theDrawnSubBandStaysInsideTheQuestsOwnBand() {
-        for (PqRecruitPoints.Point point : allPoints()) {
-            int low = Math.max(1, point.minLevel());
-            int high = Math.min(point.maxLevel(), low + Math.max(9, (point.maxLevel() - low) / 3));
-            if (high < low) {
-                high = low;
-            }
-            for (int level = low; level <= high; level++) {
-                assertTrue(point.levelEligible(level),
-                        point.name() + " would seat level " + level + ", outside its own band");
-            }
-        }
-    }
-
     private static List<PqRecruitPoints.Point> allPoints() {
         List<PqRecruitPoints.Point> all = new ArrayList<>(PqRecruitPoints.ALL);
         all.add(PqRecruitPoints.ORBIS); // spawned by its own path, seated by the same rule

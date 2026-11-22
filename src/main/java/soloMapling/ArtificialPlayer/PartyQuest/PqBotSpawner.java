@@ -16,7 +16,6 @@ import soloMapling.server.SoloMaplingConstants;
 import java.awt.Point;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Random;
 import java.util.concurrent.ThreadLocalRandom;
 
 /**
@@ -37,9 +36,6 @@ import java.util.concurrent.ThreadLocalRandom;
  */
 public final class PqBotSpawner {
 
-    /** Levels are picked per bot, so the lobby does not look stamped out. */
-    private static final Random RANDOM = new Random();
-
     /**
      * How many parties' worth of bots each lobby holds. Matches the density the Orbis lobby has
      * had all along (ten to fifteen in a room sized for five), so the quest lobbies added here
@@ -47,6 +43,8 @@ public final class PqBotSpawner {
      */
     private static final int BOTS_PER_PARTY_MULTIPLE = 3;
 
+    private static final int FIRST_JOB_LEVEL = 10;
+    private static final int SECOND_JOB_LEVEL = 30;
     private static final List<Integer> FIRST_JOBS = List.of(100, 200, 300, 400, 500);
     private static final List<Integer> JOB_PATHS =
             List.of(110, 120, 130, 210, 220, 230, 310, 320, 410, 420, 510, 520);
@@ -100,13 +98,14 @@ public final class PqBotSpawner {
     }
 
     static List<Integer> recruitPaths(PqRecruitPoints.Point point) {
-        return point.maxLevel() < 30 ? FIRST_JOBS : JOB_PATHS;
+        // The quest ceiling is never drawn, so a level-30 cap cannot offer second jobs.
+        return point.maxLevel() <= SECOND_JOB_LEVEL ? FIRST_JOBS : JOB_PATHS;
     }
 
     private static List<Integer> plannedPaths(PqRecruitPoints.Point point, int count) {
         List<Integer> paths = recruitPaths(point);
         List<Integer> jobs = new ArrayList<>(count);
-        int level = point.maxLevel() < 30 ? 10 : 30;
+        int level = Math.min(point.maxLevel() - 1, SECOND_JOB_LEVEL);
         for (int i = 0; i < count; i++) {
             jobs.add(count >= paths.size() && i < paths.size() ? paths.get(i)
                     : BotDecorate.selectJobByLevel(level));
@@ -119,6 +118,21 @@ public final class PqBotSpawner {
                 ? CarnivalPqData.MAX_TEAM_SIZE * HALL_TEAMS
                 : point.botsToOffer(1) * BOTS_PER_PARTY_MULTIPLE;
         return Math.max(recruitPaths(point).size(), scaledAmbient(base));
+    }
+
+    static int minRecruitLevel(PqRecruitPoints.Point point) {
+        int jobFloor = point.maxLevel() <= SECOND_JOB_LEVEL ? FIRST_JOB_LEVEL : SECOND_JOB_LEVEL;
+        return Math.max(point.minLevel() + 1, jobFloor);
+    }
+
+    static int maxRecruitLevel(PqRecruitPoints.Point point) {
+        int max = point.maxLevel() - 1;
+        if (point.maxLevel() <= SECOND_JOB_LEVEL || point.equals(PqRecruitPoints.ORBIS)) {
+            return max;
+        }
+        // Keep the existing low-end bias for other lobbies without drawing either boundary.
+        int min = point.minLevel();
+        return Math.min(max, min + Math.max(9, (point.maxLevel() - min) / 3));
     }
 
     /**
@@ -134,10 +148,8 @@ public final class PqBotSpawner {
         if (map == null) {
             return List.of();
         }
-        int low = Math.max(point.minLevel(), point.maxLevel() >= 30 ? 30 : 10);
-        int high = point.equals(PqRecruitPoints.ORBIS) ? point.maxLevel()
-                : Math.max(low, Math.min(point.maxLevel(),
-                        point.minLevel() + Math.max(9, (point.maxLevel() - point.minLevel()) / 3)));
+        int low = minRecruitLevel(point);
+        int high = maxRecruitLevel(point);
         var portal = map.getPortal(0);
         PqRecruitArea area = PqRecruitArea.forMap(map);
         Point anchor = area != null ? area.center() : portal == null ? new Point() : portal.getPosition();
@@ -232,6 +244,7 @@ public final class PqBotSpawner {
         if (want <= 0 || lobbyId <= 0) {
             return List.of();
         }
+        var point = cpq2 ? CARNIVAL_2 : CARNIVAL;
         if (CarnivalPqData.isHall(lobbyId)) {
             var world = Server.getInstance().getWorld(SoloMaplingConstants.GameConstants.WORLD_SCANIA);
             int target = channel > 0 ? channel
@@ -241,14 +254,9 @@ public final class PqBotSpawner {
             if (targetChannel == null) {
                 return List.of();
             }
-            var point = cpq2 ? CARNIVAL_2 : CARNIVAL;
             return spawnRecruitBatch(point, BotTypeManager.BotType.CARNIVAL_PQ_BOT,
                     targetChannel, plannedPaths(point, want));
         }
-        // Level BEFORE conversion, exactly as spawnFor does: the arena reads the level when it
-        // validates the field's parties, and a bot converted first runs a tick at the wrong one.
-        int low = cpq2 ? CarnivalPqData.CPQ2_MIN_LEVEL : CarnivalPqData.CPQ1_MIN_LEVEL;
-        int high = cpq2 ? CarnivalPqData.CPQ2_MAX_LEVEL : CarnivalPqData.CPQ1_MAX_LEVEL;
         // A field lobby only ever holds one team (the arena's).
         int budget = Math.min(want, CarnivalPqData.MAX_TEAM_SIZE);
 
@@ -258,7 +266,7 @@ public final class PqBotSpawner {
         if (ids.isEmpty()) {
             return ids;
         }
-        levelRange(ids, low, Math.min(high, low + 9));
+        alignRecruitLevels(ids, point);
         BotTypeManager.setAndStartBots(ids, BotTypeManager.BotType.CARNIVAL_PQ_BOT);
         return ids;
     }
@@ -332,38 +340,16 @@ public final class PqBotSpawner {
         };
     }
 
-    /**
-     * Put every bot's level inside the quest's band - and its job back in line with that level.
-     *
-     * <p>Drawn from the band's low end upward rather than at random across the whole thing: the
-     * high ends run to 255, and a lobby of level-250 bots standing in Henesys would look wrong
-     * even though it is legal.
-     *
-     * <p>The job is re-rolled for the final level rather than kept from the spawn. A bot is
-     * decorated at the spawner's 10..80 default band, so a quest asking for 35-50 can pin a
-     * level-78 job (a "Chief Bandit", a "Hero") onto a level-38 character. Skill use is already
-     * gated by level (BotSkillLevelGate), but the LOOK and the damage tier are not - and a lobby
-     * of level-38 三转 bots standing next to a real 38-level player is exactly as wrong as the
-     * damage was. The base class is preserved (build the same class family - a warrior stays a
-     * warrior), only the advancement is re-derived from the level that was just drawn.
-     *
-     * <p>Re-rolling restyles the character, so the dress, weapon, title and level-derived detail
-     * data all have to follow: see {@link BotDecorate#alignCareerToLevel}.
-     */
-    private static void levelRange(List<Integer> botIds, int minLevel, int maxLevel) {
-        int low = Math.max(1, minLevel);
-        // A band a player would plausibly see: the bottom third of it, or at least ten levels of
-        // room, so a handful of bots do not all land on the same level.
-        int high = Math.min(maxLevel, low + Math.max(9, (maxLevel - low) / 3));
-        if (high < low) {
-            high = low;
-        }
+    /** Field bots start at generic levels; align their levels and careers before conversion. */
+    private static void alignRecruitLevels(List<Integer> botIds, PqRecruitPoints.Point point) {
+        int low = minRecruitLevel(point);
+        int high = maxRecruitLevel(point);
         for (int botId : botIds) {
             Character bot = BotHelpers.getCharFromChannelStorage(botId);
             if (bot == null) {
                 continue;
             }
-            bot.setLevel(low + RANDOM.nextInt((high - low) + 1));
+            bot.setLevel(ThreadLocalRandom.current().nextInt(low, high + 1));
             BotDecorate.alignCareerToLevel(bot);
         }
     }

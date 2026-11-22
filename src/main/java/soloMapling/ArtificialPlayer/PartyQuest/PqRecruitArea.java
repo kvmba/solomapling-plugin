@@ -26,7 +26,7 @@ record PqRecruitArea(Point center, int radius) {
         }
         var point = PqRecruitPoints.byName(npcId == 1012112 ? "HenesysPQ" : "KerningPQ");
         // A 40px berth per expected recruit, plus 100px of NPC clearance across the diameter.
-        // At normal population: 15 Henesys recruits -> 350px; 12 Kerning recruits -> 300px.
+        // At normal population: 15 Henesys recruits -> 350px; 9 Kerning recruits -> 300px.
         int radius = Math.max(300, PqBotSpawner.recruitCount(point) * 20 + 50);
         return new PqRecruitArea(npc.getPosition(), radius);
     }

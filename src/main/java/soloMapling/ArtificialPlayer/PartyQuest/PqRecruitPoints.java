@@ -84,7 +84,7 @@ public final class PqRecruitPoints {
             new Point("BossRushPQ",   970030000,  10, 255, 1, 6),
             // Duarte's menu map (the Pyramid Dunes), where Nett's Pyramid is applied for. The
             // party version needs two members standing here, so a bot has to be one of them.
-            // Level band 40-60 is Duarte's own; the spawn's low-third draw leaves bots 40-49.
+            // Level band 40-60 is Duarte's own.
             new Point("Pyramid",      926010000,  40,  60, 2, 6),
             // Mu Lung Dojo's hall, where the master takes a party. Its rule is a 30-LEVEL SPREAD,
             // not an absolute band, so the numbers here only bound the spawn: the low-third draw
@@ -95,14 +95,12 @@ public final class PqRecruitPoints {
             // Ariant Coliseum's public lobby. The engine runs the match over an *expedition* and
             // refuses to start while any competitor is in a party, so these bots are never
             // party-invited: they enrol in the player's ARIANT expedition (see AriantExpedition)
-            // and are warped into the arena with the team. The band is the expedition's own
-            // 20-30 (the spawner's low-third draw seats them at 20-29).
+            // and are warped into the arena with the team. The band is the expedition's own.
             new Point("AriantPQ",     980010000,  20,  30, 2, 7),
             // The clocktower's machine room. Its script accepts 1-255, which is not a band worth
             // spawning from: a bot drawn at the script's floor would stand under a clock with
-            // 23,000,000 HP and contribute nothing. 95-145 keeps them in the third-job band the
-            // spawner's low-third draw turns into 95-111 - enough output to bring the clock down
-            // inside the quest's 45 minutes, and still eligible for the script's own test.
+            // 23,000,000 HP and contribute nothing. 95-145 keeps the low-end draw in the third
+            // job, with enough damage for the quest's 45-minute limit.
             new Point("PapulatusBattle", 220080000, 95, 145, 1, 6));
 
     /**

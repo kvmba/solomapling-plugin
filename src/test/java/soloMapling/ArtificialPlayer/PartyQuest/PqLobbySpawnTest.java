@@ -1,5 +1,6 @@
 package soloMapling.ArtificialPlayer.PartyQuest;
 
+import org.gms.client.Character;
 import org.gms.config.GameConfig;
 import org.gms.dao.entity.GameConfigDO;
 import org.gms.manager.ServerManager;
@@ -14,13 +15,18 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.mockito.MockedStatic;
 import org.springframework.context.ApplicationContext;
 import org.springframework.context.MessageSource;
+import soloMapling.ArtificialPlayer.BotDecoratorSystem.BotDecorate;
 import soloMapling.ArtificialPlayer.BotGeneration;
 import soloMapling.ArtificialPlayer.BotGrindSystem.BotSpotPicker;
+import soloMapling.ArtificialPlayer.BotHelpers;
 import soloMapling.ArtificialPlayer.BotTypeManager;
+import soloMapling.ArtificialPlayer.BotTypes.Carnival.CarnivalPqData;
 import soloMapling.Environment.EnvironmentManager;
+import soloMapling.Environment.PlatformPlacement;
 
 import java.awt.Point;
 import java.util.ArrayList;
@@ -110,7 +116,7 @@ class PqLobbySpawnTest {
     }
 
     @Test
-    void everyLobbyCreatesEveryCareerAtAnEligibleLevelOnTheRequestedChannel() {
+    void everyLobbyCreatesEveryCareerAtAnInteriorLevelOnTheRequestedChannel() {
         List<PqRecruitPoints.Point> points = new ArrayList<>(PqRecruitPoints.ALL);
         points.add(PqRecruitPoints.ORBIS);
         points.add(PqBotSpawner.CARNIVAL);
@@ -121,6 +127,10 @@ class PqLobbySpawnTest {
             var paths = PqBotSpawner.recruitPaths(point);
             var type = PqBotSpawner.botTypeFor(point.name());
             assertNotNull(type, point.name());
+            int low = PqBotSpawner.minRecruitLevel(point);
+            int high = PqBotSpawner.maxRecruitLevel(point);
+            assertTrue(point.minLevel() < low && low < high && high < point.maxLevel(),
+                    () -> point.name() + ": " + low + "-" + high);
 
             List<Integer> ids = PqBotSpawner.spawnRecruitBatch(point, type, channel, paths);
 
@@ -128,7 +138,8 @@ class PqLobbySpawnTest {
             var observedPaths = new HashSet<Integer>();
             for (Spawn spawn : created) {
                 observedPaths.add(spawn.job() / 10 * 10);
-                assertTrue(point.levelEligible(spawn.low()), point.name() + ": " + spawn);
+                assertTrue(spawn.low() > point.minLevel() && spawn.low() < point.maxLevel(),
+                        point.name() + ": " + spawn);
                 assertEquals(spawn.low(), spawn.high());
                 assertEquals(spawn.job() / 100, spawn.family());
                 assertEquals(2, spawn.channel());
@@ -150,7 +161,8 @@ class PqLobbySpawnTest {
             when(map.getId()).thenReturn(point.recruitMap());
             var area = PqRecruitArea.forMap(map);
 
-            PqBotSpawner.spawnRecruitBatch(point, PqBotSpawner.botTypeFor(name), channel, List.of(230));
+            PqBotSpawner.spawnRecruitBatch(point, PqBotSpawner.botTypeFor(name), channel,
+                    List.of(PqBotSpawner.recruitPaths(point).getFirst()));
 
             assertEquals(1, created.size());
             assertEquals(area.center(), created.getFirst().position());
@@ -160,18 +172,37 @@ class PqLobbySpawnTest {
     }
 
     @Test
-    void lowLevelLobbyUsesOnlyTheFiveFirstJobs() {
-        var point = new PqRecruitPoints.Point("low", 100, 10, 29, 2, 4);
-        var paths = PqBotSpawner.recruitPaths(point);
-        assertEquals(List.of(100, 200, 300, 400, 500), paths);
+    void levelThirtyCapsOfferAllInteriorLevelsAndOnlyFirstJobs() {
+        var kerning = PqRecruitPoints.byName("KerningPQ");
+        var ariant = PqRecruitPoints.byName("AriantPQ");
+        assertEquals(22, PqBotSpawner.minRecruitLevel(kerning));
+        assertEquals(21, PqBotSpawner.minRecruitLevel(ariant));
+        for (var point : List.of(kerning, ariant)) {
+            assertEquals(29, PqBotSpawner.maxRecruitLevel(point));
+            assertEquals(List.of(100, 200, 300, 400, 500), PqBotSpawner.recruitPaths(point));
+        }
+    }
 
-        PqBotSpawner.spawnRecruitBatch(
-                point, BotTypeManager.BotType.HENESYS_PQ_BOT, channel, paths);
+    @Test
+    void carnivalFieldRecruitsUseTheirEditionsInteriorBand() {
+        try (var placement = mockStatic(PlatformPlacement.class);
+             var characters = mockStatic(BotHelpers.class);
+             var decoration = mockStatic(BotDecorate.class)) {
+            List<Integer> ids = List.of(1_001);
+            for (boolean cpq2 : new boolean[]{false, true}) {
+                var point = cpq2 ? PqBotSpawner.CARNIVAL_2 : PqBotSpawner.CARNIVAL;
+                int field = cpq2 ? CarnivalPqData.lobbyForField2(0) : CarnivalPqData.lobbyForField(0);
+                Character bot = mock(Character.class);
+                placement.when(() -> PlatformPlacement.spawnBotsOnMap(1, field, 2)).thenReturn(ids);
+                characters.when(() -> BotHelpers.getCharFromChannelStorage(1_001)).thenReturn(bot);
 
-        assertEquals(5, created.size());
-        for (Spawn spawn : created) {
-            assertTrue(spawn.low() >= 10 && spawn.low() < 30);
-            assertEquals(0, spawn.job() % 100);
+                assertEquals(ids, PqBotSpawner.spawnCarnivalTeam(1, field, cpq2, 2));
+
+                var level = ArgumentCaptor.forClass(Integer.class);
+                verify(bot).setLevel(level.capture());
+                assertTrue(point.minLevel() < level.getValue() && level.getValue() < point.maxLevel());
+                decoration.verify(() -> BotDecorate.alignCareerToLevel(bot));
+            }
         }
     }
 
