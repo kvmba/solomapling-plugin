@@ -3,6 +3,7 @@ package soloMapling.ArtificialPlayer.GCMoveSystem;
 import org.gms.manager.ServerManager;
 import org.gms.property.ServiceProperty;
 import org.gms.server.maps.Foothold;
+import org.gms.server.maps.FootholdTree;
 import org.gms.server.maps.MapleMap;
 import org.gms.service.ConfigService;
 import org.junit.jupiter.api.BeforeAll;
@@ -17,6 +18,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
@@ -166,6 +168,44 @@ class StandingFootholdResolutionTest {
         assertDoesNotThrow(() -> BotPhysicsEngine.findGroundFoothold(null, new Point(0, 0)));
         assertNull(BotPhysicsEngine.findGroundFoothold(map, null));
         assertDoesNotThrow(() -> BotPhysicsEngine.findGroundFoothold(map, new Point(999999, 999999)));
+    }
+
+    @Test
+    void indexedSlopesKeepTheHostsPixelTruncationInBothDirections() {
+        var down = new Foothold(new Point(-48, 0), new Point(-8, 40), 1);
+        var up = new Foothold(new Point(8, 40), new Point(48, 0), 2);
+        MapleMap slopes = terrain(down, up);
+        for (Foothold slope : List.of(down, up)) {
+            for (int x = slope.getX1(); x <= slope.getX2(); x++) {
+                Point above = new Point(x, -1);
+                Point ground = slopes.getPointBelow(above);
+                assertNotNull(ground);
+                assertEquals(ground, BotPhysicsEngine.pointBelowIndexed(slopes, above));
+                assertSame(slope, BotPhysicsEngine.findBelowIndexed(slopes, ground));
+                assertNull(BotPhysicsEngine.findBelowIndexed(slopes, new Point(x, ground.y + 1)));
+            }
+        }
+    }
+
+    @Test
+    void landingPrefersTheReachedFloorButAllowsAForwardTangent() {
+        var tangent = new Foothold(new Point(1, 0), new Point(10, 0), 1);
+        var lower = new Foothold(new Point(-10, 5), new Point(10, 5), 2);
+        MapleMap room = terrain(tangent, lower);
+        Point start = new Point(0, 0);
+        assertSame(lower, BotPhysicsEngine.resolveAirCollision(room, start, new Point(1, 10)).foothold());
+        assertSame(tangent, BotPhysicsEngine.resolveAirCollision(room, start, new Point(1, 2)).foothold());
+        assertEquals(BotPhysicsEngine.AirCollisionType.NONE,
+                BotPhysicsEngine.resolveAirCollision(room, new Point(1, 0), new Point(1, 2)).type());
+    }
+
+    private static MapleMap terrain(Foothold... footholds) {
+        var room = new MapleMap(922019982, 0, 0, 922010000, 0f);
+        var tree = new FootholdTree(new Point(-100, -100), new Point(100, 100));
+        for (Foothold foothold : footholds) tree.insert(foothold);
+        room.setFootholds(tree);
+        room.setMapLineBoundings(-100, 100, -100, 100);
+        return room;
     }
 
     @Test

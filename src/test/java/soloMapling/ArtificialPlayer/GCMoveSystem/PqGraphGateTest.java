@@ -14,8 +14,15 @@ import org.springframework.context.ApplicationContext;
 
 import java.awt.Point;
 import java.util.List;
+import java.util.Set;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.atomic.AtomicReference;
 
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.RETURNS_DEEP_STUBS;
 import static org.mockito.Mockito.mock;
@@ -158,25 +165,25 @@ public class PqGraphGateTest {
         when(bot.getTotalMoveSpeedStat()).thenReturn(100);
         when(bot.getTotalJumpStat()).thenReturn(100);
 
-        org.junit.jupiter.api.Assertions.assertTrue(GCMovement.ensureGraph(bot),
-                "ensureGraph must produce a graph on the calling thread");
-        org.junit.jupiter.api.Assertions.assertNotNull(
+        assertTrue(GCMovement.ensureGraph(bot),
+                "ensureGraph must not return before the graph is ready");
+        assertNotNull(
                 BotNavigationGraphProvider.peekGraph(map, BotMovementProfile.fromCharacter(bot)),
                 "the exact-profile graph must be the one published, or every JUMP is withheld "
                         + "by tryExecuteJump's graph-identity gate");
-        org.junit.jupiter.api.Assertions.assertTrue(GCMovement.hasGraph(bot),
+        assertTrue(GCMovement.hasGraph(bot),
                 "hasGraph must report the graph ensureGraph just published");
         // Second call is a cache hit, not a re-bake: a rebuild would publish a NEW graph instance.
         BotNavigationGraph first = BotNavigationGraphProvider.peekGraph(
                 map, BotMovementProfile.fromCharacter(bot));
-        org.junit.jupiter.api.Assertions.assertTrue(GCMovement.ensureGraph(bot));
-        org.junit.jupiter.api.Assertions.assertSame(first, BotNavigationGraphProvider.peekGraph(
+        assertTrue(GCMovement.ensureGraph(bot));
+        assertSame(first, BotNavigationGraphProvider.peekGraph(
                         map, BotMovementProfile.fromCharacter(bot)),
                 "a cache hit must return the already-published graph, not rebuild it");
     }
 
     @Test
-    void hasGraphIsFalseUntilTheGraphIsPublished() {
+    void questCallerTakesOverQueuedWarmupWithoutLoadingAgain() throws Exception {
         // Synthetic id + geometry: a real map id may already be baked by another test in this JVM.
         MapleMap map = new MapleMap(922019981, 0, 0, 922010000, 0f);
         map.setMapLineBoundings(-4000, 4000, -4000, 4000);
@@ -190,10 +197,31 @@ public class PqGraphGateTest {
         when(bot.getTotalMoveSpeedStat()).thenReturn(100);
         when(bot.getTotalJumpStat()).thenReturn(100);
 
-        org.junit.jupiter.api.Assertions.assertFalse(GCMovement.hasGraph(bot),
-                "an unbaked map must report no graph");
-        org.junit.jupiter.api.Assertions.assertTrue(GCMovement.ensureGraph(bot));
-        org.junit.jupiter.api.Assertions.assertTrue(GCMovement.hasGraph(bot));
+        var field = BotNavigationGraphProvider.class.getDeclaredField("FAST_GRAPH_WARMUP_EXECUTOR");
+        field.setAccessible(true);
+        var warmups = (ThreadPoolExecutor) field.get(null);
+        var resumeWorkers = new CompletableFuture<Void>();
+        try {
+            for (int i = 0; i < warmups.getCorePoolSize(); i++) {
+                warmups.execute(resumeWorkers::join);
+            }
+            var previouslyQueued = Set.copyOf(warmups.getQueue());
+            BotMovementProfile profile = BotMovementProfile.fromCharacter(bot);
+            BotNavigationGraphProvider.warmGraphAsync(map, profile);
+            var queued = warmups.getQueue().stream().filter(task -> !previouslyQueued.contains(task)).toList();
+            assertTrue(queued.size() == 1 && warmups.getQueue().remove(queued.getFirst()));
+            assertFalse(GCMovement.hasGraph(bot));
+
+            assertTrue(GCMovement.ensureGraph(bot));
+            assertTrue(GCMovement.hasGraph(bot));
+            BotNavigationGraph graph = BotNavigationGraphProvider.peekGraph(map, profile);
+            assertNotNull(graph);
+            // What the deferred worker would do when it reaches this task.
+            queued.getFirst().run();
+            assertSame(graph, BotNavigationGraphProvider.peekGraph(map, profile));
+        } finally {
+            resumeWorkers.complete(null);
+        }
     }
 
     /**
@@ -205,7 +233,7 @@ public class PqGraphGateTest {
     void driverClimbsTheShelfChainWithNoFallback() throws Exception {
         MapleMap map = BotNavigationMapLoader.loadMapGeometry(STAGE_1);
         Sim sim = sim(map);
-        org.junit.jupiter.api.Assertions.assertTrue(
+        assertTrue(
                 GCMovement.ensureGraph(sim.bot()),
                 "ensureGraph must publish the exact-profile graph for this bot");
 
@@ -225,10 +253,10 @@ public class PqGraphGateTest {
                 break;
             }
         }
-        org.junit.jupiter.api.Assertions.assertTrue(
+        assertTrue(
                 Math.abs(sim.p().x - 136) <= 30 && Math.abs(sim.p().y - -572) <= 30,
                 "with the exact graph the bot must reach the -572 Ratz shelf, ended at " + sim.p());
-        org.junit.jupiter.api.Assertions.assertFalse(sim.st().graphWarmupFallback,
+        assertFalse(sim.st().graphWarmupFallback,
                 "once the graph is published the driver must never report fallback");
     }
 }

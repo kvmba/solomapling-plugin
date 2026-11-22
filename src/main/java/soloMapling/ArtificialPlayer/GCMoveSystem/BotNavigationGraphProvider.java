@@ -29,6 +29,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import static soloMapling.DebugUtilities.debugprint;
 
@@ -108,7 +109,7 @@ final class BotNavigationGraphProvider {
     // ~3.7% of a core at 1000 moving bots. This index turns those scans into a small per-map walk.
     // Maintained at both GRAPHS write sites (rebuildGraph and the async warm/load task).
     private static final Map<Integer, Set<GraphCacheKey>> GRAPH_KEYS_BY_MAP_ID = new ConcurrentHashMap<>();
-    private static final Map<GraphCacheKey, CompletableFuture<BotNavigationGraph>> PENDING_GRAPHS = new ConcurrentHashMap<>();
+    private static final Map<GraphCacheKey, GraphLoad> PENDING_GRAPHS = new ConcurrentHashMap<>();
     private static final Map<GraphCacheKey, GraphBuildReport> LAST_BUILD_REPORTS = new ConcurrentHashMap<>();
     private static final Map<Integer, Set<Integer>> COLLIDABLE_WALL_IDS_BY_MAP_ID = new ConcurrentHashMap<>();
     private static final Map<Integer, Set<Integer>> COLLIDABLE_FROM_BELOW_IDS_BY_MAP_ID = new ConcurrentHashMap<>();
@@ -404,6 +405,7 @@ final class BotNavigationGraphProvider {
         return getGraph(map, BotMovementProfile.base());
     }
 
+    /** Synchronous callers claim queued warmups instead of waiting behind unrelated maps. */
     static BotNavigationGraph getGraph(MapleMap map, BotMovementProfile movementProfile) {
         if (map == null) {
             return null;
@@ -558,49 +560,12 @@ final class BotNavigationGraphProvider {
         return rebuildGraph(map, BotMovementProfile.base());
     }
 
-    /**
-     * The exact-profile graph for this map, made available on the CALLING thread.
-     *
-     * <p>Quest bots call this and skip their tick until it answers: the warmup heuristic is not a
-     * substitute for navigation (no A*, so a shelf whose x sits inside the bot's own platform is
-     * never attempted), and joining a queued async warm would park the bot behind the whole
-     * server's cold-start map list - that queue is FIFO with no priority, which is the very
-     * failure this method exists to remove.
-     *
-     * <p>No cross-caller dedup: a party of six entering together may each build this one map on
-     * their own tick thread. That is bounded work (median 105ms, p90 390ms, worst 1.9s on the
-     * LPQ maps; a deserialize when the disk cache is present) and it never waits on a future this
-     * method does not own.
-     */
-    static BotNavigationGraph ensureGraphSync(MapleMap map, BotMovementProfile movementProfile) {
-        if (map == null) {
-            return null;
-        }
-        movementProfile = canonicalProfile(map, movementProfile);
-        GraphCacheKey key = GraphCacheKey.from(map.getId(), movementProfile);
-        BotNavigationGraph cached = GRAPHS.get(key);
-        if (cached != null) {
-            return cached;
-        }
-        // loadOrBuildGraph prefers the disk cache, so a duplicate of an in-flight async build
-        // usually costs a deserialize rather than a bake.
-        BotNavigationGraph graph = loadOrBuildGraph(map, movementProfile, key);
-        GRAPHS.put(key, graph);
-        GRAPH_KEYS_BY_MAP_ID.computeIfAbsent(map.getId(), ignored -> ConcurrentHashMap.newKeySet())
-                .add(key);
-        BotPhysicsEngine.invalidateWalkRegionLookup(map.getId());
-        return graph;
-    }
-
     static BotNavigationGraph rebuildGraph(MapleMap map, BotMovementProfile movementProfile) {
         GraphCacheKey key = GraphCacheKey.from(map.getId(), movementProfile);
         BotNavigationGraph rebuilt = buildGraph(map, movementProfile);
         GRAPHS.put(key, rebuilt);
-        GRAPH_KEYS_BY_MAP_ID.computeIfAbsent(map.getId(), ignored -> ConcurrentHashMap.newKeySet()).add(key);
-        // The map's region index changed with the graph - drop any memoized runtime lookup so
-        // physics can't keep querying the replaced graph's regions (BotPhysicsEngine).
-        BotPhysicsEngine.invalidateWalkRegionLookup(map.getId());
-        CompletableFuture<BotNavigationGraph> pending = PENDING_GRAPHS.remove(key);
+        onGraphPublished(key);
+        GraphLoad pending = PENDING_GRAPHS.remove(key);
         if (pending != null) {
             pending.complete(rebuilt);
         }
@@ -608,50 +573,59 @@ final class BotNavigationGraphProvider {
         return rebuilt;
     }
 
-    private static CompletableFuture<BotNavigationGraph> getOrStartGraphLoad(MapleMap map,
-                                                                             BotMovementProfile movementProfile,
-                                                                             GraphCacheKey key,
-                                                                             boolean async) {
-        BotNavigationGraph cached = GRAPHS.get(key);
-        if (cached != null) {
-            return CompletableFuture.completedFuture(cached);
+    private static GraphLoad getOrStartGraphLoad(MapleMap map, BotMovementProfile movementProfile,
+                                                 GraphCacheKey key, boolean async) {
+        GraphLoad load = PENDING_GRAPHS.get(key);
+        if (load == null) {
+            GraphLoad candidate = new GraphLoad(map, movementProfile, key);
+            load = PENDING_GRAPHS.putIfAbsent(key, candidate);
+            if (load == null) {
+                load = candidate;
+                if (async) selectWarmupExecutor(map).execute(load);
+            }
+        }
+        if (!async) load.run();
+        return load;
+    }
+
+    private static final class GraphLoad extends CompletableFuture<BotNavigationGraph> implements Runnable {
+        private final MapleMap map;
+        private final BotMovementProfile movementProfile;
+        private final GraphCacheKey key;
+        private final AtomicBoolean started = new AtomicBoolean();
+
+        GraphLoad(MapleMap map, BotMovementProfile movementProfile, GraphCacheKey key) {
+            this.map = map;
+            this.movementProfile = movementProfile;
+            this.key = key;
         }
 
-        CompletableFuture<BotNavigationGraph> existing = PENDING_GRAPHS.get(key);
-        if (existing != null) {
-            return existing;
-        }
-
-        CompletableFuture<BotNavigationGraph> future = new CompletableFuture<>();
-        CompletableFuture<BotNavigationGraph> race = PENDING_GRAPHS.putIfAbsent(key, future);
-        if (race != null) {
-            return race;
-        }
-
-        Runnable task = () -> {
+        @Override
+        public void run() {
+            // A synchronous caller may run the task before the warmup worker reaches it.
+            if (!started.compareAndSet(false, true) || isDone()) return;
             try {
-                BotNavigationGraph graph = loadOrBuildGraph(map, movementProfile, key);
-                GRAPHS.put(key, graph);
-                GRAPH_KEYS_BY_MAP_ID.computeIfAbsent(map.getId(), ignored -> ConcurrentHashMap.newKeySet())
-                        .add(key);
-                // New graph for this map - drop any memoized runtime lookup built from the old one.
-                BotPhysicsEngine.invalidateWalkRegionLookup(map.getId());
-                future.complete(graph);
+                BotNavigationGraph graph = GRAPHS.get(key);
+                if (graph == null) {
+                    graph = loadOrBuildGraph(map, movementProfile, key);
+                    BotNavigationGraph published = GRAPHS.putIfAbsent(key, graph);
+                    if (published == null) onGraphPublished(key);
+                    else graph = published; // an explicit rebuild may already have published a graph
+                }
+                complete(graph);
             } catch (Throwable t) {
-                future.completeExceptionally(t);
+                completeExceptionally(t);
                 log.warn("Failed to warm bot nav graph for map {} speed={} jump={}",
                         key.mapId(), key.totalSpeedStat(), key.totalJumpStat(), t);
             } finally {
-                PENDING_GRAPHS.remove(key, future);
+                PENDING_GRAPHS.remove(key, this);
             }
-        };
-
-        if (async) {
-            selectWarmupExecutor(map).execute(task);
-        } else {
-            task.run();
         }
-        return future;
+    }
+
+    private static void onGraphPublished(GraphCacheKey key) {
+        GRAPH_KEYS_BY_MAP_ID.computeIfAbsent(key.mapId(), ignored -> ConcurrentHashMap.newKeySet()).add(key);
+        BotPhysicsEngine.invalidateWalkRegionLookup(key.mapId());
     }
 
     private static ExecutorService selectWarmupExecutor(MapleMap map) {

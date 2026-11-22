@@ -1720,27 +1720,16 @@ public final class GCMovement {
     }
 
     /**
-     * Have this bot's exact-profile navigation graph ready NOW, building it on the calling thread
-     * if neither the memory nor the disk cache has it.
-     *
-     * <p>Quest bots call this and skip their tick until it answers: the warmup heuristic is not a
-     * substitute for navigation (no A* - a shelf whose x sits inside the bot's own platform is
-     * never even attempted), and joining the queued async warm would park the bot behind the
-     * server's whole cold-start map list, which is FIFO with no priority. Building here costs one
-     * map (measured on the LPQ rooms: median 105ms, p90 390ms, worst 1.9s; a deserialize when the
-     * disk cache is present) and never waits on a future this method does not own.
-     *
-     * <p>MACRO tick only: the shared 250ms combat sweep is one thread for every bot, so that path
-     * only checks with {@link #hasGraph}.
-     *
-     * <p>A build failure propagates to the caller's tick, which the tick wheel already logs and
-     * absorbs; it deliberately does NOT degrade to the heuristic (see the class comment there).
+     * Ensure the exact movement graph exists before quest work runs. A queued warmup is
+     * taken over by this caller; only an already-started load for the same key is awaited.
+     * A build failure propagates instead of falling back to heuristic movement.
+     * The shared combat sweep must only peek with {@link #hasGraph}.
      */
     public static boolean ensureGraph(Character bot) {
         if (bot == null || bot.getMap() == null) {
             return false;
         }
-        return BotNavigationGraphProvider.ensureGraphSync(bot.getMap(),
+        return BotNavigationGraphProvider.getGraph(bot.getMap(),
                 BotMovementProfile.fromCharacter(bot)) != null;
     }
 

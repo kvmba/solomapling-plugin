@@ -444,10 +444,8 @@ public abstract class PartyQuestBot extends BotSM implements GrindTickRegistry.P
         // Quest work runs with the real graph, or not at all. The warmup heuristic has no A*, so
         // it cannot take a shelf whose x sits inside the bot's own platform (LPQ stage 1: the
         // -450 mob row's first Ratz is the only one it can ever reach, and the -506/-572 rungs
-        // that lead on up the tower are never even attempted). Building costs one map on this
-        // tick's own (virtual) thread; a party entering together may build it once per member,
-        // which is bounded and never waits on the async warm queue. A build failure throws and the
-        // tick wheel logs it - it must never fall through to the heuristic.
+        // that lead on up the tower are never even attempted). The first caller claims a queued
+        // warmup; teammates needing the same profile share that load instead of baking again.
         GCMovement.ensureGraph(bot);
 
         // Once a door has the steering, do not run an old-room park or loot pass over it.

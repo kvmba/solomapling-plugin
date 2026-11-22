@@ -1359,6 +1359,7 @@ final class BotNavigationManager {
             Map<SearchState, Integer> gScore = new HashMap<>();
             Map<SearchState, SearchState> cameFrom = new HashMap<>();
             Map<SearchState, BotNavigationGraph.Edge> cameByEdge = new HashMap<>();
+            Map<Integer, Boolean> landingVerdicts = new HashMap<>();
             SearchState startState = new SearchState(startRegionId, new Point(startPos), false);
             SearchState bestGoalState = null;
             int bestGoalCost = Integer.MAX_VALUE;
@@ -1383,8 +1384,10 @@ final class BotNavigationManager {
                 }
                 expandedNodes++;
 
+                BotNavigationGraph.Region region = graph.getRegion(current.state.regionId);
+                boolean onRope = region != null && region.isRopeRegion;
                 if (current.state.regionId == targetRegionId) {
-                    int goalCost = current.cost + intraRegionTravelCost(graph, current.state.regionId, current.state.point, targetPos);
+                    int goalCost = current.cost + intraRegionTravelCost(graph, onRope, current.state.point, targetPos);
                     if (goalCost < bestGoalCost) {
                         bestGoalCost = goalCost;
                         bestGoalState = current.state;
@@ -1393,7 +1396,7 @@ final class BotNavigationManager {
 
                 for (BotNavigationGraph.Edge edge : graph.getOutgoing(current.state.regionId)) {
                     edgeChecks++;
-                    if (!isEdgeUsable(graph, map, edge, capabilities)) continue;
+                    if (!isEdgeUsable(graph, map, edge, capabilities, landingVerdicts)) continue;
                     usableEdges++;
 
                     boolean isPortal = edge.type == BotNavigationGraph.EdgeType.PORTAL;
@@ -1422,7 +1425,7 @@ final class BotNavigationManager {
                     Point landingPoint = straightDrop
                             ? new Point(approachPoint.x, edge.endPoint.y)
                             : edge.endPoint;
-                    int stepCost = intraRegionTravelCost(graph, current.state.regionId, current.state.point, approachPoint) + edgeCost;
+                    int stepCost = intraRegionTravelCost(graph, onRope, current.state.point, approachPoint) + edgeCost;
                     // Per-bot positive jitter, stable per (bot, edge): different bots perceive
                     // different edges as slightly costlier and fan out onto distinct routes, while
                     // a single bot re-plans the same route every tick (no fluttering). Positive-only
@@ -1680,10 +1683,25 @@ final class BotNavigationManager {
 
     static boolean isEdgeUsable(BotNavigationGraph graph, MapleMap map, BotNavigationGraph.Edge edge,
                                 BotMovementCapabilities capabilities) {
+        return isEdgeUsable(graph, map, edge, capabilities, null);
+    }
+
+    private static boolean isEdgeUsable(BotNavigationGraph graph, MapleMap map, BotNavigationGraph.Edge edge,
+                                        BotMovementCapabilities capabilities, Map<Integer, Boolean> landingVerdicts) {
         return switch (edge.type) {
             case WALK, CLIMB -> true;
             case TELEPORT -> capabilities.teleport();
-            case JUMP, DROP -> landingRegionIsLivable(graph, map, edge, capabilities);
+            case JUMP, DROP -> {
+                // Launch positions may differ, but the landing safety check is per region.
+                // Scope reuse to this search; portals below must still read live state.
+                if (landingVerdicts == null) yield landingRegionIsLivable(graph, map, edge, capabilities);
+                Boolean livable = landingVerdicts.get(edge.toRegionId);
+                if (livable == null) {
+                    livable = landingRegionIsLivable(graph, map, edge, capabilities);
+                    landingVerdicts.put(edge.toRegionId, livable);
+                }
+                yield livable;
+            }
             case PORTAL -> {
                 Portal portal = map.getPortal(edge.portalId);
                 yield portal != null && portal.getPortalStatus();
@@ -1929,9 +1947,8 @@ final class BotNavigationManager {
         return Math.max(0, (int) Math.round((dx * 1000.0) / Math.max(1.0, graph.movementProfile.walkVelocityPxs())));
     }
 
-    private static int intraRegionTravelCost(BotNavigationGraph graph, int regionId, Point from, Point to) {
-        BotNavigationGraph.Region region = graph.getRegion(regionId);
-        if (region != null && region.isRopeRegion) {
+    private static int intraRegionTravelCost(BotNavigationGraph graph, boolean onRope, Point from, Point to) {
+        if (onRope) {
             int travel = Math.abs(to.y - from.y);
             return Math.max(0, (int) Math.round((travel * 1000.0) / Math.max(1, BotMovementManager.cfg.CLIMB_SPEED_PXS)));
         }

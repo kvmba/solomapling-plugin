@@ -3,10 +3,12 @@ package soloMapling.ArtificialPlayer.GCMoveSystem;
 import org.gms.client.Character;
 import org.gms.constants.game.CharacterStance;
 import org.gms.server.maps.Foothold;
+import org.gms.server.maps.FootholdTree;
 import org.gms.server.maps.MapleMap;
 import org.gms.server.maps.Rope;
 
 import java.awt.*;
+import java.lang.ref.WeakReference;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -238,8 +240,10 @@ final class BotPhysicsEngine {
     }
 
     record AirCollision(AirCollisionType type, Point point, Foothold foothold, double progress) {
+        private static final AirCollision NONE = new AirCollision(AirCollisionType.NONE, null, null, Double.POSITIVE_INFINITY);
+
         static AirCollision none() {
-            return new AirCollision(AirCollisionType.NONE, null, null, Double.POSITIVE_INFINITY);
+            return NONE;
         }
     }
 
@@ -459,14 +463,11 @@ final class BotPhysicsEngine {
     private static Foothold footholdUnderFeet(MapleMap map, Point position) {
         Foothold best = null;
         int bestDelta = Integer.MAX_VALUE;
-        for (Foothold fh : collisionIndex(map).groundBucketAt(position.x)) {
-            if (fh.isWall() || position.x < fh.getX1() || position.x > fh.getX2()) {
-                continue;
-            }
-            int lineY = fh.getY1() == fh.getY2() ? fh.getY1() : slopeYAt(fh, position.x);
-            int delta = Math.abs(lineY - position.y);
+        for (IndexedGround ground : collisionIndex(map).groundBucketAt(position.x)) {
+            if (!ground.coversX(position.x)) continue;
+            int delta = Math.abs(ground.yAt(position.x) - position.y);
             if (delta <= GROUND_LINE_SLACK_PX && delta < bestDelta) {
-                best = fh;
+                best = ground.foothold();
                 bestDelta = delta;
             }
         }
@@ -516,15 +517,15 @@ final class BotPhysicsEngine {
             return false; // no index: treat as "no landing", the caller keeps its old behaviour
         }
         int probeY = from.y + 1; // exclusive of the target's own pixel
-        for (Foothold fh : index.groundBucketAt(from.x)) {
+        for (IndexedGround ground : index.groundBucketAt(from.x)) {
             // Span test on the min/max edges: 432 of the WZ's 233034 walkable footholds are
             // authored right-to-left (x1 > x2, e.g. 109010108's x 79..-169 ledge), so the raw
             // getX1()/getX2() comparison would miss the column and report "no landing" on the 18
             // rope/foothold pairs of that shape.
-            if (Math.min(fh.getX1(), fh.getX2()) > from.x || Math.max(fh.getX1(), fh.getX2()) < from.x) {
+            if (Math.min(ground.x1(), ground.x2()) > from.x || Math.max(ground.x1(), ground.x2()) < from.x) {
                 continue;
             }
-            int fy = fh.getY1() != fh.getY2() ? slopeYAt(fh, from.x) : fh.getY1();
+            int fy = ground.yAt(from.x);
             if (fy >= probeY && fy < toY) {
                 return true;
             }
@@ -581,7 +582,7 @@ final class BotPhysicsEngine {
 
     private static Point insideFootholdEndpoint(Foothold foothold, Point endpoint) {
         int x = endpoint.x + Integer.signum(foothold.getX1() + foothold.getX2() - 2 * endpoint.x);
-        return new Point(x, foothold.getY1() == foothold.getY2() ? foothold.getY1() : slopeYAt(foothold, x));
+        return new Point(x, IndexedGround.of(foothold).yAt(x));
     }
 
     private record EndpointConnection(Point from, Point to) {
@@ -2188,12 +2189,14 @@ final class BotPhysicsEngine {
         // has to be held ON the bound, or a body outside the extent would keep sliding away forever.
         // So: clamp both ends, run the searches, and fall back to the old boundary WALL only when the
         // clamped step truly hit nothing.
-        Point start = clampAirStepX(map, previousPos);
-        Point end = clampAirStepX(map, nextPos);
-        boolean sideClamped = end.x != nextPos.x;
-        AirCollision wall = findWallCollision(map, start, end);
-        AirCollision ceiling = findCeilingCollision(map, start, end);
-        AirCollision landing = findGroundCollision(map, start, end);
+        FootholdCollisionIndex index = collisionIndex(map);
+        Point bounds = mapXBounds(map, index);
+        Point start = clampStepX(previousPos, bounds);
+        Point end = clampStepX(nextPos, bounds);
+        boolean sideClamped = end != nextPos;
+        AirCollision wall = findWallCollision(index, start, end, false);
+        AirCollision ceiling = findCeilingCollision(index, start, end);
+        AirCollision landing = findGroundCollision(map, index, start, end);
         AirCollision best = AirCollision.none();
         if (wall.type() != AirCollisionType.NONE) {
             best = wall;
@@ -2235,7 +2238,7 @@ final class BotPhysicsEngine {
         // the floor under the clamp pixel and consuming the fall through it as a WALL.
         // A zero-progress hit has no pre-impact travel to sweep.
         if (best.type() == AirCollisionType.WALL && best.progress() > 0.0) {
-            AirCollision wallSideLanding = findGroundCollision(map, start, best.point());
+            AirCollision wallSideLanding = findGroundCollision(map, index, start, best.point());
             if (wallSideLanding.type() == AirCollisionType.LAND) {
                 best = new AirCollision(AirCollisionType.LAND, wallSideLanding.point(),
                         wallSideLanding.foothold(), wallSideLanding.progress() * best.progress());
@@ -2253,13 +2256,9 @@ final class BotPhysicsEngine {
      * One end of an airborne step with its X clamped into the map's X range. Y is never touched:
      * the step's height is what the landing search needs.
      */
-    private static Point clampAirStepX(MapleMap map, Point p) {
-        Rectangle area = map.getMapArea();
-        if (area == null || area.width <= 0 || area.height <= 0) {
-            return p;
-        }
-        int x = Math.max(effectiveLeftBoundaryX(map, area),
-                Math.min(effectiveRightBoundaryX(map, area), p.x));
+    private static Point clampStepX(Point p, Point bounds) {
+        if (bounds == null) return p;
+        int x = Math.max(bounds.x, Math.min(bounds.y, p.x));
         return x == p.x ? p : new Point(x, p.y);
     }
 
@@ -2741,7 +2740,8 @@ final class BotPhysicsEngine {
         return walkStep(map, profile) * airtimeTicks;
     }
 
-    private static AirCollision findGroundCollision(MapleMap map, Point previousPos, Point nextPos) {
+    private static AirCollision findGroundCollision(MapleMap map, FootholdCollisionIndex index,
+                                                    Point previousPos, Point nextPos) {
         if (nextPos.y < previousPos.y) {
             return AirCollision.none();
         }
@@ -2750,14 +2750,14 @@ final class BotPhysicsEngine {
         int endX = nextPos.x;
         int dir = Integer.compare(endX, startX);
         if (dir == 0) {
-            return landingAtX(map, previousPos, nextPos, endX, 1.0);
+            return landingAtX(map, index, previousPos, nextPos, endX, 1.0);
         }
 
         int steps = Math.abs(endX - startX);
         for (int i = 0; i <= steps; i++) {
             int x = startX + dir * i;
             double progress = i / (double) steps;
-            AirCollision landing = landingAtX(map, previousPos, nextPos, x, progress);
+            AirCollision landing = landingAtX(map, index, previousPos, nextPos, x, progress);
             if (landing.type == AirCollisionType.LAND) {
                 return landing;
             }
@@ -2765,13 +2765,13 @@ final class BotPhysicsEngine {
         return AirCollision.none();
     }
 
-    private static AirCollision findCeilingCollision(MapleMap map, Point previousPos, Point nextPos) {
-        if (map == null || map.getFootholds() == null || nextPos.y >= previousPos.y) {
+    private static AirCollision findCeilingCollision(FootholdCollisionIndex index, Point previousPos, Point nextPos) {
+        if (nextPos.y >= previousPos.y) {
             return AirCollision.none();
         }
 
         AirCollision best = AirCollision.none();
-        for (Foothold foothold : collisionIndex(map).collidableFromBelow()) {
+        for (Foothold foothold : index.collidableFromBelow()) {
             AirCollision collision = ceilingCollision(foothold, previousPos, nextPos);
             if (collision.type() == AirCollisionType.CEILING && collision.progress() < best.progress()) {
                 best = collision;
@@ -2780,36 +2780,18 @@ final class BotPhysicsEngine {
         return best;
     }
 
-    private static AirCollision findWallCollision(MapleMap map, Point previousPos, Point nextPos) {
-        return findWallCollision(map, previousPos, nextPos, false);
-    }
-
     private static AirCollision findGroundWallCollision(MapleMap map, Point previousPos, Point nextPos) {
-        return findWallCollision(map, previousPos, nextPos, true);
+        if (map == null || map.getFootholds() == null) return AirCollision.none();
+        FootholdCollisionIndex index = collisionIndex(map);
+        Point clamped = clampStepX(nextPos, mapXBounds(map, index));
+        if (clamped != nextPos) return new AirCollision(AirCollisionType.WALL, clamped, null, 0.0);
+        return findWallCollision(index, previousPos, nextPos, true);
     }
 
-    private static AirCollision findWallCollision(MapleMap map,
-                                                  Point previousPos,
-                                                  Point nextPos,
+    private static AirCollision findWallCollision(FootholdCollisionIndex index, Point previousPos, Point nextPos,
                                                   boolean allowWalkableGroundEndpoint) {
-        if (map == null || map.getFootholds() == null) {
-            return AirCollision.none();
-        }
-        // Ours (out-of-range fall): check the map's x bound even for a purely vertical step. A body
-        // resting outside the standable extent falls straight down with airVelX 0, so previousPos.x
-        // == nextPos.x on every tick; the old early return here skipped the boundary entirely and
-        // the bot fell the whole map height untouched (measured on 922010800: x=395, standable ends
-        // at 365, fell to y=4971). mapSideBoundaryCollision clamps an out-of-bounds body back and
-        // answers NONE when the body is already inside, so this call is free in the normal case.
-        AirCollision bound = mapSideBoundaryCollision(map, previousPos, nextPos);
-        if (bound.type() == AirCollisionType.WALL) {
-            return bound;
-        }
-        if (previousPos.x == nextPos.x) {
-            return AirCollision.none();
-        }
-
-        AirCollision best = bound;
+        if (previousPos.x == nextPos.x) return AirCollision.none();
+        AirCollision best = AirCollision.none();
         // Include the starting column: a body on a wall face can still move into its solid side.
         // wallCollision decides whether a zero-progress departure actually enters the wall.
         // Sweeping every collidable wall of the map on every airborne tick is the
@@ -2818,7 +2800,7 @@ final class BotPhysicsEngine {
         int spanX = nextPos.x - previousPos.x;
         int dirX = Integer.signum(spanX);
         int absSpanX = Math.abs(spanX);
-        for (Foothold foothold : collisionIndex(map).collidableWalls()) {
+        for (Foothold foothold : index.collidableWalls()) {
             int dxWall = (foothold.getX1() - previousPos.x) * dirX;
             if (dxWall < 0 || dxWall > absSpanX) {
                 continue;
@@ -2829,52 +2811,6 @@ final class BotPhysicsEngine {
             }
         }
         return best;
-    }
-
-    private static AirCollision mapSideBoundaryCollision(MapleMap map, Point previousPos, Point nextPos) {
-        Rectangle area = map.getMapArea();
-        if (area == null || area.width <= 0 || area.height <= 0) {
-            return AirCollision.none();
-        }
-        // Ours (out-of-range fall): clamp to the standable x extent BEFORE anything else, and
-        // regardless of travel direction or even of any horizontal travel at all. A body that is
-        // outside the bound must be put back on it, full stop. Two shapes used to escape here:
-        //   - a purely vertical step (airVelX 0, or drag-cancelled) skipped the whole test because
-        //     `previousPos.x == nextPos.x`;
-        //   - a step moving INWARD from outside hit the `previousPos.x > boundaryX` early return,
-        //     which disarmed the bound permanently.
-        // Measured on 922010800 with the old code: airborne at x=395 (standable ends at 365) fell
-        // to y=4971 with no collision at all. Clamping first makes the bound self-healing: one
-        // frame outside, and the very next step snaps the body back onto the edge.
-        int leftBoundX = effectiveLeftBoundaryX(map, area);
-        int rightBoundX = effectiveRightBoundaryX(map, area);
-        int clampedX = Math.max(leftBoundX, Math.min(rightBoundX, nextPos.x));
-        if (clampedX != nextPos.x) {
-            return new AirCollision(AirCollisionType.WALL, new Point(clampedX, nextPos.y), null, 0.0);
-        }
-        if (previousPos.x == nextPos.x) {
-            return AirCollision.none();
-        }
-
-        int dir = Integer.compare(nextPos.x, previousPos.x);
-        int boundaryX = dir > 0 ? rightBoundX : leftBoundX;
-        if (dir > 0 && nextPos.x <= boundaryX) {
-            return AirCollision.none();
-        }
-        if (dir < 0 && nextPos.x >= boundaryX) {
-            return AirCollision.none();
-        }
-
-        double progress = (boundaryX - previousPos.x) / (double) (nextPos.x - previousPos.x);
-        if (progress < 0.0 || progress > 1.0) {
-            return AirCollision.none();
-        }
-
-        double yAtBoundary = previousPos.y + (nextPos.y - previousPos.y) * progress;
-        return new AirCollision(AirCollisionType.WALL,
-                new Point(boundaryX, (int) Math.round(yAtBoundary)),
-                null,
-                progress);
     }
 
     /*
@@ -2898,11 +2834,10 @@ final class BotPhysicsEngine {
      * that puts its footholds outside its own VR rect would otherwise collapse the bound to a
      * degenerate line and silently disable the escape logic that reads it.
      */
-    private static Point boundaryX(MapleMap map, Rectangle area) {
-        if (!hasUsableFootholdXBounds(map)) {
-            return new Point(area.x, area.x + area.width);
-        }
-        FootholdCollisionIndex index = collisionIndex(map);
+    private static Point mapXBounds(MapleMap map, FootholdCollisionIndex index) {
+        Rectangle area = map.getMapArea();
+        if (area == null || area.width <= 0 || area.height <= 0) return null;
+        if (index.standableMinX() >= index.standableMaxX()) return new Point(area.x, area.x + area.width);
         int left = Math.max(index.standableMinX(), area.x);
         int right = Math.min(index.standableMaxX(), area.x + area.width);
         return left <= right
@@ -2910,42 +2845,12 @@ final class BotPhysicsEngine {
                 : new Point(index.standableMinX(), index.standableMaxX());
     }
 
-    private static int effectiveLeftBoundaryX(MapleMap map, Rectangle area) {
-        return boundaryX(map, area).x;
-    }
-
-    private static int effectiveRightBoundaryX(MapleMap map, Rectangle area) {
-        return boundaryX(map, area).y;
-    }
-
-    /**
-     * The x extent a bot's body may occupy: {@link #boundaryX}, i.e. the standable foothold extent
-     * intersected with the VR x rect - the same numbers the flight clamp enforces, so the watchdog
-     * and the physics can never disagree about where the map ends.
-     *
-     * <p>Null only when the map has no usable foothold columns, which is the caller's signal to fall
-     * back to the raw VR rect. Why not VR alone: the VR rect routinely extends PAST the last platform
-     * (LPQ 922010100: VR +-400, standable +-365), so a VR-only test would call a bot hovering in that
-     * gap "inside the map" and no recovery would ever fire.
-     */
+    /** The standable X range clipped to the map bounds, or null if there is no standable terrain. */
     static Point standableXBounds(MapleMap map) {
-        if (map == null || !hasUsableFootholdXBounds(map)) {
-            return null;
-        }
-        Rectangle area = map.getMapArea();
-        if (area == null || area.width <= 0 || area.height <= 0) {
-            FootholdCollisionIndex index = collisionIndex(map);
-            return new Point(index.standableMinX(), index.standableMaxX());
-        }
-        return boundaryX(map, area);
-    }
-
-    private static boolean hasUsableFootholdXBounds(MapleMap map) {
-        if (map.getFootholds() == null) {
-            return false;
-        }
         FootholdCollisionIndex index = collisionIndex(map);
-        return index != UNINDEXABLE && index.standableMinX() < index.standableMaxX();
+        if (index.standableMinX() >= index.standableMaxX()) return null;
+        Point bounds = mapXBounds(map, index);
+        return bounds != null ? bounds : new Point(index.standableMinX(), index.standableMaxX());
     }
 
     /*
@@ -2957,56 +2862,75 @@ final class BotPhysicsEngine {
      * per-id synthetic test maps and instanced map copies can never poison each other.
      */
     private static final int GROUND_BUCKET_SHIFT = 6; // 64px columns
-    private static final Foothold[] NO_FOOTHOLDS = new Foothold[0];
+    private static final IndexedGround[] NO_GROUND = new IndexedGround[0];
 
     /** Bottom of the authored standable terrain, which need not fit inside the camera's VR. */
     static int lowestStandableY(MapleMap map) {
         return collisionIndex(map).standableMaxY();
     }
 
+    private record IndexedGround(Foothold foothold, int x1, int x2, int y1, double signedCosAlpha, double cosBeta) {
+        static IndexedGround of(Foothold foothold) {
+            int x1 = foothold.getX1();
+            int x2 = foothold.getX2();
+            int y1 = foothold.getY1();
+            int dy = foothold.getY2() - y1;
+            if (dy == 0) return new IndexedGround(foothold, x1, x2, y1, 0.0, 1.0);
+
+            double height = Math.abs(dy);
+            double width = Math.abs(x2 - x1);
+            double cosAlpha = Math.cos(Math.atan(width / height));
+            double cosBeta = Math.cos(Math.atan(height / width));
+            return new IndexedGround(foothold, x1, x2, y1, Math.copySign(cosAlpha, dy), cosBeta);
+        }
+
+        boolean coversX(int x) {
+            return x1 <= x && x <= x2;
+        }
+
+        int yAt(int x) {
+            // Keep the host's divide-then-multiply and truncation. Linearizing the slope can move
+            // a landing by one pixel; only the two constant trigonometric factors are cached.
+            return signedCosAlpha == 0.0 ? y1 : y1 + (int) (signedCosAlpha * (Math.abs(x - x1) / cosBeta));
+        }
+    }
+
     private record FootholdCollisionIndex(Map<Integer, Foothold> byId,
                                           java.util.List<Foothold> collidableWalls,
                                           java.util.List<Foothold> collidableFromBelow,
                                           int bucketMinX,
-                                          Foothold[][] groundBuckets,
+                                          IndexedGround[][] groundBuckets,
                                           int standableMinX,
                                           int standableMaxX,
                                           int standableMaxY) {
-        Foothold[] groundBucketAt(int x) {
+        IndexedGround[] groundBucketAt(int x) {
             int b = (x - bucketMinX) >> GROUND_BUCKET_SHIFT;
-            return b < 0 || b >= groundBuckets.length ? NO_FOOTHOLDS : groundBuckets[b];
+            return b < 0 || b >= groundBuckets.length ? NO_GROUND : groundBuckets[b];
         }
     }
 
-    private static final java.util.Map<org.gms.server.maps.FootholdTree, FootholdCollisionIndex> COLLISION_INDEX =
+    private static final Map<FootholdTree, FootholdCollisionIndex> COLLISION_INDEX =
             java.util.Collections.synchronizedMap(new java.util.WeakHashMap<>());
 
-    // Single-entry memo in front of COLLISION_INDEX. A bake probes one map millions of times in a
-    // row, and every one of those hits had to enter COLLISION_INDEX's global monitor and hash a
-    // weak key — a warm JFR of the 198-map bake put 24% of all samples in that map lookup, the
-    // single largest item. A volatile read plus an identity compare turns the repeated hit into
-    // ~2ns, so the lock is now taken once per map switch instead of once per probe. The weak map
-    // stays authoritative (MapManager.getDisposableMap hands out uncached instances that must
-    // remain collectable); the memo pins at most ONE tree, and the next probe on any other map
-    // replaces it, so it cannot accumulate.
-    private record CachedCollisionIndex(org.gms.server.maps.FootholdTree tree, FootholdCollisionIndex index) {
-    }
+    // A worker makes many probes on one map. Remember its last tree locally: parallel bakes on
+    // different maps would otherwise evict each other on every probe and hit the shared monitor.
+    private record CachedCollisionIndex(WeakReference<FootholdTree> tree, FootholdCollisionIndex index) {}
 
-    private static volatile CachedCollisionIndex lastCollisionIndex;
+    private static final ThreadLocal<CachedCollisionIndex> LAST_COLLISION_INDEX = new ThreadLocal<>();
 
     // Sentinel for trees that can't be indexed (Mockito tree/map stubs in tests return null
     // foothold lists) — callers fall back to the original tree/map query so stubbed seams keep
     // working exactly as before.
     private static final FootholdCollisionIndex UNINDEXABLE = new FootholdCollisionIndex(
-            Map.of(), java.util.List.of(), java.util.List.of(), 0, new Foothold[0][], 0, 0, Integer.MIN_VALUE);
+            Map.of(), java.util.List.of(), java.util.List.of(), 0, new IndexedGround[0][], 0, 0, Integer.MIN_VALUE);
 
     private static FootholdCollisionIndex collisionIndex(MapleMap map) {
-        org.gms.server.maps.FootholdTree tree = map != null ? map.getFootholds() : null;
+        FootholdTree tree = map != null ? map.getFootholds() : null;
         if (tree == null) {
             return UNINDEXABLE;
         }
-        CachedCollisionIndex memo = lastCollisionIndex;
-        if (memo != null && memo.tree() == tree) {
+        CachedCollisionIndex memo = LAST_COLLISION_INDEX.get();
+        if (memo != null && memo.tree().refersTo(tree)) {
             return memo.index();
         }
         // The UNINDEXABLE verdict is cached too: getAllFootholds() rebuilds the whole list on
@@ -3022,7 +2946,7 @@ final class BotPhysicsEngine {
             }
             java.util.Set<Integer> fromBelowIds = BotNavigationGraphProvider.classifyCollidableFromBelowFootholds(byId);
             java.util.List<Foothold> walls = new java.util.ArrayList<>();
-            java.util.List<Foothold> ground = new java.util.ArrayList<>();
+            java.util.List<IndexedGround> ground = new java.util.ArrayList<>();
             java.util.List<Foothold> fromBelow = new java.util.ArrayList<>();
             int minX = Integer.MAX_VALUE;
             int maxX = Integer.MIN_VALUE;
@@ -3038,7 +2962,7 @@ final class BotPhysicsEngine {
                     }
                     continue;
                 }
-                ground.add(fh);
+                ground.add(IndexedGround.of(fh));
                 minX = Math.min(minX, Math.min(fh.getX1(), fh.getX2()));
                 maxX = Math.max(maxX, Math.max(fh.getX1(), fh.getX2()));
                 // Non-wall ⇒ x1 != x2, so this IS the standable extent (walls excluded).
@@ -3050,38 +2974,38 @@ final class BotPhysicsEngine {
                 }
             }
 
-            Foothold[][] buckets;
+            IndexedGround[][] buckets;
             if (ground.isEmpty()) {
-                buckets = new Foothold[0][];
+                buckets = new IndexedGround[0][];
                 minX = 0;
                 groundMinX = 0;
                 groundMaxX = 0;
             } else {
                 int bucketCount = ((maxX - minX) >> GROUND_BUCKET_SHIFT) + 1;
-                java.util.List<java.util.List<Foothold>> building = new java.util.ArrayList<>(bucketCount);
+                java.util.List<java.util.List<IndexedGround>> building = new java.util.ArrayList<>(bucketCount);
                 for (int i = 0; i < bucketCount; i++) {
                     building.add(null);
                 }
-                for (Foothold fh : ground) {
-                    int lo = (Math.min(fh.getX1(), fh.getX2()) - minX) >> GROUND_BUCKET_SHIFT;
-                    int hi = (Math.max(fh.getX1(), fh.getX2()) - minX) >> GROUND_BUCKET_SHIFT;
+                for (IndexedGround span : ground) {
+                    int lo = (Math.min(span.x1(), span.x2()) - minX) >> GROUND_BUCKET_SHIFT;
+                    int hi = (Math.max(span.x1(), span.x2()) - minX) >> GROUND_BUCKET_SHIFT;
                     for (int b = lo; b <= hi; b++) {
-                        java.util.List<Foothold> bucket = building.get(b);
+                        java.util.List<IndexedGround> bucket = building.get(b);
                         if (bucket == null) {
                             bucket = new java.util.ArrayList<>(4);
                             building.set(b, bucket);
                         }
-                        bucket.add(fh);
+                        bucket.add(span);
                     }
                 }
-                buckets = new Foothold[bucketCount][];
+                buckets = new IndexedGround[bucketCount][];
                 for (int i = 0; i < bucketCount; i++) {
-                    java.util.List<Foothold> bucket = building.get(i);
+                    java.util.List<IndexedGround> bucket = building.get(i);
                     if (bucket == null) {
-                        buckets[i] = NO_FOOTHOLDS;
+                        buckets[i] = NO_GROUND;
                         continue;
                     }
-                    Foothold[] sorted = bucket.toArray(NO_FOOTHOLDS);
+                    IndexedGround[] sorted = bucket.toArray(NO_GROUND);
                     // Stable insertion sort with the tree's own comparator. Foothold.compareTo is a
                     // NON-TRANSITIVE partial order — TimSort (List.sort/Collections.sort on 32+
                     // elements) throws "comparison method violates its general contract" on it.
@@ -3094,7 +3018,7 @@ final class BotPhysicsEngine {
             return new FootholdCollisionIndex(byId, java.util.List.copyOf(walls), java.util.List.copyOf(fromBelow),
                     minX, buckets, groundMinX, groundMaxX, groundMaxY);
         });
-        lastCollisionIndex = new CachedCollisionIndex(tree, index);
+        LAST_COLLISION_INDEX.set(new CachedCollisionIndex(new WeakReference<>(tree), index));
         return index;
     }
 
@@ -3113,11 +3037,11 @@ final class BotPhysicsEngine {
         return collisionIndex(map).collidableWalls();
     }
 
-    private static void insertionSort(Foothold[] footholds) {
+    private static void insertionSort(IndexedGround[] footholds) {
         for (int i = 1; i < footholds.length; i++) {
-            Foothold key = footholds[i];
+            IndexedGround key = footholds[i];
             int j = i - 1;
-            while (j >= 0 && footholds[j].compareTo(key) > 0) {
+            while (j >= 0 && footholds[j].foothold().compareTo(key.foothold()) > 0) {
                 footholds[j + 1] = footholds[j];
                 j--;
             }
@@ -3139,16 +3063,8 @@ final class BotPhysicsEngine {
         if (index == UNINDEXABLE) {
             return map.getFootholds().findBelow(p); // stubbed tree — original query path
         }
-        for (Foothold fh : index.groundBucketAt(p.x)) {
-            if (fh.getX1() <= p.x && fh.getX2() >= p.x) {
-                if (fh.getY1() != fh.getY2()) {
-                    if (slopeYAt(fh, p.x) >= p.y) {
-                        return fh;
-                    }
-                } else if (fh.getY1() >= p.y) {
-                    return fh;
-                }
-            }
+        for (IndexedGround ground : index.groundBucketAt(p.x)) {
+            if (ground.coversX(p.x) && ground.yAt(p.x) >= p.y) return ground.foothold();
         }
         return null;
     }
@@ -3161,15 +3077,16 @@ final class BotPhysicsEngine {
         if (map == null || map.getFootholds() == null) {
             return null;
         }
-        if (collisionIndex(map) == UNINDEXABLE) {
+        FootholdCollisionIndex index = collisionIndex(map);
+        if (index == UNINDEXABLE) {
             return map.getPointBelow(initial); // stubbed tree — original query path
         }
-        Foothold fh = findBelowIndexed(map, initial);
-        if (fh == null) {
-            return null;
+        for (IndexedGround ground : index.groundBucketAt(initial.x)) {
+            if (!ground.coversX(initial.x)) continue;
+            int y = ground.yAt(initial.x);
+            if (y >= initial.y) return new Point(initial.x, y);
         }
-        int dropY = fh.getY1() != fh.getY2() ? slopeYAt(fh, initial.x) : fh.getY1();
-        return new Point(initial.x, dropY);
+        return null;
     }
 
     // Furthest walkable foothold directly ABOVE p within maxRise px — the up-teleport mirror of
@@ -3185,11 +3102,9 @@ final class BotPhysicsEngine {
             return null;
         }
         int minY = p.y - maxRise;
-        for (Foothold fh : index.groundBucketAt(p.x)) {
-            if (fh.getX1() > p.x || fh.getX2() < p.x) {
-                continue;
-            }
-            int fy = fh.getY1() != fh.getY2() ? slopeYAt(fh, p.x) : fh.getY1();
+        for (IndexedGround ground : index.groundBucketAt(p.x)) {
+            if (!ground.coversX(p.x)) continue;
+            int fy = ground.yAt(p.x);
             if (fy < p.y && fy >= minY) {
                 return new Point(p.x, fy);
             }
@@ -3197,62 +3112,55 @@ final class BotPhysicsEngine {
         return null;
     }
 
-    // Verbatim port of the foothold tree's slope interpolation — the trig chain reduces to
-    // linear interpolation but is kept as-is so int truncation matches to the pixel.
-    private static int slopeYAt(Foothold fh, int x) {
-        double s1 = Math.abs(fh.getY2() - fh.getY1());
-        double s2 = Math.abs(fh.getX2() - fh.getX1());
-        double s4 = Math.abs(x - fh.getX1());
-        double alpha = Math.atan(s2 / s1);
-        double beta = Math.atan(s1 / s2);
-        double s5 = Math.cos(alpha) * (s4 / Math.cos(beta));
-        return fh.getY2() < fh.getY1() ? fh.getY1() - (int) s5 : fh.getY1() + (int) s5;
-    }
-
-    private static AirCollision landingAtX(MapleMap map,
-                                           Point previousPos,
-                                           Point nextPos,
-                                           int x,
-                                           double progress) {
-        int yAtX = (int) Math.round(previousPos.y + (nextPos.y - previousPos.y) * progress);
-        AirCollision landing = landingAtProbeY(map, previousPos, x, yAtX, progress, previousPos.y + 1, false);
-        if (landing.type() == AirCollisionType.LAND) {
-            return landing;
+    private static AirCollision landingAtX(MapleMap map, FootholdCollisionIndex index,
+                                           Point previousPos, Point nextPos, int x, double progress) {
+        int startY = previousPos.y;
+        int yAtX = (int) Math.round(startY + (nextPos.y - startY) * progress);
+        boolean allowTangent = x != previousPos.x;
+        if (index == UNINDEXABLE) {
+            AirCollision landing = landingAtUnindexedProbeY(map, startY, x, yAtX, progress, false);
+            return landing.type() == AirCollisionType.LAND || !allowTangent ? landing
+                    : landingAtUnindexedProbeY(map, startY, x, yAtX, progress, true);
         }
 
-        // Catch tangential landings at the jump apex when the next platform sits exactly at the
-        // previous Y. Keep this forward-only so drops and down-jumps do not instantly re-land on
-        // the takeoff foothold they just left.
-        if (x != previousPos.x) {
-            return landingAtProbeY(map, previousPos, x, yAtX, progress, previousPos.y, true);
+        // In bucket order, prefer the first floor below the starting height if the step reaches it.
+        // The first floor at or below that height may instead catch a forward tangent, but never
+        // a vertical drop from its own takeoff point. Both probes can share this one scan.
+        Foothold tangent = null;
+        for (IndexedGround ground : index.groundBucketAt(x)) {
+            if (!ground.coversX(x)) continue;
+            int y = ground.yAt(x);
+            if (y > startY) {
+                if (y <= yAtX) return new AirCollision(AirCollisionType.LAND, new Point(x, y), ground.foothold(), progress);
+                break;
+            }
+            if (allowTangent && y == startY) {
+                tangent = ground.foothold();
+                allowTangent = false;
+            }
         }
-
-        return AirCollision.none();
+        return tangent == null ? AirCollision.none()
+                : new AirCollision(AirCollisionType.LAND, new Point(x, startY), tangent, progress);
     }
 
-    private static AirCollision landingAtProbeY(MapleMap map,
-                                                Point previousPos,
-                                                int x,
-                                                int yAtX,
-                                                double progress,
-                                                int probeY,
-                                                boolean requireTangentFloor) {
-        Point probe = new Point(x, probeY);
-        Point floor = pointBelowIndexed(map, probe);
+    private static AirCollision landingAtUnindexedProbeY(MapleMap map, int startY, int x, int yAtX,
+                                                          double progress, boolean requireTangentFloor) {
+        Point probe = new Point(x, requireTangentFloor ? startY : startY + 1);
+        Point floor = map.getPointBelow(probe);
         if (floor == null) {
             return AirCollision.none();
         }
 
-        int minY = Math.min(previousPos.y, yAtX);
-        int maxY = Math.max(previousPos.y, yAtX);
+        int minY = Math.min(startY, yAtX);
+        int maxY = Math.max(startY, yAtX);
         if (floor.y < minY || floor.y > maxY) {
             return AirCollision.none();
         }
-        if (requireTangentFloor && floor.y != previousPos.y) {
+        if (requireTangentFloor && floor.y != startY) {
             return AirCollision.none();
         }
 
-        Foothold foothold = findBelowIndexed(map, probe);
+        Foothold foothold = map.getFootholds().findBelow(probe);
         if (foothold == null) {
             return AirCollision.none();
         }
