@@ -3,10 +3,8 @@ package soloMapling.ArtificialPlayer.BotTypes.Pirate;
 /**
  * Pirate PQ ("Lord Pirate") as its own scripts define it.
  *
- * <p>Five stages, all of the same kind: the room is full of boxes and breaking them is what
- * opens the way on. Stages 2 and 3 are boxes standing in rows; stage 4 puts the mobs inside
- * the boxes rather than on the floor, so the boxes have to be broken before there is anything
- * to fight; stage 5 is Lord Pirate himself.
+ * <p>The medal room is followed by two ship rooms. In the last ship room the doors take
+ * keys dropped by the mobs; closing them stops their spawns before Lord Pirate.
  *
  * <p>The quest tracks which stage the party is on by watching the map the leader walks into
  * ({@code changedMapInside} bumps {@code curStage} per room), which means the bot can use the
@@ -59,9 +57,10 @@ public final class PiratePqData {
      */
     private static final int[] ENTRY_BOXES = {2511000, 2512000};
     static final int[] NO_BOXES = {};
-    public static final int[] STAGE_2_BOXES = {2518000, 2511001, 2512000};
-    public static final int[] STAGE_3_BOXES = {2518000, 2511001, 2512000};
-    public static final int[] STAGE_4_BOXES = {2519000, 2519001, 2519002, 2519003};
+    private static final int[] SHIP_BOXES = {2511001, 2512000};
+    static final int DOOR_FIRST = 2519000;
+    static final int DOOR_LAST = 2519003;
+    public static final int DOOR_KEY = 4001117;
 
     /** The monsters each room declares; the first three levels of the quest use these. */
     public static final int STAGE_1_MOB_LOW = 9300114;
@@ -73,9 +72,7 @@ public final class PiratePqData {
     public static int[] boxesIn(int mapId) {
         return switch (mapId) {
             case ENTRY_MAP -> ENTRY_BOXES;
-            case STAGE_2 -> STAGE_2_BOXES;
-            case STAGE_3 -> STAGE_3_BOXES;
-            case STAGE_4 -> STAGE_4_BOXES;
+            case STAGE_2, STAGE_3 -> SHIP_BOXES;
             default -> NO_BOXES;
         };
     }
@@ -94,5 +91,5 @@ public final class PiratePqData {
      * stages want (NPC 2094002 grades the leader's inventory) plus the ship's letters. A bot
      * that picks any of them up drops them at the leader's feet.
      */
-    public static final int[] QUEST_ITEMS = {4001117, 4001120, 4001121, 4001122};
+    public static final int[] QUEST_ITEMS = {DOOR_KEY, 4001120, 4001121, 4001122};
 }

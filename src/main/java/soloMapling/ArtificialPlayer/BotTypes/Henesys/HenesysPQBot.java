@@ -3,6 +3,7 @@ package soloMapling.ArtificialPlayer.BotTypes.Henesys;
 import org.gms.client.Character;
 import soloMapling.ArtificialPlayer.BotGeneration;
 import soloMapling.ArtificialPlayer.PartyQuest.PartyQuestBot;
+import soloMapling.ArtificialPlayer.PartyQuest.PqActions;
 
 /**
  * Plays Henesys PQ ("Primrose Hill") with a real player leading.
@@ -19,8 +20,6 @@ import soloMapling.ArtificialPlayer.PartyQuest.PartyQuestBot;
  * where it shows up soonest.
  */
 public class HenesysPQBot extends PartyQuestBot {
-
-    private static final int[] CAKE_LOOT = {HenesysPqData.RICE_CAKE};
 
     public HenesysPQBot(Character character) {
         super(character);
@@ -57,20 +56,24 @@ public class HenesysPQBot extends PartyQuestBot {
     }
 
     @Override
-    protected boolean fightsOnSweep() {
-        return switch (getChr().getMapId()) {
-            case HenesysPqData.ENTRY_MAP -> plantingDone() && !HenesysStages.stageCleared(getChr())
-                    && !HenesysStages.deliversCakes(getChr());
-            case HenesysPqData.BONUS_MAP -> hasPlayerInRunRoom(HenesysPqData.BONUS_MAP);
-            default -> false;
-        };
+    protected void combatSweep(Character bot) {
+        if (PqActions.reactorBeatArmed(bot)) {
+            if (bot.getMapId() == HenesysPqData.ENTRY_MAP && !plantingDone()) {
+                PqActions.workReactorOnBeat(bot);
+                return;
+            }
+            PqActions.armReactorBeat(bot, -1);
+        }
+        super.combatSweep(bot);
     }
 
     @Override
-    protected int[] steppedOnLootIds() {
-        return getChr().getMapId() == HenesysPqData.ENTRY_MAP
-                && plantingDone() && HenesysStages.needsCakes(getChr())
-                ? CAKE_LOOT : super.steppedOnLootIds();
+    protected boolean fightsOnSweep() {
+        return switch (getChr().getMapId()) {
+            case HenesysPqData.ENTRY_MAP -> plantingDone() && !HenesysStages.stageCleared(getChr());
+            case HenesysPqData.BONUS_MAP -> hasPlayerInRunRoom(HenesysPqData.BONUS_MAP);
+            default -> false;
+        };
     }
 
     private boolean plantingDone() {
@@ -80,6 +83,7 @@ public class HenesysPQBot extends PartyQuestBot {
     @Override
     protected void releaseRoomState() {
         super.releaseRoomState();
+        PqActions.clearReactorBeat(getChr().getId());
         HenesysStages.releaseFlowerClaim(getChr());
     }
 

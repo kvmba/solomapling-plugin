@@ -1,5 +1,7 @@
 package soloMapling.ArtificialPlayer.BotTypes.Ariant;
 
+import org.gms.server.life.Monster;
+
 /**
  * Ariant Coliseum as the engine actually implements it.
  *
@@ -92,6 +94,12 @@ public final class AriantPqData {
      */
     public static boolean catchableAt(int currentHp, int maxHp) {
         return maxHp > 0 && currentHp > 0 && currentHp < (maxHp / 10) * 4;
+    }
+
+    public static boolean canWeaken(Monster monster) {
+        if (monster.getId() != SCORPION) return false;
+        int hp = monster.getHp();
+        return hp > 0 && !catchableAt(hp, monster.getMaxHp());
     }
 
     /** Whether a level may enter. */

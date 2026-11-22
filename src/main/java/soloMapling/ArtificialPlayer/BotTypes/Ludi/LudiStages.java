@@ -1059,33 +1059,6 @@ public final class LudiStages {
     }
 
     /**
-     * The nearest reactor of a data id that is still ARMED ({@code getReactorType() == 100}).
-     *
-     * <p>Distinct from {@link #nearestBoxOid} on purpose: {@code isActive()} only means "alive
-     * with a valid state type", which stays true after an item reactor fires (its next state
-     * carries a type of its own). An altar that has already summoned its boss must not be
-     * struck again, so the caller needs the stricter test.
-     */
-    private static int nearestArmedReactorOid(Character bot, int dataId) {
-        int best = -1;
-        double bestSq = Double.MAX_VALUE;
-        for (var reactor : bot.getMap().getAllReactors()) {
-            if (reactor.getId() != dataId || !reactor.isAlive() || reactor.getReactorType() != 100) {
-                continue;
-            }
-            if (reactor.getPosition() == null) {
-                continue;
-            }
-            double dsq = bot.getPosition().distanceSq(reactor.getPosition());
-            if (dsq < bestSq) {
-                bestSq = dsq;
-                best = reactor.getObjectId();
-            }
-        }
-        return best;
-    }
-
-    /**
      * Strike a box until it is gone, standing where the approach left us. The tower's pass
      * box is a multi-state reactor (each hit cracks it further, the last breaks it), and the
      * trap room's boxes share it - so one swing per macro tick was a full tick per state,
@@ -1330,36 +1303,8 @@ public final class LudiStages {
     // Stage 9 - the boss
     // =========================================================================
 
-    /**
-     * Fight the boss stage.
-     *
-     * <p>What actually ends the stage: one Alishar trophy (4001023) in the party leader's hands,
-     * so the bot's job is damage - but only on what it can reach.
-     *
-     * <p>The crystal (2201003) at (599,0) is the only thing that summons Alishar: its script
-     * spawns 9300012 on this map, and the server's own event hooks ({@code monsterKilled} /
-     * {@code allMonstersDead} in LudiPQ.js) are empty, so killing the Ratz does nothing at all
-     * despite 2040044.js saying it does. The crystal's ledge has no inbound edge in the map
-     * data (it can only be entered by falling onto it from above), so a bot that cannot reach
-     * it must WAIT rather than circle a target it can never touch - the human player can reach
-     * the altar and summon. That is why both halves are best-effort: strike the crystal when
-     * standing in its reach, add damage to Alishar when he is up, and otherwise hold.
-     */
+    /** Fight reachable enemies; leave the pass on the altar to trigger the real summoning script. */
     public static void fightBoss(Character bot) {
-        // Summon: only from inside the crystal's own reach, since the server does no distance
-        // check and a hit from across the room would read as hitting through walls. The
-        // `type == 100` test is the engine's own "still waiting for its item" state - once the
-        // altar fires it advances past it, and striking the spent crystal would do nothing.
-        int crystal = nearestArmedReactorOid(bot, LudiPqData.BOSS_CRYSTAL);
-        if (crystal >= 0 && PqActions.hitReactorIfInReach(bot, crystal)) {
-            return;
-        }
-        // Everything else is damage-only, and only on what the bot can actually touch:
-        // reachableOnly keeps the chase off the altar ledge's Ratz, which stand on a shelf no
-        // edge chain reaches. Without it the bot spends every beat walking at a target it can
-        // never fight (the "paces under the platform" report) instead of waiting for the human
-        // to summon Alishar. Alishar himself is a boss and is exempt from the ledge filter, so
-        // he is still chased the moment he appears on a floor the bot can stand on.
-        PqActions.seekAndAttack(bot, true, new int[]{LudiPqData.PASS});
+        PqActions.seekAndAttack(bot, true);
     }
 }

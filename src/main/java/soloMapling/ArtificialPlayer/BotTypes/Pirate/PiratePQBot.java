@@ -9,8 +9,8 @@ import soloMapling.ArtificialPlayer.PartyQuest.PqActions;
 /**
  * Plays Pirate PQ ("Lord Pirate") with a real player leading.
  *
- * <p>The medal room has three separate leader turn-ins. In the other rooms the bot breaks
- * boxes and fights what is still standing.
+ * <p>The medal room has three leader turn-ins. In the other rooms the bot fights, breaks
+ * ordinary boxes in grind mode, or closes the spawn doors with keys.
  *
  * <p>Which room the party is in is taken from the map, which is also what the quest itself
  * keys on - it bumps its {@code curStage} as the leader walks into each room, so the map is
@@ -20,6 +20,7 @@ public class PiratePQBot extends PartyQuestBot {
 
     private static final int MEDALS_PER_ROUND = 20;
     private static final int STAGE_NPC = 2094002;
+    private static final int[] DOOR_KEY_LOOT = {PiratePqData.DOOR_KEY};
     private static final int[][] MEDAL_LOOT_BY_ROUND = {{4001120}, {4001121}, {4001122}};
 
     public PiratePQBot(Character character) {
@@ -72,7 +73,7 @@ public class PiratePQBot extends PartyQuestBot {
             return false;
         }
         if (mapId != PiratePqData.STAGE_1) {
-            return lootIds.length == 0;
+            return mapId == PiratePqData.STAGE_4 ? lootIds == DOOR_KEY_LOOT : lootIds.length == 0;
         }
         // Each round has its own cached array. Never use the new round's quota to
         // authorize a beat that was already aimed at the previous round's medal.
@@ -82,6 +83,7 @@ public class PiratePQBot extends PartyQuestBot {
 
     @Override
     protected int[] steppedOnLootIds() {
+        if (getChr().getMapId() == PiratePqData.STAGE_4) return DOOR_KEY_LOOT;
         if (getChr().getMapId() == PiratePqData.STAGE_1) {
             int round = PqActions.readEimInt(getChr(), "stage2", -1);
             if (round >= 0 && round < MEDAL_LOOT_BY_ROUND.length) {
@@ -118,23 +120,17 @@ public class PiratePQBot extends PartyQuestBot {
             return false;
         }
 
-        // Boxes first: in room 4 the monsters are inside them, so hitting boxes is also how
-        // the fight starts. findReactorOid returns the first one still alive, so this walks
-        // the room's boxes one at a time until none are left.
-        int[] boxes = map.getId() == PiratePqData.ENTRY_MAP && PqActions.readEimInt(bot, "grindMode", 0) == 0
-                ? PiratePqData.NO_BOXES : PiratePqData.boxesIn(map.getId());
-        for (int boxId : boxes) {
-            for (int guard = 0; guard < BOXES_PER_ROOM_LIMIT; guard++) {
-                int oid = PqActions.findReactorOid(getChr(), boxId);
-                if (oid < 0) {
-                    break; // no more of this kind standing
-                }
-                if (!PqActions.hitReactor(getChr(), oid)) return false;
-                if (!stillAlive(oid)) {
-                    break; // this one is spent; the next pass finds the following one
-                }
+        if (map.getId() == PiratePqData.STAGE_4) {
+            for (var door : map.getReactorsByIdRange(PiratePqData.DOOR_FIRST, PiratePqData.DOOR_LAST)) {
+                if (PqActions.feedReactor(bot, door.getObjectId(), PiratePqData.DOOR_KEY)) return false;
             }
+            PqActions.seekAndAttack(bot, false, DOOR_KEY_LOOT);
+            PqActions.loot(bot, bot.getPosition(), 1_200, DOOR_KEY_LOOT);
+            return false;
         }
+        int[] boxes = PqActions.readEimInt(bot, "grindMode", 0) == 0
+                ? PiratePqData.NO_BOXES : PiratePqData.boxesIn(map.getId());
+        if (boxes.length > 0 && PqActions.workActiveReactors(bot, boxes)) return false;
 
         // Then whatever the room has left standing.
         if (!map.getMonsters().isEmpty()) {
@@ -150,13 +146,5 @@ public class PiratePQBot extends PartyQuestBot {
     private static boolean waitingForWuYang(Character bot) {
         return bot.getMapId() == PiratePqData.STAGE_5
                 && bot.getMap().getNPCById(PiratePqData.WU_YANG) != null;
-    }
-
-    /** How many of one box kind to keep hitting before giving the tick back. */
-    private static final int BOXES_PER_ROOM_LIMIT = 24;
-
-    private boolean stillAlive(int reactorOid) {
-        var reactor = getChr().getMap().getReactorByOid(reactorOid);
-        return reactor != null && reactor.isAlive();
     }
 }

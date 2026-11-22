@@ -1,12 +1,20 @@
 package soloMapling.ArtificialPlayer.BotSummonSystem;
 
+import org.gms.client.Character;
+import org.gms.server.life.Monster;
+import org.gms.server.life.MonsterStats;
+import org.gms.server.maps.MapleMap;
+import org.gms.server.maps.MapObjectType;
 import org.junit.jupiter.api.Test;
 
+import java.awt.Point;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.*;
 
 /**
  * Pins the turret PLACEMENT rules: where a STATIONARY turret is planted, and the knobs the
@@ -59,6 +67,28 @@ class BotSummonTurretPlacementTest {
     void placementDisabledAlwaysUsesTheOwnersFeet() throws Exception {
         // at_mobs: false restores the old rule outright, whatever the map holds.
         assertEquals(new java.awt.Point(1000, 300), anchorDryRadius(false));
+    }
+
+    @Test
+    void turretPlacementIgnoresFriendlyEscorts() throws Exception {
+        BotSummonSpawnIfAbsentTest.stubHost();
+        Character bot = mock(Character.class);
+        MapleMap map = mock(MapleMap.class);
+        Monster escort = mock(Monster.class);
+        Monster enemy = mock(Monster.class);
+        MonsterStats escortStats = new MonsterStats();
+        escortStats.setFriendly(true);
+        when(escort.getStats()).thenReturn(escortStats);
+        when(escort.getPosition()).thenReturn(new Point(10, 0));
+        when(escort.isAlive()).thenReturn(true);
+        Point enemyAt = new Point(30, 0);
+        when(enemy.getPosition()).thenReturn(enemyAt);
+        when(enemy.isAlive()).thenReturn(true);
+        Point owner = new Point();
+        when(map.getMapObjectsInRange(eq(owner), anyDouble(), eq(List.of(MapObjectType.MONSTER))))
+                .thenReturn(List.of(escort, enemy));
+
+        assertEquals(enemyAt, BotSummonFollower.turretAnchor(bot, owner, map, BotSummonConfig.defaults()));
     }
 
     @Test

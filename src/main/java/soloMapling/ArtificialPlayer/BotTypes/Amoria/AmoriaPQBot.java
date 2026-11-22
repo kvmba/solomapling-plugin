@@ -178,10 +178,8 @@ public class AmoriaPQBot extends PartyQuestBot {
             PqActions.deliverAndWait(getChr(), MIRROR_LOOT[0], 9201047);
             return false;
         }
-        // The mirror on the hall floor: its drop is the pass item itself, and it is the one
-        // thing in this stage the bots can reach (the mobs are behind gender doors).
         int mirror = PqActions.findReactorOid(getChr(), AmoriaPqData.MIRROR_REACTOR);
-        if (mirror >= 0 && !PqActions.hitReactor(getChr(), mirror)) {
+        if (mirror >= 0 && PqActions.feedReactor(getChr(), mirror, AmoriaPqData.MIRROR_OFFERING)) {
             return false;
         }
         PqActions.seekAndAttack(getChr());

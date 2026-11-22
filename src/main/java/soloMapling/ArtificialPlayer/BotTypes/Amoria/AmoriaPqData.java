@@ -86,13 +86,9 @@ public final class AmoriaPqData {
     public static final int STATUE_PIECE = 4031597;
     public static final int STATUE_PIECES_WANTED = 50;
 
-    /**
-     * Stage 1's Magik Mirror reactor (6702000, on the stage-1 hall floor): its drop table
-     * yields 4031595 - the pass 9201047 asks the leader for. The mirror fight's mobs sit
-     * behind the gender doors the bots cannot pass, so breaking the mirror is the bot's
-     * whole contribution to this stage.
-     */
+    /** The hall's mirror consumes one Cloud of Love and drops the shard for Amos. */
     public static final int MIRROR_REACTOR = 6702000;
+    public static final int MIRROR_OFFERING = 4031596;
 
     /** The instance property a rope stage stores its answer in. */
     public static String comboPropertyFor(int stage) {

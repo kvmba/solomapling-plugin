@@ -262,6 +262,7 @@ public class LudiPQBot extends PartyQuestBot {
         if (mapId == LudiPqData.STAGE5_ROOM_LAST || mapId == LudiPqData.BONUS_TAIL_MAP) {
             return false;
         }
+        if (mapId == LudiPqData.STAGE_9 && LudiStages.stageCleared(getChr(), 9)) return false;
         return !(stageOf(mapId) == 5 && LudiStages.nearbyGuardCount(getChr()) > 0);
     }
 
@@ -277,8 +278,8 @@ public class LudiPQBot extends PartyQuestBot {
     @Override
     protected int[] steppedOnLootIds() {
         int mapId = getChr().getMapId();
-        if (mapId == LudiPqData.BONUS_MAP || mapId == LudiPqData.BONUS_TAIL_MAP) {
-            return new int[0]; // the bonus room's spray is the party's, not the bot's
+        if (mapId == LudiPqData.STAGE_9 || mapId == LudiPqData.BONUS_MAP || mapId == LudiPqData.BONUS_TAIL_MAP) {
+            return super.steppedOnLootIds(); // altar offerings and bonus drops stay on the floor
         }
         return new int[]{LudiPqData.PASS};
     }

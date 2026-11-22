@@ -8,9 +8,8 @@ import soloMapling.ArtificialPlayer.PartyQuest.PqActions;
 /**
  * Plays Zakum PQ with a real player leading.
  *
- * <p>The mine holds nothing but crates, so the loop is short: break crates, pick up the ore
- * that falls out, repeat until the party has the Fire Ore it came for. There are no monsters
- * anywhere in the instance, which is why this bot needs no fight handling at all.
+ * <p>Help break ordinary crates and collect the ore once the party opens the ore chest
+ * with the mine keys. The ore chest is not a strike reactor.
  *
  * <p>The turn-in stays with the player: Aura takes the ore from whoever talks to him, and the
  * exit portal checks that the instance has been cleared rather than that anyone is carrying
@@ -18,8 +17,7 @@ import soloMapling.ArtificialPlayer.PartyQuest.PqActions;
  */
 public class ZakumPQBot extends PartyQuestBot {
 
-    /** How many crates to work through in one tick before handing the thread back. */
-    private static final int CRATE_PASSES = 24;
+    private static final int[] ORE_LOOT = {ZakumPqData.FIRE_ORE};
 
     public ZakumPQBot(Character character) {
         super(character);
@@ -52,44 +50,20 @@ public class ZakumPQBot extends PartyQuestBot {
 
     @Override
     protected boolean workStage() {
-        if (!PqActions.needsHuntForLeader(getChr(), ZakumPqData.FIRE_ORE, 1)) {
-            PqActions.deliverAndWait(getChr(), ZakumPqData.FIRE_ORE, 2032002);
+        Character bot = getChr();
+        PqActions.armReactorBeat(bot, -1);
+        if (!PqActions.needsHuntForLeader(bot, ZakumPqData.FIRE_ORE, 1)) {
+            PqActions.deliverAndWait(bot, ZakumPqData.FIRE_ORE, 2032002);
             return false;
         }
-        // Break what crates are standing, taking the first of each kind in turn. The mine's
-        // crates carry no scripts, so a hit is just a state change and there is nothing to
-        // wait for beyond the crate disappearing.
-        for (int pass = 0; pass < CRATE_PASSES; pass++) {
-            int oid = firstStandingCrate();
-            if (oid < 0) {
-                break;
-            }
-            if (!PqActions.hitReactor(getChr(), oid)) break;
-        }
-        if (firstStandingCrate() < 0) {
-            // The room's crates are all broken and the ore is in hand or on the floor:
-            // this room's work is done even though the run goes on until Aura forges.
-            sayStageClearOnce(getChr().getMapId());
-        }
+        int chest = PqActions.findReactorOid(bot, ZakumPqData.ORE_CHEST);
+        if (chest >= 0 && PqActions.feedReactor(bot, chest, ZakumPqData.MINE_KEY)) return false;
 
-        // Whatever fell out is the point of the room.
-        PqActions.loot(getChr(), getChr().getPosition(), 2_000,
-                new int[]{ZakumPqData.FIRE_ORE, ZakumPqData.FIRE_ORE_REFINED});
-        // Sub-rooms have no turn-in NPC. Keep the ore until the party returns to Adobis.
-        if (!PqActions.needsHuntForLeader(getChr(), ZakumPqData.FIRE_ORE, 1)) {
-            PqActions.deliverAndWait(getChr(), ZakumPqData.FIRE_ORE, 2032002);
+        switch (PqActions.collectPartyQuestLoot(bot, ORE_LOOT)) {
+            case PICKED_UP -> PqActions.deliverAndWait(bot, ZakumPqData.FIRE_ORE, 2032002);
+            case COLLECTING -> { }
+            case NONE -> PqActions.workActiveReactors(bot, ZakumPqData.CRATES);
         }
         return false;
-    }
-
-    /** The first crate still standing in the room, or -1 when the room is cleared. */
-    private int firstStandingCrate() {
-        for (int crateId : ZakumPqData.CRATES) {
-            int oid = PqActions.findReactorOid(getChr(), crateId);
-            if (oid >= 0) {
-                return oid;
-            }
-        }
-        return -1;
     }
 }

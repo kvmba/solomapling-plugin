@@ -107,6 +107,7 @@ public final class LudiPqData {
     public static final int PASS = 4001022;
     /** The boss trophy, one of which ends the run. */
     public static final int ALISHAR_TROPHY = 4001023;
+    public static final int STAGE7_BOX_TRIGGER = 4001156;
 
     /**
      * How many passes each stage asks for, straight out of the stage NPC scripts

@@ -27,6 +27,7 @@ import soloMapling.ArtificialPlayer.BotGrindSystem.MovementStyle;
 import soloMapling.ArtificialPlayer.BotGrindSystem.MovementStylePolicy;
 import soloMapling.ArtificialPlayer.BotLogic;
 import soloMapling.ArtificialPlayer.BotMessagingSystem.CharacterStorage;
+import soloMapling.ArtificialPlayer.BotTypes.Ariant.AriantPqData;
 import soloMapling.ArtificialPlayer.GCMoveSystem.GCMovement;
 import soloMapling.MapVFX.CustomReactor;
 import soloMapling.server.ExecutorServiceManager;
@@ -518,28 +519,28 @@ public final class PqActions {
 
     /** Approach and hit through the engine's state walk; false when no strike was made. */
     public static boolean hitReactor(Character bot, int reactorOid) {
-        if (bot == null || bot.getMap() == null
-                || approachReactor(bot, reactorOid, true, false) != Approach.IN_POSITION
-                || GCMovement.isClimbing(bot)) {
-            return false;
-        }
-        // Play the swing, or the reactor breaks by itself while the bot stands idle - the
-        // player watches boxes pop open with nobody touching them. basicSwing also breaks hides.
-        if (!BotAttack.basicSwing(bot)) return false;
-        CustomReactor.hitReactorWithScript(bot.getMap(), reactorOid, bot);
-        return true;
+        if (bot == null) return false;
+        MapleMap map = bot.getMap();
+        return approachReactor(bot, map, reactorOid, true, false) == Approach.IN_POSITION
+                && swingAtReactor(bot, map, reactorOid);
     }
 
     /** Strike only when already beside the reactor; never issue a walk, stop, or stage shield. */
     public static boolean hitReactorIfInReach(Character bot, int reactorOid) {
-        if (bot == null || bot.getMap() == null) return false;
-        Reactor reactor = bot.getMap().getReactorByOid(reactorOid);
-        if (reactor == null || !reactor.isActive()) return false;
-        Point pos = bot.getPosition();
-        Point at = reactor.getPosition();
-        if (!atApproachFloor(bot, pos, at)) return false;
-        if (!BotAttack.basicSwing(bot)) return false;
-        CustomReactor.hitReactorWithScript(bot.getMap(), reactorOid, bot);
+        if (bot == null) return false;
+        MapleMap map = bot.getMap();
+        if (map == null) return false;
+        Reactor reactor = map.getReactorByOid(reactorOid);
+        if (!isStrikeable(reactor)) return false;
+        return atApproachFloor(bot, bot.getPosition(), reactor.getPosition()) && swingAtReactor(bot, map, reactorOid);
+    }
+
+    private static boolean swingAtReactor(Character bot, MapleMap map, int oid) {
+        // The animation and the hit are separate operations. A warp during the swing
+        // must not resolve this OID against the new room.
+        if (bot.getMap() != map || !BotAttack.basicSwing(bot) || bot.getMap() != map
+                || !isStrikeable(map.getReactorByOid(oid))) return false;
+        CustomReactor.hitReactorWithScript(map, oid, bot);
         return true;
     }
 
@@ -595,6 +596,10 @@ public final class PqActions {
             this.map = map;
         }
 
+        void defer(int oid) {
+            retryAt.put(oid, movementNowMs() + REACTOR_RETRY_MS);
+        }
+
         boolean deferred(int oid) {
             Long until = retryAt.get(oid);
             if (until == null) return false;
@@ -608,8 +613,7 @@ public final class PqActions {
     public static void deferReactorApproach(Character bot, int oid) {
         SeekState control = seekStates.computeIfAbsent(bot.getId(), ignored -> new SeekState());
         synchronized (control) {
-            ReactorWork work = reactorWork(control, bot.getMap());
-            work.retryAt.put(oid, movementNowMs() + REACTOR_RETRY_MS);
+            reactorWork(control, bot.getMap()).defer(oid);
             control.approach = null;
         }
     }
@@ -630,36 +634,44 @@ public final class PqActions {
         return control.reactorWork;
     }
 
-    /** Keep working the chosen copy until it breaks or the driver gives up on reaching it. */
-    public static boolean workActiveReactors(Character bot, int dataId) {
+    /** Choose a breakable copy; the fast sweep owns every swing. */
+    public static boolean workActiveReactors(Character bot, int... dataIds) {
         MapleMap map = bot.getMap();
         SeekState control = seekStates.computeIfAbsent(bot.getId(), ignored -> new SeekState());
         synchronized (control) {
             ReactorWork work = reactorWork(control, map);
             Reactor current = work.target < 0 ? null : map.getReactorByOid(work.target);
-            if (current != null && current.getId() == dataId && current.isActive()
-                    && workReactor(bot, work, current.getObjectId())) return true;
+            if (isStrikeable(current)) {
+                for (int dataId : dataIds) {
+                    if (current.getId() == dataId && workReactor(bot, work, work.target)) return true;
+                }
+            }
 
             work.target = -1;
             boolean active = false;
-            for (Reactor reactor : map.getReactorsByIdRange(dataId, dataId)) {
-                if (!reactor.isActive()) continue;
-                active = true;
-                if (workReactor(bot, work, reactor.getObjectId())) return true;
+            for (int dataId : dataIds) {
+                for (Reactor reactor : map.getReactorsByIdRange(dataId, dataId)) {
+                    if (!isStrikeable(reactor)) continue;
+                    active = true;
+                    if (workReactor(bot, work, reactor.getObjectId())) return true;
+                }
             }
             return active; // only unreachable copies remain for now
         }
     }
 
+    private static boolean isStrikeable(Reactor reactor) {
+        return reactor != null && reactor.isActive() && reactor.getReactorType() != 100;
+    }
+
     private static boolean workReactor(Character bot, ReactorWork work, int oid) {
         if (work.deferred(oid)) return false;
-        Approach approach = approachReactor(bot, oid, true, false);
+        Approach approach = approachReactor(bot, work.map, oid, true, true);
         if (approach == Approach.STUCK) {
-            deferReactorApproach(bot, oid);
+            work.defer(oid);
             return false;
         }
         work.target = oid;
-        if (approach == Approach.IN_POSITION) hitReactor(bot, oid);
         return true;
     }
 
@@ -682,10 +694,9 @@ public final class PqActions {
 
     /**
      * Register {@code oid} as the reactor the combat sweep should carry while the stage walk
-     * is in flight (call from the macro tick right after issuing the approach). The sweep
-     * strikes it on arrival; a {@code null}/{@code -1} clears the registration. Keyed to the
-     * map instance: reactor oids collide across maps (the stage-2 tower and its trap room),
-     * so an armed box must die with the room change.
+     * is in flight. The sweep strikes it on arrival; {@code -1} releases the target without
+     * resetting the swing cooldown. Keyed to the map instance because reactor oids can collide
+     * across rooms.
      */
     public static void armReactorBeat(Character bot, int oid) {
         if (bot == null) {
@@ -712,7 +723,7 @@ public final class PqActions {
         BeatBox box = beatBoxByBot.get(bot.getId());
         if (box == null) return false;
         Reactor reactor = bot.getMap() == box.map() ? box.map().getReactorByOid(box.oid()) : null;
-        if (reactor != null && reactor.isActive()) return true;
+        if (isStrikeable(reactor)) return true;
         if (beatBoxByBot.remove(bot.getId(), box)) {
             nextReactorSwingAtByBot.remove(bot.getId());
         }
@@ -721,12 +732,18 @@ public final class PqActions {
 
     /** Reserve the box and its steering in the same critical section as combat seeking. */
     public static Approach approachReactor(Character bot, int oid, boolean descend, boolean onBeat) {
+        return approachReactor(bot, bot.getMap(), oid, descend, onBeat);
+    }
+
+    private static Approach approachReactor(Character bot, MapleMap map, int oid, boolean descend, boolean onBeat) {
+        if (map == null) return Approach.STUCK;
         SeekState control = seekStates.computeIfAbsent(bot.getId(), ignored -> new SeekState());
         synchronized (control) {
-            Reactor reactor = bot.getMap().getReactorByOid(oid);
-            if (reactor == null || !reactor.isActive()) return Approach.STUCK;
+            if (map != bot.getMap()) return Approach.STUCK;
+            Reactor reactor = map.getReactorByOid(oid);
+            if (!isStrikeable(reactor)) return Approach.STUCK;
             if (movementShielded(bot.getId())) return Approach.TRAVELLING;
-            if (onBeat) armReactorBeat(bot, oid);
+            if (onBeat) beatBoxByBot.put(bot.getId(), new BeatBox(oid, map));
             Approach result = descend ? descendToFloorAerialTarget(bot, reactor.getPosition())
                     : approachUnder(bot, reactor.getPosition());
             if (result == Approach.STUCK) {
@@ -756,13 +773,13 @@ public final class PqActions {
      * is debounced, so a multi-box combo only ever pulls one tick, and the cadence settles
      * back on its own.
      */
-    private static void strikeReactorOnBeat(Character bot, int oid, long now) {
-        nextReactorSwingAtByBot.put(bot.getId(), now + REACTOR_SWING_MIN_MS
-                + ThreadLocalRandom.current().nextLong(REACTOR_SWING_JITTER_MS));
-        hitReactor(bot, oid);
-        var reactor = bot.getMap().getReactorByOid(oid);
-        if (reactor == null || !reactor.isActive()) {
-            beatBoxByBot.remove(bot.getId());
+    private static void strikeReactorOnBeat(Character bot, BeatBox box, long now) {
+        if (swingAtReactor(bot, box.map(), box.oid())) {
+            nextReactorSwingAtByBot.put(bot.getId(), now + REACTOR_SWING_MIN_MS
+                    + ThreadLocalRandom.current().nextLong(REACTOR_SWING_JITTER_MS));
+        }
+        if (bot.getMap() != box.map() || !isStrikeable(box.map().getReactorByOid(box.oid()))) {
+            beatBoxByBot.remove(bot.getId(), box);
             nudgeStageTick(bot);
         }
     }
@@ -795,10 +812,9 @@ public final class PqActions {
             return false; // stale room (or nothing armed): the stage re-arms on its next tick
         }
         int oid = box.oid();
-        long now = movementNowMs();
-        var reactor = bot.getMap().getReactorByOid(oid);
-        if (reactor == null || !reactor.isActive()) {
-            beatBoxByBot.remove(bot.getId()); // broken by a teammate mid-walk
+        var reactor = box.map().getReactorByOid(oid);
+        if (!isStrikeable(reactor)) {
+            beatBoxByBot.remove(bot.getId()); // broken or no longer a hit-reactor
             return false;
         }
         // Never strike from across the room: the same honest-shot rule approachUnder's
@@ -809,8 +825,11 @@ public final class PqActions {
             beatBoxByBot.remove(bot.getId()); // the stage's next tick rotates the target
             return false;
         }
-        if (outcome == Approach.IN_POSITION && reactorSwingReady(bot, now)) {
-            strikeReactorOnBeat(bot, oid, now);
+        if (outcome == Approach.IN_POSITION) {
+            long now = movementNowMs();
+            if (reactorSwingReady(bot, now) && !GCMovement.isAttacking(bot)) {
+                strikeReactorOnBeat(bot, box, now);
+            }
             return false;
         }
         return outcome == Approach.TRAVELLING;
@@ -1730,7 +1749,8 @@ public final class PqActions {
 
     private static boolean canCollectFloorDrop(Character bot, MapItem drop, PartyDrops partyDrops) {
         if (!isFloorLoot(drop) || !(DropCommands.botCanLoot(bot, drop)
-                || (partyDrops != PartyDrops.NONE && isPartySourceDrop(bot, drop, partyDrops)))) return false;
+                || (partyDrops != PartyDrops.NONE && !BotLogic.reservedQuestDrop(bot, drop)
+                        && isPartySourceDrop(bot, drop, partyDrops)))) return false;
         // A Chief Bandit's Pickpocket bags are bomb fuel, not loot: botCanLoot passes them (they
         // are the bot's own drops) and they register the instant they land, so without this gate
         // the sweep eats them long before BAG_MIN_AGE_MS makes them detonable. The grind layer's
@@ -2214,7 +2234,7 @@ public final class PqActions {
         int sticky = state.targetOid;
         if (sticky >= 0) {
             MapObject mo = bot.getMap().getMapObject(sticky);
-            if (mo instanceof Monster m && isHuntTarget(m, pos) && huntFilterAdmits(bot, m)
+            if (mo instanceof Monster m && isHuntTarget(bot, m, pos)
                     && isPathable(bot, m, state)) {
                 return m;
             }
@@ -2225,7 +2245,7 @@ public final class PqActions {
         Monster nearestPathable = null;
         double nearestPathableSq = Double.MAX_VALUE;
         for (Monster m : bot.getMap().getAllMonsters()) {
-            if (!isHuntTarget(m, pos) || !huntFilterAdmits(bot, m)) {
+            if (!isHuntTarget(bot, m, pos)) {
                 continue;
             }
             Point mp = m.getPosition();
@@ -2339,19 +2359,16 @@ public final class PqActions {
      * only a real client can move) drifted into the old radius. Horizontal reach is the nav
      * graph's answer ({@link #isPathable}), never a constant.
      */
-    private static boolean isHuntTarget(Monster m, Point pos) {
+    private static boolean isHuntTarget(Character bot, Monster m, Point pos) {
         if (m == null || !m.isAlive()) {
             return false;
         }
-        if (m.getStats() != null && m.getStats().isFriendly()) {
-            return false; // Moon Bunny and friends are not targets
-        }
         Point mp = m.getPosition();
-        return mp != null && Math.abs(mp.y - pos.y) <= SEEK_STACK_RANGE_Y;
+        return mp != null && Math.abs(mp.y - pos.y) <= SEEK_STACK_RANGE_Y && huntFilterAdmits(bot, m);
     }
 
     /**
-     * The hunt filter the current beat actually uses, layered over {@link #isHuntTarget}.
+     * Optional per-bot restrictions on top of normal hostile targeting.
      *
      * <p>A content type whose room holds monsters on <em>your own</em> side needs this: Monster
      * Carnival's arena contains both parties' summons in one map object list, and the engine
@@ -2382,12 +2399,13 @@ public final class PqActions {
     }
 
     /**
-     * Whether this bot's hunt filter admits the monster; true when it has no filter.
-     *
-     * <p>Public because the attack driver selects targets on its own path - the swing and the
-     * chase must agree on what is a legal target, or the bot would still hit its own side.
+     * Whether this monster is hostile and passes the bot's optional hunt filter. Chases,
+     * swings and area attacks must all exclude friendly escorts such as Moon Bunny.
      */
     public static boolean huntFilterAdmits(Character bot, Monster m) {
+        var stats = m.getStats();
+        if (stats != null && stats.isFriendly()) return false;
+        if (AriantPqData.isArena(bot.getMapId()) && !AriantPqData.canWeaken(m)) return false;
         // Fast path for every content type that never installs a filter: `isEmpty` on a concurrent
         // map is a cheap size read, while the `get` below would hash a bot id on each of the
         // sweep's 250ms beats for every monster in the room.

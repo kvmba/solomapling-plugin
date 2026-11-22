@@ -19,9 +19,7 @@ import java.util.WeakHashMap;
  * the quest's own {@code stage} counter - which the flowers bump when one takes - says
  * whether it worked. Nothing is guessed.
  *
- * <p>Second half: keep the monsters off Moon Bunny and carry the rice cakes to Growlie. The
- * cakes are ordinary party drops, so whoever gathers them can hand them over; the bot only
- * has to keep the mobs down.
+ * <p>Second half: keep the monsters off Moon Bunny while the players collect the rice cakes.
  */
 public final class HenesysStages {
 
@@ -37,6 +35,8 @@ public final class HenesysStages {
 
     /** Work on the claimed flower until its seed is accepted by the quest script. */
     static void plantOneFlower(Character bot) {
+        // Let seed pickup or planting take the wheel even if a leaf is still active.
+        PqActions.armReactorBeat(bot, -1);
         Reactor flower = claimFlower(bot);
         if (flower == null) return;
         int index = flower.getId() - HenesysPqData.FLOWER_FIRST;
@@ -113,48 +113,17 @@ public final class HenesysStages {
     }
 
     // =========================================================================
-    // Second half - protect Moon Bunny, gather the rice cakes
+    // Second half - protect Moon Bunny
     // =========================================================================
 
-    /**
-     * Keep the monsters off Moon Bunny, and pick up rice cakes as they appear.
-     *
-     * <p>The quest counts cakes in its own property and stops the run on its own clock.
-     * Growlie (NPC 1012114) grades whoever talks to him for 10 cakes - usually the leader -
-     * so carriers deliver at Growlie one at a time while the remaining bots guard the bunny.
-     */
+    /** Guard until the leader submits the cakes; leave the drops for players. */
     public static void guardMoonBunny(Character bot) {
-        boolean collecting = needsCakes(bot);
-        if (stageCleared(bot) || deliversCakes(bot)) {
-            PqActions.deliverAndWait(bot, HenesysPqData.RICE_CAKE, HenesysPqData.GROWLIE);
+        if (stageCleared(bot)) {
+            PqActions.stopHunting(bot);
+            PqActions.waitNearStageNpc(bot, HenesysPqData.GROWLIE);
         } else {
-            // Cakes being ready does not end the escort: the bunny can still be killed
-            // before the leader submits them. Only one carrier leaves to deliver at a time.
             PqActions.seekAndAttack(bot);
-            if (collecting) {
-                PqActions.loot(bot, bot.getPosition(), 2_000, new int[]{HenesysPqData.RICE_CAKE});
-            }
         }
-    }
-
-    static boolean needsCakes(Character bot) {
-        return !stageCleared(bot)
-                && PqActions.needsHuntForLeader(bot, HenesysPqData.RICE_CAKE, HenesysPqData.RICE_CAKE_COUNT);
-    }
-
-    static boolean deliversCakes(Character bot) {
-        var instance = bot.getEventInstance();
-        if (instance == null || PqActions.countItem(bot, HenesysPqData.RICE_CAKE) == 0 || needsCakes(bot)) return false;
-        for (Character member : instance.getPlayers()) {
-            if (member.getId() < bot.getId()
-                    && PqActions.countItem(member, HenesysPqData.RICE_CAKE) > 0
-                    && CharacterStorage.getBotById(member.getId()) instanceof HenesysPQBot carrier
-                    && carrier.getRunning() && carrier.getState() != BotSM.BotState.PAUSE
-                    && !carrier.death().isCorpse()) {
-                return false;
-            }
-        }
-        return true;
     }
 
     static boolean stageCleared(Character bot) {

@@ -1,11 +1,19 @@
 package soloMapling.ArtificialPlayer.BotTypes.Henesys;
 
 import org.gms.client.Character;
+import org.gms.client.Job;
 import org.gms.client.inventory.Item;
+import org.gms.constants.id.MobId;
 import org.gms.manager.ServerManager;
+import org.gms.net.server.world.Party;
+import org.gms.net.server.world.World;
 import org.gms.property.ServiceProperty;
+import org.gms.scripting.event.EventInstanceManager;
+import org.gms.server.life.Monster;
+import org.gms.server.life.MonsterStats;
 import org.gms.server.maps.MapItem;
 import org.gms.server.maps.MapleMap;
+import org.gms.server.maps.MapObjectType;
 import org.gms.server.maps.Reactor;
 import org.gms.service.ConfigService;
 import org.gms.util.Pair;
@@ -15,13 +23,19 @@ import org.junit.jupiter.api.Test;
 import org.mockito.MockedStatic;
 import org.springframework.context.ApplicationContext;
 import org.springframework.context.MessageSource;
+import soloMapling.ArtificialPlayer.BotAttackSystem.BotAttackConfig;
+import soloMapling.ArtificialPlayer.BotAttackSystem.BotAttackData;
+import soloMapling.ArtificialPlayer.BotAttackSystem.BotAttackDriver;
+import soloMapling.ArtificialPlayer.BotAttackSystem.BotAttackProfile;
 import soloMapling.ArtificialPlayer.BotCommandsPack.BotAttack;
 import soloMapling.ArtificialPlayer.BotCommandsPack.DropCommands;
+import soloMapling.ArtificialPlayer.BotGeneration;
 import soloMapling.ArtificialPlayer.BotHealthSystem.BotDeath;
 import soloMapling.ArtificialPlayer.BotMessagingSystem.CharacterStorage;
 import soloMapling.ArtificialPlayer.GCMoveSystem.GCMovement;
 import soloMapling.ArtificialPlayer.PartyQuest.PqActions;
 import soloMapling.MapVFX.CustomReactor;
+import soloMapling.server.BotTiming;
 import soloMapling.server.ExecutorServiceManager;
 
 import java.awt.Point;
@@ -30,6 +44,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -73,6 +88,88 @@ class HenesysPlantingTest {
     void releaseSeekState() {
         PqActions.clearSeekState(BOT_ID);
         PqActions.clearSeekState(BOT_ID + 1);
+        PqActions.clearReactorBeat(BOT_ID);
+        PqActions.clearReactorBeat(BOT_ID + 1);
+        BotAttackDriver.clearBot(BOT_ID);
+    }
+
+    @Test
+    void leafSwingsContinueOnTheCombatSweepWithoutAnotherStageTick() {
+        stubReactors();
+        int oid = firstLeaf.getObjectId();
+        AtomicLong clock = new AtomicLong(1_000);
+        AtomicInteger strikes = new AtomicInteger();
+        try (var movement = movement(); var swings = mockStatic(BotAttack.class);
+             var hits = mockStatic(CustomReactor.class); var executor = mockStatic(ExecutorServiceManager.class);
+             var attacks = mockStatic(BotAttackDriver.class)) {
+            HenesysPQBot bot = startBot(movement, 0);
+            movement.when(GCMovement::movementNowMs).thenAnswer(call -> clock.get());
+            swings.when(() -> BotAttack.basicSwing(first)).thenReturn(true);
+            hits.when(() -> CustomReactor.hitReactorWithScript(map, oid, first)).thenAnswer(call -> {
+                if (strikes.incrementAndGet() == 4) when(firstLeaf.isActive()).thenReturn(false);
+                return null;
+            });
+
+            bot.workStage();
+            bot.grindTick();
+            assertEquals(1, strikes.get());
+            for (long time : new long[]{1_250, 1_500}) {
+                clock.set(time);
+                bot.grindTick();
+            }
+            assertEquals(1, strikes.get(), "respect the swing cooldown");
+            for (int count = 2; count <= 4; count++) {
+                clock.set(count * 1_000L);
+                bot.grindTick();
+                assertEquals(count, strikes.get(), "the next swing must not wait for workStage");
+            }
+            clock.set(5_000);
+            bot.grindTick();
+            assertEquals(4, strikes.get(), "the broken leaf must not be struck again");
+            assertFalse(PqActions.reactorBeatArmed(first));
+            executor.verify(() -> ExecutorServiceManager.runAsync(any(Runnable.class)));
+            attacks.verifyNoInteractions();
+        }
+    }
+
+    @Test
+    void guardsSkipTheFriendlyBunnyEvenWhenItIsInTheAttackBox() {
+        Monster bunny = mob(201, 10, true);
+        when(bunny.getId()).thenReturn(MobId.MOON_BUNNY);
+        Monster enemy = mob(202, 30, false);
+        Monster other = mob(203, 40, false);
+        doReturn(Job.BEGINNER).when(first).getJob();
+        when(first.getLevel()).thenReturn(30);
+        when(first.getObjectId()).thenReturn(200);
+        doReturn(mock(World.class)).when(first).getWorldServer();
+        when(map.getMapObject(200)).thenReturn(first);
+        when(map.getAllMonsters()).thenReturn(List.of(bunny));
+        when(map.getMapObjectsInRange(any(), anyDouble(), eq(List.of(MapObjectType.MONSTER))))
+                .thenAnswer(call -> map.getAllMonsters());
+        try (var movement = movement(); var equipment = mockStatic(BotAttack.class);
+             var config = mockStatic(BotAttackConfig.class); var timing = mockStatic(BotTiming.class);
+             var animation = mockStatic(BotAttackData.class, call ->
+                     call.getMethod().getName().equals("animationDurationMs") ? 400 : call.callRealMethod())) {
+            HenesysPQBot bot = startBot(movement, FLOWERS_TO_BLOOM);
+            movement.when(() -> GCMovement.isEnabled(first)).thenReturn(true);
+            movement.when(() -> GCMovement.broadcastActiveAttack(eq(first), any(), anyInt())).thenReturn(true);
+            config.when(() -> BotAttackConfig.resolve(Job.BEGINNER, null, 30)).thenReturn(
+                    new BotAttackConfig.JobAttacks(BotAttackProfile.basicSwing(), BotAttackProfile.meleeAoe(0, 1), null));
+            timing.when(() -> BotTiming.after(anyLong(), any())).thenAnswer(call -> {
+                call.<Runnable>getArgument(1).run();
+                return null;
+            });
+
+            bot.workStage();
+            movement.verify(() -> GCMovement.broadcastActiveAttack(eq(first), any(), anyInt()), never());
+            movement.verify(() -> GCMovement.moveTracking(eq(first), anyInt(), anyInt(), anyInt()), never());
+
+            when(map.getAllMonsters()).thenReturn(List.of(bunny, enemy, other));
+            bot.grindTick();
+            verify(enemy).damage(eq(first), anyInt(), eq(false));
+            verify(other).damage(eq(first), anyInt(), eq(false));
+            verify(bunny, never()).damage(any(), anyInt(), anyBoolean());
+        }
     }
 
     @Test
@@ -92,14 +189,18 @@ class HenesysPlantingTest {
 
             HenesysStages.plantOneFlower(first);
             HenesysStages.plantOneFlower(second);
+            PqActions.workReactorOnBeat(first);
             when(claimant.getRunning()).thenReturn(false);
             HenesysStages.plantOneFlower(second); // keep the second color even when the first opens up
-            hits.verify(() -> CustomReactor.hitReactorWithScript(map, secondLeafOid, second), times(2));
+            PqActions.workReactorOnBeat(second);
+            hits.verify(() -> CustomReactor.hitReactorWithScript(map, secondLeafOid, second));
             hits.verify(() -> CustomReactor.hitReactorWithScript(map, firstLeafOid, second), never());
 
             when(secondFlower.getState()).thenReturn((byte) 1);
             when(secondFlower.isActive()).thenReturn(false);
             HenesysStages.plantOneFlower(second);
+            movement.when(GCMovement::movementNowMs).thenReturn(1_000L);
+            PqActions.workReactorOnBeat(second);
             hits.verify(() -> CustomReactor.hitReactorWithScript(map, firstLeafOid, second));
             hits.verify(() -> CustomReactor.hitReactorWithScript(map, firstLeafOid, first));
         }
@@ -122,7 +223,7 @@ class HenesysPlantingTest {
         MapItem planted = seedDrop(seed, flowerAt);
         AtomicInteger carried = new AtomicInteger();
         when(first.getItemQuantity(seed, false)).thenAnswer(call -> carried.get());
-        List<MapItem> drops = new ArrayList<>(List.of(wrong, wanted));
+        List<MapItem> drops = new ArrayList<>(List.of(wrong));
         when(map.getMapObjectsInRange(any(), anyDouble(), anyList())).thenAnswer(call -> new ArrayList<>(drops));
         doAnswer(call -> {
             carried.incrementAndGet();
@@ -141,6 +242,10 @@ class HenesysPlantingTest {
             });
 
             HenesysStages.plantOneFlower(first);
+            assertTrue(PqActions.reactorBeatArmed(first));
+            drops.add(wanted); // a teammate breaks a different copy of the leaf
+            HenesysStages.plantOneFlower(first);
+            assertFalse(PqActions.reactorBeatArmed(first));
             movement.when(() -> GCMovement.moveTargetOf(first)).thenReturn(seedAt);
             HenesysStages.plantOneFlower(first);
             movement.verify(() -> GCMovement.move(eq(first), eq(seedAt.x), eq(seedAt.y), any(), any()));
@@ -229,9 +334,39 @@ class HenesysPlantingTest {
             movement.when(GCMovement::movementNowMs).thenReturn(60_000L);
             arrive.get().run();
             HenesysStages.plantOneFlower(first);
+            PqActions.workReactorOnBeat(first);
             hits.verify(() -> CustomReactor.hitReactorWithScript(map, alternateOid, first));
             movement.verify(() -> GCMovement.move(eq(first), eq(blocked.x), eq(blocked.y), any(), any()), times(2));
         }
+    }
+
+    private HenesysPQBot startBot(MockedStatic<GCMovement> movement, int flowersBloomed) {
+        when(map.getId()).thenReturn(ENTRY_MAP);
+        when(first.getMapId()).thenReturn(ENTRY_MAP);
+        when(first.getParty()).thenReturn(mock(Party.class));
+        when(first.getHp()).thenReturn(100);
+        when(first.isAlive()).thenReturn(true);
+        EventInstanceManager instance = mock(EventInstanceManager.class);
+        when(instance.getIntProperty("stage")).thenReturn(flowersBloomed);
+        when(first.getEventInstance()).thenReturn(instance);
+        movement.when(() -> GCMovement.hasGraph(first)).thenReturn(true);
+        try (var generation = mockStatic(BotGeneration.class)) {
+            HenesysPQBot bot = new HenesysPQBot(first);
+            bot.setRunning(true);
+            return bot;
+        }
+    }
+
+    private Monster mob(int oid, int x, boolean friendly) {
+        Monster mob = mock(Monster.class);
+        MonsterStats stats = new MonsterStats();
+        stats.setFriendly(friendly);
+        when(mob.getObjectId()).thenReturn(oid);
+        when(mob.getPosition()).thenReturn(new Point(x, 0));
+        when(mob.getStats()).thenReturn(stats);
+        when(mob.isAlive()).thenReturn(true);
+        when(map.getMapObject(oid)).thenReturn(mob);
+        return mob;
     }
 
     private Character member(int id) {

@@ -9,6 +9,7 @@ import soloMapling.ArtificialPlayer.BotCommandsPack.DropCommands;
 import soloMapling.ArtificialPlayer.BotCommandsPack.SocialCommands;
 import soloMapling.ArtificialPlayer.BotDialogueHandler;
 import soloMapling.ArtificialPlayer.BotGeneration;
+import soloMapling.ArtificialPlayer.BotGrindSystem.GrindTickRegistry;
 import soloMapling.ArtificialPlayer.BotLogic;
 import soloMapling.ArtificialPlayer.BotMessagingSystem.ChatMessage;
 import soloMapling.ArtificialPlayer.BotMessagingSystem.MessageQueue;
@@ -53,7 +54,7 @@ import static soloMapling.DebugUtilities.debugprint;
  * - All waits are time-boxed against {@link OPQConstants#STAGE_WAIT_TIMEOUT_MS}
  * so a stuck bot eventually falls back to LOOP_CHECK instead of hanging.
  */
-public class OPQBot extends BotSM {
+public class OPQBot extends BotSM implements GrindTickRegistry.Participant {
 
     // volatile: the swing chains run off-tick and read/write these
     private volatile OPQBotState opqBotState = OPQBotState.RESET;
@@ -100,7 +101,23 @@ public class OPQBot extends BotSM {
         // sees the bot as dynamic-controlled and skips the recorded portal drop.
         GCMovement.enable(getChr());
         bindRun();
+        GrindTickRegistry.getInstance().register(this);
         super.startScheduledTask(initialDelayMs);
+    }
+
+    @Override
+    public void grindTick() {
+        Character bot = getChr();
+        if (checkIfNotRunningOrPaused() || bot.getParty() == null || death().isCorpse()
+                || status().isFrozen() || !PqActions.reactorBeatArmed(bot) || !GCMovement.hasGraph(bot)) return;
+        MapleMap room = bot.getMap();
+        var instance = room.getEventInstance();
+        if (instance == null) return;
+        int mapId = room.getId();
+        if (instance.isEventCleared() ? mapId == OrbisPqData.TREASURE_MAP || OrbisPqData.isJailRoom(mapId)
+                : OrbisPqData.LOUNGE_ROOMS.contains(mapId) && instance.getIntProperty("statusStg5") != 1) {
+            PqActions.workReactorOnBeat(bot);
+        }
     }
 
     // =========================================================================
@@ -760,6 +777,9 @@ public class OPQBot extends BotSM {
         }
 
         int stage = currentMiddleStage();
+        if (stage != 5 && OrbisPqData.LOUNGE_ROOMS.contains(getChr().getMapId())) {
+            PqActions.armReactorBeat(getChr(), -1);
+        }
         if (stage < 0) {
             // Nothing outstanding that the bot can see: hand back to the exit logic, which
             // follows the leader out when the run is over.
@@ -833,9 +853,13 @@ public class OPQBot extends BotSM {
         MapleMap room = bot.getMap();
         int here = room.getId();
         if (OrbisPqData.LOUNGE_ROOMS.contains(here)) {
-            if (leavingLoungeRoom != room && needsLoungePieces() && !OrbisStages.gatherLounge(bot)) {
-                waitFor(OPQConstants.NAVIGATE_SETTLE_MS);
-                return;
+            PqActions.armReactorBeat(bot, -1); // dropped pieces have priority over the next box
+            if (leavingLoungeRoom != room && needsLoungePieces()) {
+                GCMovement.ensureGraph(bot);
+                if (!OrbisStages.gatherLounge(bot)) {
+                    waitFor(OPQConstants.NAVIGATE_SETTLE_MS);
+                    return;
+                }
             }
             // A portal walk can span ticks; finish it without starting another loot pass.
             leavingLoungeRoom = room;
@@ -1280,6 +1304,7 @@ public class OPQBot extends BotSM {
 
     private void workSettlement(MapleMap here) {
         Character bot = getChr();
+        PqActions.armReactorBeat(bot, -1);
         var instance = here.getEventInstance();
         MapleMap target = PqActions.findHumanPartyRoom(bot,
                 room -> room.getEventInstance() == instance && OrbisPqData.isOrbisRoom(room.getId()));
@@ -1296,9 +1321,10 @@ public class OPQBot extends BotSM {
             // leader-only. Follow only into a settlement room already opened for the party.
             GCMovement.changeMap(bot, target, target.getPortal(0));
         } else if (mapId == OrbisPqData.TREASURE_MAP) {
-            int box = PqActions.findReactorOid(bot, OrbisPqData.TREASURE_BOX);
-            if (box >= 0) PqActions.hitReactor(bot, box);
-            else PqActions.waitNearStageNpc(bot, OrbisPqData.MINERVA);
+            GCMovement.ensureGraph(bot);
+            if (!PqActions.workActiveReactors(bot, OrbisPqData.TREASURE_BOX)) {
+                PqActions.waitNearStageNpc(bot, OrbisPqData.MINERVA);
+            }
         } else if (mapId == OrbisPqData.STAGE_PRIZE && to == mapId) {
             if (here.getMonsters().isEmpty()) PqActions.waitNearStageNpc(bot, OrbisPqData.EAK);
             else PqActions.seekAndAttack(bot);
@@ -1324,14 +1350,15 @@ public class OPQBot extends BotSM {
             PqActions.walkThroughPortal(getChr(), here.getPortal("out00"));
         } else if (OrbisPqData.isJailRoom(mapId) && mapId != OrbisPqData.STAGE_JAIL) {
             if (mapId % 10 == 2) {
-                for (int boxId = 2002017; boxId <= 2002018; boxId++) {
-                    int box = PqActions.findReactorOid(getChr(), boxId);
-                    if (box >= 0) {
-                        PqActions.hitReactor(getChr(), box);
-                        break;
-                    }
+                if (to == mapId) {
+                    GCMovement.ensureGraph(getChr());
+                    PqActions.workActiveReactors(getChr(), 2002017, 2002018);
+                } else {
+                    PqActions.walkThroughPortal(getChr(), here.getPortal("out00"));
                 }
-            } else if (to == mapId || to == mapId + 2) {
+                return;
+            }
+            if (to == mapId || to == mapId + 2) {
                 var lever = here.getAllReactors().stream()
                         .filter(reactor -> reactor.getId() == 2008007 && reactor.getState() == 0)
                         .findFirst().orElse(null);
@@ -1549,6 +1576,7 @@ public class OPQBot extends BotSM {
      */
     @Override
     public synchronized void stopScheduledTask() {
+        GrindTickRegistry.getInstance().unregister(this);
         if (orchestrator != null) {
             OPQOrchestrator.unbind(this, orchestrator);
             orchestrator = null;

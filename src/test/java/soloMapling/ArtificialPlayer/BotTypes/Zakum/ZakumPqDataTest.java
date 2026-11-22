@@ -3,31 +3,23 @@ package soloMapling.ArtificialPlayer.BotTypes.Zakum;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Locks Zakum PQ's crate list and ore identity against the host's own data.
  *
- * <p>These two facts decide whether the run can finish at all. The Fire Ore the turn-in
- * wants (4001018, Aura's branch in 2032002.js) drops from exactly one reactor - 2112014,
- * per the reactordrops table - which stands in the mine's last room; a crate list without
- * it means the ore never falls and the exit portal stays shut forever. And the refined
- * pieces (4031061/4031062) are what Aura hands OUT afterwards, never what drops, so an
- * ore constant pointing at either of those sends the bot chasing an unobtainable item.
+ * <p>Ordinary crates can be struck; the only chest that drops the ore consumes seven keys.
  */
 class ZakumPqDataTest {
 
     @Test
-    void theOreDroppingCrateIsInTheList() {
-        // 2112014 is the only reactor the reactordrops table feeds the Fire Ore (4001018);
-        // it spawns in 280011005, so the bot has to recognise it wherever the party stands.
-        assertTrue(ZakumPqData.isQuestRoom(280011005), "the ore room is part of the run");
+    void theOreChestIsNotAnOrdinaryCrate() {
+        assertTrue(ZakumPqData.isQuestRoom(280011005));
+        assertEquals(2112014, ZakumPqData.ORE_CHEST);
         for (int crate : ZakumPqData.CRATES) {
-            if (crate == 2112014) {
-                return;
-            }
+            assertNotEquals(ZakumPqData.ORE_CHEST, crate);
         }
-        throw new AssertionError("2112014 - the only Fire Ore crate - is missing from CRATES");
     }
 
     @Test

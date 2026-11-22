@@ -18,10 +18,8 @@ import static soloMapling.ArtificialPlayer.BotHelpers.isBot;
  * scorpion is caught - which requires the scorpion to be worn down below forty percent health
  * and then, half the time, takes an Element Rock. Killing a scorpion outright scores nothing.
  *
- * <p>So the bot does the one thing no other bot here does: it checks health before swinging and
- * stops when the target is in catching range. That means reading the monsters rather than
- * firing at whatever the attack driver picks, because the attack driver has no idea it is
- * supposed to leave something alive.
+ * <p>Catch a weakened scorpion before picking another one to wear down. The shared attack
+ * layer excludes catchable scorpions and cannot deal a killing blow in the arena.
  *
  * <p>Two structural differences from every other quest bot in this package:
  * <ul>
@@ -170,15 +168,12 @@ public class AriantPQBot extends PartyQuestBot {
             return false;
         }
 
-        Monster target = bestCatchTarget();
+        Monster target = nearestCatchableScorpion(bot);
         if (target != null) {
-            if (isInCatchRange(target)) {
-                // Worn down to where a catch will be offered: ask for one instead of hitting
-                // again. The handler decides whether it succeeds.
-                throwElementRock(target);
-                return false;
-            }
-            PqActions.seekAndAttack(getChr());
+            PqActions.stopHunting(bot);
+            AriantCatch.attempt(bot, target);
+        } else {
+            PqActions.seekAndAttack(bot);
         }
         return false;
     }
@@ -228,59 +223,24 @@ public class AriantPQBot extends PartyQuestBot {
         return PqActions.countItem(getChr(), AriantPqData.ELEMENT_ROCK) > 0;
     }
 
-    /**
-     * The combat sweep may only swing in the arena while the macro tick's own catch contract
-     * holds: rocks in hand and a scorpion worth wearing down still standing. The sweep cannot
-     * pick catch targets, so where the contract is off (no rocks, or only catchable scorpions)
-     * it must not fight at all - a killed scorpion is a catch some competitor can never make.
-     */
     @Override
     protected boolean fightsOnSweep() {
-        if (!AriantPqData.isArena(getChr().getMapId()) || !hasElementRock()) {
-            return false;
-        }
-        Monster target = bestCatchTarget();
-        return target != null && !isInCatchRange(target);
+        return AriantPqData.isArena(getChr().getMapId()) && hasElementRock();
     }
 
-    /**
-     * Whether a scorpion is low enough for the handler to accept a catch, using the same
-     * arithmetic the handler uses so the bot and the server agree at the boundary.
-     */
-    private boolean isInCatchRange(Monster mob) {
-        return AriantPqData.catchableAt(mob.getHp(), mob.getMaxHp());
-    }
-
-    /**
-     * The scorpion worth working on: the healthiest one that is not yet in catch range, so the
-     * bot is always bringing something down rather than hovering over a monster it should not
-     * touch.
-     */
-    private Monster bestCatchTarget() {
-        Monster best = null;
-        for (var obj : getChr().getMap().getAllMonsters()) {
-            if (!(obj instanceof Monster mob) || mob.getId() != AriantPqData.SCORPION) {
-                continue;
-            }
-            if (mob.getHp() <= 0) {
-                continue;
-            }
-            if (best == null || mob.getHp() > best.getHp()) {
-                best = mob;
+    private static Monster nearestCatchableScorpion(Character bot) {
+        var pos = bot.getPosition();
+        Monster nearest = null;
+        double distanceSq = Double.POSITIVE_INFINITY;
+        for (Monster mob : bot.getMap().getAllMonsters()) {
+            if (mob.getId() != AriantPqData.SCORPION
+                    || !AriantPqData.catchableAt(mob.getHp(), mob.getMaxHp())) continue;
+            double distance = pos.distanceSq(mob.getPosition());
+            if (distance < distanceSq) {
+                nearest = mob;
+                distanceSq = distance;
             }
         }
-        return best;
-    }
-
-    /**
-     * Use an Element Rock on a scorpion.
-     *
-     * <p>The server's catch path is a packet handler, so a socketless bot cannot send the
-     * request the way a client does. What it can do is the part that decides the score: the
-     * handler's own work is the 50% roll, the rock spent, and the jewel added; a bot that only
-     * had the animation would catch nothing.
-     */
-    private void throwElementRock(Monster target) {
-        AriantCatch.attempt(getChr(), target);
+        return nearest;
     }
 }

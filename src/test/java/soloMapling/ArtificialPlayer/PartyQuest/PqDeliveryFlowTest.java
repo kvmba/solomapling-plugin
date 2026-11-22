@@ -11,6 +11,7 @@ import org.gms.scripting.event.EventInstanceManager;
 import org.gms.server.life.Monster;
 import org.gms.server.life.NPC;
 import org.gms.server.maps.MapItem;
+import org.gms.server.maps.MapObjectType;
 import org.gms.server.maps.MapleMap;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
@@ -21,9 +22,9 @@ import org.junit.jupiter.params.provider.CsvSource;
 import soloMapling.ArtificialPlayer.BotAttackSystem.BotAttackDriver;
 import soloMapling.ArtificialPlayer.BotCommandsPack.DropCommands;
 import soloMapling.ArtificialPlayer.BotGeneration;
-import soloMapling.ArtificialPlayer.BotMessagingSystem.CharacterStorage;
 import soloMapling.ArtificialPlayer.BotTypes.Amoria.AmoriaPQBot;
 import soloMapling.ArtificialPlayer.BotTypes.Henesys.HenesysPQBot;
+import soloMapling.ArtificialPlayer.BotTypes.Henesys.HenesysPqData;
 import soloMapling.ArtificialPlayer.BotTypes.Horntail.HorntailPQBot;
 import soloMapling.ArtificialPlayer.BotTypes.Kerning.KerningPQBot;
 import soloMapling.ArtificialPlayer.BotTypes.Ludi.LudiPQBot;
@@ -93,7 +94,6 @@ class PqDeliveryFlowTest {
             "amoria,670010700,9201045,4031594,1",
             "kerning,103000804,9020001,4001008,10",
             "pirate,925100100,2094002,4001120,20",
-            "henesys,910010000,1012114,4001101,10",
             "horntail,240050300,2083001,4001093,6",
             "zakum,280010000,2032002,4001018,1",
             "magatia,926110200,2112005,4001134,1",
@@ -104,7 +104,6 @@ class PqDeliveryFlowTest {
             String type, int mapId, int npcId, int itemId, int quota) {
         when(map.getId()).thenReturn(mapId);
         npc(npcId);
-        when(instance.getIntProperty("stage")).thenReturn(6); // Moon Bunny's guarding half
         when(instance.getIntProperty("statusStg4")).thenReturn(1);
         when(instance.getProperty("1stageclear")).thenReturn("true");
         AtomicInteger carried = new AtomicInteger(quota);
@@ -270,10 +269,16 @@ class PqDeliveryFlowTest {
     }
 
     @Test
-    void emptyHandedHenesysMembersKeepGuardingTheBunnyUntilTheLeaderSubmitsTheCakes() {
-        when(map.getId()).thenReturn(910010000);
-        when(instance.getIntProperty("stage")).thenReturn(6);
-        when(leader.getItemQuantity(4001101, false)).thenReturn(10);
+    void henesysBotsLeaveCakesForPlayersAndGuardUntilTurnIn() {
+        when(map.getId()).thenReturn(HenesysPqData.ENTRY_MAP);
+        when(instance.getIntProperty("stage")).thenReturn(HenesysPqData.FLOWERS_TO_BLOOM);
+        MapItem cake = mock(MapItem.class);
+        when(cake.getPosition()).thenReturn(position.get());
+        when(cake.getDropType()).thenReturn((byte) 2);
+        when(cake.getItemId()).thenReturn(HenesysPqData.RICE_CAKE);
+        when(cake.getItem()).thenReturn(new Item(HenesysPqData.RICE_CAKE, (short) 0, (short) 1));
+        when(map.getMapObjectsInRange(any(), anyDouble(), eq(List.of(MapObjectType.ITEM))))
+                .thenAnswer(call -> new ArrayList<>(List.of(cake)));
         try (var generation = mockStatic(BotGeneration.class);
              var movement = mockStatic(GCMovement.class);
              var attacks = mockStatic(BotAttackDriver.class)) {
@@ -283,51 +288,18 @@ class PqDeliveryFlowTest {
             bot.workStage();
             bot.grindTick();
             attacks.verify(() -> BotAttackDriver.botAttack(member), times(2));
+
+            when(leader.getItemQuantity(HenesysPqData.RICE_CAKE, false)).thenReturn(HenesysPqData.RICE_CAKE_COUNT);
+            bot.workStage();
+            bot.grindTick();
+            attacks.verify(() -> BotAttackDriver.botAttack(member), times(4));
+
             when(instance.getProperty("1stageclear")).thenReturn("true");
             bot.workStage();
             bot.grindTick();
-            attacks.verify(() -> BotAttackDriver.botAttack(member), times(2));
-        }
-    }
-
-    @Test
-    void henesysCarriersDeliverOneAtATimeInsteadOfAllAbandoningTheBunny() {
-        when(map.getId()).thenReturn(910010000);
-        when(instance.getIntProperty("stage")).thenReturn(6);
-        when(member.getItemQuantity(4001101, false)).thenReturn(5);
-        Character teammate = mock(Character.class);
-        when(teammate.getId()).thenReturn(BOT_ID - 1);
-        when(teammate.getHp()).thenReturn(100);
-        when(teammate.getInventory(InventoryType.EQUIPPED)).thenReturn(mock(Inventory.class));
-        AtomicInteger otherCakes = new AtomicInteger(5);
-        when(teammate.getItemQuantity(4001101, false)).thenAnswer(call -> otherCakes.get());
-        when(instance.getPlayers()).thenReturn(List.of(leader, member, teammate));
-        MapItem posted = postedDrop(4001101, 5);
-        npc(1012114);
-        try (var generation = mockStatic(BotGeneration.class);
-             var movement = mockStatic(GCMovement.class);
-             var attacks = mockStatic(BotAttackDriver.class);
-             var storage = mockStatic(CharacterStorage.class)) {
-            movement.when(() -> GCMovement.hasGraph(member)).thenReturn(true);
-            movement.when(GCMovement::isVirtualClock).thenReturn(true);
-            HenesysPQBot firstCarrier = new HenesysPQBot(teammate);
-            firstCarrier.setRunning(true);
-            storage.when(() -> CharacterStorage.getBotById(BOT_ID - 1)).thenReturn(firstCarrier);
-            PartyQuestBot bot = bot("henesys");
-            bot.setRunning(true);
-
-            bot.workStage();
-            bot.grindTick();
-            attacks.verify(() -> BotAttackDriver.botAttack(member), times(2));
-            movement.verify(() -> GCMovement.move(eq(member), eq(-1000), eq(0), any(), any()), never());
-
-            otherCakes.set(0);
-            when(map.getMapObjectsInRange(any(), anyDouble(), anyList()))
-                    .thenAnswer(call -> new ArrayList<>(List.of(posted)));
-            bot.workStage();
-            bot.grindTick();
-            movement.verify(() -> GCMovement.move(eq(member), eq(-1000), eq(0), any(), any()), atLeastOnce());
-            attacks.verify(() -> BotAttackDriver.botAttack(member), times(2));
+            attacks.verify(() -> BotAttackDriver.botAttack(member), times(4));
+            verify(map, never()).getMapObjectsInRange(any(), anyDouble(), eq(List.of(MapObjectType.ITEM)));
+            verify(member, never()).pickupItem(any());
         }
     }
 

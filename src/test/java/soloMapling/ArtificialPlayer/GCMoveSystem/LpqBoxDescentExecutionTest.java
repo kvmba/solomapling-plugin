@@ -148,6 +148,25 @@ class LpqBoxDescentExecutionTest {
     }
 
     @Test
+    void aWarpDuringTheSwingCannotHitAReactorInTheOtherInstance() throws Exception {
+        createBot(tower, new Point(-150, -1860), new BotMovementProfile(120, 123));
+        MapleMap next = mock(MapleMap.class);
+        Reactor otherBox = mock(Reactor.class);
+        when(otherBox.isActive()).thenReturn(true);
+        when(next.getReactorByOid(BOX_OID)).thenReturn(otherBox);
+        PqActions.armReactorBeat(bot, BOX_OID);
+        try (var swings = mockStatic(BotAttack.class); var hits = mockStatic(CustomReactor.class)) {
+            swings.when(() -> BotAttack.basicSwing(bot)).thenAnswer(call -> {
+                doReturn(next).when(bot).getMap();
+                return true;
+            });
+            PqActions.workReactorOnBeat(bot);
+            swings.verify(() -> BotAttack.basicSwing(bot));
+            hits.verifyNoInteractions();
+        }
+    }
+
+    @Test
     void arrivalDoesNotRequireTheSameFootholdSegment() throws Exception {
         // The large box platform is two connected segments: FH337 on the right, FH338 on
         // the left. Requiring foothold identity would reject a legitimate same-floor swing.

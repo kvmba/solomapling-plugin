@@ -1,6 +1,7 @@
 package soloMapling.ArtificialPlayer.PartyQuest;
 
 import org.gms.client.Character;
+import org.gms.client.Job;
 import org.gms.client.inventory.Inventory;
 import org.gms.client.inventory.InventoryType;
 import org.gms.client.inventory.Item;
@@ -11,6 +12,7 @@ import org.gms.scripting.event.EventInstanceManager;
 import org.gms.server.life.Monster;
 import org.gms.server.maps.MapItem;
 import org.gms.server.maps.MapleMap;
+import org.gms.server.maps.MapObjectType;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
@@ -18,10 +20,15 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.mockito.MockedStatic;
+import soloMapling.ArtificialPlayer.BotAttackSystem.BotAttackConfig;
 import soloMapling.ArtificialPlayer.BotAttackSystem.BotAttackDriver;
+import soloMapling.ArtificialPlayer.BotAttackSystem.BotAttackEffects;
+import soloMapling.ArtificialPlayer.BotAttackSystem.BotAttackProfile;
+import soloMapling.ArtificialPlayer.BotCommandsPack.BotAttack;
 import soloMapling.ArtificialPlayer.BotCommandsPack.DropCommands;
 import soloMapling.ArtificialPlayer.BotGeneration;
 import soloMapling.ArtificialPlayer.BotTypes.Amoria.AmoriaPQBot;
+import soloMapling.ArtificialPlayer.BotTypes.Ariant.AriantPqData;
 import soloMapling.ArtificialPlayer.BotTypes.Magatia.MagatiaPQBot;
 import soloMapling.ArtificialPlayer.BotTypes.Pirate.PiratePQBot;
 import soloMapling.ArtificialPlayer.GCMoveSystem.GCMovement;
@@ -33,6 +40,8 @@ import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Supplier;
 
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.*;
 import static soloMapling.ArtificialPlayer.BotTypes.Amoria.AmoriaPqData.STATUE_PIECE;
 
@@ -82,6 +91,39 @@ class PqCollectionCombatTest {
     @AfterEach
     void clearCombat() {
         PqActions.clearSeekState(BOT_ID);
+    }
+
+    @Test
+    void ariantSkipsCatchableScorpionsAndCannotKillOneThatStillNeedsWeakening() {
+        when(map.getId()).thenReturn(980010101);
+        doReturn(Job.BEGINNER).when(member).getJob();
+        when(member.getLevel()).thenReturn(29);
+        Monster catchable = scorpion(15, 1);
+        Monster healthy = scorpion(60, 1_200);
+        when(map.getMapObjectsInRange(eq(position), anyDouble(), eq(List.of(MapObjectType.MONSTER))))
+                .thenReturn(List.of(catchable, healthy));
+        try (var movement = movementWithGraph(); var equipment = mockStatic(BotAttack.class);
+             var profiles = mockStatic(BotAttackConfig.class)) {
+            profiles.when(() -> BotAttackConfig.resolve(Job.BEGINNER, null, 29))
+                    .thenReturn(new BotAttackConfig.JobAttacks(BotAttackProfile.basicSwing(), null, null));
+            assertFalse(BotAttackDriver.canReach(member, catchable));
+            assertTrue(BotAttackDriver.canReach(member, healthy));
+        }
+        assertFalse(BotAttackEffects.applyExternalHit(member, healthy, 2_000));
+        when(healthy.getHp()).thenReturn(1); // reaches catch range before another hit lands
+        assertFalse(BotAttackEffects.applyExternalHit(member, healthy, 2_000));
+        verify(healthy).damage(member, 2_000, true);
+        verify(healthy, never()).damage(any(), anyInt(), eq(false));
+    }
+
+    private static Monster scorpion(int x, int hp) {
+        Monster monster = mock(Monster.class);
+        when(monster.getId()).thenReturn(AriantPqData.SCORPION);
+        when(monster.getHp()).thenReturn(hp);
+        when(monster.getMaxHp()).thenReturn(1_200);
+        when(monster.getPosition()).thenReturn(new Point(x, 0));
+        when(monster.isAlive()).thenReturn(true);
+        return monster;
     }
 
     @Test

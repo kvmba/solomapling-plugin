@@ -35,17 +35,10 @@ public final class ZakumPqData {
     public static final int MAX_PLAYERS = 6;
     public static final int MIN_LEVEL = 50;
 
-    /**
-     * The crates that stand in the mine's rooms, including the one that matters: the Fire
-     * Ore (4001018) the turn-in wants drops only from reactor 2112014, which stands in the
-     * last mine room ({@code 280011005}) - the rest of the crates carry the documents side
-     * quest or nothing but potion drops (2118000/2118001 are "no function" crates linked to
-     * the potion box, 2112012/2112013 carry paper documents).
-     *
-     * <p>Sources: {@code reactordrops} migration V1.0.58 (reactor 2112014 → item 4001018)
-     * and the {@code Map2/2800100xx}/280011005 map files listing which crates stand where.
-     */
-    public static final int[] CRATES = {2112014, 2118000, 2118001, 2112012, 2112013};
+    public static final int[] CRATES = {2118000, 2118001, 2112012, 2112013};
+    /** The final chest in 280011005 consumes a stack of seven mine keys. */
+    public static final int ORE_CHEST = 2112014;
+    public static final int MINE_KEY = 4001016;
 
     /**
      * The ore the turn-in wants, and the piece Aura forges for each member after it.

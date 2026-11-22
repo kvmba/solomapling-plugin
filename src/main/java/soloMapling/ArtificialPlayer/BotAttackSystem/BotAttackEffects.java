@@ -25,6 +25,7 @@ import org.gms.server.life.MonsterInformationProvider;
 import org.gms.server.maps.MapleMap;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import soloMapling.ArtificialPlayer.BotTypes.Ariant.AriantPqData;
 import soloMapling.ArtificialPlayer.GCMoveSystem.GCMovement;
 import soloMapling.companion.CompanionRoster;
 import soloMapling.server.BotTiming;
@@ -298,6 +299,19 @@ public final class BotAttackEffects {
     /* Apply HP damage; on death, credit EXP + the death broadcast (no vanilla drops) and spawn our own loot. */
     private static boolean applyDamageAndLoot(Character bot, MapleMap map, Monster target, int damage, int hitDamage,
                                               short hitDelay) {
+        if (AriantPqData.isArena(map.getId())) {
+            // Another hit can make it catchable during this swing's flight. Recheck under the
+            // host's damage lock and keep at least 1 HP even when the rolled damage is lethal.
+            target.lockMonster();
+            try {
+                if (!AriantPqData.canWeaken(target)) return false;
+                target.damage(bot, damage, true);
+            } finally {
+                target.unlockMonster();
+            }
+            if (hitDamage > 0) target.showHitReaction(bot, hitDamage, hitDelay);
+            return false;
+        }
         Map<Integer, Integer> expBefore = companionPartyExp(bot);
 
         // Snapshot BEFORE killMonster: its finally block runs dispatchMonsterKilled ->

@@ -361,7 +361,8 @@ public class DropCommands {
     // no owner, or whose owner-protection window has expired). Lets bots grab their kills plus loot a real
     // player left on the floor, without stealing another player's still-protected drop.
     public static boolean botCanLoot(Character fakechar, MapItem mapItem) {
-        if (mapItem == null || mapItem.isPickedUp() || mapItem.getPosition() == null) {
+        if (mapItem == null || mapItem.isPickedUp() || mapItem.getPosition() == null
+                || BotLogic.reservedQuestDrop(fakechar, mapItem)) {
             return false;
         }
         if (mapItem.getOwnerId() == fakechar.getId()) {
@@ -377,7 +378,7 @@ public class DropCommands {
     // Pick up one specific drop (organic single-item loot, paced by the caller for a natural look).
     public static void botLootSingleDrop(Character fakechar, MapItem mapItem) {
         if (fakechar == null || fakechar.getMap() == null
-                || mapItem == null || mapItem.isPickedUp()) {
+                || mapItem == null || mapItem.isPickedUp() || BotLogic.reservedQuestDrop(fakechar, mapItem)) {
             return;
         }
         // Use the engine's authoritative pickup path. It enforces ownership,

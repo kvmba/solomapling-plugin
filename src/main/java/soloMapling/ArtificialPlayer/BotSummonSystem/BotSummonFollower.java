@@ -20,6 +20,7 @@ import soloMapling.ArtificialPlayer.BotAttackSystem.BotAttackEffects;
 import soloMapling.ArtificialPlayer.BotAttackSystem.BotDamageModel;
 import soloMapling.ArtificialPlayer.BotHelpers;
 import soloMapling.ArtificialPlayer.GCMoveSystem.GCMovement;
+import soloMapling.ArtificialPlayer.PartyQuest.PqActions;
 
 import java.awt.Point;
 import java.util.ArrayList;
@@ -599,7 +600,7 @@ public final class BotSummonFollower {
      */
     static Point turretAnchor(Character bot, Point owner, MapleMap map, BotSummonConfig cfg) {
         if (cfg.placeAtMobs()) {
-            List<Monster> near = nearestMobs(map, owner, cfg.placeSearchRadius(), 1);
+            List<Monster> near = nearestMobs(bot, map, owner, cfg.placeSearchRadius(), 1);
             if (!near.isEmpty()) {
                 return near.get(0).getPosition();
             }
@@ -623,7 +624,7 @@ public final class BotSummonFollower {
         }
         s.nextRelocateProbeAtMs = now + cfg.placeRelocateAfterMs();
         Point from = s.summon.getPosition();
-        int mobsInRange = nearestMobs(botMap, from, cfg.attackRange(), Integer.MAX_VALUE).size();
+        int mobsInRange = nearestMobs(bot, botMap, from, cfg.attackRange(), Integer.MAX_VALUE).size();
         if (mobsInRange >= cfg.placeRelocateMinMobs()) {
             return; // the turret is still earning its keep where it stands
         }
@@ -808,7 +809,7 @@ public final class BotSummonFollower {
         StatEffect effect = skill.getEffect(
                 Math.max(1, BotSummonTable.skillLevelForBot(bot.getLevel(), s.skillId, skill.getMaxLevel())));
         Point from = summon.getPosition();
-        List<Monster> targets = nearestMobs(bot.getMap(), from, cfg.attackRange(),
+        List<Monster> targets = nearestMobs(bot, bot.getMap(), from, cfg.attackRange(),
                 Math.max(1, effect.getMobCount()));
         if (targets.isEmpty()) {
             return;
@@ -852,11 +853,11 @@ public final class BotSummonFollower {
     }
 
     /**
-     * Up to {@code limit} live mobs within {@code range} px of the summon, nearest first.
+     * Up to {@code limit} targetable mobs within {@code range} px of the summon, nearest first.
      * {@code limit} may be {@code Integer.MAX_VALUE} to mean "all of them" (the relocate probe's
      * count).
      */
-    private static List<Monster> nearestMobs(MapleMap map, Point from, int range, int limit) {
+    private static List<Monster> nearestMobs(Character bot, MapleMap map, Point from, int range, int limit) {
         if (map == null || from == null) {
             return List.of();
         }
@@ -864,7 +865,7 @@ public final class BotSummonFollower {
         List<Monster> inRange = new ArrayList<>();
         for (MapObject mo : map.getMapObjectsInRange(from, rangeSq, List.of(MapObjectType.MONSTER))) {
             Monster m = (Monster) mo;
-            if (m.isAlive() && m.getPosition() != null) {
+            if (m.isAlive() && m.getPosition() != null && PqActions.huntFilterAdmits(bot, m)) {
                 inRange.add(m);
             }
         }

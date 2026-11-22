@@ -45,6 +45,7 @@ import soloMapling.ArtificialPlayer.BotTypes.Papulatus.PapulatusPQBot;
 import soloMapling.ArtificialPlayer.BotTypes.Pirate.PiratePQBot;
 import soloMapling.ArtificialPlayer.BotTypes.Pyramid.PyramidPQBot;
 import soloMapling.ArtificialPlayer.BotTypes.Zakum.ZakumPQBot;
+import soloMapling.ArtificialPlayer.BotTypes.Zakum.ZakumPqData;
 import soloMapling.ArtificialPlayer.GCMoveSystem.GCMovement;
 import soloMapling.server.BotTickService;
 
@@ -89,6 +90,59 @@ class PqStageTransitionTest {
         when(captain.getPlayer()).thenReturn(leader);
         when(party.getLeader()).thenReturn(captain);
         when(party.getMembers()).thenReturn(List.of(captain));
+    }
+
+    @ParameterizedTest
+    @CsvSource({"amoria,670010200,6702000,4031596", "pirate,925100400,2519000,4001117",
+            "zakum,280011005,2112014,4001016"})
+    void itemReactorConsumesAnOfferingRatherThanTakingASwing(String type, int mapId, int reactorId, int offering) {
+        int oid = 42;
+        MapleMap map = room(mapId);
+        place(member, map);
+        Reactor reactor = mock(Reactor.class);
+        when(reactor.getObjectId()).thenReturn(oid);
+        when(map.getReactorsByIdRange(2519000, 2519003)).thenReturn(List.of(reactor));
+        try (var generation = mockStatic(BotGeneration.class);
+             var actions = mockStatic(PqActions.class)) {
+            actions.when(() -> PqActions.needsHuntForLeader(eq(member), anyInt(), anyInt())).thenReturn(true);
+            actions.when(() -> PqActions.findReactorOid(member, reactorId)).thenReturn(oid);
+            actions.when(() -> PqActions.feedReactor(member, oid, offering)).thenReturn(true);
+            bot(type).workStage();
+            actions.verify(() -> PqActions.feedReactor(member, oid, offering));
+            actions.verify(() -> PqActions.hitReactor(eq(member), anyInt()), never());
+        }
+    }
+
+    @Test
+    void zakumOrePickupReplacesAnInFlightCrateWalk() {
+        MapleMap map = room(280011005);
+        place(member, map);
+        when(member.getPosition()).thenReturn(new Point());
+        when(member.getEventInstance()).thenReturn(instance);
+        when(instance.getLeader()).thenReturn(leader);
+        int crateId = ZakumPqData.CRATES[0], oid = 42;
+        Reactor crate = orbisReactor(map, crateId, oid, 300);
+        when(crate.isActive()).thenReturn(true);
+        when(map.getReactorsByIdRange(crateId, crateId)).thenReturn(List.of(crate));
+        Point orePosition = new Point(-300, 0);
+        MapItem ore = new MapItem(new Item(ZakumPqData.FIRE_ORE, (short) 0, (short) 1),
+                orePosition, mock(Reactor.class), member, null, (byte) 2, false);
+        when(map.getMapObjectsInRange(any(), anyDouble(), anyList()))
+                .thenAnswer(call -> new ArrayList<>(List.of(ore)));
+        PqActions.armReactorBeat(member, oid);
+        try (var generation = mockStatic(BotGeneration.class);
+             var movement = mockStatic(GCMovement.class)) {
+            Point cratePosition = crate.getPosition();
+            movement.when(() -> GCMovement.isMoving(member)).thenReturn(true);
+            movement.when(() -> GCMovement.moveTargetOf(member)).thenReturn(cratePosition);
+            movement.when(() -> GCMovement.canPathTo(member, orePosition.x, orePosition.y)).thenReturn(true);
+            bot("zakum").workStage();
+            movement.verify(() -> GCMovement.move(eq(member), eq(orePosition.x), eq(orePosition.y), any(), any()));
+            assertFalse(PqActions.reactorBeatArmed(member));
+        } finally {
+            PqActions.clearReactorBeat(BOT_ID);
+            PqActions.clearSeekState(BOT_ID);
+        }
     }
 
     @Test
@@ -199,6 +253,7 @@ class PqStageTransitionTest {
         int piece = OrbisPqData.STATUE_PIECE_5;
         try (var generation = mockStatic(BotGeneration.class);
              var coordinator = mockStatic(OPQOrchestrator.class, call -> run);
+             var movement = mockStatic(GCMovement.class);
              var actions = mockStatic(PqActions.class)) {
             for (String key : List.of("statusStg1", "statusStg2", "statusStg3", "statusStg4")) {
                 actions.when(() -> PqActions.readEimInt(member, key, -1)).thenReturn(1);
@@ -782,12 +837,16 @@ class PqStageTransitionTest {
              var movement = mockStatic(GCMovement.class);
              var actions = mockStatic(PqActions.class)) {
             actions.when(() -> PqActions.findHumanPartyRoom(eq(member), any())).thenCallRealMethod();
-            actions.when(() -> PqActions.findReactorOid(member, OrbisPqData.TREASURE_BOX)).thenReturn(42);
+            actions.when(() -> PqActions.workActiveReactors(member, OrbisPqData.TREASURE_BOX)).thenReturn(true);
+            actions.when(() -> PqActions.reactorBeatArmed(member)).thenReturn(true);
+            movement.when(() -> GCMovement.hasGraph(member)).thenReturn(true);
             OPQBot bot = new OPQBot(member);
             bot.setRunning(true);
 
             bot.updateState();
-            actions.verify(() -> PqActions.hitReactor(member, 42));
+            bot.grindTick();
+            actions.verify(() -> PqActions.workActiveReactors(member, OrbisPqData.TREASURE_BOX));
+            actions.verify(() -> PqActions.workReactorOnBeat(member));
             movement.verify(() -> GCMovement.changeMap(any(), any(), any()), never());
 
             MapleMap prize = room(OrbisPqData.REWARD_MAP);
@@ -807,6 +866,35 @@ class PqStageTransitionTest {
             place(member, prize);
             bot.updateState();
             actions.verify(() -> PqActions.waitNearStageNpc(member, OrbisPqData.MINERVA));
+        }
+    }
+
+    @Test
+    void orbisLeavesTheJailCratesWhenTheLeaderReturnsToTheLeverRoom() {
+        MapleMap crates = room(OrbisPqData.STAGE_JAIL + 12);
+        MapleMap lever = room(OrbisPqData.STAGE_JAIL + 10);
+        Portal exit = door(crates, "out00", lever.getId());
+        place(member, crates);
+        place(leader, crates);
+        when(instance.isEventCleared()).thenReturn(true);
+        OPQOrchestrator run = mock(OPQOrchestrator.class);
+        when(run.getSharedContext()).thenReturn(new OPQSharedContext());
+        try (var generation = mockStatic(BotGeneration.class);
+             var coordinator = mockStatic(OPQOrchestrator.class, call -> run);
+             var movement = mockStatic(GCMovement.class);
+             var actions = mockStatic(PqActions.class)) {
+            actions.when(() -> PqActions.findHumanPartyRoom(eq(member), any())).thenCallRealMethod();
+            OPQBot bot = new OPQBot(member);
+            bot.setRunning(true);
+            bot.updateState();
+            actions.verify(() -> PqActions.workActiveReactors(member, 2002017, 2002018));
+
+            place(leader, lever);
+            actions.clearInvocations();
+            bot.updateState();
+            actions.verify(() -> PqActions.armReactorBeat(member, -1));
+            actions.verify(() -> PqActions.walkThroughPortal(member, exit));
+            actions.verify(() -> PqActions.workActiveReactors(member, 2002017, 2002018), never());
         }
     }
 

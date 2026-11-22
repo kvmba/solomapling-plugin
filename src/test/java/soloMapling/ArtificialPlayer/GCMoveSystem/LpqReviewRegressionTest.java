@@ -1252,10 +1252,10 @@ class LpqReviewRegressionTest {
     }
 
     @ParameterizedTest
-    @ValueSource(ints = {1, 3, 4, 7, 9})
+    @ValueSource(ints = {1, 3, 4, 7})
     void macroAndCombatBeatsKeepTheSamePickupGoal(int stage) throws Exception {
         int mapId = stage == 4 ? LudiPqData.STAGE4_ROOM_FIRST
-                : stage == 9 ? LudiPqData.STAGE_9 - 1 : LudiPqData.ENTRY_MAP + (stage - 1) * 100 + 99;
+                : LudiPqData.ENTRY_MAP + (stage - 1) * 100 + 99;
         MapleMap map = map(mapId);
         floor(map, 1, -1000, 0, 1600);
         createBot(map, new Point(0, 0), Job.HUNTER);
@@ -1274,7 +1274,6 @@ class LpqReviewRegressionTest {
                 switch (stage) {
                     case 3 -> LudiStages.breakCratesAndHunt(bot);
                     case 4 -> LudiStages.workDoorRooms(bot, mapId, mapId);
-                    case 9 -> LudiStages.fightBoss(bot);
                     default -> LudiStages.gatherPasses(bot, stage);
                 }
                 pq.grindTick();
@@ -1535,7 +1534,7 @@ class LpqReviewRegressionTest {
                         + " bot=" + bot.getPosition() + " boss=" + bossPos.get());
     }
 
-    /** The altar summon stays best-effort and never blocks the fight (unchanged contract). */
+    /** The altar is left to the item trigger and never blocks the fight. */
     @Test
     void anUnreachableCrystalNeverArmsAWalkAndCannotBlockTheBoss() throws Exception {
         MapleMap map = map(922019975);
@@ -1546,7 +1545,7 @@ class LpqReviewRegressionTest {
         inject(map, crystal);
         assertFalse(GCMovement.canPathTo(bot, 599, 0));
         LudiStages.fightBoss(bot);
-        assertNull(state.moveTarget, "summoning is best-effort, never an unreachable approach");
+        assertNull(state.moveTarget, "do not walk to a player-operated altar");
         assertFalse(PqActions.movementShielded(BOT_ID));
 
         when(crystal.getReactorType()).thenReturn(-1);
@@ -1558,16 +1557,18 @@ class LpqReviewRegressionTest {
     }
 
     @Test
-    void aCrystalInHonestReachIsStillStruck() throws Exception {
+    void anItemTriggeredCrystalIsNotStruckEvenInReach() throws Exception {
         MapleMap map = map(922019976);
         floor(map, 1, 500, 0, 700);
         createBot(map, new Point(590, 0), Job.BEGINNER);
         inject(map, reactor(2201003, 99106, new Point(599, 0)));
         try (var swings = mockStatic(BotAttack.class); var reactors = mockStatic(CustomReactor.class)) {
             swings.when(() -> BotAttack.basicSwing(bot)).thenReturn(true);
+            assertFalse(PqActions.hitReactor(bot, 99106));
+            assertFalse(PqActions.hitReactorIfInReach(bot, 99106));
             LudiStages.fightBoss(bot);
-            reactors.verify(() -> CustomReactor.hitReactorWithScript(map, 99106, bot));
-            swings.verify(() -> BotAttack.basicSwing(bot));
+            reactors.verifyNoInteractions();
+            swings.verify(() -> BotAttack.basicSwing(bot), never());
         }
         assertNull(state.moveTarget);
         assertFalse(PqActions.movementShielded(BOT_ID));
@@ -2146,7 +2147,7 @@ class LpqReviewRegressionTest {
         when(reactor.getId()).thenReturn(id); when(reactor.getObjectId()).thenReturn(oid);
         when(reactor.getType()).thenReturn(MapObjectType.REACTOR); when(reactor.getPosition()).thenReturn(position);
         when(reactor.isAlive()).thenReturn(true); when(reactor.isActive()).thenReturn(true);
-        when(reactor.getReactorType()).thenReturn(100);
+        when(reactor.getReactorType()).thenReturn(id == LudiPqData.BOSS_CRYSTAL ? 100 : 0);
         return reactor;
     }
 

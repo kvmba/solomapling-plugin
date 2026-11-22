@@ -15,6 +15,9 @@ import org.gms.server.maps.MapObject;
 import org.gms.server.maps.MapObjectType;
 import org.gms.server.maps.MapleMap;
 import soloMapling.ArtificialPlayer.BotCommandsPack.DropCommands;
+import soloMapling.ArtificialPlayer.BotTypes.Henesys.HenesysPqData;
+import soloMapling.ArtificialPlayer.BotTypes.Ludi.LudiPqData;
+import soloMapling.ArtificialPlayer.BotTypes.Pirate.PiratePqData;
 import soloMapling.Environment.BotMessages;
 
 import java.awt.*;
@@ -71,6 +74,18 @@ public class BotLogic {
      * the same id the engine's own drop tables use for meso.
      */
     public static final int MESO_DROP_ID = 0;
+
+    /** Drops for the player or an item-triggered altar, regardless of loot ownership. */
+    public static boolean reservedQuestDrop(Character bot, MapItem drop) {
+        Item item = drop.getItem();
+        if (item == null) return false;
+        int id = item.getItemId();
+        return id == HenesysPqData.RICE_CAKE || id == LudiPqData.ALISHAR_TROPHY
+                || id == LudiPqData.STAGE7_BOX_TRIGGER
+                || id == LudiPqData.PASS && bot.getMapId() == LudiPqData.STAGE_9
+                || id == PiratePqData.DOOR_KEY && bot.getMapId() == PiratePqData.STAGE_4
+                        && drop.getDropper() instanceof Character;
+    }
 
     public static List<MapObject> checkForItemsOnFloor(Character chr, Point location, int[] itemIds) {
         return checkForItemsOnFloor(chr, location, ITEM_SCAN_RANGE_PX, itemIds);
