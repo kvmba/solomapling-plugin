@@ -360,7 +360,7 @@ class PqRearguardTest {
             wrong();
             long chatAt = ledger.retryChatAt;
             long chatDelay = chatAt - clock.get();
-            assertTrue(chatDelay >= 3_000 && chatDelay <= 5_000);
+            assertTrue(chatDelay >= 1_000 && chatDelay <= 2_000);
             verify(low.bot()).requestTickWithin(chatDelay);
             verify(high.bot()).requestTickWithin(chatDelay);
             verify(elsewhere.bot(), never()).requestTickWithin(anyLong());
@@ -384,7 +384,7 @@ class PqRearguardTest {
                     BotMessages.get("pq.position_plan.retry", 8, 2)));
             long moveAt = ledger.retryMoveAt;
             long moveDelay = moveAt - clock.get();
-            assertTrue(moveDelay >= 1_000 && moveDelay <= 3_000);
+            assertTrue(moveDelay >= 500 && moveDelay <= 1_500);
             verify(low.bot(), times(moveDelay == chatDelay ? 2 : 1)).requestTickWithin(moveDelay);
 
             clock.set(moveAt - 1);
@@ -422,7 +422,7 @@ class PqRearguardTest {
         assertEquals(first, restarted);
         assertTrue(ledger.tried.isEmpty());
         assertEquals(chatAt, ledger.retryChatAt);
-        verify(bot.bot()).requestTickWithin(longThat(delay -> delay >= 3_000 && delay <= 5_000));
+        verify(bot.bot()).requestTickWithin(longThat(delay -> delay >= 1_000 && delay <= 2_000));
     }
 
     @Test
@@ -436,7 +436,7 @@ class PqRearguardTest {
         puzzlePlan(bot, 1, null);
         wrong();
         assertTrue(PositionCombination.ledgerFor(room).tried.contains(CANDIDATES.getFirst().pattern()));
-        verify(bot.bot()).requestTickWithin(longThat(delay -> delay >= 3_000 && delay <= 5_000));
+        verify(bot.bot()).requestTickWithin(longThat(delay -> delay >= 1_000 && delay <= 2_000));
     }
 
     private static PositionCombination.Plan puzzlePlan(Bot bot, int seated, String resetProperty) {

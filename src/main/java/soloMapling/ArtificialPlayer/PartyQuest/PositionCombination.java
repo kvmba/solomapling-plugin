@@ -272,7 +272,7 @@ public final class PositionCombination {
                 ledger.tried.add(ledger.presentedPattern);
                 ledger.presented = null;
             }
-            chatDelay = ThreadLocalRandom.current().nextLong(3_000, 5_001);
+            chatDelay = ThreadLocalRandom.current().nextLong(1_000, 2_001);
             ledger.retryChatAt = movementNowMs() + chatDelay;
             ledger.retryMoveAt = 0;
         }
@@ -325,7 +325,7 @@ public final class PositionCombination {
                 if (movementNowMs() < ledger.retryChatAt || !canAnnounce(speaker, room, instance, stage)) return;
                 PqStageChat.sayPositionPlan(speaker, room, stage, plan, areas, PositionLine.RETRY);
                 // Time the second beat from the actual line, even if the first tick was late.
-                long moveDelay = ThreadLocalRandom.current().nextLong(1_000, 3_001);
+                long moveDelay = ThreadLocalRandom.current().nextLong(500, 1_501);
                 ledger.retryMoveAt = movementNowMs() + moveDelay;
                 ledger.retryChatAt = 0;
                 ledger.announced = true;
