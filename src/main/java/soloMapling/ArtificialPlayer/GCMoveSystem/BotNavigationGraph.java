@@ -529,7 +529,11 @@ final class BotNavigationGraph implements Serializable {
 
         /* Launch point at the in-window x nearest to x (the x execution would actually fire from). */
         Point pointAtNearestLaunchX(int x) {
-            return new Point(Math.clamp(x, launchMinX, launchMaxX), startPoint.y);
+            return new Point(nearestLaunchX(x), startPoint.y);
+        }
+
+        int nearestLaunchX(int x) {
+            return Math.clamp(x, launchMinX, launchMaxX);
         }
     }
 

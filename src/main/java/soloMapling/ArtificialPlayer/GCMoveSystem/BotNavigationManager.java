@@ -11,6 +11,7 @@ import org.gms.server.maps.Rope;
 
 import java.awt.*;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
@@ -122,6 +123,8 @@ final class BotNavigationManager {
         }
     }
 
+    private static final Comparator<SearchNode> SEARCH_ORDER = (a, b) -> Integer.compare(a.score, b.score);
+
     private static final class SearchNode {
         final SearchState state;
         final int cost;
@@ -138,7 +141,74 @@ final class BotNavigationManager {
     // by teleport" from "arrived by walk/jump/etc." so the search can charge the portal cooldown to
     // a portal that chains straight off another portal (see runSearch). The flag is part of the
     // dedup key, so a region reachable both ways is explored under both costs.
-    private record SearchState(int regionId, Point point, boolean viaPortal) {
+    private static final class SearchState {
+        final int regionId;
+        final int x;
+        final int y;
+        final boolean viaPortal;
+        int cost = Integer.MAX_VALUE;
+        SearchState previous;
+        BotNavigationGraph.Edge incoming;
+
+        SearchState(int regionId, int x, int y, boolean viaPortal) {
+            this.regionId = regionId;
+            this.x = x;
+            this.y = y;
+            this.viaPortal = viaPortal;
+        }
+    }
+
+    /** Per-search table. Probe the full state key without allocating, even for rejected edges. */
+    private static final class SearchStates {
+        private SearchState[] table = new SearchState[16];
+        private int size;
+
+        SearchState stateAt(int regionId, int x, int y, boolean viaPortal) {
+            int index = slot(regionId, x, y, viaPortal);
+            SearchState state = table[index];
+            if (state == null) {
+                state = new SearchState(regionId, x, y, viaPortal);
+                table[index] = state;
+                if (++size == table.length / 2) grow();
+            }
+            return state;
+        }
+
+        private int slot(int regionId, int x, int y, boolean viaPortal) {
+            int hash = regionId * 0x9e3779b9 + x * 0x85ebca6b + y * 0xc2b2ae35 + (viaPortal ? 1 : 0);
+            int mask = table.length - 1;
+            int index = (hash ^ (hash >>> 16)) & mask;
+            SearchState state;
+            while ((state = table[index]) != null
+                    && (state.regionId != regionId || state.x != x || state.y != y || state.viaPortal != viaPortal)) {
+                index = (index + 1) & mask;
+            }
+            return index;
+        }
+
+        private void grow() {
+            SearchState[] old = table;
+            table = new SearchState[old.length * 2];
+            for (SearchState state : old) {
+                if (state != null) table[slot(state.regionId, state.x, state.y, state.viaPortal)] = state;
+            }
+        }
+    }
+
+    /** Reuse edge verdicts and landing states within this search only. Portal status stays live. */
+    private static final class SearchRegion {
+        static final SearchState BLOCKED = new SearchState(0, 0, 0, false);
+        final boolean onRope;
+        final List<BotNavigationGraph.Edge> outgoing;
+        // Indexed by outgoing edge: null means no cached arrival, BLOCKED means unusable non-portal.
+        final SearchState[] arrivals;
+
+        SearchRegion(BotNavigationGraph graph, int regionId) {
+            var region = graph.getRegion(regionId);
+            onRope = region != null && region.isRopeRegion;
+            outgoing = graph.getOutgoing(regionId);
+            arrivals = new SearchState[outgoing.size()];
+        }
     }
 
     private record PathfindProfile(long elapsedNs,
@@ -1355,12 +1425,12 @@ final class BotNavigationManager {
         boolean randomized = routeSeed != 0;
         double epsilon = randomized ? 1.0 + hashFrac(routeSeed, EPSILON_SALT) * EPSILON_SPAN : 0.0;
         try {
-            PriorityQueue<SearchNode> open = new PriorityQueue<>(Comparator.comparingInt(node -> node.score));
-            Map<SearchState, Integer> gScore = new HashMap<>();
-            Map<SearchState, SearchState> cameFrom = new HashMap<>();
-            Map<SearchState, BotNavigationGraph.Edge> cameByEdge = new HashMap<>();
+            PriorityQueue<SearchNode> open = new PriorityQueue<>(SEARCH_ORDER);
+            SearchStates states = new SearchStates();
+            Map<Integer, SearchRegion> searchRegions = new HashMap<>();
             Map<Integer, Boolean> landingVerdicts = new HashMap<>();
-            SearchState startState = new SearchState(startRegionId, new Point(startPos), false);
+            SearchState startState = states.stateAt(startRegionId, startPos.x, startPos.y, false);
+            startState.cost = 0;
             SearchState bestGoalState = null;
             int bestGoalCost = Integer.MAX_VALUE;
             int expandedNodes = 0;
@@ -1370,12 +1440,14 @@ final class BotNavigationManager {
             int relaxations = 0;
             int openPeak = 1;
 
-            gScore.put(startState, 0);
-            open.add(new SearchNode(startState, 0, hValue(graph, startPos, targetPos, zeroHeuristic, randomized, epsilon)));
+            open.add(new SearchNode(startState, 0, hValue(graph, startState.x, targetPos, zeroHeuristic, randomized, epsilon)));
 
             while (!open.isEmpty()) {
                 SearchNode current = open.poll();
-                if (current.cost != gScore.getOrDefault(current.state, Integer.MAX_VALUE)) {
+                SearchState state = current.state;
+                // Keep the cost and score snapshots in the queue. A better route changes the
+                // state's best cost, not the ordering of entries already in the heap.
+                if (current.cost != state.cost) {
                     staleNodes++;
                     continue;
                 }
@@ -1384,22 +1456,34 @@ final class BotNavigationManager {
                 }
                 expandedNodes++;
 
-                BotNavigationGraph.Region region = graph.getRegion(current.state.regionId);
-                boolean onRope = region != null && region.isRopeRegion;
-                if (current.state.regionId == targetRegionId) {
-                    int goalCost = current.cost + intraRegionTravelCost(graph, onRope, current.state.point, targetPos);
+                SearchRegion region = searchRegions.get(state.regionId);
+                if (region == null) {
+                    region = new SearchRegion(graph, state.regionId);
+                    searchRegions.put(state.regionId, region);
+                }
+                if (state.regionId == targetRegionId) {
+                    int goalCost = current.cost + intraRegionTravelCost(graph, region.onRope, state, targetPos.x, targetPos.y);
                     if (goalCost < bestGoalCost) {
                         bestGoalCost = goalCost;
-                        bestGoalState = current.state;
+                        bestGoalState = state;
                     }
                 }
 
-                for (BotNavigationGraph.Edge edge : graph.getOutgoing(current.state.regionId)) {
+                // The graph stores outgoing edges in ArrayLists; visit them in their original order.
+                List<BotNavigationGraph.Edge> outgoing = region.outgoing;
+                for (int i = 0, n = outgoing.size(); i < n; i++) {
+                    BotNavigationGraph.Edge edge = outgoing.get(i);
                     edgeChecks++;
-                    if (!isEdgeUsable(graph, map, edge, capabilities, landingVerdicts)) continue;
+                    boolean isPortal = edge.type == BotNavigationGraph.EdgeType.PORTAL;
+                    SearchState nextState = region.arrivals[i];
+                    if (nextState == SearchRegion.BLOCKED) continue;
+                    if ((isPortal || nextState == null)
+                            && !isEdgeUsable(graph, map, edge, capabilities, landingVerdicts)) {
+                        if (!isPortal) region.arrivals[i] = SearchRegion.BLOCKED;
+                        continue;
+                    }
                     usableEdges++;
 
-                    boolean isPortal = edge.type == BotNavigationGraph.EdgeType.PORTAL;
                     // Portals are free on their own (edge.cost == 0). Charge PORTAL_USE_COOLDOWN_MS
                     // only when the bot enters a portal *through the exit* of the one it just took —
                     // i.e. it landed on a portal and immediately re-enters without walking. A
@@ -1407,9 +1491,9 @@ final class BotNavigationManager {
                     // that exit coincides with this portal's entry. That covers the "return to old
                     // position" round-trip and co-located A>B>C hops, but NOT A>B>walk>C>D (the bot
                     // walked off the exit first, so the entry points differ and it stays free).
-                    boolean enteredThroughExit = current.state.viaPortal
-                            && current.state.point.equals(edge.startPoint);
-                    int edgeCost = isPortal && enteredThroughExit ? (int) PORTAL_USE_COOLDOWN_MS : edge.cost;
+                    boolean enteredThroughExit = isPortal && state.viaPortal
+                            && state.x == edge.startPoint.x && state.y == edge.startPoint.y;
+                    int edgeCost = enteredThroughExit ? (int) PORTAL_USE_COOLDOWN_MS : edge.cost;
                     // A straight DROP (launchStepX==0) falls in place: it executes from the nearest
                     // in-window x to the bot (selectDropWaypoint) and lands at that same x, NOT from/at
                     // the authored window-midpoint start/end points. Cost the approach to that nearest
@@ -1419,13 +1503,9 @@ final class BotNavigationManager {
                     // lose a strictly-cheaper direct drop to a rope detour. Scoped to DROP+stepX==0
                     // only: directional drops and JUMPs keep their authored start/end geometry.
                     boolean straightDrop = edge.type == BotNavigationGraph.EdgeType.DROP && edge.launchStepX == 0;
-                    Point approachPoint = straightDrop
-                            ? edge.pointAtNearestLaunchX(current.state.point.x)
-                            : edge.startPoint;
-                    Point landingPoint = straightDrop
-                            ? new Point(approachPoint.x, edge.endPoint.y)
-                            : edge.endPoint;
-                    int stepCost = intraRegionTravelCost(graph, onRope, current.state.point, approachPoint) + edgeCost;
+                    int approachX = straightDrop ? edge.nearestLaunchX(state.x) : edge.startPoint.x;
+                    int landingX = straightDrop ? approachX : edge.endPoint.x;
+                    int stepCost = intraRegionTravelCost(graph, region.onRope, state, approachX, edge.startPoint.y) + edgeCost;
                     // Per-bot positive jitter, stable per (bot, edge): different bots perceive
                     // different edges as slightly costlier and fan out onto distinct routes, while
                     // a single bot re-plans the same route every tick (no fluttering). Positive-only
@@ -1435,22 +1515,29 @@ final class BotNavigationManager {
                         stepCost += (int) Math.round(stepCost * JITTER_FRAC * hashFrac(routeSeed, edgeKey(edge)));
                     }
                     int tentativeCost = current.cost + stepCost;
-                    SearchState nextState = new SearchState(edge.toRegionId, landingPoint, isPortal);
-                    if (tentativeCost >= gScore.getOrDefault(nextState, Integer.MAX_VALUE)) {
+                    // MAX_VALUE cannot improve even an unseen state.
+                    if (tentativeCost == Integer.MAX_VALUE) continue;
+                    int landingY = edge.endPoint.y;
+                    // A straight drop can reach a different column from another arrival in this region.
+                    if (nextState == null || nextState.x != landingX || nextState.y != landingY) {
+                        nextState = states.stateAt(edge.toRegionId, landingX, landingY, isPortal);
+                        region.arrivals[i] = nextState;
+                    }
+                    if (tentativeCost >= nextState.cost) {
                         continue;
                     }
 
+                    nextState.cost = tentativeCost;
+                    nextState.previous = state;
+                    nextState.incoming = edge;
                     relaxations++;
-                    gScore.put(nextState, tentativeCost);
-                    cameFrom.put(nextState, current.state);
-                    cameByEdge.put(nextState, edge);
-                    int fScore = tentativeCost + hValue(graph, edge.endPoint, targetPos, zeroHeuristic, randomized, epsilon);
+                    int fScore = tentativeCost + hValue(graph, edge.endPoint.x, targetPos, zeroHeuristic, randomized, epsilon);
                     open.add(new SearchNode(nextState, tentativeCost, fScore));
                     openPeak = Math.max(openPeak, open.size());
                 }
             }
 
-            List<BotNavigationGraph.Edge> path = reconstructPath(startState, bestGoalState, cameFrom, cameByEdge);
+            List<BotNavigationGraph.Edge> path = reconstructPath(startState, bestGoalState);
             profile = new PathfindProfile(
                     System.nanoTime() - startedAt,
                     expandedNodes,
@@ -1581,33 +1668,20 @@ final class BotNavigationManager {
                 profile.resultEdges());
     }
 
-    private static List<BotNavigationGraph.Edge> reconstructPath(SearchState startState,
-                                                                 SearchState goalState,
-                                                                 Map<SearchState, SearchState> cameFrom,
-                                                                 Map<SearchState, BotNavigationGraph.Edge> cameByEdge) {
+    private static List<BotNavigationGraph.Edge> reconstructPath(SearchState startState, SearchState goalState) {
         if (goalState == null) {
             return null; // no goal reached at all: UNREACHABLE, distinct from "same region, walk"
         }
-        if (!cameByEdge.containsKey(goalState)) {
+        if (goalState == startState) {
             // The goal state is the start state itself (a same-region goal): an empty path.
             return List.of();
         }
 
         List<BotNavigationGraph.Edge> path = new ArrayList<>();
-        SearchState cursor = goalState;
-        while (!cursor.equals(startState)) {
-            BotNavigationGraph.Edge edge = cameByEdge.get(cursor);
-            if (edge == null) {
-                return null;
-            }
-
-            path.add(0, edge);
-            SearchState previousState = cameFrom.get(cursor);
-            if (previousState == null) {
-                return null;
-            }
-            cursor = previousState;
+        for (SearchState cursor = goalState; cursor != startState; cursor = cursor.previous) {
+            path.add(cursor.incoming);
         }
+        Collections.reverse(path);
         return path;
     }
 
@@ -1942,21 +2016,17 @@ final class BotNavigationManager {
         return selectedX;
     }
 
-    private static int intraRegionTravelCost(BotNavigationGraph graph, Point from, Point to) {
-        int dx = Math.abs(to.x - from.x);
+    private static int horizontalTravelCost(BotNavigationGraph graph, int fromX, int toX) {
+        int dx = Math.abs(toX - fromX);
         return Math.max(0, (int) Math.round((dx * 1000.0) / Math.max(1.0, graph.movementProfile.walkVelocityPxs())));
     }
 
-    private static int intraRegionTravelCost(BotNavigationGraph graph, boolean onRope, Point from, Point to) {
+    private static int intraRegionTravelCost(BotNavigationGraph graph, boolean onRope, SearchState from, int toX, int toY) {
         if (onRope) {
-            int travel = Math.abs(to.y - from.y);
+            int travel = Math.abs(toY - from.y);
             return Math.max(0, (int) Math.round((travel * 1000.0) / Math.max(1, BotMovementManager.cfg.CLIMB_SPEED_PXS)));
         }
-        return intraRegionTravelCost(graph, from, to);
-    }
-
-    private static int heuristic(BotNavigationGraph graph, Point from, Point targetPos) {
-        return intraRegionTravelCost(graph, from, targetPos);
+        return horizontalTravelCost(graph, from.x, toX);
     }
 
     // ponytail: route-diversification knobs — calibrated on map 10000 via BotRouteDiversityTest.
@@ -1968,12 +2038,12 @@ final class BotNavigationManager {
     private static final long EPSILON_SALT = 0xE95011L;
 
     /* Heuristic value: zeroSeed callers keep h=0/legacy; per-bot search uses an inflated (weighted) admissible h to prune. */
-    private static int hValue(BotNavigationGraph graph, Point from, Point targetPos,
+    private static int hValue(BotNavigationGraph graph, int fromX, Point targetPos,
                               boolean zeroHeuristic, boolean randomized, double epsilon) {
         if (randomized) {
-            return (int) Math.round(epsilon * heuristic(graph, from, targetPos));
+            return (int) Math.round(epsilon * horizontalTravelCost(graph, fromX, targetPos.x));
         }
-        return zeroHeuristic ? 0 : heuristic(graph, from, targetPos);
+        return zeroHeuristic ? 0 : horizontalTravelCost(graph, fromX, targetPos.x);
     }
 
     /* Per-bot route seed; non-zero so the search takes the randomized branch. */
