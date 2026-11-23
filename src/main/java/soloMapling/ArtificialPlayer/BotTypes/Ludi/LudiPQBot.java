@@ -31,9 +31,6 @@ public class LudiPQBot extends PartyQuestBot {
     /** The stage whose plan was last announced, so the party is not spammed with it. */
     private int announcedStage = -1;
 
-    /** The crate attempt last announced, so a retry of the same five crates stays quiet. */
-    private int announcedCrateAttempt = -1;
-
     public LudiPQBot(Character character) {
         super(character);
         dialoguePath = PARTY_QUEST_DIALOGUE_PATH;
@@ -90,10 +87,8 @@ public class LudiPQBot extends PartyQuestBot {
     protected void releaseRoomState() {
         super.releaseRoomState();
         LudiStages.releaseRoomState(getChr().getId());
-        // The announcements reset with the search, so the next run's first attempt is spoken.
         climbFloorY = Integer.MIN_VALUE;
         announcedStage = -1;
-        announcedCrateAttempt = -1;
     }
 
     @Override
@@ -348,42 +343,10 @@ public class LudiPQBot extends PartyQuestBot {
         }
     }
 
-    /**
-     * Stand on this bot's share of the crate pattern the party is submitting right now, and say
-     * which attempt it is.
-     *
-     * <p>The stage gives no hint beyond yes/no, so the bots search the 126 patterns in a fixed
-     * order and the player is the one who asks for the verdict. That makes the announcement the
-     * only thing standing between the party and a silent deadlock - without it nobody knows when
-     * to talk, or that the previous five were already ruled out.
-     */
     private void standOnCrates() {
-        announceCratePlan(LudiStages.takeCrate(getChr(), PositionCombination.botIndex(getChr())));
-    }
-
-    /**
-     * Speak this attempt's line, once, and only as the room's one voice.
-     *
-     * <p>Every bot in the room shares the crate search (the ledger is keyed by map instance), so
-     * they all compute the same attempt on the same tick; without a single speaker the whole
-     * cohort shouts the identical line at every judged attempt. The highest-level bot in the room
-     * speaks for everybody - it is the body a player is likeliest to be watching, and a tie falls
-     * to the lowest character id so exactly one bot wins. A speaker that dies, leaves the room or
-     * stops hands the voice to the next one instead of muting the stage.
-     *
-     * @return whether a line was spoken (the caller's contract is otherwise a no-op)
-     */
-    boolean announceCratePlan(PositionCombination.Plan plan) {
-        if (announcedCrateAttempt == plan.attempt() || !PqStageChat.isRoomSpeaker(this)) {
-            return false;
-        }
-        announcedCrateAttempt = plan.attempt();
-        announcedStage = 8;
-        if (!PqStageChat.claimRoomLine(getChr(), "crate", Integer.toString(plan.attempt()))) return false;
-        PqActions.say(getChr(),
-                plan.free() == 0
-                        ? BotMessages.get("pq.ludi.stage8_full", plan.attempt())
-                        : BotMessages.get("pq.ludi.stage8", plan.attempt(), plan.free()));
-        return true;
+        Character bot = getChr();
+        var areas = LudiPqData.crateAreas(bot.getMap().getAreas());
+        var plan = LudiStages.takeCrate(bot, PositionCombination.botIndex(bot), areas);
+        PqStageChat.announcePositionPlan(this, 8, plan, areas);
     }
 }

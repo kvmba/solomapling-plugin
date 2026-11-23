@@ -157,7 +157,7 @@ public final class OrbisStages {
      */
     public static PositionCombination.Plan standOnSealedPlatform(Character bot, int index) {
         return PositionCombination.standOn(bot, index, sealedCandidates(),
-                OrbisPqData.SEALED_AREA_RECTS, OrbisPqData.STAGE_4, "stage4_0",
+                OrbisPqData.SEALED_AREA_RECTS, null,
                 PositionCombination.countsAnswer("stage4_0", "stage4_1", "stage4_2"),
                 () -> PqActions.waitNearPuzzleNpc(bot, OrbisPqData.EAK));
     }

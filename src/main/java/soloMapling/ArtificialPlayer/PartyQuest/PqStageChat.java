@@ -1,6 +1,8 @@
 package soloMapling.ArtificialPlayer.PartyQuest;
 
 import org.gms.client.Character;
+import org.gms.server.maps.MapleMap;
+import soloMapling.ArtificialPlayer.BotCommandsPack.SocialCommands;
 import soloMapling.ArtificialPlayer.BotMessagingSystem.CharacterStorage;
 import soloMapling.ArtificialPlayer.BotSM;
 import soloMapling.ArtificialPlayer.GCMoveSystem.GCMovement;
@@ -71,17 +73,30 @@ public final class PqStageChat {
                 && state != BotSM.BotState.FINISHED && !bot.death().isCorpse();
     }
 
-    /** Announce the actual spots still needed from players, independently of ambient chatter. */
+    /** Report initial readiness or the next lineup, independently of ambient chatter. */
     public static void announcePositionPlan(BotSM bot, int stage, PositionCombination.Plan plan,
                                             List<Rectangle> areas) {
         Character character = bot.getChr();
-        if (plan.spots().isEmpty() || !GCMovement.isMapObserved(character.getMap()) || !isRoomSpeaker(bot)) return;
-        String stamp = plan.attempt() + ":" + plan.free() + ":" + plan.spots().hashCode();
-        if (!claimRoomLine(character, "plan." + stage, stamp)) return;
-        if (plan.free() == 0) {
-            PqActions.say(character, BotMessages.get("pq.position_plan.ready", stage, plan.attempt()));
-            return;
-        }
+        if (plan == null || !GCMovement.isMapObserved(character.getMap()) || !isAvailable(bot)) return;
+        // The last bot to arrive can trigger the line without waiting for the speaker's own tick.
+        Character speaker = roomSpeaker(character, character, bot.getClass()::isInstance);
+        PositionCombination.announcePlan(speaker, stage, plan, areas);
+    }
+
+    static void sayPositionPlan(Character speaker, MapleMap room, int stage, PositionCombination.Plan plan,
+                                List<Rectangle> areas, PositionCombination.PositionLine line) {
+        String message = switch (line) {
+            case READY -> BotMessages.get("pq.position_plan.ready", stage, plan.attempt());
+            case STEP_OFF -> BotMessages.get("pq.position_plan.step_off", stage, plan.attempt());
+            case FILL -> BotMessages.get("pq.position_plan.fill", stage, plan.attempt(), playerSpots(plan, areas));
+            case RETRY -> plan.free() == 0
+                    ? BotMessages.get("pq.position_plan.retry", stage, plan.attempt())
+                    : BotMessages.get("pq.position_plan.retry_fill", stage, plan.attempt(), playerSpots(plan, areas));
+        };
+        SocialCommands.BotFullChat(speaker, room, message);
+    }
+
+    private static StringJoiner playerSpots(PositionCombination.Plan plan, List<Rectangle> areas) {
         // Bots take spots from the end of the list; all earlier ones are the players' share.
         var needed = new StringJoiner(BotMessages.get("pq.position_plan.separator"));
         for (int area = 0; area < areas.size(); area++) {
@@ -91,7 +106,7 @@ public final class PqStageChat {
             }
             if (count > 0) needed.add(BotMessages.get("pq.position_plan.spot", area + 1, count));
         }
-        PqActions.say(character, BotMessages.get("pq.position_plan.fill", stage, plan.attempt(), needed));
+        return needed;
     }
 
     /** Remember the last line in the event room, not on the speaker that may leave it. */

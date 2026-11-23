@@ -230,11 +230,15 @@ public class AmoriaPQBot extends PartyQuestBot {
             waitForAmos(bot, stage);
             return false;
         }
+        if (hasLiveQuestMonster()) {
+            PqActions.releasePuzzleHold(bot);
+            return false; // Amos will not judge another placement until the penalty wave is gone.
+        }
         String answerProperty = AmoriaPqData.comboPropertyFor(stage);
         var areas = AmoriaPqData.areasFor(stage);
         var plan = PositionCombination.standOn(bot, PositionCombination.botIndex(bot),
                 stage == 2 ? AmoriaPqData.stage2Candidates() : AmoriaPqData.stage3Candidates(),
-                areas, stage, answerProperty,
+                areas, stage == 2 ? answerProperty : null,
                 PositionCombination.comboAnswer(answerProperty), () -> waitForAmos(bot, stage));
         PqStageChat.announcePositionPlan(this, stage, plan, areas);
         return false;

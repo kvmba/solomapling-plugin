@@ -1396,8 +1396,11 @@ pq.passes_dropped: "Passes are at the turn-in NPC's feet!"
 pq.stage_plan: "Stage {0}: {1}"
 pq.position_plan.spot: "spot {0}: {1}"
 pq.position_plan.separator: ", "
-pq.position_plan.fill: "Stage {0}, try {1}: players, fill these spots ({2}), then have the leader check."
-pq.position_plan.ready: "Stage {0}, try {1}: the bots are taking every spot. Leader, check once everyone is in place."
+pq.position_plan.fill: "Stage {0}, try {1}: we're in place! Fill these spots ({2}), then have the leader check."
+pq.position_plan.ready: "Stage {0}, try {1}: everyone's in place. Leader, talk to the NPC to check."
+pq.position_plan.step_off: "Stage {0}, try {1}: we've filled the spots. Everyone else, step off before the leader checks."
+pq.position_plan.retry: "Stage {0}: let's try lineup {1}. We'll take the spots; everyone else stay off. Leader, check once we're in place."
+pq.position_plan.retry_fill: "Stage {0}: let's try lineup {1}. Fill these spots ({2}), then have the leader check."
 pq.kerning.pass_dropped: "Dropped my pass by the npc, lead come grab it"
 
 # Personal collection quotas: claim, non-final pickup, and ready to exchange.
@@ -1462,8 +1465,6 @@ pq.collection.done.18: "count checks out, turning it in"
 pq.collection.done.19: "done, walking back to npc"
 pq.collection.done.20: "got enough to turn in, back in a sec"
 pq.ludi.stage1: "Stage 1: 25 passes for the Red Balloon. The leader turns them in - I am fighting for them."
-pq.ludi.stage8: "Stage 8: attempt {0}, {1} crates still need a body - I am on one, take another!"
-pq.ludi.stage8_full: "Stage 8: attempt {0}, every crate is taken - leader, talk to the balloon to submit it!"
 
 # ---- In-quest stage chatter (PqStageChat) ---------------------------------
 # One shared pool per beat for every quest bot, plus per-quest pools that

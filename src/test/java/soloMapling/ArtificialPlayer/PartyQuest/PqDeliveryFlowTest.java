@@ -23,6 +23,7 @@ import soloMapling.ArtificialPlayer.BotAttackSystem.BotAttackDriver;
 import soloMapling.ArtificialPlayer.BotCommandsPack.DropCommands;
 import soloMapling.ArtificialPlayer.BotGeneration;
 import soloMapling.ArtificialPlayer.BotTypes.Amoria.AmoriaPQBot;
+import soloMapling.ArtificialPlayer.BotTypes.Amoria.AmoriaPqData;
 import soloMapling.ArtificialPlayer.BotTypes.Henesys.HenesysPQBot;
 import soloMapling.ArtificialPlayer.BotTypes.Henesys.HenesysPqData;
 import soloMapling.ArtificialPlayer.BotTypes.Horntail.HorntailPQBot;
@@ -182,8 +183,26 @@ class PqDeliveryFlowTest {
 
             assertFalse(bot(type).workStage(), "clearing the puzzle does not end the run");
 
-            movement.verify(() -> GCMovement.moveIfTargetChanged(member, post.x, post.y, 1));
+            movement.verify(() -> GCMovement.moveIfTargetChanged(member, post.x, post.y, 1, null));
             assertTrue(PqActions.movementShielded(BOT_ID));
+        }
+    }
+
+    @Test
+    void amoriaYieldsThePlacementToCombatWhileTheJudgeRefusesToCheck() {
+        when(map.getId()).thenReturn(670010400);
+        var spot = AmoriaPqData.ROPE_SPOTS.getFirst();
+        var area = AmoriaPqData.areasFor(3).getFirst();
+        position.set(spot);
+        Monster penalty = mock(Monster.class);
+        when(penalty.isAlive()).thenReturn(true);
+        when(map.getAllMonsters()).thenReturn(List.of(penalty));
+        try (var generation = mockStatic(BotGeneration.class);
+             var movement = mockStatic(GCMovement.class)) {
+            PqActions.holdPuzzleSpot(member, spot, area);
+            assertTrue(PqActions.movementShielded(BOT_ID));
+            assertFalse(bot("amoria").workStage());
+            assertFalse(PqActions.movementShielded(BOT_ID));
         }
     }
 

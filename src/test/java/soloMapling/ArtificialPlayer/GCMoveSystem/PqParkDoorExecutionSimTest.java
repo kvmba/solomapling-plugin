@@ -18,13 +18,17 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.context.ApplicationContext;
+import soloMapling.ArtificialPlayer.BotMessagingSystem.CharacterStorage;
+import soloMapling.ArtificialPlayer.BotSM;
 import soloMapling.ArtificialPlayer.BotTypes.Amoria.AmoriaPqData;
 import soloMapling.ArtificialPlayer.BotTypes.Kerning.KerningPqData;
 import soloMapling.ArtificialPlayer.BotTypes.Kerning.KerningStages;
 import soloMapling.ArtificialPlayer.BotTypes.Ludi.LudiPqData;
+import soloMapling.ArtificialPlayer.BotTypes.OPQ.OrbisPqData;
 import soloMapling.ArtificialPlayer.PartyQuest.PqActions;
 
 import java.awt.Point;
+import java.awt.Rectangle;
 import java.lang.reflect.Method;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
@@ -32,6 +36,7 @@ import java.util.concurrent.atomic.AtomicReference;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.fail;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
@@ -321,6 +326,57 @@ class PqParkDoorExecutionSimTest {
     }
 
     @ParameterizedTest
+    @CsvSource({"103000801,3", "103000802,4", "103000803,5", "922010800,4", "920010500,2"})
+    void reachesTheCountedAreaAndWakesTheBotOnArrival(int mapId, int index) {
+        assumeTrue(wzAvailable(mapId), "Map.wz needed");
+        MapleMap map = realRoom(mapId);
+        Sim sim = sim(map, map.getPortal("sp").getPosition());
+        int stage = mapId - KerningPqData.STAGE_1 + 1;
+        Point spot = switch (mapId) {
+            case LudiPqData.STAGE_8 -> LudiPqData.CRATE_SPOTS.get(index);
+            case OrbisPqData.STAGE_SEALED -> OrbisPqData.SEALED_AREAS[index];
+            default -> KerningPqData.spotsFor(stage).get(index);
+        };
+        Rectangle area = switch (mapId) {
+            case LudiPqData.STAGE_8 -> LudiPqData.crateAreas(map.getAreas()).get(index);
+            case OrbisPqData.STAGE_SEALED -> OrbisPqData.SEALED_AREA_RECTS.get(index);
+            default -> KerningPqData.areasFor(stage).get(index);
+        };
+        BotSM fsm = mock(BotSM.class);
+        CharacterStorage.addActiveBot(BOT_ID, fsm);
+        try {
+            PqActions.holdPuzzleSpot(sim.st().bot, spot, area);
+            verify(fsm, never()).requestTickWithin(0);
+            tickN(sim, 500);
+            assertTrue(area.contains(sim.p()), () -> "Outside " + area + " at " + sim.p());
+            verify(fsm).requestTickWithin(0);
+        } finally {
+            CharacterStorage.removeActiveBot(BOT_ID);
+        }
+    }
+
+    @Test
+    void arrivalOutsideTheCountedAreaDoesNotImmediatelyRearmTheTick() {
+        int mapId = KerningPqData.STAGE_4;
+        assumeTrue(wzAvailable(mapId), "Map.wz needed");
+        Point floor = KerningPqData.spotsFor(4).getLast();
+        Sim sim = sim(mapId, floor);
+        Point spot = new Point(floor.x, floor.y - 4);
+        Rectangle area = new Rectangle(spot.x - 1, spot.y - 1, 3, 3);
+        BotSM fsm = mock(BotSM.class);
+        CharacterStorage.addActiveBot(BOT_ID, fsm);
+        try {
+            PqActions.holdPuzzleSpot(sim.st().bot, spot, area);
+            GCMovementDriver.clearReachedMoveTarget(sim.st());
+            assertNull(GCMovement.moveTargetOf(sim.st().bot), "the driver accepts the nearby floor");
+            assertFalse(area.contains(sim.p()), "the judge does not count that floor position");
+            verify(fsm, never()).requestTickWithin(0);
+        } finally {
+            CharacterStorage.removeActiveBot(BOT_ID);
+        }
+    }
+
+    @ParameterizedTest
     @ValueSource(ints = {2, 3, 4})
     void kerningClearedPuzzleReplacesTheSpotWalkButNotTheNextDoor(int stage) {
         int mapId = KerningPqData.STAGE_1 + stage - 1;
@@ -333,7 +389,7 @@ class PqParkDoorExecutionSimTest {
             var rope = sim.map().getRopes().stream().filter(r -> r.x() == start.x).findFirst().orElseThrow();
             BotPhysicsEngine.attachToRope(sim.st(), bot, rope, start.y);
         }
-        PqActions.holdArea(bot, puzzleSpots.getLast(), 1_200);
+        PqActions.holdPuzzleSpot(bot, puzzleSpots.getLast(), KerningPqData.areasFor(stage).getLast());
         assertEquals(puzzleSpots.getLast(), GCMovement.moveTargetOf(bot));
 
         PqActions.waitNearPuzzleNpc(bot, KerningPqData.NPC_CLOTO);

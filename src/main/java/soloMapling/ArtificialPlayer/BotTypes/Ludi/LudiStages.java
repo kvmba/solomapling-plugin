@@ -1234,10 +1234,9 @@ public final class LudiStages {
      * talk provably judged it wrong - but each round may also peek at {@code stage8combo}: the
      * chance is 0% on the first round and grows 0.5% per failed one.
      */
-    public static PositionCombination.Plan takeCrate(Character bot, int bodyIndex) {
+    public static PositionCombination.Plan takeCrate(Character bot, int bodyIndex, List<java.awt.Rectangle> areas) {
         return PositionCombination.standOn(bot, bodyIndex,
-                LudiPqData.crateCandidates(), LudiPqData.crateAreas(bot.getMap().getAreas()),
-                8, LudiPqData.COMBO_PROPERTY, PositionCombination.comboAnswer(LudiPqData.COMBO_PROPERTY),
+                LudiPqData.crateCandidates(), areas, null, PositionCombination.comboAnswer(LudiPqData.COMBO_PROPERTY),
                 () -> PqActions.waitNearPuzzleNpc(bot, LudiPqData.stageNpcId(8)));
     }
 

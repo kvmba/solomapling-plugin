@@ -38,6 +38,7 @@ import soloMapling.server.ExecutorServiceManager;
 import static soloMapling.ArtificialPlayer.GCMoveSystem.GCMovement.movementNowMs;
 
 import java.awt.Point;
+import java.awt.Rectangle;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -129,38 +130,27 @@ public final class PqActions {
         return total;
     }
 
-    public static Pattern observedPattern(Character bot, List<java.awt.Rectangle> areas) {
-        List<Point> positions = new java.util.ArrayList<>();
-        EventInstanceManager eim = instanceOf(bot);
-        if (eim != null) {
-            for (Character member : eim.getPlayers()) {
-                positions.add(member.getPosition());
-            }
-        }
-        return observedPattern(positions, areas);
-    }
-
-    /** {@link #observedPattern(Character, List)} over explicit positions (tests, odd callers). */
     public static Pattern observedPattern(List<Point> positions, List<java.awt.Rectangle> areas) {
         long pattern = 0;
         int bodies = 0;
         for (Point position : positions) {
-            if (position == null) {
-                continue;
-            }
-            for (int area = 0; area < areas.size(); area++) {
-                java.awt.Rectangle rect = areas.get(area);
-                if (rect != null && rect.contains(position)) {
-                    int shift = area * 4;
-                    if (shift < Long.SIZE - 4) {
-                        pattern += 1L << shift; // one more body in this area
-                    }
-                    bodies++;
-                    break;
-                }
+            int area = areaOf(position, areas);
+            if (area >= 0) {
+                int shift = area * 4;
+                if (shift < Long.SIZE - 4) pattern += 1L << shift;
+                bodies++;
             }
         }
         return new Pattern(pattern, bodies);
+    }
+
+    static int areaOf(Point position, List<java.awt.Rectangle> areas) {
+        if (position == null) return -1;
+        for (int i = 0; i < areas.size(); i++) {
+            var area = areas.get(i);
+            if (area != null && area.contains(position)) return i;
+        }
+        return -1;
     }
 
     // =========================================================================
@@ -344,7 +334,7 @@ public final class PqActions {
 
     // Stage-walk shield: the macro tick's walks (portal following, puzzle holds) must not be
     // re-targeted by the 250ms combat beat, which would yank the walk at a mob and oscillate
-    // the bot between its goal and the fight. walkTo/holdArea arm a shield that outlives the
+    // the bot between its goal and the fight. Stage walks arm a shield that outlives the
     // blocking window. Door walks also hold the landing until the script runs or the shield
     // expires; the combat beat skips only chase steering, not swings.
     private static final long STAGE_WALK_SHIELD_MS = 8_000;
@@ -1337,31 +1327,9 @@ public final class PqActions {
     // N5 - holding an area
     // =========================================================================
 
-    /**
-     * Stand on a spot and stay there.
-     *
-     * <p>Standing still is the whole mechanic for the area puzzles: the quest counts players
-     * inside each rectangle ({@code MapleMap#getNumPlayersInArea}) and compares that against
-     * a target it picked at random. A bot that wanders mid-check reads as absent. The walk in
-     * arms the stage-walk shield, and the hold extends it: a puzzle room with mobs must not
-     * have its hold yanked apart by the combat beat's chase move.
-     */
-    public static void holdArea(Character bot, Point spot, long millis) {
-        if (bot == null || spot == null) {
-            return;
-        }
-        walkTo(bot, spot);
-        SeekState control = seekStates.computeIfAbsent(bot.getId(), ignored -> new SeekState());
-        synchronized (control) {
-            armStageWalkShield(bot);
-        }
-        // Capped at one walk block: a longer hold freezes a busy stage tick for the whole
-        // span, and a bot-only room's 36-48s cadence already spaces its ticks far apart.
-        // A virtual clock means an execution sim owns the timeline - a real sleep here would
-        // just cost the test suite that many wall-clock seconds per call.
-        if (!GCMovement.isVirtualClock()) {
-            blockingSleep(Math.min(millis, WALK_BLOCK_CAP_MS));
-        }
+    /** Hold inside the actual scoring area, which can be narrower than the normal walk tolerance. */
+    public static void holdPuzzleSpot(Character bot, Point spot, Rectangle area) {
+        moveToPuzzlePosition(bot, spot, area);
     }
 
     /** Inline-pickup cap for a loot sweep (see {@link #loot}): what one tick may pay for. */
@@ -3108,15 +3076,37 @@ public final class PqActions {
         // Keep waiters on the post's tread. In the LPQ crate room the slope beside the Blue
         // Balloon can send bots from the entrance toward the tower's outer wall instead.
         Point spot = parkSpot(bot, post, 0);
+        moveToPuzzlePosition(bot, spot, null);
+    }
+
+    private static boolean atPuzzlePosition(Point position, Point spot, Rectangle area) {
+        return area != null ? area.contains(position) : withinWalkReach(position, spot, false);
+    }
+
+    private static void moveToPuzzlePosition(Character bot, Point spot, Rectangle area) {
         int botId = bot.getId();
         SeekState control = seekStates.computeIfAbsent(botId, ignored -> new SeekState());
         synchronized (control) {
             StageWalkShield shield = stageWalkShieldUntilByBot.get(botId);
             if (shield != null && shield.portal() && movementShielded(botId)) return;
-            armStageWalkShield(bot); // Do not let the combat sweep pull waiters into the puzzle.
-            if (!withinWalkReach(bot.getPosition(), spot, false) || GCMovement.hasMoveTarget(bot)) {
-                GCMovement.moveIfTargetChanged(bot, spot.x, spot.y, 1);
+            armStageWalkShield(bot);
+            if (!atPuzzlePosition(bot.getPosition(), spot, area) || GCMovement.hasMoveTarget(bot)) {
+                BotSM fsm = CharacterStorage.getBotById(botId);
+                // The driver's arrival tolerance can stop short of a scoring area. Leave those
+                // moves to the normal retry cadence rather than immediately ordering them again.
+                GCMovement.moveIfTargetChanged(bot, spot.x, spot.y, 1, fsm == null ? null : () -> {
+                    if (atPuzzlePosition(bot.getPosition(), spot, area)) fsm.requestTickWithin(0);
+                });
             }
+        }
+    }
+
+    /** Let the combat sweep take over when the puzzle itself spawns a wave. */
+    public static void releasePuzzleHold(Character bot) {
+        int id = bot.getId();
+        var shield = stageWalkShieldUntilByBot.get(id);
+        if (shield != null && shield.bot() == bot && shield.map() == bot.getMap() && !shield.portal()) {
+            stageWalkShieldUntilByBot.remove(id, shield);
         }
     }
 

@@ -187,13 +187,7 @@ public final class LudiPqData {
             new Point(-150, -182), new Point(-83, -183), new Point(-216, -143),
             new Point(-149, -143), new Point(-84, -144), new Point(-13, -143));
 
-    /**
-     * The instance property the stage stores its answer in.
-     *
-     * <p>The judge only checks its PRESENCE - "has the intro talk happened yet" - so a later talk
-     * can be told apart from the intro. Its VALUE is read by exactly one thing: the round's peek
-     * in {@link PositionCombination}, whose chance starts at 0% and grows 0.5% per failed round.
-     */
+    /** The instance property the optional peek reads for the crate puzzle. */
     public static final String COMBO_PROPERTY = "stage8combo";
 
     public static final int CRATES_TO_STAND_ON = 5;

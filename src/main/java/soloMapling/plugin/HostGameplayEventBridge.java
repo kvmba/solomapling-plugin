@@ -5,8 +5,10 @@ import org.gms.extension.event.CharacterDirectChatEvent;
 import org.gms.extension.event.CharacterMapEnteredEvent;
 import org.gms.extension.event.ChatType;
 import org.gms.extension.event.PartyQuestStageClearedEvent;
+import org.gms.extension.event.PartyQuestStageWrongEvent;
 import org.gms.extension.api.HostRuntime;
 import soloMapling.ArtificialPlayer.PartyQuest.PartyQuestBot;
+import soloMapling.ArtificialPlayer.PartyQuest.PositionCombination;
 import soloMapling.server.EventMessageSystem.EventBus;
 import soloMapling.server.EventMessageSystem.EventType;
 import soloMapling.server.EventMessageSystem.GameEvent;
@@ -33,6 +35,7 @@ public final class HostGameplayEventBridge {
         runtime.events().subscribe(CharacterDirectChatEvent.class, HostGameplayEventBridge::onDirectChat);
         runtime.events().subscribe(PartyQuestStageClearedEvent.class,
                 event -> PartyQuestBot.sayRearguardLine(event.instance(), event.map()));
+        runtime.events().subscribe(PartyQuestStageWrongEvent.class, PositionCombination::onWrong);
     }
 
     // A directed line (whisper / buddy / party / guild / alliance) addressed to a bot. The recipient

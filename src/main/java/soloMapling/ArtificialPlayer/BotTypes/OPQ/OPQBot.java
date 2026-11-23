@@ -978,6 +978,7 @@ public class OPQBot extends BotSM implements GrindTickRegistry.Participant {
             case 4 -> {
                 var plan = OrbisStages.standOnSealedPlatform(getChr(), PositionCombination.botIndex(getChr()));
                 PqStageChat.announcePositionPlan(this, OrbisPqData.STAGE_4, plan, OrbisPqData.SEALED_AREA_RECTS);
+                return; // placement arrivals and verdicts can wake the next tick immediately
             }
             case 5 -> { /* handled by workLounge, which rotates the sub-rooms */ }
             case 6 -> OrbisStages.pullCorrectLevers(getChr());

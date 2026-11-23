@@ -1,20 +1,28 @@
 package soloMapling.ArtificialPlayer.PartyQuest;
 
 import org.gms.client.Character;
+import org.gms.extension.event.PartyQuestStageWrongEvent;
+import org.gms.scripting.event.EventInstanceManager;
 import org.gms.server.maps.MapleMap;
 import soloMapling.ArtificialPlayer.BotMessagingSystem.CharacterStorage;
 import soloMapling.ArtificialPlayer.BotSM;
+import soloMapling.ArtificialPlayer.BotTypes.OPQ.OPQBot;
+import soloMapling.ArtificialPlayer.BotTypes.OPQ.OrbisPqData;
+import soloMapling.ArtificialPlayer.GCMoveSystem.GCMovement;
 
 import java.awt.Point;
 import java.awt.Rectangle;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.WeakHashMap;
 import java.util.concurrent.ThreadLocalRandom;
+
+import static soloMapling.ArtificialPlayer.GCMoveSystem.GCMovement.movementNowMs;
 
 /**
  * The honest search for a body-placement puzzle: the party puts bodies on areas and the quest
@@ -28,13 +36,8 @@ import java.util.concurrent.ThreadLocalRandom;
  *   <li>Amoria stage 2 and Orbis stage 4 - a body COUNT per area, carried in the pattern's
  *       nibbles instead of single bits.</li>
  * </ul>
- * Every one of them picks the answer when the leader first talks to the stage NPC, stores it in
- * an instance property, and compares it against the party's placement on every later talk; a miss
- * is {@code showWrongEffect()} and nothing else - no hint about which area was wrong.
- *
- * <p>Reading that property outright would turn the stage into a lookup, which is not the puzzle a
- * player plays, so the search walks the candidates in a fixed order and retires one only when a
- * talk has provably judged it wrong; see {@link #judgedPattern}. Each round may additionally
+ * The search tries candidates in a fixed order and retires the presented one only when the stage
+ * signals a miss and the room is standing on that pattern. Each round may also
  * peek at the answer: the first round never does, and every pattern already retired adds 0.5%
  * to the next round's chance - see {@link #peekChance} and {@link #peekedIndex}.
  *
@@ -42,13 +45,6 @@ import java.util.concurrent.ThreadLocalRandom;
  * candidate, so they must all see the same ledger.
  */
 public final class PositionCombination {
-
-    /**
-     * How long the party has to have been standing on the presented pattern before a talk counts
-     * as its verdict. A candidate change sends every bot walking; a talk landing mid-walk judged
-     * whatever happened to be standing then, not the pattern the ledger is about to retire.
-     */
-    private static final long SETTLE_MS = 2_500L;
 
     /**
      * How much each failed round adds to the next round's chance of peeking at the answer:
@@ -69,26 +65,14 @@ public final class PositionCombination {
         int peekIndex = -1;
         /** Index of the candidate being presented. */
         int index;
-        /** The pattern presented, and when the party was first seen standing on it. */
+        List<Rectangle> areas;
+        String resetProperty;
         long presentedPattern = -1;
-        /** The pattern seen on the latest observation, and how many bodies it counted. */
-        long currentPattern = -1;
-        /** When the current pattern was first seen (see {@link #SETTLE_MS}). */
-        long firstSeenAtMs;
-        int currentBodies;
-        /**
-         * Whether the stage has already answered at least once, i.e. whether a talk can be
-         * judged at all. The first talk in a stage is the intro: it picks the answer and explains
-         * the rules, so nothing is being judged. Every talk after it is a verdict attempt.
-         */
-        boolean stageAnswered;
-        /** The leader whose talks are being watched; a handover restarts the observation. */
-        int leaderId = Integer.MIN_VALUE;
-        /** The leader's NPC clock at the last sample: an advance means a talk just finished. */
-        long leaderTalkAt = Long.MIN_VALUE;
-        /** The stage this ledger is watching; a stage change restarts the observation. */
-        int stage = Integer.MIN_VALUE;
-        private boolean sampled;
+        Plan presented;
+        boolean announced;
+        // The room shares both deadlines; individual bot ticks must not start their own timers.
+        long retryChatAt;
+        long retryMoveAt;
     }
 
     // The map owns the lifetime of the puzzle. One bot leaving must not erase the team's search.
@@ -101,6 +85,8 @@ public final class PositionCombination {
     /** The candidate the party is submitting, plus what to say about it. */
     public record Plan(List<Point> spots, int free, int attempt) {
     }
+
+    enum PositionLine { FILL, READY, STEP_OFF, RETRY }
 
     /**
      * The answer a stage published, as its packed pattern, or a non-positive value when this
@@ -183,44 +169,46 @@ public final class PositionCombination {
      * @param bodyIndex  its rank among the bots, for the tail-first split
      * @param candidates every pattern the puzzle can ask for, in the order to try them
      * @param areas      the room's area rectangles, in the script's own order
-     * @param stage      the stage number, for the {@code <stage>stageclear} flag
-     * @param answerProperty the instance property the stage stores its answer in. Only its
-     *     PRESENCE is used - it being set means the intro talk happened, so a later talk is a
-     *     real verdict. Its value is never read by this path, so it carries no peek.
+     * @param resetProperty the property the stage blanks when discarding its answer, or null
      * @param answer     how to read the answer for the round's peek, or {@code null} to
      *     search honestly in every round
      * @param waitAtPost how to move an unassigned bot out of the counted areas to the NPC's post
+     * @return the plan to announce, or null while the room is waiting for its next action
      */
     public static Plan standOn(Character bot, int bodyIndex, List<Candidate> candidates,
-                               List<Rectangle> areas, int stage, String answerProperty,
+                               List<Rectangle> areas, String resetProperty,
                                Answer answer, Runnable waitAtPost) {
-        Plan plan = decide(bot, candidates, areas, stage, answerProperty, seatedBots(bot), answer);
+        Ledger ledger = ledgerFor(bot.getMap());
+        Plan plan;
+        synchronized (ledger) {
+            long deadline = ledger.retryChatAt != 0 ? ledger.retryChatAt : ledger.retryMoveAt;
+            if (deadline != 0) {
+                long remaining = deadline - movementNowMs();
+                if (remaining > 0) {
+                    // An earlier wheel request can win over this one. Keep the room's deadline.
+                    BotSM fsm = CharacterStorage.getBotById(bot.getId());
+                    if (fsm != null) fsm.requestTickWithin(remaining);
+                    return null;
+                }
+            }
+            plan = decide(ledger, bot, candidates, areas, resetProperty, seatedBots(bot), answer);
+            if (ledger.retryChatAt != 0) return plan; // let the room speak before anyone moves
+            ledger.retryMoveAt = 0;
+        }
         Point mine = mine(plan.spots(), bodyIndex);
         if (mine == null) {
             waitAtPost.run();
         } else {
-            PqActions.holdArea(bot, mine, 1_200);
+            PqActions.holdPuzzleSpot(bot, mine, areas.get(PqActions.areaOf(mine, areas)));
         }
         return plan;
     }
 
-    /**
-     * The decision half of {@link #standOn}, with no movement: observe the room, fold in any
-     * verdict, and pick the candidate to present. Split out so the judgement wiring is testable
-     * without a navigation graph behind the map (the tests have none).
-     *
-     * <p>The peek is rolled by {@link #plan}, once per round. The round is the same attempt number
-     * the plan reports - {@code tried.size() + 1} - so round 1 is a hard 0% and every verdict that
-     * retires a pattern moves the chance one step of 0.5%.
-     */
-    static Plan decide(Character bot, List<Candidate> candidates, List<Rectangle> areas,
-                       int stage, String answerProperty, int seated, Answer answer) {
-        MapleMap room = bot.getMap();
-        Ledger ledger = ledgerFor(room);
-        synchronized (ledger) {
-            observeJudgement(bot, room, ledger, areas, stage, answerProperty);
-            return plan(ledger, candidates, seated, bot, answer);
-        }
+    static Plan decide(Ledger ledger, Character bot, List<Candidate> candidates, List<Rectangle> areas,
+                       String resetProperty, int seated, Answer answer) {
+        ledger.areas = areas;
+        ledger.resetProperty = resetProperty;
+        return plan(ledger, candidates, seated, bot, answer);
     }
 
     static Ledger ledgerFor(MapleMap room) {
@@ -263,191 +251,132 @@ public final class PositionCombination {
         return -1;
     }
 
-    /**
-     * The pattern a just-ended talk judged wrong, or {@code -1} when the evidence is not
-     * conclusive.
-     *
-     * <p>This is the whole safety story, kept pure so the "never blame the wrong pattern"
-     * invariants are testable without a live map. A talk retires the presented pattern only when
-     * every one of these holds - each is a way the judged pattern could otherwise differ from the
-     * one the bots believe they are presenting:
-     * <ul>
-     *   <li>the stage has answered before, so this was not the intro talk (which picks the answer
-     *       and judges nothing);</li>
-     *   <li>the stage is not clear, so the talk really was a miss and not the winning one;</li>
-     *   <li>the room is standing on the presented pattern right now, and has been for the settle
-     *       window - so a talk that lands while the bots are still walking judges nothing;</li>
-     *   <li>the bodies actually counted match what the presented pattern needs. Two people in one
-     *       area leave a mask-looking pattern intact but still fail the script's count; retiring
-     *       then would throw away a correct answer.</li>
-     * </ul>
-     *
-     * @param bodies          bodies the room counted on this sample
-     * @param bodiesInPattern bodies the presented pattern asks for
-     * @return the pattern to retire, or -1 to keep it in play
-     */
-    public static long judgedPattern(long presentedPattern, int bodies, int bodiesInPattern,
-                                     long standingSinceMs, long settleMs,
-                                     boolean judgedBefore, boolean cleared) {
-        boolean settled = presentedPattern > 0
-                && bodiesInPattern > 0
-                && bodies == bodiesInPattern
-                && standingSinceMs >= settleMs;
-        return settled && judgedBefore && !cleared ? presentedPattern : -1;
-    }
-
-    /** Whether the quest says this stage is behind the party. */
-    static boolean stageCleared(Character bot, int stage) {
-        return PqActions.readEimString(bot, stage + "stageclear") != null;
-    }
-
-    /**
-     * Feed one observation of the room's pattern into the ledger.
-     *
-     * <p>Keeps the last pattern actually seen and the moment it started being seen. The settle
-     * window is measured from there - from when the party is standing on the pattern - and not
-     * from when the candidate was chosen, which would let a talk that lands while everyone is
-     * still walking count as a verdict on the destination.
-     */
-    static void sampleWindow(Ledger ledger, long pattern, int bodies) {
-        if (pattern != ledger.currentPattern || ledger.firstSeenAtMs == 0L) {
-            ledger.currentPattern = pattern;
-            ledger.firstSeenAtMs = System.currentTimeMillis();
-        }
-        ledger.currentBodies = bodies;
-    }
-
-    /**
-     * Begin watching a (leader, stage) pair. A new leader or a new stage restarts the
-     * observation: the new stage's intro is again a first talk, which judges nothing.
-     */
-    static void startWatching(Ledger ledger, int leaderId, int stage, long talkAt) {
-        ledger.sampled = true;
-        ledger.leaderId = leaderId;
-        ledger.stage = stage;
-        ledger.leaderTalkAt = talkAt;
-        ledger.stageAnswered = false;
-    }
-
-    /**
-     * Fold one tick of the stage's state into the ledger.
-     *
-     * <p>The judgement signal needs care, because the obvious ones are wrong. The leader's NPC
-     * clock ({@code getNpcCooldown}) advances on EVERY finished conversation - including the
-     * leave-map NPC standing in the same room - so it cannot distinguish a verdict from a
-     * goodbye. What does: the stage scripts publish a per-stage answer property as soon as the
-     * intro talk happens, and every verdict talk needs that property to already exist. The
-     * property NAME is supplied by the quest, but its VALUE is never read - only whether the
-     * stage has answered, which is the precondition for any judgement, not the answer itself.
-     */
-    private static void observeJudgement(Character bot, MapleMap room, Ledger ledger, List<Rectangle> areas,
-                                         int stage, String answerProperty) {
-        Character leader = PqActions.partyLeader(bot);
-        if (leader == null || leader.getMap() != room) {
-            return; // only a talk in this room, by the body the scripts listen to, can judge
-        }
-        PqActions.Pattern standing = PqActions.observedPattern(bot, areas);
-        sampleWindow(ledger, standing.pattern(), standing.bodies());
-        long talkAt = leader.getNpcCooldown();
-        if (!ledger.sampled || ledger.leaderId != leader.getId() || stage != ledger.stage) {
-            startWatching(ledger, leader.getId(), stage, talkAt);
-            return;
-        }
-        boolean answered = stageAnswered(bot, answerProperty);
-        if (answerWasDiscarded(ledger.stageAnswered, answered)) {
-            // The stage threw its answer away and will pick a NEW one (Amoria stage 2 does this
-            // every seven misses: stage2combo is blanked, then regenerated on the next talk).
-            // Everything ruled out so far was ruled out against the OLD answer, so the whole
-            // search restarts - keeping the ledger would skip candidates that may now be right.
-            resetSearch(ledger);
-        }
-        if (!ledger.stageAnswered) {
-            // Until an answer exists nothing can have been judged. Only its presence is checked -
-            // never its value.
-            if (!answered) {
-                return;
+    /** Check the placement on the NPC script thread rather than guessing from dialogue timing. */
+    public static void onWrong(PartyQuestStageWrongEvent event) {
+        MapleMap room = event.map();
+        Ledger ledger = LEDGERS.get(room);
+        EventInstanceManager instance = event.instance();
+        if (ledger == null || room.getEventInstance() != instance) return;
+        List<Character> members;
+        long chatDelay;
+        synchronized (ledger) {
+            if (ledger.resetProperty != null && "".equals(instance.getProperty(ledger.resetProperty))) {
+                // Amoria stage 2 just discarded its answer. Previous misses no longer apply.
+                resetSearch(ledger);
+                if (ledger.retryChatAt != 0) return;
+                members = instance.getPlayers();
+            } else {
+                if (ledger.presented == null || ledger.retryChatAt != 0 || ledger.retryMoveAt != 0) return;
+                members = instance.getPlayers();
+                if (standingPattern(room, members, ledger.areas) != ledger.presentedPattern) return;
+                ledger.tried.add(ledger.presentedPattern);
+                ledger.presented = null;
             }
-            // The talk that created it WAS the intro, so judging starts from the next one.
-            ledger.stageAnswered = true;
-            ledger.leaderTalkAt = talkAt;
-            ledger.firstSeenAtMs = System.currentTimeMillis();
-            return;
+            chatDelay = ThreadLocalRandom.current().nextLong(3_000, 5_001);
+            ledger.retryChatAt = movementNowMs() + chatDelay;
+            ledger.retryMoveAt = 0;
         }
-        if (!talkFinished(ledger.leaderTalkAt, talkAt)) {
-            return; // no conversation finished since the last sample: nothing was judged
-        }
-        ledger.leaderTalkAt = talkAt;
-        if (ledger.currentPattern != ledger.presentedPattern) {
-            return; // the room is not on the candidate, so nothing about it was judged
-        }
-        if (ledger.firstSeenAtMs == 0L) {
-            return; // the party has not been seen standing on this candidate yet
-        }
-        long standingFor = System.currentTimeMillis() - ledger.firstSeenAtMs;
-        long retired = judgedPattern(ledger.presentedPattern, ledger.currentBodies,
-                PqActions.bodiesOf(ledger.presentedPattern),
-                standingFor, SETTLE_MS, true, stageCleared(bot, stage));
-        if (retired > 0) {
-            ledger.tried.add(retired);
+        wakeRoomBots(room, members, chatDelay);
+    }
+
+    private static void wakeRoomBots(MapleMap room, List<Character> members, long delay) {
+        for (Character member : members) {
+            if (member.getMap() != room) continue;
+            BotSM bot = CharacterStorage.getBotById(member.getId());
+            if ((bot instanceof PartyQuestBot || bot instanceof OPQBot) && PqStageChat.isAvailable(bot)) {
+                bot.requestTickWithin(delay);
+            }
         }
     }
 
-    /**
-     * Whether the stage has discarded the answer it previously published.
-     *
-     * <p>This is the trigger for {@link #resetSearch}: a stage that had an answer and no longer
-     * has one is about to generate a different one (Amoria stage 2 blanks {@code stage2combo}
-     * every seven misses). Ruled-out candidates belong to the old answer and must not survive.
-     */
-    static boolean answerWasDiscarded(boolean hadAnswer, boolean hasAnswer) {
-        return hadAnswer && !hasAnswer;
-    }
-
-    /**
-     * Throw the whole search away, because the stage discarded its answer and will pick a new one.
-     *
-     * <p>Amoria stage 2 does exactly this every seven misses: it blanks {@code stage2combo} and
-     * regenerates a different combination on the next talk. Everything ruled out so far was
-     * ruled out against the OLD answer, so carrying the ledger over would skip candidates that
-     * may now be the answer - and the stage could never be finished.
-     */
     static void resetSearch(Ledger ledger) {
-        // The round is derived from the ruled-out set, so clearing it puts the next submission
-        // back on round 1 (a hard 0%); the roll key goes with it.
         ledger.tried.clear();
         ledger.index = 0;
         ledger.peekRound = -1;
         ledger.peekIndex = -1;
         ledger.presentedPattern = -1;
-        ledger.firstSeenAtMs = 0L;
-        ledger.stageAnswered = false;
+        ledger.presented = null;
     }
 
-    /**
-     * Whether a conversation finished since the last sample.
-     *
-     * <p>Needed ALONGSIDE {@code stageAnswered}: without it the ledger would treat every tick as
-     * a verdict, and a party that simply stood still would burn one candidate per tick until the
-     * space was empty. The clock advances on any finished conversation, so this answers exactly
-     * one question - "did something just happen?" - and the stage-answered gate separates the
-     * stage NPC's verdict from the leave-map NPC's goodbye.
-     */
-    static boolean talkFinished(long lastTalkAt, long talkNow) {
-        return talkNow > lastTalkAt;
+    private static long standingPattern(MapleMap room, List<Character> members, List<Rectangle> areas) {
+        // Orbis checks the map roster; the other scripts check the event roster.
+        long pattern = 0;
+        if (room.getId() == OrbisPqData.STAGE_SEALED) {
+            for (int area = 0; area < areas.size(); area++) {
+                pattern += (long) room.getNumPlayersInArea(area) << (area * 4);
+            }
+            return pattern;
+        }
+        for (Character member : members) {
+            int area = PqActions.areaOf(member.getPosition(), areas);
+            if (area >= 0) pattern += 1L << (area * 4);
+        }
+        return pattern;
     }
 
-    /**
-     * Whether the stage has already published its answer (its value is never read here).
-     *
-     * <p>An EMPTY value counts as "not answered": Amoria stage 2 blanks {@code stage2combo} with
-     * {@code ""} when it discards a wrong combination, so a null check alone would read the
-     * discarded state as still answered and {@link #resetSearch} would never fire.
-     */
-    static boolean stageAnswered(Character bot, String answerProperty) {
-        String published = answerProperty == null
-                ? null
-                : PqActions.readEimString(bot, answerProperty);
-        return published != null && !published.isBlank();
+    static void announcePlan(Character speaker, int stage, Plan plan, List<Rectangle> areas) {
+        MapleMap room = speaker.getMap();
+        Ledger ledger = LEDGERS.get(room);
+        EventInstanceManager instance = speaker.getEventInstance();
+        if (ledger == null || instance == null) return;
+        synchronized (ledger) {
+            if (ledger.presented != plan || ledger.announced) return;
+            if (ledger.retryChatAt != 0) {
+                if (movementNowMs() < ledger.retryChatAt || !canAnnounce(speaker, room, instance, stage)) return;
+                PqStageChat.sayPositionPlan(speaker, room, stage, plan, areas, PositionLine.RETRY);
+                // Time the second beat from the actual line, even if the first tick was late.
+                long moveDelay = ThreadLocalRandom.current().nextLong(1_000, 3_001);
+                ledger.retryMoveAt = movementNowMs() + moveDelay;
+                ledger.retryChatAt = 0;
+                ledger.announced = true;
+                wakeRoomBots(room, instance.getPlayers(), moveDelay);
+                return;
+            }
+        }
+        // These checks use per-bot movement locks; don't hold the room ledger while taking them.
+        if (!botsInPosition(speaker, plan, areas)) return;
+        synchronized (ledger) {
+            if (ledger.presented != plan || ledger.announced || !canAnnounce(speaker, room, instance, stage)) return;
+            boolean ready = standingPattern(room, instance.getPlayers(), areas) == ledger.presentedPattern;
+            PositionLine line = ready ? PositionLine.READY
+                    : plan.free() == 0 ? PositionLine.STEP_OFF : PositionLine.FILL;
+            // Queue the line before a wrong effect can retire this plan and start the next move.
+            PqStageChat.sayPositionPlan(speaker, room, stage, plan, areas, line);
+            ledger.announced = true;
+        }
+    }
+
+    private static boolean canAnnounce(Character speaker, MapleMap room, EventInstanceManager instance, int stage) {
+        Character leader = instance.getLeader();
+        return leader != null && leader.getMap() == room && speaker.getMap() == room
+                && (room.getId() == OrbisPqData.STAGE_SEALED
+                ? instance.getIntProperty("statusStg4") != 1 : instance.getProperty(stage + "stageclear") == null);
+    }
+
+    private static boolean botsInPosition(Character speaker, Plan plan, List<Rectangle> areas) {
+        List<Character> bots = new ArrayList<>();
+        bots.add(speaker);
+        BotSM self = CharacterStorage.getBotById(speaker.getId());
+        var party = speaker.getParty();
+        if (party != null) {
+            for (var member : party.getMembers()) {
+                int id = member.getId();
+                if (id == speaker.getId()) continue;
+                BotSM peer = eligiblePeer(speaker, self, id);
+                if (peer != null) bots.add(peer.getChr());
+            }
+        }
+        if (plan.free() != Math.max(0, plan.spots().size() - bots.size())) return false;
+        bots.sort(Comparator.comparingInt(Character::getId));
+        for (int i = 0; i < bots.size(); i++) {
+            Character bot = bots.get(i);
+            int area = PqActions.areaOf(bot.getPosition(), areas);
+            if (area != PqActions.areaOf(mine(plan.spots(), i), areas)) return false;
+            // A parked climber still reads as moving to the generic movement query.
+            if (area >= 0 && GCMovement.isMoving(bot)
+                    && !(GCMovement.isHoldingClimb(bot) && !GCMovement.hasMoveTarget(bot))) return false;
+        }
+        return true;
     }
 
     /** The first candidate from {@code from} that no judged talk has ruled out, wrapping once. */
@@ -505,13 +434,14 @@ public final class PositionCombination {
         Candidate presented = ledger.peekIndex >= 0
                 ? candidates.get(ledger.peekIndex)
                 : candidates.get(honest);
-        // NOTE: the settle clock is NOT touched here. It belongs to the OBSERVATION, which
-        // sampleWindow owns - and the room has not moved yet, so the old reading is still the
-        // truth. The candidate changes what we ask the party to stand on; the clock starts when
-        // they actually get there.
-        ledger.presentedPattern = presented.pattern();
-        int seatedNow = Math.min(seated, presented.spots().size());
-        return new Plan(presented.spots(), presented.spots().size() - seatedNow, round);
+        int free = Math.max(0, presented.spots().size() - seated);
+        if (ledger.presented == null || ledger.presentedPattern != presented.pattern()
+                || ledger.presented.free() != free || ledger.presented.attempt() != round) {
+            ledger.presentedPattern = presented.pattern();
+            ledger.presented = new Plan(presented.spots(), free, round);
+            ledger.announced = false;
+        }
+        return ledger.presented;
     }
 
     /**
@@ -553,7 +483,7 @@ public final class PositionCombination {
         int bots = 1;
         for (var member : party.getMembers()) {
             int id = member.getId();
-            if (id != bot.getId() && eligiblePeer(bot, self, id)) {
+            if (id != bot.getId() && eligiblePeer(bot, self, id) != null) {
                 bots++;
             }
         }
@@ -567,15 +497,15 @@ public final class PositionCombination {
         BotSM self = CharacterStorage.getBotById(bot.getId());
         int ahead = 0;
         for (var member : party.getMembers()) {
-            if (member.getId() < bot.getId() && eligiblePeer(bot, self, member.getId())) ahead++;
+            if (member.getId() < bot.getId() && eligiblePeer(bot, self, member.getId()) != null) ahead++;
         }
         return ahead;
     }
 
-    private static boolean eligiblePeer(Character bot, BotSM self, int id) {
+    private static BotSM eligiblePeer(Character bot, BotSM self, int id) {
         BotSM peer = CharacterStorage.getBotById(id);
         return peer != null && (self == null || peer.getClass() == self.getClass())
-                && peer.getChr().getMap() == bot.getMap() && PqStageChat.isAvailable(peer);
+                && peer.getChr().getMap() == bot.getMap() && PqStageChat.isAvailable(peer) ? peer : null;
     }
 
     /**

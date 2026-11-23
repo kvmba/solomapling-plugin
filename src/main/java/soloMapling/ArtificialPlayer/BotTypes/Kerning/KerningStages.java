@@ -225,7 +225,7 @@ public final class KerningStages {
         var candidates = KerningPqData.candidatesFor(stage);
         String answerProperty = KerningPqData.answerPropertyFor(stage);
         return PositionCombination.standOn(bot, botIndex, candidates,
-                KerningPqData.areasFor(stage), stage, answerProperty,
+                KerningPqData.areasFor(stage), null,
                 PositionCombination.indexAnswer(answerProperty, candidates),
                 () -> PqActions.waitNearPuzzleNpc(bot, KerningPqData.NPC_CLOTO));
     }

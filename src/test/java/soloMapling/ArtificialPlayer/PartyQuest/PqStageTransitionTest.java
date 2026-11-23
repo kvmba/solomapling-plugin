@@ -1254,20 +1254,6 @@ class PqStageTransitionTest {
         assertTrue(PositionCombination.ledgerFor(otherCopy).tried.isEmpty());
     }
 
-    @Test
-    void aLeaderInAnotherCopyCannotJudgeThisRoomsPuzzle() {
-        MapleMap puzzle = room(KERNING_1 + 1);
-        place(member, puzzle);
-        place(leader, room(puzzle.getId()));
-        var rooms = List.of(new java.awt.Rectangle(0, 0, 10, 10));
-        var candidates = List.of(new PositionCombination.Candidate(1L, List.of(new Point(2, 2))));
-        try (var actions = mockStatic(PqActions.class)) {
-            actions.when(() -> PqActions.partyLeader(member)).thenReturn(leader);
-            PositionCombination.decide(member, candidates, rooms, 2, "stg2Property", 1, null);
-            actions.verify(() -> PqActions.observedPattern(member, rooms), never());
-        }
-    }
-
     private PartyQuestBot bot(String type) {
         return switch (type) {
             case "kerning" -> new KerningPQBot(member);

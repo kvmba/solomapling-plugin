@@ -3,6 +3,7 @@ package soloMapling.ArtificialPlayer.BotCommandsPack;
 import org.gms.client.Character;
 import org.gms.extension.event.ChatType;
 import org.gms.net.server.Server;
+import org.gms.server.maps.MapleMap;
 import soloMapling.ArtificialPlayer.BotHelpers;
 import org.gms.util.PacketCreator;
 import soloMapling.ArtificialPlayer.GCMoveSystem.GCMovement;
@@ -22,7 +23,12 @@ public class SocialCommands {
     static boolean debugSkipDialog = false;
 
     public static void BotFullChat(Character fakechar, String message) {
-        fakechar.getMap().broadcastMessage(PacketCreator.getChatText(fakechar.getId(), message, fakechar.isGM(), (byte) 0));
+        BotFullChat(fakechar, fakechar.getMap(), message);
+    }
+
+    /** Send to the room that owns the line, not wherever the speaker may have warped to. */
+    public static void BotFullChat(Character fakechar, MapleMap room, String message) {
+        room.broadcastMessage(PacketCreator.getChatText(fakechar.getId(), message, fakechar.isGM(), (byte) 0));
     }
 
     // Chance an ordinary spoken line is punctuated by a facial expression. The face is a random

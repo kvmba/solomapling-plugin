@@ -85,12 +85,7 @@ public final class KerningPqData {
             new Point(927, -234), new Point(894, -182), new Point(963, -182),
             new Point(862, -130), new Point(927, -130), new Point(998, -130));
 
-    /**
-     * The instance property a stage stores its answer in.
-     *
-     * <p>Its PRESENCE is what makes a later talk a verdict rather than another intro; its value
-     * is read only by the round's peek in {@code PositionCombination}, never by the judge.
-     */
+    /** The instance property the optional peek reads for this stage. */
     public static String answerPropertyFor(int stage) {
         return switch (stage) {
             case 2 -> "stg2Property";

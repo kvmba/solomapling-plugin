@@ -5,6 +5,7 @@ import org.gms.config.GameConfig;
 import org.gms.dao.entity.GameConfigDO;
 import org.gms.extension.api.HostRuntime;
 import org.gms.extension.event.PartyQuestStageClearedEvent;
+import org.gms.extension.event.PartyQuestStageWrongEvent;
 import org.gms.extension.runtime.InMemoryHostEventBus;
 import org.gms.manager.ServerManager;
 import org.gms.net.server.world.Party;
@@ -40,21 +41,39 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Properties;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.longThat;
 import static org.mockito.Mockito.CALLS_REAL_METHODS;
 import static org.mockito.Mockito.RETURNS_DEEP_STUBS;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.mockStatic;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class PqRearguardTest {
+
+    private static final Point FIRST = new Point(5, 5);
+    private static final Point SECOND = new Point(25, 5);
+    private static final Point THIRD = new Point(45, 5);
+    private static final List<Rectangle> AREAS = List.of(
+            new Rectangle(0, 0, 10, 10), new Rectangle(20, 0, 10, 10), new Rectangle(40, 0, 10, 10));
+    private static final List<PositionCombination.Candidate> CANDIDATES = List.of(
+            new PositionCombination.Candidate(PositionCombination.maskToPattern(0b110), List.of(SECOND, THIRD)),
+            new PositionCombination.Candidate(PositionCombination.maskToPattern(0b101), List.of(FIRST, THIRD)));
 
     @BeforeAll
     static void bootHost() throws Exception {
@@ -126,7 +145,10 @@ class PqRearguardTest {
     @AfterEach
     void releaseBots() {
         speech.close();
-        registered.forEach(CharacterStorage::removeActiveBot);
+        for (int id : registered) {
+            CharacterStorage.removeActiveBot(id);
+            PqActions.clearSeekState(id);
+        }
     }
 
     @Test
@@ -260,23 +282,176 @@ class PqRearguardTest {
     void thePuzzleLineNamesTheActualMissingSpotAndSurvivesSpeakerHandover() {
         Bot high = addBot(55, 70, room);
         Bot low = addBot(50, 50, room);
-        when(high.character().getEventInstance()).thenReturn(instance);
-        when(low.character().getEventInstance()).thenReturn(instance);
-        var areas = List.of(new Rectangle(5, 0, 10, 10),
-                new Rectangle(20, 0, 10, 10), new Rectangle(40, 0, 10, 10));
-        var plan = new PositionCombination.Plan(List.of(new Point(25, 5), new Point(45, 5)), 1, 2);
-        String expected = BotMessages.get("pq.position_plan.fill", 4, 2,
-                BotMessages.get("pq.position_plan.spot", 2, 1));
-        try (var movement = mockStatic(GCMovement.class); var actions = mockStatic(PqActions.class)) {
+        var candidate = new PositionCombination.Candidate(
+                PositionCombination.maskToPattern(0b111), List.of(FIRST, SECOND, THIRD));
+        var ledger = PositionCombination.ledgerFor(room);
+        var plan = PositionCombination.decide(ledger, high.character(), List.of(candidate), AREAS, null, 2, null);
+        String expected = BotMessages.get("pq.position_plan.fill", 8, 1,
+                BotMessages.get("pq.position_plan.spot", 1, 1));
+        when(high.character().getPosition()).thenReturn(THIRD);
+        when(low.character().getPosition()).thenReturn(SECOND);
+        try (var movement = mockStatic(GCMovement.class)) {
             movement.when(() -> GCMovement.isMapObserved(room)).thenReturn(true);
-            PqStageChat.announcePositionPlan(low.bot(), 4, plan, areas);
-            PqStageChat.announcePositionPlan(high.bot(), 4, plan, areas);
-            when(high.death().isCorpse()).thenReturn(true);
-            PqStageChat.announcePositionPlan(low.bot(), 4, plan, areas);
+            PqStageChat.announcePositionPlan(high.bot(), 8, plan, AREAS);
+            speech.verifyNoInteractions(); // Right count, but the bots still have to swap spots.
 
-            actions.verify(() -> PqActions.say(high.character(), expected));
-            actions.verifyNoMoreInteractions();
+            when(high.character().getPosition()).thenReturn(SECOND);
+            when(low.character().getPosition()).thenReturn(THIRD);
+            movement.when(() -> GCMovement.isMoving(low.character())).thenReturn(true);
+            PqStageChat.announcePositionPlan(high.bot(), 8, plan, AREAS);
+            speech.verifyNoInteractions();
+
+            movement.when(() -> GCMovement.isHoldingClimb(low.character())).thenReturn(true);
+            PqStageChat.announcePositionPlan(low.bot(), 8, plan, AREAS);
+            when(high.death().isCorpse()).thenReturn(true);
+            PqStageChat.announcePositionPlan(low.bot(), 8, plan, AREAS);
+
+            speech.verify(() -> SocialCommands.BotFullChat(high.character(), room, expected));
+            speech.verifyNoMoreInteractions();
         }
+    }
+
+    @Test
+    void aFullBotLineupTellsAnExtraPlayerToStepOffInsteadOfStayingSilent() {
+        Bot low = addBot(50, 50, room);
+        Bot high = addBot(55, 70, room);
+        when(low.character().getPosition()).thenReturn(THIRD);
+        when(high.character().getPosition()).thenReturn(SECOND);
+        when(leader.getPosition()).thenReturn(SECOND);
+        when(instance.getPlayers()).thenReturn(List.of(leader, low.character(), high.character()));
+        var plan = puzzlePlan(high, 2, null);
+        try (var movement = mockStatic(GCMovement.class)) {
+            movement.when(() -> GCMovement.isMapObserved(room)).thenReturn(true);
+            PqStageChat.announcePositionPlan(low.bot(), 8, plan, AREAS);
+            PqStageChat.announcePositionPlan(high.bot(), 8, plan, AREAS);
+            speech.verify(() -> SocialCommands.BotFullChat(high.character(), room,
+                    BotMessages.get("pq.position_plan.step_off", 8, 1)));
+            speech.verifyNoMoreInteractions();
+        }
+    }
+
+    @Test
+    void aValidWrongEffectStartsOneSharedChatThenMovementSequence() {
+        Bot low = addBot(50, 50, room);
+        Bot high = addBot(55, 70, room);
+        MapleMap otherCopy = room(room.getId());
+        Bot elsewhere = addBot(60, 90, otherCopy);
+        when(instance.getPlayers()).thenReturn(List.of(leader, low.character(), high.character(), elsewhere.character()));
+        var first = puzzlePlan(high, 2, null);
+        when(leader.getNpcCooldown()).thenReturn(1L);
+        assertSame(first, puzzlePlan(low, 2, null), "ordinary dialogue cannot advance a round");
+
+        when(low.character().getPosition()).thenReturn(THIRD);
+        wrong();
+        when(high.character().getPosition()).thenReturn(SECOND);
+        when(leader.getPosition()).thenReturn(SECOND);
+        wrong(); // extra body
+        assertSame(first, puzzlePlan(low, 2, null));
+        verify(low.bot(), never()).requestTickWithin(anyLong());
+
+        when(leader.getPosition()).thenReturn(new Point(-20, 0));
+        events.publish(new PartyQuestStageWrongEvent(instance, otherCopy));
+        assertSame(first, puzzlePlan(low, 2, null));
+        var ledger = PositionCombination.ledgerFor(room);
+        var clock = new AtomicLong(10_000);
+        try (var movement = mockStatic(GCMovement.class)) {
+            movement.when(GCMovement::movementNowMs).thenAnswer(call -> clock.get());
+            movement.when(() -> GCMovement.isMapObserved(room)).thenReturn(true);
+            wrong();
+            long chatAt = ledger.retryChatAt;
+            long chatDelay = chatAt - clock.get();
+            assertTrue(chatDelay >= 3_000 && chatDelay <= 5_000);
+            verify(low.bot()).requestTickWithin(chatDelay);
+            verify(high.bot()).requestTickWithin(chatDelay);
+            verify(elsewhere.bot(), never()).requestTickWithin(anyLong());
+
+            clock.set(chatAt - 1);
+            wrong(); // an extra click while the old formation is still standing
+            assertEquals(chatAt, ledger.retryChatAt, "a duplicate click must not restart the delay");
+            assertNull(standOn(high, 1), "an early macro tick may not move to the next lineup");
+            PqStageChat.announcePositionPlan(low.bot(), 8, first, AREAS);
+            speech.verifyNoInteractions();
+            movement.verify(() -> GCMovement.moveIfTargetChanged(eq(high.character()),
+                    eq(FIRST.x), eq(FIRST.y), eq(1), any()), never());
+
+            clock.set(chatAt + 250); // movement must be delayed from the actual line, not its deadline
+            var next = standOn(low, 0);
+            assertEquals(2, next.attempt());
+            assertEquals(List.of(FIRST, THIRD), next.spots());
+            PqStageChat.announcePositionPlan(low.bot(), 8, next, AREAS);
+            PqStageChat.announcePositionPlan(high.bot(), 8, next, AREAS);
+            speech.verify(() -> SocialCommands.BotFullChat(high.character(), room,
+                    BotMessages.get("pq.position_plan.retry", 8, 2)));
+            long moveAt = ledger.retryMoveAt;
+            long moveDelay = moveAt - clock.get();
+            assertTrue(moveDelay >= 1_000 && moveDelay <= 3_000);
+            verify(low.bot(), times(moveDelay == chatDelay ? 2 : 1)).requestTickWithin(moveDelay);
+
+            clock.set(moveAt - 1);
+            assertNull(standOn(high, 1));
+            movement.verify(() -> GCMovement.moveIfTargetChanged(eq(high.character()),
+                    eq(FIRST.x), eq(FIRST.y), eq(1), any()), never());
+
+            clock.set(moveAt);
+            assertSame(next, standOn(high, 1));
+            movement.verify(() -> GCMovement.moveIfTargetChanged(eq(high.character()),
+                    eq(FIRST.x), eq(FIRST.y), eq(1), any()));
+            when(high.character().getPosition()).thenReturn(FIRST);
+            PqStageChat.announcePositionPlan(low.bot(), 8, next, AREAS);
+            PqStageChat.announcePositionPlan(high.bot(), 8, next, AREAS);
+            speech.verifyNoMoreInteractions();
+        }
+    }
+
+    @Test
+    void anAnswerResetAllowsTheFirstRoundToBeTriedAgain() {
+        Bot bot = addBot(50, 50, room);
+        String property = "stage2combo";
+        when(bot.character().getPosition()).thenReturn(THIRD);
+        when(leader.getPosition()).thenReturn(SECOND);
+        when(instance.getPlayers()).thenReturn(List.of(bot.character(), leader));
+        var first = puzzlePlan(bot, 1, property);
+        wrong();
+        var ledger = PositionCombination.ledgerFor(room);
+        long chatAt = ledger.retryChatAt;
+        assertFalse(ledger.tried.isEmpty());
+
+        when(instance.getProperty(property)).thenReturn("");
+        wrong();
+        var restarted = puzzlePlan(bot, 1, property);
+        assertEquals(first, restarted);
+        assertTrue(ledger.tried.isEmpty());
+        assertEquals(chatAt, ledger.retryChatAt);
+        verify(bot.bot()).requestTickWithin(longThat(delay -> delay >= 3_000 && delay <= 5_000));
+    }
+
+    @Test
+    void orbisUsesTheMapCountsAndConsumesTheFirstWrongEffect() {
+        room = room(OrbisPqData.STAGE_SEALED);
+        when(leader.getMap()).thenReturn(room);
+        Bot bot = addBot(50, 50, room);
+        when(instance.getPlayers()).thenReturn(List.of(bot.character(), leader));
+        when(room.getNumPlayersInArea(1)).thenReturn(1);
+        when(room.getNumPlayersInArea(2)).thenReturn(1);
+        puzzlePlan(bot, 1, null);
+        wrong();
+        assertTrue(PositionCombination.ledgerFor(room).tried.contains(CANDIDATES.getFirst().pattern()));
+        verify(bot.bot()).requestTickWithin(longThat(delay -> delay >= 3_000 && delay <= 5_000));
+    }
+
+    private static PositionCombination.Plan puzzlePlan(Bot bot, int seated, String resetProperty) {
+        Character character = bot.character();
+        return PositionCombination.decide(PositionCombination.ledgerFor(character.getMap()), character,
+                CANDIDATES, AREAS, resetProperty, seated, null);
+    }
+
+    private static PositionCombination.Plan standOn(Bot bot, int index) {
+        return PositionCombination.standOn(bot.character(), index, CANDIDATES, AREAS, null, null, () -> {});
+    }
+
+    private void wrong() {
+        when(room.getEventInstance()).thenReturn(instance);
+        events.publish(new PartyQuestStageWrongEvent(instance, room));
     }
 
     @Test
@@ -332,6 +507,7 @@ class PqRearguardTest {
 
     private Bot addBot(int id, int level, MapleMap map) {
         Character character = character(id, level, map);
+        when(character.getEventInstance()).thenReturn(instance);
         BotDeath death = mock(BotDeath.class);
         PartyQuestBot bot = mock(LudiPQBot.class, CALLS_REAL_METHODS);
         doReturn(character).when(bot).getChr();

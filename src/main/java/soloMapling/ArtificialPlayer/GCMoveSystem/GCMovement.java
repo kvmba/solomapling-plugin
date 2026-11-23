@@ -274,6 +274,10 @@ public final class GCMovement {
 
     /** Reconcile a chase against the live driver goal atomically with arrival/abandonment. */
     public static void moveIfTargetChanged(Character bot, int x, int y, int epsilonPx) {
+        moveIfTargetChanged(bot, x, y, epsilonPx, null);
+    }
+
+    public static void moveIfTargetChanged(Character bot, int x, int y, int epsilonPx, Runnable onArrival) {
         enable(bot);
         BotMovementState st = STATES.get(bot.getId());
         if (st == null) {
@@ -287,7 +291,7 @@ public final class GCMovement {
             Point current = st.moveTarget;
             if (current == null || st.moveTargetMap != bot.getMap() || Math.abs(current.x - x) >= epsilonPx
                     || Math.abs(current.y - y) >= epsilonPx) {
-                setMoveTarget(st, x, y, null);
+                setMoveTarget(st, x, y, onArrival);
             }
         } finally {
             st.lock.unlock();

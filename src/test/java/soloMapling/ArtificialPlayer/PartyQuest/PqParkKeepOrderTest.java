@@ -267,12 +267,6 @@ class PqParkKeepOrderTest {
                 "a bot that has arrived on its own post must be stood down");
     }
 
-    /**
-     * The behaviour the blanket stop also provided, and which must NOT be lost: a puzzle area hold
-     * pins the bot. {@code holdArea} arms the stage-walk shield after its walk, so the combat beat
-     * cannot steer it off the crate - and with {@code stopIfTarget} the hold is the only producer
-     * of a goal here, so it is still cancelled as before.
-     */
     @Test
     void aPuzzleHoldStillPinsTheBot() {
         assumeTrue(wzAvailable(), "Map.wz needed");
@@ -283,8 +277,7 @@ class PqParkKeepOrderTest {
         Character bot = botOn(map, park);
         DriverlessMovementState.inject(bot);
 
-        GCMovement.move(bot, park.x, park.y);
-        PqActions.holdArea(bot, park, 0);
+        PqActions.holdPuzzleSpot(bot, park, new java.awt.Rectangle(park.x - 1, park.y - 1, 3, 3));
         assertEquals(null, GCMovement.moveTargetOf(bot),
                 "the hold must stand the bot down on its own spot");
         assertTrue(PqActions.movementShielded(BOT_ID),
