@@ -15,8 +15,7 @@ import java.awt.Point;
 import java.awt.Rectangle;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.Executors;
-import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledThreadPoolExecutor;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -95,13 +94,18 @@ final class GCMovementDriver {
     private static final int TICK_POOL_SIZE =
             Math.max(1, Runtime.getRuntime().availableProcessors());
 
-    private static final ScheduledExecutorService POOL = Executors.newScheduledThreadPool(
+    private static final ScheduledThreadPoolExecutor POOL = new ScheduledThreadPoolExecutor(
             TICK_POOL_SIZE,
             r -> {
                 Thread t = new Thread(r, "gcmove-tick-" + THREAD_SEQ.getAndIncrement());
                 t.setDaemon(true);
                 return t;
             });
+
+    static {
+        // Waking or stopping an unseen bot must not leave its old 1s/4s deadline in the queue.
+        POOL.setRemoveOnCancelPolicy(true);
+    }
 
     static void start(BotMovementState entry) {
         entry.lock.lock();
@@ -170,7 +174,6 @@ final class GCMovementDriver {
             if (entry.tickStopped || entry.tickGeneration != generation) {
                 return;
             }
-            long tickStartedNanos = System.nanoTime();
             safeTick(entry);
             if (entry.tickStopped || entry.tickGeneration != generation) {
                 return;
@@ -1109,7 +1112,6 @@ final class GCMovementDriver {
             // it acts promptly instead of on its slow 2-6s/10s wheel. See BotMapEntryResponder (B).
             soloMapling.ArtificialPlayer.BotMapEntryResponder.onBotArrivedObserved(bot);
         }
-        entry.fhIndex = BotMovementManager.buildFhIndex(map);
         Point spawn = bot.getPosition();
         Point ground = BotPhysicsEngine.findGroundPoint(map, new Point(spawn.x, spawn.y - 1));
         // Clear stale nav from the old map first (does not touch the physics state set below).

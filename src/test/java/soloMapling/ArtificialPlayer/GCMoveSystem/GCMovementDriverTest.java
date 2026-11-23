@@ -2,8 +2,13 @@ package soloMapling.ArtificialPlayer.GCMoveSystem;
 
 import org.junit.jupiter.api.Test;
 
+import java.lang.reflect.Field;
+import java.util.concurrent.ScheduledThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class GCMovementDriverTest {
@@ -22,6 +27,26 @@ class GCMovementDriverTest {
         assertEquals(1_250L, GCMovementDriver.nextDeadline(1_000L, 1_018L, 250L));
         assertEquals(2_000L, GCMovementDriver.nextDeadline(1_000L, 1_018L, 1_000L));
         assertEquals(1_050L, GCMovementDriver.nextDeadline(1_000L, 1_018L, 50L));
+    }
+
+    @Test
+    void stoppingRemovesACancelledDeadlineFromTheQueueImmediately() throws Exception {
+        Field field = GCMovementDriver.class.getDeclaredField("POOL");
+        field.setAccessible(true);
+        var pool = (ScheduledThreadPoolExecutor) field.get(null);
+        var state = new BotMovementState(null, null);
+        var deadline = pool.schedule(() -> {}, 1, TimeUnit.DAYS);
+        state.task = deadline;
+        try {
+            assertTrue(pool.getQueue().contains(deadline));
+            GCMovementDriver.stop(state);
+            assertTrue(deadline.isCancelled());
+            assertFalse(pool.getQueue().contains(deadline));
+            assertNull(state.task);
+        } finally {
+            deadline.cancel(false);
+            pool.remove((Runnable) deadline);
+        }
     }
 
     @Test

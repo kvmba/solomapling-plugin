@@ -146,7 +146,6 @@ class LpqStage3PickupExecutionTest {
         state.movementProfile = profile;
         state.lastProfileRefreshMs = Long.MAX_VALUE / 4;
         state.lastMap = map;
-        state.fhIndex = BotMovementManager.buildFhIndex(map);
         BotPhysicsEngine.teleportTo(state, bot, start);
         BotMovementManager.resetEntryStateAfterTeleport(state);
         state.moveTarget = new Point(target);

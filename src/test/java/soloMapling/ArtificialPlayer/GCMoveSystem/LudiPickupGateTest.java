@@ -151,7 +151,6 @@ class LudiPickupGateTest {
         state.movementProfile = BotMovementProfile.base();
         state.lastMap = map;
         state.lastProfileRefreshMs = Long.MAX_VALUE / 4;
-        state.fhIndex = BotMovementManager.buildFhIndex(map);
         BotPhysicsEngine.teleportTo(state, bot, bot.getPosition());
         states().put(bot.getId(), state);
     }

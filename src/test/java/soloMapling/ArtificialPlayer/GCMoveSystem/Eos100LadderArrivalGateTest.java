@@ -201,7 +201,6 @@ public class Eos100LadderArrivalGateTest {
         st.movementProfile = profile;
         st.lastProfileRefreshMs = Long.MAX_VALUE / 4;
         st.lastMap = map;
-        st.fhIndex = BotMovementManager.buildFhIndex(real);
         st.grinding = true;
         BotPhysicsEngine.teleportTo(st, bot, new Point(spawnX, spawnY));
         BotMovementManager.resetEntryStateAfterTeleport(st);

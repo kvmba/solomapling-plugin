@@ -126,7 +126,6 @@ public class PqGraphGateTest {
         st.movementProfile = BotMovementProfile.fromCharacter(bot);
         st.lastProfileRefreshMs = Long.MAX_VALUE / 4;
         st.lastMap = map;
-        st.fhIndex = BotMovementManager.buildFhIndex(map);
         BotPhysicsEngine.teleportTo(st, bot, new Point(136, -450));
         BotMovementManager.resetEntryStateAfterTeleport(st);
         return new Sim(bot, st, pos);

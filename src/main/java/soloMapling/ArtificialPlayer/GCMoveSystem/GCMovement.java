@@ -74,7 +74,6 @@ public final class GCMovement {
                 st.movementProfile = BotMovementProfile.fromCharacter(bot);
                 if (bot.getMap() != null) {
                     st.lastMap = bot.getMap();
-                    st.fhIndex = BotMovementManager.buildFhIndex(bot.getMap());
                     Point cur = bot.getPosition();
                     Point ground = BotPhysicsEngine.findGroundPoint(bot.getMap(), new Point(cur.x, cur.y - 1));
                     BotPhysicsEngine.teleportTo(st, bot, settledPoint(cur, ground));

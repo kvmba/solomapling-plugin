@@ -276,7 +276,6 @@ class LpqBoxDescentExecutionTest {
         state.movementProfile = profile;
         state.lastMap = map;
         state.lastProfileRefreshMs = Long.MAX_VALUE / 4;
-        state.fhIndex = BotMovementManager.buildFhIndex(map);
         BotPhysicsEngine.teleportTo(state, bot, start);
         states().put(BOT_ID, state);
     }

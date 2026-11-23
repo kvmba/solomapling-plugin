@@ -128,7 +128,6 @@ public class RopeMidArrivalTest {
         st.movementProfile = profile;
         st.lastProfileRefreshMs = Long.MAX_VALUE / 4;
         st.lastMap = map;
-        st.fhIndex = BotMovementManager.buildFhIndex(map);
         BotPhysicsEngine.teleportTo(st, bot, new Point(LADDER_X, y));
         BotMovementManager.resetEntryStateAfterTeleport(st);
         BotPhysicsEngine.attachToRope(st, bot, ladder, y);

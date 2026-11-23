@@ -158,7 +158,6 @@ public class LpqLiveMobChaseRealSeekTest {
         st.movementProfile = BotMovementProfile.base();
         st.lastProfileRefreshMs = Long.MAX_VALUE / 4;
         st.lastMap = map;
-        st.fhIndex = BotMovementManager.buildFhIndex(map);
         BotPhysicsEngine.teleportTo(st, bot, new Point(sx, sy));
         BotMovementManager.resetEntryStateAfterTeleport(st);
         return st;

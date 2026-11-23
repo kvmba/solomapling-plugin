@@ -535,7 +535,7 @@ public final class BotAuraState {
     public static void updateGuardHide(Character bot) {
         int id = bot.getId();
         boolean crossing = false;
-        if (bot.getMap() != null && bot.getHp() > 0 && GUARD_MAPS.contains(bot.getMapId())) {
+        if (bot.getMap() != null && GUARD_MAPS.contains(bot.getMapId()) && bot.getHp() > 0) {
             crossing = GCMovement.monsterWithinTouch(bot, LPQ_GUARD_MOB, GUARD_LOOKAHEAD_PX);
         }
         if (!crossing) {

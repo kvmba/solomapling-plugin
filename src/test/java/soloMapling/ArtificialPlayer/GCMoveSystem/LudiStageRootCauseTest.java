@@ -331,7 +331,6 @@ class LudiStageRootCauseTest {
         state.movementProfile = BotMovementProfile.base();
         state.lastMap = map;
         state.lastProfileRefreshMs = Long.MAX_VALUE / 4;
-        state.fhIndex = BotMovementManager.buildFhIndex(map);
         BotPhysicsEngine.teleportTo(state, bot, initial);
         states().put(BOT_ID, state);
     }

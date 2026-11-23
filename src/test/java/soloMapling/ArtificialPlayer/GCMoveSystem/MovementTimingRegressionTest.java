@@ -203,7 +203,6 @@ class MovementTimingRegressionTest {
         var state = new BotMovementState(bot, null);
         state.lastMap = map;
         state.lastProfileRefreshMs = Long.MAX_VALUE;
-        state.fhIndex = BotMovementManager.buildFhIndex(map);
         BotPhysicsEngine.teleportTo(state, bot, start);
         state.moveTarget = target;
         state.moveTargetMap = map;

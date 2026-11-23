@@ -182,7 +182,6 @@ class PqParkDoorExecutionSimTest {
         st.movementProfile = BotMovementProfile.base();
         st.lastProfileRefreshMs = Long.MAX_VALUE / 4;
         st.lastMap = map;
-        st.fhIndex = BotMovementManager.buildFhIndex(map);
         BotPhysicsEngine.teleportTo(st, bot, new Point(start));
         BotMovementManager.resetEntryStateAfterTeleport(st);
         // The production helpers address the engine's own state map; publish this entry there so

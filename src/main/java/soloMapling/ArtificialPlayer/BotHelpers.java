@@ -3,6 +3,7 @@ package soloMapling.ArtificialPlayer;
 import org.gms.client.Character;
 import org.gms.client.Client;
 import org.gms.extension.api.ArtificialCharacters;
+import org.gms.extension.api.CharacterClassifier;
 import org.gms.server.ItemInformationProvider;
 import org.gms.server.maps.MapItem;
 import org.gms.server.maps.MapObject;
@@ -12,6 +13,7 @@ import soloMapling.server.BotChannelRouter;
 import java.awt.*;
 import java.util.List;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.function.IntPredicate;
 
 public class BotHelpers {
 
@@ -47,13 +49,25 @@ public class BotHelpers {
      * Falls back to the historical SoloMapling id convention when no classifier is bound.
      */
     public static boolean isBot(int id) {
-        if (id == 999) {
-            return true;
+        return id == 999 || isBot(id, ArtificialCharacters.classifiers());
+    }
+
+    /** Reuse one registry snapshot for a character scan; classifiers still read live state. */
+    public static IntPredicate botClassifierSnapshot() {
+        List<CharacterClassifier> classifiers = ArtificialCharacters.classifiers();
+        return id -> id == 999 || isBot(id, classifiers);
+    }
+
+    private static boolean isBot(int id, List<CharacterClassifier> classifiers) {
+        if (classifiers.isEmpty()) {
+            return id > 20000;
         }
-        if (!ArtificialCharacters.classifiers().isEmpty()) {
-            return ArtificialCharacters.isArtificial(id);
+        for (int i = 0, n = classifiers.size(); i < n; i++) {
+            if (classifiers.get(i).isArtificial(id)) {
+                return true;
+            }
         }
-        return id > 20000;
+        return false;
     }
 
     /**

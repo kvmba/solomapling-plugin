@@ -135,7 +135,6 @@ public class LpqStage1ExecutionSimTest {
         // their graph on the profile they pass in, so a recompute would swap the key mid-run.
         st.lastProfileRefreshMs = Long.MAX_VALUE / 4;
         st.lastMap = map;
-        st.fhIndex = BotMovementManager.buildFhIndex(map);
         BotPhysicsEngine.teleportTo(st, bot, new Point(0, 130));
         BotMovementManager.resetEntryStateAfterTeleport(st);
         return new Sim(st, pos, new StringBuilder());

@@ -144,7 +144,6 @@ class ShopWalkOffBoundaryDropTest {
         BotMovementState state = new BotMovementState(bot, null);
         state.lastMap = tree;
         state.lastProfileRefreshMs = Long.MAX_VALUE / 4;
-        state.fhIndex = BotMovementManager.buildFhIndex(tree);
         BotPhysicsEngine.teleportTo(state, bot, start);
         state.moveTarget = goal;
         state.moveTargetMap = tree;

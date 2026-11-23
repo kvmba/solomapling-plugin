@@ -173,7 +173,9 @@ public final class BotDeath {
     /** The zero-HP half of {@link #isCorpse()}: zeroed, artificial, and nobody's companion. */
     private boolean zeroedTemplateBot() {
         Character chr = this.chr;
-        return chr != null && needsZeroHpAdoption(
+        // Most checks come from the shared combat sweep, including on unobserved maps.
+        // Living bots never need a classifier/roster lookup. Recheck HP before adopting a corpse.
+        return chr != null && chr.getHp() <= 0 && needsZeroHpAdoption(
                 BotHelpers.isBot(chr), CompanionRoster.isCompanion(chr.getId()),
                 chr.getMap() != null, chr.getHp());
     }

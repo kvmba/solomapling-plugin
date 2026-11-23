@@ -123,7 +123,6 @@ public class LPQStage5TopDoorExecutionTest {
         st.movementProfile = profile;
         st.lastProfileRefreshMs = Long.MAX_VALUE / 4;
         st.lastMap = map;
-        st.fhIndex = BotMovementManager.buildFhIndex(map);
         BotPhysicsEngine.teleportTo(st, bot, new Point(start));
         BotMovementManager.resetEntryStateAfterTeleport(st);
         return new Sim(st, pos);
@@ -224,7 +223,6 @@ public class LPQStage5TopDoorExecutionTest {
         st.movementProfile = profile;
         st.lastProfileRefreshMs = Long.MAX_VALUE / 4;
         st.lastMap = map;
-        st.fhIndex = BotMovementManager.buildFhIndex(map);
         BotPhysicsEngine.teleportTo(st, bot, new Point(start));
         BotMovementManager.resetEntryStateAfterTeleport(st);
         Sim sim = new Sim(st, pos);

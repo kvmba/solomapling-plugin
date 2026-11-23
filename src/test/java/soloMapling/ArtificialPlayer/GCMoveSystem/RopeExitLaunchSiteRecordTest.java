@@ -123,7 +123,6 @@ public class RopeExitLaunchSiteRecordTest {
         // which would wreck the profile (and the graph-key identity) on the first tick.
         st.lastProfileRefreshMs = Long.MAX_VALUE / 4;
         st.lastMap = map;
-        st.fhIndex = BotMovementManager.buildFhIndex(map);
         st.navGraph = BotNavigationGraphProvider.getGraph(map, profile);
         st.navEdge = null; // set per case
         BotPhysicsEngine.attachToRope(st, bot, rope, anchor.y);

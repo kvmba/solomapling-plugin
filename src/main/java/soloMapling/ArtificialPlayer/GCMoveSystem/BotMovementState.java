@@ -6,8 +6,6 @@ import org.gms.server.maps.MapleMap;
 import org.gms.server.maps.Rope;
 
 import java.awt.Point;
-import java.util.HashMap;
-import java.util.Map;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.locks.ReentrantLock;
@@ -156,9 +154,7 @@ class BotMovementState {
     Point lastMobTouchCheckPos = null;    // previous-tick foot pos for the swept anti-tunnel AABB
     int lastMobTouchMapId = -1;           // invalidates the sweep across a map change
 
-    // ── Foothold index, rebuilt on map change ──
-    MapleMap lastMap = null;
-    Map<Integer, Foothold> fhIndex = new HashMap<>();
+    MapleMap lastMap = null;              // last map instance processed by the driver
 
     // ── Spacing / stagger + tick gating ──
     int followOffsetX = 0;

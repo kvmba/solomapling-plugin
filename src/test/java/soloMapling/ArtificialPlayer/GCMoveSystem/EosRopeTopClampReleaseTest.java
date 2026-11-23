@@ -127,7 +127,6 @@ class EosRopeTopClampReleaseTest {
         st.movementProfile = profile;
         st.lastProfileRefreshMs = Long.MAX_VALUE / 4;
         st.lastMap = map;
-        st.fhIndex = BotMovementManager.buildFhIndex(map);
         BotPhysicsEngine.teleportTo(st, bot, new Point(spawnX, spawnY));
         BotMovementManager.resetEntryStateAfterTeleport(st);
         st.grinding = true;

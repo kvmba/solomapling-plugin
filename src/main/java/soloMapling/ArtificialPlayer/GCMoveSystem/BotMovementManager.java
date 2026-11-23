@@ -11,8 +11,6 @@ import org.gms.server.maps.Rope;
 import org.gms.util.PacketCreator;
 
 import java.awt.*;
-import java.util.HashMap;
-import java.util.Map;
 import java.util.concurrent.ThreadLocalRandom;
 
 // Ported from GreenCatMS. Credit: NutNNut.
@@ -1725,14 +1723,6 @@ class BotMovementManager {
         entry.lastBroadcastVelY = snapshot.velY();
         entry.lastBroadcastStance = stance;
         entry.lastBroadcastFh = fhId;
-    }
-
-    static Map<Integer, Foothold> buildFhIndex(MapleMap map) {
-        Map<Integer, Foothold> index = new HashMap<>();
-        for (Foothold foothold : map.getFootholds().getAllFootholds()) {
-            index.put(foothold.getId(), foothold);
-        }
-        return index;
     }
 
     private static JumpLanding wrapLanding(BotPhysicsEngine.JumpLanding landing) {

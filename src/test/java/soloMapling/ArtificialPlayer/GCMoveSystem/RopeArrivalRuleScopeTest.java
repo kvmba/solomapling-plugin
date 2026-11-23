@@ -123,7 +123,6 @@ public class RopeArrivalRuleScopeTest {
         st.movementProfile = profile;
         st.lastProfileRefreshMs = Long.MAX_VALUE / 4;
         st.lastMap = map;
-        st.fhIndex = BotMovementManager.buildFhIndex(map);
         BotPhysicsEngine.teleportTo(st, bot, new Point(ROPE_X, 400));
         BotMovementManager.resetEntryStateAfterTeleport(st);
         BotPhysicsEngine.attachToRope(st, bot, rope, 400);

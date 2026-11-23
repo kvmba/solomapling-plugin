@@ -19,6 +19,7 @@ import org.junit.jupiter.api.Test;
 import org.mockito.MockedStatic;
 import org.springframework.context.ApplicationContext;
 import org.springframework.context.MessageSource;
+import soloMapling.ArtificialPlayer.BotHealthSystem.BotDeath;
 import soloMapling.ArtificialPlayer.BotPetSystem.BotPetConfig;
 import soloMapling.ArtificialPlayer.BotPetSystem.BotPetFollower;
 import soloMapling.ArtificialPlayer.BotSummonSystem.BotSummonConfig;
@@ -176,6 +177,21 @@ class UnobservedBotWorkTest {
             ObserverTracker.observe(Set.of(map), Set.of(), MovementClock.nowMs());
             movement.verify(() -> GCMovement.wake(bot), times(1));
         }
+    }
+
+    @Test
+    void livingBotSkipsIdentityAndMapLookupsUntilHostHpReachesZero() {
+        when(bot.getId()).thenReturn(999); // built-in template bot, independent of the classifier registry
+        when(bot.getHp()).thenReturn(100);
+        BotDeath death = new BotDeath(bot);
+        assertFalse(death.adoptIfZeroHp());
+        assertFalse(death.isCorpse());
+        verify(bot, never()).getId();
+        verify(bot, never()).getMap();
+
+        when(bot.getHp()).thenReturn(0);
+        assertTrue(death.isCorpse());
+        assertFalse(death.isDead()); // host damage is visible before the episode is adopted
     }
 
     @Test

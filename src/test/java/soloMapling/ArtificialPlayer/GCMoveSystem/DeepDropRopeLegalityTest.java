@@ -129,7 +129,6 @@ public class DeepDropRopeLegalityTest {
         st.movementProfile = profile;
         st.lastProfileRefreshMs = Long.MAX_VALUE / 4;
         st.lastMap = map;
-        st.fhIndex = BotMovementManager.buildFhIndex(map);
         BotPhysicsEngine.teleportTo(st, bot, new Point(129, rope.bottomY()));
         BotMovementManager.resetEntryStateAfterTeleport(st);
         BotPhysicsEngine.attachToRope(st, bot, rope, rope.bottomY());

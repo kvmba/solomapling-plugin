@@ -75,8 +75,9 @@ final class ObserverTracker {
         if (map == null) {
             return false;
         }
+        var isBot = BotHelpers.botClassifierSnapshot();
         for (Character c : map.getAllPlayers()) {
-            if (c != null && !BotHelpers.isBot(c)) {
+            if (c != null && !isBot.test(c.getId())) {
                 return true;
             }
         }
@@ -180,13 +181,15 @@ final class ObserverTracker {
         }
         Set<MapleMap> full = new HashSet<>();
         List<Character> realPlayers = new ArrayList<>();
+        var isBot = BotHelpers.botClassifierSnapshot();
         for (World world : server.getWorlds()) {
             if (world == null) {
                 continue;
             }
             for (Character chr : world.getPlayerStorage().getAllCharacters()) {
-                if (chr != null && chr.getMap() != null && !BotHelpers.isBot(chr)) {
-                    full.add(chr.getMap());
+                MapleMap map = chr == null ? null : chr.getMap();
+                if (map != null && !isBot.test(chr.getId())) {
+                    full.add(map);
                     realPlayers.add(chr);
                 }
             }
