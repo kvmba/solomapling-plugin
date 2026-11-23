@@ -331,6 +331,23 @@ class PqRearguardTest {
     }
 
     @Test
+    void standingReadsThePartyRosterWithoutHoldingTheRoomLedger() {
+        Bot bot = addBot(50, 50, room);
+        when(bot.character().getPosition()).thenReturn(THIRD);
+        var ledger = PositionCombination.ledgerFor(room);
+        when(party.getMembers()).thenAnswer(call -> {
+            assertFalse(Thread.holdsLock(ledger) || ledger.lock.isHeldByCurrentThread(),
+                    "the room ledger must not couple the NPC to the party lock");
+            return members;
+        });
+
+        try (var movement = mockStatic(GCMovement.class)) {
+            assertEquals(1, standOn(bot, 0).free());
+        }
+        verify(party).getMembers();
+    }
+
+    @Test
     void aValidWrongEffectStartsOneSharedChatThenMovementSequence() {
         Bot low = addBot(50, 50, room);
         Bot high = addBot(55, 70, room);

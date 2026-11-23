@@ -21,6 +21,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.WeakHashMap;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.concurrent.locks.ReentrantLock;
 
 import static soloMapling.ArtificialPlayer.GCMoveSystem.GCMovement.movementNowMs;
 
@@ -55,6 +56,8 @@ public final class PositionCombination {
 
     /** One room's search: what is ruled out, what is presented, and what the stage has told us. */
     static final class Ledger {
+        // Room contention must let JDK 21 bot ticks unmount from their carrier threads.
+        final ReentrantLock lock = new ReentrantLock();
         final Set<Long> tried = new HashSet<>();
         /**
          * The round whose peek has been rolled. The round is {@code tried.size() + 1}, so this
@@ -179,8 +182,11 @@ public final class PositionCombination {
                                List<Rectangle> areas, String resetProperty,
                                Answer answer, Runnable waitAtPost) {
         Ledger ledger = ledgerFor(bot.getMap());
+        // Party.getMembers() takes the host's fair lock; do not make the NPC wait on that read.
+        int seated = seatedBots(bot);
         Plan plan;
-        synchronized (ledger) {
+        ledger.lock.lock();
+        try {
             long deadline = ledger.retryChatAt != 0 ? ledger.retryChatAt : ledger.retryMoveAt;
             if (deadline != 0) {
                 long remaining = deadline - movementNowMs();
@@ -191,9 +197,11 @@ public final class PositionCombination {
                     return null;
                 }
             }
-            plan = decide(ledger, bot, candidates, areas, resetProperty, seatedBots(bot), answer);
+            plan = decide(ledger, bot, candidates, areas, resetProperty, seated, answer);
             if (ledger.retryChatAt != 0) return plan; // let the room speak before anyone moves
             ledger.retryMoveAt = 0;
+        } finally {
+            ledger.lock.unlock();
         }
         Point mine = mine(plan.spots(), bodyIndex);
         if (mine == null) {
@@ -259,7 +267,8 @@ public final class PositionCombination {
         if (ledger == null || room.getEventInstance() != instance) return;
         List<Character> members;
         long chatDelay;
-        synchronized (ledger) {
+        ledger.lock.lock();
+        try {
             if (ledger.resetProperty != null && "".equals(instance.getProperty(ledger.resetProperty))) {
                 // Amoria stage 2 just discarded its answer. Previous misses no longer apply.
                 resetSearch(ledger);
@@ -275,6 +284,8 @@ public final class PositionCombination {
             chatDelay = ThreadLocalRandom.current().nextLong(1_000, 2_001);
             ledger.retryChatAt = movementNowMs() + chatDelay;
             ledger.retryMoveAt = 0;
+        } finally {
+            ledger.lock.unlock();
         }
         wakeRoomBots(room, members, chatDelay);
     }
@@ -319,7 +330,8 @@ public final class PositionCombination {
         Ledger ledger = LEDGERS.get(room);
         EventInstanceManager instance = speaker.getEventInstance();
         if (ledger == null || instance == null) return;
-        synchronized (ledger) {
+        ledger.lock.lock();
+        try {
             if (ledger.presented != plan || ledger.announced) return;
             if (ledger.retryChatAt != 0) {
                 if (movementNowMs() < ledger.retryChatAt || !canAnnounce(speaker, room, instance, stage)) return;
@@ -332,10 +344,13 @@ public final class PositionCombination {
                 wakeRoomBots(room, instance.getPlayers(), moveDelay);
                 return;
             }
+        } finally {
+            ledger.lock.unlock();
         }
         // These checks use per-bot movement locks; don't hold the room ledger while taking them.
         if (!botsInPosition(speaker, plan, areas)) return;
-        synchronized (ledger) {
+        ledger.lock.lock();
+        try {
             if (ledger.presented != plan || ledger.announced || !canAnnounce(speaker, room, instance, stage)) return;
             boolean ready = standingPattern(room, instance.getPlayers(), areas) == ledger.presentedPattern;
             PositionLine line = ready ? PositionLine.READY
@@ -343,6 +358,8 @@ public final class PositionCombination {
             // Queue the line before a wrong effect can retire this plan and start the next move.
             PqStageChat.sayPositionPlan(speaker, room, stage, plan, areas, line);
             ledger.announced = true;
+        } finally {
+            ledger.lock.unlock();
         }
     }
 
