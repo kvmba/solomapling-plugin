@@ -790,9 +790,8 @@ public final class PqActions {
      * further step, {@code isActive} false) drops out of the registration and pulls the next
      * macro tick forward - picking the next box is stage logic that only runs there, and
      * without the pull the party stares at the bot standing beside the rubble it just made
-     * for one full macro cadence (the "打完停顿才继续" half of the rhythm report). The nudge
-     * is debounced, so a multi-box combo only ever pulls one tick, and the cadence settles
-     * back on its own.
+     * for one full macro cadence. The earliest pending deadline wins when several events
+     * arrive before the same tick.
      */
     private static void strikeReactorOnBeat(Character bot, BeatBox box, long now) {
         if (swingAtReactor(bot, box.map(), box.oid())) {
@@ -871,25 +870,22 @@ public final class PqActions {
      * Pull this bot's next macro tick forward so stage work (walk a portal/exit's follow-up,
      * rotate to the next box, loot, hand off) resumes promptly after the event it waits on:
      * a walk's arrival or a beat-driven box break. The pull is the only bridge from the
-     * movement/beat layers back into stage logic - it must never run the stage inline, that
-     * is what produced the old act-freeze-act cadence. Debounced by BotSM's own nudge guard;
-     * a no-op when the wheel entry is gone (bot stopping).
+     * movement/beat layers back into stage logic. Use an action deadline rather than a social
+     * nudge: two distinct arrivals can happen inside the social debounce window, and missing
+     * the second leaves a bot idle until its next regular tick.
      *
-     * <p>ALWAYS DISPATCHED, never inlined: this is reachable from the movement driver's tick,
-     * which holds the bot's movement monitor, and {@code BotSM.nudgeSoon} is synchronized on the
-     * macro monitor. Taking the macro monitor from there closes an AB-BA cycle with the stop path
-     * ({@code stopScheduledTask} holds the macro monitor and waits for the movement monitor via
-     * {@code GCMovement.disable}) - a hard deadlock that leaves the bot frozen and the driver
-     * thread parked forever. The same hazard is already handled this way in BotDeath,
-     * BotMapEntryResponder and BotPlayerReaction. Off the driver there is no order to invert, so
-     * dispatching unconditionally is always safe (the nudge is cheap and debounced).
+     * <p>Keep this bridge off the movement driver's stack: the stop path takes the macro monitor
+     * before the movement monitor, so an arrival must not acquire them in the reverse order.
      */
     private static void nudgeStageTick(Character bot) {
         final int botId = bot.getId();
         ExecutorServiceManager.runAsync(() -> {
             BotSM nudgeable = CharacterStorage.getBotById(botId);
-            if (nudgeable != null) {
-                nudgeable.nudgeSoon(STAGE_TICK_NUDGE_MS);
+            if (nudgeable != null && nudgeable.getRunning()) {
+                BotSM.BotState state = nudgeable.getState();
+                if (state != BotSM.BotState.TRADING && state != BotSM.BotState.FINISHED) {
+                    nudgeable.requestTickWithin(STAGE_TICK_NUDGE_MS);
+                }
             }
         });
     }

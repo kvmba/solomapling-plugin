@@ -1,6 +1,7 @@
 package soloMapling.ArtificialPlayer.BotTypes.OPQ;
 
 import org.gms.client.Character;
+import org.gms.scripting.event.EventInstanceManager;
 import org.gms.server.maps.MapleMap;
 import org.gms.server.maps.Reactor;
 import soloMapling.ArtificialPlayer.BotCommandsPack.DropCommands;
@@ -70,7 +71,7 @@ public class OPQBot extends BotSM implements GrindTickRegistry.Participant {
 
     /** Stage 5: which of the lounge's four sub-rooms to enter next (advances on each visit). */
     private int loungeVisit;
-    private MapleMap leavingLoungeRoom;
+    private volatile MapleMap leavingLoungeRoom;
 
     private volatile int lootedRecordItemId = -1;
 
@@ -112,20 +113,62 @@ public class OPQBot extends BotSM implements GrindTickRegistry.Participant {
         Character bot = getChr();
         MapleMap room = bot.getMap();
         if (room == null || checkIfNotRunningOrPaused() || bot.getParty() == null || death().isCorpse()
-                || status().isFrozen() || !PqActions.reactorBeatArmed(bot) || !GCMovement.hasGraph(bot)) return;
+                || status().isFrozen() || !GCMovement.hasGraph(bot)) return;
         var instance = room.getEventInstance();
         if (instance == null || bot.getMap() != room) return;
         int mapId = room.getId();
-        boolean workReactor = instance.isEventCleared()
-                ? mapId == OrbisPqData.TREASURE_MAP || OrbisPqData.isJailRoom(mapId)
-                : switch (mapId) {
-                    case OPQConstants.OPQ_STAGE_1 -> opqBotState == OPQBotState.STAGE_1_HIT_REACTOR
-                            && instance.getIntProperty("statusStg0") != 1;
-                    case OPQConstants.OPQ_STAGE_2 -> opqBotState == OPQBotState.STAGE_2_HIT_BOX
-                            && instance.getIntProperty("statusStg3") < 0;
-                    default -> OrbisPqData.LOUNGE_ROOMS.contains(mapId) && instance.getIntProperty("statusStg5") != 1;
-                };
-        if (workReactor) PqActions.workReactorOnBeat(bot);
+        if (instance.isEventCleared()) {
+            if (mapId == OrbisPqData.STAGE_PRIZE && PqActions.findHumanPartyRoom(bot, map -> map == room) == room) {
+                PqActions.seekAndAttack(bot);
+            } else if (mapId == OrbisPqData.TREASURE_MAP || OrbisPqData.isJailRoom(mapId)) {
+                PqActions.workReactorOnBeat(bot);
+            }
+            return;
+        }
+        switch (mapId) {
+            case OPQConstants.OPQ_STAGE_1 -> {
+                if (opqBotState == OPQBotState.STAGE_1_HIT_REACTOR && instance.getIntProperty("statusStg0") != 1) {
+                    sweepAssignedReactor(bot);
+                }
+            }
+            case OPQConstants.OPQ_STAGE_2 -> {
+                if (opqBotState == OPQBotState.STAGE_2_HIT_BOX && instance.getIntProperty("statusStg3") < 0) {
+                    sweepAssignedReactor(bot);
+                }
+            }
+            default -> {
+                int[] loot = combatLootIds(room, instance);
+                if (loot == null) return;
+                if ((loot == OrbisStages.WALKWAY_LOOT && !needsWalkwayPieces())
+                        || (loot == OrbisStages.LOUNGE_LOOT && !needsLoungePieces())) {
+                    PqActions.stopPartyLoot(bot);
+                    PqActions.stopHunting(bot);
+                } else if (loot == OrbisStages.LOUNGE_LOOT && PqActions.reactorBeatArmed(bot)) {
+                    PqActions.workReactorOnBeat(bot);
+                } else {
+                    OrbisStages.fightAndCollect(bot, loot);
+                }
+            }
+        }
+    }
+
+    private void sweepAssignedReactor(Character bot) {
+        PqActions.workReactorOnBeat(bot);
+        // A broken/stalled target needs a new stage action, not another wait on the macro cadence.
+        if (!PqActions.reactorBeatArmed(bot)) requestTickWithin(0);
+    }
+
+    private int[] combatLootIds(MapleMap room, EventInstanceManager instance) {
+        return switch (room.getId()) {
+            case OrbisPqData.STAGE_WALKWAY -> instance.getIntProperty("statusStg1") != 1
+                    ? OrbisStages.WALKWAY_LOOT : null;
+            case OrbisPqData.STAGE_STORAGE -> instance.getIntProperty("statusStg2") != 1
+                    ? OrbisStages.STORAGE_LOOT : null;
+            case OrbisPqData.STAGE_PAPA -> instance.getIntProperty("statusStg7") == -1
+                    ? OrbisStages.PAPA_LOOT : null;
+            default -> OrbisPqData.LOUNGE_ROOMS.contains(room.getId()) && leavingLoungeRoom != room
+                    && instance.getIntProperty("statusStg5") != 1 ? OrbisStages.LOUNGE_LOOT : null;
+        };
     }
 
     // =========================================================================
@@ -164,18 +207,23 @@ public class OPQBot extends BotSM implements GrindTickRegistry.Participant {
 
     public boolean wantsQuestLoot(int itemId) {
         Character bot = getChr();
-        int room = bot.getMapId();
-        return switch (room) {
-            case OPQConstants.OPQ_STAGE_1 -> opqBotState == OPQBotState.STAGE_1_LOOT
-                    && itemId == OPQConstants.CLOUD_PIECE;
-            case OPQConstants.OPQ_STAGE_2 -> opqBotState == OPQBotState.STAGE_2_LOOT
-                    && itemId == wantedRecord(bot.getMap()) && PqActions.countItem(bot, itemId) == 0;
-            case OrbisPqData.STAGE_STORAGE -> itemId == OrbisPqData.PAPA_TRAP_ITEM;
-            case OrbisPqData.STAGE_PAPA -> (itemId == OrbisPqData.PAPA_MEDAL || itemId == OrbisPqData.PAPA_TRAP_ITEM
-                    || itemId == OrbisPqData.PAPA_SEED) && PqActions.readEimInt(bot, "statusStg7", -1) == -1;
-            default -> itemId == OrbisPqData.STATUE_PIECE_5 && OrbisPqData.LOUNGE_ROOMS.contains(room)
-                    && leavingLoungeRoom != bot.getMap();
-        };
+        MapleMap room = bot.getMap();
+        if (room == null) return false;
+        var instance = room.getEventInstance();
+        if (instance == null || instance.isEventCleared()) return false;
+        if (room.getId() == OPQConstants.OPQ_STAGE_1) {
+            return opqBotState == OPQBotState.STAGE_1_LOOT && itemId == OPQConstants.CLOUD_PIECE
+                    && instance.getIntProperty("statusStg0") != 1;
+        }
+        if (room.getId() == OPQConstants.OPQ_STAGE_2) {
+            return opqBotState == OPQBotState.STAGE_2_LOOT && instance.getIntProperty("statusStg3") < 0
+                    && itemId == wantedRecord(room) && PqActions.countItem(bot, itemId) == 0;
+        }
+        int[] loot = combatLootIds(room, instance);
+        if (loot != null) {
+            for (int id : loot) if (itemId == id) return true;
+        }
+        return false;
     }
 
     /**
@@ -275,6 +323,8 @@ public class OPQBot extends BotSM implements GrindTickRegistry.Participant {
         }
         if (instance != null && OrbisPqData.isOrbisRoom(map.getId())) {
             potionSim.tick(getChr());
+            if (!GCMovement.hasGraph(getChr())) GCMovement.ensureGraph(getChr());
+            if (getChr().getMap() != map) return;
             if (instance.isEventCleared()) {
                 transitionTo(OPQBotState.EXIT_DETECT, "settling the cleared run");
                 workSettlement(map);
@@ -295,19 +345,29 @@ public class OPQBot extends BotSM implements GrindTickRegistry.Participant {
         if (mapId == OPQConstants.OPQ_STAGE_1 || mapId == OPQConstants.OPQ_STAGE_2) {
             int leaderMap = partyLeaderMapId();
             if (leaderMap == OPQConstants.OPQ_EXIT_LOBBY || leaderMap == OPQConstants.OPQ_LOBBY) {
-                PqActions.armReactorBeat(getChr(), -1);
+                stopRoomWork();
                 followLeaderOut();
                 return;
             }
             if (mapId == OPQConstants.OPQ_STAGE_1 && readEimInt("statusStg0", -1) == 1) {
+                stopRoomWork();
                 transitionTo(OPQBotState.STAGE_1_TRANSITION, "Eak opened the tower route");
                 handleStage1Transition();
                 return;
             }
-            if (mapId == OPQConstants.OPQ_STAGE_2 && leaderMap != mapId
-                    && OrbisPqData.isOrbisRoom(leaderMap) && readEimInt("statusStg3", -1) >= 1) {
-                walkOutOfCurrentRoom();
-                return;
+            if (mapId == OPQConstants.OPQ_STAGE_2) {
+                int musicStatus = readEimInt("statusStg3", -1);
+                if (musicStatus >= 0) {
+                    stopRoomWork();
+                    sharedContext.putBoxAssignment(getChr().getId(), null);
+                    transitionTo(OPQBotState.STAGE_2_WAIT, "the music box has accepted its record");
+                    if (musicStatus >= 1 && leaderMap != mapId && OrbisPqData.isOrbisRoom(leaderMap)) {
+                        walkOutOfCurrentRoom();
+                    } else {
+                        PqActions.waitNearStageNpc(getChr(), OrbisPqData.EAK);
+                    }
+                    return;
+                }
             }
         }
 
@@ -528,9 +588,12 @@ public class OPQBot extends BotSM implements GrindTickRegistry.Participant {
         debugLogf("handleStage1Navigate: reactorOid=" + reactorOid
                 + "Char pos=" + getChr().getPosition());
         if (reactorOid == null) {
-            if (!orchestrator.hasUnclaimedLiveCloudReactor(getChr().getMap(), getChr().getId())) {
+            if (collectClouds()) return;
+            if (room.getAllReactors().stream().noneMatch(r -> r.getId() == OPQConstants.STAGE_1_CLOUD_REACTOR_ID
+                    && PqActions.isStrikeable(r))) {
                 transitionTo(OPQBotState.STAGE_1_RETURN,
-                        "no clouds available -> going return state");
+                        "all cloud reactors are broken");
+                handleStage1Return();
             }
             return;
         }
@@ -543,11 +606,6 @@ public class OPQBot extends BotSM implements GrindTickRegistry.Participant {
         Character bot = getChr();
         if (bot.getMap() != room) return;
         int botId = bot.getId();
-        if (!cloud && musicPlaying()) {
-            sharedContext.putBoxAssignment(botId, null);
-            transitionTo(OPQBotState.STAGE_2_WAIT, "the music box has accepted its record");
-            return;
-        }
         OPQBotState navigate = cloud ? OPQBotState.STAGE_1_NAVIGATE : OPQBotState.STAGE_2_NAVIGATE;
         Integer reactorOid = cloud ? sharedContext.getMyCloudAssignment(botId) : sharedContext.getMyBoxAssignment(botId);
         if (reactorOid == null) {
@@ -555,18 +613,17 @@ public class OPQBot extends BotSM implements GrindTickRegistry.Participant {
             return;
         }
 
-        // Once armed, the sweep owns the walk and swings as soon as it reaches the reactor.
-        if (PqActions.reactorBeatArmed(bot)) return;
-        GCMovement.ensureGraph(bot);
-        if (PqActions.approachReactor(bot, room, reactorOid, false, true) != PqActions.Approach.STUCK
-                || bot.getMap() != room) return;
-
         Reactor reactor = room.getReactorByOid(reactorOid);
         if (!PqActions.isStrikeable(reactor)) {
             transitionTo(cloud ? OPQBotState.STAGE_1_LOOT : OPQBotState.STAGE_2_LOOT,
                     "reactor broken oid=" + reactorOid);
+            requestTickWithin(0);
             return;
         }
+        // Once armed, the sweep owns the walk and swings as soon as it reaches the reactor.
+        if (PqActions.reactorBeatArmed(bot)
+                || PqActions.approachReactor(bot, room, reactorOid, false, true) != PqActions.Approach.STUCK
+                || bot.getMap() != room) return;
         PqActions.deferReactorApproach(bot, reactorOid);
         if (cloud) sharedContext.putCloudAssignment(botId, null);
         else sharedContext.putBoxAssignment(botId, null);
@@ -574,16 +631,20 @@ public class OPQBot extends BotSM implements GrindTickRegistry.Participant {
     }
 
     private void handleStage1Loot() {
-        switch (PqActions.collectReactorLoot(getChr(), CLOUD_LOOT)) {
-            case COLLECTING -> { return; }
-            case PICKED_UP -> {
-                SocialCommands.BotChatbubble(getChr(), BotMessages.get("opq.cloud_pieces", cloudPiecesCount()));
-                return; // There may be another uncollected cloud on this floor.
-            }
-            case NONE -> { }
-        }
+        if (collectClouds()) return;
         transitionTo(OPQBotState.STAGE_1_NAVIGATE,
                 "loot pass complete, searching for next cloud reactor");
+        requestTickWithin(0);
+    }
+
+    private boolean collectClouds() {
+        PqActions.LootBeat loot = PqActions.collectReactorLoot(getChr(), CLOUD_LOOT);
+        if (loot == PqActions.LootBeat.NONE) return false;
+        if (loot == PqActions.LootBeat.PICKED_UP) {
+            SocialCommands.BotChatbubble(getChr(), BotMessages.get("opq.cloud_pieces", cloudPiecesCount()));
+        }
+        requestTickWithin(GrindTickRegistry.TICK_MS);
+        return true;
     }
 
     private void handleStage1Return() {
@@ -591,8 +652,8 @@ public class OPQBot extends BotSM implements GrindTickRegistry.Participant {
         // altar's trigger box, and the altar sits at x=377 (the old target, x=497, was 20px
         // outside it to the right - which is why the altar never fired).
         if (!PqActions.walkTo(getChr(), OPQConstants.STAGE_1_DROP_POS)) return;
-        waitFor(OPQConstants.NAVIGATE_SETTLE_MS); // settle before DROP_ITEMS ticks
         transitionTo(OPQBotState.STAGE_1_DROP_ITEMS, "return state done.");
+        requestTickWithin(0);
     }
 
     private void handleStage1DropItems() {
@@ -660,6 +721,10 @@ public class OPQBot extends BotSM implements GrindTickRegistry.Participant {
     }
 
     private void handleStage1Wait() {
+        if (getChr().getMap().getNPCById(OrbisPqData.EAK) != null) {
+            PqActions.waitNearStageNpc(getChr(), OrbisPqData.EAK);
+            return;
+        }
         if (orchestrator.hasUnclaimedLiveCloudReactor(getChr().getMap(), getChr().getId())) {
             transitionTo(OPQBotState.STAGE_1_NAVIGATE, "a cloud reactor is available again");
             return;
@@ -677,15 +742,16 @@ public class OPQBot extends BotSM implements GrindTickRegistry.Participant {
         Character leader = PqActions.partyLeader(bot);
         MapleMap here = bot.getMap();
         MapleMap target = leader == null ? null : leader.getMap();
-        if (target == null || here == target || here.getEventInstance() != target.getEventInstance()
-                || !OrbisPqData.isOrbisRoom(target.getId()) || target.getId() == OPQConstants.OPQ_STAGE_1) {
+        if (target == null || here.getEventInstance() != target.getEventInstance()
+                || !OrbisPqData.isOrbisRoom(target.getId())) {
             return;
         }
         // Eak moves the team to the top platform; the tower is reached via in00 even when
         // the leader has already left it for another room.
         var door = here.getPortal("in00");
         if (door != null) {
-            PqActions.walkThroughPortal(bot, door);
+            if (target == here) PqActions.walkToPortal(bot, door);
+            else if (target.getId() != OPQConstants.OPQ_STAGE_1) PqActions.walkThroughPortal(bot, door);
         }
     }
 
@@ -709,17 +775,11 @@ public class OPQBot extends BotSM implements GrindTickRegistry.Participant {
      */
     private void handleMiddleStage() {
         sharedContext_trySetPhase(OPQPhase.STAGE_2);
-
-        if (getChr().getMapId() == OrbisPqData.STAGE_SEALED
-                && readEimInt("statusStg4", -1) == 1
-                && partyLeaderMapId() == OrbisPqData.STAGE_SEALED) {
-            PqActions.waitNearPuzzleNpc(getChr(), OrbisPqData.EAK);
-            return; // Eak has spawned the prize box; wait for the leader to leave the room.
-        }
+        if (rallyInClearedRoom()) return;
 
         int stage = currentMiddleStage();
         if (stage != 5 && OrbisPqData.LOUNGE_ROOMS.contains(getChr().getMapId())) {
-            PqActions.armReactorBeat(getChr(), -1);
+            stopRoomWork();
         }
         if (stage < 0) {
             // Nothing outstanding that the bot can see: hand back to the exit logic, which
@@ -755,8 +815,7 @@ public class OPQBot extends BotSM implements GrindTickRegistry.Participant {
                 followLeaderIntoPapaRoom();
                 return;
             }
-            OrbisStages.settlePapaRoom(getChr());
-            waitFor(OPQConstants.NAVIGATE_SETTLE_MS);
+            OrbisStages.feedPapaReactors(getChr());
             return;
         }
 
@@ -780,7 +839,35 @@ public class OPQBot extends BotSM implements GrindTickRegistry.Participant {
             return;
         }
 
-        doRoomWork(stage, room);
+        doRoomWork(stage);
+    }
+
+    /** Like LPQ, regroup at the turn-in post before following the leader out of a cleared room. */
+    private boolean rallyInClearedRoom() {
+        Character bot = getChr();
+        int stage = switch (bot.getMapId()) {
+            case OrbisPqData.STAGE_WALKWAY -> 1;
+            case OrbisPqData.STAGE_STORAGE -> 2;
+            case OrbisPqData.STAGE_SEALED -> 4;
+            case OrbisPqData.STAGE_LOUNGE -> 5;
+            case OrbisPqData.STAGE_UP -> 6;
+            case OrbisPqData.STAGE_PAPA -> 7;
+            default -> 0;
+        };
+        if (stage == 0 || readEimInt("statusStg" + stage, -1) != 1) return false;
+        Character leader = PqActions.partyLeader(bot);
+        if (leader == null || leader.getMap() != bot.getMap()) return false;
+        stopRoomWork();
+        if (stage == 4) PqActions.waitNearPuzzleNpc(bot, OrbisPqData.EAK);
+        else PqActions.waitNearStageNpc(bot, OrbisPqData.EAK);
+        return true;
+    }
+
+    private void stopRoomWork() {
+        Character bot = getChr();
+        PqActions.armReactorBeat(bot, -1);
+        PqActions.stopPartyLoot(bot);
+        PqActions.stopHunting(bot);
     }
 
     /**
@@ -794,16 +881,12 @@ public class OPQBot extends BotSM implements GrindTickRegistry.Participant {
         MapleMap room = bot.getMap();
         int here = room.getId();
         if (OrbisPqData.LOUNGE_ROOMS.contains(here)) {
-            PqActions.armReactorBeat(bot, -1); // dropped pieces have priority over the next box
             if (leavingLoungeRoom != room && needsLoungePieces()) {
-                GCMovement.ensureGraph(bot);
-                if (!OrbisStages.gatherLounge(bot)) {
-                    waitFor(OPQConstants.NAVIGATE_SETTLE_MS);
-                    return;
-                }
+                if (!OrbisStages.gatherLounge(bot)) return;
             }
             // A portal walk can span ticks; finish it without starting another loot pass.
             leavingLoungeRoom = room;
+            stopRoomWork();
             walkOutOfCurrentRoom();
             if (bot.getMap() != room) {
                 leavingLoungeRoom = null;
@@ -825,7 +908,6 @@ public class OPQBot extends BotSM implements GrindTickRegistry.Participant {
             return;
         }
         PqActions.walkThroughPortal(getChr(), door);
-        waitFor(OPQConstants.NAVIGATE_SETTLE_MS);
     }
 
     private boolean needsLoungePieces() {
@@ -903,12 +985,7 @@ public class OPQBot extends BotSM implements GrindTickRegistry.Participant {
         if (exit == null) {
             exit = getChr().getMap().getPortal(OrbisPqData.LOUNGE_EXIT_PORTAL);
         }
-        if (exit == null) {
-            waitFor(OPQConstants.NAVIGATE_SETTLE_MS);
-            return;
-        }
-        PqActions.walkThroughPortal(getChr(), exit);
-        waitFor(OPQConstants.NAVIGATE_SETTLE_MS);
+        if (exit != null) PqActions.walkThroughPortal(getChr(), exit);
     }
 
     /** Papa Pixie's room is entered by Eak's warp, so the bot simply stays with the leader. */
@@ -916,10 +993,11 @@ public class OPQBot extends BotSM implements GrindTickRegistry.Participant {
         if (partyLeaderMapId() == OrbisPqData.STAGE_PAPA) {
             orchestrator.followLeaderWarp(getChr(),
                     OrbisPqData.PAPA_SPRING_SPOT);
+        } else if (getChr().getMapId() == OrbisPqData.TOWER_MAP) {
+            PqActions.waitNearStageNpc(getChr(), OrbisPqData.EAK);
         } else {
             walkToTower();
         }
-        waitFor(OPQConstants.NAVIGATE_SETTLE_MS);
     }
 
     /**
@@ -938,28 +1016,42 @@ public class OPQBot extends BotSM implements GrindTickRegistry.Participant {
         if (portal != null) {
             PqActions.walkThroughPortal(getChr(), portal);
         }
-        waitFor(OPQConstants.NAVIGATE_SETTLE_MS);
     }
 
-    private void doRoomWork(int stage, OrbisStages.StageRoom room) {
+    private boolean needsWalkwayPieces() {
+        return PqActions.needsHuntForLeader(getChr(), OrbisPqData.STATUE_PIECE_1, OrbisPqData.WALKWAY_COUNT);
+    }
+
+    private void doRoomWork(int stage) {
+        Character bot = getChr();
         switch (stage) {
-            case 1 -> OrbisStages.huntWalkway(getChr());
-            case 2 -> OrbisStages.clearStorage(getChr());
+            case 1 -> {
+                if (!needsWalkwayPieces() || (bot.getMap().countMonsters() == 0
+                        && PqActions.collectPartyQuestLoot(bot, OrbisStages.WALKWAY_LOOT) == PqActions.LootBeat.NONE)) {
+                    PqActions.stopPartyLoot(bot);
+                    PqActions.deliverAndWait(bot, OrbisPqData.STATUE_PIECE_1, OrbisPqData.EAK);
+                }
+            }
+            case 2 -> {
+                if (bot.getMap().countMonsters() == 0 && bot.getMap().countItems() == 0) {
+                    PqActions.stopHunting(bot);
+                    PqActions.waitNearStageNpc(bot, OrbisPqData.EAK);
+                }
+            }
             case 3 -> {
                 // The music box is the one stage the bot already knew how to finish.
                 transitionTo(OPQBotState.STAGE_2_NAVIGATE, "music box room reached");
-                return;
+                requestTickWithin(0);
             }
             case 4 -> {
                 var plan = OrbisStages.standOnSealedPlatform(getChr(), PositionCombination.botIndex(getChr()));
                 PqStageChat.announcePositionPlan(this, OrbisPqData.STAGE_4, plan, OrbisPqData.SEALED_AREA_RECTS);
-                return; // placement arrivals and verdicts can wake the next tick immediately
             }
-            case 5 -> { /* handled by workLounge, which rotates the sub-rooms */ }
-            case 6 -> OrbisStages.pullCorrectLevers(getChr());
+            case 6 -> {
+                if (OrbisStages.pullCorrectLevers(bot)) PqActions.waitNearStageNpc(bot, OrbisPqData.EAK);
+            }
             default -> { /* nothing to do */ }
         }
-        waitFor(OPQConstants.NAVIGATE_SETTLE_MS);
     }
 
     // =========================================================================
@@ -974,29 +1066,13 @@ public class OPQBot extends BotSM implements GrindTickRegistry.Participant {
             followLeaderOut();
             return;
         }
-        if (musicPlaying()) {
-            sharedContext.putBoxAssignment(getChr().getId(), null);
-            transitionTo(OPQBotState.STAGE_2_WAIT, "the music box has accepted its record");
-            return;
-        }
-
-        // Debug: dump all reactors on the map on first entry
-        debugLogf("handleStage2Navigate: dumping all reactors on map " + getChr().getMapId());
-//        for (Reactor r : getChr().getMap().getAllReactors()) {
-//            debugLogf("  reactor oid=" + r.getObjectId()
-//                    + " dataId=" + r.getId()
-//                    + " state=" + r.getState()
-//                    + " alive=" + r.isAlive()
-//                    + " pos=" + r.getPosition());
-//        }
+        if (collectMissingRecord(wantedRecord(room))) return;
 
         Integer reactorOid = orchestrator.assignBoxReactor(this);
         debugLogf("handleStage2Navigate: reactorOid=" + reactorOid
                 + " pos=" + getChr().getPosition());
 
-        boolean moreBoxesLeft = orchestrator.hasUnclaimedLiveBoxReactor(
-                getChr().getMap(), getChr().getId());
-        if (!moreBoxesLeft && reactorOid == null) {
+        if (reactorOid == null && !orchestrator.hasUnclaimedLiveBoxReactor(room, getChr().getId())) {
             // All boxes broken or claimed — if we have an item, go drop it first
             if (lootedRecordItemId > 0) {
                 transitionTo(OPQBotState.STAGE_2_RETURN,
@@ -1024,17 +1100,8 @@ public class OPQBot extends BotSM implements GrindTickRegistry.Participant {
     }
 
     private void handleStage2Loot() {
-        if (musicPlaying()) {
-            PqActions.stopPartyLoot(getChr());
-            sharedContext.putBoxAssignment(getChr().getId(), null);
-            transitionTo(OPQBotState.STAGE_2_WAIT, "the music box has accepted its record");
-            return;
-        }
         int wanted = wantedRecord(getChr().getMap());
-        if (wanted > 0 && PqActions.countItem(getChr(), wanted) == 0
-                && PqActions.collectReactorLoot(getChr(), new int[]{wanted}) == PqActions.LootBeat.COLLECTING) {
-            return;
-        }
+        if (collectMissingRecord(wanted)) return;
 
         // Which record the bot ended up holding is read back off the inventory rather than
         // predicted from the box: the engine's own reactordrops decides what each box yields.
@@ -1045,8 +1112,6 @@ public class OPQBot extends BotSM implements GrindTickRegistry.Participant {
         if (carryingRecord) {
             SocialCommands.BotChatbubble(getChr(), BotMessages.get("opq.got_record"));
         }
-        waitFor(800); // loot beat before RETURN ticks
-
         // Clear box assignment so we can pick a new one
         sharedContext.putBoxAssignment(getChr().getId(), null);
 
@@ -1058,6 +1123,18 @@ public class OPQBot extends BotSM implements GrindTickRegistry.Participant {
             transitionTo(OPQBotState.STAGE_2_NAVIGATE,
                     "this box did not hold today's record, trying another");
         }
+        requestTickWithin(0);
+    }
+
+    /** A teammate may have already broken the right box, including while we were waiting. */
+    private boolean collectMissingRecord(int wanted) {
+        Character bot = getChr();
+        if (wanted <= 0 || PqActions.countItem(bot, wanted) > 0) return false;
+        PqActions.LootBeat loot = PqActions.collectReactorLoot(bot, new int[]{wanted});
+        if (loot == PqActions.LootBeat.NONE) return false;
+        transitionTo(OPQBotState.STAGE_2_LOOT, "today's record is available");
+        requestTickWithin(loot == PqActions.LootBeat.PICKED_UP ? 0 : GrindTickRegistry.TICK_MS);
+        return true;
     }
 
     /** Read the run's own music-box requirement, fixed when this instance opened. */
@@ -1093,9 +1170,9 @@ public class OPQBot extends BotSM implements GrindTickRegistry.Participant {
         // on x. The landing point already accounts for the drop re-seating itself 85px down
         // onto the floor below the box - see OPQConstants.STAGE_2_DROP_POS.
         if (!PqActions.walkTo(getChr(), OPQConstants.STAGE_2_DROP_POS)) return;
-        waitFor(OPQConstants.NAVIGATE_SETTLE_MS); // settle before DROP_ITEMS ticks
         transitionTo(OPQBotState.STAGE_2_DROP_ITEMS,
                 "arrived at music box drop zone");
+        requestTickWithin(0);
     }
 
     private void handleStage2DropItems() {
@@ -1155,15 +1232,11 @@ public class OPQBot extends BotSM implements GrindTickRegistry.Participant {
             return;
         }
 
+        if (collectMissingRecord(wantedRecord(getChr().getMap()))) return;
         if (sharedContext.isStage2Complete()) {
             transitionTo(OPQBotState.EXIT_DETECT,
                     "stage2Complete flag flipped by orchestrator");
             return;
-        }
-
-        if (musicPlaying()) {
-            waitFor(OPQConstants.NAVIGATE_SETTLE_MS);
-            return; // leave the remaining boxes alone while Eak validates the stage
         }
         if (orchestrator.hasUnclaimedLiveBoxReactor(getChr().getMap(), getChr().getId())) {
             transitionTo(OPQBotState.STAGE_2_NAVIGATE, "a record box is available again");
@@ -1182,7 +1255,6 @@ public class OPQBot extends BotSM implements GrindTickRegistry.Participant {
 
     private void workSettlement(MapleMap here) {
         Character bot = getChr();
-        PqActions.armReactorBeat(bot, -1);
         var instance = here.getEventInstance();
         MapleMap target = PqActions.findHumanPartyRoom(bot,
                 room -> room.getEventInstance() == instance && OrbisPqData.isOrbisRoom(room.getId()));
@@ -1192,6 +1264,10 @@ public class OPQBot extends BotSM implements GrindTickRegistry.Participant {
         }
         int mapId = here.getId();
         int to = target.getId();
+        if (mapId != OrbisPqData.TREASURE_MAP
+                && !(here == target && OrbisPqData.isJailRoom(mapId) && mapId % 10 == 2)) {
+            PqActions.armReactorBeat(bot, -1);
+        }
         if (mapId == OrbisPqData.REWARD_MAP) {
             PqActions.waitNearStageNpc(bot, OrbisPqData.MINERVA);
         } else if (to != mapId && (to == OrbisPqData.REWARD_MAP || to == OrbisPqData.TREASURE_MAP)) {
@@ -1199,13 +1275,14 @@ public class OPQBot extends BotSM implements GrindTickRegistry.Participant {
             // leader-only. Follow only into a settlement room already opened for the party.
             GCMovement.changeMap(bot, target, target.getPortal(0));
         } else if (mapId == OrbisPqData.TREASURE_MAP) {
-            GCMovement.ensureGraph(bot);
             if (!PqActions.workActiveReactors(bot, OrbisPqData.TREASURE_BOX)) {
                 PqActions.waitNearStageNpc(bot, OrbisPqData.MINERVA);
             }
         } else if (mapId == OrbisPqData.STAGE_PRIZE && to == mapId) {
-            if (here.getMonsters().isEmpty()) PqActions.waitNearStageNpc(bot, OrbisPqData.EAK);
-            else PqActions.seekAndAttack(bot);
+            if (here.countMonsters() == 0) {
+                PqActions.stopHunting(bot);
+                PqActions.waitNearStageNpc(bot, OrbisPqData.EAK);
+            }
         } else {
             followSettlementDoor(here, to);
         }
@@ -1229,7 +1306,6 @@ public class OPQBot extends BotSM implements GrindTickRegistry.Participant {
         } else if (OrbisPqData.isJailRoom(mapId) && mapId != OrbisPqData.STAGE_JAIL) {
             if (mapId % 10 == 2) {
                 if (to == mapId) {
-                    GCMovement.ensureGraph(getChr());
                     PqActions.workActiveReactors(getChr(), 2002017, 2002018);
                 } else {
                     PqActions.walkThroughPortal(getChr(), here.getPortal("out00"));

@@ -106,35 +106,14 @@ public final class OrbisStages {
     // Stage 1 - walkway: kill 9300045..9300047 for 30 of 4001050
     // =========================================================================
 
-    /**
-     * Clear the walkway of its statue-piece carriers.
-     *
-     * <p>Kills are real ({@code BotAttackDriver}), so the drops are the map's own, and they
-     * are party drops ({@code droptype=1} when the killer is in a party), which is why the
-     * player can pick them up. The bot does not loot: {@code cm.haveItem(4001050, 30)} is
-     * checked against whoever turns them in, and Eak is the one who does that.
-     */
-    public static void huntWalkway(Character bot) {
-        huntMobs(bot, OrbisPqData.WALKWAY_MOB_FIRST, OrbisPqData.WALKWAY_MOB_LAST);
-    }
+    static final int[] WALKWAY_LOOT = {OrbisPqData.STATUE_PIECE_1};
 
     // =========================================================================
     // Stage 2 - storage: the room must be empty before Eak hands over the piece
     // =========================================================================
 
-    /**
-     * Empty the storage room.
-     *
-     * <p>Eak's condition is {@code countMonsters() == 0 && countItems() == 0} - not a kill
-     * count - so anything left alive or lying on the floor blocks him. The leftover-items
-     * half matters here: the room's mob (9300040) drops {@code 4001074} (the trap item the
-     * Papa room's pots also take - the only drop row for that mob), and a stray drop keeps
-     * the check false even after everything is dead.
-     */
-    public static void clearStorage(Character bot) {
-        huntMobs(bot, OrbisPqData.STORAGE_MOB, OrbisPqData.STORAGE_MOB);
-        sweepFloor(bot);
-    }
+    static final int[] STORAGE_LOOT = {OrbisPqData.PAPA_TRAP_ITEM, OrbisPqData.STATUE_PIECE_1,
+            OrbisPqData.STATUE_PIECE_5, OrbisPqData.STATUE_PIECE_8, OrbisPqData.CLOUD_PIECE};
 
     // =========================================================================
     // Stage 4 - sealed room: stand in the three areas
@@ -188,15 +167,13 @@ public final class OrbisStages {
     // Stage 5 - lounge: kill 9300041..9300043 for 40 of 4001052, plus the room-604 reactors
     // =========================================================================
 
-    private static final int[] LOUNGE_LOOT = {OrbisPqData.STATUE_PIECE_5};
+    static final int[] LOUNGE_LOOT = {OrbisPqData.STATUE_PIECE_5};
 
     /** Work this visit's drops before breaking another reactor or walking out. */
     public static boolean gatherLounge(Character bot) {
-        if (PqActions.collectPartyQuestLoot(bot, LOUNGE_LOOT) != PqActions.LootBeat.NONE) return false;
-        if (mobsPresent(bot, OrbisPqData.LOUNGE_MOB_FIRST, OrbisPqData.LOUNGE_MOB_LAST)) {
-            PqActions.seekAndAttack(bot);
-            return false;
-        }
+        if (PqActions.reactorBeatArmed(bot)
+                || PqActions.collectPartyQuestLoot(bot, LOUNGE_LOOT) != PqActions.LootBeat.NONE
+                || bot.getMap().countMonsters() > 0) return false;
         return !PqActions.workActiveReactors(bot, OrbisPqData.LOUNGE_REACTOR);
     }
 
@@ -253,8 +230,11 @@ public final class OrbisStages {
         }
     }
 
+    // Leave the spring's final statue piece for the leader: the room's exit checks their inventory.
+    static final int[] PAPA_LOOT = {OrbisPqData.PAPA_MEDAL, OrbisPqData.PAPA_TRAP_ITEM, OrbisPqData.PAPA_SEED};
+
     /**
-     * Work Papa Pixie's room, which is a chain of item-triggered reactors rather than a puzzle.
+     * Feed Papa Pixie's item-triggered reactors; the combat sweep supplies their items.
      *
      * <p>Every reactor here is {@code type 100}: it fires only when the item it wants is DROPPED
      * inside its box (hitting one does nothing). Feeding a pot ({@code 2001000/2001001}) its medal
@@ -268,46 +248,12 @@ public final class OrbisStages {
      * kills them, so the bot loots its own share and feeds the reactors exactly as a player does.
      * If another member carries the item, the helper's copy is what the flag needs; the loop just
      * keeps working the room until the flag moves.
-     *
-     * <p>Returns true once the stage flag has moved, so the caller can stop looping.
      */
-    public static boolean settlePapaRoom(Character bot) {
-        if (PqActions.readEimInt(bot, "statusStg7", -1) != -1) {
-            // The spring has fired: the flag is set and the final piece has dropped. The bot does
-            // NOT pick it up - exactly one drops, and the leader must hold it to open the room's
-            // exit (party3_gardenin warps the team only for a leader carrying 4001055). Grabbing it
-            // would strand the party here.
-            return true;
-        }
-
-        // The finish: drop the Root of Life onto the spring, whose script sets the flag.
-        if (feedReactor(bot, OrbisPqData.PAPA_SPRING_REACTOR, OrbisPqData.PAPA_SEED)) {
-            return PqActions.readEimInt(bot, "statusStg7", -1) != -1;
-        }
-
-        // With a trap item, end the room: feed a trap and Papa Pixie appears; his death is what
-        // produces the Root of Life. A pending drop owns the tick too: do not loot it back
-        // during the host's delayed item trigger.
-        if (feedReactor(bot, OrbisPqData.PAPA_TRAP, OrbisPqData.PAPA_TRAP_ITEM)) {
-            return false;
-        }
-
-        // With a medal, feed a pot, which is what makes the room summon its mobs and drop more.
-        if (feedReactor(bot, OrbisPqData.PAPA_POT, OrbisPqData.PAPA_MEDAL)
-                || feedReactor(bot, OrbisPqData.PAPA_POT_ALT, OrbisPqData.PAPA_MEDAL)) {
-            return false;
-        }
-
-        // Otherwise fight what is here (Papa, or the mobs a pot summoned) and take their drops.
-        // The loot is confined to this branch on purpose: a seed the bot has just dropped on the
-        // spring must NOT be picked back up, because the spring reads its stack five seconds later
-        // and a pickup in that window cancels the trigger.
-        if (mobsPresent(bot, OrbisPqData.PAPA_MOB_LOW, OrbisPqData.PAPA_MOB_HIGH)) {
-            huntMobs(bot, OrbisPqData.PAPA_MOB_LOW, OrbisPqData.PAPA_MOB_HIGH);
-            PqActions.loot(bot, bot.getPosition(), 4_000,
-                    new int[]{OrbisPqData.PAPA_MEDAL, OrbisPqData.PAPA_TRAP_ITEM, OrbisPqData.PAPA_SEED});
-        }
-        return false;
+    static void feedPapaReactors(Character bot) {
+        if (feedReactor(bot, OrbisPqData.PAPA_SPRING_REACTOR, OrbisPqData.PAPA_SEED)
+                || feedReactor(bot, OrbisPqData.PAPA_TRAP, OrbisPqData.PAPA_TRAP_ITEM)
+                || feedReactor(bot, OrbisPqData.PAPA_POT, OrbisPqData.PAPA_MEDAL)) return;
+        feedReactor(bot, OrbisPqData.PAPA_POT_ALT, OrbisPqData.PAPA_MEDAL);
     }
 
     /** Feed the first live reactor of a data id its item; false when none is standing. */
@@ -355,36 +301,13 @@ public final class OrbisStages {
     // helpers
     // =========================================================================
 
-    /**
-     * Attack in place while any of the given mobs are alive nearby.
-     *
-     * <p>Deliberately does not pick up: the statue pieces are the party's turn-in currency,
-     * and Eak checks the inventory of the player who talks to him.
-     */
-    private static void huntMobs(Character bot, int firstMobId, int lastMobId) {
-        for (int pass = 0; pass < 60; pass++) {
-            if (!mobsPresent(bot, firstMobId, lastMobId)) {
-                return;
-            }
+    /** One combat beat. A pickup walk owns steering but must not suppress a swing in range. */
+    static void fightAndCollect(Character bot, int[] loot) {
+        if (PqActions.collectPartyQuestLoot(bot, loot) == PqActions.LootBeat.NONE) {
             PqActions.seekAndAttack(bot);
+        } else {
+            PqActions.attack(bot);
         }
-    }
-
-    /** Pick up anything on the floor, so a room-clear condition can be met. */
-    private static void sweepFloor(Character bot) {
-        PqActions.loot(bot, bot.getPosition(), 4_000,
-                new int[]{OrbisPqData.STATUE_PIECE_1, OrbisPqData.STATUE_PIECE_5,
-                        OrbisPqData.STATUE_PIECE_8, OrbisPqData.CLOUD_PIECE,
-                        // The storage mob's own drop (9300040 -> 4001074): countItems() == 0
-                        // cannot be reached while it lies here, and no other stage-2 path
-                        // picks it up (the Papa room deliberately keeps its spawn stock, so
-                        // only this sweep lists it).
-                        OrbisPqData.PAPA_TRAP_ITEM});
-    }
-
-    private static boolean mobsPresent(Character bot, int firstMobId, int lastMobId) {
-        return bot.getMap().getAllMonsters().stream()
-                .anyMatch(m -> m.getId() >= firstMobId && m.getId() <= lastMobId);
     }
 
     private static Reactor nearestReactorTo(Character bot, int dataId, Point spot) {

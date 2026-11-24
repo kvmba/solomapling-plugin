@@ -13,6 +13,7 @@ import org.gms.server.maps.Portal;
 import org.gms.server.maps.Reactor;
 import org.gms.server.maps.ReactorStats;
 import org.gms.server.partyquest.AriantColiseum;
+import org.gms.util.Pair;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -21,6 +22,7 @@ import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.EnumSource;
 import soloMapling.ArtificialPlayer.BotGeneration;
 import soloMapling.ArtificialPlayer.BotSM;
+import soloMapling.ArtificialPlayer.BotAttackSystem.BotAttackDriver;
 import soloMapling.ArtificialPlayer.BotCommandsPack.BotAttack;
 import soloMapling.ArtificialPlayer.BotCommandsPack.SocialCommands;
 import soloMapling.ArtificialPlayer.BotCommandsPack.WarpCommands;
@@ -54,6 +56,7 @@ import soloMapling.ArtificialPlayer.BotTypes.Zakum.ZakumPqData;
 import soloMapling.ArtificialPlayer.GCMoveSystem.GCMovement;
 import soloMapling.MapVFX.CustomReactor;
 import soloMapling.server.BotTickService;
+import soloMapling.server.ExecutorServiceManager;
 
 import java.awt.Point;
 import java.util.ArrayList;
@@ -288,6 +291,133 @@ class PqStageTransitionTest {
         }
     }
 
+    @Test
+    void orbisWalkwayPicksUpAndKeepsSwingingOnTheCombatBeat() {
+        MapleMap walkway = room(OrbisPqData.STAGE_WALKWAY);
+        place(member, walkway);
+        place(leader, walkway);
+        when(member.getEventInstance()).thenReturn(instance);
+        when(member.getPosition()).thenReturn(new Point());
+        when(instance.getLeader()).thenReturn(leader);
+        when(instance.getPlayers()).thenReturn(List.of(member, leader));
+        int piece = OrbisPqData.STATUE_PIECE_1;
+        when(leader.getItemQuantity(piece, false)).thenReturn(OrbisPqData.WALKWAY_COUNT - 1);
+        MapItem fragment = mock(MapItem.class);
+        when(fragment.getItem()).thenReturn(new Item(piece, (short) 0, (short) 1));
+        when(fragment.getItemId()).thenReturn(piece);
+        when(fragment.getPosition()).thenReturn(new Point(40, 0));
+        when(fragment.getOwnerId()).thenReturn(BOT_ID);
+        when(walkway.getMapObjectsInRange(any(), anyDouble(), anyList()))
+                .thenAnswer(call -> new ArrayList<>(List.of(fragment)));
+        doAnswer(call -> {
+            when(fragment.isPickedUp()).thenReturn(true);
+            when(member.getItemQuantity(piece, false)).thenReturn(1);
+            return null;
+        }).when(member).pickupItem(fragment);
+
+        try (var generation = mockStatic(BotGeneration.class);
+             var movement = mockStatic(GCMovement.class);
+             var attacks = mockStatic(BotAttackDriver.class)) {
+            movement.when(() -> GCMovement.hasGraph(member)).thenReturn(true);
+            OPQBot bot = new OPQBot(member);
+            bot.setRunning(true);
+            bot.grindTick(); // No stage tick needed to start taking the post-kill drops.
+            verify(member).pickupItem(fragment);
+            attacks.verify(() -> BotAttackDriver.botAttack(member));
+
+            bot.grindTick(); // The party has all 30 now, even before Eak's clear flag changes.
+            attacks.verify(() -> BotAttackDriver.botAttack(member), times(1));
+        } finally {
+            PqActions.clearSeekState(BOT_ID);
+        }
+    }
+
+    @Test
+    void orbisWalkwayDeliversItsFragmentsAndRalliesAtEakWhenCleared() {
+        MapleMap walkway = room(OrbisPqData.STAGE_WALKWAY);
+        place(member, walkway);
+        place(leader, walkway);
+        OPQOrchestrator run = mock(OPQOrchestrator.class);
+        when(run.getSharedContext()).thenReturn(new OPQSharedContext());
+        try (var generation = mockStatic(BotGeneration.class);
+             var coordinator = mockStatic(OPQOrchestrator.class, call -> run);
+             var movement = mockStatic(GCMovement.class);
+             var actions = mockStatic(PqActions.class)) {
+            actions.when(() -> PqActions.partyLeader(member)).thenReturn(leader);
+            OPQBot bot = new OPQBot(member);
+            bot.setRunning(true);
+            bot.updateState();
+            actions.verify(() -> PqActions.deliverAndWait(member, OrbisPqData.STATUE_PIECE_1, OrbisPqData.EAK));
+
+            actions.when(() -> PqActions.readEimInt(member, "statusStg1", -1)).thenReturn(1);
+            bot.updateState();
+            actions.verify(() -> PqActions.waitNearStageNpc(member, OrbisPqData.EAK));
+        }
+    }
+
+    @Test
+    void orbisPollsForASettlingCloudOnTheCombatCadenceNotTheStageCadence() {
+        MapleMap clouds = room(OrbisPqData.STAGE_CLOUDS);
+        place(member, clouds);
+        place(leader, clouds);
+        OPQOrchestrator run = mock(OPQOrchestrator.class);
+        when(run.getSharedContext()).thenReturn(new OPQSharedContext());
+        try (var generation = mockStatic(BotGeneration.class);
+             var coordinator = mockStatic(OPQOrchestrator.class, call -> run);
+             var movement = mockStatic(GCMovement.class);
+             var actions = mockStatic(PqActions.class);
+             var ticker = mockStatic(BotTickService.class)) {
+            actions.when(() -> PqActions.collectReactorLoot(member, new int[]{OrbisPqData.CLOUD_PIECE}))
+                    .thenReturn(PqActions.LootBeat.COLLECTING, PqActions.LootBeat.NONE);
+            OPQBot bot = new OPQBot(member);
+            bot.setRunning(true);
+            bot.setStateForDebug(OPQBot.OPQBotState.STAGE_1_LOOT);
+            bot.updateState();
+            assertEquals(OPQBot.OPQBotState.STAGE_1_LOOT, bot.getOPQBotState());
+            ticker.verify(() -> BotTickService.requestEarlierTick(eq(BOT_ID), any(), eq(250L)));
+
+            bot.updateState();
+            assertEquals(OPQBot.OPQBotState.STAGE_1_NAVIGATE, bot.getOPQBotState());
+            ticker.verify(() -> BotTickService.requestEarlierTick(eq(BOT_ID), any(), eq(0L)));
+        }
+    }
+
+    @Test
+    void consecutiveQuestActionsEachRequestAShortDeadline() {
+        PartyQuestBot bot = shell();
+        bot.setRunning(true);
+        try (var storage = mockStatic(CharacterStorage.class);
+             var executor = mockStatic(ExecutorServiceManager.class);
+             var ticks = mockStatic(BotTickService.class)) {
+            storage.when(() -> CharacterStorage.getBotById(BOT_ID)).thenReturn(bot);
+            executor.when(() -> ExecutorServiceManager.runAsync(any(Runnable.class))).thenAnswer(call -> {
+                call.getArgument(0, Runnable.class).run();
+                return null;
+            });
+            PqActions.boxFinishedPullTick(member);
+            PqActions.boxFinishedPullTick(member);
+            ticks.verify(() -> BotTickService.requestEarlierTick(eq(BOT_ID), any(), eq(500L)), times(2));
+        }
+    }
+
+    @ParameterizedTest
+    @CsvSource({"ellin,930000500,4001163", "magatia,926110100,4001132",
+            "horntail,240050100,4001087", "zakum,280011005," + ZakumPqData.FIRE_ORE})
+    void collectionQuestsSweepTheirStageItemsWithoutWaitingForTheStageTick(String type, int mapId, int itemId) {
+        place(member, room(mapId));
+        try (var generation = mockStatic(BotGeneration.class);
+             var movement = mockStatic(GCMovement.class);
+             var actions = mockStatic(PqActions.class)) {
+            movement.when(() -> GCMovement.hasGraph(member)).thenReturn(true);
+            actions.when(() -> PqActions.needsHuntForLeader(member, itemId, 1)).thenReturn(true);
+
+            PartyQuestBot bot = bot(type);
+            bot.setRunning(true);
+            bot.grindTick();
+            actions.verify(() -> PqActions.lootSteppedOn(member, new int[]{itemId}));
+        }
+    }
+
     @ParameterizedTest
     @CsvSource({
             "920010000,2002001,STAGE_1_HIT_REACTOR,STAGE_1_LOOT",
@@ -325,6 +455,7 @@ class PqStageTransitionTest {
              var movement = mockStatic(GCMovement.class);
              var chat = mockStatic(SocialCommands.class);
              var swings = mockStatic(BotAttack.class);
+             var ticker = mockStatic(BotTickService.class);
              var hits = mockStatic(CustomReactor.class)) {
             movement.when(() -> GCMovement.hasGraph(member)).thenReturn(true);
             movement.when(() -> GCMovement.isSettled(member)).thenReturn(true);
@@ -354,6 +485,7 @@ class PqStageTransitionTest {
             assertEquals(3, reactor.getState(), "arrival must not bypass swing cadence");
             now.addAndGet(750);
             bot.grindTick();
+            ticker.verify(() -> BotTickService.requestEarlierTick(eq(BOT_ID), any(), eq(0L)));
             assertEquals(4, reactor.getState());
             assertTrue(reactor.isActive());
             assertFalse(PqActions.reactorBeatArmed(member));
@@ -514,7 +646,8 @@ class PqStageTransitionTest {
 
     @ParameterizedTest
     @EnumSource(value = OPQBot.OPQBotState.class,
-            names = {"STAGE_2_NAVIGATE", "STAGE_2_HIT_BOX", "STAGE_2_LOOT", "STAGE_2_WAIT"})
+            names = {"STAGE_2_NAVIGATE", "STAGE_2_HIT_BOX", "STAGE_2_LOOT",
+                    "STAGE_2_RETURN", "STAGE_2_DROP_ITEMS", "STAGE_2_WAIT"})
     void orbisStopsHuntingForRecordsOnceTheMusicIsPlaying(OPQBot.OPQBotState start) {
         MapleMap music = room(920010400);
         place(member, music);
@@ -538,6 +671,43 @@ class PqStageTransitionTest {
             chat.verifyNoInteractions();
         } finally {
             PqActions.clearSeekState(BOT_ID);
+        }
+    }
+
+    @ParameterizedTest
+    @EnumSource(value = OPQBot.OPQBotState.class, names = {"STAGE_2_NAVIGATE", "STAGE_2_WAIT"})
+    void orbisCollectsTheRecordAnotherPlayerAlreadyExposed(OPQBot.OPQBotState start) {
+        MapleMap musicRoom = room(OrbisPqData.STAGE_MUSIC);
+        place(member, musicRoom);
+        place(leader, musicRoom);
+        Reactor music = mock(Reactor.class);
+        int record = OrbisPqData.RECORD_LP_FIRST;
+        when(musicRoom.getReactorByName("music")).thenReturn(music);
+        when(music.isAlive()).thenReturn(true);
+        when(music.getReactorType()).thenReturn(100);
+        when(music.getReactItem((byte) 0)).thenReturn(new Pair<>(record, 1));
+        OPQOrchestrator run = mock(OPQOrchestrator.class);
+        when(run.getSharedContext()).thenReturn(new OPQSharedContext());
+        try (var generation = mockStatic(BotGeneration.class);
+             var coordinator = mockStatic(OPQOrchestrator.class, call -> run);
+             var movement = mockStatic(GCMovement.class);
+             var chat = mockStatic(SocialCommands.class);
+             var actions = mockStatic(PqActions.class)) {
+            actions.when(() -> PqActions.partyLeader(member)).thenReturn(leader);
+            actions.when(() -> PqActions.readEimInt(member, "statusStg3", -1)).thenReturn(-1);
+            actions.when(() -> PqActions.countItem(member, record)).thenReturn(0, 1);
+            actions.when(() -> PqActions.collectReactorLoot(member, new int[]{record}))
+                    .thenReturn(PqActions.LootBeat.PICKED_UP);
+            OPQBot bot = new OPQBot(member);
+            bot.setRunning(true);
+            bot.setStateForDebug(start);
+
+            bot.updateState();
+            actions.verify(() -> PqActions.collectReactorLoot(member, new int[]{record}));
+            assertEquals(OPQBot.OPQBotState.STAGE_2_LOOT, bot.getOPQBotState());
+            bot.updateState();
+            assertEquals(OPQBot.OPQBotState.STAGE_2_RETURN, bot.getOPQBotState());
+            verify(run, never()).assignBoxReactor(any());
         }
     }
 
@@ -575,6 +745,7 @@ class PqStageTransitionTest {
         when(run.getSharedContext()).thenReturn(new OPQSharedContext());
         try (var generation = mockStatic(BotGeneration.class);
              var coordinator = mockStatic(OPQOrchestrator.class, call -> run);
+             var movement = mockStatic(GCMovement.class);
              var actions = mockStatic(PqActions.class)) {
             actions.when(() -> PqActions.readEimInt(member, "statusStg3", -1)).thenReturn(clearFlag);
             actions.when(() -> PqActions.partyLeader(member)).thenReturn(leader);
@@ -726,16 +897,17 @@ class PqStageTransitionTest {
 
     @ParameterizedTest
     @EnumSource(value = OPQBot.OPQBotState.class, names = {"STAGE_1_RETURN", "STAGE_1_WAIT"})
-    void orbisCloudStageStillUsesTheTowerDoorWhenTheLeaderIsTwoRoomsAhead(OPQBot.OPQBotState state) {
+    void orbisCloudStageRalliesAtTheTowerDoorAndFollowsTheLeader(OPQBot.OPQBotState state) {
         MapleMap clouds = room(920010000);
         place(member, clouds);
-        place(leader, room(920010200));
+        place(leader, clouds);
         when(member.getEventInstance()).thenReturn(instance);
         Portal exit = door(clouds, "in00", 920010100);
         OPQOrchestrator run = mock(OPQOrchestrator.class);
         when(run.getSharedContext()).thenReturn(new OPQSharedContext());
         try (var generation = mockStatic(BotGeneration.class);
              var coordinator = mockStatic(OPQOrchestrator.class, call -> run);
+             var movement = mockStatic(GCMovement.class);
              var actions = mockStatic(PqActions.class)) {
             actions.when(() -> PqActions.readEimInt(member, "statusStg0", -1)).thenReturn(1);
             actions.when(() -> PqActions.partyLeader(member)).thenReturn(leader);
@@ -744,6 +916,11 @@ class PqStageTransitionTest {
             bot.setStateForDebug(state);
             bot.updateState();
             assertEquals(OPQBot.OPQBotState.STAGE_1_TRANSITION, bot.getOPQBotState());
+            actions.verify(() -> PqActions.walkToPortal(member, exit));
+            actions.verify(() -> PqActions.walkThroughPortal(member, exit), never());
+
+            place(leader, room(920010200));
+            bot.updateState();
             actions.verify(() -> PqActions.walkThroughPortal(member, exit));
         }
     }
@@ -758,6 +935,7 @@ class PqStageTransitionTest {
         when(run.getSharedContext()).thenReturn(new OPQSharedContext());
         try (var generation = mockStatic(BotGeneration.class);
              var coordinator = mockStatic(OPQOrchestrator.class, call -> run);
+             var movement = mockStatic(GCMovement.class);
              var actions = mockStatic(PqActions.class)) {
             actions.when(() -> PqActions.readEimInt(member, "statusStg4", -1)).thenReturn(1);
             actions.when(() -> PqActions.partyLeader(member)).thenReturn(leader);

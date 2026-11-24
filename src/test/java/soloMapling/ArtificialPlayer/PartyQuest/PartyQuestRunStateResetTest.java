@@ -10,57 +10,41 @@ import java.util.List;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Per-run latches must be cleared at the run's end, not only when the bot object is thrown away.
+ * Per-run claims and latches must be cleared before recruiting the same bot for another run.
  *
  * <p>A quest bot is a long-lived object: the same instance is recruited again for the next party,
  * so any field that records "where I am in this run" survives into the next one. The base class
  * already owns the seam for that - {@link PartyQuestBot#releaseRoomState()} runs on every run end
- * (and on stop/retype) - and Ludi, Ariant and Papulatus reset their own state there.
- *
- * <p>The latches guarded here would silently degrade the second run:
- * <ul>
- *   <li>Henesys' {@code guarding} stayed true, so the next run skipped the planting half and stood
- *       in an empty field while Moon Bunny never spawned;</li>
- *   <li>Magatia's "already announced" latch suppressed the plan line the player needs.</li>
- * </ul>
- *
- * <p>Pinned at the source level: a run-scoped field and its reset live in the same seam, and a
- * unit test cannot build a live bot without a WZ tree. The assertion is deliberately about the
- * shape - "the class overrides releaseRoomState and the field is reset in it" - because that is
- * exactly what a future edit would forget.
+ * and on stop/retype. Check that quest-specific cleanup stays wired to that seam.
  */
 class PartyQuestRunStateResetTest {
 
-    /** Quest bot file -> the per-run fields it must reset at the run's end. */
+    /** Quest bot file -> the per-run state it must release or reset. */
     private static final List<String[]> RESETS = List.of(
-            new String[]{"Henesys/HenesysPQBot.java", "guarding"},
-            new String[]{"Magatia/MagatiaPQBot.java", "announcedCombination"},
-            // These two already reset; kept so the list stays the whole register of run latches.
-            new String[]{"Ludi/LudiPQBot.java", "announcedCrateAttempt"});
+            new String[]{"Henesys/HenesysPQBot.java", "HenesysStages.releaseFlowerClaim(getChr())"},
+            new String[]{"Magatia/MagatiaPQBot.java", "announcedCombination = null"},
+            new String[]{"Ludi/LudiPQBot.java", "announcedStage = -1"},
+            new String[]{"Ludi/LudiPQBot.java", "climbFloorY = Integer.MIN_VALUE"});
 
     @Test
-    void everyRunScopedLatchIsClearedAtTheRunsEnd() throws Exception {
+    void runScopedStateIsReleasedAtTheEnd() throws Exception {
         List<String> offenders = new ArrayList<>();
         for (String[] entry : RESETS) {
             Path file = Path.of("src/main/java/soloMapling/ArtificialPlayer/BotTypes", entry[0]);
             String source = Files.readString(file);
-            String field = entry[1];
-
-            assertTrue(source.contains(field + " ="),
-                    entry[0] + " must still declare the latch " + field);
+            String reset = entry[1];
 
             String release = methodBody(source, "protected void releaseRoomState()");
             if (release == null) {
-                offenders.add(entry[0] + " declares " + field + " but never overrides "
-                        + "releaseRoomState(), so it survives into the next run");
+                offenders.add(entry[0] + " never overrides releaseRoomState(): " + reset);
                 continue;
             }
             if (!release.contains("super.releaseRoomState()")) {
                 offenders.add(entry[0] + ".releaseRoomState() must call super - the base class "
                         + "resets its run state and releases the bot's wait spot there");
             }
-            if (!release.contains(field + " =")) {
-                offenders.add(entry[0] + ".releaseRoomState() does not reset " + field);
+            if (!release.contains(reset)) {
+                offenders.add(entry[0] + ".releaseRoomState() is missing " + reset);
             }
         }
         assertTrue(offenders.isEmpty(), String.join("\n", offenders));

@@ -138,22 +138,19 @@ public class MagatiaPQBot extends PartyQuestBot {
     @Override
     protected boolean fightsOnSweep() {
         var instance = getChr().getEventInstance();
-        return getChr().getMapId() % 10_000 < 600 && (instance == null || !instance.isEventCleared())
-                && !collectionRoomCleared();
+        int room = getChr().getMapId() % 10_000;
+        return room < 600 && (instance == null || !instance.isEventCleared())
+                && !collectionRoomCleared() && (room != 200 || !carryingDocumentsForLeader());
     }
 
     @Override
-    protected boolean wantsQuestLoot(int itemId) {
-        Character bot = getChr();
-        int room = bot.getMapId() % 10_000;
-        if (room == 100) return itemId == BEAKER_LOOT[0] && !collectionRoomCleared();
-        if (room == 200 && (PqActions.readEimInt(bot, "statusStg4", 0) == 1
-                || PqActions.countItem(bot, DOCUMENTS[0]) > 0 || PqActions.countItem(bot, DOCUMENTS[1]) > 0)) return false;
-        if (room != 1 && (room < 200 || room > 203)) return false;
-        for (int id : MagatiaPqData.QUEST_ITEMS) {
-            if (id == itemId) return true;
-        }
-        return false;
+    protected int[] steppedOnLootIds() {
+        return switch (getChr().getMapId() % 10_000) {
+            case 100 -> BEAKER_LOOT;
+            case 200 -> carryingDocumentsForLeader() ? super.steppedOnLootIds() : MagatiaPqData.QUEST_ITEMS;
+            case 1, 201, 202, 203 -> MagatiaPqData.QUEST_ITEMS;
+            default -> super.steppedOnLootIds();
+        };
     }
 
     private boolean collectionRoomCleared() {
@@ -170,6 +167,15 @@ public class MagatiaPQBot extends PartyQuestBot {
     private boolean documentsReady() {
         return !PqActions.needsHuntForLeader(getChr(), DOCUMENTS[0], 1)
                 && !PqActions.needsHuntForLeader(getChr(), DOCUMENTS[1], 1);
+    }
+
+    private boolean carryingDocumentsForLeader() {
+        Character bot = getChr();
+        int letter = bot.getMapId() == MagatiaPqData.DOCUMENT_ROOM_A
+                ? MagatiaPqData.ROMEO_LETTER : MagatiaPqData.JULIET_LETTER;
+        return PqActions.countItem(bot, DOCUMENTS[0]) > 0 || PqActions.countItem(bot, DOCUMENTS[1]) > 0
+                || (PqActions.readEimInt(bot, MagatiaPqData.LETTER_DELIVERED, 0) == 0
+                        && PqActions.countItem(bot, letter) > 0);
     }
 
     private void deliverDocuments() {
@@ -351,11 +357,7 @@ public class MagatiaPQBot extends PartyQuestBot {
     private void fightAndBreak() {
         Character bot = getChr();
         int room = bot.getMapId() % 10_000;
-        if (room == 200
-                && (PqActions.countItem(bot, DOCUMENTS[0]) > 0 || PqActions.countItem(bot, DOCUMENTS[1]) > 0
-                || (PqActions.readEimInt(bot, MagatiaPqData.LETTER_DELIVERED, 0) == 0
-                        && PqActions.countItem(bot, bot.getMapId() == MagatiaPqData.DOCUMENT_ROOM_A
-                                ? MagatiaPqData.ROMEO_LETTER : MagatiaPqData.JULIET_LETTER) > 0))) {
+        if (room == 200 && carryingDocumentsForLeader()) {
             deliverDocuments();
             return;
         }

@@ -22,6 +22,11 @@ import soloMapling.ArtificialPlayer.PartyQuest.PqActions;
 public class HorntailPQBot extends PartyQuestBot {
 
     private static final int[] SIDE_KEYS = {4001092, 4001093};
+    private static final int[][] CAVE_KEY_LOOT = new int[HorntailPqData.KEY_COUNT][1];
+
+    static {
+        for (int i = 0; i < CAVE_KEY_LOOT.length; i++) CAVE_KEY_LOOT[i][0] = HorntailPqData.keyForRoom(i);
+    }
 
     public HorntailPQBot(Character character) {
         super(character);
@@ -87,14 +92,15 @@ public class HorntailPQBot extends PartyQuestBot {
     }
 
     @Override
-    protected boolean wantsQuestLoot(int itemId) {
+    protected int[] steppedOnLootIds() {
         Character bot = getChr();
         int room = bot.getMapId();
         if (room == HorntailPqData.LIGHT_ROOM || room == HorntailPqData.DARK_ROOM) {
-            return itemId == SIDE_KEYS[0] || itemId == SIDE_KEYS[1];
+            return SIDE_KEYS;
         }
         int index = HorntailPqData.roomIndexOf(room);
-        return index >= 0 && itemId == HorntailPqData.keyForRoom(index) && PqActions.countItem(bot, itemId) == 0;
+        return index >= 0 && PqActions.countItem(bot, CAVE_KEY_LOOT[index][0]) == 0
+                ? CAVE_KEY_LOOT[index] : super.steppedOnLootIds();
     }
 
     @Override
@@ -130,15 +136,8 @@ public class HorntailPQBot extends PartyQuestBot {
             return false; // the cave's reactor still has to open the next door
         }
 
-        // Kill this room's monsters, then sweep for the key. The room holds a pair and only
-        // one of them carries it, so one seek beat plus a loot sweep per macro tick is the
-        // whole job - the swings land on the shared combat sweep; the loot sweep must stay
-        // on this bounded macro tick or a key that never reaches the inventory (inventory
-        // full, drop uncollected) would spin here forever.
-        if (PqActions.countItem(getChr(), key) == 0) {
-            PqActions.seekAndAttack(getChr());
-            PqActions.loot(getChr(), getChr().getPosition(), 1_200, new int[]{key});
-        }
+        // The sweep loots while fighting. Look for keys that landed outside its chase radius.
+        PqActions.approachRoomLoot(getChr(), CAVE_KEY_LOOT[index]);
         // A key the leader missed on the floor despawns with the room's other drops; take it
         // back and offer it again next tick.
         PqActions.recoverUngatheredHandoffs(getChr(), key);

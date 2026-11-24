@@ -1,6 +1,8 @@
 package soloMapling.ArtificialPlayer.PartyQuest;
 
 import org.gms.client.Character;
+import org.gms.client.inventory.Inventory;
+import org.gms.client.inventory.InventoryType;
 import org.gms.config.GameConfig;
 import org.gms.dao.entity.GameConfigDO;
 import org.gms.extension.api.HostRuntime;
@@ -63,6 +65,7 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.withSettings;
 
 class PqRearguardTest {
 
@@ -525,9 +528,10 @@ class PqRearguardTest {
     private Bot addBot(int id, int level, MapleMap map) {
         Character character = character(id, level, map);
         when(character.getEventInstance()).thenReturn(instance);
+        when(character.getInventory(InventoryType.EQUIPPED)).thenReturn(mock(Inventory.class));
         BotDeath death = mock(BotDeath.class);
-        PartyQuestBot bot = mock(LudiPQBot.class, CALLS_REAL_METHODS);
-        doReturn(character).when(bot).getChr();
+        PartyQuestBot bot = mock(LudiPQBot.class, withSettings()
+                .useConstructor(character).defaultAnswer(CALLS_REAL_METHODS));
         doReturn(true).when(bot).getRunning();
         doReturn(BotSM.BotState.RUNNING).when(bot).getState();
         doReturn(death).when(bot).death();

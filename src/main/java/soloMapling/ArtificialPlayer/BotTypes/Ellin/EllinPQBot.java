@@ -87,11 +87,11 @@ public class EllinPQBot extends PartyQuestBot {
     }
 
     @Override
-    protected boolean wantsQuestLoot(int itemId) {
+    protected int[] steppedOnLootIds() {
         return switch (getChr().getMapId()) {
-            case FOREST_MAP -> itemId == RAW_POISON || itemId == DILUTED_POISON;
-            case STONE_MAP -> itemId == MAGIC_STONE;
-            default -> false;
+            case FOREST_MAP -> POISON_LOOT;
+            case STONE_MAP -> STONE_LOOT;
+            default -> super.steppedOnLootIds();
         };
     }
 
@@ -249,6 +249,8 @@ public class EllinPQBot extends PartyQuestBot {
     protected boolean fightsOnSweep() {
         return switch (getChr().getMapId()) {
             case EllinPqData.FROG_ROOM, 930000700, EllinPqData.LAST_ROOM -> false;
+            case FOREST_MAP -> PqActions.findReactorOid(getChr(), EllinPqData.SPINE_REACTOR) >= 0;
+            case STONE_MAP -> PqActions.needsHuntForLeader(getChr(), MAGIC_STONE, 1);
             default -> true;
         };
     }

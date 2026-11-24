@@ -1,5 +1,6 @@
 package soloMapling.ArtificialPlayer.BotTypes.Ludi;
 
+import org.gms.client.Character;
 import org.gms.config.GameConfig;
 import org.gms.dao.entity.GameConfigDO;
 import org.gms.manager.ServerManager;
@@ -8,6 +9,7 @@ import org.gms.service.ConfigService;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.springframework.context.ApplicationContext;
+import soloMapling.ArtificialPlayer.PartyQuest.PqActions;
 
 import java.util.List;
 
@@ -24,7 +26,7 @@ import static org.mockito.Mockito.*;
  *   <li>stage 3 - a crate is not opened while its own spawn is still alive (not fixed: the
  *       quest's own pacing; kept out of scope deliberately);</li>
  *   <li>stage 7 - the ledge mobs are the pass source and the box is never walked at;</li>
- *   <li>stage 9 - the altar is struck, and an unreachable target is not chased;</li>
+ *   <li>stage 9 - leave the item-triggered altar alone and fight reachable enemies;</li>
  *   <li>after stage 9 - the bonus room breaks boxes and never loots.</li>
  * </ul>
  *
@@ -126,17 +128,13 @@ class LudiStageFixesTest {
     }
 
     @Test
-    void stage9StrikesTheAltarAndDoesNotChaseWhatItCannotReach() throws Exception {
-        assertEquals(2201003, LudiPqData.BOSS_CRYSTAL);
-        String boss = methodBody(source(LudiStages.class), "public static void fightBoss(");
-        assertTrue(boss.contains("LudiPqData.BOSS_CRYSTAL"),
-                "the altar is the only thing that summons Alishar on this server");
-        assertTrue(boss.contains("hitReactorIfInReach(bot, crystal)"),
-                "striking it is a plain reactor hit - type 100 does not block a weapon hit");
-        assertTrue(boss.indexOf("BOSS_CRYSTAL") < boss.indexOf("seekAndAttack"),
-                "summon first, then add damage");
-        assertTrue(boss.contains("seekAndAttack(bot, true, new int[]{LudiPqData.PASS})"),
-                "the altar ledge's Ratz are unreachable: the chase must not walk at them");
+    void stage9LeavesTheAltarOfferingAloneAndFightsReachableEnemies() {
+        Character bot = mock(Character.class);
+        try (var actions = mockStatic(PqActions.class)) {
+            LudiStages.fightBoss(bot);
+            actions.verify(() -> PqActions.seekAndAttack(bot, true));
+            actions.verifyNoMoreInteractions();
+        }
     }
 
     @Test
