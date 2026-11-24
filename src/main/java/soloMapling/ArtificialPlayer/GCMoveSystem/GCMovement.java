@@ -588,7 +588,11 @@ public final class GCMovement {
      */
     public static Point portalApproachPoint(MapleMap map, Portal portal) {
         Point entrance = portal.getPosition();
-        Point ground = BotPhysicsEngine.findGroundPoint(map, entrance);
+        // Amoria's gate trigger sits inside the wall. Stand on the near side of the gate,
+        // rather than trying to reach its artwork position below the wall's top.
+        Point probe = "apqDoor".equals(portal.getScriptName())
+                ? new Point(entrance.x - 20, entrance.y) : entrance;
+        Point ground = BotPhysicsEngine.findGroundPoint(map, probe);
         return ground != null && Math.abs(ground.y - entrance.y) <= 32 ? ground : entrance;
     }
 

@@ -7,8 +7,6 @@ import soloMapling.ArtificialPlayer.BotGeneration;
 import soloMapling.ArtificialPlayer.GCMoveSystem.GCMovement;
 import soloMapling.ArtificialPlayer.PartyQuest.PartyQuestBot;
 import soloMapling.ArtificialPlayer.PartyQuest.PqActions;
-import soloMapling.ArtificialPlayer.PartyQuest.PqStageChat;
-import soloMapling.Environment.BotMessages;
 
 /**
  * Plays Magatia PQ ("Romeo and Juliet") with a real player leading.
@@ -43,8 +41,7 @@ public class MagatiaPQBot extends PartyQuestBot {
      */
     private final int lobbyMap;
 
-    /** The stage-6 combination last spoken, so the once-per-tick read does not repeat it. */
-    private String announcedCombination;
+    private final MagatiaLane lane = new MagatiaLane();
 
     public MagatiaPQBot(Character character) {
         super(character);
@@ -104,16 +101,10 @@ public class MagatiaPQBot extends PartyQuestBot {
         return door == null ? null : map.getPortal(door);
     }
 
-    /**
-     * Forget the spoken combination when the run ends.
-     *
-     * <p>The property is republished per run, and {@code stage6_comb1} can easily come out the same
-     * two runs in a row; a stale value would silence the one line the party needs.
-     */
     @Override
     protected void releaseRoomState() {
         super.releaseRoomState();
-        announcedCombination = null;
+        lane.reset();
     }
 
     @Override
@@ -236,12 +227,11 @@ public class MagatiaPQBot extends PartyQuestBot {
                 return false;
             }
             case 300 -> {
-                readCombination();
                 takeFreeLane(bot);
                 return false;
             }
             case 301, 302, 303, 304 -> {
-                climbLane(bot, room - 300);
+                if (lane.climb(bot)) requestTickWithin(0);
                 return false;
             }
             default -> { }
@@ -288,68 +278,12 @@ public class MagatiaPQBot extends PartyQuestBot {
         for (int slot = 0; slot < MagatiaPqData.STAGE_6_SLOTS; slot++) {
             if ((occupied & (1 << slot)) == 0) {
                 Portal door = bot.getMap().getPortal("pt0" + slot);
-                if (door != null) PqActions.walkThroughPortal(bot, door);
+                if (door == null || !door.getPortalStatus()) continue;
+                var approach = GCMovement.portalApproachPoint(bot.getMap(), door);
+                if (!GCMovement.canPathTo(bot, approach.x, approach.y)) continue;
+                PqActions.walkThroughPortal(bot, door);
                 return; // the game's own entrance script reserves the slot
             }
-        }
-    }
-
-    private static void climbLane(Character bot, int lane) {
-        var map = bot.getMap();
-        int y = bot.getPosition().y;
-        Portal exit = map.getPortal("out00");
-        if (exit != null && Math.abs(exit.getPosition().y - y) < 80) {
-            PqActions.walkThroughPortal(bot, exit);
-            return;
-        }
-        String combination = PqActions.readEimString(bot, MagatiaPqData.stage6Key(lane - 1));
-        if (combination == null || combination.length() != 10) return;
-        Portal next = null;
-        int nearestRow = Integer.MAX_VALUE;
-        for (int row = 0; row < combination.length(); row++) {
-            Portal portal = map.getPortal("pt" + row + combination.charAt(row));
-            if (portal != null) {
-                int height = Math.abs(portal.getPosition().y - y);
-                if (height < nearestRow) {
-                    nearestRow = height;
-                    next = portal;
-                }
-            }
-        }
-        if (next != null) PqActions.walkThroughPortal(bot, next);
-    }
-
-    /**
-     * Stage 6's published combination.
-     *
-     * <p>Each {@code stage6_combN} property is a ten-digit string of digits 0-3, not a number -
-     * the stage's climbing puzzle reads one digit per row. So it is read as a string and spoken
-     * back as one, and only the properties the quest actually writes are read.
-     *
-     * <p>Spoken once per combination, not once per tick: {@link #workStage} runs every 2.5s in a
-     * run, so an unguarded {@code say} here repeated the same six strings forty times a minute -
-     * the bot's single most spammy line in the whole quest family.
-     */
-    private void readCombination() {
-        if (!GCMovement.isMapObserved(getChr().getMap()) || !PqStageChat.isRoomSpeaker(this)) return;
-        StringBuilder plan = new StringBuilder();
-        for (int slot = 0; slot < MagatiaPqData.STAGE_6_SLOTS; slot++) {
-            String digits = PqActions.readEimString(getChr(), MagatiaPqData.stage6Key(slot));
-            if (digits == null) {
-                return; // not published yet; the party has not reached the prompt
-            }
-            if (slot > 0) {
-                plan.append(", ");
-            }
-            plan.append(digits);
-        }
-        String spoken = plan.toString();
-        if (spoken.equals(announcedCombination)) {
-            return; // same combination, same line - do not spam the room
-        }
-        announcedCombination = spoken;
-        if (PqStageChat.claimRoomLine(getChr(), "magatia.combination", spoken)) {
-            PqActions.say(getChr(), BotMessages.get("pq.stage_plan", 6, spoken));
         }
     }
 

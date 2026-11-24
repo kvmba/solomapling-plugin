@@ -7,9 +7,8 @@ import java.util.concurrent.ConcurrentHashMap;
  * Blackboard shared between {@link OPQOrchestrator} (writer) and all
  * {@link OPQBot} instances (readers).
  *
- * Bots read freely. The only write bots are allowed to make is
- * {@link #markTaskComplete(int)} — a single-bit "I finished my current
- * sub-task" signal. Everything else is orchestrator-owned.
+ * Bots read freely. They report completed tasks and share their observed lounge portal
+ * results; the stage flags and assignments are orchestrator-owned.
  *
  * Thread-safety model: volatile for scalars (atomic publish), ConcurrentHashMap
  * for collections. Sealed-slot allocation and reset share a monitor.
@@ -42,6 +41,14 @@ public class OPQSharedContext {
     // ---- Task completion ----------------------------------------------------
     private final Map<Integer, Boolean> botTaskComplete     = new ConcurrentHashMap<>();
 
+    // ---- Stage 5: lounge portal observations --------------------------------
+    // Unlike stage flags, this is learned by bots from the lounge scripts' actual landings.
+    private volatile OrbisLounge.Puzzle loungePuzzle = new OrbisLounge.Puzzle();
+
+    OrbisLounge.Puzzle loungePuzzle() {
+        return loungePuzzle;
+    }
+
     // =========================================================================
     // Reader API (safe for bots to call)
     // =========================================================================
@@ -69,7 +76,7 @@ public class OPQSharedContext {
         return Boolean.TRUE.equals(botTaskComplete.get(botId));
     }
 
-    /** The one write bots are allowed: "I finished the thing you told me to do." */
+    /** Report a completed assignment to the orchestrator. */
     public void markTaskComplete(int botId) {
         botTaskComplete.put(botId, Boolean.TRUE);
     }
@@ -119,6 +126,7 @@ public class OPQSharedContext {
         boxAssignments.clear();
         platformAssignments.clear();
         botTaskComplete.clear();
+        loungePuzzle = new OrbisLounge.Puzzle();
         clearSealedSlots();
     }
 

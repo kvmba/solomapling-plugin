@@ -237,7 +237,10 @@ class PqCollectionCombatTest {
             attack.verify(() -> BotAttackDriver.botAttack(member)); // both beats stood down
 
             when(map.getId()).thenReturn(670010600);
-            bot.grindTick(); // the following survival stage still fights
+            try (var actions = mockStatic(PqActions.class, CALLS_REAL_METHODS)) {
+                bot.grindTick(); // defend in range without replacing the gate walk with a chase
+                actions.verify(() -> PqActions.seekAndAttack(eq(member), eq(false), any(int[].class)), never());
+            }
             attack.verify(() -> BotAttackDriver.botAttack(member), times(2));
         }
     }

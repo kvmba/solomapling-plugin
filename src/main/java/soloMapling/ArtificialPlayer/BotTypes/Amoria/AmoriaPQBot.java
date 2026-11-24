@@ -3,6 +3,7 @@ package soloMapling.ArtificialPlayer.BotTypes.Amoria;
 import org.gms.client.Character;
 import org.gms.server.maps.Portal;
 import soloMapling.ArtificialPlayer.BotGeneration;
+import soloMapling.ArtificialPlayer.GCMoveSystem.GCMovement;
 import soloMapling.ArtificialPlayer.PartyQuest.PartyQuestBot;
 import soloMapling.ArtificialPlayer.PartyQuest.PositionCombination;
 import soloMapling.ArtificialPlayer.PartyQuest.PqActions;
@@ -25,10 +26,16 @@ import soloMapling.ArtificialPlayer.PartyQuest.PqStageChat;
 public class AmoriaPQBot extends PartyQuestBot {
 
     private static final int[] STATUE_PIECE_LOOT = {AmoriaPqData.STATUE_PIECE};
-    private static final int[] MIRROR_LOOT = {4031595};
+    private static final int[] MIRROR_LOOT = {4031595, AmoriaPqData.MIRROR_OFFERING};
     private static final int[] BOSS_LOOT = {4031594};
+    private static final int GATE_RUN_MAP = 670010600;
     private static final int MARRIED_BONUS_MAP = 670010750;
     private static final int EXIT_MAP = 670011000;
+    private static final int MIRROR_NPC = 9201047;
+    private static final int GATE_NPC = 9201045;
+    private static final long GATE_SWING_MS = 900;
+    /** Both monster rooms are below the common entrance floor (Y=810). */
+    private static final int MONSTER_ROOM_TOP = 1000;
 
     public AmoriaPQBot(Character character) {
         super(character);
@@ -86,7 +93,9 @@ public class AmoriaPQBot extends PartyQuestBot {
         }
         return switch (AmoriaPqData.stageOf(mapId)) {
             case 1 -> PqActions.readEimString(bot, "1stageclear") == null
-                    && PqActions.needsHuntForLeader(bot, MIRROR_LOOT[0], 1);
+                    && PqActions.needsHuntForLeader(bot, MIRROR_LOOT[0], 1)
+                    && (bot.getPosition().y >= MONSTER_ROOM_TOP
+                        || PqActions.readEimInt(bot, "statusStg1", -1) >= 1);
             case 4 -> !collectionCleared()
                     && PqActions.needsHuntForLeader(bot, AmoriaPqData.STATUE_PIECE, AmoriaPqData.STATUE_PIECES_WANTED);
             case 6 -> PqActions.readEimString(bot, "6stageclear") == null
@@ -94,6 +103,15 @@ public class AmoriaPQBot extends PartyQuestBot {
             case 9 -> false;
             default -> true;
         };
+    }
+
+    @Override
+    protected void combatSweep(Character bot) {
+        if (bot.getMapId() == GATE_RUN_MAP) {
+            PqActions.attack(bot); // defend in reach; the gate run owns steering
+        } else {
+            super.combatSweep(bot);
+        }
     }
 
     @Override
@@ -138,7 +156,7 @@ public class AmoriaPQBot extends PartyQuestBot {
                 }
                 yield false;
             }
-            case 5 -> fightRoom();
+            case 5 -> workGateRun();
             default -> false; // past the run: nothing to add
         };
     }
@@ -179,29 +197,73 @@ public class AmoriaPQBot extends PartyQuestBot {
         return PqActions.readEimString(getChr(), "4stageclear") != null;
     }
 
-    /** A fight room the bot can help in without reading anything. */
-    private boolean fightRoom() {
-        PqActions.seekAndAttack(getChr());
+    /** Seven wall gates, then the slope up to the area where Amos counts the party. */
+    private boolean workGateRun() {
+        Character bot = getChr();
+        var map = bot.getMap();
+        int x = bot.getPosition().x;
+        for (int i = 0; i < 7; i++) {
+            String suffix = "0" + i;
+            Portal landing = map.getPortal("gt" + suffix + "PIB");
+            if (x >= landing.getPosition().x) continue;
+            Portal entry = map.getPortal("gt" + suffix + "WP");
+            var gate = map.getReactorByName("gate" + suffix);
+            if (gate == null) return false;
+            if (gate.getState() == 4) {
+                if (PqActions.walkToPortal(bot, entry)) {
+                    PqActions.enterPortal(bot, entry);
+                    if (bot.getPosition().x >= landing.getPosition().x) requestTickWithin(0);
+                }
+            } else {
+                var approach = GCMovement.portalApproachPoint(map, entry);
+                if (PqActions.walkTo(bot, approach)
+                        && PqActions.hitReactorIfInReach(bot, gate.getObjectId(), approach)) {
+                    requestTickWithin(GATE_SWING_MS);
+                }
+            }
+            return false;
+        }
+        PqActions.waitNearStageNpc(bot, GATE_NPC);
         return false;
     }
 
-    /**
-     * Stage 1 is "shatter the mirror and bring the shard back" - the fight to get the shard is
-     * the only part a bot can help with, and the turn-in wants the piece in the hand of
-     * whoever talks to the NPC.
-     */
+    /** Clear the assigned monster side, then work the flame and mirror in the common hall. */
     private boolean stageOne() {
-        if (PqActions.readEimString(getChr(), "1stageclear") != null
-                || !PqActions.needsHuntForLeader(getChr(), MIRROR_LOOT[0], 1)) {
-            PqActions.deliverAndWait(getChr(), MIRROR_LOOT[0], 9201047);
+        Character bot = getChr();
+        var map = bot.getMap();
+        boolean needShard = PqActions.readEimString(bot, "1stageclear") == null
+                && PqActions.needsHuntForLeader(bot, MIRROR_LOOT[0], 1);
+        var position = bot.getPosition();
+        boolean inside = position.y >= MONSTER_ROOM_TOP;
+        boolean female = inside ? position.x < 0 : bot.getGender() == 1;
+        boolean clearSides = needShard && PqActions.readEimInt(bot, "statusStg1", -1) < 1;
+        if (inside || clearSides) {
+            boolean sideHasMobs = clearSides && map.getAllMonsters().stream().anyMatch(m -> {
+                var p = m.getPosition();
+                return m.isAlive() && p.y >= MONSTER_ROOM_TOP && (p.x < 0) == female;
+            });
+            if (inside != sideHasMobs) {
+                String name = (female ? "female" : "male") + (inside ? "01" : "00");
+                PqActions.stopHunting(bot);
+                PqActions.walkThroughPortal(bot, map.getPortal(name));
+            } else if (inside) {
+                PqActions.seekAndAttack(bot, true);
+            } else {
+                PqActions.stopHunting(bot);
+                PqActions.waitNearStageNpc(bot, MIRROR_NPC);
+            }
             return false;
         }
-        int mirror = PqActions.findReactorOid(getChr(), AmoriaPqData.MIRROR_REACTOR);
-        if (mirror >= 0 && PqActions.feedReactor(getChr(), mirror, AmoriaPqData.MIRROR_OFFERING)) {
+        if (!needShard) {
+            PqActions.deliverAndWait(bot, MIRROR_LOOT[0], MIRROR_NPC);
             return false;
         }
-        PqActions.seekAndAttack(getChr());
-        PqActions.loot(getChr(), getChr().getPosition(), 2_000, MIRROR_LOOT);
+        int mirror = PqActions.findReactorOid(bot, AmoriaPqData.MIRROR_REACTOR);
+        if (mirror >= 0 && PqActions.feedReactor(bot, mirror, AmoriaPqData.MIRROR_OFFERING)) {
+            return false;
+        }
+        PqActions.seekAndAttack(bot, true, MIRROR_LOOT);
+        PqActions.loot(bot, position, 2_000, MIRROR_LOOT);
         return false;
     }
 

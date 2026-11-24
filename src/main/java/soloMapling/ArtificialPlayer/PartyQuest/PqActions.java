@@ -195,10 +195,10 @@ public final class PqActions {
      * reaching the wait deadline is NOT arrival.
      */
     public static boolean walkTo(Character bot, Point target) {
-        return walkTo(bot, target, false);
+        return walkTo(bot, target, false, null);
     }
 
-    private static boolean walkTo(Character bot, Point target, boolean portal) {
+    private static boolean walkTo(Character bot, Point target, boolean portal, Runnable onAbandon) {
         if (bot == null || target == null || bot.getMap() == null) {
             return false;
         }
@@ -226,7 +226,13 @@ public final class PqActions {
                 if (!portal) stageWalkShieldUntilByBot.remove(bot.getId(), shield);
                 arrived.countDown();
                 nudgeStageTick(bot); // arrival is the event the FSM waits on - wake it (debounced)
-            }, () -> stageWalkShieldUntilByBot.remove(bot.getId(), shield));
+            }, () -> {
+                stageWalkShieldUntilByBot.remove(bot.getId(), shield);
+                if (onAbandon != null) {
+                    onAbandon.run();
+                    nudgeStageTick(bot);
+                }
+            });
         }
         // Bounded block: the tick waits for the walk to land, but never longer than one slow
         // cadence. A bot-only room's ticks are 36-48s apart, and a full-length block there is
@@ -519,8 +525,13 @@ public final class PqActions {
 
     /** Walking and script entry agree on where the bot can actually stand at the door. */
     public static boolean walkToPortal(Character bot, Portal portal) {
+        return walkToPortal(bot, portal, null);
+    }
+
+    /** Report the driver's actual abandonment, not the expiry of the stage's blocking wait. */
+    public static boolean walkToPortal(Character bot, Portal portal, Runnable onAbandon) {
         return portal.getPortalStatus()
-                && walkTo(bot, GCMovement.portalApproachPoint(bot.getMap(), portal), true);
+                && walkTo(bot, GCMovement.portalApproachPoint(bot.getMap(), portal), true, onAbandon);
     }
 
     public static void walkThroughPortal(Character bot, Portal portal) {
@@ -543,12 +554,22 @@ public final class PqActions {
 
     /** Strike only when already beside the reactor; never issue a walk, stop, or stage shield. */
     public static boolean hitReactorIfInReach(Character bot, int reactorOid) {
+        return hitReactorIfInReach(bot, reactorOid, null);
+    }
+
+    /** A wall-mounted reactor may have its standing floor beside, rather than under, its own X. */
+    public static boolean hitReactorIfInReach(Character bot, int reactorOid, Point approachFloor) {
         if (bot == null) return false;
         MapleMap map = bot.getMap();
         if (map == null) return false;
         Reactor reactor = map.getReactorByOid(reactorOid);
         if (!isStrikeable(reactor)) return false;
-        return atApproachFloor(bot, bot.getPosition(), reactor.getPosition()) && swingAtReactor(bot, map, reactorOid);
+        Point reactorPos = reactor.getPosition();
+        Point here = bot.getPosition();
+        if (approachFloor != null && (Math.abs(here.x - reactorPos.x) > APPROACH_X
+                || Math.abs(here.y - reactorPos.y) > APPROACH_Y)) return false;
+        return atApproachFloor(bot, here, approachFloor == null ? reactorPos : approachFloor)
+                && swingAtReactor(bot, map, reactorOid);
     }
 
     private static boolean swingAtReactor(Character bot, MapleMap map, int oid) {

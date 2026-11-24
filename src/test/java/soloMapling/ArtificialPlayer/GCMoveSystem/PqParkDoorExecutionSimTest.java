@@ -2,11 +2,15 @@ package soloMapling.ArtificialPlayer.GCMoveSystem;
 
 import org.gms.client.Character;
 import org.gms.client.Client;
+import org.gms.client.Job;
 import org.gms.config.GameConfig;
 import org.gms.dao.entity.GameConfigDO;
 import org.gms.manager.ServerManager;
+import org.gms.net.server.world.Party;
 import org.gms.property.ServiceProperty;
 import org.gms.scripting.event.EventInstanceManager;
+import org.gms.server.life.Monster;
+import org.gms.server.maps.MapObjectType;
 import org.gms.server.maps.MapleMap;
 import org.gms.server.maps.Portal;
 import org.gms.service.ConfigService;
@@ -18,20 +22,37 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.context.ApplicationContext;
+import soloMapling.ArtificialPlayer.BotGeneration;
+import soloMapling.ArtificialPlayer.BotCommandsPack.BotAttack;
 import soloMapling.ArtificialPlayer.BotMessagingSystem.CharacterStorage;
 import soloMapling.ArtificialPlayer.BotSM;
 import soloMapling.ArtificialPlayer.BotTypes.Amoria.AmoriaPqData;
+import soloMapling.ArtificialPlayer.BotTypes.Amoria.AmoriaPQBot;
 import soloMapling.ArtificialPlayer.BotTypes.Kerning.KerningPqData;
 import soloMapling.ArtificialPlayer.BotTypes.Kerning.KerningStages;
 import soloMapling.ArtificialPlayer.BotTypes.Ludi.LudiPqData;
+import soloMapling.ArtificialPlayer.BotTypes.Magatia.MagatiaPQBot;
+import soloMapling.ArtificialPlayer.BotTypes.OPQ.OPQBot;
+import soloMapling.ArtificialPlayer.BotTypes.OPQ.OPQOrchestrator;
+import soloMapling.ArtificialPlayer.BotTypes.OPQ.OPQSharedContext;
 import soloMapling.ArtificialPlayer.BotTypes.OPQ.OrbisPqData;
 import soloMapling.ArtificialPlayer.PartyQuest.PqActions;
+import soloMapling.MapVFX.CustomReactor;
+import soloMapling.server.BotTickService;
 
 import java.awt.Point;
 import java.awt.Rectangle;
 import java.lang.reflect.Method;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Predicate;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -41,12 +62,15 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.fail;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.RETURNS_DEEP_STUBS;
 import static org.mockito.Mockito.doAnswer;
-import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.doNothing;
 import static org.mockito.Mockito.doReturn;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.mockStatic;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.verify;
@@ -251,6 +275,282 @@ class PqParkDoorExecutionSimTest {
 
     private static void tickN(Sim sim, int ticks) {
         tickN(sim, ticks, true);
+    }
+
+    @ParameterizedTest
+    @CsvSource({
+            "CLERIC,11", "CLERIC,12", "CLERIC,13", "CLERIC,21", "CLERIC,22", "CLERIC,23",
+            "CLERIC,31", "CLERIC,32", "CLERIC,33",
+            "ASSASSIN,11", "ASSASSIN,12", "ASSASSIN,13", "ASSASSIN,21", "ASSASSIN,22", "ASSASSIN,23",
+            "ASSASSIN,31", "ASSASSIN,32", "ASSASSIN,33",
+            "FIGHTER,33", "MAGICIAN,33", "THIEF,33"
+    })
+    void orbisLoungeUsesTheHostPuzzleAndWalksBackDown(String jobName, String combination) {
+        int hallId = OrbisPqData.STAGE_LOUNGE;
+        assumeTrue(wzAvailable(hallId) && (Files.isRegularFile(Path.of("scripts/portal/party3_r4pt.js"))
+                || Files.isRegularFile(Path.of("scripts-zh-CN/portal/party3_r4pt.js"))),
+                "GMS083 WZ and portal scripts needed");
+        Job job = Job.valueOf(jobName);
+        MapleMap hall = realRoom(hallId);
+        var instance = mock(EventInstanceManager.class);
+        var rooms = new HashMap<Integer, MapleMap>();
+        rooms.put(hallId, hall);
+        for (int id : OrbisPqData.LOUNGE_ROOMS) rooms.put(id, realRoom(id));
+        rooms.forEach((id, map) -> {
+            map.setEventInstance(instance);
+            when(instance.getMapInstance(id)).thenReturn(map);
+        });
+        when(instance.getIntProperty(any())).thenAnswer(call -> switch (call.<String>getArgument(0)) {
+            case "statusStg0", "statusStg1", "statusStg2", "statusStg3", "statusStg4" -> 1;
+            default -> -1;
+        });
+        when(instance.getProperty("stage4_comb")).thenReturn(combination);
+
+        Point start = GCMovement.portalApproachPoint(hall, hall.getPortal("st00"));
+        var pos = new AtomicReference<>(start);
+        var here = new AtomicReference<>(hall);
+        Character member = spy(new CharacterDouble(BOT_ID, hall, pos::get, pos::set));
+        var client = mock(Client.class);
+        doReturn(client).when(member).getClient();
+        when(client.getPlayer()).thenReturn(member);
+        doAnswer(call -> here.get()).when(member).getMap();
+        doAnswer(call -> here.get().getId()).when(member).getMapId();
+        doReturn(instance).when(member).getEventInstance();
+        doReturn(mock(Party.class)).when(member).getParty();
+        doReturn(job).when(member).getJob();
+        doReturn(60).when(member).getLevel();
+        doReturn(true).when(member).isLoggedInWorld();
+        when(instance.getLeader()).thenReturn(member);
+        when(instance.getPlayers()).thenReturn(List.of(member));
+
+        List<Integer> visited = new ArrayList<>();
+        List<String> tried = new ArrayList<>();
+        doAnswer(call -> {
+            MapleMap destination = call.getArgument(0);
+            Portal portal = call.getArgument(1);
+            here.set(destination);
+            pos.set(new Point(portal.getPosition()));
+            if (destination != hall) visited.add(destination.getId());
+            return null;
+        }).when(member).changeMap(any(MapleMap.class), any(Portal.class));
+        doAnswer(call -> {
+            Point at = pos.get();
+            tried.add(hall.getPortals().stream()
+                    .filter(p -> "party3_r4pt".equals(p.getScriptName()))
+                    .min(Comparator.comparingDouble(p -> p.getPosition().distanceSq(at)))
+                    .orElseThrow().getName());
+            pos.set(new Point(hall.getPortal(call.<Integer>getArgument(1)).getPosition()));
+            return null;
+        }).when(member).changeMap(anyInt(), any());
+
+        Sim sim = registerSim(member, hall, start, pos);
+        sim.st().movementProfile = BotMovementProfile.fromCharacter(member);
+        var context = new OPQSharedContext();
+        var coordinator = mock(OPQOrchestrator.class);
+        when(coordinator.getSharedContext()).thenReturn(context);
+        try (var generation = mockStatic(BotGeneration.class);
+             var runs = mockStatic(OPQOrchestrator.class, call -> coordinator)) {
+            OPQBot bot = new OPQBot(member);
+            bot.setRunning(true);
+            bot.setStateForDebug(OPQBot.OPQBotState.MIDDLE_STAGE);
+            boolean upper = job == Job.CLERIC || job == Job.ASSASSIN;
+            List<Integer> expectedRooms = upper ? OrbisPqData.LOUNGE_ROOMS : List.of(920010604);
+            Point post = hall.getNPCById(OrbisPqData.EAK).getPosition();
+            for (int beat = 0; beat < 180; beat++) {
+                bot.updateState();
+                tickN(sim, 10);
+                if (visited.size() == expectedRooms.size() && here.get() == hall
+                        && sim.p().distance(post) < 55 && GCMovement.isSettled(member)) break;
+            }
+            assertEquals(expectedRooms, visited.stream().sorted().toList(),
+                    () -> tried + " " + GCMovement.movementStateReport(member));
+            assertEquals(hall, here.get());
+            assertTrue(sim.p().distance(post) < 55, () -> GCMovement.movementStateReport(member));
+            if (upper) {
+                var correct = List.of("r4rp1" + combination.charAt(0), "r4rp2" + combination.charAt(1));
+                assertTrue(tried.containsAll(correct), tried::toString);
+                var failures = tried.stream().filter(guess -> !correct.contains(guess)).toList();
+                assertEquals(failures.stream().distinct().toList(), failures);
+                if (combination.equals("33")) assertEquals(4, failures.size());
+            } else {
+                assertTrue(tried.isEmpty(), tried::toString);
+            }
+        }
+    }
+
+    @ParameterizedTest
+    @CsvSource({"926100301,rnj5_rp,3333333333", "926110304,jnr5_rp,3021310232"})
+    void magatiaUsesItsOwnLaneAndNeverRepeatsARejectedDoor(int mapId, String script, String answer) {
+        assumeTrue(wzAvailable(mapId) && hostPortalScript(script), "GMS083 WZ and scripts needed");
+        MapleMap lane = realRoom(mapId);
+        MapleMap next = realRoom(mapId - mapId % 100 + 100);
+        var visits = new ArrayList<PortalVisit>();
+        var refused = new AtomicBoolean();
+        var firstCorrect = new PortalVisit("pt03", "pt13");
+        Sim sim = scriptSim(lane, next, visits, visit -> !visit.equals(firstCorrect)
+                || !visits.contains(firstCorrect) || !refused.compareAndSet(false, true));
+        Character bot = sim.st().bot;
+        when(bot.getEventInstance().getProperty("stage6_comb" + mapId % 10)).thenReturn(answer);
+        try (var generation = mockStatic(BotGeneration.class)) {
+            var member = new MagatiaPQBot(bot);
+            member.setRunning(true);
+            for (int beat = 0; beat < 1500 && bot.getMap() == lane; beat++) {
+                member.updateState();
+                tickN(sim, 10);
+            }
+        }
+        assertEquals(next, bot.getMap(), () -> visits + " " + GCMovement.movementStateReport(bot));
+        var rejected = visits.stream().filter(v -> v.to().equals("fail")).map(PortalVisit::from).toList();
+        assertEquals(rejected.stream().distinct().toList(), rejected);
+        assertEquals(answer.chars().map(c -> c - '0').sum(), rejected.size());
+        assertTrue(refused.get(), "A valid, already learned door must be retried after a refused warp");
+    }
+
+    @ParameterizedTest
+    @ValueSource(ints = {0, 1})
+    void amoriaEntersItsOwnGenderDoorAndReturnsAfterThatSideIsClear(int gender) {
+        int id = AmoriaPqData.ENTRY_MAP;
+        assumeTrue(wzAvailable(id) && hostPortalScript("gendergo"), "GMS083 WZ and scripts needed");
+        MapleMap room = realRoom(id);
+        List<PortalVisit> visits = new ArrayList<>();
+        Sim sim = scriptSim(room, room, visits);
+        Character bot = sim.st().bot;
+        doReturn(gender).when(bot).getGender();
+        Monster mob = mock(Monster.class);
+        when(mob.getType()).thenReturn(MapObjectType.MONSTER);
+        when(mob.isAlive()).thenReturn(true);
+        when(mob.getPosition()).thenReturn(gender == 1 ? new Point(-1440, 1870) : new Point(360, 1450));
+        room.addMapObject(mob);
+        String prefix = gender == 1 ? "female" : "male";
+        try (var generation = mockStatic(BotGeneration.class)) {
+            var member = new AmoriaPQBot(bot);
+            member.setRunning(true);
+            for (int beat = 0; beat < 70 && visits.isEmpty(); beat++) {
+                member.updateState();
+                tickN(sim, 10);
+            }
+            assertEquals(List.of(new PortalVisit(prefix + "00", prefix + "01")), visits);
+            when(mob.isAlive()).thenReturn(false);
+            for (int beat = 0; beat < 50 && sim.p().y > 900; beat++) {
+                member.updateState();
+                tickN(sim, 10);
+            }
+            assertTrue(sim.p().y < 900, () -> GCMovement.movementStateReport(bot));
+        }
+    }
+
+    @Test
+    void amoriaOpensAndWalksThroughAllSevenGatesBeforeRallying() {
+        int id = 670010600;
+        assumeTrue(wzAvailable(id) && hostPortalScript("apqDoor"), "GMS083 WZ and scripts needed");
+        MapleMap room = realRoom(id);
+        List<PortalVisit> visits = new ArrayList<>();
+        Sim sim = scriptSim(room, room, visits);
+        Character bot = sim.st().bot;
+        var area = mapData(id).getChildByPath("area/2");
+        int left = org.gms.provider.DataTool.getInt("x1", area);
+        int top = org.gms.provider.DataTool.getInt("y1", area);
+        var finish = new Rectangle(left, top, org.gms.provider.DataTool.getInt("x2", area) - left,
+                org.gms.provider.DataTool.getInt("y2", area) - top);
+        for (var entry : mapData(id).getChildByPath("reactor")) {
+            var gate = new org.gms.server.maps.Reactor(
+                    org.gms.server.maps.ReactorFactory.getReactor(6702001), 6702001);
+            gate.setName(org.gms.provider.DataTool.getString("name", entry));
+            gate.setPosition(new Point(org.gms.provider.DataTool.getInt("x", entry),
+                    org.gms.provider.DataTool.getInt("y", entry)));
+            room.addMapObject(gate);
+        }
+        var nextBeatMs = new AtomicLong();
+        long deadline = MovementClock.nowMs() + 240_000;
+        try (var generation = mockStatic(BotGeneration.class);
+             var attack = mockStatic(BotAttack.class);
+             var reactor = mockStatic(CustomReactor.class);
+             var wheel = mockStatic(BotTickService.class)) {
+            wheel.when(() -> BotTickService.requestEarlierTick(eq(BOT_ID), any(), anyLong()))
+                    .thenAnswer(call -> {
+                nextBeatMs.accumulateAndGet(call.<Long>getArgument(2), Math::min);
+                return null;
+            });
+            attack.when(() -> BotAttack.basicSwing(bot)).thenReturn(true);
+            reactor.when(() -> CustomReactor.hitReactorWithScript(eq(room), anyInt(), eq(bot)))
+                    .thenAnswer(call -> {
+                var gate = room.getReactorByOid(call.getArgument(1));
+                assertTrue(bot.getPosition().distance(gate.getPosition()) < 75);
+                assertTrue(bot.getPosition().x < gate.getPosition().x);
+                gate.setState((byte) (gate.getState() + 1));
+                return null;
+            });
+            var member = new AmoriaPQBot(bot);
+            member.setRunning(true);
+            while (MovementClock.nowMs() < deadline && !finish.contains(sim.p())) {
+                nextBeatMs.set(3_500);
+                member.updateState();
+                tickN(sim, (int) Math.max(1, nextBeatMs.get() / BotPhysicsEngine.cfg.TICK_MS));
+            }
+        }
+        assertTrue(finish.contains(sim.p()), () -> visits + " " + GCMovement.movementStateReport(bot));
+        assertTrue(MovementClock.nowMs() < deadline, "The original gate run only allows four minutes");
+        assertEquals(java.util.stream.IntStream.range(0, 7)
+                .mapToObj(i -> new PortalVisit("gt0" + i + "WP", "gt0" + i + "PIB")).toList(), visits);
+    }
+
+    private record PortalVisit(String from, String to) {}
+
+    private static boolean hostPortalScript(String name) {
+        return Files.isRegularFile(Path.of("scripts/portal", name + ".js"))
+                || Files.isRegularFile(Path.of("scripts-zh-CN/portal", name + ".js"));
+    }
+
+    /** Play the real script; stub only applying its warp so the virtual movement driver owns position. */
+    private static Sim scriptSim(MapleMap initial, MapleMap next, List<PortalVisit> visits) {
+        return scriptSim(initial, next, visits, visit -> true);
+    }
+
+    private static Sim scriptSim(MapleMap initial, MapleMap next, List<PortalVisit> visits,
+                                 Predicate<PortalVisit> allowWarp) {
+        var instance = mock(EventInstanceManager.class);
+        initial.setEventInstance(instance);
+        next.setEventInstance(instance);
+        when(instance.getMapInstance(initial.getId())).thenReturn(initial);
+        when(instance.getMapInstance(next.getId())).thenReturn(next);
+        Point start = initial.getPortal(0).getPosition();
+        var pos = new AtomicReference<>(new Point(start));
+        var map = new AtomicReference<>(initial);
+        Character bot = spy(new CharacterDouble(BOT_ID, initial, pos::get, pos::set));
+        var client = mock(Client.class);
+        when(client.getPlayer()).thenReturn(bot);
+        doReturn(client).when(bot).getClient();
+        doReturn(mock(Party.class)).when(bot).getParty();
+        doReturn(instance).when(bot).getEventInstance();
+        doReturn(Job.FIGHTER).when(bot).getJob();
+        doReturn(75).when(bot).getLevel();
+        doReturn(true).when(bot).isLoggedInWorld();
+        doAnswer(call -> map.get()).when(bot).getMap();
+        doAnswer(call -> map.get().getId()).when(bot).getMapId();
+        when(instance.getLeader()).thenReturn(bot);
+        when(instance.getPlayers()).thenReturn(List.of(bot));
+        doAnswer(call -> {
+            map.set(call.getArgument(0));
+            pos.set(new Point(call.<Portal>getArgument(1).getPosition()));
+            return null;
+        }).when(bot).changeMap(any(MapleMap.class), any(Portal.class));
+        doAnswer(call -> {
+            MapleMap destination = instance.getMapInstance(call.getArgument(0));
+            Object target = call.getArgument(1);
+            Portal arrival = target instanceof Integer n ? destination.getPortal(n)
+                    : destination.getPortal((String) target);
+            Portal source = map.get().getPortals().stream().filter(p -> p.getScriptName() != null)
+                    .min(Comparator.comparingDouble(p -> p.getPosition().distanceSq(pos.get()))).orElseThrow();
+            var visit = new PortalVisit(source.getName(), arrival.getName());
+            if (!allowWarp.test(visit)) return null;
+            visits.add(visit);
+            map.set(destination);
+            pos.set(new Point(arrival.getPosition()));
+            return null;
+        }).when(bot).changeMap(anyInt(), any());
+        Sim sim = registerSim(bot, initial, start, pos);
+        sim.st().movementProfile = BotMovementProfile.fromCharacter(bot);
+        return sim;
     }
 
     private static void tickN(Sim sim, int ticks, boolean observed) {

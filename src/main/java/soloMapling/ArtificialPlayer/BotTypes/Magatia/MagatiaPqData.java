@@ -59,19 +59,10 @@ public final class MagatiaPqData {
     public static final int MAX_LEVEL = 85;
 
     // =========================================================================
-    // Stage 6 - the combination that is published per slot
+    // Stage 6 - personal portal lanes
     // =========================================================================
 
-    /**
-     * The stage-6 combination properties: the quest writes four of them ({@code stage6_comb1..4}),
-     * each a ten-digit string of digits 0-3 naming the correct column per row. The bot reads and
-     * repeats them rather than guessing a pattern.
-     */
     public static final int STAGE_6_SLOTS = 4;
-
-    public static String stage6Key(int slot) {
-        return "stage6_comb" + (slot + 1);
-    }
 
     // =========================================================================
     // Yulete's escort

@@ -22,7 +22,7 @@ class PartyQuestRunStateResetTest {
     /** Quest bot file -> the per-run state it must release or reset. */
     private static final List<String[]> RESETS = List.of(
             new String[]{"Henesys/HenesysPQBot.java", "HenesysStages.releaseFlowerClaim(getChr())"},
-            new String[]{"Magatia/MagatiaPQBot.java", "announcedCombination = null"},
+            new String[]{"Magatia/MagatiaPQBot.java", "lane.reset()"},
             new String[]{"Ludi/LudiPQBot.java", "announcedStage = -1"},
             new String[]{"Ludi/LudiPQBot.java", "climbFloorY = Integer.MIN_VALUE"});
 

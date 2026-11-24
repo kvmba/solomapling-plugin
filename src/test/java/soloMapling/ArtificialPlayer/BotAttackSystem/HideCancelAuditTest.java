@@ -48,8 +48,8 @@ class HideCancelAuditTest {
             new SwingSite("soloMapling/ArtificialPlayer/BotAttackSystem/BotAttackEffects.java", "private static StrikeResult broadcastAndApply("),
             // The energy-charge touch retaliation - a real ENERGY_ATTACK strike of its own.
             new SwingSite("soloMapling/ArtificialPlayer/BotAttackSystem/BotEnergyCharge.java", "strike("),
-            // The PQ stage scripts hit reactors without a swing - a reactor hit is still an attack.
-            new SwingSite("soloMapling/ArtificialPlayer/PartyQuest/PqActions.java", "hitReactor(")
+            // All PQ reactor strikes share the same accepted-swing gate.
+            new SwingSite("soloMapling/ArtificialPlayer/PartyQuest/PqActions.java", "private static boolean swingAtReactor(")
     );
 
     @Test

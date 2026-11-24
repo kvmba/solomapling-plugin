@@ -69,8 +69,7 @@ public class OPQBot extends BotSM implements GrindTickRegistry.Participant {
     private long stageWaitStartTime;
     private long lastRecruitMessageAt;
 
-    /** Stage 5: which of the lounge's four sub-rooms to enter next (advances on each visit). */
-    private int loungeVisit;
+    private final OrbisLounge lounge = new OrbisLounge();
     private volatile MapleMap leavingLoungeRoom;
 
     private volatile int lootedRecordItemId = -1;
@@ -180,6 +179,7 @@ public class OPQBot extends BotSM implements GrindTickRegistry.Participant {
         if (run != orchestrator) {
             orchestrator = run;
             sharedContext = run.getSharedContext();
+            resetLounge();
         }
         orchestrator.noteLeaderFromBot(this);
     }
@@ -277,8 +277,7 @@ public class OPQBot extends BotSM implements GrindTickRegistry.Participant {
         stageWaitStartTime = 0;
         lastRecruitMessageAt = 0;
         lootedRecordItemId = -1;
-        loungeVisit = 0;
-        leavingLoungeRoom = null;
+        resetLounge();
     }
 
     // =========================================================================
@@ -870,19 +869,19 @@ public class OPQBot extends BotSM implements GrindTickRegistry.Participant {
         PqActions.stopHunting(bot);
     }
 
-    /**
-     * Work stage 5: the lounge's statue pieces are in its four sub-rooms, so the bot walks into
-     * one, clears what is there, and steps back out; each entry advances the rotation so it
-     * covers all four (three hold the piece-dropping mobs, the fourth the reactor that drops the
-     * same item).
-     */
+    /** Gather the lounge's pieces, then bring them back to Eak in the hall. */
     private void workLounge() {
         Character bot = getChr();
         MapleMap room = bot.getMap();
         int here = room.getId();
         if (OrbisPqData.LOUNGE_ROOMS.contains(here)) {
             if (leavingLoungeRoom != room && needsLoungePieces()) {
-                if (!OrbisStages.gatherLounge(bot)) return;
+                boolean quiet = OrbisStages.gatherLounge(bot);
+                if (!lounge.roomClear(room, quiet)) {
+                    if (quiet) requestTickWithin(OrbisLounge.ROOM_DROP_SETTLE_MS);
+                    return;
+                }
+                lounge.finishedRoom(here);
             }
             // A portal walk can span ticks; finish it without starting another loot pass.
             leavingLoungeRoom = room;
@@ -890,7 +889,7 @@ public class OPQBot extends BotSM implements GrindTickRegistry.Participant {
             walkOutOfCurrentRoom();
             if (bot.getMap() != room) {
                 leavingLoungeRoom = null;
-                loungeVisit++;
+                lounge.resetHallWalks();
             }
             return;
         }
@@ -899,15 +898,18 @@ public class OPQBot extends BotSM implements GrindTickRegistry.Participant {
             walkToRoom(OrbisStages.roomFor(5));
             return;
         }
-        if (!needsLoungePieces()) {
-            PqActions.deliverAndWait(bot, OrbisPqData.STATUE_PIECE_5, OrbisPqData.EAK);
-            return;
+        if (needsLoungePieces()) {
+            var beat = lounge.step(bot, sharedContext.loungePuzzle());
+            if (beat == OrbisLounge.Beat.ADVANCED) requestTickWithin(0);
+            if (beat != OrbisLounge.Beat.NO_WORK) return;
         }
-        var door = room.getPortal(OrbisPqData.loungeEntryPortal(loungeVisit));
-        if (door == null) {
-            return;
-        }
-        PqActions.walkThroughPortal(getChr(), door);
+        lounge.stopWalking(bot);
+        PqActions.deliverAndWait(bot, OrbisPqData.STATUE_PIECE_5, OrbisPqData.EAK);
+    }
+
+    private void resetLounge() {
+        lounge.reset();
+        leavingLoungeRoom = null;
     }
 
     private boolean needsLoungePieces() {
@@ -1383,8 +1385,7 @@ public class OPQBot extends BotSM implements GrindTickRegistry.Participant {
         sharedContext.putPlatformAssignment(getChr().getId(), null);
         stageWaitStartTime = 0;
         lootedRecordItemId = -1;
-        loungeVisit = 0;
-        leavingLoungeRoom = null;
+        resetLounge();
 
         if (isInParty()) {
             transitionTo(OPQBotState.IN_PARTY_IDLE,

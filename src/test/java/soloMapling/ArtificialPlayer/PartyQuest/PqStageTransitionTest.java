@@ -1,6 +1,7 @@
 package soloMapling.ArtificialPlayer.PartyQuest;
 
 import org.gms.client.Character;
+import org.gms.client.Job;
 import org.gms.client.inventory.Inventory;
 import org.gms.client.inventory.InventoryType;
 import org.gms.client.inventory.Item;
@@ -20,6 +21,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.EnumSource;
+import org.junit.jupiter.params.provider.ValueSource;
 import soloMapling.ArtificialPlayer.BotGeneration;
 import soloMapling.ArtificialPlayer.BotSM;
 import soloMapling.ArtificialPlayer.BotAttackSystem.BotAttackDriver;
@@ -110,11 +112,13 @@ class PqStageTransitionTest {
         int oid = 42;
         MapleMap map = room(mapId);
         place(member, map);
+        when(member.getPosition()).thenReturn(new Point(103, 810));
         Reactor reactor = mock(Reactor.class);
         when(reactor.getObjectId()).thenReturn(oid);
         when(map.getReactorsByIdRange(2519000, 2519003)).thenReturn(List.of(reactor));
         try (var generation = mockStatic(BotGeneration.class);
              var actions = mockStatic(PqActions.class)) {
+            actions.when(() -> PqActions.readEimInt(member, "statusStg1", -1)).thenReturn(1);
             actions.when(() -> PqActions.needsHuntForLeader(eq(member), anyInt(), anyInt())).thenReturn(true);
             actions.when(() -> PqActions.findReactorOid(member, reactorId)).thenReturn(oid);
             actions.when(() -> PqActions.feedReactor(member, oid, offering)).thenReturn(true);
@@ -262,6 +266,7 @@ class PqStageTransitionTest {
         OPQOrchestrator run = mock(OPQOrchestrator.class);
         when(run.getSharedContext()).thenReturn(new OPQSharedContext());
         int piece = OrbisPqData.STATUE_PIECE_5;
+        var now = new AtomicLong();
         try (var generation = mockStatic(BotGeneration.class);
              var coordinator = mockStatic(OPQOrchestrator.class, call -> run);
              var movement = mockStatic(GCMovement.class);
@@ -270,9 +275,10 @@ class PqStageTransitionTest {
                 actions.when(() -> PqActions.readEimInt(member, key, -1)).thenReturn(1);
             }
             actions.when(() -> PqActions.needsHuntForLeader(member, piece, OrbisPqData.LOUNGE_COUNT))
-                    .thenReturn(true, true, false);
+                    .thenReturn(true);
+            movement.when(GCMovement::movementNowMs).thenAnswer(call -> now.get());
             actions.when(() -> PqActions.collectPartyQuestLoot(member, new int[]{piece}))
-                    .thenReturn(PqActions.LootBeat.COLLECTING, PqActions.LootBeat.NONE);
+                    .thenReturn(PqActions.LootBeat.NONE, PqActions.LootBeat.COLLECTING, PqActions.LootBeat.NONE);
             actions.when(() -> PqActions.walkThroughPortal(member, exit)).thenAnswer(call -> null)
                     .thenAnswer(call -> { place(member, lounge); return null; });
 
@@ -280,14 +286,126 @@ class PqStageTransitionTest {
             bot.setRunning(true);
             bot.setStateForDebug(OPQBot.OPQBotState.MIDDLE_STAGE);
             bot.updateState();
+            now.set(500);
+            bot.updateState(); // the last reactor's fragment appeared after the room first looked empty
+            now.set(1_000);
+            bot.updateState();
             actions.verify(() -> PqActions.walkThroughPortal(member, exit), never());
+            now.set(2_000);
             bot.updateState();
             assertSame(boxes, member.getMap());
             bot.updateState();
             assertSame(lounge, member.getMap());
-            actions.verify(() -> PqActions.collectPartyQuestLoot(member, new int[]{piece}), times(2));
+            actions.verify(() -> PqActions.collectPartyQuestLoot(member, new int[]{piece}), times(4));
+            actions.when(() -> PqActions.needsHuntForLeader(member, piece, OrbisPqData.LOUNGE_COUNT))
+                    .thenReturn(false);
             bot.updateState();
             actions.verify(() -> PqActions.deliverAndWait(member, piece, OrbisPqData.EAK));
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    void orbisSharesWrongGuessesButKeepsFailedWalksLocal(boolean wrongGuess) {
+        MapleMap hall = room(OrbisPqData.STAGE_LOUNGE);
+        Point start = new Point(-42, -1265);
+        Point fail = new Point(-163, -1267);
+        Point firstStep = new Point(-191, -1458);
+        Point nextStep = new Point(-90, -1459);
+        Portal first = door(hall, "r4rp11", 999999999);
+        Portal next = door(hall, "r4rp12", 999999999);
+        when(first.getId()).thenReturn(11);
+        when(next.getId()).thenReturn(12);
+        when(door(hall, "fail", 999999999).getPosition()).thenReturn(fail);
+        when(door(hall, "success", 999999999).getPosition()).thenReturn(new Point(108, -1829));
+        when(door(hall, "r4rp20", 999999999).getPosition()).thenReturn(new Point(89, -1637));
+        Character peer = mock(Character.class);
+        when(peer.getId()).thenReturn(BOT_ID + 1);
+        when(peer.getInventory(InventoryType.EQUIPPED)).thenReturn(mock(Inventory.class));
+        for (Character chr : List.of(member, peer)) {
+            place(chr, hall);
+            when(chr.getParty()).thenReturn(party);
+            when(chr.getEventInstance()).thenReturn(instance);
+            when(chr.getJob()).thenReturn(Job.CLERIC);
+            when(chr.getPosition()).thenReturn(start);
+        }
+        OPQOrchestrator run = mock(OPQOrchestrator.class);
+        when(run.getSharedContext()).thenReturn(new OPQSharedContext());
+        try (var generation = mockStatic(BotGeneration.class);
+             var coordinator = mockStatic(OPQOrchestrator.class, call -> run);
+             var movement = mockStatic(GCMovement.class);
+             var actions = mockStatic(PqActions.class)) {
+            for (String key : List.of("statusStg1", "statusStg2", "statusStg3", "statusStg4")) {
+                actions.when(() -> PqActions.readEimInt(any(), eq(key), eq(-1))).thenReturn(1);
+            }
+            actions.when(() -> PqActions.needsHuntForLeader(any(), eq(OrbisPqData.STATUE_PIECE_5),
+                    eq(OrbisPqData.LOUNGE_COUNT))).thenReturn(true);
+            movement.when(() -> GCMovement.isSettled(any())).thenReturn(true);
+            movement.when(() -> GCMovement.ensureGraph(any())).thenReturn(true);
+            movement.when(() -> GCMovement.portalApproachPoint(hall, first)).thenReturn(firstStep);
+            movement.when(() -> GCMovement.portalApproachPoint(hall, next)).thenReturn(nextStep);
+            movement.when(() -> GCMovement.canPathTo(any(), anyInt(), anyInt())).thenReturn(true);
+            movement.when(() -> GCMovement.withinArrivalBox(any(), any())).thenCallRealMethod();
+            actions.when(() -> PqActions.walkToPortal(eq(member), eq(first), any())).thenAnswer(call -> {
+                if (!wrongGuess) call.<Runnable>getArgument(2).run();
+                return wrongGuess;
+            });
+            actions.when(() -> PqActions.enterPortal(member, first)).thenAnswer(call -> {
+                when(member.getPosition()).thenReturn(fail);
+                return null;
+            });
+            OPQBot scout = new OPQBot(member);
+            scout.setRunning(true);
+            scout.setStateForDebug(OPQBot.OPQBotState.MIDDLE_STAGE);
+            scout.updateState();
+            scout.updateState();
+            actions.verify(() -> PqActions.walkToPortal(eq(member), eq(first), any()));
+            actions.verify(() -> PqActions.walkToPortal(eq(member), eq(next), any()));
+
+            OPQBot teammate = new OPQBot(peer);
+            teammate.setRunning(true);
+            teammate.setStateForDebug(OPQBot.OPQBotState.MIDDLE_STAGE);
+            teammate.updateState();
+            actions.verify(() -> PqActions.walkToPortal(eq(peer), eq(wrongGuess ? next : first), any()));
+        }
+    }
+
+    @Test
+    void orbisDoesNotClimbBackToAnUnreachableSecondRowAfterFallingBack() {
+        MapleMap hall = room(OrbisPqData.STAGE_LOUNGE);
+        Point secondRow = new Point(89, -1637);
+        Point firstStep = new Point(-191, -1458);
+        Portal first = door(hall, "r4rp11", 999999999);
+        when(door(hall, "success", 999999999).getPosition()).thenReturn(new Point(108, -1829));
+        when(door(hall, "r4rp20", 999999999).getPosition()).thenReturn(secondRow);
+        place(member, hall);
+        when(member.getEventInstance()).thenReturn(instance);
+        when(member.getJob()).thenReturn(Job.CLERIC);
+        when(member.getPosition()).thenReturn(secondRow);
+        OPQOrchestrator run = mock(OPQOrchestrator.class);
+        when(run.getSharedContext()).thenReturn(new OPQSharedContext());
+        try (var generation = mockStatic(BotGeneration.class);
+             var coordinator = mockStatic(OPQOrchestrator.class, call -> run);
+             var movement = mockStatic(GCMovement.class);
+             var actions = mockStatic(PqActions.class)) {
+            for (String key : List.of("statusStg1", "statusStg2", "statusStg3", "statusStg4")) {
+                actions.when(() -> PqActions.readEimInt(member, key, -1)).thenReturn(1);
+            }
+            int piece = OrbisPqData.STATUE_PIECE_5;
+            actions.when(() -> PqActions.needsHuntForLeader(member, piece, OrbisPqData.LOUNGE_COUNT))
+                    .thenReturn(true);
+            movement.when(() -> GCMovement.isSettled(member)).thenReturn(true);
+            movement.when(() -> GCMovement.ensureGraph(member)).thenReturn(true);
+            movement.when(() -> GCMovement.portalApproachPoint(hall, first)).thenReturn(firstStep);
+            movement.when(() -> GCMovement.canPathTo(member, firstStep.x, firstStep.y)).thenReturn(true);
+            OPQBot bot = new OPQBot(member);
+            bot.setRunning(true);
+            bot.setStateForDebug(OPQBot.OPQBotState.MIDDLE_STAGE);
+            bot.updateState();
+            when(member.getPosition()).thenReturn(new Point(97, -728));
+            bot.updateState();
+            actions.verify(() -> PqActions.deliverAndWait(member, piece, OrbisPqData.EAK), times(2));
+            actions.verify(() -> PqActions.walkToPortal(eq(member), eq(first), any()), never());
         }
     }
 
@@ -1413,14 +1531,20 @@ class PqStageTransitionTest {
         place(member, assembly);
         place(leader, room(926110401));
         var entrance = door(assembly, "pt01", 999999999);
-        Portal rung = door(lane, "pt02", 999999999);
-        when(rung.getPosition()).thenReturn(new Point(300, -52));
+        Portal rung = door(lane, "pt00", 999999999);
+        for (int row = 0; row < 10; row++) {
+            Portal left = row == 0 ? rung : door(lane, "pt" + row + "0", 999999999);
+            when(left.getPosition()).thenReturn(new Point(-298, -52 - row * 300));
+        }
+        when(door(lane, "success", 999999999).getPosition()).thenReturn(new Point(-312, -3042));
         when(member.getPosition()).thenReturn(new Point(0, 120));
         try (var generation = mockStatic(BotGeneration.class);
              var movement = mockStatic(GCMovement.class);
              var actions = mockStatic(PqActions.class)) {
             actions.when(() -> PqActions.readEimInt(member, "statusStg5", 0)).thenReturn(1);
-            actions.when(() -> PqActions.readEimString(member, "stage6_comb2")).thenReturn("2000000000");
+            movement.when(() -> GCMovement.isSettled(member)).thenReturn(true);
+            movement.when(() -> GCMovement.portalApproachPoint(any(), any())).thenReturn(new Point());
+            movement.when(() -> GCMovement.canPathTo(member, 0, 0)).thenReturn(true);
             actions.when(() -> PqActions.walkThroughPortal(member, entrance)).thenAnswer(call -> {
                 place(member, lane);
                 return null;
@@ -1429,7 +1553,8 @@ class PqStageTransitionTest {
             bot.tickPartyQuest();
             assertSame(lane, member.getMap());
             bot.tickPartyQuest();
-            actions.verify(() -> PqActions.walkThroughPortal(member, rung));
+            actions.verify(() -> PqActions.walkToPortal(eq(member), eq(rung), any()));
+            actions.verify(() -> PqActions.readEimString(member, "stage6_comb2"), never());
         }
     }
 
