@@ -1070,7 +1070,7 @@ public final class LudiStages {
     private static void breakBoxInPlace(Character bot, int oid) {
         for (int swings = 0; swings < BOX_SWING_CAP; swings++) {
             var reactor = bot.getMap().getReactorByOid(oid);
-            if (reactor == null || !reactor.isActive()) {
+            if (!PqActions.isStrikeable(reactor)) {
                 PqActions.boxFinishedPullTick(bot); // pull the next box's tick forward
                 return; // broken (or being reset) - no further transition to walk
             }

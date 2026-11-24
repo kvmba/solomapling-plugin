@@ -151,7 +151,7 @@ public class OPQOrchestrator {
         Integer existing = context.getMyCloudAssignment(id);
         if (existing != null) {
             Reactor r = map.getReactorByOid(existing);
-            if (r != null && r.isAlive() && r.getState() < 4) {
+            if (PqActions.isStrikeable(r)) {
                 return existing;
             }
             opqLog("Dropping stale cloud assignment oid=" + existing + " for " + chr.getName());
@@ -164,7 +164,7 @@ public class OPQOrchestrator {
         Point botPos = chr.getPosition();
         for (Reactor r : map.getAllReactors()) {
             if (!isCloudReactor(r)) continue;
-            if (!r.isAlive() || r.getState() >= 4) continue;
+            if (!PqActions.isStrikeable(r)) continue;
             int oid = r.getObjectId();
             if (taken.contains(oid) || PqActions.reactorApproachDeferred(chr, oid)) continue;
             double d = botPos.distance(r.getPosition());
@@ -203,7 +203,7 @@ public class OPQOrchestrator {
         Integer mine = context.getMyCloudAssignment(askingBotId);
         for (Reactor r : map.getAllReactors()) {
             if (!isCloudReactor(r)) continue;
-            if (!r.isAlive() || r.getState() >= 4) continue;
+            if (!PqActions.isStrikeable(r)) continue;
             int oid = r.getObjectId();
             // Don't count reactors taken by *other* bots; the asker's own
             // (already-broken) assignment will get cleared before re-querying.
@@ -228,7 +228,7 @@ public class OPQOrchestrator {
         Integer existing = context.getMyBoxAssignment(id);
         if (existing != null) {
             Reactor r = map.getReactorByOid(existing);
-            if (r != null && r.isAlive() && r.getState() < 4) {
+            if (PqActions.isStrikeable(r)) {
                 return existing;
             }
             opqLog("Dropping stale box assignment oid=" + existing + " for " + chr.getName());
@@ -241,7 +241,7 @@ public class OPQOrchestrator {
         Point botPos = chr.getPosition();
         for (Reactor r : map.getAllReactors()) {
             if (!isBoxReactor(r)) continue;
-            if (!r.isAlive() || r.getState() >= 4) continue;
+            if (!PqActions.isStrikeable(r)) continue;
             int oid = r.getObjectId();
             if (taken.contains(oid) || PqActions.reactorApproachDeferred(chr, oid)) continue;
             double d = botPos.distance(r.getPosition());
@@ -277,7 +277,7 @@ public class OPQOrchestrator {
         Collection<Integer> taken = context.getBoxAssignmentsView().values();
         for (Reactor r : map.getAllReactors()) {
             if (!isBoxReactor(r)) continue;
-            if (!r.isAlive() || r.getState() >= 4) continue;
+            if (!PqActions.isStrikeable(r)) continue;
             int oid = r.getObjectId();
             if (taken.contains(oid)) continue;
             return true;

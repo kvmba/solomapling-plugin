@@ -117,22 +117,20 @@ public final class BotPotionSim {
      * ground from 1 to 70 still carries the template's level-1 pool and gets floored by a
      * single contact hit.
      *
-     * <p>Grows only: a real pool is also raised by gear and Hyper Body, and clamping it
-     * back down would undo those. Memoized on the level, so an already-correct bot costs
-     * one int compare per tick instead of re-locking the character every tick.
+     * <p>Raise the base pool only. Gear and Hyper Body must not mask an under-levelled
+     * base pool. Memoize by level so a healthy bot does not take the stat lock every tick.
      */
     private void ensureMaxHp(Character bot) {
         int level = bot.getLevel();
         if (level == lastMaxHpForLevel) {
             return;
         }
-        lastMaxHpForLevel = level;
         int target = Math.min(MAX_HP_CAP,
                 BASE_MAX_HP + Math.max(0, level - 1) * MAX_HP_PER_LEVEL);
-        if (target <= bot.getCurrentMaxHp()) {
-            return;
+        if (target > bot.getMaxHp()) {
+            BotClientBinding.runWithBoundPlayer(bot, () -> bot.updateMaxHp(target));
         }
-        BotClientBinding.runWithBoundPlayer(bot, () -> bot.updateMaxHp(target));
+        lastMaxHpForLevel = level;
     }
 
     /** True for artificial players that have no survival loop of their own. */

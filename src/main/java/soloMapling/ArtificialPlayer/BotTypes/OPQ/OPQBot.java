@@ -8,6 +8,7 @@ import soloMapling.ArtificialPlayer.BotCommandsPack.SocialCommands;
 import soloMapling.ArtificialPlayer.BotDialogueHandler;
 import soloMapling.ArtificialPlayer.BotGeneration;
 import soloMapling.ArtificialPlayer.BotGrindSystem.GrindTickRegistry;
+import soloMapling.ArtificialPlayer.BotHealthSystem.BotPotionSim;
 import soloMapling.ArtificialPlayer.BotMessagingSystem.ChatMessage;
 import soloMapling.ArtificialPlayer.BotMessagingSystem.MessageQueue;
 import soloMapling.ArtificialPlayer.BotPartySystem.BotPartyLogic;
@@ -55,7 +56,9 @@ public class OPQBot extends BotSM implements GrindTickRegistry.Participant {
 
     private static final int[] CLOUD_LOOT = {OPQConstants.CLOUD_PIECE};
 
-    // volatile: the swing chains run off-tick and read/write these
+    private final BotPotionSim potionSim = new BotPotionSim();
+
+    // The combat sweep reads the phase while the macro tick advances it.
     private volatile OPQBotState opqBotState = OPQBotState.RESET;
     private volatile OPQOrchestrator orchestrator;
     private volatile OPQSharedContext sharedContext = new OPQSharedContext();
@@ -64,7 +67,6 @@ public class OPQBot extends BotSM implements GrindTickRegistry.Participant {
     // Per-state timers / scratch fields
     private long stageWaitStartTime;
     private long lastRecruitMessageAt;
-    private volatile int reactorHitsThisTarget;
 
     /** Stage 5: which of the lounge's four sub-rooms to enter next (advances on each visit). */
     private int loungeVisit;
@@ -96,6 +98,7 @@ public class OPQBot extends BotSM implements GrindTickRegistry.Participant {
      */
     @Override
     public synchronized void startScheduledTask(long initialDelayMs) {
+        potionSim.tick(getChr());
         // Enable before the FSM starts and before any arrival warp, so the map-entry choreography
         // sees the bot as dynamic-controlled and skips the recorded portal drop.
         GCMovement.enable(getChr());
@@ -107,16 +110,22 @@ public class OPQBot extends BotSM implements GrindTickRegistry.Participant {
     @Override
     public void grindTick() {
         Character bot = getChr();
-        if (checkIfNotRunningOrPaused() || bot.getParty() == null || death().isCorpse()
-                || status().isFrozen() || !PqActions.reactorBeatArmed(bot) || !GCMovement.hasGraph(bot)) return;
         MapleMap room = bot.getMap();
+        if (room == null || checkIfNotRunningOrPaused() || bot.getParty() == null || death().isCorpse()
+                || status().isFrozen() || !PqActions.reactorBeatArmed(bot) || !GCMovement.hasGraph(bot)) return;
         var instance = room.getEventInstance();
-        if (instance == null) return;
+        if (instance == null || bot.getMap() != room) return;
         int mapId = room.getId();
-        if (instance.isEventCleared() ? mapId == OrbisPqData.TREASURE_MAP || OrbisPqData.isJailRoom(mapId)
-                : OrbisPqData.LOUNGE_ROOMS.contains(mapId) && instance.getIntProperty("statusStg5") != 1) {
-            PqActions.workReactorOnBeat(bot);
-        }
+        boolean workReactor = instance.isEventCleared()
+                ? mapId == OrbisPqData.TREASURE_MAP || OrbisPqData.isJailRoom(mapId)
+                : switch (mapId) {
+                    case OPQConstants.OPQ_STAGE_1 -> opqBotState == OPQBotState.STAGE_1_HIT_REACTOR
+                            && instance.getIntProperty("statusStg0") != 1;
+                    case OPQConstants.OPQ_STAGE_2 -> opqBotState == OPQBotState.STAGE_2_HIT_BOX
+                            && instance.getIntProperty("statusStg3") < 0;
+                    default -> OrbisPqData.LOUNGE_ROOMS.contains(mapId) && instance.getIntProperty("statusStg5") != 1;
+                };
+        if (workReactor) PqActions.workReactorOnBeat(bot);
     }
 
     // =========================================================================
@@ -182,6 +191,9 @@ public class OPQBot extends BotSM implements GrindTickRegistry.Participant {
             return;
         }
         this.opqBotState = next;
+        if (prev == OPQBotState.STAGE_1_HIT_REACTOR || prev == OPQBotState.STAGE_2_HIT_BOX) {
+            PqActions.armReactorBeat(getChr(), -1);
+        }
         log(String.format("[OPQBot %s] %s -> %s | %s | map=%d pos=%s",
                 getChr().getName(), prev, next, reason,
                 getChr().getMapId(), getChr().getPosition()));
@@ -216,7 +228,6 @@ public class OPQBot extends BotSM implements GrindTickRegistry.Participant {
         hint = Collections.singletonList(getChr().getName());
         stageWaitStartTime = 0;
         lastRecruitMessageAt = 0;
-        reactorHitsThisTarget = 0;
         lootedRecordItemId = -1;
         loungeVisit = 0;
         leavingLoungeRoom = null;
@@ -262,10 +273,13 @@ public class OPQBot extends BotSM implements GrindTickRegistry.Participant {
                 return;
             }
         }
-        if (OrbisPqData.isOrbisRoom(map.getId()) && instance != null && instance.isEventCleared()) {
-            transitionTo(OPQBotState.EXIT_DETECT, "settling the cleared run");
-            workSettlement(map);
-            return;
+        if (instance != null && OrbisPqData.isOrbisRoom(map.getId())) {
+            potionSim.tick(getChr());
+            if (instance.isEventCleared()) {
+                transitionTo(OPQBotState.EXIT_DETECT, "settling the cleared run");
+                workSettlement(map);
+                return;
+            }
         }
 
         // Authoritative re-home: if the game teleported us to a map we weren't
@@ -281,6 +295,7 @@ public class OPQBot extends BotSM implements GrindTickRegistry.Participant {
         if (mapId == OPQConstants.OPQ_STAGE_1 || mapId == OPQConstants.OPQ_STAGE_2) {
             int leaderMap = partyLeaderMapId();
             if (leaderMap == OPQConstants.OPQ_EXIT_LOBBY || leaderMap == OPQConstants.OPQ_LOBBY) {
+                PqActions.armReactorBeat(getChr(), -1);
                 followLeaderOut();
                 return;
             }
@@ -308,10 +323,10 @@ public class OPQBot extends BotSM implements GrindTickRegistry.Participant {
                 handleInPartyIdle();
                 break;
             case STAGE_1_NAVIGATE:
-                handleStage1Navigate();
+                handleStage1Navigate(map);
                 break;
             case STAGE_1_HIT_REACTOR:
-                hitReactor4Times();
+                workAssignedReactor(map, true);
                 break;
             case STAGE_1_LOOT:
                 handleStage1Loot();
@@ -332,10 +347,10 @@ public class OPQBot extends BotSM implements GrindTickRegistry.Participant {
                 handleMiddleStage();
                 break;
             case STAGE_2_NAVIGATE:
-                handleStage2Navigate();
+                handleStage2Navigate(map);
                 break;
             case STAGE_2_HIT_BOX:
-                hitBox4Times();
+                workAssignedReactor(map, false);
                 break;
             case STAGE_2_LOOT:
                 handleStage2Loot();
@@ -506,7 +521,7 @@ public class OPQBot extends BotSM implements GrindTickRegistry.Participant {
     // assignCloudReactor picks a fresh closest one. Only when no clouds
     // are left do we mark task complete and wait.
 
-    private void handleStage1Navigate() {
+    private void handleStage1Navigate(MapleMap room) {
         sharedContext_trySetPhase(OPQPhase.STAGE_1);
 
         Integer reactorOid = orchestrator.assignCloudReactor(this);
@@ -520,82 +535,42 @@ public class OPQBot extends BotSM implements GrindTickRegistry.Participant {
             return;
         }
 
-        Reactor reactor = getChr().getMap().getReactorByOid(reactorOid);
-        if (reactor == null || !reactor.isAlive() || reactor.getState() >= 4) {
-            // Stale assignment — clear and retry next tick.
-            sharedContext.putCloudAssignment(getChr().getId(), null);
-            debugLogf("Reactor oid=" + reactorOid + " is stale (null/dead/state>=4) — re-requesting next tick");
-            return;
-        }
-
-        var approach = PqActions.approachReactor(getChr(), reactorOid, false, false);
-        if (approach == PqActions.Approach.STUCK) {
-            PqActions.deferReactorApproach(getChr(), reactorOid);
-            sharedContext.putCloudAssignment(getChr().getId(), null);
-        } else if (approach == PqActions.Approach.IN_POSITION) {
-            reactorHitsThisTarget = 0;
-            transitionTo(OPQBotState.STAGE_1_HIT_REACTOR,
-                    "arrived beside reactor oid=" + reactorOid);
-            return;
-        }
-        waitFor(OPQConstants.NAVIGATE_SETTLE_MS);
+        transitionTo(OPQBotState.STAGE_1_HIT_REACTOR, "assigned cloud reactor oid=" + reactorOid);
+        workAssignedReactor(room, true);
     }
 
-    private void hitReactor4Times() {
-        // swings play out on a chain; the gate kills leftover swings once a hit
-        // transitions us to LOOT, and waitFor holds ticks until the chain is done
-        BotTiming.Chain chain = BotTiming.chain()
-                .stopUnless(() -> opqBotState == OPQBotState.STAGE_1_HIT_REACTOR);
-        for (int x = 0; x < 4; x++) {
-            chain.run(this::handleStage1HitReactor).pause(OPQConstants.SWING_INTERVAL_MS);
+    private void workAssignedReactor(MapleMap room, boolean cloud) {
+        Character bot = getChr();
+        if (bot.getMap() != room) return;
+        int botId = bot.getId();
+        if (!cloud && musicPlaying()) {
+            sharedContext.putBoxAssignment(botId, null);
+            transitionTo(OPQBotState.STAGE_2_WAIT, "the music box has accepted its record");
+            return;
         }
-        chain.start();
-        waitFor(OPQConstants.SWING_INTERVAL_MS * 4 + 200);
-    }
-
-    private void handleStage1HitReactor() {
-        Integer reactorOid = sharedContext.getMyCloudAssignment(getChr().getId());
+        OPQBotState navigate = cloud ? OPQBotState.STAGE_1_NAVIGATE : OPQBotState.STAGE_2_NAVIGATE;
+        Integer reactorOid = cloud ? sharedContext.getMyCloudAssignment(botId) : sharedContext.getMyBoxAssignment(botId);
         if (reactorOid == null) {
-            // Lost our assignment somehow — go back to navigate to re-request.
-            transitionTo(OPQBotState.STAGE_1_NAVIGATE, "no reactor assignment in HIT state");
-            return;
-        }
-        Reactor reactor = getChr().getMap().getReactorByOid(reactorOid);
-        if (reactor == null || !reactor.isAlive() || reactor.getState() >= 4) {
-            debugLogf("Reactor oid=" + reactorOid + " already dead — skipping to LOOT");
-            transitionTo(OPQBotState.STAGE_1_LOOT, "reactor already broken on arrival");
+            transitionTo(navigate, "no reactor assignment");
             return;
         }
 
-        debugLogf("handleStage1HitReactor: hit#" + (reactorHitsThisTarget + 1)
-                + "/" + OPQConstants.MAX_REACTOR_HITS
-                + " reactorOid=" + reactorOid + " state=" + reactor.getState());
+        // Once armed, the sweep owns the walk and swings as soon as it reaches the reactor.
+        if (PqActions.reactorBeatArmed(bot)) return;
+        GCMovement.ensureGraph(bot);
+        if (PqActions.approachReactor(bot, room, reactorOid, false, true) != PqActions.Approach.STUCK
+                || bot.getMap() != room) return;
 
-        // Defensive: re-check state immediately before swinging. The top-of-tick
-        // check above can go stale if a real player hit the reactor in the same
-        // tick window — overshooting state 4 crashes the map.
-        if (reactor.getState() >= 4) {
-            debugLogf("Pre-hit guard tripped: state=" + reactor.getState() + " — skipping to LOOT");
-            transitionTo(OPQBotState.STAGE_1_LOOT, "pre-hit state guard");
+        Reactor reactor = room.getReactorByOid(reactorOid);
+        if (!PqActions.isStrikeable(reactor)) {
+            transitionTo(cloud ? OPQBotState.STAGE_1_LOOT : OPQBotState.STAGE_2_LOOT,
+                    "reactor broken oid=" + reactorOid);
             return;
         }
-
-        if (!PqActions.hitReactor(getChr(), reactorOid)) {
-            transitionTo(OPQBotState.STAGE_1_NAVIGATE, "reactor approach not settled");
-            return;
-        }
-        reactorHitsThisTarget++;
-
-        // The engine drops the cloud piece itself now (2002001.js act() -> rm.dropItems()),
-        // so nothing is spawned by hand. Whether THIS swing was the one that broke it is not
-        // knowable from the caller's side - act() fires inside the engine's state walk - so
-        // the loot step that follows simply sweeps the floor either way.
-        byte stateAfter = reactor.getState();
-
-        if (stateAfter >= 4 || reactorHitsThisTarget >= OPQConstants.MAX_REACTOR_HITS) {
-            transitionTo(OPQBotState.STAGE_1_LOOT,
-                    "reactor broken (state=" + stateAfter + ", hits=" + reactorHitsThisTarget + ")");
-        }
+        PqActions.deferReactorApproach(bot, reactorOid);
+        if (cloud) sharedContext.putCloudAssignment(botId, null);
+        else sharedContext.putBoxAssignment(botId, null);
+        transitionTo(navigate, "reactor approach stalled oid=" + reactorOid);
     }
 
     private void handleStage1Loot() {
@@ -991,7 +966,7 @@ public class OPQBot extends BotSM implements GrindTickRegistry.Participant {
     // Phase: Stage 2
     // =========================================================================
 
-    private void handleStage2Navigate() {
+    private void handleStage2Navigate(MapleMap room) {
         sharedContext_trySetPhase(OPQPhase.STAGE_2);
 
         if (leaderLeftStage2()) {
@@ -1040,89 +1015,11 @@ public class OPQBot extends BotSM implements GrindTickRegistry.Participant {
             return;
         }
 
-        Reactor reactor = getChr().getMap().getReactorByOid(reactorOid);
-        if (reactor == null || !reactor.isAlive() || reactor.getState() >= 4) {
-            sharedContext.putBoxAssignment(getChr().getId(), null);
-            debugLogf("Box reactor oid=" + reactorOid + " is stale (null/dead/state>=4) — re-requesting next tick");
-            return;
-        }
-
-        // Chat which box we're going for (ordinal based on sorted position right-to-left)
-        String ordinal = orchestrator.getBoxOrdinal(reactorOid);
-        var approach = PqActions.approachReactor(getChr(), reactorOid, false, false);
-        if (approach == PqActions.Approach.STUCK) {
-            PqActions.deferReactorApproach(getChr(), reactorOid);
-            sharedContext.putBoxAssignment(getChr().getId(), null);
-        } else if (approach == PqActions.Approach.IN_POSITION) {
+        transitionTo(OPQBotState.STAGE_2_HIT_BOX, "assigned record box oid=" + reactorOid);
+        workAssignedReactor(room, false);
+        if (opqBotState == OPQBotState.STAGE_2_HIT_BOX) {
+            String ordinal = orchestrator.getBoxOrdinal(reactorOid);
             SocialCommands.BotSpeak(getChr(), BotMessages.get("opq.taking_box", localizeOrdinal(ordinal)));
-            reactorHitsThisTarget = 0;
-            transitionTo(OPQBotState.STAGE_2_HIT_BOX,
-                    "arrived at " + ordinal + " box (oid=" + reactorOid + ")");
-            return;
-        }
-        waitFor(OPQConstants.NAVIGATE_SETTLE_MS);
-    }
-
-    private void hitBox4Times() {
-        // Face toward the box reactor before swinging
-        Integer reactorOid = sharedContext.getMyBoxAssignment(getChr().getId());
-        if (reactorOid != null) {
-            Reactor reactor = getChr().getMap().getReactorByOid(reactorOid);
-            if (reactor != null) {
-                boolean boxIsLeft = reactor.getPosition().x < getChr().getPosition().x;
-                // The dynamic engine owns the bot's facing (there is no recorded turn to replay),
-                // so ask it to face the box before the swing.
-                GCMovement.face(getChr(), boxIsLeft);
-            }
-        }
-
-        BotTiming.Chain chain = BotTiming.chain()
-                .stopUnless(() -> opqBotState == OPQBotState.STAGE_2_HIT_BOX);
-        for (int x = 0; x < 4; x++) {
-            chain.run(this::handleStage2HitBox).pause(OPQConstants.SWING_INTERVAL_MS);
-        }
-        chain.start();
-        waitFor(OPQConstants.SWING_INTERVAL_MS * 4 + 200);
-    }
-
-    private void handleStage2HitBox() {
-        Integer reactorOid = sharedContext.getMyBoxAssignment(getChr().getId());
-        if (reactorOid == null) {
-            transitionTo(OPQBotState.STAGE_2_NAVIGATE, "no box assignment in HIT state");
-            return;
-        }
-        Reactor reactor = getChr().getMap().getReactorByOid(reactorOid);
-        if (reactor == null || !reactor.isAlive() || reactor.getState() >= 4) {
-            debugLogf("Box reactor oid=" + reactorOid + " already broken — skipping to LOOT");
-            transitionTo(OPQBotState.STAGE_2_LOOT, "box already broken on arrival");
-            return;
-        }
-
-        debugLogf("handleStage2HitBox: hit#" + (reactorHitsThisTarget + 1)
-                + "/" + OPQConstants.MAX_REACTOR_HITS
-                + " reactorOid=" + reactorOid + " state=" + reactor.getState());
-
-        if (reactor.getState() >= 4) {
-            debugLogf("Pre-hit guard tripped: state=" + reactor.getState() + " — skipping to LOOT");
-            transitionTo(OPQBotState.STAGE_2_LOOT, "pre-hit state guard");
-            return;
-        }
-
-        if (!PqActions.hitReactor(getChr(), reactorOid)) {
-            transitionTo(OPQBotState.STAGE_2_NAVIGATE, "box approach not settled");
-            return;
-        }
-        reactorHitsThisTarget++;
-
-        // As in stage 1: the engine drops the record itself (2002004..2002010 -> act() ->
-        // rm.dropItems()), so nothing is spawned by hand. Which record this box yields is
-        // reactordrops' business (2002004 -> 4001056, ... in data-id order, not screen
-        // order); the loot step reads the inventory afterwards to find out.
-        byte stateAfter = reactor.getState();
-
-        if (stateAfter >= 4 || reactorHitsThisTarget >= OPQConstants.MAX_REACTOR_HITS) {
-            transitionTo(OPQBotState.STAGE_2_LOOT,
-                    "box broken (state=" + stateAfter + ", hits=" + reactorHitsThisTarget + ")");
         }
     }
 
@@ -1408,7 +1305,6 @@ public class OPQBot extends BotSM implements GrindTickRegistry.Participant {
         sharedContext.putCloudAssignment(getChr().getId(), null);
         sharedContext.putBoxAssignment(getChr().getId(), null);
         sharedContext.putPlatformAssignment(getChr().getId(), null);
-        reactorHitsThisTarget = 0;
         stageWaitStartTime = 0;
         lootedRecordItemId = -1;
         loungeVisit = 0;

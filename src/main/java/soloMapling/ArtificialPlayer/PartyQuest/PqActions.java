@@ -561,7 +561,7 @@ public final class PqActions {
     }
 
     /**
-     * Every alive reactor on the map with this data id, as oids. Quest stages scatter several
+     * Every strikeable reactor on the map with this data id, as oids. Quest stages scatter several
      * boxes of the same id across the room (LPQ stage 2's eleven pass boxes share 2202003), so
      * the first-oid lookup cannot reach them all.
      *
@@ -577,7 +577,7 @@ public final class PqActions {
             return List.of();
         }
         return bot.getMap().getAllReactors().stream()
-                .filter(r -> r.getId() == dataId && r.isActive())
+                .filter(r -> r.getId() == dataId && isStrikeable(r))
                 .mapToInt(Reactor::getObjectId)
                 .boxed().toList();
     }
@@ -676,8 +676,12 @@ public final class PqActions {
         }
     }
 
-    private static boolean isStrikeable(Reactor reactor) {
-        return reactor != null && reactor.isActive() && reactor.getReactorType() != 100;
+    public static boolean isStrikeable(Reactor reactor) {
+        if (reactor == null || !reactor.isActive()) return false;
+        int type = reactor.getReactorType();
+        // WZ frames without an event use type 999. The host leaves a spent box
+        // active in its last frame, but a starting frame can still advance.
+        return type != 100 && (type != 999 || reactor.getStats().getNextState(reactor.getState(), (byte) 0) >= 0);
     }
 
     private static boolean workReactor(Character bot, ReactorWork work, int oid) {
@@ -701,7 +705,7 @@ public final class PqActions {
     // driver's swing cadence, so arrival converts into hits within one 250ms beat.
 
     /** botId -> the box the combat sweep may strike once the approach lands (oid + map instance). */
-    private record BeatBox(int oid, MapleMap map) {
+    private record BeatBox(int oid, MapleMap map, boolean descend) {
     }
 
     private static final Map<Integer, BeatBox> beatBoxByBot = new java.util.concurrent.ConcurrentHashMap<>();
@@ -721,7 +725,7 @@ public final class PqActions {
         SeekState control = seekStates.computeIfAbsent(bot.getId(), ignored -> new SeekState());
         synchronized (control) {
             if (oid >= 0) {
-                beatBoxByBot.put(bot.getId(), new BeatBox(oid, bot.getMap()));
+                beatBoxByBot.put(bot.getId(), new BeatBox(oid, bot.getMap(), true));
             } else {
                 beatBoxByBot.remove(bot.getId());
             }
@@ -751,7 +755,8 @@ public final class PqActions {
         return approachReactor(bot, bot.getMap(), oid, descend, onBeat);
     }
 
-    private static Approach approachReactor(Character bot, MapleMap map, int oid, boolean descend, boolean onBeat) {
+    /** Approach a reactor reserved in this specific map instance, not an OID in the new room after a warp. */
+    public static Approach approachReactor(Character bot, MapleMap map, int oid, boolean descend, boolean onBeat) {
         if (map == null) return Approach.STUCK;
         SeekState control = seekStates.computeIfAbsent(bot.getId(), ignored -> new SeekState());
         synchronized (control) {
@@ -759,7 +764,7 @@ public final class PqActions {
             Reactor reactor = map.getReactorByOid(oid);
             if (!isStrikeable(reactor)) return Approach.STUCK;
             if (movementShielded(bot.getId())) return Approach.TRAVELLING;
-            if (onBeat) beatBoxByBot.put(bot.getId(), new BeatBox(oid, map));
+            if (onBeat) beatBoxByBot.put(bot.getId(), new BeatBox(oid, map, descend));
             Approach result = descend ? descendToFloorAerialTarget(bot, reactor.getPosition())
                     : approachUnder(bot, reactor.getPosition());
             if (result == Approach.STUCK) {
@@ -836,7 +841,8 @@ public final class PqActions {
         // Never strike from across the room: the same honest-shot rule approachUnder's
         // callers follow. The approach also owns the walk (and re-issues it when the driver
         // has given up), so the beat advances the descent/approach the macro tick started.
-        Approach outcome = descendToFloorAerialTarget(bot, reactor.getPosition());
+        Approach outcome = box.descend() ? descendToFloorAerialTarget(bot, reactor.getPosition())
+                : approachUnder(bot, reactor.getPosition());
         if (outcome == Approach.STUCK) {
             beatBoxByBot.remove(bot.getId()); // the stage's next tick rotates the target
             return false;
@@ -844,6 +850,8 @@ public final class PqActions {
         if (outcome == Approach.IN_POSITION) {
             long now = movementNowMs();
             if (reactorSwingReady(bot, now) && !GCMovement.isAttacking(bot)) {
+                int dx = reactor.getPosition().x - bot.getPosition().x;
+                if (dx != 0) GCMovement.face(bot, dx < 0);
                 strikeReactorOnBeat(bot, box, now);
             }
             return false;

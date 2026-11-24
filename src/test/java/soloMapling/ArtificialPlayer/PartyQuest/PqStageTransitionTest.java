@@ -11,6 +11,7 @@ import org.gms.server.maps.MapItem;
 import org.gms.server.maps.MapleMap;
 import org.gms.server.maps.Portal;
 import org.gms.server.maps.Reactor;
+import org.gms.server.maps.ReactorStats;
 import org.gms.server.partyquest.AriantColiseum;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
@@ -19,8 +20,11 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.EnumSource;
 import soloMapling.ArtificialPlayer.BotGeneration;
+import soloMapling.ArtificialPlayer.BotSM;
+import soloMapling.ArtificialPlayer.BotCommandsPack.BotAttack;
 import soloMapling.ArtificialPlayer.BotCommandsPack.SocialCommands;
 import soloMapling.ArtificialPlayer.BotCommandsPack.WarpCommands;
+import soloMapling.ArtificialPlayer.BotGrindSystem.GrindTickRegistry;
 import soloMapling.ArtificialPlayer.BotMessagingSystem.CharacterStorage;
 import soloMapling.ArtificialPlayer.BotTypes.Amoria.AmoriaPQBot;
 import soloMapling.ArtificialPlayer.BotTypes.Ariant.AriantPQBot;
@@ -48,12 +52,14 @@ import soloMapling.ArtificialPlayer.BotTypes.Pyramid.PyramidPQBot;
 import soloMapling.ArtificialPlayer.BotTypes.Zakum.ZakumPQBot;
 import soloMapling.ArtificialPlayer.BotTypes.Zakum.ZakumPqData;
 import soloMapling.ArtificialPlayer.GCMoveSystem.GCMovement;
+import soloMapling.MapVFX.CustomReactor;
 import soloMapling.server.BotTickService;
 
 import java.awt.Point;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -283,6 +289,181 @@ class PqStageTransitionTest {
     }
 
     @ParameterizedTest
+    @CsvSource({
+            "920010000,2002001,STAGE_1_HIT_REACTOR,STAGE_1_LOOT",
+            "920010400,2002004,STAGE_2_HIT_BOX,STAGE_2_LOOT"
+    })
+    void orbisSwingsOnTheFirstBeatAfterArrivalAndStopsAtTheTerminalFrame(
+            int mapId, int reactorId, OPQBot.OPQBotState hitting, OPQBot.OPQBotState looting) throws Exception {
+        MapleMap map = room(mapId);
+        place(member, map);
+        place(leader, map);
+        when(member.getEventInstance()).thenReturn(instance);
+        when(instance.getIntProperty("statusStg3")).thenReturn(-1);
+
+        // Two strikes remain. The host keeps the final WZ frame alive and of type 999.
+        ReactorStats stats = new ReactorStats();
+        stats.addState((byte) 2, 0, null, (byte) 3, -1, (byte) 0);
+        stats.addState((byte) 3, 0, null, (byte) 4, -1, (byte) 0);
+        stats.addState((byte) 4, 999, null, (byte) -1, 0, (byte) 0);
+        Reactor reactor = new Reactor(stats, reactorId);
+        int oid = 101;
+        Point target = new Point(100, 125);
+        Point floor = new Point(100, 200);
+        reactor.setObjectId(oid);
+        reactor.setState((byte) 2);
+        reactor.setPosition(target);
+        when(map.getAllReactors()).thenReturn(List.of(reactor));
+        when(map.getReactorByOid(oid)).thenReturn(reactor);
+        when(member.getPosition()).thenReturn(new Point(100, 0));
+
+        OPQOrchestrator run = orbisRun();
+        AtomicLong now = new AtomicLong(1_000);
+        try (var generation = mockStatic(BotGeneration.class);
+             var coordinator = mockStatic(OPQOrchestrator.class, call ->
+                     "bind".equals(call.getMethod().getName()) ? run : call.callRealMethod());
+             var movement = mockStatic(GCMovement.class);
+             var chat = mockStatic(SocialCommands.class);
+             var swings = mockStatic(BotAttack.class);
+             var hits = mockStatic(CustomReactor.class)) {
+            movement.when(() -> GCMovement.hasGraph(member)).thenReturn(true);
+            movement.when(() -> GCMovement.isSettled(member)).thenReturn(true);
+            movement.when(() -> GCMovement.groundPointBelow(map, target.x, target.y)).thenReturn(floor);
+            movement.when(() -> GCMovement.peekRegionIdAt(eq(map), anyInt(), anyInt())).thenReturn(1);
+            movement.when(GCMovement::movementNowMs).thenAnswer(call -> now.get());
+            swings.when(() -> BotAttack.basicSwing(member)).thenReturn(true);
+            hits.when(() -> CustomReactor.hitReactorWithScript(map, oid, member)).thenAnswer(call -> {
+                reactor.setState((byte) (reactor.getState() + 1));
+                return null;
+            });
+
+            OPQBot bot = new OPQBot(member);
+            bot.setRunning(true);
+            bot.updateState();
+            assertEquals(hitting, bot.getOPQBotState());
+            bot.grindTick();
+            hits.verifyNoInteractions();
+            // Macro and sweep both aim for the floor, including when a walk needs reissuing.
+            movement.verify(() -> GCMovement.move(eq(member), eq(floor.x), eq(floor.y), any(), any()), times(2));
+
+            when(member.getPosition()).thenReturn(new Point(floor.x + 30, floor.y));
+            bot.grindTick(); // no second macro tick after arrival
+            assertEquals(3, reactor.getState());
+            now.addAndGet(250);
+            bot.grindTick();
+            assertEquals(3, reactor.getState(), "arrival must not bypass swing cadence");
+            now.addAndGet(750);
+            bot.grindTick();
+            assertEquals(4, reactor.getState());
+            assertTrue(reactor.isActive());
+            assertFalse(PqActions.reactorBeatArmed(member));
+            assertTrue(PqActions.findAllReactorOids(member, reactorId).isEmpty());
+            now.addAndGet(1_000);
+            bot.grindTick();
+            hits.verify(() -> CustomReactor.hitReactorWithScript(map, oid, member), times(2));
+
+            bot.updateState();
+            assertEquals(looting, bot.getOPQBotState());
+        } finally {
+            PqActions.clearSeekState(BOT_ID);
+            PqActions.clearReactorBeat(BOT_ID);
+        }
+    }
+
+    @Test
+    void orbisDoesNotArmTheSameReactorOidInAnotherInstanceDuringGraphWarmup() throws Exception {
+        MapleMap map = room(OrbisPqData.STAGE_CLOUDS);
+        MapleMap replacement = room(OrbisPqData.STAGE_CLOUDS);
+        EventInstanceManager nextRun = mock(EventInstanceManager.class);
+        when(replacement.getEventInstance()).thenReturn(nextRun);
+        place(member, map);
+        place(leader, map);
+        when(member.getPosition()).thenReturn(new Point());
+        int oid = 101, cloud = 2002001;
+        Reactor reactor = orbisReactor(map, cloud, oid, 150);
+        when(map.getAllReactors()).thenReturn(List.of(reactor));
+        orbisReactor(replacement, cloud, oid, 250);
+
+        OPQOrchestrator run = orbisRun();
+        try (var generation = mockStatic(BotGeneration.class);
+             var coordinator = mockStatic(OPQOrchestrator.class, call ->
+                     "bind".equals(call.getMethod().getName()) ? run : call.callRealMethod());
+             var movement = mockStatic(GCMovement.class)) {
+            movement.when(() -> GCMovement.ensureGraph(member)).thenAnswer(call -> {
+                place(member, replacement);
+                return true;
+            });
+            OPQBot bot = new OPQBot(member);
+            bot.setRunning(true);
+            bot.updateState();
+
+            assertSame(replacement, member.getMap());
+            assertFalse(PqActions.reactorBeatArmed(member));
+            movement.verify(() -> GCMovement.move(eq(member), anyInt(), anyInt(), any(), any()), never());
+        } finally {
+            PqActions.clearSeekState(BOT_ID);
+            PqActions.clearReactorBeat(BOT_ID);
+        }
+    }
+
+    @ParameterizedTest
+    @CsvSource({"true,51,50,0,1150,395", "false,45,50,0,1018,355", "true,51,800,60,1150,602"})
+    void pqBotsSetLevelBasedHpBeforeEnablingMovement(
+            boolean orbis, int level, int templateHp, int hyperBodyPct, int baseHp, int healedHp) {
+        place(member, room(orbis ? OrbisPqData.STAGE_WALKWAY : LudiPqData.ENTRY_MAP));
+        when(member.isAlive()).thenReturn(true);
+        when(member.getLevel()).thenReturn(level);
+        when(member.getHp()).thenReturn(50);
+        var pool = new AtomicInteger(templateHp);
+        when(member.getMaxHp()).thenAnswer(call -> pool.get());
+        when(member.getCurrentMaxHp()).thenAnswer(call -> pool.get() * (100 + hyperBodyPct) / 100);
+        doAnswer(call -> { pool.set(call.getArgument(0)); return null; }).when(member).updateMaxHp(anyInt());
+
+        OPQOrchestrator run = mock(OPQOrchestrator.class);
+        when(run.getSharedContext()).thenReturn(new OPQSharedContext());
+        GrindTickRegistry registry = mock(GrindTickRegistry.class);
+        try (var generation = mockStatic(BotGeneration.class);
+             var coordinator = mockStatic(OPQOrchestrator.class, call -> run);
+             var ticker = mockStatic(BotTickService.class);
+             var combat = mockStatic(GrindTickRegistry.class);
+             var movement = mockStatic(GCMovement.class)) {
+            combat.when(GrindTickRegistry::getInstance).thenReturn(registry);
+            movement.when(() -> GCMovement.enable(member)).thenAnswer(call -> {
+                assertEquals(baseHp, pool.get());
+                verify(member).updateHp(healedHp);
+                return null;
+            });
+            BotSM bot = orbis ? new OPQBot(member) : new LudiPQBot(member);
+            bot.startScheduledTask(0);
+            movement.verify(() -> GCMovement.enable(member));
+        }
+    }
+
+    @Test
+    void orbisRecoversDamageDuringLaterRoomWork() {
+        MapleMap walkway = room(OrbisPqData.STAGE_WALKWAY);
+        place(member, walkway);
+        place(leader, walkway);
+        when(member.getEventInstance()).thenReturn(instance);
+        when(instance.getIntProperty(anyString())).thenReturn(-1);
+        when(member.isAlive()).thenReturn(true);
+        when(member.getLevel()).thenReturn(51);
+        when(member.getMaxHp()).thenReturn(1_150);
+        when(member.getCurrentMaxHp()).thenReturn(1_150);
+        when(member.getHp()).thenReturn(100);
+        OPQOrchestrator run = mock(OPQOrchestrator.class);
+        when(run.getSharedContext()).thenReturn(new OPQSharedContext());
+        try (var generation = mockStatic(BotGeneration.class);
+             var coordinator = mockStatic(OPQOrchestrator.class, call -> run);
+             var movement = mockStatic(GCMovement.class)) {
+            OPQBot bot = new OPQBot(member);
+            bot.setRunning(true);
+            bot.updateState();
+            verify(member).updateHp(445);
+        }
+    }
+
+    @ParameterizedTest
     @CsvSource({"920010000,STAGE_1_NAVIGATE,STAGE_1_WAIT", "920010400,STAGE_2_NAVIGATE,STAGE_2_WAIT"})
     void orbisSharesAStalledReactorWithAnotherBotInsteadOfImmediatelyTakingItBack(
             int mapId, OPQBot.OPQBotState navigate, OPQBot.OPQBotState waiting) throws Exception {
@@ -299,18 +480,14 @@ class PqStageTransitionTest {
         when(map.getAllReactors()).thenReturn(List.of(selected, alternate));
         if (!cloud) when(selected.getState()).thenReturn((byte) 1);
 
-        // Keep the production assignment logic without starting the orchestrator's timer.
-        var constructor = OPQOrchestrator.class.getDeclaredConstructors()[0];
-        constructor.setAccessible(true);
-        OPQOrchestrator run = spy((OPQOrchestrator) constructor.newInstance((Object) null));
-        doNothing().when(run).mirrorPhase(any(), any());
+        OPQOrchestrator run = orbisRun();
         OPQSharedContext assignments = run.getSharedContext();
         try (var generation = mockStatic(BotGeneration.class);
              var coordinator = mockStatic(OPQOrchestrator.class, call ->
                      "bind".equals(call.getMethod().getName()) ? run : call.callRealMethod());
              var actions = mockStatic(PqActions.class, call -> {
                  if ("approachReactor".equals(call.getMethod().getName())) {
-                     return ((int) call.getArgument(1)) == 101 ? PqActions.Approach.STUCK : PqActions.Approach.TRAVELLING;
+                     return ((int) call.getArgument(2)) == 101 ? PqActions.Approach.STUCK : PqActions.Approach.TRAVELLING;
                  }
                  return call.callRealMethod();
              }); var chat = mockStatic(SocialCommands.class); var movement = mockStatic(GCMovement.class)) {
@@ -336,7 +513,8 @@ class PqStageTransitionTest {
     }
 
     @ParameterizedTest
-    @EnumSource(value = OPQBot.OPQBotState.class, names = {"STAGE_2_NAVIGATE", "STAGE_2_LOOT", "STAGE_2_WAIT"})
+    @EnumSource(value = OPQBot.OPQBotState.class,
+            names = {"STAGE_2_NAVIGATE", "STAGE_2_HIT_BOX", "STAGE_2_LOOT", "STAGE_2_WAIT"})
     void orbisStopsHuntingForRecordsOnceTheMusicIsPlaying(OPQBot.OPQBotState start) {
         MapleMap music = room(920010400);
         place(member, music);
@@ -363,11 +541,21 @@ class PqStageTransitionTest {
         }
     }
 
+    private static OPQOrchestrator orbisRun() throws ReflectiveOperationException {
+        // Keep the production assignment logic without starting the orchestrator's timer.
+        var constructor = OPQOrchestrator.class.getDeclaredConstructors()[0];
+        constructor.setAccessible(true);
+        OPQOrchestrator run = spy((OPQOrchestrator) constructor.newInstance((Object) null));
+        doNothing().when(run).mirrorPhase(any(), any());
+        return run;
+    }
+
     private static Reactor orbisReactor(MapleMap map, int dataId, int oid, int x) {
         Reactor reactor = mock(Reactor.class);
         when(reactor.getId()).thenReturn(dataId);
         when(reactor.getObjectId()).thenReturn(oid);
         when(reactor.isAlive()).thenReturn(true);
+        when(reactor.isActive()).thenReturn(true);
         when(reactor.getPosition()).thenReturn(new Point(x, 0));
         when(map.getReactorByOid(oid)).thenReturn(reactor);
         return reactor;

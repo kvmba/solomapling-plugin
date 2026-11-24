@@ -142,6 +142,8 @@ public abstract class PartyQuestBot extends BotSM implements GrindTickRegistry.P
 
     @Override
     public synchronized void startScheduledTask(long initialDelayMs) {
+        // Seed level-based HP before a portal or the movement driver exposes the bot to mobs.
+        potionSim.tick(getChr());
         // Both engine sessions span the FSM's RUNNING lifetime, not the object's - the same rule
         // the sweep registration below follows, and for the same reason: a bot wrapped but never
         // started (the GM createAndSetBot paths) would otherwise hold a live driver thread and the
@@ -449,6 +451,9 @@ public abstract class PartyQuestBot extends BotSM implements GrindTickRegistry.P
             noteEnteredQuest();
         }
 
+        // Following a door can consume the entire tick; don't defer recovery until room work.
+        potionSim.tick(bot);
+
         // Quest work runs with the real graph, or not at all. The warmup heuristic has no A*, so
         // it cannot take a shelf whose x sits inside the bot's own platform (LPQ stage 1: the
         // -450 mob row's first Ratz is the only one it can ever reach, and the -506/-572 rungs
@@ -471,9 +476,6 @@ public abstract class PartyQuestBot extends BotSM implements GrindTickRegistry.P
         if (moved) {
             return; // moved rooms; work resumes from the new one next tick
         }
-
-        // Survive the fight: sip back whatever the room's mobs took off (no-op while full).
-        potionSim.tick(bot);
 
         if (instance == null || !instance.isEventCleared()) {
             maybeQuestChat(Beat.WORKING);
