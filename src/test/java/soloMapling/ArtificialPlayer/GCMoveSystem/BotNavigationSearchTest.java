@@ -11,6 +11,8 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.FutureTask;
+import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.mock;
@@ -47,6 +49,30 @@ class BotNavigationSearchTest {
     }
 
     @Test
+    void aPendingTieKeepsTheJdkHeapOrderEvenAfterGrowth() throws Exception {
+        List<BotNavigationGraph.Edge> branches = new ArrayList<>();
+        Map<Integer, List<BotNavigationGraph.Edge>> outgoing = new HashMap<>();
+        for (int region = 10; region < 74; region++) {
+            branches.add(walk(1, region, 10));
+            if (region != 10) outgoing.put(region, List.of(walk(region, 2, 0)));
+        }
+        outgoing.put(1, branches);
+        var graph = graph(outgoing);
+
+        // The first leaf is a dead end. The old heap moves its last entry to the root on removal
+        // and leaves it there when both children tie, so the last branch wins, not the second.
+        onSearchWorker(() -> {
+            var outcome = search(graph, null, 1, ANCHOR, 2, ANCHOR);
+            var direct = walk(1, 2, 90);
+            var next = search(graph(Map.of(1, List.of(direct))), null, 1, ANCHOR, 2, ANCHOR);
+            assertEquals(List.of(direct), next.path());
+            assertEquals(90, next.cost());
+            assertEquals(List.of(branches.getLast(), outgoing.get(73).getFirst()), outcome.path());
+            assertEquals(10, outcome.cost());
+        });
+    }
+
+    @Test
     void aWalkAndAPortalToTheSameAnchorAreDistinctAndPortalsReadLiveStatus() {
         MapleMap map = mock(MapleMap.class);
         Portal entry = mock(Portal.class);
@@ -80,6 +106,79 @@ class BotNavigationSearchTest {
         var closed = search(graph, map, 1, ANCHOR, 3, ANCHOR);
         assertEquals(List.of(firstPortal, walkOut), closed.path());
         assertEquals(1000, closed.cost());
+    }
+
+    @Test
+    void aReentrantSearchCannotOverwritePendingStates() throws Exception {
+        var sameKey = walk(1, 2, 999);
+        var nestedGraph = graph(Map.of(1, List.of(sameKey)));
+        var firstLeg = walk(1, 3, 10);
+        var pending = walk(1, 2, 80);
+        var exit = new BotNavigationGraph.Edge(3, 2, PORTAL, ANCHOR, ANCHOR, 0, 1, 0, 0, 0, 0);
+        var outerGraph = graph(Map.of(1, List.of(firstLeg, pending), 3, List.of(exit)));
+        MapleMap map = mock(MapleMap.class);
+        Portal portal = mock(Portal.class);
+        when(map.getPortal(1)).thenReturn(portal);
+        when(portal.getPortalStatus()).thenAnswer(ignored -> {
+            assertEquals(List.of(sameKey), search(nestedGraph, null, 1, ANCHOR, 2, ANCHOR).path());
+            return true;
+        });
+
+        onSearchWorker(() -> {
+            var outcome = search(outerGraph, map, 1, ANCHOR, 2, ANCHOR);
+            assertEquals(List.of(firstLeg, exit), outcome.path());
+            assertEquals(10, outcome.cost());
+        });
+    }
+
+    @Test
+    void aFailedSearchLeavesNoStateForTheNextSearchOnTheSameWorker() throws Exception {
+        var walk = walk(1, 2, 80);
+        var exit = new BotNavigationGraph.Edge(1, 2, PORTAL, ANCHOR, ANCHOR, 0, 1, 0, 0, 0, 0);
+        var graph = graph(Map.of(1, List.of(walk, exit)));
+        MapleMap map = mock(MapleMap.class);
+        Portal portal = mock(Portal.class);
+        when(map.getPortal(1)).thenReturn(portal);
+        when(portal.getPortalStatus()).thenThrow(new IllegalStateException("portal read failed")).thenReturn(false);
+
+        onSearchWorker(() -> {
+            assertThrows(IllegalStateException.class, () -> search(graph, map, 1, ANCHOR, 2, ANCHOR));
+            var outcome = search(graph, map, 1, ANCHOR, 2, ANCHOR);
+            assertEquals(List.of(walk), outcome.path());
+            assertEquals(80, outcome.cost());
+        });
+    }
+
+    @Test
+    void walkingCostsDoNotLeakBetweenMovementProfilesAndMatchAVirtualThread() throws Exception {
+        var leg = walk(1, 2, 8);
+        var outgoing = Map.of(1, List.of(leg));
+        var normal = graph(outgoing);
+        var fast = new BotNavigationGraph(1, 1, new BotMovementProfile(125, 100),
+                List.of(), Map.of(), Map.of(), outgoing, Set.of());
+        var start = new Point(ANCHOR.x - 101, ANCHOR.y);
+        var farTarget = new Point(ANCHOR.x + 2001, ANCHOR.y);
+        // Initialize the host movement constants before exercising the virtual-thread search itself.
+        double speed = Math.max(1.0, fast.movementProfile.walkVelocityPxs());
+        long expectedCost = leg.cost + Math.round(101_000.0 / speed) + Math.round(2_001_000.0 / speed);
+
+        var fallback = new FutureTask<>(() -> {
+            assertTrue(Thread.currentThread().isVirtual());
+            return search(fast, null, 1, start, 2, farTarget);
+        });
+        Thread.startVirtualThread(fallback);
+        var expectedFast = fallback.get(10, TimeUnit.SECONDS);
+
+        onSearchWorker(() -> {
+            var first = search(normal, null, 1, start, 2, farTarget);
+            var next = search(fast, null, 1, start, 2, farTarget);
+            var again = search(normal, null, 1, start, 2, farTarget);
+            assertEquals(List.of(leg), first.path());
+            assertEquals(expectedFast, next);
+            assertEquals(expectedCost, next.cost());
+            assertTrue(next.cost() < first.cost());
+            assertEquals(first, again);
+        });
     }
 
     @Test
@@ -175,6 +274,14 @@ class BotNavigationSearchTest {
     private static BotNavigationManager.SearchOutcome search(BotNavigationGraph graph, MapleMap map, int from,
                                                               Point start, int to, Point target) {
         return BotNavigationManager.runSearch(graph, map, start, from, to, target, null, true, false, 0L);
+    }
+
+    private static void onSearchWorker(Runnable check) throws Exception {
+        var task = new FutureTask<Void>(check, null);
+        var thread = new BotNavigationManager.SearchWorker(task, "test-movement-search");
+        thread.setDaemon(true);
+        thread.start();
+        task.get(10, TimeUnit.SECONDS);
     }
 
     private static BotNavigationGraph.Edge walk(int from, int to, int cost) {

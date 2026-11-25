@@ -11,12 +11,11 @@ import org.gms.server.maps.Rope;
 
 import java.awt.*;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
-import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.PriorityQueue;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ThreadLocalRandom;
 
@@ -123,51 +122,45 @@ final class BotNavigationManager {
         }
     }
 
-    private static final Comparator<SearchNode> SEARCH_ORDER = (a, b) -> Integer.compare(a.score, b.score);
-
-    private static final class SearchNode {
-        final SearchState state;
-        final int cost;
-        final int score;
-
-        SearchNode(SearchState state, int cost, int score) {
-            this.state = state;
-            this.cost = cost;
-            this.score = score;
-        }
-    }
-
     // viaPortal: true when this state was reached by a PORTAL edge. It distinguishes "arrived here
     // by teleport" from "arrived by walk/jump/etc." so the search can charge the portal cooldown to
     // a portal that chains straight off another portal (see runSearch). The flag is part of the
     // dedup key, so a region reachable both ways is explored under both costs.
     private static final class SearchState {
-        final int regionId;
-        final int x;
-        final int y;
-        final boolean viaPortal;
-        int cost = Integer.MAX_VALUE;
+        int regionId;
+        int x;
+        int y;
+        boolean viaPortal;
+        int cost;
         SearchState previous;
         BotNavigationGraph.Edge incoming;
-
-        SearchState(int regionId, int x, int y, boolean viaPortal) {
-            this.regionId = regionId;
-            this.x = x;
-            this.y = y;
-            this.viaPortal = viaPortal;
-        }
     }
 
     /** Per-search table. Probe the full state key without allocating, even for rejected edges. */
     private static final class SearchStates {
         private SearchState[] table = new SearchState[16];
+        private SearchState[] pool;
         private int size;
+
+        SearchStates(boolean reusable) {
+            pool = reusable ? new SearchState[table.length / 2] : null;
+        }
 
         SearchState stateAt(int regionId, int x, int y, boolean viaPortal) {
             int index = slot(regionId, x, y, viaPortal);
             SearchState state = table[index];
             if (state == null) {
-                state = new SearchState(regionId, x, y, viaPortal);
+                if (pool == null) {
+                    state = new SearchState();
+                } else {
+                    state = pool[size];
+                    if (state == null) pool[size] = state = new SearchState();
+                }
+                state.regionId = regionId;
+                state.x = x;
+                state.y = y;
+                state.viaPortal = viaPortal;
+                state.cost = Integer.MAX_VALUE;
                 table[index] = state;
                 if (++size == table.length / 2) grow();
             }
@@ -188,16 +181,168 @@ final class BotNavigationManager {
 
         private void grow() {
             SearchState[] old = table;
-            table = new SearchState[old.length * 2];
+            SearchState[] expanded = new SearchState[old.length * 2];
+            if (pool != null) pool = Arrays.copyOf(pool, old.length);
+            table = expanded;
             for (SearchState state : old) {
                 if (state != null) table[slot(state.regionId, state.x, state.y, state.viaPortal)] = state;
             }
+        }
+
+        void clear() {
+            Arrays.fill(table, null);
+            for (int i = 0; i < size; i++) {
+                pool[i].previous = null;
+                pool[i].incoming = null;
+            }
+            size = 0;
+        }
+    }
+
+    /** Binary heap of cost/score snapshots, without allocating a node per relaxation. */
+    private static final class SearchQueue {
+        private SearchState[] states = new SearchState[16];
+        private int[] costs = new int[16];
+        private int[] scores = new int[16];
+        private int size;
+
+        void add(SearchState state, int cost, int score) {
+            int i = size;
+            if (i == states.length) {
+                int capacity = i * 2;
+                SearchState[] expandedStates = Arrays.copyOf(states, capacity);
+                int[] expandedCosts = Arrays.copyOf(costs, capacity);
+                int[] expandedScores = Arrays.copyOf(scores, capacity);
+                states = expandedStates;
+                costs = expandedCosts;
+                scores = expandedScores;
+            }
+            size++;
+            while (i > 0) {
+                int parent = (i - 1) >>> 1;
+                if (score >= scores[parent]) break; // match PriorityQueue's ordering on equal scores
+                move(parent, i);
+                i = parent;
+            }
+            set(i, state, cost, score);
+        }
+
+        void removeFirst() {
+            int last = --size;
+            SearchState state = states[last];
+            states[last] = null;
+            if (last == 0) return;
+            int cost = costs[last];
+            int score = scores[last];
+            int i = 0;
+            while (i < (last >>> 1)) {
+                int child = (i << 1) + 1;
+                int right = child + 1;
+                if (right < last && scores[right] < scores[child]) child = right;
+                if (score <= scores[child]) break; // prefer left on a tie; never sift down on equal score
+                move(child, i);
+                i = child;
+            }
+            set(i, state, cost, score);
+        }
+
+        private void move(int from, int to) {
+            set(to, states[from], costs[from], scores[from]);
+        }
+
+        private void set(int i, SearchState state, int cost, int score) {
+            states[i] = state;
+            costs[i] = cost;
+            scores[i] = score;
+        }
+
+        void clear() {
+            Arrays.fill(states, 0, size, null);
+            size = 0;
+        }
+    }
+
+    /** Scratch belongs to a fixed movement-pool thread, not to a ThreadLocal or a virtual-thread carrier. */
+    static final class SearchWorker extends Thread {
+        private static final int MAX_RETAINED_CAPACITY = 8192;
+        private SearchWorkspace workspace;
+        private boolean searching;
+
+        SearchWorker(Runnable task, String name) {
+            super(task, name);
+        }
+
+        private SearchWorkspace acquireWorkspace() {
+            if (searching) return new SearchWorkspace(false); // reentrant calls cannot borrow a live workspace
+            if (workspace == null) workspace = new SearchWorkspace(true);
+            searching = true;
+            return workspace;
+        }
+
+        private void releaseWorkspace(SearchWorkspace used) {
+            if (used != workspace) return;
+            if (used.states.table.length > MAX_RETAINED_CAPACITY || used.open.states.length > MAX_RETAINED_CAPACITY) {
+                workspace = null;
+            } else {
+                used.open.clear();
+                used.states.clear();
+            }
+            searching = false;
+        }
+    }
+
+    private static final class SearchWorkspace {
+        final SearchStates states;
+        final SearchQueue open = new SearchQueue();
+        final SearchTravelCosts travelCosts;
+
+        SearchWorkspace(boolean reusable) {
+            states = new SearchStates(reusable);
+            travelCosts = new SearchTravelCosts(reusable);
+        }
+    }
+
+    /** Exact travel costs, with a bounded lookup for common walking distances. */
+    private static final class SearchTravelCosts {
+        private final int[] walkByDistance;
+        private double walkSpeed;
+        private double climbSpeed;
+
+        SearchTravelCosts(boolean reusable) {
+            walkByDistance = reusable ? new int[1024] : null;
+        }
+
+        void prepare(BotMovementProfile profile) {
+            // The same worker can search for a different speed profile on its next tick.
+            double speed = Math.max(1.0, profile.walkVelocityPxs());
+            if (walkByDistance != null && walkSpeed != speed) Arrays.fill(walkByDistance, 0);
+            walkSpeed = speed;
+            climbSpeed = Math.max(1, BotMovementManager.cfg.CLIMB_SPEED_PXS);
+        }
+
+        int walk(int fromX, int toX) {
+            int dx = Math.abs(toX - fromX);
+            if (walkByDistance == null || dx < 0 || dx >= walkByDistance.length) return travelMillis(dx, walkSpeed);
+            int cached = walkByDistance[dx];
+            if (cached == 0) {
+                // dx < 1024 and speed >= 1: one-based encoding distinguishes an unset entry from a zero cost.
+                walkByDistance[dx] = cached = travelMillis(dx, walkSpeed) + 1;
+            }
+            return cached - 1;
+        }
+
+        int withinRegion(boolean onRope, SearchState from, int toX, int toY) {
+            return onRope ? travelMillis(Math.abs(toY - from.y), climbSpeed) : walk(from.x, toX);
+        }
+
+        private static int travelMillis(int distance, double speed) {
+            return Math.max(0, (int) Math.round((distance * 1000.0) / speed));
         }
     }
 
     /** Reuse edge verdicts and landing states within this search only. Portal status stays live. */
     private static final class SearchRegion {
-        static final SearchState BLOCKED = new SearchState(0, 0, 0, false);
+        static final SearchState BLOCKED = new SearchState();
         final boolean onRope;
         final List<BotNavigationGraph.Edge> outgoing;
         // Indexed by outgoing edge: null means no cached arrival, BLOCKED means unusable non-portal.
@@ -1424,9 +1569,14 @@ final class BotNavigationManager {
         // weighted A* that prunes. Seed 0 = exact legacy behavior (probes/calibration/non-bot).
         boolean randomized = routeSeed != 0;
         double epsilon = randomized ? 1.0 + hashFrac(routeSeed, EPSILON_SALT) * EPSILON_SPAN : 0.0;
+        // currentThread() returns the virtual thread itself on a virtual-thread call, never its carrier.
+        SearchWorker worker = Thread.currentThread() instanceof SearchWorker movementWorker ? movementWorker : null;
+        SearchWorkspace workspace = worker == null ? new SearchWorkspace(false) : worker.acquireWorkspace();
         try {
-            PriorityQueue<SearchNode> open = new PriorityQueue<>(SEARCH_ORDER);
-            SearchStates states = new SearchStates();
+            SearchQueue open = workspace.open;
+            SearchStates states = workspace.states;
+            SearchTravelCosts travel = workspace.travelCosts;
+            travel.prepare(graph.movementProfile);
             Map<Integer, SearchRegion> searchRegions = new HashMap<>();
             Map<Integer, Boolean> landingVerdicts = new HashMap<>();
             SearchState startState = states.stateAt(startRegionId, startPos.x, startPos.y, false);
@@ -1440,18 +1590,20 @@ final class BotNavigationManager {
             int relaxations = 0;
             int openPeak = 1;
 
-            open.add(new SearchNode(startState, 0, hValue(graph, startState.x, targetPos, zeroHeuristic, randomized, epsilon)));
+            open.add(startState, 0, hValue(travel, startState.x, targetPos, zeroHeuristic, randomized, epsilon));
 
-            while (!open.isEmpty()) {
-                SearchNode current = open.poll();
-                SearchState state = current.state;
+            while (open.size != 0) {
+                SearchState state = open.states[0];
+                int currentCost = open.costs[0];
+                int currentScore = open.scores[0];
+                open.removeFirst();
                 // Keep the cost and score snapshots in the queue. A better route changes the
                 // state's best cost, not the ordering of entries already in the heap.
-                if (current.cost != state.cost) {
+                if (currentCost != state.cost) {
                     staleNodes++;
                     continue;
                 }
-                if (bestGoalState != null && current.score >= bestGoalCost) {
+                if (bestGoalState != null && currentScore >= bestGoalCost) {
                     break;
                 }
                 expandedNodes++;
@@ -1462,7 +1614,7 @@ final class BotNavigationManager {
                     searchRegions.put(state.regionId, region);
                 }
                 if (state.regionId == targetRegionId) {
-                    int goalCost = current.cost + intraRegionTravelCost(graph, region.onRope, state, targetPos.x, targetPos.y);
+                    int goalCost = currentCost + travel.withinRegion(region.onRope, state, targetPos.x, targetPos.y);
                     if (goalCost < bestGoalCost) {
                         bestGoalCost = goalCost;
                         bestGoalState = state;
@@ -1505,7 +1657,7 @@ final class BotNavigationManager {
                     boolean straightDrop = edge.type == BotNavigationGraph.EdgeType.DROP && edge.launchStepX == 0;
                     int approachX = straightDrop ? edge.nearestLaunchX(state.x) : edge.startPoint.x;
                     int landingX = straightDrop ? approachX : edge.endPoint.x;
-                    int stepCost = intraRegionTravelCost(graph, region.onRope, state, approachX, edge.startPoint.y) + edgeCost;
+                    int stepCost = travel.withinRegion(region.onRope, state, approachX, edge.startPoint.y) + edgeCost;
                     // Per-bot positive jitter, stable per (bot, edge): different bots perceive
                     // different edges as slightly costlier and fan out onto distinct routes, while
                     // a single bot re-plans the same route every tick (no fluttering). Positive-only
@@ -1514,7 +1666,7 @@ final class BotNavigationManager {
                     if (randomized) {
                         stepCost += (int) Math.round(stepCost * JITTER_FRAC * hashFrac(routeSeed, edgeKey(edge)));
                     }
-                    int tentativeCost = current.cost + stepCost;
+                    int tentativeCost = currentCost + stepCost;
                     // MAX_VALUE cannot improve even an unseen state.
                     if (tentativeCost == Integer.MAX_VALUE) continue;
                     int landingY = edge.endPoint.y;
@@ -1531,9 +1683,9 @@ final class BotNavigationManager {
                     nextState.previous = state;
                     nextState.incoming = edge;
                     relaxations++;
-                    int fScore = tentativeCost + hValue(graph, edge.endPoint.x, targetPos, zeroHeuristic, randomized, epsilon);
-                    open.add(new SearchNode(nextState, tentativeCost, fScore));
-                    openPeak = Math.max(openPeak, open.size());
+                    int fScore = tentativeCost + hValue(travel, edge.endPoint.x, targetPos, zeroHeuristic, randomized, epsilon);
+                    open.add(nextState, tentativeCost, fScore);
+                    openPeak = Math.max(openPeak, open.size);
                 }
             }
 
@@ -1559,6 +1711,7 @@ final class BotNavigationManager {
             }
             return new SearchOutcome(path, bestGoalCost, expandedNodes, usesPortal);
         } finally {
+            if (worker != null) worker.releaseWorkspace(workspace);
             if (instrument) {
                 if (profile == null) {
                     profile = new PathfindProfile(
@@ -2016,19 +2169,6 @@ final class BotNavigationManager {
         return selectedX;
     }
 
-    private static int horizontalTravelCost(BotNavigationGraph graph, int fromX, int toX) {
-        int dx = Math.abs(toX - fromX);
-        return Math.max(0, (int) Math.round((dx * 1000.0) / Math.max(1.0, graph.movementProfile.walkVelocityPxs())));
-    }
-
-    private static int intraRegionTravelCost(BotNavigationGraph graph, boolean onRope, SearchState from, int toX, int toY) {
-        if (onRope) {
-            int travel = Math.abs(toY - from.y);
-            return Math.max(0, (int) Math.round((travel * 1000.0) / Math.max(1, BotMovementManager.cfg.CLIMB_SPEED_PXS)));
-        }
-        return horizontalTravelCost(graph, from.x, toX);
-    }
-
     // ponytail: route-diversification knobs — calibrated on map 10000 via BotRouteDiversityTest.
     // jitter spreads routes; epsilon trades diversity for a perf prune. At 0.55/0.15 the modal
     // corridor drops from 43% to ~28% of bots (12 distinct routes) for ~29% worst-case overhead.
@@ -2038,12 +2178,12 @@ final class BotNavigationManager {
     private static final long EPSILON_SALT = 0xE95011L;
 
     /* Heuristic value: zeroSeed callers keep h=0/legacy; per-bot search uses an inflated (weighted) admissible h to prune. */
-    private static int hValue(BotNavigationGraph graph, int fromX, Point targetPos,
+    private static int hValue(SearchTravelCosts travel, int fromX, Point targetPos,
                               boolean zeroHeuristic, boolean randomized, double epsilon) {
         if (randomized) {
-            return (int) Math.round(epsilon * horizontalTravelCost(graph, fromX, targetPos.x));
+            return (int) Math.round(epsilon * travel.walk(fromX, targetPos.x));
         }
-        return zeroHeuristic ? 0 : horizontalTravelCost(graph, fromX, targetPos.x);
+        return zeroHeuristic ? 0 : travel.walk(fromX, targetPos.x);
     }
 
     /* Per-bot route seed; non-zero so the search takes the randomized branch. */

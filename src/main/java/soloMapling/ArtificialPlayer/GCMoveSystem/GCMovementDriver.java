@@ -97,7 +97,7 @@ final class GCMovementDriver {
     private static final ScheduledThreadPoolExecutor POOL = new ScheduledThreadPoolExecutor(
             TICK_POOL_SIZE,
             r -> {
-                Thread t = new Thread(r, "gcmove-tick-" + THREAD_SEQ.getAndIncrement());
+                Thread t = new BotNavigationManager.SearchWorker(r, "gcmove-tick-" + THREAD_SEQ.getAndIncrement());
                 t.setDaemon(true);
                 return t;
             });
