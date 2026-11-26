@@ -379,6 +379,85 @@ class PqParkDoorExecutionSimTest {
     }
 
     @ParameterizedTest
+    @CsvSource({"100,100,4444444444444444,01010", "100,100,1234321414232413,10001", "140,123,4321432143214321,01001"})
+    void orbisUpwardPassageLearnsTheStairsAndReturnsAfterSettingTheLevers(int speed, int jump, String stairs, String levers) {
+        int id = OrbisPqData.STAGE_UP;
+        assumeTrue(wzAvailable(id) && hostPortalScript("party3_r6pt"), "GMS083 WZ and scripts needed");
+        MapleMap room = realRoom(id);
+        var visits = new ArrayList<PortalVisit>();
+        var refused = new AtomicBoolean();
+        String firstCorrect = "rp01" + stairs.charAt(0);
+        Sim sim = scriptSim(room, room, visits,
+                visit -> !visit.from().equals(firstCorrect) || !refused.compareAndSet(false, true));
+        Character member = sim.st().bot;
+        doReturn(speed).when(member).getTotalMoveSpeedStat();
+        doReturn(jump).when(member).getTotalJumpStat();
+        sim.st().movementProfile = BotMovementProfile.fromCharacter(member);
+        var instance = member.getEventInstance();
+        when(instance.getIntProperty(any())).thenAnswer(call -> switch (call.<String>getArgument(0)) {
+            case "statusStg0", "statusStg1", "statusStg2", "statusStg3", "statusStg4", "statusStg5" -> 1;
+            case "statusStg6" -> 0;
+            default -> -1;
+        });
+        when(instance.getProperty("stage6_comb")).thenReturn("0" + stairs);
+        when(instance.getProperty("stage6_c")).thenReturn(levers);
+        Point start = GCMovement.portalApproachPoint(room, room.getPortal("st00"));
+        BotPhysicsEngine.teleportTo(sim.st(), member, start);
+        BotMovementManager.resetEntryStateAfterTeleport(sim.st());
+        BotNavigationGraphProvider.getGraph(room, sim.st().movementProfile);
+
+        for (var entry : mapData(id).getChildByPath("reactor")) {
+            int reactorId = org.gms.provider.DataTool.getIntConvert("id", entry, 0);
+            if (reactorId != OrbisPqData.LEVER_REACTOR) continue;
+            var lever = new org.gms.server.maps.Reactor(
+                    org.gms.server.maps.ReactorFactory.getReactor(reactorId), reactorId);
+            lever.setName(org.gms.provider.DataTool.getString("name", entry));
+            lever.setPosition(new Point(org.gms.provider.DataTool.getInt("x", entry),
+                    org.gms.provider.DataTool.getInt("y", entry)));
+            room.addMapObject(lever);
+        }
+        // A teammate may have already flipped the wrong lever. It must be turned back off.
+        room.getReactorByName("3").setState((byte) 1);
+        List<String> strikes = new ArrayList<>();
+        var coordinator = mock(OPQOrchestrator.class);
+        when(coordinator.getSharedContext()).thenReturn(new OPQSharedContext());
+        Point eak = room.getNPCById(OrbisPqData.EAK).getPosition();
+        try (var generation = mockStatic(BotGeneration.class);
+             var runs = mockStatic(OPQOrchestrator.class, call -> coordinator);
+             var attack = mockStatic(BotAttack.class);
+             var reactor = mockStatic(CustomReactor.class)) {
+            attack.when(() -> BotAttack.basicSwing(member)).thenReturn(true);
+            reactor.when(() -> CustomReactor.hitReactorWithScript(eq(room), anyInt(), eq(member)))
+                    .thenAnswer(call -> {
+                        var lever = room.getReactorByOid(call.getArgument(1));
+                        strikes.add(lever.getName());
+                        lever.setState((byte) (1 - lever.getState()));
+                        return null;
+                    });
+            var bot = new OPQBot(member);
+            bot.setRunning(true);
+            bot.setStateForDebug(OPQBot.OPQBotState.MIDDLE_STAGE);
+            for (int beat = 0; beat < 1_200; beat++) {
+                bot.updateState();
+                tickN(sim, 15);
+                if (strikes.size() == 3 && sim.p().distance(eak) < 55 && GCMovement.isSettled(member)) break;
+            }
+        }
+        List<String> correct = java.util.stream.IntStream.range(0, stairs.length())
+                .mapToObj(i -> String.format(java.util.Locale.ROOT, "rp%02d%c", i + 1, stairs.charAt(i))).toList();
+        List<String> tried = visits.stream().map(PortalVisit::from).toList();
+        assertTrue(refused.get(), "A refused correct portal must still be tried again");
+        assertTrue(tried.containsAll(correct), () -> tried + " " + GCMovement.movementStateReport(member));
+        List<String> wrong = tried.stream().filter(guess -> !correct.contains(guess)).toList();
+        assertEquals(wrong.stream().distinct().toList(), wrong, "Do not repeat a rejected portal");
+        assertEquals(3, strikes.size(), () -> strikes + " " + GCMovement.movementStateReport(member));
+        for (int i = 0; i < levers.length(); i++) {
+            assertEquals(levers.charAt(i) - '0', room.getReactorByName(Integer.toString(i + 1)).getState());
+        }
+        assertTrue(sim.p().distance(eak) < 55, () -> GCMovement.movementStateReport(member));
+    }
+
+    @ParameterizedTest
     @CsvSource({"926100301,rnj5_rp,3333333333", "926110304,jnr5_rp,3021310232"})
     void magatiaUsesItsOwnLaneAndNeverRepeatsARejectedDoor(int mapId, String script, String answer) {
         assumeTrue(wzAvailable(mapId) && hostPortalScript(script), "GMS083 WZ and scripts needed");

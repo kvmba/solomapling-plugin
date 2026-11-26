@@ -178,37 +178,6 @@ public final class OrbisStages {
     }
 
     // =========================================================================
-    // Stage 6 - levers: turn on the two the quest picked
-    // =========================================================================
-
-    /**
-     * Pull the two levers the quest wants.
-     *
-     * <p>The quest publishes its answer as {@code stage6_c}, a five-character string such as
-     * {@code "01010"}; each '1' names a lever to push. Reading it removes the search
-     * entirely. Turned on means the reactor's state is above zero, and all five share a data
-     * id, so they are found by position rather than by id.
-     */
-    public static boolean pullCorrectLevers(Character bot) {
-        String wanted = PqActions.readEimString(bot, "stage6_c");
-        if (wanted == null || wanted.length() != OrbisPqData.LEVER_COUNT) {
-            return false;
-        }
-        for (int i = 0; i < wanted.length(); i++) {
-            if (wanted.charAt(i) != '1') {
-                continue;
-            }
-            Point lever = OrbisPqData.LEVER_SPOTS[i];
-            Reactor reactor = nearestReactorTo(bot, OrbisPqData.LEVER_REACTOR, lever);
-            if (reactor != null && reactor.getState() == 0
-                    && !PqActions.hitReactor(bot, reactor.getObjectId())) {
-                return false;
-            }
-        }
-        return true;
-    }
-
-    // =========================================================================
     // Stage 7 - break the scars (tower), then settle Papa Pixie's room
     // =========================================================================
 
@@ -308,10 +277,6 @@ public final class OrbisStages {
         } else {
             PqActions.attack(bot);
         }
-    }
-
-    private static Reactor nearestReactorTo(Character bot, int dataId, Point spot) {
-        return nearestReactorInRange(bot, dataId, dataId, spot);
     }
 
     private static Reactor nearestReactorInRange(Character bot, int firstId, int lastId, Point spot) {

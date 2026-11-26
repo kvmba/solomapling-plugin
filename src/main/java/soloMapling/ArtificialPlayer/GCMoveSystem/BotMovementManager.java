@@ -357,10 +357,8 @@ class BotMovementManager {
         return ground != null && ground.y - y <= MAX_DISMOUNT_DROP_PX;
     }
 
-    static void jumpToRope(BotMovementState entry, Character bot, int dx) {
-        Rope sourceRope = entry.climbRope;
-        int airVelX = resolveAirVelocityX(entry, bot.getMap(), entry.movementProfile, dx);
-        BotPhysicsEngine.beginRopeTransferJump(entry, bot, sourceRope, airVelX);
+    static void jumpToRope(BotMovementState entry, Character bot, Rope target, int stepX) {
+        BotPhysicsEngine.beginRopeJump(entry, bot, target, stepX);
         broadcastMovement(entry);
     }
 
@@ -437,10 +435,6 @@ class BotMovementManager {
             Character bot = entry.bot;
             Point botPos = bot.getPosition();
 
-            if (successfullyGrabbedRope(entry, bot, botPos)) {
-                return;
-            }
-
             // Set air steering intent. If fidget manager already set moveDir (non-zero),
             // preserve it. Committed nav trajectories (fixedAirArc, JUMP/DROP/CLIMB-launch
             // edges) instead fly with the LAUNCH key held — like the real player performing
@@ -471,27 +465,12 @@ class BotMovementManager {
             }
 
             BotPhysicsEngine.AirborneStepResult result = BotPhysicsEngine.stepAirborne(entry, bot);
-            if (result == BotPhysicsEngine.AirborneStepResult.WALL) {
-                if (successfullyGrabbedRope(entry, bot, bot.getPosition())) {
-                    return;
-                }
-                broadcastMovement(entry);
-                return;
-            }
-            if (result == BotPhysicsEngine.AirborneStepResult.CEILING) {
-                broadcastMovement(entry);
-                return;
-            }
-            if (result == BotPhysicsEngine.AirborneStepResult.LANDED) {
-                entry.jumpCooldownMs = 0;
+            if (result != BotPhysicsEngine.AirborneStepResult.CONTINUE) {
+                if (result == BotPhysicsEngine.AirborneStepResult.LANDED) entry.jumpCooldownMs = 0;
                 broadcastMovement(entry);
                 return;
             }
 
-            // CONTINUE — position advanced, check for rope grab at new position
-            if (successfullyGrabbedRope(entry, bot, bot.getPosition())) {
-                return;
-            }
             if (entry.flashJumpFired) {
                 // Apex tick of a flash jump: emit the type-6 "fj" dash frame in place of the normal
                 // move so observers see the dash animation. relDx/relDy = this tick's position delta.
@@ -504,30 +483,6 @@ class BotMovementManager {
         } finally {
             BotPerformanceMonitor.record("move-air", System.nanoTime() - startedAt);
         }
-    }
-
-    private static boolean successfullyGrabbedRope(BotMovementState entry, Character bot, Point botPos) {
-        if (!entry.climbUpIntent || MovementClock.nowMs() < entry.attackMovementLockUntilMs) {
-            return false;
-        }
-
-        for (Rope rope : bot.getMap().getRopes()) {
-            if (sameRope(entry.blockedRopeGrab, rope)) {
-                continue;
-            }
-            if (Math.abs(rope.x() - botPos.x) > BotPhysicsEngine.cfg.ROPE_GRAB_X) {
-                continue;
-            }
-            if (botPos.y < rope.topY() || botPos.y > rope.bottomY() + 2) {
-                continue;
-            }
-
-            BotPhysicsEngine.attachToRope(entry, bot, rope, botPos.y);
-            broadcastMovement(entry);
-            return true;
-        }
-
-        return false;
     }
 
     static boolean sameRope(Rope left, Rope right) {
@@ -1444,11 +1399,6 @@ class BotMovementManager {
             }
         }
         return best;
-    }
-
-    static void initiateRopeJump(BotMovementState entry, Character bot, int dx) {
-        BotPhysicsEngine.beginClimbUpJump(entry, bot, resolveAirVelocityX(entry, bot.getMap(), entry.movementProfile, dx));
-        broadcastMovement(entry);
     }
 
     private static int resolveAirVelocityX(BotMovementState entry, MapleMap map, BotMovementProfile profile, int dx) {

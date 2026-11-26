@@ -253,6 +253,7 @@ final class BotPhysicsEngine {
         WALL,
         CEILING,
         LANDED,
+        GRABBED_ROPE,
         CONTINUE
     }
 
@@ -979,7 +980,6 @@ final class BotPhysicsEngine {
     }
 
     static void beginGroundJump(BotMovementState entry, Character bot, int airVelX) {
-        entry.blockedRopeGrab = null;
         // A 疾驰 burst rides through a jump exactly like the real timed buff: the launch velocity
         // derives from the un-burst profile (resolveAirVelocityX / carriedAirVelX clamp), so the
         // arc stays inside its validated band, and the dash resumes on landing.
@@ -1020,19 +1020,16 @@ final class BotPhysicsEngine {
         launchAirborne(entry, bot, bot.getPosition(), -jumpForcePerTick(entry.movementProfile), airVelX, false);
     }
 
-    static void beginClimbUpJump(BotMovementState entry, Character bot, int airVelX) {
-        entry.blockedRopeGrab = null;
-        launchAirborne(entry, bot, bot.getPosition(), -jumpForcePerTick(entry.movementProfile), airVelX, true);
+    static void beginRopeJump(BotMovementState entry, Character bot, Rope target, int stepX) {
+        float force = entry.climbing ? ropeJumpForcePerTick(entry.movementProfile) : jumpForcePerTick(entry.movementProfile);
+        launchAirborne(entry, bot, bot.getPosition(), -force, stepX, true);
+        // Fly the arc checked for the selected rope, even if the move target changes mid-flight.
+        entry.ropeJumpTarget = target;
+        entry.fixedAirArc = true;
     }
 
     static void beginJumpOffRope(BotMovementState entry, Character bot, int airVelX) {
-        entry.blockedRopeGrab = null;
         launchAirborne(entry, bot, bot.getPosition(), -ropeJumpForcePerTick(entry.movementProfile), airVelX, false);
-    }
-
-    static void beginRopeTransferJump(BotMovementState entry, Character bot, Rope sourceRope, int airVelX) {
-        entry.blockedRopeGrab = sourceRope;
-        launchAirborne(entry, bot, bot.getPosition(), -ropeJumpForcePerTick(entry.movementProfile), airVelX, true);
     }
 
     static void beginDownJump(BotMovementState entry, Character bot) {
@@ -1055,7 +1052,6 @@ final class BotPhysicsEngine {
             syncCharacterState(entry);
             return;
         }
-        entry.blockedRopeGrab = null;
         // In swim maps a down-jump is a committed drop into water, not a land-map hop: swim physics
         // owns motion, so set up swim mode directly instead of routing through launchAirborne — whose
         // px/tick velocity the swim integrator (which reads px/s) would swallow whole, leaving the bot
@@ -1117,7 +1113,6 @@ final class BotPhysicsEngine {
     }
 
     private static void beginFall(BotMovementState entry, Character bot, Point position, int airVelX) {
-        entry.blockedRopeGrab = null;
         bot.setPosition(new Point(position));
         launchAirborne(entry, bot, position, 0f, airVelX, false);
     }
@@ -1125,7 +1120,6 @@ final class BotPhysicsEngine {
     static void beginKnockback(BotMovementState entry, Character bot, Point position, float initialVelY, int airVelX) {
         int preservedFacingDir = entry.facingDir;
         bot.setPosition(position);
-        entry.blockedRopeGrab = null;
         launchAirborne(entry, bot, position, initialVelY, airVelX, true);
         entry.facingDir = preservedFacingDir;
         syncCharacterState(entry);
@@ -1146,7 +1140,7 @@ final class BotPhysicsEngine {
         entry.airSteerVelX = 0.0;
         entry.fixedAirArc = false;
         entry.downJumpPending = false;
-        entry.blockedRopeGrab = null;
+        entry.ropeJumpTarget = null;
         setMovementVelocity(entry, velocityFromDeltaX(airVelX), velocityFromAirStep(entry.velY));
         entry.facingDir = preservedFacingDir;
         syncCharacterState(entry);
@@ -1188,7 +1182,7 @@ final class BotPhysicsEngine {
         entry.downJumpGracePeriodMS = 0L;
         entry.groundPhysicsCarryMs = 0.0;
         entry.groundContact = foothold;
-        entry.blockedRopeGrab = null;
+        entry.ropeJumpTarget = null;
         entry.topClampSinceMs = 0L;
         // The flight ended on real ground: the edge it was launched for is no longer in flight.
         entry.navFlightEdge = null;
@@ -1218,6 +1212,7 @@ final class BotPhysicsEngine {
         // A flight ends the moment the bot grabs a rope: whatever edge it launched for is no
         // longer in flight (the climb owns the bot from here).
         entry.navFlightEdge = null;
+        entry.ropeJumpTarget = null;
         // Re-grabbing a rope is a fresh climb: the top-clamp clock must restart, or a clock
         // left over from an earlier clamp on THIS session (clamp 2s -> release -> re-grab the
         // next rope down) is already past TOP_CLAMP_RELEASE_MS and the release fires on the
@@ -1780,7 +1775,18 @@ final class BotPhysicsEngine {
 
         Point previousPos = roundedAirPosition(entry);
         Point nextPos = advanceAirbornePosition(entry, bot);
-        AirCollision collision = resolveAirCollision(bot.getMap(), previousPos, nextPos);
+        MapleMap map = bot.getMap();
+        var index = collisionIndex(map);
+        boolean hasTerrain = map != null && map.getFootholds() != null;
+        Point bounds = hasTerrain ? mapXBounds(map, index) : null;
+        Point start = clampStepX(previousPos, bounds);
+        Point end = clampStepX(nextPos, bounds);
+        AirCollision collision = hasTerrain ? resolveAirCollision(map, index, start, end, end != nextPos) : AirCollision.none();
+        boolean lands = collision.type() == AirCollisionType.LAND && (canLand(entry) || forbidFallDownLanding(collision));
+        if (entry.climbUpIntent && MovementClock.nowMs() >= entry.attackMovementLockUntilMs
+                && grabRopeDuringFlight(entry, bot, map, index, bounds, start, end, ropeGrabLimit(collision, lands, start, end))) {
+            return AirborneStepResult.GRABBED_ROPE;
+        }
         if (collision.type() == AirCollisionType.WALL) {
             collideWithAirWall(entry, bot, collision.point());
             return AirborneStepResult.WALL;
@@ -1789,13 +1795,36 @@ final class BotPhysicsEngine {
             collideWithAirCeiling(entry, bot, collision.point());
             return AirborneStepResult.CEILING;
         }
-        if (collision.type() == AirCollisionType.LAND && (canLand(entry) || forbidFallDownLanding(collision))) {
+        if (lands) {
             landOnGround(entry, bot, collision.point(), collision.foothold(),
                     nextPos.x - previousPos.x, nextPos.y - previousPos.y);
             return AirborneStepResult.LANDED;
         }
         applyAirbornePosition(entry, bot, nextPos);
         return AirborneStepResult.CONTINUE;
+    }
+
+    private static boolean grabRopeDuringFlight(BotMovementState entry, Character bot, MapleMap map,
+                                                FootholdCollisionIndex index, Point bounds, Point start, Point end,
+                                                double limit) {
+        Rope target = entry.ropeJumpTarget;
+        if (target != null) {
+            double hit = ropeGrabProgress(index, bounds, start, end, target, limit);
+            if (hit >= limit) return false;
+            attachToRope(entry, bot, target, ropeGrabY(start, end, hit));
+            return true;
+        }
+        Rope contacted = null;
+        for (Rope rope : map.getRopes()) {
+            double hit = ropeGrabProgress(index, bounds, start, end, rope, limit);
+            if (hit < limit) {
+                limit = hit;
+                contacted = rope;
+            }
+        }
+        if (contacted == null) return false;
+        attachToRope(entry, bot, contacted, ropeGrabY(start, end, limit));
+        return true;
     }
 
     private static void collideWithAirWall(BotMovementState entry, Character bot, Point collisionPoint) {
@@ -2174,6 +2203,14 @@ final class BotPhysicsEngine {
         if (map == null || map.getFootholds() == null || previousPos == null || nextPos == null) {
             return AirCollision.none();
         }
+        FootholdCollisionIndex index = collisionIndex(map);
+        Point bounds = mapXBounds(map, index);
+        Point end = clampStepX(nextPos, bounds);
+        return resolveAirCollision(map, index, clampStepX(previousPos, bounds), end, end != nextPos);
+    }
+
+    private static AirCollision resolveAirCollision(MapleMap map, FootholdCollisionIndex index,
+                                                     Point start, Point end, boolean sideClamped) {
         // Ours (CPQ prep map 980000100): judge the clamped step, not the raw one.
         //
         // Both ends are clamped because the airborne integrator can hold an out-of-range pixel for a
@@ -2189,11 +2226,6 @@ final class BotPhysicsEngine {
         // has to be held ON the bound, or a body outside the extent would keep sliding away forever.
         // So: clamp both ends, run the searches, and fall back to the old boundary WALL only when the
         // clamped step truly hit nothing.
-        FootholdCollisionIndex index = collisionIndex(map);
-        Point bounds = mapXBounds(map, index);
-        Point start = clampStepX(previousPos, bounds);
-        Point end = clampStepX(nextPos, bounds);
-        boolean sideClamped = end != nextPos;
         AirCollision wall = findWallCollision(index, start, end, false);
         AirCollision ceiling = findCeilingCollision(index, start, end);
         AirCollision landing = findGroundCollision(map, index, start, end);
@@ -2279,6 +2311,7 @@ final class BotPhysicsEngine {
         entry.velY = initialVelY;
         stopGroundMotion(entry);
         entry.climbUpIntent = climbUpIntent;
+        entry.ropeJumpTarget = null;
         clearRopeEntryIntent(entry);
         entry.airVelX = airVelX;
         entry.airSteerVelX = 0.0;
@@ -2457,7 +2490,7 @@ final class BotPhysicsEngine {
         entry.moveDir = 0;
         entry.groundBrakeDir = 0;
         entry.climbUpIntent = false;
-        entry.blockedRopeGrab = null;
+        entry.ropeJumpTarget = null;
         entry.ropeGrabCooldownMs = 0;
         entry.topClampSinceMs = 0L;
         entry.navFlightEdge = null; // teleports / map changes / death end any committed flight
@@ -3299,17 +3332,16 @@ final class BotPhysicsEngine {
         float velocityY = initialVelY;
         double physX = from.x;
         double physY = from.y;
-        int previousIntY = from.y;
         long remainingLandingGraceMs = Math.max(0L, landingGraceMs);
         final float gravity = gravityPerTick();
         final float maxFall = maxFallPerTick();
         final int floorY = mapFloorY(map);
+        var index = collisionIndex(map);
+        boolean hasTerrain = map != null && map.getFootholds() != null;
+        Point bounds = hasTerrain ? mapXBounds(map, index) : null;
 
         for (int tick = 0; tick < FALL_SIM_TICK_CAP; tick++) {
             Point current = new Point((int) Math.round(physX), (int) Math.round(physY));
-            if (canGrabRopeAtPoint(current, targetRope)) {
-                return new RopeGrabResult(new Point(targetRope.x(), current.y), tick);
-            }
 
             if (remainingLandingGraceMs > 0L) {
                 remainingLandingGraceMs = Math.max(0L, remainingLandingGraceMs - cfg.TICK_MS);
@@ -3319,33 +3351,30 @@ final class BotPhysicsEngine {
             physY += velocityY + 0.5f * gravity;
             velocityY = Math.min(velocityY + gravity, maxFall);
 
-            int x = (int) Math.round(physX);
-            int intY = (int) Math.round(physY);
-            AirCollision collision = resolveAirCollision(map, new Point((int) Math.round(physX - stepX), previousIntY),
-                    new Point(x, intY));
+            Point next = new Point((int) Math.round(physX), (int) Math.round(physY));
+            Point start = clampStepX(current, bounds);
+            Point end = clampStepX(next, bounds);
+            AirCollision collision = hasTerrain ? resolveAirCollision(map, index, start, end, end != next) : AirCollision.none();
+            boolean lands = collision.type() == AirCollisionType.LAND
+                    && (remainingLandingGraceMs == 0L || forbidFallDownLanding(collision));
+            double limit = ropeGrabLimit(collision, lands, start, end);
+            double hit = ropeGrabProgress(index, bounds, start, end, targetRope, limit);
+            if (hit < limit) {
+                return new RopeGrabResult(new Point(targetRope.x(), ropeGrabY(start, end, hit)), tick + (hit > 0 ? 1 : 0));
+            }
             if (collision.type() == AirCollisionType.WALL) {
                 physX = collision.point().x;
                 physY = collision.point().y;
                 stepX = 0;
-                previousIntY = collision.point().y;
                 continue;
             }
             if (collision.type() == AirCollisionType.CEILING) {
                 physX = collision.point().x;
                 physY = collision.point().y;
                 velocityY = 0f;
-                previousIntY = collision.point().y;
                 continue;
             }
-            if (collision.type() == AirCollisionType.LAND
-                    && (remainingLandingGraceMs == 0L || forbidFallDownLanding(collision))) {
-                return null;
-            }
-
-            if (intY > floorY) {
-                return null; // fell past the map floor — no rope to grab below
-            }
-            previousIntY = intY;
+            if (lands || next.y > floorY) return null;
         }
 
         return null;
@@ -3371,10 +3400,62 @@ final class BotPhysicsEngine {
         return result != null ? result.ticks() * cfg.TICK_MS : Integer.MAX_VALUE;
     }
 
-    private static boolean canGrabRopeAtPoint(Point position, Rope rope) {
-        return Math.abs(position.x - rope.x()) <= cfg.ROPE_GRAB_X
-                && position.y >= firstClimbableY(rope)
-                && position.y <= rope.bottomY();
+    private static double ropeGrabLimit(AirCollision collision, boolean lands, Point start, Point end) {
+        return switch (collision.type()) {
+            case WALL -> collision.foothold() == null ? 1.0 : collision.progress(); // map bound at the clamped endpoint
+            case CEILING -> collision.progress();
+            case LAND -> {
+                if (!lands) yield Double.POSITIVE_INFINITY;
+                // A vertical ground probe reports the whole step; the floor can be crossed earlier.
+                yield start.x == end.x && end.y > start.y
+                        ? (collision.point().y - start.y) / (double) (end.y - start.y) : collision.progress();
+            }
+            case NONE -> Double.POSITIVE_INFINITY;
+        };
+    }
+
+    /** First entry into the grip rectangle along one flight step, shared by baking and movement. */
+    private static double ropeGrabProgress(FootholdCollisionIndex index, Point bounds, Point from, Point to,
+                                          Rope rope, double before) {
+        int x = rope.x();
+        int left = x - cfg.ROPE_GRAB_X;
+        int right = x + cfg.ROPE_GRAB_X;
+        int top = firstClimbableY(rope);
+        int bottom = rope.bottomY();
+        if ((bounds != null && (x < bounds.x || x > bounds.y))
+                || Math.max(from.x, to.x) < left || Math.min(from.x, to.x) > right
+                || Math.max(from.y, to.y) < top || Math.min(from.y, to.y) > bottom) {
+            return Double.POSITIVE_INFINITY;
+        }
+
+        // Clip the step's [0, 1] progress interval against each axis of the grip rectangle.
+        double enter = 0.0;
+        double exit = 1.0;
+        int dx = to.x - from.x;
+        int dy = to.y - from.y;
+        if (dx != 0) {
+            enter = Math.max(enter, ((dx > 0 ? left : right) - from.x) / (double) dx);
+            exit = Math.min(exit, ((dx > 0 ? right : left) - from.x) / (double) dx);
+        }
+        if (dy != 0) {
+            enter = Math.max(enter, ((dy > 0 ? top : bottom) - from.y) / (double) dy);
+            exit = Math.min(exit, ((dy > 0 ? bottom : top) - from.y) / (double) dy);
+        }
+        if (enter > exit || enter >= before) return Double.POSITIVE_INFINITY;
+
+        int gripX = (int) Math.round(from.x + dx * enter);
+        // Being within arm's reach cannot pull a bot sideways through a solid wall.
+        if (gripX != x && !index.collidableWalls().isEmpty()) {
+            int y = ropeGrabY(from, to, enter);
+            if (findWallCollision(index, new Point(gripX, y), new Point(x, y), false).type() == AirCollisionType.WALL) {
+                return Double.POSITIVE_INFINITY;
+            }
+        }
+        return enter;
+    }
+
+    private static int ropeGrabY(Point from, Point to, double progress) {
+        return (int) Math.round(from.y + (to.y - from.y) * progress);
     }
 
     static JumpLanding simulateLanding(MapleMap map, Point from, float initialVelY,

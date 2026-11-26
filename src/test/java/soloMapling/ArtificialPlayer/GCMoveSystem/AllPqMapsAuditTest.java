@@ -32,7 +32,7 @@ import static org.mockito.Mockito.*;
  *      attribute failures to decorative-rope noise.
  * The per-map fallback-launch sweep is report-only and opt-in
  * ({@code -Dpq.audit.fallbackScan=true}) - see FALLBACK_SCAN_ENABLED.
- * Report goes to /tmp/pq_audit_report.txt.
+ * Report goes to target/pq_audit_report.txt.
  */
 public class AllPqMapsAuditTest {
     @BeforeAll
@@ -205,7 +205,9 @@ public class AllPqMapsAuditTest {
             // usable pass's verdict gates.
             if (line.contains("usable LINK-FAIL")) linkFail++;
         }
-        Files.writeString(Path.of("/tmp/pq_audit_report.txt"), report.toString());
+        Path reportFile = Path.of("target", "pq_audit_report.txt");
+        Files.createDirectories(reportFile.getParent());
+        Files.writeString(reportFile, report.toString());
         System.out.println("[audit] maps=" + audited + " bakeFail=" + bakeFail
                 + " linkFail=" + linkFail
                 + " fallbackScan=" + (FALLBACK_SCAN_ENABLED ? "on" : "off"));
@@ -215,8 +217,8 @@ public class AllPqMapsAuditTest {
         // and the walk layer handles approach, so a human can eyeball each one.
         org.junit.jupiter.api.Assertions.assertTrue(audited >= 60,
                 "audited too few maps (" + audited + ") - check the map-list sources");
-        org.junit.jupiter.api.Assertions.assertEquals(0, bakeFail, "bake failures - see /tmp/pq_audit_report.txt");
-        org.junit.jupiter.api.Assertions.assertEquals(0, linkFail, "climb-link failures - see /tmp/pq_audit_report.txt");
+        org.junit.jupiter.api.Assertions.assertEquals(0, bakeFail, "bake failures - see " + reportFile);
+        org.junit.jupiter.api.Assertions.assertEquals(0, linkFail, "climb-link failures - see " + reportFile);
     }
 
     private String audit(int mapId) {

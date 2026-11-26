@@ -1041,7 +1041,7 @@ final class BotNavigationManager {
 
         if (canExecuteGroundRopeJumpEntryFromCurrentPosition(botPos, edge)) {
             entry.lastEdgeBlockReason = null;
-            BotMovementManager.initiateRopeJump(entry, bot, edge.launchStepX);
+            BotMovementManager.jumpToRope(entry, bot, rope, edge.launchStepX);
             return new NavigationDirective(rawTargetPos, true);
         }
 
@@ -1066,7 +1066,7 @@ final class BotNavigationManager {
             if (targetRope == null || BotMovementManager.sameRope(entry.climbRope, targetRope)) {
                 return null;
             }
-            BotMovementManager.jumpToRope(entry, bot, edge.launchStepX);
+            BotMovementManager.jumpToRope(entry, bot, targetRope, edge.launchStepX);
             return new NavigationDirective(rawTargetPos, true);
         }
 

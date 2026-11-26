@@ -183,8 +183,8 @@ public class PqGraphGateTest {
 
     @Test
     void questCallerTakesOverQueuedWarmupWithoutLoadingAgain() throws Exception {
-        // Synthetic id + geometry: a real map id may already be baked by another test in this JVM.
-        MapleMap map = new MapleMap(922019981, 0, 0, 922010000, 0f);
+        // Do not share the key of an earlier test map: this fixture must start without a graph.
+        MapleMap map = new MapleMap(-922019981, 0, 0, 922010000, 0f);
         map.setMapLineBoundings(-4000, 4000, -4000, 4000);
         map.setFootholds(new org.gms.server.maps.FootholdTree(
                 new Point(-4000, -4000), new Point(4000, 4000)));
@@ -192,7 +192,7 @@ public class PqGraphGateTest {
                 new Point(-200, 0), new Point(200, 0), 1));
         org.gms.client.Character bot = mock(org.gms.client.Character.class, RETURNS_DEEP_STUBS);
         when(bot.getMap()).thenReturn(map);
-        when(bot.getMapId()).thenReturn(922019981);
+        when(bot.getMapId()).thenReturn(map.getId());
         when(bot.getTotalMoveSpeedStat()).thenReturn(100);
         when(bot.getTotalJumpStat()).thenReturn(100);
 

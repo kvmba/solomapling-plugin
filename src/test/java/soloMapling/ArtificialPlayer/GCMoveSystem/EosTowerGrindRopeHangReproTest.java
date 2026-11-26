@@ -191,11 +191,12 @@ public class EosTowerGrindRopeHangReproTest {
         for (int[] stat : new int[][]{{105, 110}, {120, 115}}) {
             BotMovementProfile profile = new BotMovementProfile(stat[0], stat[1]);
             Sim sim = sim(221020400, 4, 1886, profile);
+            Point bottom = new Point(76, 1638);
             StringBuilder trace = new StringBuilder();
             // 240 beats * 5 ticks = 1200 ticks = 60s of grind
             for (int beat = 0; beat < 240; beat++) {
                 // mobs alternate between the y=430 top row and the y=1638 bottom row
-                Point target = (beat % 12 < 6) ? new Point(140, 430) : new Point(76, 1638);
+                Point target = (beat % 12 < 6) ? new Point(140, 430) : bottom;
                 move(sim.st(), target.x, target.y);
                 Point before = sim.p();
                 tickN(sim, 5, 221020400);
@@ -207,13 +208,19 @@ public class EosTowerGrindRopeHangReproTest {
                         sim.st().lastNavDecision,
                         sim.st().lastEdgeBlockReason));
             }
-            Point end = sim.p();
             BotMovementState st = sim.st();
-            System.out.println("grind-loop " + stat[0] + "/" + stat[1] + " END " + end
-                    + " climbing=" + st.climbing + " inAir=" + st.inAir);
-            System.out.println(trace);
-            org.junit.jupiter.api.Assertions.assertFalse(st.climbing,
-                    "profile " + stat[0] + "/" + stat[1] + " ended mid-rope at " + end);
+            // Stop changing targets and give the last order time to finish. A snapshot during
+            // an ordinary climb cannot distinguish a stuck bot from a different route cadence.
+            for (int beat = 0; beat < 48 && !settledAt(sim, bottom); beat++) {
+                tickN(sim, 5, 221020400);
+            }
+            org.junit.jupiter.api.Assertions.assertTrue(settledAt(sim, bottom),
+                    () -> "profile " + profile + " did not finish the last grind order, ended at " + sim.p()
+                            + " climbing=" + st.climbing + " inAir=" + st.inAir + "\n" + trace);
         }
+    }
+
+    private static boolean settledAt(Sim sim, Point goal) {
+        return !sim.st().climbing && !sim.st().inAir && sim.p().distanceSq(goal) <= 8 * 8;
     }
 }

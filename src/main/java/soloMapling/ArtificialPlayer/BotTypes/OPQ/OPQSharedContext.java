@@ -7,7 +7,7 @@ import java.util.concurrent.ConcurrentHashMap;
  * Blackboard shared between {@link OPQOrchestrator} (writer) and all
  * {@link OPQBot} instances (readers).
  *
- * Bots read freely. They report completed tasks and share their observed lounge portal
+ * Bots read freely. They report completed tasks and share their observed puzzle portal
  * results; the stage flags and assignments are orchestrator-owned.
  *
  * Thread-safety model: volatile for scalars (atomic publish), ConcurrentHashMap
@@ -47,6 +47,13 @@ public class OPQSharedContext {
 
     OrbisLounge.Puzzle loungePuzzle() {
         return loungePuzzle;
+    }
+
+    // ---- Stage 6: upward passage portal observations ----
+    private volatile OrbisUpwardPassage.Puzzle upwardPuzzle = new OrbisUpwardPassage.Puzzle();
+
+    OrbisUpwardPassage.Puzzle upwardPuzzle() {
+        return upwardPuzzle;
     }
 
     // =========================================================================
@@ -127,6 +134,7 @@ public class OPQSharedContext {
         platformAssignments.clear();
         botTaskComplete.clear();
         loungePuzzle = new OrbisLounge.Puzzle();
+        upwardPuzzle = new OrbisUpwardPassage.Puzzle();
         clearSealedSlots();
     }
 

@@ -69,9 +69,9 @@ final class BotFallbackMovementManager {
             // the same simulation the launched jump follows, so its verdict is exact. The old
             // crude 2*walkStep range gate rejected arcs the physics proves (a 17px stand-off
             // from an overhung ladder), which left the bot steering instead of jumping.
-            int ropeDx = rope.x() - botPos.x;
+            int stepX = Integer.compare(rope.x(), botPos.x) * BotPhysicsEngine.walkStep(map, entry.movementProfile);
             if (BotPhysicsEngine.canReachRopeFromGround(map, botPos, rope, entry.movementProfile)) {
-                BotMovementManager.initiateRopeJump(entry, bot, ropeDx);
+                BotMovementManager.jumpToRope(entry, bot, rope, stepX);
                 return true;
             }
         }

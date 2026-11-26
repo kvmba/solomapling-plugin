@@ -71,6 +71,7 @@ public class OPQBot extends BotSM implements GrindTickRegistry.Participant {
 
     private final OrbisLounge lounge = new OrbisLounge();
     private volatile MapleMap leavingLoungeRoom;
+    private final OrbisUpwardPassage upwardPassage = new OrbisUpwardPassage();
 
     private volatile int lootedRecordItemId = -1;
 
@@ -179,7 +180,7 @@ public class OPQBot extends BotSM implements GrindTickRegistry.Participant {
         if (run != orchestrator) {
             orchestrator = run;
             sharedContext = run.getSharedContext();
-            resetLounge();
+            resetRoomProgress();
         }
         orchestrator.noteLeaderFromBot(this);
     }
@@ -277,7 +278,7 @@ public class OPQBot extends BotSM implements GrindTickRegistry.Participant {
         stageWaitStartTime = 0;
         lastRecruitMessageAt = 0;
         lootedRecordItemId = -1;
-        resetLounge();
+        resetRoomProgress();
     }
 
     // =========================================================================
@@ -309,6 +310,7 @@ public class OPQBot extends BotSM implements GrindTickRegistry.Participant {
 
         MapleMap map = getChr().getMap();
         if (map == null) return;
+        if (map.getId() != OrbisPqData.STAGE_UP) upwardPassage.stopWalking(getChr());
         var instance = map.getEventInstance();
         if (map.getId() == OPQConstants.OPQ_LOBBY) {
             if (instance != null) {
@@ -777,7 +779,9 @@ public class OPQBot extends BotSM implements GrindTickRegistry.Participant {
         if (rallyInClearedRoom()) return;
 
         int stage = currentMiddleStage();
-        if (stage != 5 && OrbisPqData.LOUNGE_ROOMS.contains(getChr().getMapId())) {
+        int here = getChr().getMapId();
+        if ((stage != 5 && OrbisPqData.LOUNGE_ROOMS.contains(here))
+                || (stage != 6 && here == OrbisPqData.STAGE_UP)) {
             stopRoomWork();
         }
         if (stage < 0) {
@@ -864,6 +868,7 @@ public class OPQBot extends BotSM implements GrindTickRegistry.Participant {
 
     private void stopRoomWork() {
         Character bot = getChr();
+        upwardPassage.stopWalking(bot);
         PqActions.armReactorBeat(bot, -1);
         PqActions.stopPartyLoot(bot);
         PqActions.stopHunting(bot);
@@ -907,9 +912,10 @@ public class OPQBot extends BotSM implements GrindTickRegistry.Participant {
         PqActions.deliverAndWait(bot, OrbisPqData.STATUE_PIECE_5, OrbisPqData.EAK);
     }
 
-    private void resetLounge() {
+    private void resetRoomProgress() {
         lounge.reset();
         leavingLoungeRoom = null;
+        upwardPassage.reset(getChr());
     }
 
     private boolean needsLoungePieces() {
@@ -1050,7 +1056,7 @@ public class OPQBot extends BotSM implements GrindTickRegistry.Participant {
                 PqStageChat.announcePositionPlan(this, OrbisPqData.STAGE_4, plan, OrbisPqData.SEALED_AREA_RECTS);
             }
             case 6 -> {
-                if (OrbisStages.pullCorrectLevers(bot)) PqActions.waitNearStageNpc(bot, OrbisPqData.EAK);
+                if (upwardPassage.step(bot, sharedContext.upwardPuzzle())) requestTickWithin(0);
             }
             default -> { /* nothing to do */ }
         }
@@ -1385,7 +1391,7 @@ public class OPQBot extends BotSM implements GrindTickRegistry.Participant {
         sharedContext.putPlatformAssignment(getChr().getId(), null);
         stageWaitStartTime = 0;
         lootedRecordItemId = -1;
-        resetLounge();
+        resetRoomProgress();
 
         if (isInParty()) {
             transitionTo(OPQBotState.IN_PARTY_IDLE,
