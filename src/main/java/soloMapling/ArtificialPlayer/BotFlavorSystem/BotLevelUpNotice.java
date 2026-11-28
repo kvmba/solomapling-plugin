@@ -1,41 +1,43 @@
 package soloMapling.ArtificialPlayer.BotFlavorSystem;
 
+import com.esotericsoftware.yamlbeans.YamlReader;
 import org.gms.client.Character;
-import org.gms.config.GameConfig;
 import org.gms.util.I18nUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import soloMapling.ArtificialPlayer.BotHelpers;
+import soloMapling.Environment.PluginResources;
+
+import java.io.IOException;
+import java.util.Map;
 
 /**
- * The world-wide level-up notice for a bot that levelled silently.
- *
- * <p>Bots advance two ways. When a real player is watching, their kills go through
- * the host's {@code Character.gainExp} and the host already announces the level-up
- * like any player's. When nobody is watching, a bot (and a companion grinding
- * alone) levels by cheap arithmetic — {@code setLevel}/{@code setExp} with no
- * packets — which bypasses {@code gainExp} entirely, so the host never sees it.
- * This closes that gap for the silent paths only.</p>
- *
- * <p>It deliberately mirrors the host's own announcement (same config switch, same
- * i18n key, same notice type) so a bot's notice is indistinguishable from a
- * player's, and only ever delivers to real players — a bot receiving it would be a
- * no-op ({@code BotClient.sendPacket} is empty), so skipping bots just saves the
- * scan of the ~2.5k artificial characters in the world storage.</p>
+ * World-wide notice for simulated training bot level-ups that bypass
+ * {@link Character#gainExp(int)}.
  */
 public final class BotLevelUpNotice {
 
     private static final Logger log = LoggerFactory.getLogger(BotLevelUpNotice.class);
+    private static final String RESOURCE_PATH = "ArtificialPlayer/BotFlavorSystem/BotLevelUpNotice.yaml";
+    private static volatile boolean enabled;
 
     private BotLevelUpNotice() {}
 
-    /** Announce {@code bot}'s current level to every real player, if the host switch allows it. */
-    public static void announce(Character bot) {
-        if (bot == null || bot.getMap() == null || bot.isGM()) {
-            return; // matches the host: GM level-ups are not announced
+    public static void loadConfig() {
+        boolean configured;
+        try (var reader = PluginResources.openReader(RESOURCE_PATH)) {
+            configured = new YamlReader(reader).read() instanceof Map<?, ?> config
+                    && Boolean.parseBoolean(String.valueOf(config.get("enabled")));
+        } catch (IOException e) {
+            log.warn("Could not load {}; bot level-up notices disabled", RESOURCE_PATH, e);
+            configured = false;
         }
-        if (!GameConfig.getServerBoolean("use_announce_global_level_up")) {
-            return; // same switch the host uses for real players
+        enabled = configured;
+    }
+
+    public static void announce(Character bot) {
+        if (!enabled || bot == null || bot.getMap() == null || bot.isGM()) {
+            return;
         }
         String msg = I18nUtil.getMessage("Character.levelUp.globalNotice",
                 bot.getName(), bot.getMap().getMapName(), bot.getLevel());

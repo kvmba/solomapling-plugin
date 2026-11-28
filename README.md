@@ -100,6 +100,15 @@ solomapling:
     fallback-to-yaml: true          # on LLM failure, speak a YAML line instead
 ```
 
+### Bot level-up notices
+
+The plugin ships with simulated training bot level-up notices disabled in
+[`BotLevelUpNotice.yaml`](src/main/java/soloMapling/ArtificialPlayer/BotFlavorSystem/BotLevelUpNotice.yaml).
+To enable them, set `enabled: true` in
+`data/solomapling/override/ArtificialPlayer/BotFlavorSystem/BotLevelUpNotice.yaml`
+relative to the server's working directory and restart the server. The host's
+`use_announce_global_level_up` setting controls notices sent directly by the host.
+
 ### SocialBot LLM chat (Hybrid)
 
 When `solomapling.llm.enabled: true` and an API key is set, **SocialBot** uses an OpenAI-compatible chat endpoint (DeepSeek at `https://api.deepseek.com` by default; point `base-url` at any compatible service) for **free-form player chat** during an active conversation (player must @ the bot by name first). Structured intents still use YAML:

@@ -19,6 +19,7 @@ import org.gms.server.maps.MapFactory;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import soloMapling.ArtificialPlayer.BotClientHandler;
+import soloMapling.ArtificialPlayer.BotFlavorSystem.BotLevelUpNotice;
 import soloMapling.ArtificialPlayer.BotGeneration;
 import soloMapling.ArtificialPlayer.BotMessagingSystem.CharacterStorage;
 import soloMapling.ArtificialPlayer.BotMessagingSystem.DirectChatBridge;
@@ -137,6 +138,7 @@ public final class SoloMaplingExtension implements ServerExtension {
 
         SocialLlmService.configure(runtime.config());
         SocialPersonaConfig.configure(runtime.config());
+        BotLevelUpNotice.loadConfig();
         installCompanionRuntimeCapabilities(runtime);
 
         String populationPath = runtime.config().getString("solomapling.population-config", "");

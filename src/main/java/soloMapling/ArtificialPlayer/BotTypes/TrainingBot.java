@@ -1408,8 +1408,7 @@ public class TrainingBot extends BotSM implements GrindTickRegistry.Participant 
             // real players). Once, at the final level. The abstract EXP loop can span several levels
             // when the bot ticks slowly while unobserved - we still fire a single event.
             EventBus.getInstance().publish(EventFactory.createLevelUpEvent(chr));
-            // This silent path bypasses the host's gainExp, so the host never announces it. Fire the
-            // same world notice a real player's level-up gets (real players only; the host switch gates it).
+            // This path bypasses the host's gainExp, so the plugin sends the world notice when enabled.
             BotLevelUpNotice.announce(chr);
         }
     }
